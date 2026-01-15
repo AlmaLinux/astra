@@ -6,7 +6,8 @@ This folder provisions AWS infrastructure for the **astra** Django app.
 
 - One EC2 instance (default `t3.small`) per environment
 - Aurora PostgreSQL cluster per environment (not publicly accessible)
-- Staging also provisions a FreeIPA EC2 instance for testing (production uses the real FreeIPA host)
+- Staging also provisions a FreeIPA EC2 instance for testing (production uses the real FreeIPA host). The
+  FreeIPA security group only allows VPC-internal traffic (no public HTTP/HTTPS/SSH ingress).
 - Security group for SSH + HTTP/HTTPS
 - User data that installs podman and systemd units for the app + Caddy
 - Uses the default VPC and its subnets
