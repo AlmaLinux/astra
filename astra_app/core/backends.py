@@ -1019,7 +1019,7 @@ class FreeIPAGroup:
         else:
             object_classes = _clean_str_list(self._group_data.get('objectclass', []))
             self.fas_group = 'fasgroup' in [oc.lower() for oc in object_classes]
-    
+
     def __str__(self):
         return self.cn
 
@@ -1213,7 +1213,7 @@ class FreeIPAGroup:
                     lambda client: client.group_remove_member(self.cn, o_group=self.member_groups),
                 )
                 _raise_if_freeipa_failed(res, action="group_remove_member", subject=f"group={self.cn}")
-            
+
             # Now delete the group
             _with_freeipa_service_client_retry(
                 self.get_client,
@@ -1631,15 +1631,23 @@ class FreeIPAFASAgreement:
         try:
             def _do(client: ClientMeta):
                 try:
-                    return self._rpc(client, "fasagreement_add_group", [self.cn], {"group": [group_cn]})
+                    return self._rpc(client, "fasagreement_add_group", [self.cn], {"group": group_cn})
                 except Exception:
                     # Some clients/servers may accept 'groups' as parameter name.
-                    return self._rpc(client, "fasagreement_add_group", [self.cn], {"groups": [group_cn]})
+                    return self._rpc(client, "fasagreement_add_group", [self.cn], {"groups": group_cn})
 
             res = _with_freeipa_service_client_retry(self.get_client, _do)
             _raise_if_freeipa_failed(res, action="fasagreement_add_group", subject=f"agreement={self.cn} group={group_cn}")
             _invalidate_agreement_cache(self.cn)
             _invalidate_agreements_list_cache()
+
+            fresh = type(self).get(self.cn)
+            if not fresh or group_cn not in set(fresh.groups):
+                raise FreeIPAOperationFailed(
+                    f"FreeIPA fasagreement_add_group did not persist (agreement={self.cn} group={group_cn})"
+                )
+
+            self.groups = list(fresh.groups)
         except Exception:
             logger.exception("Failed to add group to FAS agreement cn=%s group=%s", self.cn, group_cn)
             raise
@@ -1648,14 +1656,23 @@ class FreeIPAFASAgreement:
         try:
             def _do(client: ClientMeta):
                 try:
-                    return self._rpc(client, "fasagreement_remove_group", [self.cn], {"group": [group_cn]})
+                    return self._rpc(client, "fasagreement_remove_group", [self.cn], {"group": group_cn})
                 except Exception:
-                    return self._rpc(client, "fasagreement_remove_group", [self.cn], {"groups": [group_cn]})
+                    return self._rpc(client, "fasagreement_remove_group", [self.cn], {"groups": group_cn})
 
             res = _with_freeipa_service_client_retry(self.get_client, _do)
             _raise_if_freeipa_failed(res, action="fasagreement_remove_group", subject=f"agreement={self.cn} group={group_cn}")
             _invalidate_agreement_cache(self.cn)
             _invalidate_agreements_list_cache()
+
+            fresh = type(self).get(self.cn)
+            if fresh and group_cn in set(fresh.groups):
+                raise FreeIPAOperationFailed(
+                    f"FreeIPA fasagreement_remove_group did not persist (agreement={self.cn} group={group_cn})"
+                )
+
+            if fresh:
+                self.groups = list(fresh.groups)
         except Exception:
             logger.exception("Failed to remove group from FAS agreement cn=%s group=%s", self.cn, group_cn)
             raise
@@ -1664,14 +1681,24 @@ class FreeIPAFASAgreement:
         try:
             def _do(client: ClientMeta):
                 try:
-                    return self._rpc(client, "fasagreement_add_user", [self.cn], {"user": [username]})
+                    return self._rpc(client, "fasagreement_add_user", [self.cn], {"user": username})
                 except Exception:
-                    return self._rpc(client, "fasagreement_add_user", [self.cn], {"users": [username]})
+                    return self._rpc(client, "fasagreement_add_user", [self.cn], {"users": username})
 
             res = _with_freeipa_service_client_retry(self.get_client, _do)
             _raise_if_freeipa_failed(res, action="fasagreement_add_user", subject=f"agreement={self.cn} user={username}")
             _invalidate_agreement_cache(self.cn)
             _invalidate_agreements_list_cache()
+
+            # Don't claim success if the server ignored the change (we've seen
+            # this happen when parameter shapes don't match the plugin).
+            fresh = type(self).get(self.cn)
+            if not fresh or username not in set(fresh.users):
+                raise FreeIPAOperationFailed(
+                    f"FreeIPA fasagreement_add_user did not persist (agreement={self.cn} user={username})"
+                )
+
+            self.users = list(fresh.users)
         except Exception:
             logger.exception("Failed to add user to FAS agreement cn=%s user=%s", self.cn, username)
             raise
@@ -1680,14 +1707,23 @@ class FreeIPAFASAgreement:
         try:
             def _do(client: ClientMeta):
                 try:
-                    return self._rpc(client, "fasagreement_remove_user", [self.cn], {"user": [username]})
+                    return self._rpc(client, "fasagreement_remove_user", [self.cn], {"user": username})
                 except Exception:
-                    return self._rpc(client, "fasagreement_remove_user", [self.cn], {"users": [username]})
+                    return self._rpc(client, "fasagreement_remove_user", [self.cn], {"users": username})
 
             res = _with_freeipa_service_client_retry(self.get_client, _do)
             _raise_if_freeipa_failed(res, action="fasagreement_remove_user", subject=f"agreement={self.cn} user={username}")
             _invalidate_agreement_cache(self.cn)
             _invalidate_agreements_list_cache()
+
+            fresh = type(self).get(self.cn)
+            if fresh and username in set(fresh.users):
+                raise FreeIPAOperationFailed(
+                    f"FreeIPA fasagreement_remove_user did not persist (agreement={self.cn} user={username})"
+                )
+
+            if fresh:
+                self.users = list(fresh.users)
         except Exception:
             logger.exception("Failed to remove user from FAS agreement cn=%s user=%s", self.cn, username)
             raise
