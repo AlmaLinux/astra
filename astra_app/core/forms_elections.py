@@ -73,7 +73,7 @@ class ElectionDetailsForm(forms.ModelForm):
         ]
         widgets = {
             "name": forms.TextInput(attrs={"class": "form-control"}),
-            "description": forms.Textarea(attrs={"class": "form-control", "rows": 3}),
+            "description": forms.Textarea(attrs={"class": "form-control", "rows": 3, "spellcheck": "true"}),
             "url": forms.URLInput(attrs={"class": "form-control"}),
         }
 
@@ -162,12 +162,12 @@ class ElectionVotingEmailForm(forms.Form):
 
     html_content = forms.CharField(
         required=False,
-        widget=forms.Textarea(attrs={"class": "form-control", "rows": 10}),
+        widget=forms.Textarea(attrs={"class": "form-control", "rows": 10, "spellcheck": "true"}),
     )
 
     text_content = forms.CharField(
         required=False,
-        widget=forms.Textarea(attrs={"class": "form-control", "rows": 10}),
+        widget=forms.Textarea(attrs={"class": "form-control", "rows": 10, "spellcheck": "true"}),
     )
 
 
@@ -184,7 +184,7 @@ class CandidateWizardForm(forms.ModelForm):
             "url",
         ]
         widgets = {
-            "description": forms.Textarea(attrs={"class": "form-control", "rows": 2}),
+            "description": forms.Textarea(attrs={"class": "form-control", "rows": 2, "spellcheck": "true"}),
             "url": forms.URLInput(attrs={"class": "form-control"}),
         }
 

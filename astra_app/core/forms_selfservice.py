@@ -83,10 +83,16 @@ class _StyledForm(forms.Form):
         for name, field in self.fields.items():
             if isinstance(field.widget, forms.CheckboxInput):
                 field.widget.attrs.setdefault("class", "form-check-input")
-            elif isinstance(field.widget, (forms.Textarea, forms.TextInput, forms.PasswordInput, forms.EmailInput, forms.URLInput, forms.ClearableFileInput)):
+            elif isinstance(
+                field.widget,
+                (forms.Textarea, forms.TextInput, forms.PasswordInput, forms.EmailInput, forms.URLInput, forms.ClearableFileInput),
+            ):
                 field.widget.attrs.setdefault("class", "form-control")
             else:
                 field.widget.attrs.setdefault("class", "form-control")
+
+            if isinstance(field.widget, forms.Textarea):
+                field.widget.attrs.setdefault("spellcheck", "true")
 
     def full_clean(self):
         super().full_clean()

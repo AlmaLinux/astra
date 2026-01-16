@@ -1443,11 +1443,11 @@ class BallotAdmin(admin.ModelAdmin):
     @override
     def has_add_permission(self, request: HttpRequest) -> bool:
         return False
-    
+
     @override
     def has_change_permission(self, request: HttpRequest, obj: object | None = None) -> bool:
         return False
-    
+
     @override
     def has_delete_permission(self, request: HttpRequest, obj: Any | None = ...) -> bool:
         return False
@@ -1468,7 +1468,7 @@ class AuditLogEntryAdmin(admin.ModelAdmin):
     @override
     def has_change_permission(self, request: HttpRequest, obj: object | None = None) -> bool:
         return False
-    
+
     @override
     def has_delete_permission(self, request: HttpRequest, obj: Any | None = ...) -> bool:
         return False

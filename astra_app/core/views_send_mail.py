@@ -407,11 +407,11 @@ class SendMailForm(forms.Form):
     subject = forms.CharField(required=False, widget=forms.TextInput(attrs={"class": "form-control"}))
     html_content = forms.CharField(
         required=False,
-        widget=forms.Textarea(attrs={"rows": 12, "class": "form-control"}),
+        widget=forms.Textarea(attrs={"rows": 12, "class": "form-control", "spellcheck": "true"}),
     )
     text_content = forms.CharField(
         required=False,
-        widget=forms.Textarea(attrs={"rows": 12, "class": "form-control"}),
+        widget=forms.Textarea(attrs={"rows": 12, "class": "form-control", "spellcheck": "true"}),
     )
 
     action = forms.CharField(required=False)

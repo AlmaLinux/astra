@@ -305,6 +305,8 @@
     function initCodeMirror() {
       var htmlTa = q(container, 'textarea[name="html_content"]');
       var textTa = q(container, 'textarea[name="text_content"]');
+      if (htmlTa) htmlTa.setAttribute('spellcheck', 'true');
+      if (textTa) textTa.setAttribute('spellcheck', 'true');
       if (!window.CodeMirror || !htmlTa || !textTa) return;
 
       function ensureHtmlLintWarning(message) {
@@ -348,6 +350,15 @@
         return null;
       }
 
+      var cmSpellcheckOpts = {
+        // Enables native browser spellcheck (red underline) while keeping
+        // CodeMirror syntax highlighting via the editor mode.
+        inputStyle: 'contenteditable',
+        spellcheck: true,
+        autocorrect: true,
+        autocapitalize: true,
+      };
+
       var htmlEditor = window.CodeMirror.fromTextArea(htmlTa, {
         mode: 'htmlmixed',
         theme: 'mdn-like',
@@ -359,6 +370,10 @@
           selfContain: true,
           highlightLines: true,
         },
+        inputStyle: cmSpellcheckOpts.inputStyle,
+        spellcheck: cmSpellcheckOpts.spellcheck,
+        autocorrect: cmSpellcheckOpts.autocorrect,
+        autocapitalize: cmSpellcheckOpts.autocapitalize,
       });
 
       // The CodeMirror html-lint addon depends on a global HTMLHint.
@@ -373,6 +388,10 @@
         theme: 'mdn-like',
         lineNumbers: false,
         lineWrapping: true,
+        inputStyle: cmSpellcheckOpts.inputStyle,
+        spellcheck: cmSpellcheckOpts.spellcheck,
+        autocorrect: cmSpellcheckOpts.autocorrect,
+        autocapitalize: cmSpellcheckOpts.autocapitalize,
       });
 
       htmlEditor.addOverlay(mustacheOverlay());

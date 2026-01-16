@@ -12,7 +12,7 @@ class GroupEditForm(forms.Form):
         required=False,
         label="Description",
         max_length=255,
-        widget=forms.Textarea(attrs={"class": "form-control", "rows": 3}),
+        widget=forms.Textarea(attrs={"class": "form-control", "rows": 3, "spellcheck": "true"}),
     )
     fas_url = forms.CharField(
         required=False,

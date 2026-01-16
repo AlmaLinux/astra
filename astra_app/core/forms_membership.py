@@ -55,10 +55,10 @@ class MembershipRequestForm(forms.Form):
         to_field_name="code",
     )
 
-    q_contributions = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 6}))
+    q_contributions = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 6, "spellcheck": "true"}))
     q_domain = forms.CharField(required=False)
     q_pull_request = forms.CharField(required=False)
-    q_additional_info = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 4}))
+    q_additional_info = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 4, "spellcheck": "true"}))
 
     @classmethod
     def question_specs_for_membership_type(cls, membership_type: MembershipType) -> tuple[_QuestionSpec, ...]:
@@ -78,6 +78,10 @@ class MembershipRequestForm(forms.Form):
         self.fields["q_domain"].widget.attrs.update({"class": "form-control w-100"})
         self.fields["q_pull_request"].widget.attrs.update({"class": "form-control w-100"})
         self.fields["q_additional_info"].widget.attrs.update({"class": "form-control w-100"})
+
+        for field in self.fields.values():
+            if isinstance(field.widget, forms.Textarea):
+                field.widget.attrs.setdefault("spellcheck", "true")
 
         # Use titles as user-facing labels.
         for spec in self.all_question_specs():
@@ -138,7 +142,7 @@ class MembershipRequestForm(forms.Form):
 
 
 class MembershipRejectForm(forms.Form):
-    reason = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 3}))
+    reason = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 3, "spellcheck": "true"}))
 
 
 class MembershipRequestUpdateResponsesForm(forms.Form):
@@ -158,7 +162,7 @@ class MembershipRequestUpdateResponsesForm(forms.Form):
                 self.fields[spec.field_name] = forms.CharField(
                     required=False,
                     label=spec.title,
-                    widget=forms.Textarea(attrs={"rows": 4, "class": "form-control w-100"}),
+                    widget=forms.Textarea(attrs={"rows": 4, "class": "form-control w-100", "spellcheck": "true"}),
                     initial=str(answer or ""),
                 )
                 self._question_specs.append(spec)
@@ -169,9 +173,13 @@ class MembershipRequestUpdateResponsesForm(forms.Form):
             self.fields[extra_spec.field_name] = forms.CharField(
                 required=False,
                 label=extra_spec.title,
-                widget=forms.Textarea(attrs={"rows": 4, "class": "form-control w-100"}),
+                widget=forms.Textarea(attrs={"rows": 4, "class": "form-control w-100", "spellcheck": "true"}),
             )
         self._question_specs.append(extra_spec)
+
+        for field in self.fields.values():
+            if isinstance(field.widget, forms.Textarea):
+                field.widget.attrs.setdefault("spellcheck", "true")
 
     def responses(self) -> list[dict[str, str]]:
         out: list[dict[str, str]] = []
