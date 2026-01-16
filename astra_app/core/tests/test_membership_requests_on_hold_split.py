@@ -84,7 +84,7 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
         self.assertContains(resp, f"Request #{on_hold.pk}")
 
     def test_on_hold_section_has_bulk_and_row_actions_and_waiting_inline(self) -> None:
-        from django.utils.dateformat import format as dateformat
+        from django.utils import formats
 
         MembershipType.objects.update_or_create(
             code="individual",
@@ -154,7 +154,8 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
 
         # Waiting time should be rendered inline under "On hold since" (no separate "Waiting" column).
         self.assertNotContains(resp, ">Waiting</th>")
-        self.assertContains(resp, dateformat(on_hold_at, "r"))
+        # Use the same formatting Django templates use for "DATETIME_FORMAT".
+        self.assertContains(resp, formats.date_format(on_hold_at, "DATETIME_FORMAT"))
         self.assertContains(resp, " ago")
 
     def test_requests_list_hides_requested_by_when_same_as_target_user(self) -> None:

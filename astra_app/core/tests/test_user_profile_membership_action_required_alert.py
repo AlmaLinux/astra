@@ -50,8 +50,9 @@ class UserProfileMembershipActionRequiredAlertTests(TestCase):
             resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "complete your membership request")
-        self.assertContains(resp, "provide the requested information")
+        self.assertContains(resp, 'id="membership-action-required-alert"')
+        self.assertContains(resp, "Respond to a membership request")
+        self.assertContains(resp, "Provide info")
         self.assertContains(resp, reverse("membership-request-self", args=[req.pk]))
         self.assertContains(resp, "alert alert-danger")
         self.assertContains(resp, ">Awaiting action<")
