@@ -1250,6 +1250,11 @@ def membership_set_expiry(request: HttpRequest, username: str, membership_type_c
 
     membership_type = get_object_or_404(MembershipType, pk=membership_type_code)
 
+    target = FreeIPAUser.get(username)
+    if target is None:
+        messages.error(request, "Unable to load the requested user from FreeIPA.")
+        return redirect("user-profile", username=username)
+
     valid_memberships = get_valid_memberships_for_username(username)
     current_membership = next(
         (m for m in valid_memberships if m.membership_type_id == membership_type.code),
@@ -1270,12 +1275,35 @@ def membership_set_expiry(request: HttpRequest, username: str, membership_type_c
     # (single source of truth), and rely on timezone conversion for display.
     expires_at = datetime.datetime.combine(expires_on, datetime.time(23, 59, 59), tzinfo=datetime.UTC)
 
+    # If the committee sets expiry to now/past, ensure access is revoked immediately.
+    now = timezone.now()
+    if expires_at <= now:
+        group_cn = str(membership_type.group_cn or "").strip()
+        if group_cn and group_cn in target.groups_list:
+            try:
+                target.remove_from_group(group_name=group_cn)
+            except Exception:
+                logger.exception(
+                    "membership_set_expiry: failed to remove user from group username=%s membership_type=%s group_cn=%s",
+                    username,
+                    membership_type.code,
+                    group_cn,
+                )
+                messages.error(request, "Failed to remove the user from the FreeIPA group.")
+                return redirect("user-profile", username=username)
+
     MembershipLog.create_for_expiry_change(
         actor_username=request.user.get_username(),
         target_username=username,
         membership_type=membership_type,
         expires_at=expires_at,
     )
+
+    if expires_at <= now:
+        from core.models import Membership
+
+        Membership.objects.filter(target_username=username, membership_type=membership_type).delete()
+
     messages.success(request, "Membership expiration updated.")
     return redirect("user-profile", username=username)
 
@@ -1305,6 +1333,23 @@ def membership_terminate(request: HttpRequest, username: str, membership_type_co
     if current_membership is None:
         messages.error(request, "That user does not currently have an active membership of that type.")
         return redirect("user-profile", username=username)
+
+    # Keep FreeIPA group membership as the primary source of truth for access.
+    # Termination must remove group membership immediately; deleting the Membership
+    # row alone is not sufficient.
+    group_cn = str(membership_type.group_cn or "").strip()
+    if group_cn and group_cn in target.groups_list:
+        try:
+            target.remove_from_group(group_name=group_cn)
+        except Exception:
+            logger.exception(
+                "membership_terminate: failed to remove user from group username=%s membership_type=%s group_cn=%s",
+                username,
+                membership_type.code,
+                group_cn,
+            )
+            messages.error(request, "Failed to remove the user from the FreeIPA group.")
+            return redirect("user-profile", username=username)
 
     MembershipLog.create_for_termination(
         actor_username=request.user.get_username(),
@@ -1368,6 +1413,32 @@ def organization_sponsorship_set_expiry(request: HttpRequest, organization_id: i
         expires_at=expires_at,
     )
 
+    # If the committee sets expiry to now/past, ensure access is revoked immediately.
+    now = timezone.now()
+    if expires_at <= now:
+        group_cn = str(membership_type.group_cn or "").strip()
+        rep_username = str(organization.representative or "").strip()
+        if group_cn and rep_username:
+            rep = FreeIPAUser.get(rep_username)
+            if rep is not None and group_cn in rep.groups_list:
+                try:
+                    rep.remove_from_group(group_name=group_cn)
+                except Exception:
+                    logger.exception(
+                        "organization_sponsorship_set_expiry: failed to remove representative from group org_id=%s rep=%r group_cn=%r",
+                        organization.pk,
+                        rep_username,
+                        group_cn,
+                    )
+                    messages.error(request, "Failed to remove the representative from the FreeIPA group.")
+                    return redirect(redirect_to)
+
+        if organization.membership_level_id == membership_type.code:
+            organization.membership_level = None
+            organization.save(update_fields=["membership_level"])
+
+        OrganizationSponsorship.objects.filter(organization=organization).delete()
+
     messages.success(request, "Sponsorship expiration updated.")
     return redirect(redirect_to)
 
@@ -1392,6 +1463,23 @@ def organization_sponsorship_terminate(request: HttpRequest, organization_id: in
     if sponsorship is None or sponsorship.expires_at is None or sponsorship.expires_at <= timezone.now():
         messages.error(request, "That organization does not currently have an active sponsorship of that type.")
         return redirect("organization-detail", organization_id=organization.pk)
+
+    group_cn = str(membership_type.group_cn or "").strip()
+    rep_username = str(organization.representative or "").strip()
+    if group_cn and rep_username:
+        rep = FreeIPAUser.get(rep_username)
+        if rep is not None and group_cn in rep.groups_list:
+            try:
+                rep.remove_from_group(group_name=group_cn)
+            except Exception:
+                logger.exception(
+                    "organization_sponsorship_terminate: failed to remove representative from group org_id=%s rep=%r group_cn=%r",
+                    organization.pk,
+                    rep_username,
+                    group_cn,
+                )
+                messages.error(request, "Failed to remove the representative from the FreeIPA group.")
+                return redirect("organization-detail", organization_id=organization.pk)
 
     MembershipLog.create_for_org_termination(
         actor_username=request.user.get_username(),

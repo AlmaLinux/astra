@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import logging
 from typing import override
 
 from django import forms
@@ -24,6 +25,8 @@ from core.permissions import (
 )
 from core.user_labels import user_choice_from_freeipa
 from core.views_utils import _normalize_str
+
+logger = logging.getLogger(__name__)
 
 
 def _can_access_organization(request: HttpRequest, organization: Organization) -> bool:
@@ -497,7 +500,82 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
                         "show_representatives": True,
                     },
                 )
+
+            old_representative = organization.representative
             updated_org.representative = representative
+
+            # If the org currently has an active sponsorship, keep FreeIPA group membership
+            # aligned with the current representative.
+            group_cn = ""
+            if original_membership_level_id:
+                current_level = MembershipType.objects.filter(pk=original_membership_level_id).only("group_cn").first()
+                group_cn = str(current_level.group_cn or "").strip() if current_level is not None else ""
+
+            if group_cn and old_representative and old_representative != representative:
+                sponsorship = OrganizationSponsorship.objects.select_related("membership_type").filter(
+                    organization=organization,
+                    membership_type_id=original_membership_level_id,
+                ).first()
+                now = timezone.now()
+                sponsorship_active = bool(sponsorship and sponsorship.expires_at and sponsorship.expires_at > now)
+
+                if sponsorship_active:
+                    old_rep = FreeIPAUser.get(old_representative)
+                    new_rep = FreeIPAUser.get(representative)
+                    if new_rep is None:
+                        # This should already be prevented by OrganizationEditForm.clean_representative,
+                        # but keep the view defensive.
+                        form.add_error("representative", f"Unknown user: {representative}")
+                        return render(
+                            request,
+                            "core/organization_form.html",
+                            {
+                                "organization": organization,
+                                "form": form,
+                                "is_create": False,
+                                "cancel_url": "",
+                                "show_representatives": True,
+                            },
+                        )
+
+                    try:
+                        if old_rep is not None:
+                            old_rep.remove_from_group(group_name=group_cn)
+                        if group_cn not in new_rep.groups_list:
+                            new_rep.add_to_group(group_name=group_cn)
+                    except Exception:
+                        logger.exception(
+                            "organization_edit: failed to sync representative group org_id=%s old=%r new=%r group_cn=%r",
+                            organization.pk,
+                            old_representative,
+                            representative,
+                            group_cn,
+                        )
+
+                        # Best-effort rollback: if we removed the old rep, try restoring it.
+                        try:
+                            if old_rep is not None and group_cn not in old_rep.groups_list:
+                                old_rep.add_to_group(group_name=group_cn)
+                        except Exception:
+                            logger.exception(
+                                "organization_edit: failed to rollback representative group org_id=%s old=%r group_cn=%r",
+                                organization.pk,
+                                old_representative,
+                                group_cn,
+                            )
+
+                        form.add_error(None, "Failed to update FreeIPA group membership for the representative.")
+                        return render(
+                            request,
+                            "core/organization_form.html",
+                            {
+                                "organization": organization,
+                                "form": form,
+                                "is_create": False,
+                                "cancel_url": "",
+                                "show_representatives": True,
+                            },
+                        )
 
         # Membership level changes are reviewed by the committee; do not apply directly.
         updated_org.membership_level_id = original_membership_level_id
