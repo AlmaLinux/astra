@@ -10,6 +10,8 @@ from django.http import HttpResponse
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
+from python_freeipa import exceptions
+
 from core import views_settings
 
 
@@ -633,7 +635,7 @@ class SelfServiceSettingsPagesTests(TestCase):
         FREEIPA_HOST="ipa.test",
         FREEIPA_VERIFY_SSL=False,
     )
-    def test_settings_password_uses_passwd_when_available(self):
+    def test_settings_password_uses_change_password(self):
         factory = RequestFactory()
         request = factory.post(
             "/settings/",
@@ -652,27 +654,26 @@ class SelfServiceSettingsPagesTests(TestCase):
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
             with patch("core.views_settings.ClientMeta", autospec=True) as mocked_client_cls:
                 mocked_client = mocked_client_cls.return_value
-                mocked_client.login.return_value = None
-                mocked_client.passwd.return_value = None
+                mocked_client.change_password.return_value = None
 
                 response = views_settings.settings_root(request)
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], reverse("settings") + "#security")
-        mocked_client.login.assert_called_once_with("alice", "oldpw")
-        mocked_client.passwd.assert_called_once_with("alice", "oldpw", "newpw")
+        mocked_client.change_password.assert_called_once_with("alice", "newpw", "oldpw", otp=None)
 
     @override_settings(
         FREEIPA_HOST="ipa.test",
         FREEIPA_VERIFY_SSL=False,
     )
-    def test_settings_password_falls_back_to_user_mod_when_no_passwd(self):
+    def test_settings_password_includes_otp_when_provided(self):
         factory = RequestFactory()
         request = factory.post(
             "/settings/",
             data={
                 "tab": "security",
                 "current_password": "oldpw",
+                "otp": "123456",
                 "new_password": "newpw",
                 "confirm_new_password": "newpw",
             },
@@ -685,15 +686,45 @@ class SelfServiceSettingsPagesTests(TestCase):
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
             with patch("core.views_settings.ClientMeta", autospec=True) as mocked_client_cls:
                 mocked_client = mocked_client_cls.return_value
-                mocked_client.login.return_value = None
-                # Simulate no passwd attribute in this client version.
-                if hasattr(mocked_client, "passwd"):
-                    delattr(mocked_client, "passwd")
-                mocked_client.user_mod.return_value = None
+                mocked_client.change_password.return_value = None
 
                 response = views_settings.settings_root(request)
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], reverse("settings") + "#security")
-        mocked_client.login.assert_called_once_with("alice", "oldpw")
-        mocked_client.user_mod.assert_called_once_with("alice", o_userpassword="newpw")
+        mocked_client.change_password.assert_called_once_with("alice", "newpw", "oldpw", otp="123456")
+
+    @override_settings(
+        DEBUG=True,
+        FREEIPA_HOST="ipa.test",
+        FREEIPA_VERIFY_SSL=False,
+    )
+    def test_settings_password_wrong_current_password_shows_single_non_debug_message(self):
+        factory = RequestFactory()
+        request = factory.post(
+            "/settings/",
+            data={
+                "tab": "security",
+                "current_password": "wrongpw",
+                "new_password": "newpw",
+                "confirm_new_password": "newpw",
+            },
+        )
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        fake_user = SimpleNamespace(_user_data={"fasstatusnote": ["US"]})
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            with patch("core.views_settings.ClientMeta", autospec=True) as mocked_client_cls:
+                mocked_client = mocked_client_cls.return_value
+                mocked_client.change_password.side_effect = exceptions.PWChangeInvalidPassword("bad")
+
+                response = views_settings.settings_root(request)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("settings") + "#security")
+        msgs = [m.message for m in get_messages(request)]
+        self.assertEqual(len(msgs), 1)
+        self.assertNotIn("(debug)", msgs[0])
+        self.assertIn("Incorrect current password", msgs[0])

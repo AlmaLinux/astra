@@ -260,7 +260,8 @@ def activate(request: HttpRequest) -> HttpResponse:
             # Try to un-expire it by changing it "as the user".
             try:
                 c = ClientMeta(host=settings.FREEIPA_HOST, verify_ssl=settings.FREEIPA_VERIFY_SSL)
-                c.change_password(username, password, password)
+                # python-freeipa signature: change_password(username, new_password, old_password, otp=None)
+                c.change_password(username, password, password, otp=None)
             except exceptions.PWChangePolicyError as e:
                 logger.info("Activation succeeded but password policy rejected username=%s error=%s", username, e)
                 messages.warning(

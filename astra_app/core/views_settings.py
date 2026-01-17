@@ -386,33 +386,56 @@ def settings_root(request: HttpRequest) -> HttpResponse:
             return blocked
 
         current = password_form.cleaned_data["current_password"]
-        otp = _normalize_str(password_form.cleaned_data.get("otp"))
-        if otp:
-            current = f"{current}{otp}"
+        otp = _normalize_str(password_form.cleaned_data.get("otp")) or None
         new = password_form.cleaned_data["new_password"]
 
         try:
             client = ClientMeta(host=settings.FREEIPA_HOST, verify_ssl=settings.FREEIPA_VERIFY_SSL)
-            client.login(username, current)
 
-            # Feature-detection: older python_freeipa versions do not expose `passwd`.
-            passwd = getattr(client, "passwd", None)
-            if callable(passwd):
+            # Prefer the password-change endpoint: it works for self-service password changes
+            # and supports OTP validation.
+            change_password = getattr(client, "change_password", None)
+            if callable(change_password):
+                # python-freeipa signature: change_password(username, new_password, old_password, otp=None)
+                change_password(username, new, current, otp=otp)
+            else:
+                # Fallback for very old python-freeipa versions.
+                client.login(username, current)
+                passwd = getattr(client, "passwd", None)
+                if not callable(passwd):
+                    raise RuntimeError("python-freeipa client does not support password changes")
                 try:
                     passwd(username, current, new)
                 except TypeError:
                     passwd(username, o_password=current, o_new_password=new)
-            else:
-                client.user_mod(username, o_userpassword=new)
 
             messages.success(request, "Password changed.")
             return redirect(_settings_url("security"))
-        except Exception as e:
+        except exceptions.PWChangePolicyError as e:
+            logger.info("Password change rejected by policy username=%s error=%s", username, e)
+            messages.error(request, "Password change rejected by policy. Please choose a stronger password.")
+            return redirect(_settings_url("security"))
+        except exceptions.PWChangeInvalidPassword:
+            # Most commonly: wrong/missing OTP for OTP-enabled accounts.
+            logger.info("Password change rejected (invalid current password/OTP) username=%s", username)
+            messages.error(request, "Incorrect current password or OTP.")
+            return redirect(_settings_url("security"))
+        except exceptions.PasswordExpired:
+            messages.error(request, "Password is expired; please change it below.")
+            return redirect(_settings_url("security"))
+        except (exceptions.InvalidSessionPassword, exceptions.Unauthorized):
+            # Treat auth failures as a normal user error, not a crash.
+            logger.info("Password change rejected (bad credentials) username=%s", username)
+            messages.error(request, "Incorrect current password or OTP.")
+            return redirect(_settings_url("security"))
+        except exceptions.FreeIPAError as e:
+            logger.warning("Password change failed (FreeIPA error) username=%s error=%s", username, e)
+            messages.error(request, "Unable to change password due to a FreeIPA error.")
+            return redirect(_settings_url("security"))
+        except Exception:
             logger.exception("Failed to change password username=%s", username)
-            if settings.DEBUG:
-                messages.error(request, f"Failed to change password (debug): {e}")
-            else:
-                messages.error(request, "Failed to change password due to an internal error.")
+            messages.error(request, "Failed to change password due to an internal error.")
+            return redirect(_settings_url("security"))
 
     using_otp = False
     try:
@@ -1406,39 +1429,6 @@ def settings_root(request: HttpRequest) -> HttpResponse:
         if is_add or is_confirm:
             context["force_tab"] = "security"
             return render(request, "core/settings.html", context)
-
-        if password_form.is_valid():
-            blocked = _block_settings_change_without_country_code(request, user_data=data)
-            if blocked is not None:
-                return blocked
-
-            current = password_form.cleaned_data["current_password"]
-            otp = _normalize_str(password_form.cleaned_data.get("otp"))
-            if otp:
-                current = f"{current}{otp}"
-            new = password_form.cleaned_data["new_password"]
-
-            try:
-                client = ClientMeta(host=settings.FREEIPA_HOST, verify_ssl=settings.FREEIPA_VERIFY_SSL)
-                client.login(username, current)
-
-                passwd = getattr(client, "passwd", None)
-                if callable(passwd):
-                    try:
-                        passwd(username, current, new)
-                    except TypeError:
-                        passwd(username, o_password=current, o_new_password=new)
-                else:
-                    client.user_mod(username, o_userpassword=new)
-
-                messages.success(request, "Password changed.")
-                return redirect(_settings_url("security"))
-            except Exception as e:
-                logger.exception("Failed to change password username=%s", username)
-                if settings.DEBUG:
-                    messages.error(request, f"Failed to change password (debug): {e}")
-                else:
-                    messages.error(request, "Failed to change password due to an internal error.")
 
         context["force_tab"] = "security"
         return render(request, "core/settings.html", context)

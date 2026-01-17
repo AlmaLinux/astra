@@ -158,7 +158,7 @@ class FASAttributesTests(TestCase):
         self.assertEqual(got_del, del_)
 
     @patch("core.forms_selfservice.get_timezone_options", autospec=True, return_value=["UTC"])
-    @patch("core.forms_selfservice.get_locale_options", autospec=True, return_value=["en_US"])
+    @patch("core.forms_selfservice.get_locale_options", autospec=True, return_value=["en-US"])
     def test_profile_set_all_fas_fields(self, _mock_locales, _mock_tzs):
         fu = _DummyFreeIPAUser(
             first_name="",
@@ -181,7 +181,7 @@ class FASAttributesTests(TestCase):
                 "givenname": "Alice",
                 "sn": "User",
                 "fasPronoun": "she/her",
-                "fasLocale": "en_US",
+                "fasLocale": "en-US",
                 "fasTimezone": "UTC",
                 "fasWebsiteUrl": "https://example.com",
                 "fasRssUrl": "https://example.com/rss.xml",
@@ -211,7 +211,7 @@ class FASAttributesTests(TestCase):
                 "fasIRCNick=matrix://matrix.example/alice",
             },
             set_={
-                "fasLocale=en_US",
+                "fasLocale=en-US",
                 "fasTimezone=UTC",
                 "fasGitHubUsername=alice-1",
                 "fasGitLabUsername=alice_1",
@@ -434,7 +434,7 @@ class FASAttributesTests(TestCase):
         self.assertEqual(data.get("c"), "US")
 
     @patch("core.forms_selfservice.get_timezone_options", autospec=True, return_value=["UTC", "Europe/Paris"])
-    @patch("core.forms_selfservice.get_locale_options", autospec=True, return_value=["en_US", "fr_FR"])
+    @patch("core.forms_selfservice.get_locale_options", autospec=True, return_value=["en-US", "fr-FR"])
     def test_profile_edit_all_fas_fields(self, _mock_locales, _mock_tzs):
         fu = _DummyFreeIPAUser(
             first_name="Alice",
@@ -470,7 +470,7 @@ class FASAttributesTests(TestCase):
                 "givenname": "Alicia",
                 "sn": "User",
                 "fasPronoun": "they/them",
-                "fasLocale": "fr_FR",
+                "fasLocale": "fr-FR",
                 "fasTimezone": "Europe/Paris",
                 "fasWebsiteUrl": "https://new.example.com",
                 "fasRssUrl": "https://old.example.com/rss.xml\nhttps://new.example.com/rss.xml",
@@ -500,7 +500,7 @@ class FASAttributesTests(TestCase):
                 "fasIRCNick=matrix://matrix.example/alice",
             },
             set_={
-                "fasLocale=fr_FR",
+                "fasLocale=fr-FR",
                 "fasTimezone=Europe/Paris",
                 "fasGitHubUsername=alice-1",
                 "fasGitLabUsername=alice_1",
