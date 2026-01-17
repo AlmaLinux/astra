@@ -9,7 +9,6 @@ from core import (
     views_search,
     views_send_mail,
     views_settings,
-    views_settings_otp,
     views_templated_email,
     views_users,
 )
@@ -233,10 +232,9 @@ urlpatterns = [
         name="membership-terminate",
     ),
 
+    path("settings/", views_settings.settings_root, name="settings"),
     path("settings/avatar/", views_settings.avatar_manage, name="avatar-manage"),
 
-    path("settings/profile/", views_settings.settings_profile, name="settings-profile"),
-    path("settings/address/", views_settings.settings_address, name="settings-address"),
     path(
         "settings/address/lookup/",
         views_settings.settings_address_lookup,
@@ -247,19 +245,9 @@ urlpatterns = [
         views_settings.settings_address_suggest,
         name="settings-address-suggest",
     ),
-    path("settings/emails/", views_settings.settings_emails, name="settings-emails"),
     path("settings/emails/validate/", views_settings.settings_email_validate, name="settings-email-validate"),
-    path("settings/keys/", views_settings.settings_keys, name="settings-keys"),
-    path("settings/otp/", views_settings_otp.settings_otp, name="settings-otp"),
-    path("settings/otp/enable/", views_settings_otp.otp_enable, name="otp-enable"),
-    path("settings/otp/disable/", views_settings_otp.otp_disable, name="otp-disable"),
-    path("settings/otp/delete/", views_settings_otp.otp_delete, name="otp-delete"),
-    path("settings/otp/rename/", views_settings_otp.otp_rename, name="otp-rename"),
-    path("settings/password/", views_settings.settings_password, name="settings-password"),
-    path("settings/agreements/", views_settings.settings_agreements, name="settings-agreements"),
-    path(
-        "settings/agreements/<str:cn>/",
-        views_settings.settings_agreement_detail,
-        name="settings-agreement-detail",
-    ),
+    path("settings/security/otp/enable/", views_settings.security_otp_enable, name="security-otp-enable"),
+    path("settings/security/otp/disable/", views_settings.security_otp_disable, name="security-otp-disable"),
+    path("settings/security/otp/delete/", views_settings.security_otp_delete, name="security-otp-delete"),
+    path("settings/security/otp/rename/", views_settings.security_otp_rename, name="security-otp-rename"),
 ]

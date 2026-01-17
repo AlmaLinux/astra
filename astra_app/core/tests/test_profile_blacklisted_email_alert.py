@@ -55,7 +55,7 @@ class ProfileBlacklistedEmailAlertTests(TestCase):
         self.assertContains(resp, 'id="account-setup-required-alert"')
         self.assertContains(resp, 'id="email-blacklisted-alert"')
         self.assertContains(resp, "blacklisted", html=False)
-        self.assertContains(resp, f'href="{reverse("settings-emails")}"')
+        self.assertContains(resp, f'href="{reverse("settings")}#emails"')
 
         # Other user view: should not see the alert.
         self._login_as_freeipa("viewer")

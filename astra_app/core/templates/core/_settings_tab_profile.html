@@ -1,0 +1,307 @@
+{% load avatar_tags %}
+{% load static %}
+
+<form method="post" novalidate class="m-0" data-settings-save-all="1">
+	{% csrf_token %}
+	<input type="hidden" name="tab" value="profile" />
+
+	{% if profile_form.non_field_errors %}
+		<div class="alert alert-danger">{{ profile_form.non_field_errors }}</div>
+	{% endif %}
+
+	<div class="settings-form">
+		<div class="settings-profile-hero mb-4">
+			<div class="d-flex align-items-center">
+				<div class="settings-profile-avatar">
+					{% if request.user.email %}
+						{% avatar request.user 96 class="img-fluid img-circle" style="width:96px;height:96px;object-fit:cover;" alt="Avatar" %}
+					{% else %}
+						<div class="img-circle bg-light" style="width:96px;height:96px;"></div>
+					{% endif %}
+				</div>
+				<div class="ml-3">
+					<a class="btn btn-outline-secondary" href="{% url 'avatar-manage' %}" target="_blank" rel="noopener">Change avatar</a>
+					<div class="mt-1">
+						<small class="text-muted">We don't host avatar uploads. This sends you to your avatar provider (LibRAvatar/Gravatar).</small>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<div class="form-row">
+			<div class="form-group col-md-6">
+				{{ profile_form.givenname.label_tag }}
+				{{ profile_form.givenname }}
+				{% if profile_form.givenname.errors %}<div class="invalid-feedback d-block">{{ profile_form.givenname.errors }}</div>{% endif %}
+			</div>
+			<div class="form-group col-md-6">
+				{{ profile_form.sn.label_tag }}
+				{{ profile_form.sn }}
+				{% if profile_form.sn.errors %}<div class="invalid-feedback d-block">{{ profile_form.sn.errors }}</div>{% endif %}
+			</div>
+		</div>
+
+		<div class="form-group">
+			{{ profile_form.fasPronoun.label_tag }}
+			{{ profile_form.fasPronoun }}
+			{% if profile_form.fasPronoun.errors %}<div class="invalid-feedback d-block">{{ profile_form.fasPronoun.errors }}</div>{% endif %}
+			{% if profile_form.fasPronoun.help_text %}<small class="form-text text-muted">{{ profile_form.fasPronoun.help_text }}</small>{% endif %}
+			<datalist id="pronoun-options">
+				<option value="she / her / hers"></option>
+				<option value="he / him / his"></option>
+				<option value="they / them / theirs"></option>
+			</datalist>
+		</div>
+
+		<div class="form-group">
+			{{ profile_form.fasLocale.label_tag }}
+			{{ profile_form.fasLocale }}
+			{% if profile_form.fasLocale.errors %}<div class="invalid-feedback d-block">{{ profile_form.fasLocale.errors }}</div>{% endif %}
+			{% if profile_form.fasLocale.help_text %}<small class="form-text text-muted">{{ profile_form.fasLocale.help_text }}</small>{% endif %}
+		</div>
+
+		<div class="form-group">
+			{{ profile_form.fasTimezone.label_tag }}
+			{{ profile_form.fasTimezone }}
+			{% if profile_form.fasTimezone.errors %}<div class="invalid-feedback d-block">{{ profile_form.fasTimezone.errors }}</div>{% endif %}
+			{% if profile_form.fasTimezone.help_text %}<small class="form-text text-muted">{{ profile_form.fasTimezone.help_text }}</small>{% endif %}
+		</div>
+
+		<div class="form-group">
+			<label>{{ profile_form.fasWebsiteUrl.label }}</label>
+
+			<div id="website-urls-widget" class="d-none">
+				<div class="table-responsive">
+					<table class="table table-sm table-bordered align-middle mb-2" id="website-urls-table">
+						<tbody></tbody>
+					</table>
+				</div>
+				<button type="button" class="btn btn-sm btn-outline-secondary" id="website-urls-add">Add website URL</button>
+			</div>
+
+			<div id="website-urls-fallback">
+				{{ profile_form.fasWebsiteUrl }}
+				{% if profile_form.fasWebsiteUrl.errors %}<div class="invalid-feedback d-block">{{ profile_form.fasWebsiteUrl.errors }}</div>{% endif %}
+			</div>
+			{% if profile_form.fasWebsiteUrl.help_text %}<small class="form-text text-muted">{{ profile_form.fasWebsiteUrl.help_text }}</small>{% endif %}
+		</div>
+
+		<div class="form-group">
+			<label>{{ profile_form.fasRssUrl.label }}</label>
+
+			<div id="rss-urls-widget" class="d-none">
+				<div class="table-responsive">
+					<table class="table table-sm table-bordered align-middle mb-2" id="rss-urls-table">
+						<tbody></tbody>
+					</table>
+				</div>
+				<button type="button" class="btn btn-sm btn-outline-secondary" id="rss-urls-add">Add RSS URL</button>
+			</div>
+
+			<div id="rss-urls-fallback">
+				{{ profile_form.fasRssUrl }}
+				{% if profile_form.fasRssUrl.errors %}<div class="invalid-feedback d-block">{{ profile_form.fasRssUrl.errors }}</div>{% endif %}
+			</div>
+			{% if profile_form.fasRssUrl.help_text %}<small class="form-text text-muted">{{ profile_form.fasRssUrl.help_text }}</small>{% endif %}
+		</div>
+
+		<div class="form-group">
+			<label>Chat Nicknames</label>
+
+			<small class="form-text text-muted">
+				The format is either <strong>username</strong> or <strong>username:server.name</strong> (IRC/Matrix). For Mattermost custom servers use <strong>@username:server.name:team</strong>:
+				<ul class="mb-0">
+					<li>For Mattermost: <strong>{{ chat_networks.mattermost.default_server }}</strong> (team <strong>{{ chat_networks.mattermost.default_team }}</strong>)</li>
+					<li>For IRC: <strong>{{ chat_networks.irc.default_server }}</strong></li>
+					<li>For Matrix: <strong>{{ chat_networks.matrix.default_server }}</strong></li>
+				</ul>
+			</small>
+
+			<div
+				id="chat-nicks-widget"
+				class="d-none js-chat-nicks-editor"
+				data-textarea-id="{{ profile_form.fasIRCNick.id_for_label }}"
+				data-fallback-id="chat-nicks-fallback"
+				data-mattermost-default-server="{{ chat_networks.mattermost.default_server }}"
+				data-mattermost-default-team="{{ chat_networks.mattermost.default_team }}"
+				data-irc-default-server="{{ chat_networks.irc.default_server }}"
+				data-matrix-default-server="{{ chat_networks.matrix.default_server }}"
+			>
+				<div class="table-responsive">
+					<table class="table table-sm table-bordered align-middle mb-2" id="chat-nicks-table">
+						<tbody></tbody>
+					</table>
+				</div>
+				<button type="button" class="btn btn-sm btn-outline-secondary js-chat-nicks-add" id="chat-nicks-add">Add nickname</button>
+			</div>
+
+			<div id="chat-nicks-fallback">
+				{{ profile_form.fasIRCNick.label_tag }}
+				{{ profile_form.fasIRCNick }}
+				{% if profile_form.fasIRCNick.errors %}<div class="invalid-feedback d-block">{{ profile_form.fasIRCNick.errors }}</div>{% endif %}
+				{% if profile_form.fasIRCNick.help_text %}<small class="form-text text-muted">{{ profile_form.fasIRCNick.help_text }}</small>{% endif %}
+			</div>
+		</div>
+
+		<div class="form-group">
+			{{ profile_form.fasGitHubUsername.label_tag }}
+			<div class="input-group">
+				<div class="input-group-prepend">
+					<span class="input-group-text">@</span>
+				</div>
+				{{ profile_form.fasGitHubUsername }}
+			</div>
+			{% if profile_form.fasGitHubUsername.errors %}<div class="invalid-feedback d-block">{{ profile_form.fasGitHubUsername.errors }}</div>{% endif %}
+		</div>
+
+		<div class="form-group">
+			{{ profile_form.fasGitLabUsername.label_tag }}
+			<div class="input-group">
+				<div class="input-group-prepend">
+					<span class="input-group-text">@</span>
+				</div>
+				{{ profile_form.fasGitLabUsername }}
+			</div>
+			{% if profile_form.fasGitLabUsername.errors %}<div class="invalid-feedback d-block">{{ profile_form.fasGitLabUsername.errors }}</div>{% endif %}
+		</div>
+
+		<div class="form-group form-check">
+			{{ profile_form.fasIsPrivate }}
+			<label class="form-check-label" for="{{ profile_form.fasIsPrivate.id_for_label }}">{{ profile_form.fasIsPrivate.label }} <small class="text-muted">Hide personal data (except username and email address).</small></label>
+			{% if profile_form.fasIsPrivate.errors %}<div class="invalid-feedback d-block">{{ profile_form.fasIsPrivate.errors }}</div>{% endif %}
+		</div>
+	</div>
+
+	<div class="d-flex justify-content-end">
+		<button type="submit" class="btn btn-primary">Save</button>
+	</div>
+</form>
+
+<script src="{% static 'core/js/chat_nicknames_editor.js' %}"></script>
+
+<script>
+	(function () {
+		function onReady(fn) {
+			if (document.readyState === 'loading') {
+				document.addEventListener('DOMContentLoaded', fn);
+			} else {
+				fn();
+			}
+		}
+
+		function setupUrlListEditor(opts) {
+			const textarea = document.getElementById(opts.textareaId);
+			const widget = document.getElementById(opts.widgetId);
+			const fallback = document.getElementById(opts.fallbackId);
+			const tableBody = document.querySelector(opts.tableBodySelector);
+			const addBtn = document.getElementById(opts.addBtnId);
+
+			if (!textarea || !widget || !fallback || !tableBody || !addBtn || !textarea.form) return;
+
+			function parseExisting(value) {
+				return String(value || '')
+					.replaceAll('\r', '')
+					.split('\n')
+					.flatMap(function (line) {
+						return String(line || '')
+							.split(',')
+							.map(function (p) { return String(p || '').trim(); })
+							.filter(Boolean);
+					});
+			}
+
+			function buildRow(initialValue) {
+				const tr = document.createElement('tr');
+				tr.className = opts.rowClass;
+
+				tr.innerHTML = `
+					<td>
+						<input type="url" class="form-control form-control-sm text-monospace ${opts.inputClass}" placeholder="${opts.placeholder}" />
+					</td>
+					<td style="width: 44px;" class="text-center">
+						<button type="button" class="btn btn-sm btn-outline-secondary" aria-label="Remove">×</button>
+					</td>
+				`;
+
+				const valueEl = tr.querySelector('input');
+				const removeBtn = tr.querySelector('button');
+
+				valueEl.value = initialValue || '';
+				valueEl.addEventListener('input', syncToTextarea);
+				removeBtn.addEventListener('click', function () {
+					tr.remove();
+					syncToTextarea();
+				});
+
+				return tr;
+			}
+
+			function syncToTextarea() {
+				const rows = Array.from(tableBody.querySelectorAll('tr.' + opts.rowClass));
+				const lines = [];
+				for (const row of rows) {
+					const valueEl = row.querySelector('input');
+					const raw = (valueEl && valueEl.value) ? String(valueEl.value) : '';
+					const v = raw.replaceAll('\r', '').trim();
+					if (v) lines.push(v);
+				}
+				textarea.value = lines.join('\n');
+			}
+
+			function addRow(value) {
+				const tr = buildRow(value);
+				tableBody.appendChild(tr);
+				syncToTextarea();
+				return tr;
+			}
+
+			const existing = parseExisting(textarea.value);
+			if (existing.length === 0) {
+				addRow('');
+			} else {
+				for (const v of existing) addRow(v);
+			}
+
+			addBtn.addEventListener('click', function () {
+				const tr = addRow('');
+				const input = tr.querySelector('input');
+				if (input) input.focus();
+			});
+
+			textarea.form.addEventListener('submit', function () {
+				syncToTextarea();
+			});
+
+			// Do not hide fallback if validation errors are present.
+			const hasErrors = !!fallback.querySelector('.errorlist');
+			if (!hasErrors) {
+				fallback.classList.add('d-none');
+			}
+			widget.classList.remove('d-none');
+		}
+
+		onReady(function () {
+			setupUrlListEditor({
+				textareaId: 'id_fasWebsiteUrl',
+				widgetId: 'website-urls-widget',
+				fallbackId: 'website-urls-fallback',
+				tableBodySelector: '#website-urls-table tbody',
+				addBtnId: 'website-urls-add',
+				rowClass: 'website-urls-row',
+				inputClass: 'website-urls-value',
+				placeholder: 'https://example.com'
+			});
+
+			setupUrlListEditor({
+				textareaId: 'id_fasRssUrl',
+				widgetId: 'rss-urls-widget',
+				fallbackId: 'rss-urls-fallback',
+				tableBodySelector: '#rss-urls-table tbody',
+				addBtnId: 'rss-urls-add',
+				rowClass: 'rss-urls-row',
+				inputClass: 'rss-urls-value',
+				placeholder: 'https://example.com/rss.xml'
+			});
+		});
+	})();
+</script>

@@ -100,7 +100,7 @@ class GroupsSponsorsAndAgreementsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         html = response.content.decode("utf-8")
         self.assertIn("Missing Agreement", html)
-        self.assertIn(reverse("settings-agreement-detail", kwargs={"cn": "cla"}), html)
+        self.assertIn(reverse("settings") + "?agreement=cla#agreements", html)
 
     def test_group_detail_shows_required_agreements_with_signed_status_and_link(self):
         factory = RequestFactory()
@@ -134,7 +134,7 @@ class GroupsSponsorsAndAgreementsTests(TestCase):
         html = response.content.decode("utf-8")
         self.assertIn("Required agreements", html)
         self.assertIn("Unsigned", html)
-        self.assertIn(reverse("settings-agreements"), html)
+        self.assertIn(reverse("settings") + "#agreements", html)
 
     def test_group_detail_greys_out_members_and_sponsors_missing_required_agreements(self):
         factory = RequestFactory()
@@ -182,21 +182,29 @@ class GroupsSponsorsAndAgreementsTests(TestCase):
 
     def test_settings_agreement_detail_disabled_is_not_visible(self):
         factory = RequestFactory()
-        request = factory.get("/settings/agreements/disabled-agreement/")
+        request = factory.get("/settings/?tab=agreements&agreement=disabled-agreement")
         self._add_session_and_messages(request)
         request.user = self._auth_user("alice")
 
         disabled = SimpleNamespace(cn="disabled-agreement", enabled=False, users=["alice"], groups=[])
 
+        fu = SimpleNamespace(
+            username="alice",
+            is_authenticated=True,
+            get_username=lambda: "alice",
+            groups_list=[],
+            _user_data={"uid": ["alice"], "fasstatusnote": ["US"]},
+        )
+
         with patch("core.views_settings.has_enabled_agreements", autospec=True, return_value=True):
             with patch(
                 "core.views_settings._get_full_user",
                 autospec=True,
-                return_value=SimpleNamespace(groups_list=[]),
+                return_value=fu,
             ):
                 with patch("core.views_settings.FreeIPAFASAgreement.get", autospec=True, return_value=disabled):
                     with self.assertRaises(Http404):
-                        views_settings.settings_agreement_detail(request, "disabled-agreement")
+                        views_settings.settings_root(request)
 
     def test_group_detail_leave_group_removes_self(self):
         factory = RequestFactory()

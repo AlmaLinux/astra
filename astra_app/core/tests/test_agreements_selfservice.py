@@ -125,12 +125,12 @@ class AgreementsSelfServiceTests(TestCase):
         self.assertEqual(missing[0]["cn"], "cla")
         self.assertEqual(
             missing[0]["settings_url"],
-            reverse("settings-agreement-detail", kwargs={"cn": "cla"}),
+            reverse("settings") + "?agreement=cla#agreements",
         )
 
     def test_settings_agreements_lists_enabled_agreements(self):
         factory = RequestFactory()
-        request = factory.get("/settings/agreements/")
+        request = factory.get("/settings/?tab=agreements")
         self._add_session_and_messages(request)
         request.user = self._auth_user("alice")
 
@@ -171,7 +171,7 @@ class AgreementsSelfServiceTests(TestCase):
                     return_value=agreement_detail,
                 ):
                     with patch("core.views_settings.render", autospec=True, side_effect=fake_render):
-                        resp = views_settings.settings_agreements(request)
+                        resp = views_settings.settings_root(request)
 
         self.assertEqual(resp.status_code, 200)
         ctx = captured["context"]
@@ -179,7 +179,7 @@ class AgreementsSelfServiceTests(TestCase):
 
     def test_settings_agreements_renders_required_for_group_and_danger_not_signed_badge(self):
         factory = RequestFactory()
-        request = factory.get("/settings/agreements/")
+        request = factory.get("/settings/?tab=agreements")
         self._add_session_and_messages(request)
         request.user = self._auth_user("alice")
 
@@ -211,7 +211,7 @@ class AgreementsSelfServiceTests(TestCase):
                         autospec=True,
                         return_value=agreement_detail,
                     ):
-                        resp = views_settings.settings_agreements(request)
+                        resp = views_settings.settings_root(request)
 
         self.assertEqual(resp.status_code, 200)
         content = resp.content.decode("utf-8")
@@ -227,8 +227,17 @@ class AgreementsSelfServiceTests(TestCase):
 
     def test_settings_agreement_detail_renders_required_for_group_and_danger_not_signed_badge(self):
         factory = RequestFactory()
-        request = factory.get("/settings/agreements/cla/")
+        request = factory.get("/settings/?tab=agreements&agreement=cla")
+        self._add_session_and_messages(request)
         request.user = self._auth_user("alice")
+
+        fu = SimpleNamespace(
+            username="alice",
+            is_authenticated=True,
+            get_username=lambda: "alice",
+            groups_list=[],
+            _user_data={"uid": ["alice"], "fasstatusnote": ["US"]},
+        )
 
         agreement_detail = FreeIPAFASAgreement(
             "cla",
@@ -241,13 +250,15 @@ class AgreementsSelfServiceTests(TestCase):
             },
         )
 
-        with patch("core.views_settings.has_enabled_agreements", autospec=True, return_value=True):
-            with patch(
-                "core.backends.FreeIPAFASAgreement.get",
-                autospec=True,
-                return_value=agreement_detail,
-            ):
-                resp = views_settings.settings_agreement_detail(request, "cla")
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
+            with patch("core.views_settings.has_enabled_agreements", autospec=True, return_value=True):
+                with patch("core.views_settings.list_agreements_for_user", autospec=True, return_value=[]):
+                    with patch(
+                        "core.backends.FreeIPAFASAgreement.get",
+                        autospec=True,
+                        return_value=agreement_detail,
+                    ):
+                        resp = views_settings.settings_root(request)
 
         self.assertEqual(resp.status_code, 200)
         content = resp.content.decode("utf-8")
@@ -264,8 +275,8 @@ class AgreementsSelfServiceTests(TestCase):
     def test_settings_agreements_post_signs_agreement(self):
         factory = RequestFactory()
         request = factory.post(
-            "/settings/agreements/",
-            data={"action": "sign", "cn": "cla"},
+            "/settings/",
+            data={"tab": "agreements", "action": "sign", "cn": "cla"},
         )
         self._add_session_and_messages(request)
         request.user = self._auth_user("alice")
@@ -292,17 +303,17 @@ class AgreementsSelfServiceTests(TestCase):
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
             with patch("core.backends.FreeIPAFASAgreement.get", autospec=True, return_value=agreement):
                 with patch.object(agreement, "add_user", autospec=True) as mocked_add:
-                    resp = views_settings.settings_agreements(request)
+                    resp = views_settings.settings_root(request)
 
         self.assertEqual(resp.status_code, 302)
-        self.assertEqual(resp["Location"], reverse("settings-agreements"))
+        self.assertEqual(resp["Location"], reverse("settings") + "#agreements")
         mocked_add.assert_called_once_with("alice")
         msgs = [m.message for m in get_messages(request)]
         self.assertTrue(any("signed" in m.lower() for m in msgs))
 
     def test_settings_agreements_redirects_when_no_enabled_agreements(self):
         factory = RequestFactory()
-        request = factory.get("/settings/agreements/")
+        request = factory.get("/settings/?tab=agreements")
         self._add_session_and_messages(request)
         request.user = self._auth_user("alice")
 
@@ -316,7 +327,7 @@ class AgreementsSelfServiceTests(TestCase):
 
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
             with patch("core.backends.FreeIPAFASAgreement.all", autospec=True, return_value=[]):
-                resp = views_settings.settings_agreements(request)
+                resp = views_settings.settings_root(request)
 
         self.assertEqual(resp.status_code, 302)
-        self.assertEqual(resp["Location"], reverse("settings-profile"))
+        self.assertEqual(resp["Location"], reverse("settings") + "#profile")

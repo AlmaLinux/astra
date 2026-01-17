@@ -85,7 +85,7 @@ class MembershipCountryRequirementsTests(TestCase):
             response = views_membership.membership_request(request)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], reverse("settings-address"))
+        self.assertEqual(response["Location"], reverse("settings") + "#address")
         msgs = [m.message for m in get_messages(request)]
         self.assertTrue(any("country" in m.lower() for m in msgs))
 
@@ -212,8 +212,9 @@ class MembershipCountryRequirementsTests(TestCase):
         )
 
         request = self.factory.post(
-            "/settings/address/",
+            "/settings/",
             data={
+                "tab": "address",
                 "street": "",
                 "l": "",
                 "st": "",
@@ -228,10 +229,10 @@ class MembershipCountryRequirementsTests(TestCase):
 
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
             with patch("core.views_settings._update_user_attrs", autospec=True, return_value=([], True)):
-                response = views_settings.settings_address(request)
+                response = views_settings.settings_root(request)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], reverse("settings-address"))
+        self.assertEqual(response["Location"], reverse("settings") + "#address")
 
         notes = list(Note.objects.filter(membership_request=mr, username=CUSTOS).order_by("timestamp", "pk"))
         self.assertTrue(

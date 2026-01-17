@@ -1,0 +1,227 @@
+
+<h5 class="mb-3">Change password</h5>
+
+<form method="post" novalidate>
+	{% csrf_token %}
+	<input type="hidden" name="tab" value="security" />
+
+	{% if password_form.non_field_errors %}
+		<div class="alert alert-danger">{{ password_form.non_field_errors }}</div>
+	{% endif %}
+
+	<div class="form-group">
+		<label for="{{ password_form.current_password.id_for_label }}">{{ password_form.current_password.label }}</label>
+		{{ password_form.current_password }}
+		{% if password_form.current_password.errors %}<div class="text-danger">{{ password_form.current_password.errors }}</div>{% endif %}
+	</div>
+
+	{% if using_otp %}
+		<div class="form-group" id="otpinput">
+			<label for="{{ password_form.otp.id_for_label }}">{{ password_form.otp.label }}</label>
+			{{ password_form.otp }}
+			{% if password_form.otp.errors %}<div class="text-danger">{{ password_form.otp.errors }}</div>{% endif %}
+			<small class="form-text text-muted">Your account has OTP enabled; enter your current OTP.</small>
+		</div>
+	{% endif %}
+
+	<div class="form-group">
+		<label for="{{ password_form.new_password.id_for_label }}">{{ password_form.new_password.label }}</label>
+		{{ password_form.new_password }}
+		{% if password_form.new_password.errors %}<div class="text-danger">{{ password_form.new_password.errors }}</div>{% endif %}
+	</div>
+
+	<div class="form-group">
+		<label for="{{ password_form.confirm_new_password.id_for_label }}">{{ password_form.confirm_new_password.label }}</label>
+		{{ password_form.confirm_new_password }}
+		{% if password_form.confirm_new_password.errors %}<div class="text-danger">{{ password_form.confirm_new_password.errors }}</div>{% endif %}
+	</div>
+
+	<button type="submit" class="btn btn-danger">Change password</button>
+</form>
+
+<hr class="my-4" />
+
+<h5 class="mb-3">OTP Tokens</h5>
+
+{% if otp_uri %}
+	<div class="modal fade" id="otp-modal" tabindex="-1" role="dialog" aria-hidden="true">
+		<div class="modal-dialog" role="document">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h5 class="modal-title">Scan your new token</h5>
+					<button type="button" class="close" data-dismiss="modal" aria-label="Close">
+						<span aria-hidden="true">&times;</span>
+					</button>
+				</div>
+				<div class="modal-body">
+					<p>Your new token is ready. Click the button below to reveal the QR code and scan it.</p>
+					<div class="text-center">
+						<button id="otp-toggle" class="btn btn-primary" type="button">Reveal</button>
+					</div>
+					<div id="otp-qrcode" class="text-center mt-3" style="display:none;">
+						{% if otp_qr_png_b64 %}
+							<img alt="OTP QR code" class="img-fluid" src="data:image/png;base64,{{ otp_qr_png_b64 }}" />
+						{% endif %}
+					</div>
+
+					<p class="mb-1 mt-4">or copy and paste the following token URL if you can't scan the QR code:</p>
+					<input id="otp-uri" class="form-control" readonly value="{{ otp_uri }}" />
+
+					<form method="post" class="py-3" novalidate>
+						{% csrf_token %}
+						<input type="hidden" name="tab" value="security" />
+						{{ otp_confirm_form.secret }}
+						{{ otp_confirm_form.description }}
+
+						<p class="mb-2">After enrolling the token in your application, verify it by generating your first code and entering it below:</p>
+
+						<div class="form-group">
+							<label for="{{ otp_confirm_form.code.id_for_label }}">{{ otp_confirm_form.code.label }}</label>
+							{{ otp_confirm_form.code }}
+							{% if otp_confirm_form.code.errors %}<div class="text-danger">{{ otp_confirm_form.code.errors }}</div>{% endif %}
+						</div>
+						{% if otp_confirm_form.non_field_errors %}
+							<div class="alert alert-danger">{{ otp_confirm_form.non_field_errors }}</div>
+						{% endif %}
+						<div class="d-flex justify-content-between">
+							<button type="submit" class="btn btn-primary" name="confirm-submit" value="1">Verify and Enable OTP Token</button>
+							<button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel">Cancel</button>
+						</div>
+					</form>
+				</div>
+			</div>
+		</div>
+	</div>
+{% endif %}
+
+<div class="modal fade" id="add-token-modal" tabindex="-1" role="dialog" aria-hidden="true">
+	<div class="modal-dialog" role="document">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h5 class="modal-title">Add OTP Token</h5>
+				<button type="button" class="close" data-dismiss="modal" aria-label="Close">
+					<span aria-hidden="true">&times;</span>
+				</button>
+			</div>
+			<div class="modal-body">
+				{% if not otp_tokens %}
+					<div class="alert alert-info">
+						<div><small>Creating your first OTP token enables two-factor authentication using OTP.</small></div>
+						<div><small><strong>Once enabled, two-factor authentication cannot be disabled.</strong></small></div>
+					</div>
+				{% endif %}
+				<form method="post" novalidate>
+					{% csrf_token %}
+					<input type="hidden" name="tab" value="security" />
+
+					<div class="form-group">
+						<label for="{{ otp_add_form.description.id_for_label }}">{{ otp_add_form.description.label }}</label>
+						{{ otp_add_form.description }}
+						{% if otp_add_form.description.errors %}<div class="text-danger">{{ otp_add_form.description.errors }}</div>{% endif %}
+					</div>
+
+					<div class="form-group">
+						<label for="{{ otp_add_form.password.id_for_label }}">{{ otp_add_form.password.label }}</label>
+						{{ otp_add_form.password }}
+						{% if otp_add_form.password.errors %}<div class="text-danger">{{ otp_add_form.password.errors }}</div>{% endif %}
+						{% if otp_add_form.password.help_text %}<small class="form-text text-muted">{{ otp_add_form.password.help_text }}</small>{% endif %}
+					</div>
+
+					{% if otp_tokens %}
+						<div class="form-group">
+							<label for="{{ otp_add_form.otp.id_for_label }}">{{ otp_add_form.otp.label }}</label>
+							{{ otp_add_form.otp }}
+							{% if otp_add_form.otp.errors %}<div class="text-danger">{{ otp_add_form.otp.errors }}</div>{% endif %}
+							{% if otp_add_form.otp.help_text %}<small class="form-text text-muted">{{ otp_add_form.otp.help_text }}</small>{% endif %}
+						</div>
+					{% endif %}
+
+					{% if otp_add_form.non_field_errors %}
+						<div class="alert alert-danger">{{ otp_add_form.non_field_errors }}</div>
+					{% endif %}
+					<button type="submit" class="btn btn-primary" name="add-submit" value="1">Generate OTP Token</button>
+				</form>
+			</div>
+		</div>
+	</div>
+</div>
+
+<div class="d-flex">
+	<button class="btn btn-primary btn-sm ml-auto" data-toggle="modal" data-target="#add-token-modal" type="button">Add OTP Token</button>
+</div>
+
+<div class="list-group list-group-flush mt-3">
+	{% for t in otp_tokens %}
+		<div class="list-group-item {% if t.ipatokendisabled %}text-muted bg-light{% endif %}">
+			<div class="row align-items-center">
+				<div class="col">
+					<div class="font-weight-bold otp-description">
+						<span data-role="token-description">{{ t.description|default:"(no name)" }}</span>
+						<button class="btn btn-sm btn-outline-secondary ml-1 otp-rename-toggle" type="button" title="Rename"><i class="fa fa-edit"></i></button>
+					</div>
+					<div class="otp-rename-form d-none">
+						<form action="{% url 'security-otp-rename' %}" method="post" class="form-inline">
+							{% csrf_token %}
+							<input type="hidden" name="token" value="{{ t.ipatokenuniqueid.0|default:'' }}" />
+							<input type="text" class="form-control form-control-sm mr-2" name="description" value="{{ t.description|default:'' }}" />
+							<button type="submit" class="btn btn-sm btn-primary">Rename</button>
+						</form>
+					</div>
+					<div class="text-monospace">{{ t.ipatokenuniqueid.0|default:'' }}</div>
+				</div>
+				<div class="col-auto">
+					{% if not t.ipatokendisabled %}
+						<form action="{% url 'security-otp-disable' %}" method="post" class="d-inline">
+							{% csrf_token %}
+							<input type="hidden" name="token" value="{{ t.ipatokenuniqueid.0|default:'' }}" />
+							<button type="submit" class="btn btn-sm btn-outline-secondary">Disable</button>
+						</form>
+					{% else %}
+						<form action="{% url 'security-otp-enable' %}" method="post" class="d-inline">
+							{% csrf_token %}
+							<input type="hidden" name="token" value="{{ t.ipatokenuniqueid.0|default:'' }}" />
+							<button type="submit" class="btn btn-sm btn-outline-secondary">Enable</button>
+						</form>
+					{% endif %}
+					<form action="{% url 'security-otp-delete' %}" method="post" class="d-inline">
+						{% csrf_token %}
+						<input type="hidden" name="token" value="{{ t.ipatokenuniqueid.0|default:'' }}" />
+						<button type="submit" class="btn btn-sm btn-outline-danger" title="Delete"><i class="fa fa-trash"></i></button>
+					</form>
+				</div>
+			</div>
+		</div>
+	{% empty %}
+		<div class="list-group-item text-center bg-light text-muted font-weight-bold">
+			<div>You have no OTP tokens</div>
+			<div><small>Add an OTP token to enable two-factor authentication on your account.</small></div>
+		</div>
+	{% endfor %}
+</div>
+
+{% if otp_uri or otp_add_form.errors %}
+	<script>
+		$(document).ready(function () {
+			{% if otp_uri %}
+				$('#otp-modal').modal('show');
+				$('#otp-toggle').click(function () {
+					$('#otp-qrcode').slideToggle('fast');
+				});
+			{% endif %}
+
+			{% if otp_add_form.errors %}
+				$('#add-token-modal').modal('show');
+			{% endif %}
+		});
+	</script>
+{% endif %}
+
+<script>
+	$(document).ready(function () {
+		$('.otp-rename-toggle').click(function () {
+			let parent = $(this).closest('.col');
+			parent.find('.otp-description').addClass('d-none');
+			parent.find('.otp-rename-form').removeClass('d-none');
+		});
+	});
+</script>

@@ -47,8 +47,8 @@ class EmailChangeValidationFlowTests(TestCase):
         )
 
         request = self.factory.post(
-            "/settings/emails/",
-            data={"mail": "new@example.org", "fasRHBZEmail": ""},
+            "/settings/",
+            data={"tab": "emails", "mail": "new@example.org", "fasRHBZEmail": ""},
         )
         self._add_session_and_messages(request)
         request.user = self._auth_user("alice")
@@ -57,7 +57,7 @@ class EmailChangeValidationFlowTests(TestCase):
             with patch("core.views_settings._update_user_attrs", autospec=True) as update_mock:
                 with patch("post_office.mail.send", autospec=True) as send_mock:
                     update_mock.return_value = ([], True)
-                    resp = views_settings.settings_emails(request)
+                    resp = views_settings.settings_root(request)
 
         self.assertEqual(resp.status_code, 302)
         update_mock.assert_not_called()
@@ -91,8 +91,8 @@ class EmailChangeValidationFlowTests(TestCase):
         )
 
         request = self.factory.post(
-            "/settings/emails/",
-            data={"mail": "verified@example.org", "fasRHBZEmail": "verified@example.org"},
+            "/settings/",
+            data={"tab": "emails", "mail": "verified@example.org", "fasRHBZEmail": "verified@example.org"},
         )
         self._add_session_and_messages(request)
         request.user = self._auth_user("alice")
@@ -101,7 +101,7 @@ class EmailChangeValidationFlowTests(TestCase):
             with patch("core.views_settings._update_user_attrs", autospec=True) as update_mock:
                 with patch("post_office.mail.send", autospec=True) as send_mock:
                     update_mock.return_value = ([], True)
-                    resp = views_settings.settings_emails(request)
+                    resp = views_settings.settings_root(request)
 
         self.assertEqual(resp.status_code, 302)
         update_mock.assert_called_once()
@@ -125,8 +125,12 @@ class EmailChangeValidationFlowTests(TestCase):
         )
 
         request = self.factory.post(
-            "/settings/emails/",
-            data={"mail": "verified-bz@example.org", "fasRHBZEmail": "verified-bz@example.org"},
+            "/settings/",
+            data={
+                "tab": "emails",
+                "mail": "verified-bz@example.org",
+                "fasRHBZEmail": "verified-bz@example.org",
+            },
         )
         self._add_session_and_messages(request)
         request.user = self._auth_user("alice")
@@ -135,7 +139,7 @@ class EmailChangeValidationFlowTests(TestCase):
             with patch("core.views_settings._update_user_attrs", autospec=True) as update_mock:
                 with patch("post_office.mail.send", autospec=True) as send_mock:
                     update_mock.return_value = ([], True)
-                    resp = views_settings.settings_emails(request)
+                    resp = views_settings.settings_root(request)
 
         self.assertEqual(resp.status_code, 302)
         update_mock.assert_called_once()

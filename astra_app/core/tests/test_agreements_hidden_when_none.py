@@ -41,6 +41,7 @@ class AgreementsHiddenWhenNoneTests(TestCase):
             last_name="User",
             email="a@example.org",
             is_authenticated=True,
+            groups_list=[],
             _user_data={
                 "givenname": ["Alice"],
                 "sn": ["User"],
@@ -52,8 +53,8 @@ class AgreementsHiddenWhenNoneTests(TestCase):
         with patch("core.backends.FreeIPAUser.get", return_value=middleware_user):
             with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
                 with patch("core.backends.FreeIPAFASAgreement.all", return_value=[]):
-                    resp = self.client.get(reverse("settings-profile"))
+                    resp = self.client.get(reverse("settings"))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertNotIn(b"settings/agreements", resp.content)
+        self.assertNotIn(b"#agreements", resp.content)
         self.assertNotIn(b">Agreements<", resp.content)

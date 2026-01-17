@@ -1,0 +1,81 @@
+{% if agreement %}
+	<h4>{{ agreement.cn }}</h4>
+	<div class="mb-2">
+		{% if agreement_signed %}
+			<span class="badge badge-success">Signed</span>
+		{% else %}
+			<span class="badge badge-danger">Not signed</span>
+		{% endif %}
+	</div>
+	{% if agreement.groups %}
+		<div class="mb-3">
+			<strong>Required for:</strong>
+			{% for group_cn in agreement.groups %}
+				<a href="{% url 'group-detail' name=group_cn %}">{{ group_cn }}</a>{% if not forloop.last %}, {% endif %}
+			{% endfor %}
+		</div>
+	{% endif %}
+	<div class="mb-3">{{ agreement.description|linebreaksbr }}</div>
+	<form method="post" novalidate>
+		{% csrf_token %}
+		<input type="hidden" name="tab" value="agreements" />
+		<input type="hidden" name="action" value="sign" />
+		<input type="hidden" name="cn" value="{{ agreement.cn }}" />
+		{% if agreement_signed %}
+			<button type="button" class="btn btn-outline-secondary" disabled>Signed</button>
+		{% else %}
+			<button type="submit" class="btn btn-primary">Sign</button>
+		{% endif %}
+	</form>
+	<div class="mt-3">
+		<a href="{% url 'settings' %}#agreements">Back to agreements</a>
+	</div>
+{% else %}
+	<h4>Agreements</h4>
+	{% if agreements %}
+		<div class="table-responsive">
+			<table class="table table-sm table-hover mb-0">
+				<tbody>
+					{% for a in agreements %}
+						<tr>
+							<td>
+								<div>
+									<div class="d-flex align-items-center">
+										<strong>{{ a.cn }}</strong>
+										{% if not a.signed and a.groups %}
+											<span class="badge badge-danger ml-2">Not signed</span>
+										{% elif a.signed %}
+											<span class="badge badge-success ml-2">Signed</span>
+										{% endif %}
+									</div>
+									{% if not a.signed and a.groups %}
+										<div class="text-muted text-sm mt-1">
+											Required for:
+											{% for g in a.groups %}
+												<a href="{% url 'group-detail' name=g %}">{{ g }}</a>{% if not forloop.last %}, {% endif %}
+											{% endfor %}
+										</div>
+									{% endif %}
+								</div>
+							</td>
+							<td class="text-right" style="white-space: nowrap;">
+								<a class="btn btn-sm btn-outline-secondary" href="{% url 'settings' %}?agreement={{ a.cn|urlencode }}#agreements">View agreement</a>
+								{% if not a.signed %}
+									<form method="post" class="d-inline" novalidate>
+										{% csrf_token %}
+										<input type="hidden" name="tab" value="agreements" />
+										<input type="hidden" name="action" value="sign" />
+										<input type="hidden" name="cn" value="{{ a.cn }}" />
+										<button type="submit" class="btn btn-sm btn-primary">Sign</button>
+									</form>
+								{% endif %}
+							</td>
+						</tr>
+					{% endfor %}
+				</tbody>
+			</table>
+		</div>
+	{% else %}
+		<p class="text-muted">No enabled agreements.</p>
+	{% endif %}
+{% endif %}

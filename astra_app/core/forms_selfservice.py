@@ -4,6 +4,7 @@ import locale
 import re
 import zoneinfo
 from functools import lru_cache
+from typing import override
 from urllib.parse import urlparse
 
 import pyotp
@@ -18,6 +19,55 @@ _GITHUB_USERNAME_RE = re.compile(r"^(?!-)(?!.*--)[A-Za-z0-9-]{1,39}(?<!-)$")
 
 # GitLab username rules are more permissive; keep basic constraints.
 _GITLAB_USERNAME_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,253}[A-Za-z0-9])?$")
+
+
+def normalize_locale_tag(value: object) -> str:
+    """Normalize locale values to a BCP47-style tag (e.g. en-US).
+
+    FreeIPA deployments may store either POSIX-style values (en_US) or BCP47-ish
+    tags (en-US). For UI consistency we present the BCP47-ish form, while still
+    accepting underscore inputs.
+    """
+
+    v = _normalize_str(value)
+    if not v:
+        return ""
+
+    # Strip encoding/modifiers for concise tags.
+    base = v.split(".", 1)[0].split("@", 1)[0].strip()
+    if not base:
+        return ""
+
+    parts = [p for p in base.replace("_", "-").split("-") if p]
+    if not parts:
+        return ""
+
+    # Basic BCP47-ish casing: language lower, region upper, script Title.
+    normalized: list[str] = []
+    for i, p in enumerate(parts):
+        if i == 0:
+            normalized.append(p.lower())
+            continue
+        if len(p) == 2 and p.isalpha():
+            normalized.append(p.upper())
+            continue
+        if len(p) == 4 and p.isalpha():
+            normalized.append(p.title())
+            continue
+        normalized.append(p)
+
+    return "-".join(normalized)
+
+
+class _LocaleChoiceField(forms.ChoiceField):
+    """ChoiceField that accepts en_US and normalizes it to en-US."""
+
+    @override
+    def clean(self, value: object) -> str:
+        normalized = normalize_locale_tag(value)
+        if normalized:
+            return super().clean(normalized)
+        return super().clean(value)
 
 
 def _get_timezones() -> set[str]:
@@ -47,13 +97,14 @@ def get_locale_options() -> list[str]:
         v = v.split("@", 1)[0]
         v = v.strip()
         if v and len(v) <= 64:
-            candidates.add(v)
+            candidates.add(normalize_locale_tag(v))
 
     for k, v in aliases.items():
         _add(k)
         _add(v)
 
     return sorted(candidates)
+
 
 def _is_valid_locale_code(value: str) -> bool:
     # Use Python's locale alias registry. This is not the same as "installed locales",
@@ -62,12 +113,15 @@ def _is_valid_locale_code(value: str) -> bool:
     if not v:
         return True
 
-    # Normalize common inputs like en_US.UTF-8 -> en_US.utf8
-    normalized = locale.normalize(v)
+    # Normalize common inputs like en_US.UTF-8 -> en_US.utf8.
+    # Accept BCP47-ish inputs like en-US by treating '-' as '_'.
+    canonical = v.replace("-", "_")
+    normalized = locale.normalize(canonical)
 
     # locale.locale_alias keys are lower-case.
     candidates = {
         v.lower(),
+        canonical.lower(),
         normalized.lower(),
         normalized.split(".", 1)[0].lower(),
     }
@@ -133,10 +187,10 @@ class ProfileForm(_StyledForm):
         ),
         help_text="Comma-separated.",
     )
-    fasLocale = forms.ChoiceField(
+    fasLocale = _LocaleChoiceField(
         label="Locale",
         required=False,
-        help_text="Example: en_US",
+        help_text="Example: en-US",
         choices=(),
     )
     fasTimezone = forms.ChoiceField(
@@ -189,12 +243,24 @@ class ProfileForm(_StyledForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+        # Ensure the stored FreeIPA locale (which may be en_US or en-US) renders
+        # against the BCP47-ish choices.
+        if not self.is_bound:
+            self.initial["fasLocale"] = normalize_locale_tag(self.initial.get("fasLocale"))
+
         def _current_value(name: str) -> str:
             if self.is_bound:
-                # Bound forms should validate against the known choices.
-                return ""
-            v = self.initial.get(name)
-            return _normalize_str(v)
+                # In practice FreeIPA may return values that aren't in Python's
+                # locale alias registry (e.g. "en-US"). If the form is bound,
+                # include the submitted value so ChoiceField validation doesn't
+                # fail with "Select a valid choice" before our clean_* methods
+                # can run.
+                if name == "fasLocale":
+                    return normalize_locale_tag(self.data.get(name))
+                return _normalize_str(self.data.get(name))
+            if name == "fasLocale":
+                return normalize_locale_tag(self.initial.get(name))
+            return _normalize_str(self.initial.get(name))
 
         def _choices(options: list[str], *, current: str) -> list[tuple[str, str]]:
             out: list[tuple[str, str]] = [("", "—")]
@@ -291,7 +357,7 @@ class ProfileForm(_StyledForm):
 
     def clean_fasLocale(self):
         # Matches baseruserfas: Str("faslocale?", maxlength=64)
-        value = _normalize_str(self.cleaned_data.get("fasLocale"))
+        value = normalize_locale_tag(self.cleaned_data.get("fasLocale"))
         if len(value) > 64:
             raise forms.ValidationError("Locale must be at most 64 characters")
         if value and not _is_valid_locale_code(value):
@@ -366,6 +432,7 @@ class AddressForm(_StyledForm):
         if not is_valid_country_alpha2(value):
             raise forms.ValidationError("Country code must be a valid ISO 3166-1 alpha-2")
         return value
+
 
 class EmailsForm(_StyledForm):
     mail = forms.EmailField(label="E-mail Address", required=True)

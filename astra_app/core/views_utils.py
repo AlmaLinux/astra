@@ -8,6 +8,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
+from django.urls import reverse
 
 from core.agreements import has_enabled_agreements
 from core.backends import FreeIPAUser, _invalidate_user_cache, _invalidate_users_list_cache
@@ -43,7 +44,7 @@ def block_action_without_country_code(
         request,
         f"A valid country code is required before you can {action_label}. Please set it on the Address tab.",
     )
-    return redirect("settings-address")
+    return redirect(f"{reverse('settings')}#address")
 
 
 _ATTR_NOT_ALLOWED_RE = re.compile(r"attribute\s+['\"]?([a-zA-Z0-9_-]+)['\"]?\s+not\s+allowed", re.IGNORECASE)

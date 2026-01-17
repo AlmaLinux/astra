@@ -23,7 +23,7 @@
       <form action="{{ request.get_full_path }}" method="post" class="m-0">
         {% csrf_token %}
         <div class="d-flex justify-content-between">
-          <a class="btn btn-secondary" href="{% url 'settings-emails' %}">Cancel</a>
+          <a class="btn btn-secondary" href="{% url 'settings' %}#emails">Cancel</a>
           <button class="btn btn-primary" type="submit">Confirm</button>
         </div>
       </form>

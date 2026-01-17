@@ -10,14 +10,7 @@ from django.contrib.sessions.middleware import SessionMiddleware
 from django.http import HttpResponse
 from django.test import RequestFactory, TestCase, override_settings
 
-from core.views_settings import (
-    settings_address,
-    settings_address_lookup,
-    settings_address_suggest,
-    settings_emails,
-    settings_keys,
-    settings_profile,
-)
+from core.views_settings import settings_address_lookup, settings_address_suggest, settings_root
 from core.views_users import user_profile
 
 
@@ -182,8 +175,9 @@ class FASAttributesTests(TestCase):
         self.assertEqual(before.get("pronouns", ""), "")
 
         req = self.factory.post(
-            "/settings/profile/",
+            "/settings/",
             data={
+                "tab": "profile",
                 "givenname": "Alice",
                 "sn": "User",
                 "fasPronoun": "she/her",
@@ -203,7 +197,7 @@ class FASAttributesTests(TestCase):
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
             with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
                 with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
-                    resp = settings_profile(req)
+                    resp = settings_root(req)
 
         self.assertEqual(resp.status_code, 302)
         self._assert_user_mod_called_with_sets(
@@ -248,8 +242,9 @@ class FASAttributesTests(TestCase):
         client.user_mod.side_effect = lambda _username, **kwargs: self._apply_user_mod_to_dummy(fu, kwargs)
 
         req = self.factory.post(
-            "/settings/address/",
+            "/settings/",
             data={
+                "tab": "address",
                 "street": "Main St 5",
                 "l": "Springfield",
                 "st": "Illinois",
@@ -263,7 +258,7 @@ class FASAttributesTests(TestCase):
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
             with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
                 with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
-                    resp = settings_address(req)
+                    resp = settings_root(req)
 
         self.assertEqual(resp.status_code, 302)
         self._assert_user_mod_called_with_sets(
@@ -469,8 +464,9 @@ class FASAttributesTests(TestCase):
         self.assertIn("she/her", before.get("pronouns", ""))
 
         req = self.factory.post(
-            "/settings/profile/",
+            "/settings/",
             data={
+                "tab": "profile",
                 "givenname": "Alicia",
                 "sn": "User",
                 "fasPronoun": "they/them",
@@ -490,7 +486,7 @@ class FASAttributesTests(TestCase):
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
             with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
                 with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
-                    resp = settings_profile(req)
+                    resp = settings_root(req)
 
         self.assertEqual(resp.status_code, 302)
         self._assert_user_mod_called_with_sets(
@@ -557,8 +553,9 @@ class FASAttributesTests(TestCase):
         self.assertTrue(before.get("pronouns"))
 
         req = self.factory.post(
-            "/settings/profile/",
+            "/settings/",
             data={
+                "tab": "profile",
                 "givenname": "Alice",
                 "sn": "User",
                 "fasPronoun": "",
@@ -578,7 +575,7 @@ class FASAttributesTests(TestCase):
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
             with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
                 with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
-                    resp = settings_profile(req)
+                    resp = settings_root(req)
 
         self.assertEqual(resp.status_code, 302)
         self._assert_user_mod_called_with_sets(
@@ -618,8 +615,9 @@ class FASAttributesTests(TestCase):
 
         # set
         req = self.factory.post(
-            "/settings/emails/",
+            "/settings/",
             data={
+                "tab": "emails",
                 "mail": "alice@example.com",
                 "fasRHBZEmail": "alice@bugzilla.example",
             },
@@ -631,7 +629,7 @@ class FASAttributesTests(TestCase):
             with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
                 with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
                     with patch("post_office.mail.send", autospec=True) as send_mock:
-                        resp = settings_emails(req)
+                        resp = settings_root(req)
 
         self.assertEqual(resp.status_code, 302)
         # Email changes are deferred until validated; no direct FreeIPA updates here.
@@ -651,8 +649,9 @@ class FASAttributesTests(TestCase):
         client.user_mod.reset_mock()
 
         req2 = self.factory.post(
-            "/settings/emails/",
+            "/settings/",
             data={
+                "tab": "emails",
                 "mail": "alice2@example.com",
                 "fasRHBZEmail": "alice2@bugzilla.example",
             },
@@ -664,7 +663,7 @@ class FASAttributesTests(TestCase):
             with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
                 with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
                     with patch("post_office.mail.send", autospec=True) as send_mock2:
-                        resp2 = settings_emails(req2)
+                        resp2 = settings_root(req2)
 
         self.assertEqual(resp2.status_code, 302)
         client.user_mod.assert_not_called()
@@ -684,8 +683,9 @@ class FASAttributesTests(TestCase):
         client.user_mod.reset_mock()
 
         req3 = self.factory.post(
-            "/settings/emails/",
+            "/settings/",
             data={
+                "tab": "emails",
                 "mail": "alice2@example.com",
                 "fasRHBZEmail": "",
             },
@@ -696,7 +696,7 @@ class FASAttributesTests(TestCase):
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
             with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
                 with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
-                    resp3 = settings_emails(req3)
+                    resp3 = settings_root(req3)
 
         self.assertEqual(resp3.status_code, 302)
         call_args, call_kwargs = client.user_mod.call_args
@@ -724,8 +724,9 @@ class FASAttributesTests(TestCase):
 
         # set
         req = self.factory.post(
-            "/settings/keys/",
+            "/settings/",
             data={
+                "tab": "keys",
                 "fasGPGKeyId": "0123456789ABCDEF\nFEDCBA9876543210",
                 "ipasshpubkey": "ssh-ed25519 AAAA alice@laptop\nssh-rsa AAAA alice@desktop",
             },
@@ -736,7 +737,7 @@ class FASAttributesTests(TestCase):
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
             with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
                 with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
-                    resp = settings_keys(req)
+                    resp = settings_root(req)
 
         self.assertEqual(resp.status_code, 302)
         self._assert_user_mod_called_with_sets(
@@ -760,8 +761,9 @@ class FASAttributesTests(TestCase):
         client.user_mod.reset_mock()
 
         req2 = self.factory.post(
-            "/settings/keys/",
+            "/settings/",
             data={
+                "tab": "keys",
                 "fasGPGKeyId": "0123456789ABCDEF\nAAAAAAAAAAAAAAAA",
                 "ipasshpubkey": "ssh-ed25519 AAAA alice@laptop\nssh-ed25519 AAAA alice@phone",
             },
@@ -772,7 +774,7 @@ class FASAttributesTests(TestCase):
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
             with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
                 with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
-                    resp2 = settings_keys(req2)
+                    resp2 = settings_root(req2)
 
         self.assertEqual(resp2.status_code, 302)
         self._assert_user_mod_called_with_sets(
@@ -794,8 +796,9 @@ class FASAttributesTests(TestCase):
         # clear
         client.user_mod.reset_mock()
         req3 = self.factory.post(
-            "/settings/keys/",
+            "/settings/",
             data={
+                "tab": "keys",
                 "fasGPGKeyId": "",
                 "ipasshpubkey": "",
             },
@@ -806,7 +809,7 @@ class FASAttributesTests(TestCase):
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
             with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
                 with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
-                    resp3 = settings_keys(req3)
+                    resp3 = settings_root(req3)
 
         self.assertEqual(resp3.status_code, 302)
         call_args, call_kwargs = client.user_mod.call_args

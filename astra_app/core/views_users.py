@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
@@ -98,10 +99,7 @@ def _profile_context_for_user(
         )
         coc_signed = bool(coc_agreement and coc_agreement.signed)
         coc_settings_url = (
-            reverse(
-                "settings-agreement-detail",
-                kwargs={"cn": settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN},
-            )
+            f"{reverse('settings')}?agreement={quote(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN)}#agreements"
             if is_self
             else None
         )
@@ -115,7 +113,7 @@ def _profile_context_for_user(
             {
                 "cn": agreement_cn,
                 "required_by": sorted(required_by, key=str.lower),
-                "settings_url": reverse("settings-agreement-detail", kwargs={"cn": agreement_cn})
+                "settings_url": f"{reverse('settings')}?agreement={quote(agreement_cn)}#agreements"
                 if is_self
                 else None,
             }
@@ -263,7 +261,7 @@ def _profile_context_for_user(
                 {
                     "id": "country-code-missing-alert",
                     "label": "Add a valid ISO 3166-1 alpha-2 country code",
-                    "url": reverse("settings-address"),
+                    "url": f"{reverse('settings')}#address",
                     "url_label": "Set country code",
                 }
             )
@@ -273,7 +271,7 @@ def _profile_context_for_user(
                 {
                     "id": "email-blacklisted-alert",
                     "label": "Fix email delivery (your address is blacklisted)",
-                    "url": reverse("settings-emails"),
+                    "url": f"{reverse('settings')}#emails",
                     "url_label": "Update email",
                 }
             )

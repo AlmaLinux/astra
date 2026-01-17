@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import cast
+from urllib.parse import quote
 
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied
@@ -165,8 +166,8 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
                 {
                     "cn": agreement_cn,
                     "signed": username in users_signed,
-                    "detail_url": reverse("settings-agreement-detail", kwargs={"cn": agreement_cn}),
-                    "list_url": reverse("settings-agreements"),
+                    "detail_url": f"{reverse('settings')}?agreement={quote(agreement_cn)}#agreements",
+                    "list_url": f"{reverse('settings')}#agreements",
                 }
             )
 

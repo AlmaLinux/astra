@@ -1,0 +1,22 @@
+<form method="post" novalidate data-settings-save-all="1">
+	{% csrf_token %}
+	<input type="hidden" name="tab" value="emails" />
+
+	{% if emails_form.non_field_errors %}
+		<div class="alert alert-danger">{{ emails_form.non_field_errors }}</div>
+	{% endif %}
+
+	<div class="form-group">
+		<label for="{{ emails_form.mail.id_for_label }}">{{ emails_form.mail.label }}</label>
+		{{ emails_form.mail }}
+		{% if emails_form.mail.errors %}<div class="text-danger">{{ emails_form.mail.errors }}</div>{% endif %}
+	</div>
+
+	<div class="form-group">
+		<label for="{{ emails_form.fasRHBZEmail.id_for_label }}">{{ emails_form.fasRHBZEmail.label }}</label>
+		{{ emails_form.fasRHBZEmail }}
+		{% if emails_form.fasRHBZEmail.errors %}<div class="text-danger">{{ emails_form.fasRHBZEmail.errors }}</div>{% endif %}
+	</div>
+
+	<button type="submit" class="btn btn-primary">Save</button>
+</form>

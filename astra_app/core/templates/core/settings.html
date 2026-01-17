@@ -1,0 +1,177 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Settings{% endblock %}
+
+{% block header %}
+	<h1 class="m-0">Settings for <a href="{% url 'user-profile' request.user.get_username %}">{{ request.user.get_username }}</a></h1>
+{% endblock %}
+
+{% block content %}
+<div class="settings-page">
+	<div class="card card-primary card-tabs settings-card mt-3">
+		<div class="card-header p-0 pt-1">
+			{% include 'core/_settings_tabs.html' %}
+		</div>
+
+		<div class="card-body">
+			<div class="tab-content">
+				<div class="tab-pane {% if active_tab == 'profile' %}active{% endif %}" id="profile" role="tabpanel">
+					{% include 'core/_settings_tab_profile.html' %}
+				</div>
+
+				<div class="tab-pane {% if active_tab == 'address' %}active{% endif %}" id="address" role="tabpanel">
+					{% include 'core/_settings_tab_address.html' %}
+				</div>
+
+				<div class="tab-pane {% if active_tab == 'emails' %}active{% endif %}" id="emails" role="tabpanel">
+					{% include 'core/_settings_tab_emails.html' %}
+				</div>
+
+				<div class="tab-pane {% if active_tab == 'keys' %}active{% endif %}" id="keys" role="tabpanel">
+					{% include 'core/_settings_tab_keys.html' %}
+				</div>
+
+				<div class="tab-pane {% if active_tab == 'security' %}active{% endif %}" id="security" role="tabpanel">
+					{% include 'core/_settings_tab_security.html' %}
+				</div>
+
+				{% if show_agreements_tab %}
+					<div class="tab-pane {% if active_tab == 'agreements' %}active{% endif %}" id="agreements" role="tabpanel">
+						{% include 'core/_settings_tab_agreements.html' %}
+					</div>
+				{% endif %}
+			</div>
+		</div>
+	</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+	{{ block.super }}
+	<script>
+		(function () {
+			var forceTab = '{{ force_tab|default:""|escapejs }}';
+
+			function activateFromHash() {
+				var hash = window.location.hash || '';
+				if (forceTab) {
+					hash = '#' + forceTab;
+					forceTab = '';
+					if (window.location.hash !== hash) {
+						window.location.hash = hash;
+					}
+				}
+				if (!hash) {
+					return;
+				}
+				var $link = document.querySelector('a[data-toggle="tab"][href="' + hash + '"]');
+				if (!$link || !window.jQuery) {
+					return;
+				}
+				window.jQuery($link).tab('show');
+			}
+
+			if (window.jQuery) {
+				window.jQuery('a[data-toggle="tab"]').on('shown.bs.tab', function (e) {
+					if (e && e.target && e.target.getAttribute) {
+						var href = e.target.getAttribute('href');
+						if (href && href.startsWith('#')) {
+							window.location.hash = href;
+						}
+					}
+				});
+			}
+
+			window.addEventListener('hashchange', activateFromHash);
+			activateFromHash();
+		})();
+	</script>
+	<script>
+		(function () {
+			var forms = document.querySelectorAll('form[data-settings-save-all="1"]');
+			if (!forms || !forms.length) {
+				return;
+			}
+
+			function hasFilePayload(form) {
+				var fileInputs = form.querySelectorAll('input[type="file"]');
+				if (!fileInputs || !fileInputs.length) {
+					return false;
+				}
+				for (var i = 0; i < fileInputs.length; i++) {
+					var input = fileInputs[i];
+					if (input && input.files && input.files.length) {
+						return true;
+					}
+				}
+				return false;
+			}
+
+			function combinedSubmit(event, sourceForm) {
+				if (!event || !sourceForm) {
+					return;
+				}
+
+				if (hasFilePayload(sourceForm)) {
+					return;
+				}
+
+				event.preventDefault();
+
+				var tabInput = sourceForm.querySelector('input[name="tab"]');
+				var activeTab = (tabInput && tabInput.value) ? tabInput.value : 'profile';
+
+				var combined = new FormData();
+				var csrf = null;
+
+				for (var i = 0; i < forms.length; i++) {
+					var f = forms[i];
+					var fd = new FormData(f);
+					fd.forEach(function (value, key) {
+						if (key === 'tab' || key === 'save_all') {
+							return;
+						}
+						if (key === 'csrfmiddlewaretoken') {
+							csrf = csrf || value;
+							return;
+						}
+						combined.append(key, value);
+					});
+				}
+
+				if (csrf) {
+					combined.set('csrfmiddlewaretoken', csrf);
+				}
+				combined.set('tab', activeTab);
+				combined.set('save_all', '1');
+
+				var postForm = document.createElement('form');
+				postForm.method = 'post';
+				postForm.action = sourceForm.getAttribute('action') || window.location.href;
+				postForm.style.display = 'none';
+
+				combined.forEach(function (value, key) {
+					if (value && value instanceof File) {
+						return;
+					}
+					var input = document.createElement('input');
+					input.type = 'hidden';
+					input.name = key;
+					input.value = String(value);
+					postForm.appendChild(input);
+				});
+
+				document.body.appendChild(postForm);
+				postForm.submit();
+			}
+
+			for (var i = 0; i < forms.length; i++) {
+				(function (form) {
+					form.addEventListener('submit', function (e) {
+						combinedSubmit(e, form);
+					});
+				})(forms[i]);
+			}
+		})();
+	</script>
+{% endblock %}

@@ -107,10 +107,10 @@ DEBUG = _env_bool("DEBUG", default=False)
 
 # Self-service Address settings: where to store the ISO 3166-1 country code.
 # Some FreeIPA dev schemas don't allow writing to the LDAP "c" attribute.
-# Configure in production via SELF_SERVICE_ADDRESS_COUNTRY_ATTR=c
+# Configure in devel via SELF_SERVICE_ADDRESS_COUNTRY_ATTR=fasstatusnote
 SELF_SERVICE_ADDRESS_COUNTRY_ATTR = (
-    _env_str("SELF_SERVICE_ADDRESS_COUNTRY_ATTR", default="fasstatusnote")
-    or "fasstatusnote"
+    _env_str("SELF_SERVICE_ADDRESS_COUNTRY_ATTR", default="c")
+    or "c"
 )
 
 # FreeIPA FAS agreement CN used for the Community Code of Conduct.

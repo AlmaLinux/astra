@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import patch
+from urllib.parse import quote
 
 from django.test import TestCase
 from django.urls import reverse
@@ -54,7 +55,8 @@ class ProfileAccountSetupAlertTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'id="account-setup-required-alert"')
         self.assertContains(resp, coc_cn)
-        self.assertContains(resp, f'href="{reverse("settings-agreement-detail", kwargs={"cn": coc_cn})}"')
+        settings_url = f"{reverse('settings')}?agreement={quote(coc_cn)}#agreements"
+        self.assertContains(resp, f'href="{settings_url}"')
 
     def test_shows_recommended_membership_request_when_no_individual_membership(self) -> None:
         bob = FreeIPAUser(
