@@ -347,6 +347,11 @@ def _profile_context_for_user(
                 }
             )
 
+    account_setup_required_is_rfi = any(
+        action["id"] in {"membership-action-required-alert", "sponsorship-action-required-alert"}
+        for action in account_setup_required_actions
+    )
+
     return {
         "fu": fu,
         "profile_avatar_user": profile_avatar_user,
@@ -355,6 +360,7 @@ def _profile_context_for_user(
         "country_code": country_status.code,
         "country_code_missing_or_invalid": not country_status.is_valid,
         "account_setup_required_actions": account_setup_required_actions,
+        "account_setup_required_is_rfi": account_setup_required_is_rfi,
         "account_setup_recommended_actions": account_setup_recommended_actions,
         "membership_request_url": membership_request_url,
         "membership_can_request_any": membership_can_request_any,

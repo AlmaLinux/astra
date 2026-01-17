@@ -54,6 +54,8 @@ class ProfileAccountSetupAlertTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'id="account-setup-required-alert"')
+        self.assertContains(resp, "Please complete these steps to finish setting up your account")
+        self.assertNotContains(resp, "Please address the following issues")
         self.assertContains(resp, coc_cn)
         settings_url = f"{reverse('settings')}?agreement={quote(coc_cn)}#agreements"
         self.assertContains(resp, f'href="{settings_url}"')

@@ -12,7 +12,11 @@
   {% if is_self and account_setup_required_actions %}
     <div class="alert alert-danger shadow" id="account-setup-required-alert" role="alert">
       <strong>Action required:</strong>
-      Please complete these steps to finish setting up your account.
+      {% if account_setup_required_is_rfi %}
+        Please address the following issues.
+      {% else %}
+        Please complete these steps to finish setting up your account.
+      {% endif %}
       <ul class="mb-0 pl-3">
         {% for item in account_setup_required_actions %}
           <li id="{{ item.id }}">
