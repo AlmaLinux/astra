@@ -296,7 +296,7 @@ class MembershipRequest(models.Model):
                 name="uniq_membershiprequest_open_user_type",
             ),
             models.UniqueConstraint(
-                fields=["requested_organization", "membership_type"],
+                fields=["requested_organization"],
                 condition=Q(status__in=["pending", "on_hold"], requested_organization__isnull=False),
                 name="uniq_membershiprequest_open_org_type",
             ),

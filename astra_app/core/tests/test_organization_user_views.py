@@ -590,7 +590,8 @@ class OrganizationUserViewsTests(TestCase):
             requested_username="",
             requested_organization=org,
             membership_type_id="gold",
-            status=MembershipRequest.Status.pending,
+            status=MembershipRequest.Status.approved,
+            decided_at=timezone.now(),
         )
         req2 = MembershipRequest.objects.create(
             requested_username="",
@@ -710,6 +711,99 @@ class OrganizationUserViewsTests(TestCase):
                 target_organization=org,
                 membership_request=req,
             ).exists()
+        )
+
+    def test_representative_cannot_submit_second_org_membership_request_while_one_open(self) -> None:
+        from core.models import MembershipRequest, MembershipType, Organization, OrganizationSponsorship
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "description": "Gold Sponsor Member (Annual dues: $20,000 USD)",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "description": "Silver Sponsor Member (Annual dues: $2,500 USD)",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(
+            name="AlmaLinux",
+            business_contact_name="Business Person",
+            business_contact_email="contact@almalinux.org",
+            pr_marketing_contact_name="PR Person",
+            pr_marketing_contact_email="pr@almalinux.org",
+            technical_contact_name="Tech Person",
+            technical_contact_email="tech@almalinux.org",
+            membership_level_id="gold",
+            website_logo="https://example.com/logo-options",
+            website="https://almalinux.org/",
+            additional_information="Renewal note",
+            representative="bob",
+        )
+
+        expires_at = timezone.now() + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS - 1)
+        OrganizationSponsorship.objects.create(
+            organization=org,
+            membership_type_id="gold",
+            expires_at=expires_at,
+        )
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        self._login_as_freeipa_user("bob")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            resp = self.client.post(reverse("organization-sponsorship-extend", args=[org.pk]), follow=False)
+        self.assertEqual(resp.status_code, 302)
+
+        self.assertEqual(
+            MembershipRequest.objects.filter(
+                requested_organization=org,
+                status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
+            ).count(),
+            1,
+        )
+
+        payload = {
+            "name": org.name,
+            "business_contact_name": org.business_contact_name,
+            "business_contact_email": org.business_contact_email,
+            "business_contact_phone": org.business_contact_phone,
+            "pr_marketing_contact_name": org.pr_marketing_contact_name,
+            "pr_marketing_contact_email": org.pr_marketing_contact_email,
+            "pr_marketing_contact_phone": org.pr_marketing_contact_phone,
+            "technical_contact_name": org.technical_contact_name,
+            "technical_contact_email": org.technical_contact_email,
+            "technical_contact_phone": org.technical_contact_phone,
+            "membership_level": "silver",
+            "website_logo": org.website_logo,
+            "website": org.website,
+            "additional_information": org.additional_information,
+        }
+
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            resp = self.client.post(reverse("organization-edit", args=[org.pk]), data=payload, follow=True)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "A sponsorship request is already pending.")
+        self.assertEqual(
+            MembershipRequest.objects.filter(
+                requested_organization=org,
+                status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
+            ).count(),
+            1,
         )
 
     def test_committee_can_edit_org_sponsorship_expiry_and_terminate(self) -> None:

@@ -178,7 +178,7 @@ class OrganizationEditForm(forms.ModelForm):
             return ""
 
         username = str(self.cleaned_data.get("representative") or "").strip()
-        
+
         if not username:
             return ""
 
@@ -397,14 +397,13 @@ def organization_sponsorship_extend(request: HttpRequest, organization_id: int) 
     existing = (
         MembershipRequest.objects.filter(
             requested_organization=organization,
-            membership_type=membership_type,
-            status=MembershipRequest.Status.pending,
+            status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
         )
         .order_by("-requested_at")
         .first()
     )
     if existing is not None:
-        messages.info(request, "A sponsorship renewal request is already pending.")
+        messages.info(request, "A sponsorship request is already pending.")
         return redirect("organization-detail", organization_id=organization.pk)
 
     responses: list[dict[str, str]] = []
@@ -482,8 +481,7 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
             existing = (
                 MembershipRequest.objects.filter(
                     requested_organization=organization,
-                    membership_type=requested_membership_level,
-                    status=MembershipRequest.Status.pending,
+                    status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
                 )
                 .order_by("-requested_at")
                 .first()
@@ -509,7 +507,7 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
 
                 messages.success(request, "Sponsorship level change submitted for review.")
             else:
-                messages.info(request, "A sponsorship level change request is already pending.")
+                messages.info(request, "A sponsorship request is already pending.")
 
         return redirect("organization-detail", organization_id=organization.pk)
 
