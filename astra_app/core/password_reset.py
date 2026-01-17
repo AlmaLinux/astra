@@ -4,7 +4,6 @@ import datetime
 import logging
 from urllib.parse import quote
 
-import post_office.mail
 from django.conf import settings
 from django.core import signing
 from django.http import HttpRequest
@@ -13,6 +12,7 @@ from django.utils import timezone
 
 from core.backends import FreeIPAUser
 from core.email_context import user_email_context
+from core.templated_email import queue_templated_email
 from core.tokens import make_signed_token, read_signed_token
 from core.views_utils import _normalize_str
 
@@ -52,31 +52,29 @@ def send_password_reset_email(*, request: HttpRequest, username: str, email: str
     valid_until_utc = valid_until.astimezone(datetime.UTC).strftime("%H:%M")
 
     base_ctx = user_email_context(username=username)
-    post_office.mail.send(
+    queue_templated_email(
         recipients=[email],
         sender=settings.DEFAULT_FROM_EMAIL,
-        template=settings.PASSWORD_RESET_EMAIL_TEMPLATE_NAME,
+        template_name=settings.PASSWORD_RESET_EMAIL_TEMPLATE_NAME,
         context={
             **base_ctx,
             "reset_url": reset_url,
             "ttl_minutes": ttl_minutes,
             "valid_until_utc": valid_until_utc,
         },
-        render_on_delivery=True,
     )
 
 
 def send_password_reset_success_email(*, request: HttpRequest, username: str, email: str) -> None:
     base_ctx = user_email_context(username=username)
-    post_office.mail.send(
+    queue_templated_email(
         recipients=[email],
         sender=settings.DEFAULT_FROM_EMAIL,
-        template=settings.PASSWORD_RESET_SUCCESS_EMAIL_TEMPLATE_NAME,
+        template_name=settings.PASSWORD_RESET_SUCCESS_EMAIL_TEMPLATE_NAME,
         context={
             **base_ctx,
             "login_url": password_reset_login_url(request=request),
         },
-        render_on_delivery=True,
     )
 
 

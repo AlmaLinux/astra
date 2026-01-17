@@ -23,6 +23,7 @@ from post_office.models import Email
 
 from core.backends import FreeIPAGroup, FreeIPAUser
 from core.email_context import user_email_context, user_email_context_from_user
+from core.templated_email import queue_templated_email
 from core.models import (
     AuditLogEntry,
     Ballot,
@@ -332,12 +333,11 @@ def send_vote_receipt_email(
 
     context = _post_office_json_context(context)
 
-    post_office.mail.send(
+    queue_templated_email(
         recipients=[email],
         sender=settings.DEFAULT_FROM_EMAIL,
-        template=settings.ELECTION_VOTE_RECEIPT_EMAIL_TEMPLATE_NAME,
+        template_name=settings.ELECTION_VOTE_RECEIPT_EMAIL_TEMPLATE_NAME,
         context=context,
-        render_on_delivery=True,
     )
 
 
@@ -376,12 +376,11 @@ def send_voting_credential_email(
         return
 
     context = _post_office_json_context(context)
-    post_office.mail.send(
+    queue_templated_email(
         recipients=[email],
         sender=settings.DEFAULT_FROM_EMAIL,
-        template=settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME,
+        template_name=settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME,
         context=context,
-        render_on_delivery=True,
     )
 
 

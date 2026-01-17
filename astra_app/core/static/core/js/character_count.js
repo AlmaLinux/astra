@@ -50,7 +50,9 @@
   }
 
   $(function () {
-    $('textarea[maxlength], input[type="text"][maxlength]').each(function () {
+    // Default behavior: only show counters for freeform text areas.
+    // Text inputs (email/username/short fields) must opt in explicitly.
+    $('textarea[maxlength], input[type="text"][maxlength][data-character-count="true"]').each(function () {
       attachCharacterCount(this);
     });
   });

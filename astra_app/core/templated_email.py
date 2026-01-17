@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import os
 import re
 import tempfile
 from collections.abc import Iterable, Mapping
@@ -10,11 +12,13 @@ from urllib.parse import urlsplit
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.http import HttpRequest, JsonResponse
 from django.template import Context, Template, engines
 from django.template.exceptions import TemplateSyntaxError
-from post_office.models import EmailTemplate
+import post_office.mail
+from post_office.models import Email, EmailTemplate
 
 _VAR_PATTERN = re.compile(r"{{\s*([A-Za-z0-9_]+)")
 _PLURALIZE_PATTERN = re.compile(
@@ -32,6 +36,8 @@ _INLINE_IMAGE_TAG_REWRITE_PATTERN = re.compile(
 )
 
 _MAX_INLINE_IMAGE_BYTES: int = 10 * 1024 * 1024
+
+logger = logging.getLogger(__name__)
 
 
 def configured_email_template_names() -> frozenset[str]:
@@ -162,7 +168,7 @@ def _storage_key_from_inline_image_arg(raw: str) -> str:
     return value.lstrip("/")
 
 
-def stage_inline_images_for_sending(html_content: str) -> tuple[str, list[str]]:
+def stage_inline_images_for_sending(html_content: str, *, strict: bool = True) -> tuple[str, list[str]]:
     """Rewrite inline_image arguments to local temp files for sending.
 
     Returns (rewritten_html, temp_paths). Callers must delete temp_paths.
@@ -182,11 +188,23 @@ def stage_inline_images_for_sending(html_content: str) -> tuple[str, list[str]]:
 
         local_path = staged.get(raw_arg)
         if local_path is None:
-            key = _storage_key_from_inline_image_arg(raw_arg)
+            try:
+                key = _storage_key_from_inline_image_arg(raw_arg)
+            except ValueError:
+                if strict:
+                    raise
+                logger.warning("Inline image arg could not be mapped to storage: %s", raw_arg, exc_info=True)
+                return ""
             try:
                 file_obj = default_storage.open(key, "rb")
             except Exception as exc:
-                raise ValueError(f"No such file in storage: {key}") from exc
+                if strict:
+                    raise ValueError(f"No such file in storage: {key}") from exc
+
+                # Best-effort sending: missing inline images should not block the email.
+                # We drop the tag entirely so clients simply won't render the image.
+                logger.warning("Inline image missing in storage key=%s", key, exc_info=True)
+                return ""
 
             with file_obj:
                 data = file_obj.read(_MAX_INLINE_IMAGE_BYTES + 1)
@@ -214,6 +232,97 @@ def stage_inline_images_for_sending(html_content: str) -> tuple[str, list[str]]:
 
     rewritten = _INLINE_IMAGE_TAG_REWRITE_PATTERN.sub(repl, str(html_content or ""))
     return rewritten, temp_paths
+
+
+def queue_templated_email(
+    *,
+    recipients: list[str],
+    sender: str,
+    template_name: str,
+    context: Mapping[str, object],
+    cc: list[str] | None = None,
+    bcc: list[str] | None = None,
+    strict_inline_images: bool = False,
+) -> Email:
+    """Queue an EmailTemplate with inline_image support and storage-backed images.
+
+    We render subject/text/html immediately (using the `post_office` template
+    engine so `{% inline_image %}` works), stage any storage-backed images into
+    local temp files, and convert attached inline images into post_office
+    Attachments with the correct Content-ID headers.
+
+    This avoids delivery-time template rendering failures (e.g. FileNotFoundError
+    for inline image URLs) from blocking the email from being queued/sent.
+    """
+
+    template = EmailTemplate.objects.get(name=template_name)
+
+    staged_files: list[str] = []
+    try:
+        staged_html_content, staged_files = stage_inline_images_for_sending(
+            template.html_content or "",
+            strict=strict_inline_images,
+        )
+
+        template_engine = engines["post_office"]
+        subject_template = template_engine.from_string(template.subject or "")
+        text_template = template_engine.from_string(preview_drop_inline_image_tags(template.content or ""))
+        html_template = template_engine.from_string(staged_html_content)
+
+        rendered_subject = subject_template.render(dict(context))
+        rendered_text = text_template.render(dict(context))
+        rendered_html = html_template.render(dict(context))
+
+        attachments: dict[str, object] = {}
+        for image in getattr(html_template, "_attached_images", []) or []:
+            cid = str(image.get("Content-ID") or "").strip().strip("<>")
+            if not cid:
+                continue
+            payload = image.get_payload(decode=True) or b""
+            content_type = str(image.get_content_type() or "application/octet-stream")
+            headers = {str(k): str(v) for k, v in image.items()}
+
+            filename = cid
+            subtype = content_type.split("/", 1)[-1]
+            if subtype and subtype.isalnum():
+                filename = f"{cid}.{subtype}"
+
+            attachments[filename] = {
+                "file": ContentFile(payload),
+                "mimetype": content_type,
+                "headers": headers,
+            }
+
+        email = post_office.mail.send(
+            recipients=recipients,
+            sender=sender,
+            subject=rendered_subject,
+            message=rendered_text,
+            html_message=rendered_html,
+            attachments=attachments or None,
+            render_on_delivery=False,
+            cc=cc,
+            bcc=bcc,
+        )
+
+        # Preserve linkage to the EmailTemplate and original context so the admin UI
+        # and any dedupe logic based on template/context continue to work.
+        try:
+            email.template = template
+            email.context = dict(context)
+            email.save(update_fields=["template", "context"])
+        except Exception:
+            logger.exception("Failed to persist post_office template/context metadata template=%s", template_name)
+
+        return email
+    finally:
+        for path in staged_files:
+            try:
+                os.unlink(path)
+            except FileNotFoundError:
+                pass
+            except Exception:
+                logger.exception("Failed to delete temp inline image path=%s", path)
 
 
 def _iter_pluralize_vars(*sources: str) -> Iterable[str]:

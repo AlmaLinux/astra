@@ -4,12 +4,12 @@ import datetime
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
-import post_office.mail
 from django.conf import settings
 from django.utils import timezone
 
 from core.email_context import user_email_context
 from core.models import MembershipType
+from core.templated_email import queue_templated_email
 
 
 def membership_extend_url(*, membership_type_code: str, base_url: str | None = None) -> str:
@@ -76,10 +76,10 @@ def send_membership_notification(
 
     base_ctx = user_context if user_context is not None else user_email_context(username=username)
 
-    post_office.mail.send(
+    queue_templated_email(
         recipients=[address],
         sender=settings.DEFAULT_FROM_EMAIL,
-        template=template_name,
+        template_name=template_name,
         context={
             **base_ctx,
             "membership_type": membership_type.name,
@@ -88,7 +88,6 @@ def send_membership_notification(
             "expires_at": _format_expires_at(expires_at=expires_at, tz_name=tz_name),
             "days": days,
         },
-        render_on_delivery=True,
     )
 
     return True

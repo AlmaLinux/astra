@@ -7,6 +7,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.backends import FreeIPAGroup, FreeIPAUser
+from core.templated_email import queue_templated_email
 from core.models import FreeIPAPermissionGrant, MembershipRequest
 from core.permissions import ASTRA_ADD_MEMBERSHIP
 
@@ -85,15 +86,14 @@ class Command(BaseCommand):
                 return
 
         recipients.sort()
-        post_office.mail.send(
+        queue_templated_email(
             recipients=recipients,
             sender=settings.DEFAULT_FROM_EMAIL,
-            template=settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME,
+            template_name=settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME,
             context={
                 "pending_count": pending_count,
                 "requests_url": _membership_requests_url(base_url=settings.PUBLIC_BASE_URL),
             },
-            render_on_delivery=True,
         )
 
         self.stdout.write(f"Queued 1 email to {len(recipients)} recipient(s).")

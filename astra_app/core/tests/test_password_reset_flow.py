@@ -36,7 +36,7 @@ class PasswordResetFlowTests(TestCase):
 
         with (
             patch("core.password_reset.FreeIPAUser.get", autospec=True, return_value=user),
-            patch("post_office.mail.send", autospec=True) as post_office_send_mock,
+            patch("core.password_reset.queue_templated_email", autospec=True) as queue_email_mock,
         ):
             resp = client.post(
                 reverse("password-reset"),
@@ -46,10 +46,10 @@ class PasswordResetFlowTests(TestCase):
 
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(resp["Location"], "/login/")
-        self.assertEqual(post_office_send_mock.call_count, 1)
+        self.assertEqual(queue_email_mock.call_count, 1)
 
-        ctx = post_office_send_mock.call_args.kwargs.get("context", {})
-        self.assertEqual(post_office_send_mock.call_args.kwargs.get("template"), "password-reset")
+        self.assertEqual(queue_email_mock.call_args.kwargs.get("template_name"), "password-reset")
+        ctx = queue_email_mock.call_args.kwargs.get("context", {})
         self.assertEqual(ctx.get("username"), "alice")
         self.assertIn("first_name", ctx)
         self.assertIn("last_name", ctx)
@@ -68,7 +68,7 @@ class PasswordResetFlowTests(TestCase):
 
         with (
             patch("core.password_reset.FreeIPAUser.get", autospec=True, return_value=None),
-            patch("post_office.mail.send", autospec=True) as post_office_send_mock,
+            patch("core.password_reset.queue_templated_email", autospec=True) as queue_email_mock,
         ):
             resp = client.post(
                 reverse("password-reset"),
@@ -78,7 +78,7 @@ class PasswordResetFlowTests(TestCase):
 
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(resp["Location"], "/login/")
-        post_office_send_mock.assert_not_called()
+        queue_email_mock.assert_not_called()
 
     @override_settings(PASSWORD_RESET_TOKEN_TTL_SECONDS=60 * 60)
     def test_password_reset_confirm_sets_new_password(self):
@@ -96,7 +96,7 @@ class PasswordResetFlowTests(TestCase):
 
         with (
             patch("core.password_reset.FreeIPAUser.get", autospec=True, return_value=user),
-            patch("post_office.mail.send", autospec=True) as post_office_send_mock,
+            patch("core.password_reset.queue_templated_email", autospec=True) as queue_email_mock,
         ):
             resp = client.post(
                 reverse("password-reset"),
@@ -105,7 +105,7 @@ class PasswordResetFlowTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 302)
-        reset_url = post_office_send_mock.call_args.kwargs.get("context", {}).get("reset_url", "")
+        reset_url = queue_email_mock.call_args.kwargs.get("context", {}).get("reset_url", "")
         token_match = re.search(r"token=([^\s&]+)", reset_url)
         self.assertIsNotNone(token_match)
         assert token_match is not None
@@ -127,7 +127,7 @@ class PasswordResetFlowTests(TestCase):
             patch("core.password_reset.FreeIPAUser.get", autospec=True, return_value=user),
             patch("core.views_auth.FreeIPAUser.get_client", autospec=True, return_value=svc_client),
             patch("core.views_auth.ClientMeta", autospec=True, return_value=pw_client),
-            patch("post_office.mail.send", autospec=True) as post_office_send_mock,
+            patch("core.password_reset.queue_templated_email", autospec=True) as queue_email_mock,
         ):
             post_resp = client.post(
                 reverse("password-reset-confirm"),
@@ -139,7 +139,7 @@ class PasswordResetFlowTests(TestCase):
         self.assertEqual(post_resp["Location"], "/login/")
 
         # Success email should be queued.
-        self.assertGreaterEqual(post_office_send_mock.call_count, 1)
+        self.assertGreaterEqual(queue_email_mock.call_count, 1)
 
 
 class AdminPasswordResetEmailTests(TestCase):
@@ -166,14 +166,14 @@ class AdminPasswordResetEmailTests(TestCase):
 
         with (
             patch("core.backends.FreeIPAUser.get", side_effect=_fake_get),
-            patch("post_office.mail.send", autospec=True) as post_office_send_mock,
+            patch("core.password_reset.queue_templated_email", autospec=True) as queue_email_mock,
         ):
             url = reverse("admin:auth_ipauser_send_password_reset", args=["bob"])
             resp = self.client.post(url, data={"post": "1"}, follow=False)
 
         self.assertEqual(resp.status_code, 302)
-        self.assertEqual(post_office_send_mock.call_count, 1)
-        ctx = post_office_send_mock.call_args.kwargs.get("context", {})
+        self.assertEqual(queue_email_mock.call_count, 1)
+        ctx = queue_email_mock.call_args.kwargs.get("context", {})
         self.assertEqual(ctx.get("username"), "bob")
         self.assertIn("first_name", ctx)
         self.assertIn("last_name", ctx)
