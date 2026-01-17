@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.contrib import messages
+from django.db.models import Q
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -18,7 +19,11 @@ from core.agreements import (
 )
 from core.backends import FreeIPAGroup, FreeIPAUser
 from core.country_codes import country_code_status_from_user_data
-from core.membership import get_valid_membership_type_codes_for_username, get_valid_memberships_for_username
+from core.membership import (
+    get_extendable_membership_type_codes_for_username,
+    get_valid_membership_type_codes_for_username,
+    get_valid_memberships_for_username,
+)
 from core.models import MembershipLog, MembershipRequest, MembershipType
 from core.views_utils import _data_get, _first, _get_full_user, _normalize_str, _value_to_text
 
@@ -215,9 +220,18 @@ def _profile_context_for_user(
         r for r in pending_requests if r.get("status") == MembershipRequest.Status.on_hold
     ]
 
-    membership_can_request_any = MembershipType.objects.filter(enabled=True, isIndividual=True).exclude(
-        code__in=valid_membership_type_codes
-    ).exclude(group_cn="").exists()
+    pending_membership_type_codes = {r.membership_type_id for r in pending_requests_qs}
+    extendable_membership_type_codes = get_extendable_membership_type_codes_for_username(fu.username)
+    blocked_membership_type_codes = valid_membership_type_codes - extendable_membership_type_codes
+
+    membership_can_request_any = (
+        MembershipType.objects.filter(enabled=True)
+        .filter(Q(isIndividual=True) | Q(code="mirror"))
+        .exclude(code__in=blocked_membership_type_codes)
+        .exclude(code__in=pending_membership_type_codes)
+        .exclude(group_cn="")
+        .exists()
+    )
 
     email_is_blacklisted = False
     if is_self and fu.email:

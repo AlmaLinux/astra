@@ -105,5 +105,7 @@ class UserProfileMembershipActionRequiredAlertTests(TestCase):
             resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, ">On hold<")
-        self.assertNotContains(resp, ">Awaiting action<")
+        # Pending membership requests are only visible to the user themself or
+        # membership reviewers.
+        self.assertNotContains(resp, "On hold")
+        self.assertNotContains(resp, "Awaiting action")

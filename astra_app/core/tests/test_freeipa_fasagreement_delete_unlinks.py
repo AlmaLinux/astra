@@ -10,7 +10,7 @@ from core.backends import FreeIPAFASAgreement
 
 class FreeIPAFASAgreementDeleteUnlinksTests(SimpleTestCase):
     def test_delete_unlinks_groups_and_users_then_retries(self):
-        agreement = FreeIPAFASAgreement(
+        initial = FreeIPAFASAgreement(
             "test_agreement",
             {
                 "cn": ["test_agreement"],
@@ -18,6 +18,9 @@ class FreeIPAFASAgreementDeleteUnlinksTests(SimpleTestCase):
                 "memberuser_user": ["u1"],
             },
         )
+
+        groups_unlinked = False
+        users_unlinked = False
 
         calls: list[str] = []
 
@@ -29,10 +32,22 @@ class FreeIPAFASAgreementDeleteUnlinksTests(SimpleTestCase):
                     0,
                 )
             if method == "fasagreement_remove_group":
+                nonlocal groups_unlinked
+                groups_unlinked = True
                 return {"failed": {"member": {"group": []}}}
             if method == "fasagreement_remove_user":
+                nonlocal users_unlinked
+                users_unlinked = True
                 return {"failed": {"memberuser": {"user": []}}}
             return {}
+
+        def get(_cn: str) -> FreeIPAFASAgreement:
+            data = {
+                "cn": ["test_agreement"],
+                "member_group": [] if groups_unlinked else ["g1"],
+                "memberuser_user": [] if users_unlinked else ["u1"],
+            }
+            return FreeIPAFASAgreement("test_agreement", data)
 
         def retry(_get_client, fn):
             return fn(object())
@@ -40,9 +55,9 @@ class FreeIPAFASAgreementDeleteUnlinksTests(SimpleTestCase):
         with (
             patch("core.backends._with_freeipa_service_client_retry", side_effect=retry),
             patch.object(FreeIPAFASAgreement, "_rpc", side_effect=rpc),
-            patch.object(FreeIPAFASAgreement, "get", return_value=agreement),
+            patch.object(FreeIPAFASAgreement, "get", side_effect=get),
         ):
-            agreement.delete()
+            initial.delete()
 
         self.assertEqual(
             calls,

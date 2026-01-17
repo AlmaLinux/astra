@@ -481,6 +481,9 @@ class OrganizationUserViewsTests(TestCase):
         )
         self._login_as_freeipa_user("reviewer")
 
+        def _get_user(username: str) -> FreeIPAUser | None:
+            return {"reviewer": reviewer, "bob": bob}.get(username)
+
         with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("membership-requests"))
         self.assertEqual(resp.status_code, 200)
@@ -488,7 +491,10 @@ class OrganizationUserViewsTests(TestCase):
         self.assertContains(resp, "Request responses")
         self.assertContains(resp, "Please consider our updated sponsorship level.")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with (
+            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch.object(FreeIPAUser, "add_to_group", autospec=True),
+        ):
             resp = self.client.post(reverse("membership-request-approve", args=[req.pk]), follow=False)
         self.assertEqual(resp.status_code, 302)
 

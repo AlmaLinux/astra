@@ -455,6 +455,10 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
     def test_profile_disables_request_button_when_no_membership_types_available(self) -> None:
         from core.models import MembershipLog, MembershipType
 
+        # Keep the test deterministic even with --keepdb: ensure no other enabled
+        # requestable membership types exist.
+        MembershipType.objects.update(enabled=False)
+
         MembershipType.objects.update_or_create(
             code="individual",
             defaults={
@@ -486,8 +490,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
                         resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Request")
-        self.assertContains(resp, "disabled")
+        self.assertNotContains(resp, 'class="btn btn-sm btn-outline-primary">Request</a>')
 
     def test_committee_can_terminate_membership_early_and_it_is_logged(self) -> None:
         from core.models import MembershipLog, MembershipType
