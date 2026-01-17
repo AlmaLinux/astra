@@ -14,7 +14,7 @@ from django.views.decorators.http import require_GET
 
 from core.backends import FreeIPAUser
 from core.membership_request_workflow import record_membership_request_created
-from core.models import MembershipRequest, MembershipType, Organization, OrganizationSponsorship
+from core.models import MembershipLog, MembershipRequest, MembershipType, Organization, OrganizationSponsorship
 from core.permissions import (
     ASTRA_ADD_MEMBERSHIP,
     ASTRA_CHANGE_MEMBERSHIP,
@@ -345,6 +345,34 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
         .first()
     )
 
+    sponsorship_request_id: int | None = None
+    if organization.membership_level_id:
+        approved_log = (
+            MembershipLog.objects.filter(
+                target_organization=organization,
+                membership_request__isnull=False,
+                action=MembershipLog.Action.approved,
+            )
+            .only("membership_request_id", "created_at")
+            .order_by("-created_at", "-pk")
+            .first()
+        )
+        if approved_log is not None and approved_log.membership_request_id is not None:
+            sponsorship_request_id = int(approved_log.membership_request_id)
+        else:
+            approved_req = (
+                MembershipRequest.objects.filter(
+                    requested_organization=organization,
+                    membership_type_id=organization.membership_level_id,
+                    status=MembershipRequest.Status.approved,
+                )
+                .only("pk", "decided_at", "requested_at")
+                .order_by("-decided_at", "-requested_at")
+                .first()
+            )
+            if approved_req is not None:
+                sponsorship_request_id = int(approved_req.pk)
+
     can_edit_organization = _can_edit_organization(request, organization)
 
     return render(
@@ -357,6 +385,7 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
             "pending_membership_level_request": pending_membership_level_request,
             "sponsorship": sponsorship,
             "sponsorship_is_expiring_soon": sponsorship_is_expiring_soon,
+            "sponsorship_request_id": sponsorship_request_id,
             "is_representative": is_representative,
             "can_edit_organization": can_edit_organization,
         },

@@ -168,6 +168,8 @@ class MembershipRequestUpdateResponsesForm(forms.Form):
                 self._question_specs.append(spec)
 
         # Always provide a place for the user to add clarifications.
+        # If the existing request already has an "Additional Information" response,
+        # reuse it (same field name) instead of creating a second question.
         extra_spec = _QuestionSpec(name="Additional information", title="Additional information", required=False)
         if extra_spec.field_name not in self.fields:
             self.fields[extra_spec.field_name] = forms.CharField(
@@ -175,7 +177,7 @@ class MembershipRequestUpdateResponsesForm(forms.Form):
                 label=extra_spec.title,
                 widget=forms.Textarea(attrs={"rows": 4, "class": "form-control w-100", "spellcheck": "true"}),
             )
-        self._question_specs.append(extra_spec)
+            self._question_specs.append(extra_spec)
 
         for field in self.fields.values():
             if isinstance(field.widget, forms.Textarea):

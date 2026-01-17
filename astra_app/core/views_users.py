@@ -197,28 +197,61 @@ def _profile_context_for_user(
             }
         )
 
-    pending_requests_qs = list(
+    personal_pending_requests_qs = list(
         MembershipRequest.objects.select_related("membership_type")
-        .filter(requested_username=fu.username, status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold])
+        .filter(
+            requested_username=fu.username,
+            status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
+        )
         .order_by("requested_at")
     )
 
-    pending_requests: list[dict[str, object]] = [
+    org_pending_requests_qs = list(
+        MembershipRequest.objects.select_related("membership_type", "requested_organization")
+        .filter(
+            requested_username="",
+            requested_organization__representative=fu.username,
+            status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
+        )
+        .order_by("requested_at")
+    )
+
+    personal_pending_requests: list[dict[str, object]] = [
         {
             "membership_type": r.membership_type,
             "requested_at": r.requested_at,
             "request_id": r.pk,
             "status": r.status,
             "on_hold_at": r.on_hold_at,
+            "is_organization": False,
+            "organization_name": "",
         }
-        for r in pending_requests_qs
+        for r in personal_pending_requests_qs
     ]
+
+    org_pending_requests: list[dict[str, object]] = [
+        {
+            "membership_type": r.membership_type,
+            "requested_at": r.requested_at,
+            "request_id": r.pk,
+            "status": r.status,
+            "on_hold_at": r.on_hold_at,
+            "is_organization": True,
+            "organization_name": r.requested_organization_name or (r.requested_organization.name if r.requested_organization else ""),
+        }
+        for r in org_pending_requests_qs
+    ]
+
+    pending_requests: list[dict[str, object]] = sorted(
+        [*personal_pending_requests, *org_pending_requests],
+        key=lambda item: (item.get("requested_at"), item.get("request_id")),
+    )
 
     membership_action_required_requests: list[dict[str, object]] = [
         r for r in pending_requests if r.get("status") == MembershipRequest.Status.on_hold
     ]
 
-    pending_membership_type_codes = {r.membership_type_id for r in pending_requests_qs}
+    pending_membership_type_codes = {r.membership_type_id for r in personal_pending_requests_qs}
     extendable_membership_type_codes = get_extendable_membership_type_codes_for_username(fu.username)
     blocked_membership_type_codes = valid_membership_type_codes - extendable_membership_type_codes
 
@@ -243,7 +276,7 @@ def _profile_context_for_user(
     account_setup_required_actions: list[dict[str, str]] = []
     account_setup_recommended_actions: list[dict[str, str]] = []
 
-    has_open_membership_request = bool(pending_requests)
+    has_open_membership_request = bool(personal_pending_requests)
 
     if is_self:
         if not coc_signed and coc_settings_url:
@@ -270,20 +303,37 @@ def _profile_context_for_user(
             account_setup_required_actions.append(
                 {
                     "id": "email-blacklisted-alert",
-                    "label": "Fix email delivery (your address is blacklisted)",
+                    "label": "We're having trouble delivering emails",
                     "url": f"{reverse('settings')}#emails",
-                    "url_label": "Update email",
+                    "url_label": "Update your email",
                 }
             )
 
-        if membership_action_required_requests:
-            request_id = int(membership_action_required_requests[0]["request_id"])
+        personal_action_required = [
+            r for r in personal_pending_requests if r.get("status") == MembershipRequest.Status.on_hold
+        ]
+        if personal_action_required:
+            request_id = int(personal_action_required[0]["request_id"])
             account_setup_required_actions.append(
                 {
                     "id": "membership-action-required-alert",
-                    "label": "Respond to a membership request (information requested)",
+                    "label": "Help us review your membership request",
                     "url": reverse("membership-request-self", args=[request_id]),
-                    "url_label": "Provide info",
+                    "url_label": "Add details",
+                }
+            )
+
+        org_action_required = [
+            r for r in org_pending_requests if r.get("status") == MembershipRequest.Status.on_hold
+        ]
+        if org_action_required:
+            request_id = int(org_action_required[0]["request_id"])
+            account_setup_required_actions.append(
+                {
+                    "id": "sponsorship-action-required-alert",
+                    "label": "Help us review your sponsorship request",
+                    "url": reverse("membership-request-self", args=[request_id]),
+                    "url_label": "Add details",
                 }
             )
 

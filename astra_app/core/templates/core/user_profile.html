@@ -264,12 +264,21 @@
                   <div class="font-weight-bold">
                     <a href="{% url 'membership-request-self' req.request_id %}">{{ req.membership_type.name }}</a>
                   </div>
+                  {% if req.organization_name %}
+                    <div class="small text-muted">Organization: {{ req.organization_name }}</div>
+                  {% endif %}
                 {% elif membership_can_view %}
                   <div class="font-weight-bold">
                     <a href="{% url 'membership-request-detail' req.request_id %}">{{ req.membership_type.name }}</a>
                   </div>
+                  {% if req.organization_name %}
+                    <div class="small text-muted">Organization: {{ req.organization_name }}</div>
+                  {% endif %}
                 {% else %}
                   <div class="font-weight-bold">{{ req.membership_type.name }}</div>
+                  {% if req.organization_name %}
+                    <div class="small text-muted">Organization: {{ req.organization_name }}</div>
+                  {% endif %}
                 {% endif %}
               </div>
               {% if req.status == 'on_hold' %}

@@ -1198,7 +1198,7 @@ def membership_request_rfi(request: HttpRequest, pk: int) -> HttpResponse:
         )
 
     target_label = _membership_request_target_label(req)
-    messages.success(request, f"Sent RFI for {target_label}.")
+    messages.success(request, f"Sent Request for Information for {target_label}.")
     if email_error is not None:
         messages.error(request, "Request was put on hold, but the email could not be sent.")
     return redirect(redirect_to)

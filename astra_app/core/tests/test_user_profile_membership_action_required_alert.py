@@ -6,7 +6,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from core.backends import FreeIPAUser
-from core.models import MembershipRequest, MembershipType
+from core.models import MembershipRequest, MembershipType, Organization
 
 
 class UserProfileMembershipActionRequiredAlertTests(TestCase):
@@ -56,6 +56,51 @@ class UserProfileMembershipActionRequiredAlertTests(TestCase):
         self.assertContains(resp, reverse("membership-request-self", args=[req.pk]))
         self.assertContains(resp, "alert alert-danger")
         self.assertContains(resp, ">Awaiting action<")
+
+    def test_self_profile_shows_action_required_alert_for_on_hold_org_request(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="org",
+            defaults={
+                "name": "Organization",
+                "group_cn": "almalinux-org",
+                "isIndividual": False,
+                "isOrganization": True,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="Example Org", representative="alice")
+        req = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="org",
+            status=MembershipRequest.Status.on_hold,
+        )
+
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.com"],
+                "memberof_group": [],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+            },
+        )
+
+        self._login_as_freeipa_user("alice")
+        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+            resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'id="sponsorship-action-required-alert"')
+        self.assertContains(resp, "Respond to a sponsorship request")
+        self.assertContains(resp, "Provide info")
+        self.assertContains(resp, reverse("membership-request-self", args=[req.pk]))
+        self.assertContains(resp, "alert alert-danger")
+        self.assertContains(resp, ">Awaiting action<")
+        self.assertContains(resp, "Example Org")
 
     def test_other_profile_keeps_on_hold_badge_label(self) -> None:
         MembershipType.objects.update_or_create(

@@ -113,6 +113,55 @@ class OrganizationUserViewsTests(TestCase):
         self.assertNotContains(resp, "(UTC)")
         self.assertNotContains(resp, "Expires Jan 22, 2027")
 
+    def test_org_detail_sponsorship_card_links_to_request_for_representative_and_committee(self) -> None:
+        from core.models import MembershipRequest, MembershipType, Organization
+        from core.permissions import ASTRA_VIEW_MEMBERSHIP
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "description": "Gold Sponsor Member (Annual dues: $20,000 USD)",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+        membership_type = MembershipType.objects.get(code="gold")
+
+        org = Organization.objects.create(name="Acme", membership_level=membership_type, representative="bob")
+        req = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type=membership_type,
+            status=MembershipRequest.Status.approved,
+            responses=[{"Additional Information": "Org answers"}],
+        )
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        self._login_as_freeipa_user("bob")
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            resp_rep = self.client.get(reverse("organization-detail", args=[org.pk]))
+        self.assertEqual(resp_rep.status_code, 200)
+        self.assertContains(resp_rep, reverse("membership-request-self", args=[req.pk]))
+
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": []},
+        )
+
+        self._login_as_freeipa_user("reviewer")
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp_committee = self.client.get(reverse("organization-detail", args=[org.pk]))
+        self.assertEqual(resp_committee.status_code, 200)
+        self.assertContains(resp_committee, reverse("membership-request-detail", args=[req.pk]))
+
     def test_membership_viewer_can_view_org_but_cannot_see_edit_button(self) -> None:
         from core.models import MembershipType, Organization
 

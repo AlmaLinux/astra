@@ -202,6 +202,176 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
         self.assertEqual(req.status, MembershipRequest.Status.pending)
         self.assertEqual(req.responses, [{"Contributions": "Old"}])
 
+    def test_reject_preserves_original_request_responses(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.pending,
+            responses=[{"Contributions": "Old"}],
+        )
+
+        committee_cn = "membership-committee"
+        self._add_freeipa_user(
+            username="reviewer",
+            email="reviewer@example.com",
+            groups=[committee_cn],
+            first_name="Reviewer",
+            last_name="User",
+        )
+        self._add_freeipa_user(
+            username="alice",
+            email="alice@example.com",
+            groups=[],
+            first_name="Alice",
+            last_name="User",
+        )
+
+        self._login_as_freeipa_user("reviewer")
+        with patch("post_office.mail.send", autospec=True):
+            resp = self.client.post(
+                reverse("membership-request-reject", args=[req.pk]),
+                data={"reason": "No."},
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 302)
+
+        req.refresh_from_db()
+        self.assertEqual(req.status, MembershipRequest.Status.rejected)
+        self.assertTrue(any(item.get("Contributions") == "Old" for item in req.responses))
+        self.assertTrue(any(item.get("Rejection reason") == "No." for item in req.responses))
+
+        resp_detail = self.client.get(reverse("membership-request-detail", args=[req.pk]))
+        self.assertEqual(resp_detail.status_code, 200)
+        self.assertContains(resp_detail, "Request responses")
+        self.assertContains(resp_detail, "Contributions")
+        self.assertContains(resp_detail, "Old")
+
+    def test_reject_preserves_original_org_request_responses(self) -> None:
+        from core.models import MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="org",
+            defaults={
+                "name": "Organization",
+                "group_cn": "almalinux-org",
+                "isIndividual": False,
+                "isOrganization": True,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="Acme", representative="bob")
+        req = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="org",
+            status=MembershipRequest.Status.pending,
+            responses=[{"Additional Information": "Org answers"}],
+        )
+
+        committee_cn = "membership-committee"
+        self._add_freeipa_user(
+            username="reviewer",
+            email="reviewer@example.com",
+            groups=[committee_cn],
+            first_name="Reviewer",
+            last_name="User",
+        )
+        self._add_freeipa_user(
+            username="bob",
+            email="bob@example.com",
+            groups=[],
+            first_name="Bob",
+            last_name="Rep",
+        )
+
+        self._login_as_freeipa_user("reviewer")
+        with patch("post_office.mail.send", autospec=True):
+            resp = self.client.post(
+                reverse("membership-request-reject", args=[req.pk]),
+                data={"reason": "No."},
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 302)
+
+        req.refresh_from_db()
+        self.assertEqual(req.status, MembershipRequest.Status.rejected)
+        self.assertTrue(any(item.get("Additional Information") == "Org answers" for item in req.responses))
+        self.assertTrue(any(item.get("Rejection reason") == "No." for item in req.responses))
+
+        resp_detail = self.client.get(reverse("membership-request-detail", args=[req.pk]))
+        self.assertEqual(resp_detail.status_code, 200)
+        self.assertContains(resp_detail, "Request responses")
+        self.assertContains(resp_detail, "Additional Information")
+        self.assertContains(resp_detail, "Org answers")
+
+    def test_org_rfi_resubmit_replaces_additional_information(self) -> None:
+        from core.models import MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="org",
+            defaults={
+                "name": "Organization",
+                "group_cn": "almalinux-org",
+                "isIndividual": False,
+                "isOrganization": True,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="Acme", representative="bob")
+        req = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="org",
+            status=MembershipRequest.Status.on_hold,
+            on_hold_at=timezone.now(),
+            responses=[{"Additional Information": "Old"}],
+        )
+
+        self._add_freeipa_user(username="bob", email="bob@example.com")
+
+        self._login_as_freeipa_user("bob")
+        resp_post = self.client.post(
+            reverse("membership-request-self", args=[req.pk]),
+            data={
+                "q_additional_information": "New",
+            },
+            follow=False,
+        )
+
+        self.assertEqual(resp_post.status_code, 302)
+        req.refresh_from_db()
+        self.assertEqual(req.status, MembershipRequest.Status.pending)
+        self.assertIsNone(req.on_hold_at)
+
+        additional_info_items = [
+            item
+            for item in req.responses
+            if isinstance(item, dict)
+            and any(str(k).strip().lower() == "additional information" for k in item.keys())
+        ]
+        self.assertEqual(len(additional_info_items), 1)
+        self.assertTrue(any(item.get("Additional Information") == "New" for item in additional_info_items))
+
     def test_user_can_edit_on_hold_request_and_submit_returns_to_pending(self) -> None:
         from core.models import MembershipLog, MembershipType, Note
 

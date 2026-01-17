@@ -723,7 +723,16 @@ def reject_membership_request(
 
     reason = str(rejection_reason or "").strip()
     if reason:
-        membership_request.responses = [{"Rejection reason": reason}]
+        existing = membership_request.responses
+        if isinstance(existing, list):
+            responses = list(existing)
+        else:
+            responses = []
+
+        # Preserve the applicant's original answers; store the committee's reason
+        # as an additional response item so it is visible on request detail pages.
+        responses.append({"Rejection reason": reason})
+        membership_request.responses = responses
 
     email_error: Exception | None = None
 

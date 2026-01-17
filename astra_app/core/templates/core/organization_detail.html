@@ -91,7 +91,17 @@
                         <button type="submit" class="btn btn-sm btn-primary">Extend</button>
                       </form>
                     {% else %}
-                      <span class="badge badge-success">Active</span>
+                      {% if sponsorship_request_id %}
+                        {% if is_representative %}
+                          <a class="badge badge-success" href="{% url 'membership-request-self' sponsorship_request_id %}">Active</a>
+                        {% elif membership_can_view %}
+                          <a class="badge badge-success" href="{% url 'membership-request-detail' sponsorship_request_id %}">Active</a>
+                        {% else %}
+                          <span class="badge badge-success">Active</span>
+                        {% endif %}
+                      {% else %}
+                        <span class="badge badge-success">Active</span>
+                      {% endif %}
                     {% endif %}
 
                     {% if membership_can_change and membership_can_delete %}
@@ -109,7 +119,23 @@
                       <div class="text-muted small">{{ pending_membership_level_request.membership_type.description }}</div>
                     {% endif %}
                   </div>
-                  <span class="badge badge-secondary">In Review</span>
+                  {% if pending_membership_level_request.status == 'on_hold' %}
+                    {% if is_representative %}
+                      <a class="badge badge-danger" href="{% url 'membership-request-self' pending_membership_level_request.pk %}">Awaiting action</a>
+                    {% elif membership_can_view %}
+                      <a class="badge badge-danger" href="{% url 'membership-request-detail' pending_membership_level_request.pk %}">On hold</a>
+                    {% else %}
+                      <span class="badge badge-danger">On hold</span>
+                    {% endif %}
+                  {% else %}
+                    {% if is_representative %}
+                      <a class="badge badge-secondary" href="{% url 'membership-request-self' pending_membership_level_request.pk %}">In Review</a>
+                    {% elif membership_can_view %}
+                      <a class="badge badge-secondary" href="{% url 'membership-request-detail' pending_membership_level_request.pk %}">In Review</a>
+                    {% else %}
+                      <span class="badge badge-secondary">In Review</span>
+                    {% endif %}
+                  {% endif %}
                 </li>
               {% endif %}
             {% else %}

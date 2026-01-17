@@ -1,10 +1,10 @@
 {% extends 'core/base.html' %}
 
-{% block title %}Your Membership Request #{{ req.pk }}{% endblock %}
+{% block title %}{% if req.requested_organization_name or req.requested_organization %}Your Sponsorship Request #{{ req.pk }}{% else %}Your Membership Request #{{ req.pk }}{% endif %}{% endblock %}
 
 {% block header %}
   <div class="d-flex align-items-center justify-content-between flex-wrap" style="gap: .5rem;">
-    <h1 class="m-0">Your Membership Request #{{ req.pk }}</h1>
+    <h1 class="m-0">{% if req.requested_organization_name or req.requested_organization %}Your Sponsorship Request #{{ req.pk }}{% else %}Your Membership Request #{{ req.pk }}{% endif %}</h1>
     <a href="{% url 'user-profile' request.user.get_username %}" class="btn btn-sm btn-outline-secondary">Back to profile</a>
   </div>
 {% endblock %}
@@ -21,6 +21,11 @@
 
         <dt class="col-sm-3">Type</dt>
         <dd class="col-sm-9">{{ req.membership_type.name }}</dd>
+
+        {% if req.requested_organization_name %}
+          <dt class="col-sm-3">Organization</dt>
+          <dd class="col-sm-9">{{ req.requested_organization_name }}</dd>
+        {% endif %}
 
         {% if req.on_hold_at %}
           <dt class="col-sm-3">On hold since</dt>
@@ -61,7 +66,7 @@
               class="btn btn-outline-danger"
               formaction="{% url 'membership-request-rescind' req.pk %}"
               formnovalidate
-              title="Cancel your membership request"
+              title="{% if req.requested_organization_name or req.requested_organization %}Cancel your sponsorship request{% else %}Cancel your membership request{% endif %}"
             >Rescind request</button>
             <button type="submit" class="btn btn-primary">Submit request</button>
           </div>
@@ -82,7 +87,7 @@
           <hr>
           <form method="post" action="{% url 'membership-request-rescind' req.pk %}">
             {% csrf_token %}
-            <button type="submit" class="btn btn-outline-danger" title="Cancel your membership request">Rescind request</button>
+            <button type="submit" class="btn btn-outline-danger" title="{% if req.requested_organization_name or req.requested_organization %}Cancel your sponsorship request{% else %}Cancel your membership request{% endif %}">Rescind request</button>
           </form>
         {% endif %}
       {% endif %}
