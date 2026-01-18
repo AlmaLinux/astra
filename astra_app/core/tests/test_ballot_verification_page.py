@@ -3,7 +3,9 @@ from __future__ import annotations
 import datetime
 from unittest.mock import patch
 
+from django.core.cache import cache
 from django.test import TestCase
+from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -215,3 +217,21 @@ class BallotVerificationPageTests(TestCase):
         self.assertContains(resp, "replaced")
         # Must not leak the replacement receipt.
         self.assertNotContains(resp, ballot2.ballot_hash)
+
+    @override_settings(
+        ELECTION_RATE_LIMIT_BALLOT_VERIFY_LIMIT=1,
+        ELECTION_RATE_LIMIT_BALLOT_VERIFY_WINDOW_SECONDS=60,
+    )
+    def test_verify_page_rate_limits_repeated_queries(self) -> None:
+        cache.clear()
+
+        url = reverse("ballot-verify")
+        unknown = "a" * 64
+
+        resp1 = self.client.get(url, data={"receipt": unknown})
+        self.assertEqual(resp1.status_code, 200)
+
+        resp2 = self.client.get(url, data={"receipt": unknown})
+        self.assertEqual(resp2.status_code, 429)
+        self.assertContains(resp2, "Too many", status_code=429)
+

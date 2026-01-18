@@ -13,7 +13,7 @@ from django.contrib.auth.decorators import permission_required
 from django.core.paginator import Paginator
 from django.db.models import Count, Max, Min, Prefetch, Sum
 from django.db.models.functions import TruncDate
-from django.http import Http404, HttpRequest, HttpResponse, HttpResponseBadRequest, HttpResponseGone, JsonResponse
+from django.http import Http404, HttpRequest, HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
@@ -26,6 +26,7 @@ from core.elections_services import (
     ElectionError,
     ElectionNotOpenError,
     InvalidCredentialError,
+    election_genesis_chain_hash,
     election_quorum_status,
     eligible_voters_from_memberships,
     issue_voting_credentials_from_memberships_detailed,
@@ -49,6 +50,7 @@ from core.models import (
     VotingCredential,
 )
 from core.permissions import ASTRA_ADD_ELECTION, json_permission_required
+from core.rate_limit import allow_request
 from core.templated_email import (
     placeholderize_empty_values,
     render_templated_email_preview,
@@ -79,6 +81,34 @@ def ballot_verify(request):
 
     has_query = bool(receipt_raw)
     is_valid_receipt = bool(_RECEIPT_RE.fullmatch(receipt)) if receipt else False
+
+    client_ip = str(request.META.get("REMOTE_ADDR") or "").strip() or "unknown"
+
+    if has_query and not allow_request(
+        scope="elections.ballot_verify",
+        key_parts=[client_ip],
+        limit=settings.ELECTION_RATE_LIMIT_BALLOT_VERIFY_LIMIT,
+        window_seconds=settings.ELECTION_RATE_LIMIT_BALLOT_VERIFY_WINDOW_SECONDS,
+    ):
+        return render(
+            request,
+            "core/ballot_verify.html",
+            {
+                "receipt": receipt_raw,
+                "has_query": has_query,
+                "is_valid_receipt": is_valid_receipt,
+                "found": False,
+                "election": None,
+                "election_status": "",
+                "submitted_date": "",
+                "is_superseded": False,
+                "is_final_ballot": False,
+                "public_ballots_url": "",
+                "audit_log_url": "",
+                "rate_limited": True,
+            },
+            status=429,
+        )
 
     ballot: Ballot | None = None
     if is_valid_receipt:
@@ -135,6 +165,7 @@ def ballot_verify(request):
             "is_final_ballot": is_final_ballot,
             "public_ballots_url": public_ballots_url,
             "audit_log_url": audit_log_url,
+            "rate_limited": False,
         },
     )
 
@@ -640,10 +671,12 @@ def election_edit(request, election_id: int):
                     end_form = None
                 new_end = end_form.cleaned_data.get("end_datetime") if end_form is not None else None
                 if isinstance(new_end, datetime.datetime):
+                    actor = str(request.user.username or "").strip() or None
                     try:
                         elections_services.extend_election_end_datetime(
                             election=election,
                             new_end_datetime=new_end,
+                            actor=actor,
                         )
                     except ElectionError as exc:
                         details_form.add_error("end_datetime", str(exc))
@@ -816,6 +849,7 @@ def election_edit(request, election_id: int):
                         "emailed": emailed,
                         "skipped": skipped,
                         "failures": failures,
+                        "genesis_chain_hash": election_genesis_chain_hash(election.id),
                     },
                     is_public=True,
                 )
@@ -1255,7 +1289,7 @@ def _eligible_voters_context(*, request, election: Election, enabled: bool) -> d
     }
 
 
-@require_GET
+@require_POST
 @permission_required(ASTRA_ADD_ELECTION, raise_exception=True, login_url=reverse_lazy("users"))
 def election_send_mail_credentials(request: HttpRequest, election_id: int) -> HttpResponse:
     election = Election.objects.exclude(status=Election.Status.deleted).filter(pk=election_id).first()
@@ -1266,7 +1300,19 @@ def election_send_mail_credentials(request: HttpRequest, election_id: int) -> Ht
         messages.error(request, "Only open elections can send credential reminders.")
         return redirect("election-detail", election_id=election.id)
 
-    target_username = str(request.GET.get("username") or "").strip()
+    admin_username = str(request.session.get("_freeipa_username") or "").strip()
+    if not admin_username:
+        admin_username = str(request.user.get_username() or "").strip()
+
+    if not allow_request(
+        scope="elections.credential_resend",
+        key_parts=[str(election.id), admin_username],
+        limit=settings.ELECTION_RATE_LIMIT_CREDENTIAL_RESEND_LIMIT,
+        window_seconds=settings.ELECTION_RATE_LIMIT_CREDENTIAL_RESEND_WINDOW_SECONDS,
+    ):
+        return HttpResponse("Too many resend attempts. Please try again later.", status=429)
+
+    target_username = str(request.POST.get("username") or "").strip()
 
     credentials_qs = VotingCredential.objects.filter(election=election).exclude(freeipa_username__isnull=True)
     if not credentials_qs.exists():
@@ -1343,6 +1389,15 @@ def election_send_mail_credentials(request: HttpRequest, election_id: int) -> Ht
     return redirect(f"{send_mail_url}?{query}")
 
 
+def _confirm_election_action(*, request: HttpRequest, election: Election) -> bool:
+    raw = str(request.POST.get("confirm") or "").strip()
+    if not raw:
+        return False
+    if raw == str(election.id):
+        return True
+    return raw.casefold() == str(election.name or "").strip().casefold()
+
+
 @require_POST
 @permission_required(ASTRA_ADD_ELECTION, raise_exception=True, login_url=reverse_lazy("users"))
 def election_conclude(request, election_id: int):
@@ -1350,10 +1405,15 @@ def election_conclude(request, election_id: int):
     if election is None:
         raise Http404
 
+    if not _confirm_election_action(request=request, election=election):
+        return HttpResponseBadRequest("Confirmation required.")
+
     skip_tally = bool(request.POST.get("skip_tally"))
 
+    actor = str(request.user.username or "").strip() or None
+
     try:
-        elections_services.close_election(election=election)
+        elections_services.close_election(election=election, actor=actor)
     except ElectionError as exc:
         messages.error(request, str(exc))
         return redirect("election-detail", election_id=election.id)
@@ -1363,7 +1423,7 @@ def election_conclude(request, election_id: int):
         return redirect("election-detail", election_id=election.id)
 
     try:
-        elections_services.tally_election(election=election)
+        elections_services.tally_election(election=election, actor=actor)
     except ElectionError as exc:
         messages.error(request, f"Election closed, but tally failed: {exc}")
         return redirect("election-detail", election_id=election.id)
@@ -1378,6 +1438,9 @@ def election_extend_end(request, election_id: int):
     election = Election.objects.exclude(status=Election.Status.deleted).filter(pk=election_id).first()
     if election is None:
         raise Http404
+
+    if not _confirm_election_action(request=request, election=election):
+        return HttpResponseBadRequest("Confirmation required.")
 
     if election.status != Election.Status.open:
         messages.error(request, "Only open elections can be extended.")
@@ -1394,10 +1457,13 @@ def election_extend_end(request, election_id: int):
         messages.error(request, "Invalid end datetime.")
         return redirect("election-detail", election_id=election.id)
 
+    actor = str(request.user.username or "").strip() or None
+
     try:
         elections_services.extend_election_end_datetime(
             election=election,
             new_end_datetime=new_end,
+            actor=actor,
         )
     except ElectionError as exc:
         messages.error(request, str(exc))
@@ -1913,6 +1979,17 @@ def election_vote_submit(request, election_id: int):
     if not username:
         return JsonResponse({"ok": False, "error": "Authentication required."}, status=403)
 
+    if not allow_request(
+        scope="elections.vote_submit",
+        key_parts=[str(election.id), username],
+        limit=settings.ELECTION_RATE_LIMIT_VOTE_SUBMIT_LIMIT,
+        window_seconds=settings.ELECTION_RATE_LIMIT_VOTE_SUBMIT_WINDOW_SECONDS,
+    ):
+        return JsonResponse(
+            {"ok": False, "error": "Too many vote submissions. Please try again later."},
+            status=429,
+        )
+
     # Voting eligibility and weight are determined when credentials are issued.
     # Do not re-check current memberships here; they can change while the election is open.
     try:
@@ -1976,7 +2053,15 @@ def election_vote(request, election_id: int):
     if election is None:
         raise Http404
     if election.status in {Election.Status.closed, Election.Status.tallied}:
-        return HttpResponseGone("Election is closed.")
+        return render(
+            request,
+            "core/election_vote_closed.html",
+            {
+                "election": election,
+                "ballot_verify_url": reverse("ballot-verify"),
+            },
+            status=410,
+        )
     if election.status != Election.Status.open:
         raise Http404
 

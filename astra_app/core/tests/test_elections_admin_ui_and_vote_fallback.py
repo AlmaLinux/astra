@@ -190,7 +190,7 @@ class ElectionDetailAdminControlsTests(TestCase):
             return FreeIPAUser(username, {"uid": [username], "mail": [f"{username}@example.com"], "memberof_group": []})
 
         with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
-            resp = self.client.get(reverse("election-send-mail-credentials", args=[election.id]))
+            resp = self.client.post(reverse("election-send-mail-credentials", args=[election.id]))
 
         self.assertEqual(resp.status_code, 302)
         location = str(resp["Location"])
@@ -240,6 +240,7 @@ class ElectionDetailAdminControlsTests(TestCase):
             freeipa_username="alice",
             weight=1,
         )
+
         VotingCredential.objects.create(
             election=election,
             public_id="cred-bob",
@@ -251,8 +252,9 @@ class ElectionDetailAdminControlsTests(TestCase):
             return FreeIPAUser(username, {"uid": [username], "mail": [f"{username}@example.com"], "memberof_group": []})
 
         with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
-            resp = self.client.get(
-                reverse("election-send-mail-credentials", args=[election.id]) + "?username=alice"
+            resp = self.client.post(
+                reverse("election-send-mail-credentials", args=[election.id]),
+                data={"username": "alice"},
             )
 
         self.assertEqual(resp.status_code, 302)
@@ -262,6 +264,79 @@ class ElectionDetailAdminControlsTests(TestCase):
         payload = json.loads(str(raw_csv_payload))
         self.assertEqual(len(payload["recipients"]), 1)
         self.assertEqual(payload["recipients"][0]["username"], "alice")
+        self.assertEqual(payload["recipients"][0]["credential_public_id"], "cred-alice")
+
+    def test_conclude_requires_confirmation(self) -> None:
+        self._login_as_freeipa_user("viewer")
+
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_ADD_ELECTION,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="viewer",
+        )
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Confirm election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+
+        url = reverse("election-conclude", args=[election.id])
+
+        viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "mail": ["viewer@example.com"], "memberof_group": []})
+        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+            resp1 = self.client.post(url, data={"skip_tally": "1"})
+        self.assertEqual(resp1.status_code, 400)
+        election.refresh_from_db()
+        self.assertEqual(election.status, Election.Status.open)
+
+        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+            resp2 = self.client.post(url, data={"skip_tally": "1", "confirm": str(election.id)})
+        self.assertEqual(resp2.status_code, 302)
+        election.refresh_from_db()
+        self.assertEqual(election.status, Election.Status.closed)
+
+    def test_extend_requires_confirmation(self) -> None:
+        self._login_as_freeipa_user("viewer")
+
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_ADD_ELECTION,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="viewer",
+        )
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Extend confirm election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+
+        url = reverse("election-extend-end", args=[election.id])
+        original_end = election.end_datetime
+        new_end = election.end_datetime + datetime.timedelta(days=1)
+        new_end_local = new_end.strftime("%Y-%m-%dT%H:%M")
+
+        viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "mail": ["viewer@example.com"], "memberof_group": []})
+        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+            resp1 = self.client.post(url, data={"end_datetime": new_end_local})
+        self.assertEqual(resp1.status_code, 400)
+        election.refresh_from_db()
+        self.assertEqual(election.end_datetime, original_end)
+
+        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+            resp2 = self.client.post(url, data={"end_datetime": new_end_local, "confirm": str(election.id)})
+        self.assertEqual(resp2.status_code, 302)
+        election.refresh_from_db()
+        self.assertGreater(election.end_datetime, original_end)
+
     def test_does_not_show_resend_buttons_when_not_open(self) -> None:
         self._login_as_freeipa_user("viewer")
 
@@ -377,9 +452,7 @@ class ElectionDetailAdminControlsTests(TestCase):
                 side_effect=AssertionError("should not bulk issue"),
             ),
         ):
-            resp = self.client.get(
-                reverse("election-send-mail-credentials", args=[election.id]) + "?username=alice"
-            )
+            resp = self.client.post(reverse("election-send-mail-credentials", args=[election.id]), data={"username": "alice"})
 
         self.assertEqual(resp.status_code, 302)
 

@@ -127,6 +127,24 @@
                           Current end: {{ election.end_datetime|date:"Y-m-d H:i T" }}
                         </div>
                       </div>
+
+                      <hr />
+
+                      <div class="form-group mb-0">
+                        <label for="extend-confirm">Type the election ID or name to confirm</label>
+                        <div class="text-muted small mb-2">
+                          <strong>Election ID:</strong> {{ election.id }}<br>
+                          <strong>Election name:</strong> {{ election.name }}
+                        </div>
+                        <input
+                          id="extend-confirm"
+                          name="confirm"
+                          type="text"
+                          class="form-control"
+                          placeholder="e.g. {{ election.id }} or {{ election.name }}"
+                          required
+                        >
+                      </div>
                     </div>
                     <div class="modal-footer">
                       <button type="button" class="btn btn-outline-secondary" data-dismiss="modal">Cancel</button>
@@ -165,7 +183,13 @@
                       </button>
                     </div>
                     <div class="modal-body">
-                      <p class="mb-3">This will close the election and prevent further voting.</p>
+                      <p class="mb-3">You are about to close this election and end voting.</p>
+
+                      <ul class="mb-3">
+                        <li>Voting ends and no further ballots can be submitted.</li>
+                        <li><strong>Irreversible:</strong> Voting credentials are anonymized and election-related emails are scrubbed.</li>
+                        <li>If you tally now, results and public audit artifacts will be published.</li>
+                      </ul>
                       <div class="custom-control custom-checkbox">
                         <input
                           type="checkbox"
@@ -176,6 +200,24 @@
                         <label class="custom-control-label" for="conclude-skip-tally">
                           Close election, but do not tally votes
                         </label>
+                      </div>
+
+                      <hr />
+
+                      <div class="form-group mb-0">
+                        <label for="conclude-confirm">Type the election ID or name to confirm</label>
+                        <div class="text-muted small mb-2">
+                          <strong>Election ID:</strong> {{ election.id }}<br>
+                          <strong>Election name:</strong> {{ election.name }}
+                        </div>
+                        <input
+                          id="conclude-confirm"
+                          name="confirm"
+                          type="text"
+                          class="form-control"
+                          placeholder="e.g. {{ election.id }} or {{ election.name }}"
+                          required
+                        >
                       </div>
                     </div>
                     <div class="modal-footer">
@@ -420,10 +462,14 @@
             {% if election.status == 'open' %}
               <div class="mb-3">
                 <div class="mb-3">
-                  <a href="{% url 'election-send-mail-credentials' election.id %}" class="btn btn-outline-primary btn-sm">Resend all credentials</a>
+                  <form method="post" action="{% url 'election-send-mail-credentials' election.id %}" class="mb-0">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-outline-primary btn-sm">Resend all credentials</button>
+                  </form>
                 </div>
 
-                <form method="get" action="{% url 'election-send-mail-credentials' election.id %}" class="mb-0">
+                <form method="post" action="{% url 'election-send-mail-credentials' election.id %}" class="mb-0">
+                  {% csrf_token %}
                   <label class="sr-only" for="resend-credential-username">Username</label>
                   <div class="input-group input-group-sm">
                     <input

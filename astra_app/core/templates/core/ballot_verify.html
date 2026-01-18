@@ -13,6 +13,12 @@
       </div>
 
       <div class="card-body">
+        {% if rate_limited %}
+          <div class="alert alert-danger" role="alert">
+            <strong>Too many verification requests.</strong> Please wait a moment and try again.
+          </div>
+        {% endif %}
+
         <p class="text-muted">
           Enter the 64-character receipt you received after submitting your ballot. This page confirms whether a ballot
           with that receipt is recorded. It does not show your selections, your identity, or exact timestamps.

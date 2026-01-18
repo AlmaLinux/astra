@@ -593,7 +593,7 @@ class ElectionDetailConcludeElectionTests(TestCase):
         admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
 
         with patch("core.backends.FreeIPAUser.get", return_value=admin):
-            resp = self.client.post(reverse("election-conclude", args=[election.id]), data={})
+            resp = self.client.post(reverse("election-conclude", args=[election.id]), data={"confirm": str(election.id)})
         self.assertEqual(resp.status_code, 302)
 
         election.refresh_from_db()
@@ -623,7 +623,7 @@ class ElectionDetailConcludeElectionTests(TestCase):
         with patch("core.backends.FreeIPAUser.get", return_value=admin):
             resp = self.client.post(
                 reverse("election-conclude", args=[election.id]),
-                data={"skip_tally": "on"},
+                data={"skip_tally": "on", "confirm": str(election.id)},
             )
         self.assertEqual(resp.status_code, 302)
 
@@ -718,7 +718,7 @@ class ElectionDetailExtendElectionTests(TestCase):
         with patch("core.backends.FreeIPAUser.get", return_value=admin):
             resp = self.client.post(
                 reverse("election-extend-end", args=[election.id]),
-                {"end_datetime": timezone.localtime(same_end).strftime("%Y-%m-%dT%H:%M")},
+                {"end_datetime": timezone.localtime(same_end).strftime("%Y-%m-%dT%H:%M"), "confirm": str(election.id)},
             )
         self.assertEqual(resp.status_code, 302)
         election.refresh_from_db()
@@ -734,7 +734,7 @@ class ElectionDetailExtendElectionTests(TestCase):
         with patch("core.backends.FreeIPAUser.get", return_value=admin):
             resp = self.client.post(
                 reverse("election-extend-end", args=[election.id]),
-                {"end_datetime": timezone.localtime(new_end).strftime("%Y-%m-%dT%H:%M")},
+                {"end_datetime": timezone.localtime(new_end).strftime("%Y-%m-%dT%H:%M"), "confirm": str(election.id)},
             )
         self.assertEqual(resp.status_code, 302)
 

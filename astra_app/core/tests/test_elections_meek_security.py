@@ -173,8 +173,8 @@ class MeekSTVSecurityTests(TestCase):
         self.assertEqual(len(result["elected"]), 1)
         self.assertIn(result["elected"][0], [1, 2])
 
-    def test_negative_ballot_weight_ignored(self) -> None:
-        """Ballots with negative weights should be ignored."""
+    def test_negative_ballot_weight_raises_error(self) -> None:
+        """Ballots with negative weights should be rejected."""
         from core.elections_meek import tally_meek
 
         ballots = [
@@ -187,12 +187,12 @@ class MeekSTVSecurityTests(TestCase):
             {"id": 2, "name": "Bob", "tiebreak_uuid": str(uuid.uuid4())},
         ]
 
-        result = tally_meek(ballots=ballots, candidates=candidates, seats=1)
-        # Only candidate 1 should have received any votes
-        self.assertEqual(result["elected"][0], 1)
+        with self.assertRaises(ValueError) as ctx:
+            tally_meek(ballots=ballots, candidates=candidates, seats=1)
+        self.assertIn("ballot weight", str(ctx.exception))
 
-    def test_excessive_ballot_weight_ignored(self) -> None:
-        """Ballots with excessive weights should be ignored."""
+    def test_excessive_ballot_weight_raises_error(self) -> None:
+        """Ballots with excessive weights should be rejected."""
         from core.elections_meek import tally_meek
 
         ballots = [
@@ -205,9 +205,9 @@ class MeekSTVSecurityTests(TestCase):
             {"id": 2, "name": "Bob", "tiebreak_uuid": str(uuid.uuid4())},
         ]
 
-        result = tally_meek(ballots=ballots, candidates=candidates, seats=1)
-        # Only candidate 1 should have received valid votes
-        self.assertEqual(result["elected"][0], 1)
+        with self.assertRaises(ValueError) as ctx:
+            tally_meek(ballots=ballots, candidates=candidates, seats=1)
+        self.assertIn("ballot weight", str(ctx.exception))
 
     def test_out_of_range_candidate_id_in_ballot_ignored(self) -> None:
         """Candidate IDs outside valid range in ballots should be ignored."""

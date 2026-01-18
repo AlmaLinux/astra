@@ -1,0 +1,28 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Voting closed{% endblock %}
+
+{% block header %}
+  <h1 class="m-0">Voting closed: {{ election.name }}</h1>
+  <a class="btn btn-link px-0" href="{% url 'election-detail' election.id %}">Back to election detail</a>
+{% endblock %}
+
+{% block content %}
+  <div class="row justify-content-center">
+    <div class="col-md-10 col-lg-8">
+      <div class="card card-warning">
+        <div class="card-header">
+          <h3 class="card-title">Voting has ended</h3>
+        </div>
+
+        <div class="card-body">
+          <p class="mb-2">This election is closed, so no further ballots can be submitted.</p>
+          <p class="mb-0">
+            You can still verify a ballot receipt at:
+            <a href="{{ ballot_verify_url }}">{{ ballot_verify_url }}</a>
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

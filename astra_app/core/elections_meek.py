@@ -43,6 +43,20 @@ def _ballot_ranking(ballot: Mapping[str, object]) -> list[int]:
     return result
 
 
+def _ballot_weight(ballot: Mapping[str, object]) -> Decimal:
+    try:
+        weight_val = int(ballot.get("weight") or 0)
+    except (ValueError, TypeError, OverflowError) as e:
+        raise ValueError("invalid ballot weight") from e
+
+    # Elections should never produce absurdly large or negative ballot weights.
+    # If this happens, it indicates a corrupted DB row or a bug upstream.
+    if weight_val < 0 or weight_val > 1_000_000:
+        raise ValueError(f"ballot weight {weight_val} out of valid range [0, 1000000]")
+
+    return _decimal(weight_val)
+
+
 def _distribute_votes(
     *,
     ballots: Iterable[Mapping[str, object]],
@@ -53,14 +67,7 @@ def _distribute_votes(
     retained: dict[int, Decimal] = {cid: Decimal(0) for cid in continuing_ids}
 
     for ballot in ballots:
-        try:
-            weight_val = int(ballot.get("weight") or 0)
-            # Reasonable bounds: weights should be positive and not absurdly large
-            if weight_val < 0 or weight_val > 1_000_000:
-                continue
-            remaining = _decimal(weight_val)
-        except (ValueError, TypeError, OverflowError):
-            continue
+        remaining = _ballot_weight(ballot)
         if remaining <= 0:
             continue
 
@@ -86,7 +93,7 @@ def _distribute_votes(
 def _first_preferences(*, ballots: Iterable[Mapping[str, object]], continuing_ids: frozenset[int]) -> dict[int, Decimal]:
     first: dict[int, Decimal] = {cid: Decimal(0) for cid in continuing_ids}
     for ballot in ballots:
-        w = _decimal(int(ballot.get("weight") or 0))
+        w = _ballot_weight(ballot)
         if w <= 0:
             continue
         for cid in _ballot_ranking(ballot):
@@ -569,14 +576,14 @@ def tally_meek(
                 raise ValueError(f"candidate id {cid} out of valid range [0, 1000000]")
         except (ValueError, TypeError, OverflowError) as e:
             raise ValueError(f"invalid candidate id: {e}") from e
-        
+
         name = str(c.get("name") or "")
         tiebreak_uuid = str(c.get("tiebreak_uuid") or "")
-        
+
         # Validate tiebreak_uuid is present and reasonable
         if not tiebreak_uuid or len(tiebreak_uuid) > 200:
             raise ValueError(f"candidate {cid} has invalid or missing tiebreak_uuid")
-        
+
         parsed_candidates.append(_Candidate(id=cid, name=name, tiebreak_uuid=tiebreak_uuid))
 
     candidate_name_by_id: dict[int, str] = {c.id: c.name for c in parsed_candidates if c.name}
@@ -587,14 +594,14 @@ def tally_meek(
     for g in exclusion_groups or []:
         if not isinstance(g, dict):
             raise TypeError("each exclusion group must be a dict")
-        
+
         try:
             max_elected = int(g.get("max_elected") or 0)
             if max_elected < 0 or max_elected > seats:
                 raise ValueError(f"exclusion group max_elected {max_elected} out of valid range")
         except (ValueError, TypeError, OverflowError) as e:
             raise ValueError(f"invalid exclusion group max_elected: {e}") from e
-        
+
         # Safely parse candidate IDs
         group_candidate_ids: set[int] = set()
         for x in (g.get("candidate_ids") or []):
@@ -604,7 +611,7 @@ def tally_meek(
                     group_candidate_ids.add(cid)
             except (ValueError, TypeError, OverflowError):
                 continue
-        
+
         groups.append(
             _ExclusionGroup(
                 public_id=str(g.get("public_id") or ""),
@@ -617,7 +624,7 @@ def tally_meek(
     with localcontext() as ctx:
         ctx.prec = 80
 
-        total_weight = sum((_decimal(int(b.get("weight") or 0)) for b in ballots), start=Decimal(0))
+        total_weight = sum((_ballot_weight(b) for b in ballots), start=Decimal(0))
         quota = (total_weight / Decimal(seats + 1)).to_integral_value(rounding=ROUND_DOWN) + Decimal(1)
 
         retention: dict[int, Decimal] = {cid: Decimal(1) for cid in all_candidate_ids}
@@ -722,7 +729,8 @@ def tally_meek(
             )
             if len(remaining) == 1:
                 trace[-1]["result"] = "resolved"
-                return ordered, trace
+                winner = remaining[0]
+                return [winner, *[cid for cid in ordered if cid != winner]], trace
             trace[-1]["result"] = "tied"
 
             values2: dict[int, Decimal] = {cid: cumulative_support.get(cid, Decimal(0)) for cid in remaining}
@@ -736,7 +744,8 @@ def tally_meek(
             )
             if len(remaining) == 1:
                 trace[-1]["result"] = "resolved"
-                return ordered, trace
+                winner = remaining[0]
+                return [winner, *[cid for cid in ordered if cid != winner]], trace
             trace[-1]["result"] = "tied"
 
             values3: dict[int, Decimal] = {cid: first_preferences.get(cid, Decimal(0)) for cid in remaining}
@@ -750,7 +759,8 @@ def tally_meek(
             )
             if len(remaining) == 1:
                 trace[-1]["result"] = "resolved"
-                return ordered, trace
+                winner = remaining[0]
+                return [winner, *[cid for cid in ordered if cid != winner]], trace
             trace[-1]["result"] = "tied"
 
             # Rule 4: deterministic lexical fallback; highest UUID wins.

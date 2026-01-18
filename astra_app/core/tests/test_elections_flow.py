@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import datetime
 import json
+import re
 from unittest.mock import patch
 
 from django.conf import settings
+from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -167,6 +169,53 @@ class ElectionCredentialAndBallotTests(TestCase):
 
         self.assertNotEqual(ballot2.id, ballot1.id)
         self.assertNotEqual(ballot2.ballot_hash, ballot1.ballot_hash)
+
+    def test_credential_cannot_be_used_across_elections(self) -> None:
+        """Regression test: credentials are election-scoped and cannot be reused."""
+        from core.elections_services import submit_ballot, InvalidCredentialError
+
+        now = timezone.now()
+        election_a = Election.objects.create(
+            name="Election A",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+        election_b = Election.objects.create(
+            name="Election B",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+
+        Candidate.objects.create(election=election_a, freeipa_username="alice", nominated_by="nominator")
+        Candidate.objects.create(election=election_b, freeipa_username="bob", nominated_by="nominator")
+
+        cred_a = VotingCredential.objects.create(
+            election=election_a,
+            public_id="cred-election-a",
+            freeipa_username="voter1",
+            weight=1,
+        )
+        VotingCredential.objects.create(
+            election=election_b,
+            public_id="cred-election-b",
+            freeipa_username="voter1",
+            weight=1,
+        )
+
+        with self.assertRaises(InvalidCredentialError):
+            submit_ballot(
+                election=election_b,
+                credential_public_id=cred_a.public_id,
+                ranking=[Candidate.objects.filter(election=election_b).first().id],
+            )
+
+        self.assertFalse(Ballot.objects.filter(election=election_b).exists())
 
 
 class ElectionCredentialIssuanceAndAnonymizationTests(TestCase):
@@ -465,6 +514,9 @@ class ElectionPublicExportTests(TestCase):
         data = response.json()
 
         self.assertEqual([e["event_type"] for e in data["audit_log"]], ["tally_round"])
+        ts = data["audit_log"][0].get("timestamp")
+        self.assertIsInstance(ts, str)
+        self.assertTrue(re.fullmatch(r"\d{4}-\d{2}-\d{2}", ts))
 
 
 class ElectionCloseAndTallyTests(TestCase):
@@ -803,6 +855,17 @@ class ElectionCloseAndTallyTests(TestCase):
 
 class ElectionEmailTimezoneTests(TestCase):
     def test_vote_receipt_email_uses_recipient_timezone(self) -> None:
+        from post_office.models import Email, EmailTemplate
+
+        EmailTemplate.objects.get_or_create(
+            name=settings.ELECTION_VOTE_RECEIPT_EMAIL_TEMPLATE_NAME,
+            defaults={
+                "subject": "Receipt",
+                "content": "Receipt {{ ballot_hash }} End {{ election_end_datetime }}",
+                "html_content": "",
+            },
+        )
+
         start_utc = timezone.make_aware(datetime.datetime(2026, 1, 2, 12, 0, 0), timezone=timezone.UTC)
         end_utc = timezone.make_aware(datetime.datetime(2026, 1, 2, 14, 0, 0), timezone=timezone.UTC)
         election = Election.objects.create(
@@ -825,17 +888,21 @@ class ElectionEmailTimezoneTests(TestCase):
         )
         receipt = BallotReceipt(ballot=ballot, nonce="n" * 32)
 
-        with patch("post_office.mail.send", autospec=True) as send_mock:
-            send_vote_receipt_email(
-                request=None,
-                election=election,
-                username="voter1",
-                email="voter1@example.com",
-                receipt=receipt,
-                tz_name="Europe/Paris",
-            )
+        send_vote_receipt_email(
+            request=None,
+            election=election,
+            username="voter1",
+            email="voter1@example.com",
+            receipt=receipt,
+            tz_name="Europe/Paris",
+        )
 
-        ctx = send_mock.call_args.kwargs.get("context", {})
+        self.assertEqual(Email.objects.count(), 1)
+        queued = Email.objects.first()
+        assert queued is not None
+        self.assertEqual(queued.to, ["voter1@example.com"])
+
+        ctx = queued.context or {}
         self.assertIn("first_name", ctx)
         self.assertIn("last_name", ctx)
         self.assertIn("full_name", ctx)
@@ -844,6 +911,17 @@ class ElectionEmailTimezoneTests(TestCase):
         self.assertIn("15:00", str(ctx.get("election_end_datetime") or ""))
 
     def test_voting_credential_email_uses_recipient_timezone(self) -> None:
+        from post_office.models import Email, EmailTemplate
+
+        EmailTemplate.objects.get_or_create(
+            name=settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME,
+            defaults={
+                "subject": "Credential",
+                "content": "Credential {{ credential_public_id }} Start {{ election_start_datetime }}",
+                "html_content": "",
+            },
+        )
+
         start_utc = timezone.make_aware(datetime.datetime(2026, 1, 2, 12, 0, 0), timezone=timezone.UTC)
         end_utc = timezone.make_aware(datetime.datetime(2026, 1, 2, 14, 0, 0), timezone=timezone.UTC)
         election = Election.objects.create(
@@ -855,17 +933,21 @@ class ElectionEmailTimezoneTests(TestCase):
             status=Election.Status.open,
         )
 
-        with patch("post_office.mail.send", autospec=True) as send_mock:
-            send_voting_credential_email(
-                request=None,
-                election=election,
-                username="voter1",
-                email="voter1@example.com",
-                credential_public_id="cred-xyz",
-                tz_name="Europe/Paris",
-            )
+        send_voting_credential_email(
+            request=None,
+            election=election,
+            username="voter1",
+            email="voter1@example.com",
+            credential_public_id="cred-xyz",
+            tz_name="Europe/Paris",
+        )
 
-        ctx = send_mock.call_args.kwargs.get("context", {})
+        self.assertEqual(Email.objects.count(), 1)
+        queued = Email.objects.first()
+        assert queued is not None
+        self.assertEqual(queued.to, ["voter1@example.com"])
+
+        ctx = queued.context or {}
         self.assertIn("first_name", ctx)
         self.assertIn("last_name", ctx)
         self.assertIn("full_name", ctx)
@@ -967,6 +1049,17 @@ class ElectionVoteEndpointTests(TestCase):
         self.assertEqual(ballot.weight, 2)
 
     def test_vote_submit_sends_receipt_email_when_user_has_email(self) -> None:
+        from post_office.models import Email, EmailTemplate
+
+        EmailTemplate.objects.get_or_create(
+            name=settings.ELECTION_VOTE_RECEIPT_EMAIL_TEMPLATE_NAME,
+            defaults={
+                "subject": "Receipt",
+                "content": "Receipt {{ ballot_hash }} Nonce {{ nonce }} Verify {{ verify_url }}",
+                "html_content": "",
+            },
+        )
+
         self._login_as_freeipa_user("voter1")
 
         url = reverse("election-vote-submit", args=[self.election.id])
@@ -980,10 +1073,7 @@ class ElectionVoteEndpointTests(TestCase):
             },
         )
 
-        with (
-            patch("core.backends.FreeIPAUser.get", return_value=voter1),
-            patch("post_office.mail.send", autospec=True) as send_mock,
-        ):
+        with patch("core.backends.FreeIPAUser.get", return_value=voter1):
             response = self.client.post(
                 url,
                 data={
@@ -997,11 +1087,12 @@ class ElectionVoteEndpointTests(TestCase):
         payload = response.json()
         self.assertTrue(payload["ok"])
 
-        self.assertEqual(send_mock.call_count, 1)
-        self.assertEqual(send_mock.call_args.kwargs.get("recipients"), ["voter1@example.com"])
-        self.assertEqual(send_mock.call_args.kwargs.get("template"), settings.ELECTION_VOTE_RECEIPT_EMAIL_TEMPLATE_NAME)
+        self.assertEqual(Email.objects.count(), 1)
+        queued = Email.objects.first()
+        assert queued is not None
+        self.assertEqual(queued.to, ["voter1@example.com"])
 
-        ctx = send_mock.call_args.kwargs.get("context", {})
+        ctx = queued.context or {}
         self.assertIn("first_name", ctx)
         self.assertIn("last_name", ctx)
         self.assertIn("full_name", ctx)
@@ -1118,6 +1209,40 @@ class ElectionVoteEndpointTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertIn("error", response.json())
+
+    @override_settings(
+        ELECTION_RATE_LIMIT_VOTE_SUBMIT_LIMIT=1,
+        ELECTION_RATE_LIMIT_VOTE_SUBMIT_WINDOW_SECONDS=60 * 60,
+    )
+    def test_vote_submit_rate_limits_repeated_submissions(self) -> None:
+        cache.clear()
+        self._login_as_freeipa_user("voter1")
+
+        url = reverse("election-vote-submit", args=[self.election.id])
+
+        voter1 = FreeIPAUser("voter1", {"uid": ["voter1"], "memberof_group": []})
+        with patch("core.backends.FreeIPAUser.get", return_value=voter1):
+            resp1 = self.client.post(
+                url,
+                data={
+                    "credential_public_id": self.cred.public_id,
+                    "ranking": [self.c2.id, self.c1.id],
+                },
+                content_type="application/json",
+            )
+        self.assertEqual(resp1.status_code, 200)
+
+        with patch("core.backends.FreeIPAUser.get", return_value=voter1):
+            resp2 = self.client.post(
+                url,
+                data={
+                    "credential_public_id": self.cred.public_id,
+                    "ranking": [self.c2.id, self.c1.id],
+                },
+                content_type="application/json",
+            )
+        self.assertEqual(resp2.status_code, 429)
+        self.assertIn("error", resp2.json())
 
 
 class ElectionPublicPagesTests(TestCase):
@@ -1417,3 +1542,5 @@ class ElectionPublicPagesTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "not eligible")
         self.assertContains(resp, "/membership/request/")
+
+

@@ -51,9 +51,8 @@ class UnifiedSettingsTests(TestCase):
         self.assertIsNotNone(ctx)
         tabs = captured["context"].get("tabs")
         self.assertTrue(tabs)
-        tab_ids = {t["id"] for t in tabs}
-        self.assertIn("profile", tab_ids)
-        self.assertIn("security", tab_ids)
+        self.assertIn("profile", tabs)
+        self.assertIn("security", tabs)
         # OTP + Password are merged into Security.
-        self.assertNotIn("otp", tab_ids)
-        self.assertNotIn("password", tab_ids)
+        self.assertNotIn("otp", tabs)
+        self.assertNotIn("password", tabs)

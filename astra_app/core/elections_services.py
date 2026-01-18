@@ -23,7 +23,6 @@ from post_office.models import Email
 
 from core.backends import FreeIPAGroup, FreeIPAUser
 from core.email_context import user_email_context, user_email_context_from_user
-from core.templated_email import queue_templated_email
 from core.models import (
     AuditLogEntry,
     Ballot,
@@ -33,6 +32,7 @@ from core.models import (
     OrganizationSponsorship,
     VotingCredential,
 )
+from core.templated_email import queue_templated_email
 from core.tokens import election_chain_next_hash, election_genesis_chain_hash
 
 
@@ -53,7 +53,12 @@ class ElectionNotClosedError(ElectionError):
 
 
 @transaction.atomic
-def extend_election_end_datetime(*, election: Election, new_end_datetime: datetime.datetime) -> None:
+def extend_election_end_datetime(
+    *,
+    election: Election,
+    new_end_datetime: datetime.datetime,
+    actor: str | None = None,
+) -> None:
     # IMPORTANT: ModelForms populate their instance during validation. Views that
     # validate end_datetime via a ModelForm may pass an already-mutated instance.
     # Re-load under a row lock so validation compares against the persisted end.
@@ -74,14 +79,18 @@ def extend_election_end_datetime(*, election: Election, new_end_datetime: dateti
     locked.save(update_fields=["end_datetime", "updated_at"])
 
     status = election_quorum_status(election=locked)
+    payload = {
+        "previous_end_datetime": old_end.isoformat(),
+        "new_end_datetime": new_end_datetime.isoformat(),
+        **status,
+    }
+    if actor:
+        payload["actor"] = actor
+    
     AuditLogEntry.objects.create(
         election=locked,
         event_type="election_end_extended",
-        payload={
-            "previous_end_datetime": old_end.isoformat(),
-            "new_end_datetime": new_end_datetime.isoformat(),
-            **status,
-        },
+        payload=payload,
         is_public=True,
     )
 
@@ -210,7 +219,8 @@ def build_public_audit_export(*, election: Election) -> dict[str, object]:
         )
     )
     for row in rows:
-        row["timestamp"] = row["timestamp"].isoformat()
+        # Privacy: export only a coarse date, not a precise timestamp.
+        row["timestamp"] = row["timestamp"].date().isoformat()
 
     return {
         "election_id": election.id,
@@ -871,38 +881,68 @@ def scrub_election_emails(*, election: Election) -> int:
 
 
 @transaction.atomic
-def close_election(*, election: Election) -> None:
+def close_election(*, election: Election, actor: str | None = None) -> None:
     election.refresh_from_db(fields=["status"])
     if election.status != Election.Status.open:
         raise ElectionError("election must be open to close")
 
     ended_at = timezone.now()
 
-    last_chain_hash = (
-        Ballot.objects.filter(election=election)
-        .order_by("-created_at", "-id")
-        .values_list("chain_hash", flat=True)
-        .first()
-    )
-    genesis_hash = election_genesis_chain_hash(election.id)
-    chain_head = str(last_chain_hash or genesis_hash)
+    try:
+        last_chain_hash = (
+            Ballot.objects.filter(election=election)
+            .order_by("-created_at", "-id")
+            .values_list("chain_hash", flat=True)
+            .first()
+        )
+        genesis_hash = election_genesis_chain_hash(election.id)
+        chain_head = str(last_chain_hash or genesis_hash)
 
-    election.status = Election.Status.closed
-    election.end_datetime = ended_at
-    election.save(update_fields=["status", "end_datetime"])
+        election.status = Election.Status.closed
+        election.end_datetime = ended_at
+        election.save(update_fields=["status", "end_datetime"])
 
-    anonymize_election(election=election)
+        anonymize_election(election=election)
 
-    AuditLogEntry.objects.create(
-        election=election,
-        event_type="election_closed",
-        payload={"chain_head": chain_head},
-        is_public=True,
-    )
+        payload = {"chain_head": chain_head}
+        if actor:
+            payload["actor"] = actor
+        
+        AuditLogEntry.objects.create(
+            election=election,
+            event_type="election_closed",
+            payload=payload,
+            is_public=True,
+        )
+    except Exception as exc:
+        failure_payload = {
+            "error": str(exc),
+            "error_type": type(exc).__name__,
+        }
+        if actor:
+            failure_payload["actor"] = actor
+        
+        # Use autonomous transaction to persist audit log even if outer transaction rolls back
+        try:
+            with transaction.atomic():
+                AuditLogEntry.objects.create(
+                    election=election,
+                    event_type="election_close_failed",
+                    payload=failure_payload,
+                    is_public=False,
+                )
+        except Exception:
+            pass  # Don't let audit log failure mask original error
+        
+        raise ElectionError(
+            f"Failed to close election: {exc}. "
+            "Recovery: Verify database connectivity and election state, then retry. "
+            "Contact an administrator if the issue persists."
+        ) from exc
 
 
 @transaction.atomic
-def tally_election(*, election: Election) -> dict[str, object]:
+def tally_election(*, election: Election, actor: str | None = None) -> dict[str, object]:
     from core.elections_meek import tally_meek
     from core.models import ExclusionGroup, ExclusionGroupCandidate
 
@@ -910,80 +950,111 @@ def tally_election(*, election: Election) -> dict[str, object]:
     if election.status != Election.Status.closed:
         raise ElectionError("election must be closed to tally")
 
-    candidates_qs = Candidate.objects.filter(election=election).only(
-        "id",
-        "freeipa_username",
-        "tiebreak_uuid",
-    )
-    candidates: list[dict[str, object]] = [
-        {"id": c.id, "name": c.freeipa_username, "tiebreak_uuid": c.tiebreak_uuid} for c in candidates_qs
-    ]
-
-    ballots_qs = Ballot.objects.filter(election=election, superseded_by__isnull=True).only("weight", "ranking")
-    ballots: list[dict[str, object]] = [{"weight": b.weight, "ranking": list(b.ranking)} for b in ballots_qs]
-
-    group_rows = list(
-        ExclusionGroup.objects.filter(election=election).values("id", "public_id", "max_elected", "name")
-    )
-    group_candidate_rows = list(
-        ExclusionGroupCandidate.objects.filter(exclusion_group__election=election).values(
-            "exclusion_group_id",
-            "candidate_id",
+    try:
+        candidates_qs = Candidate.objects.filter(election=election).only(
+            "id",
+            "freeipa_username",
+            "tiebreak_uuid",
         )
-    )
-    candidate_ids_by_group_id: dict[int, list[int]] = {}
-    for row in group_candidate_rows:
-        gid = int(row["exclusion_group_id"])
-        candidate_ids_by_group_id.setdefault(gid, []).append(int(row["candidate_id"]))
+        candidates: list[dict[str, object]] = [
+            {"id": c.id, "name": c.freeipa_username, "tiebreak_uuid": c.tiebreak_uuid} for c in candidates_qs
+        ]
 
-    exclusion_groups: list[dict[str, object]] = []
-    for row in group_rows:
-        gid = int(row["id"])
-        exclusion_groups.append(
-            {
-                "public_id": str(row["public_id"]),
-                "name": str(row["name"]),
-                "max_elected": int(row["max_elected"]),
-                "candidate_ids": candidate_ids_by_group_id.get(gid, []),
-            }
+        ballots_qs = Ballot.objects.filter(election=election, superseded_by__isnull=True).only("weight", "ranking")
+        ballots: list[dict[str, object]] = [{"weight": b.weight, "ranking": list(b.ranking)} for b in ballots_qs]
+
+        group_rows = list(
+            ExclusionGroup.objects.filter(election=election).values("id", "public_id", "max_elected", "name")
         )
-
-    raw_result = tally_meek(
-        ballots=ballots,
-        candidates=candidates,
-        seats=int(election.number_of_seats),
-        exclusion_groups=exclusion_groups,
-    )
-    result = _jsonify_tally_result(raw_result)
-
-    election.tally_result = result
-    election.status = Election.Status.tallied
-    election.save(update_fields=["tally_result", "status"])
-
-    persist_public_election_artifacts(election=election)
-
-    for idx, round_payload in enumerate(result.get("rounds") or [], start=1):
-        AuditLogEntry.objects.create(
-            election=election,
-            event_type="tally_round",
-            payload={
-                "round": idx,
-                **(round_payload if isinstance(round_payload, dict) else {"data": round_payload}),
-            },
-            is_public=True,
+        group_candidate_rows = list(
+            ExclusionGroupCandidate.objects.filter(exclusion_group__election=election).values(
+                "exclusion_group_id",
+                "candidate_id",
+            )
         )
+        candidate_ids_by_group_id: dict[int, list[int]] = {}
+        for row in group_candidate_rows:
+            gid = int(row["exclusion_group_id"])
+            candidate_ids_by_group_id.setdefault(gid, []).append(int(row["candidate_id"]))
 
-    AuditLogEntry.objects.create(
-        election=election,
-        event_type="tally_completed",
-        payload={
+        exclusion_groups: list[dict[str, object]] = []
+        for row in group_rows:
+            gid = int(row["id"])
+            exclusion_groups.append(
+                {
+                    "public_id": str(row["public_id"]),
+                    "name": str(row["name"]),
+                    "max_elected": int(row["max_elected"]),
+                    "candidate_ids": candidate_ids_by_group_id.get(gid, []),
+                }
+            )
+
+        raw_result = tally_meek(
+            ballots=ballots,
+            candidates=candidates,
+            seats=int(election.number_of_seats),
+            exclusion_groups=exclusion_groups,
+        )
+        result = _jsonify_tally_result(raw_result)
+
+        election.tally_result = result
+        election.status = Election.Status.tallied
+        election.save(update_fields=["tally_result", "status"])
+
+        persist_public_election_artifacts(election=election)
+
+        for idx, round_payload in enumerate(result.get("rounds") or [], start=1):
+            AuditLogEntry.objects.create(
+                election=election,
+                event_type="tally_round",
+                payload={
+                    "round": idx,
+                    **(round_payload if isinstance(round_payload, dict) else {"data": round_payload}),
+                },
+                is_public=True,
+            )
+
+        tally_completed_payload = {
             "quota": result.get("quota"),
             "elected": result.get("elected"),
             "eliminated": result.get("eliminated"),
             "forced_excluded": result.get("forced_excluded"),
             "method": "meek",
-        },
-        is_public=True,
-    )
+        }
+        if actor:
+            tally_completed_payload["actor"] = actor
+        
+        AuditLogEntry.objects.create(
+            election=election,
+            event_type="tally_completed",
+            payload=tally_completed_payload,
+            is_public=True,
+        )
 
-    return result
+        return result
+    except Exception as exc:
+        failure_payload = {
+            "error": str(exc),
+            "error_type": type(exc).__name__,
+        }
+        if actor:
+            failure_payload["actor"] = actor
+        
+        # Use autonomous transaction to persist audit log even if outer transaction rolls back
+        try:
+            with transaction.atomic():
+                AuditLogEntry.objects.create(
+                    election=election,
+                    event_type="tally_failed",
+                    payload=failure_payload,
+                    is_public=False,
+                )
+        except Exception:
+            pass  # Don't let audit log failure mask original error
+        
+        raise ElectionError(
+            f"Failed to tally election: {exc}. "
+            "Recovery: Verify ballot data integrity and candidate configuration, then retry from the election detail page. "
+            "The election remains in 'closed' state and can be tallied again. "
+            "Contact an administrator if the issue persists."
+        ) from exc

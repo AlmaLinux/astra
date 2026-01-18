@@ -25,13 +25,13 @@
             <br />
             Note: Election administrators may extend the end date if quorum is not reached.
           </div>
-          <form id="election-vote-form" method="post" action="{% url 'election-vote-submit' election.id %}">
+          <form id="election-vote-form" method="post" action="{% url 'election-vote-submit' election.id %}" data-verify-url="{% url 'ballot-verify' %}">
             {% csrf_token %}
             <div class="form-group">
               <label for="election-credential">Voting credential</label>
               <input id="election-credential" class="form-control" type="text" name="credential_public_id" autocomplete="off" required />
               <small class="form-text text-muted">Paste the credential you received. Keep it private.</small>
-              <small class="form-text text-muted mb-3">Submitting again with the same credential replaces your previous ballot.</small>
+              <small class="form-text text-muted mb-3">Submitting again replaces your previous ballot. Only your latest ballot submitted before voting closes is counted.</small>
               {% if voter_votes is not None %}
                 {% if voter_votes > 0 %}
                   <p class="form-text mb-0">
@@ -60,12 +60,16 @@
             <div class="alert d-none" id="election-vote-result" role="alert"></div>
 
             <div class="d-none" id="election-receipt-box">
-              <label class="text-muted" for="election-receipt">Receipt</label>
+              <label class="text-muted" for="election-receipt">Receipt (ballot hash)</label>
               <div class="input-group">
                 <input id="election-receipt" class="form-control" type="text" readonly />
                 <div class="input-group-append">
                   <button type="button" class="btn btn-outline-secondary" id="election-receipt-copy">Copy</button>
                 </div>
+              </div>
+
+              <div class="mt-2">
+                <a id="election-receipt-verify" href="{% url 'ballot-verify' %}" target="_blank" rel="noopener noreferrer">Verify this receipt</a>
               </div>
 
               <div class="mt-2">

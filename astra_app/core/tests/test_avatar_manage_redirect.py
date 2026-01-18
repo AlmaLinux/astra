@@ -67,6 +67,6 @@ class AvatarManageRedirectTests(TestCase):
 
         response = views_settings.avatar_manage(request)
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], "/settings/profile/")
+        self.assertEqual(response["Location"], "/settings/#profile")
         msgs = [m.message for m in get_messages(request)]
         self.assertTrue(any("does not support" in m for m in msgs))

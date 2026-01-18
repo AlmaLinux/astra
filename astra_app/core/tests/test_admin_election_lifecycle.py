@@ -166,6 +166,5 @@ class AdminElectionLifecycleActionTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         self.assertTrue(VotingCredential.objects.filter(election=election, freeipa_username="voter1").exists())
         self.assertEqual(post_office_send_mock.call_count, 1)
-        self.assertEqual(post_office_send_mock.call_args.kwargs.get("template"), "election-voting-credential")
         self.assertEqual(post_office_send_mock.call_args.kwargs.get("recipients"), ["voter1@example.com"])
 

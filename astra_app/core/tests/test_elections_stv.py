@@ -119,10 +119,10 @@ class STVTallyTests(TestCase):
         audit_text = str(elim_round.get("audit_text") or "")
         self.assertIn("Final results", audit_text)
         self.assertTrue(
-            
+
                 "After this elimination, the remaining eligible candidate exactly filled" in audit_text
                 or "After this elimination, the remaining eligible candidates exactly filled" in audit_text
-            
+
         )
 
     def test_meek_fill_remaining_seats_explains_rule_election(self) -> None:
@@ -154,10 +154,10 @@ class STVTallyTests(TestCase):
 
         audit_text = str(r.get("audit_text") or "")
         self.assertTrue(
-            
+
                 "remaining eligible candidate exactly filled" in audit_text
                 or "remaining eligible candidates exactly filled" in audit_text
-            
+
         )
         # Guardrail: do not imply every elected candidate had quota-reduction / surplus.
         self.assertNotIn("each elected candidate's retained vote total was reduced", audit_text)
@@ -694,3 +694,46 @@ class MeekTieBreakEndToEndTests(TestCase):
         rnd, _tb = self._find_resolved_rule(rounds, rule=3)
         self.assertIn("tie resolved deterministically", str(rnd.get("summary_text") or ""))
         self.assertIn("The tie was resolved using first-preference votes.", str(rnd.get("audit_text") or ""))
+
+    def test_tally_meek_elimination_uses_rule_trace_winner(self) -> None:
+        from core.elections_meek import tally_meek
+
+        # Regression: tie-break traces can resolve a tie before the UUID fallback.
+        # The elimination choice must match the resolved rule-trace winner, not a
+        # leftover ordering based on candidate IDs.
+        candidates = [
+            {"id": 1, "name": "A", "tiebreak_uuid": uuid.UUID("00000000-0000-0000-0000-000000000001")},
+            {"id": 5, "name": "E", "tiebreak_uuid": uuid.UUID("00000000-0000-0000-0000-000000000005")},
+            {"id": 9, "name": "I", "tiebreak_uuid": uuid.UUID("00000000-0000-0000-0000-000000000009")},
+        ]
+        ballots = [
+            {"weight": 1, "ranking": [5, 9, 1]},
+            {"weight": 1, "ranking": [5, 9]},
+            {"weight": 1, "ranking": [1, 5, 9]},
+            {"weight": 1, "ranking": [5, 1, 9]},
+            {"weight": 1, "ranking": [5, 9, 1]},
+        ]
+
+        result = tally_meek(
+            ballots=ballots,
+            candidates=candidates,
+            seats=2,
+            epsilon=Decimal("1e-6"),
+            max_iterations=120,
+        )
+
+        elimination_rounds = [r for r in list(result.get("rounds") or []) if isinstance(r, dict) and r.get("eliminated") is not None]
+        self.assertGreaterEqual(len(elimination_rounds), 1)
+
+        r0 = elimination_rounds[0]
+        self.assertEqual(r0.get("eliminated"), 9)
+
+        tie_breaks = list(r0.get("tie_breaks") or [])
+        elimination_tie_breaks = [tb for tb in tie_breaks if tb.get("type") == "elimination"]
+        self.assertTrue(elimination_tie_breaks)
+        tb = elimination_tie_breaks[0]
+        self.assertEqual(tb.get("selected"), 9)
+
+        resolved = [step for step in list(tb.get("rule_trace") or []) if step.get("result") == "resolved"]
+        self.assertTrue(resolved)
+        self.assertEqual(resolved[0].get("rule"), 3)

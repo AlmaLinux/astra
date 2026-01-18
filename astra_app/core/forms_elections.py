@@ -40,7 +40,7 @@ class ElectionDetailsForm(forms.ModelForm):
     quorum = forms.IntegerField(
         min_value=0,
         max_value=100,
-        initial=50,
+        initial=10,
         widget=forms.NumberInput(
             attrs={
                 "class": "form-control smallNumber",

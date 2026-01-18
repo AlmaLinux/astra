@@ -90,6 +90,12 @@
     return form ? form.querySelector('button[type="submit"], input[type="submit"]') : null;
   }
 
+  function setSubmitLabel(text) {
+    var btn = getSubmitButton();
+    if (!btn) return;
+    btn.textContent = String(text || 'Submit vote');
+  }
+
   function setSubmitVisible(visible) {
     var btn = getSubmitButton();
     if (!btn) return;
@@ -97,21 +103,6 @@
       btn.classList.remove('d-none');
     } else {
       btn.classList.add('d-none');
-    }
-  }
-
-  function isVoteSubmitted() {
-    var form = $('election-vote-form');
-    return !!(form && form.getAttribute('data-vote-submitted') === '1');
-  }
-
-  function setVoteSubmitted(submitted) {
-    var form = $('election-vote-form');
-    if (!form) return;
-    if (submitted) {
-      form.setAttribute('data-vote-submitted', '1');
-    } else {
-      form.removeAttribute('data-vote-submitted');
     }
   }
 
@@ -127,8 +118,8 @@
     if (receiptBox) receiptBox.classList.add('d-none');
 
     if (isError) {
-      setVoteSubmitted(false);
       setSubmitVisible(true);
+      setSubmitLabel('Submit vote');
     }
   }
 
@@ -138,8 +129,8 @@
     if (!receiptBox || !receiptInput) return;
     receiptInput.value = receipt;
     receiptBox.classList.remove('d-none');
-    setVoteSubmitted(true);
-    setSubmitVisible(false);
+    setSubmitVisible(true);
+    setSubmitLabel('Submit replacement ballot');
   }
 
   function setReceiptDetails(details) {
@@ -147,6 +138,13 @@
 
     var receipt = String(details.ballot_hash || '');
     if (receipt) setReceipt(receipt);
+
+    var verifyLink = $('election-receipt-verify');
+    var form = $('election-vote-form');
+    var verifyBase = form ? String(form.getAttribute('data-verify-url') || '') : '';
+    if (verifyLink && verifyBase && receipt) {
+      verifyLink.href = verifyBase + '?receipt=' + encodeURIComponent(receipt);
+    }
 
     var nonceInput = $('election-nonce');
     if (nonceInput) nonceInput.value = String(details.nonce || '');
@@ -352,13 +350,6 @@
 
     form.addEventListener('submit', async function (ev) {
       ev.preventDefault();
-      if (isVoteSubmitted()) {
-        setResult('Vote already recorded. Receipt shown below.', false);
-        var existingReceipt = $('election-receipt');
-        var existingValue = existingReceipt ? String(existingReceipt.value || '').trim() : '';
-        if (existingValue) setReceipt(existingValue);
-        return;
-      }
       if (!validateRankingOrShowError()) return;
 
       var data = new window.FormData(form);
@@ -394,5 +385,7 @@
 
     var form = $('election-vote-form');
     if (form) updateRankingGuidance(form);
+
+    setSubmitLabel('Submit vote');
   });
 })(window, document);
