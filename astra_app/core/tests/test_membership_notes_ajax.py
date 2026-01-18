@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from django.conf import settings
+
 import json
 import re
 from datetime import timedelta
@@ -22,7 +24,7 @@ class MembershipNotesAjaxTests(TestCase):
         FreeIPAPermissionGrant.objects.get_or_create(
             permission=ASTRA_ADD_MEMBERSHIP,
             principal_type=FreeIPAPermissionGrant.PrincipalType.group,
-            principal_name="membership-committee",
+            principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
         )
 
         MembershipType.objects.update_or_create(
@@ -51,7 +53,7 @@ class MembershipNotesAjaxTests(TestCase):
             {
                 "uid": ["reviewer"],
                 "mail": ["reviewer@example.com"],
-                "memberof_group": ["membership-committee"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
             },
         )
 
@@ -98,7 +100,7 @@ class MembershipNotesAjaxTests(TestCase):
             {
                 "uid": ["reviewer"],
                 "mail": ["reviewer@example.com"],
-                "memberof_group": ["membership-committee"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
             },
         )
 
@@ -163,7 +165,7 @@ class MembershipNotesAjaxTests(TestCase):
             {
                 "uid": ["reviewer"],
                 "mail": ["reviewer@example.com"],
-                "memberof_group": ["membership-committee"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
             },
         )
 
@@ -213,7 +215,7 @@ class MembershipNotesAjaxTests(TestCase):
             {
                 "uid": ["reviewer"],
                 "mail": ["reviewer@example.com"],
-                "memberof_group": ["membership-committee"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
             },
         )
 

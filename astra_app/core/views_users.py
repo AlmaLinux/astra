@@ -412,6 +412,11 @@ def user_profile(request: HttpRequest, username: str) -> HttpResponse:
 
 
 def users(request: HttpRequest) -> HttpResponse:
+    from core.permissions import ASTRA_VIEW_USER_DIRECTORY
+
+    if not request.user.has_perm(ASTRA_VIEW_USER_DIRECTORY):
+        raise Http404
+
     users_list = FreeIPAUser.all()
     q = _normalize_str(request.GET.get("q"))
 

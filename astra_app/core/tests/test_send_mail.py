@@ -5,6 +5,7 @@ import json
 from unittest.mock import patch
 from urllib.parse import quote
 
+from django.conf import settings
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
@@ -24,7 +25,7 @@ class SendMailTests(TestCase):
         FreeIPAPermissionGrant.objects.get_or_create(
             permission=ASTRA_ADD_SEND_MAIL,
             principal_type=FreeIPAPermissionGrant.PrincipalType.group,
-            principal_name="membership-committee",
+            principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
         )
 
     def test_requires_permission(self) -> None:
@@ -39,7 +40,7 @@ class SendMailTests(TestCase):
     def test_group_recipients_show_variables_and_count(self) -> None:
         self._login_as_freeipa_user("reviewer")
 
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         class _FakeGroup:
             cn = "example-group"
@@ -103,7 +104,7 @@ class SendMailTests(TestCase):
 
     def test_csv_recipients_show_header_variables(self) -> None:
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         csv_bytes = b"Email,Display Name,Company\nalice@example.com,Alice User,Acme\n"
         csv_file = io.BytesIO(csv_bytes)
@@ -127,7 +128,7 @@ class SendMailTests(TestCase):
 
     def test_manual_recipients_show_variables_and_count(self) -> None:
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=reviewer),
@@ -150,7 +151,7 @@ class SendMailTests(TestCase):
 
     def test_get_prefills_group_recipients_from_query_params(self) -> None:
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         class _FakeGroup:
             cn = "example-group"
@@ -208,7 +209,7 @@ class SendMailTests(TestCase):
 
     def test_get_prefills_cc_from_query_params(self) -> None:
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         cc_raw = "cc1@example.com,cc2@example.com"
         url = reverse("send-mail") + f"?cc={quote(cc_raw)}"
@@ -231,7 +232,7 @@ class SendMailTests(TestCase):
 
     def test_empty_group_still_shows_placeholder_variable_examples(self) -> None:
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         class _EmptyGroup:
             cn = "empty-group"
@@ -265,7 +266,7 @@ class SendMailTests(TestCase):
 
     def test_get_prefills_manual_recipients_from_query_params(self) -> None:
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=reviewer),
@@ -284,7 +285,7 @@ class SendMailTests(TestCase):
 
     def test_get_extra_query_params_are_added_to_context(self) -> None:
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=reviewer),
@@ -308,7 +309,7 @@ class SendMailTests(TestCase):
             "reviewer",
             {
                 "uid": ["reviewer"],
-                "memberof_group": ["membership-committee"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
             },
         )
 
@@ -363,7 +364,7 @@ class SendMailTests(TestCase):
     def test_variable_examples_choose_best_context_and_placeholder_missing(self) -> None:
         self._login_as_freeipa_user("reviewer")
 
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         class _FakeGroup:
             cn = "example-group"
@@ -420,7 +421,7 @@ class SendMailTests(TestCase):
         from post_office.models import EmailTemplate
 
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         tpl = EmailTemplate.objects.create(
             name="send-mail-prefill",
@@ -445,7 +446,7 @@ class SendMailTests(TestCase):
     def test_compose_shows_html_to_text_button_and_variables_card(self) -> None:
         self._login_as_freeipa_user("reviewer")
 
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         class _FakeGroup:
             cn = "example-group"
@@ -496,7 +497,7 @@ class SendMailTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         class _FakeGroup:
             cn = "example-group"
@@ -563,7 +564,7 @@ class SendMailTests(TestCase):
         from post_office.models import EmailTemplate
 
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         class _FakeGroup:
             cn = "example-group"
@@ -637,7 +638,7 @@ class SendMailTests(TestCase):
         from post_office.models import EmailTemplate
 
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         class _FakeGroup:
             cn = "example-group"
@@ -702,7 +703,7 @@ class SendMailTests(TestCase):
 
     def test_send_emails_renders_extra_context_vars(self) -> None:
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=reviewer),
@@ -731,7 +732,7 @@ class SendMailTests(TestCase):
 
     def test_send_mail_attaches_related_inline_images(self) -> None:
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         class _FakeTemplate:
             def __init__(self, rendered: str) -> None:
@@ -788,7 +789,7 @@ class SendMailTests(TestCase):
         # resolve the file. This matches local/dev behavior where the current bug
         # is most visible.
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         image_url = "http://localhost:9000/astra-media/mail-images/logo.png"
         html = "{% load post_office %}\n" f"<img src=\"{{% inline_image '{image_url}' %}}\" />\n"
@@ -836,12 +837,12 @@ class UnifiedEmailPreviewSendMailTests(TestCase):
         FreeIPAPermissionGrant.objects.get_or_create(
             permission=ASTRA_ADD_SEND_MAIL,
             principal_type=FreeIPAPermissionGrant.PrincipalType.group,
-            principal_name="membership-committee",
+            principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
         )
 
     def test_unified_preview_requires_loaded_recipients(self) -> None:
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
@@ -858,7 +859,7 @@ class UnifiedEmailPreviewSendMailTests(TestCase):
 
     def test_unified_preview_renders_inline_image_tag_as_url_in_html(self) -> None:
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         session = self.client.session
         session["send_mail_preview_first_context_v1"] = json.dumps({"full_name": "Preview User"})
@@ -884,7 +885,7 @@ class UnifiedEmailPreviewSendMailTests(TestCase):
 
     def test_unified_preview_renders_unquoted_inline_image_tag_as_url_in_html(self) -> None:
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         session = self.client.session
         session["send_mail_preview_first_context_v1"] = json.dumps({"full_name": "Preview User"})
@@ -910,7 +911,7 @@ class UnifiedEmailPreviewSendMailTests(TestCase):
 
     def test_unified_preview_with_load_post_office_and_inline_image_tag(self) -> None:
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         session = self.client.session
         session["send_mail_preview_first_context_v1"] = json.dumps({"full_name": "Preview User"})

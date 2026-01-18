@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from django.conf import settings
+
 from unittest.mock import patch
 
 from django.test import TestCase
@@ -17,7 +19,7 @@ class MembershipReviewBadgeLogicTests(TestCase):
         FreeIPAPermissionGrant.objects.get_or_create(
             permission=ASTRA_ADD_MEMBERSHIP,
             principal_type=FreeIPAPermissionGrant.PrincipalType.group,
-            principal_name="membership-committee",
+            principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
         )
         MembershipType.objects.update_or_create(
             code="individual",
@@ -48,7 +50,7 @@ class MembershipReviewBadgeLogicTests(TestCase):
             {
                 "uid": ["reviewer"],
                 "mail": ["reviewer@example.com"],
-                "memberof_group": ["membership-committee"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
             },
         )
 

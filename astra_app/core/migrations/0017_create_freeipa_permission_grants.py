@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from django.conf import settings
 from django.db import migrations, models
 
 
 def _seed_membership_committee_permissions(apps, schema_editor) -> None:
     FreeIPAPermissionGrant = apps.get_model("core", "FreeIPAPermissionGrant")
 
-    # Keep these strings stable; they are used by user.has_perm('astra.*') checks.
     perms = [
         "astra.add_membership",
         "astra.change_membership",
@@ -20,7 +20,7 @@ def _seed_membership_committee_permissions(apps, schema_editor) -> None:
         FreeIPAPermissionGrant.objects.get_or_create(
             permission=perm,
             principal_type="group",
-            principal_name="membership-committee",
+            principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
         )
 
 

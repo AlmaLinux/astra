@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from unittest.mock import patch
 
+from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
@@ -23,7 +24,7 @@ class MailImagesUiTests(TestCase):
         FreeIPAPermissionGrant.objects.get_or_create(
             permission=ASTRA_ADD_SEND_MAIL,
             principal_type=FreeIPAPermissionGrant.PrincipalType.group,
-            principal_name="membership-committee",
+            principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
         )
 
     def test_requires_permission(self) -> None:
@@ -37,7 +38,7 @@ class MailImagesUiTests(TestCase):
 
     def test_lists_images_with_preview_and_url(self) -> None:
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         dt = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -70,7 +71,7 @@ class MailImagesUiTests(TestCase):
 
     def test_upload_and_delete(self) -> None:
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         upload = SimpleUploadedFile("logo.png", b"pngbytes", content_type="image/png")
 

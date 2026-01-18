@@ -571,6 +571,8 @@ FREEIPA_SERVICE_PASSWORD = _env_str("FREEIPA_SERVICE_PASSWORD", default="") or "
 if not _ALLOW_MISSING_RUNTIME_SECRETS and not FREEIPA_SERVICE_PASSWORD:
     raise ImproperlyConfigured("FREEIPA_SERVICE_PASSWORD must be set.")
 FREEIPA_ADMIN_GROUP = _env_str("FREEIPA_ADMIN_GROUP", default="admins") or "admins"
+FREEIPA_MEMBERSHIP_COMMITTEE_GROUP = _env_str("FREEIPA_MEMBERSHIP_COMMITTEE_GROUP", default="membership-committee") or "membership-committee"
+FREEIPA_ELECTION_COMMITTEE_GROUP = _env_str("FREEIPA_ELECTION_COMMITTEE_GROUP", default="election-committee") or "election-committee"
 
 # Reuse the FreeIPA service-account client across requests (per worker thread).
 # This avoids repeated logins for admin/selfservice pages that trigger multiple

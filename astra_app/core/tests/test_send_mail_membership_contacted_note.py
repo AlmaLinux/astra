@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from django.conf import settings
+
 import json
 from unittest.mock import patch
 
@@ -22,7 +24,7 @@ class SendMailMembershipContactedNoteTests(TestCase):
         FreeIPAPermissionGrant.objects.get_or_create(
             permission=ASTRA_ADD_SEND_MAIL,
             principal_type=FreeIPAPermissionGrant.PrincipalType.group,
-            principal_name="membership-committee",
+            principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
         )
 
         MembershipType.objects.update_or_create(
@@ -41,7 +43,7 @@ class SendMailMembershipContactedNoteTests(TestCase):
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
 
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=reviewer),

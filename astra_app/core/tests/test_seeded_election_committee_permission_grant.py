@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from django.conf import settings
 from django.test import TestCase
 
 from core.models import FreeIPAPermissionGrant
@@ -12,6 +13,6 @@ class SeededElectionCommitteePermissionGrantTests(TestCase):
             FreeIPAPermissionGrant.objects.filter(
                 permission=ASTRA_ADD_ELECTION,
                 principal_type="group",
-                principal_name="election-committee",
+                principal_name=settings.FREEIPA_ELECTION_COMMITTEE_GROUP,
             ).exists()
         )

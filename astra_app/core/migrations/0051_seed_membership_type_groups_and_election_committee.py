@@ -31,8 +31,8 @@ _NON_FASGROUP_CNS: tuple[str, ...] = (
 
 
 _FASGROUP_CNS: tuple[str, ...] = (
-    "election-committee",
-    "membership-committee",
+    settings.FREEIPA_ELECTION_COMMITTEE_GROUP,
+    settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
 )
 
 
@@ -46,11 +46,10 @@ def _seed_membership_type_group_cns(apps, schema_editor) -> None:
 def _seed_election_committee_permission(apps, schema_editor) -> None:
     FreeIPAPermissionGrant = apps.get_model("core", "FreeIPAPermissionGrant")
 
-    # Keep the permission string stable; it is referenced by user.has_perm('astra.*') checks.
     FreeIPAPermissionGrant.objects.get_or_create(
         permission=ASTRA_ADD_ELECTION,
         principal_type="group",
-        principal_name="election-committee",
+        principal_name=settings.FREEIPA_ELECTION_COMMITTEE_GROUP,
     )
 
 

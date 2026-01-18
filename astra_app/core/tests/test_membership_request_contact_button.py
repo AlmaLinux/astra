@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from django.conf import settings
+
 from unittest.mock import patch
 from urllib.parse import urlencode
 
@@ -14,7 +16,7 @@ from core.permissions import ASTRA_ADD_MEMBERSHIP, ASTRA_ADD_SEND_MAIL, ASTRA_VI
 class MembershipRequestRfiButtonTests(TestCase):
     def setUp(self) -> None:
         super().setUp()
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         for perm in (ASTRA_ADD_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP, ASTRA_ADD_SEND_MAIL):
             FreeIPAPermissionGrant.objects.get_or_create(
                 permission=perm,
@@ -44,7 +46,7 @@ class MembershipRequestRfiButtonTests(TestCase):
 
         reviewer = FreeIPAUser(
             "reviewer",
-            {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": ["membership-committee"]},
+            {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]},
         )
         alice = FreeIPAUser("alice", {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []})
 
@@ -85,7 +87,7 @@ class MembershipRequestRfiButtonTests(TestCase):
 
         reviewer = FreeIPAUser(
             "reviewer",
-            {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": ["membership-committee"]},
+            {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]},
         )
         alice = FreeIPAUser("alice", {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []})
 
@@ -125,7 +127,7 @@ class MembershipRequestRfiButtonTests(TestCase):
 
         reviewer = FreeIPAUser(
             "reviewer",
-            {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": ["membership-committee"]},
+            {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]},
         )
 
         self._login_as_freeipa_user("reviewer")
@@ -158,7 +160,7 @@ class MembershipRequestRfiButtonTests(TestCase):
 
         reviewer = FreeIPAUser(
             "reviewer",
-            {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": ["membership-committee"]},
+            {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]},
         )
         orgrep = FreeIPAUser("orgrep", {"uid": ["orgrep"], "mail": ["orgrep@example.com"], "memberof_group": []})
 

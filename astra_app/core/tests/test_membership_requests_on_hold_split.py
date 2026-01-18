@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from django.conf import settings
+
 import datetime
 import re
 from unittest.mock import patch
@@ -19,7 +21,7 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
         FreeIPAPermissionGrant.objects.get_or_create(
             permission=ASTRA_ADD_MEMBERSHIP,
             principal_type=FreeIPAPermissionGrant.PrincipalType.group,
-            principal_name="membership-committee",
+            principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
         )
 
     def _login_as_freeipa_user(self, username: str) -> None:
@@ -57,7 +59,7 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
             {
                 "uid": ["reviewer"],
                 "mail": ["reviewer@example.com"],
-                "memberof_group": ["membership-committee"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
             },
         )
         alice = FreeIPAUser("alice", {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []})
@@ -116,7 +118,7 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
             {
                 "uid": ["reviewer"],
                 "mail": ["reviewer@example.com"],
-                "memberof_group": ["membership-committee"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
             },
         )
         alice = FreeIPAUser("alice", {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []})
@@ -203,7 +205,7 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
             {
                 "uid": ["reviewer"],
                 "mail": ["reviewer@example.com"],
-                "memberof_group": ["membership-committee"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
             },
         )
         alice = FreeIPAUser("alice", {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []})

@@ -22,7 +22,7 @@ class EmailTemplatesUiTests(TestCase):
         FreeIPAPermissionGrant.objects.get_or_create(
             permission=ASTRA_ADD_SEND_MAIL,
             principal_type=FreeIPAPermissionGrant.PrincipalType.group,
-            principal_name="membership-committee",
+            principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
         )
 
     def test_requires_permission(self) -> None:
@@ -38,7 +38,7 @@ class EmailTemplatesUiTests(TestCase):
         from post_office.models import EmailTemplate
 
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         EmailTemplate.objects.create(
             name="t-1",
@@ -60,7 +60,7 @@ class EmailTemplatesUiTests(TestCase):
         from post_office.models import EmailTemplate
 
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
             create_resp = self.client.post(
@@ -111,7 +111,7 @@ class EmailTemplatesUiTests(TestCase):
         from post_office.models import EmailTemplate
 
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         locked_name = settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME
         tpl, _ = EmailTemplate.objects.update_or_create(
@@ -138,7 +138,7 @@ class EmailTemplatesUiTests(TestCase):
         from post_office.models import EmailTemplate
 
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         locked_name = settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME
         tpl, _ = EmailTemplate.objects.update_or_create(
@@ -164,7 +164,7 @@ class EmailTemplatesUiTests(TestCase):
         from post_office.models import EmailTemplate
 
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         locked_name = settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME
         tpl, _ = EmailTemplate.objects.update_or_create(
@@ -197,7 +197,7 @@ class EmailTemplatesUiTests(TestCase):
         from post_office.models import EmailTemplate
 
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         locked_name = settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME
         tpl, _ = EmailTemplate.objects.update_or_create(
@@ -232,7 +232,7 @@ class EmailTemplatesUiTests(TestCase):
         from post_office.models import EmailTemplate
 
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         tpl = EmailTemplate.objects.create(
             name="membership-acceptance-locked",
@@ -270,7 +270,7 @@ class EmailTemplatesUiTests(TestCase):
         from post_office.models import EmailTemplate
 
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         tpl = EmailTemplate.objects.create(
             name="membership-acceptance-locked-rename",
@@ -316,7 +316,7 @@ class EmailTemplatesUiTests(TestCase):
         from post_office.models import EmailTemplate
 
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         too_long_subject = "Action required: more information needed for your membership application"
 
@@ -339,7 +339,7 @@ class EmailTemplatesUiTests(TestCase):
 
     def test_save_as_rejects_subject_that_would_be_header_folded(self) -> None:
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         too_long_subject = "Action required: more information needed for your membership application"
 
@@ -361,7 +361,7 @@ class EmailTemplatesUiTests(TestCase):
 
     def test_template_render_preview_endpoint(self) -> None:
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
@@ -381,7 +381,7 @@ class EmailTemplatesUiTests(TestCase):
 
     def test_template_render_preview_endpoint_rewrites_inline_image_tag_to_url(self) -> None:
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         image_url = "http://localhost:9000/astra-media/mail-images/logo.png"
         html = (
@@ -409,7 +409,7 @@ class EmailTemplatesUiTests(TestCase):
         from post_office.models import EmailTemplate
 
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": ["membership-committee"]})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         tpl = EmailTemplate.objects.create(
             name="t-1",

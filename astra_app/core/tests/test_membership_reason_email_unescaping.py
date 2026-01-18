@@ -24,7 +24,7 @@ class MembershipReasonEmailUnescapingTests(TestCase):
             FreeIPAPermissionGrant.objects.get_or_create(
                 permission=perm,
                 principal_type=FreeIPAPermissionGrant.PrincipalType.group,
-                principal_name="membership-committee",
+                principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
             )
 
     def _login_as_freeipa_user(self, username: str) -> None:
@@ -61,7 +61,7 @@ class MembershipReasonEmailUnescapingTests(TestCase):
         )
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
 
-        self._add_freeipa_user(username="reviewer", email="reviewer@example.com", groups=["membership-committee"])
+        self._add_freeipa_user(username="reviewer", email="reviewer@example.com", groups=[settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP])
         self._add_freeipa_user(username="alice", email="alice@example.com", groups=[])
 
         self._login_as_freeipa_user("reviewer")
@@ -100,7 +100,7 @@ class MembershipReasonEmailUnescapingTests(TestCase):
         )
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
 
-        self._add_freeipa_user(username="reviewer", email="reviewer@example.com", groups=["membership-committee"])
+        self._add_freeipa_user(username="reviewer", email="reviewer@example.com", groups=[settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP])
         self._add_freeipa_user(username="alice", email="alice@example.com", groups=[])
 
         self._login_as_freeipa_user("reviewer")

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from django.conf import settings
+
 import datetime
 from unittest.mock import patch
 
@@ -27,7 +29,7 @@ class MembershipGroupSyncLifecycleTests(TestCase):
             FreeIPAPermissionGrant.objects.get_or_create(
                 permission=perm,
                 principal_type=FreeIPAPermissionGrant.PrincipalType.group,
-                principal_name="membership-committee",
+                principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
             )
 
     def _login_as_freeipa_user(self, username: str) -> None:
@@ -58,7 +60,7 @@ class MembershipGroupSyncLifecycleTests(TestCase):
             expires_at=timezone.now() + datetime.timedelta(days=30),
         )
 
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         reviewer = FreeIPAUser(
             "reviewer",
             {
@@ -118,7 +120,7 @@ class MembershipGroupSyncLifecycleTests(TestCase):
             expires_at=timezone.now() + datetime.timedelta(days=30),
         )
 
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         reviewer = FreeIPAUser(
             "reviewer",
             {
@@ -178,7 +180,7 @@ class MembershipGroupSyncLifecycleTests(TestCase):
             expires_at=timezone.now() + datetime.timedelta(days=30),
         )
 
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         reviewer = FreeIPAUser(
             "reviewer",
             {

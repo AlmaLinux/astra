@@ -26,7 +26,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             FreeIPAPermissionGrant.objects.get_or_create(
                 permission=perm,
                 principal_type=FreeIPAPermissionGrant.PrincipalType.group,
-                principal_name="membership-committee",
+                principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
             )
 
     def _login_as_freeipa_user(self, username: str) -> None:
@@ -130,7 +130,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         )
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
 
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
         alice = self._make_user("alice", full_name="Alice User")
 
@@ -186,7 +186,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             expires_at=timezone.now() + datetime.timedelta(days=200),
         )
 
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
         alice = self._make_user("alice", full_name="Alice User")
 
@@ -233,7 +233,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             expires_at=timezone.now() + datetime.timedelta(days=200),
         )
 
-        reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=["membership-committee"])
+        reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP])
         alice = self._make_user("alice", full_name="Alice User")
 
         def _get_user(username: str) -> FreeIPAUser | None:
@@ -516,7 +516,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             expires_at=timezone.now() + datetime.timedelta(days=200),
         )
 
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
         alice = self._make_user("alice", full_name="Alice User")
 
@@ -577,7 +577,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             expires_at=timezone.now() + datetime.timedelta(days=200),
         )
 
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
         alice = self._make_user("alice", full_name="Alice User")
 
@@ -633,7 +633,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             },
         )
 
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
         self._login_as_freeipa_user("reviewer")
 
@@ -656,7 +656,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertContains(resp1, "badge-danger")
 
     def test_committee_sidebar_has_audit_log_link_to_all_users(self) -> None:
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
         self._login_as_freeipa_user("reviewer")
 
@@ -668,7 +668,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertContains(resp, reverse("membership-audit-log"))
 
     def test_committee_sidebar_shows_organizations_link(self) -> None:
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
         self._login_as_freeipa_user("reviewer")
 
@@ -695,7 +695,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         )
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
 
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
         alice = self._make_user("alice", full_name="Alice User")
 
@@ -731,7 +731,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         )
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
 
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
 
         def _get_user(username: str) -> FreeIPAUser | None:
@@ -773,7 +773,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             membership_type_id="gold",
         )
 
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
 
         def _get_user(username: str) -> FreeIPAUser | None:
@@ -807,7 +807,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         )
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
 
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
 
         def _get_user(username: str) -> FreeIPAUser | None:
@@ -840,7 +840,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
         Note.objects.create(membership_request=req, username="reviewer", content="Needs manual review")
 
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
         alice = FreeIPAUser(
             "alice",
@@ -950,7 +950,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         req2 = MembershipRequest.objects.create(requested_username="alice", membership_type_id="mirror")
         Note.objects.create(membership_request=req1, username="reviewer", content="Older note")
 
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
         alice = FreeIPAUser(
             "alice",
@@ -1029,7 +1029,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
         Note.objects.create(membership_request=req, username="reviewer", content="Request note")
 
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
         alice = FreeIPAUser(
             "alice",
@@ -1079,7 +1079,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             responses=[{"Contributions": "I did docs and CI."}],
         )
 
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
         alice = self._make_user("alice", full_name="Alice User")
 
@@ -1116,7 +1116,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         )
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
 
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
         self._login_as_freeipa_user("reviewer")
 
@@ -1155,7 +1155,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         )
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
 
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
         self._login_as_freeipa_user("reviewer")
 
@@ -1194,7 +1194,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         )
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
 
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
         self._login_as_freeipa_user("reviewer")
 
@@ -1318,7 +1318,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
                 created_at=base_time + datetime.timedelta(seconds=i),
             )
 
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
         self._login_as_freeipa_user("reviewer")
 
@@ -1357,7 +1357,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             expires_at=timezone.now() + datetime.timedelta(days=settings.MEMBERSHIP_VALIDITY_DAYS),
         )
 
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
         self._login_as_freeipa_user("reviewer")
 
@@ -1403,7 +1403,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             membership_request=req,
         )
 
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
         self._login_as_freeipa_user("reviewer")
 
@@ -1416,7 +1416,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertContains(resp, "Patch submissions")
 
     def test_membership_management_menu_stays_open_on_child_pages(self) -> None:
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
         self._login_as_freeipa_user("reviewer")
 
@@ -1442,7 +1442,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             },
         )
 
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
         alice = self._make_user("alice", full_name="Alice User")
 
@@ -1490,7 +1490,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             expires_at=expires_at_utc,
         )
 
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         alice = FreeIPAUser(
             "alice",
             {

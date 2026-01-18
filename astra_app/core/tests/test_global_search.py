@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import re
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.test import TestCase
 
 from core.backends import FreeIPAUser, clear_current_viewer_username, set_current_viewer_username
+from core.models import FreeIPAPermissionGrant
+from core.permissions import ASTRA_VIEW_USER_DIRECTORY
 
 
 class GlobalSearchTests(TestCase):
@@ -98,3 +101,49 @@ class GlobalSearchTests(TestCase):
         data = resp.json()
         self.assertIn("alice", {u["username"] for u in data["users"]})
         self.assertNotIn("bob", {u["username"] for u in data["users"]})
+
+
+class GlobalSearchTemplateCopyTests(TestCase):
+    def _login_as_freeipa(self, username: str) -> None:
+        session = self.client.session
+        session["_freeipa_username"] = username
+        session.save()
+
+    def test_placeholder_and_aria_without_directory_access(self) -> None:
+        self._login_as_freeipa("alice")
+
+        alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": []})
+        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+            resp = self.client.get("/groups/")
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+
+        self.assertRegex(
+            html,
+            re.compile(
+                r"id=\"global-search-input\".*?placeholder=\"Search groups\.\.\.\".*?aria-label=\"Search groups\"",
+                re.S,
+            ),
+        )
+
+    def test_placeholder_and_aria_with_directory_access(self) -> None:
+        self._login_as_freeipa("admin")
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_VIEW_USER_DIRECTORY,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+        )
+
+        admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+        with patch("core.backends.FreeIPAUser.get", return_value=admin):
+            resp = self.client.get("/groups/")
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+
+        self.assertRegex(
+            html,
+            re.compile(
+                r"id=\"global-search-input\".*?placeholder=\"Search users and groups\.\.\.\".*?aria-label=\"Search users and groups\"",
+                re.S,
+            ),
+        )

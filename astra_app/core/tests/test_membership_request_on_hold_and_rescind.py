@@ -38,7 +38,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
             FreeIPAPermissionGrant.objects.get_or_create(
                 permission=perm,
                 principal_type=FreeIPAPermissionGrant.PrincipalType.group,
-                principal_name="membership-committee",
+                principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
             )
 
     def _login_as_freeipa_user(self, username: str) -> None:
@@ -87,7 +87,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
         )
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
 
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         self._add_freeipa_user(
             username="reviewer",
             email="reviewer@example.com",
@@ -224,7 +224,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
             responses=[{"Contributions": "Old"}],
         )
 
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         self._add_freeipa_user(
             username="reviewer",
             email="reviewer@example.com",
@@ -285,7 +285,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
             responses=[{"Additional Information": "Org answers"}],
         )
 
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         self._add_freeipa_user(
             username="reviewer",
             email="reviewer@example.com",
@@ -518,7 +518,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
 
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
 
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         self._add_freeipa_user(
             username="reviewer",
             email="reviewer@example.com",
@@ -567,7 +567,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
 
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
 
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         self._add_freeipa_user(
             username="reviewer",
             email="reviewer@example.com",
@@ -616,7 +616,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
 
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
 
-        committee_cn = "membership-committee"
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         self._add_freeipa_user(
             username="reviewer",
             email="reviewer@example.com",

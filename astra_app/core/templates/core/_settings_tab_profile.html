@@ -167,7 +167,7 @@
 
 		<div class="form-group form-check">
 			{{ profile_form.fasIsPrivate }}
-			<label class="form-check-label" for="{{ profile_form.fasIsPrivate.id_for_label }}">{{ profile_form.fasIsPrivate.label }} <small class="text-muted">Hide personal data (except username and email address).</small></label>
+			<label class="form-check-label" for="{{ profile_form.fasIsPrivate.id_for_label }}">{{ profile_form.fasIsPrivate.label }} <small class="text-muted">Hide personal details (including your name and email) from other signed-in users. Your profile stays visible, as do your groups and memberships.</small></label>
 			{% if profile_form.fasIsPrivate.errors %}<div class="invalid-feedback d-block">{{ profile_form.fasIsPrivate.errors }}</div>{% endif %}
 		</div>
 	</div>

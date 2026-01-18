@@ -15,6 +15,8 @@ ASTRA_ADD_SEND_MAIL = "astra.add_sendmail"
 
 ASTRA_ADD_ELECTION = "astra.add_election"
 
+ASTRA_VIEW_USER_DIRECTORY = "astra.view_user_directory"
+
 MEMBERSHIP_PERMISSIONS: frozenset[str] = frozenset(
     {
         ASTRA_ADD_MEMBERSHIP,

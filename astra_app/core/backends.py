@@ -540,10 +540,10 @@ class FreeIPAUser:
 
         This keeps only:
         - username
-        - email
         - groups (memberof_group)
         - fasIsPrivate itself
 
+        Email is redacted (CRITICAL-01 privacy fix).
         Agreements are computed separately from FreeIPA and are not stored on
         the user object.
         """
@@ -551,6 +551,7 @@ class FreeIPAUser:
         if not self.fas_is_private:
             return
 
+        self.email = ""
         self.first_name = ""
         self.last_name = ""
         self.displayname = ""
@@ -559,7 +560,7 @@ class FreeIPAUser:
 
         self._user_data = {
             "uid": [self.username],
-            "mail": [self.email] if self.email else [],
+            "mail": [],
             "memberof_group": list(self.groups_list),
             "fasIsPrivate": ["TRUE"],
         }

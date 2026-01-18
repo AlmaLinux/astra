@@ -105,7 +105,7 @@ class FASIsPrivateAnonymizeTests(TestCase):
         self.assertNotIn("Bob User", html)
         self.assertNotIn("they/them", html)
         self.assertNotIn("example.invalid", html)
+        self.assertNotIn("bob@example.org", html)
 
-        # Allowed fields remain visible
-        self.assertIn("bob@example.org", html)
+        # Username remains visible
         self.assertIn("bob", html)
