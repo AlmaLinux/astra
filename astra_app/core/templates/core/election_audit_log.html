@@ -27,7 +27,13 @@
             <dd class="col-sm-7">{{ ballots_cast }}</dd>
             <dt class="col-sm-5">Votes cast</dt>
             <dd class="col-sm-7">{{ votes_cast }}</dd>
-            <dt class="col-sm-5">STV election quota</dt>
+            <dt class="col-sm-5">Counting method</dt>
+            <dd class="col-sm-7">Meek STV (High-Precision Variant)</dd>
+            <dt class="col-sm-5">Algorithm version</dt>
+            <dd class="col-sm-7">{{ tally_result.algorithm.version|default:"1.0" }}</dd>
+            <dt class="col-sm-5">Specification</dt>
+            <dd class="col-sm-7"><a href="{% url 'election-algorithm' %}">Election algorithm</a></dd>
+            <dt class="col-sm-5">Quota (Droop)</dt>
             <dd class="col-sm-7">{{ quota|floatformat:4 }}</dd>
           </dl>
 

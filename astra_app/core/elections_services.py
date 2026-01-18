@@ -36,6 +36,11 @@ from core.templated_email import queue_templated_email
 from core.tokens import election_chain_next_hash, election_genesis_chain_hash
 
 
+ELECTION_TALLY_ALGORITHM_NAME = "Meek STV (High-Precision Variant)"
+ELECTION_TALLY_ALGORITHM_VERSION = "1.0"
+ELECTION_TALLY_ALGORITHM_SPEC_DOC = "agent-output/architecture/002-meek-stv-complete-architecture.md (Section 10)"
+
+
 class ElectionError(Exception):
     pass
 
@@ -222,8 +227,25 @@ def build_public_audit_export(*, election: Election) -> dict[str, object]:
         # Privacy: export only a coarse date, not a precise timestamp.
         row["timestamp"] = row["timestamp"].date().isoformat()
 
+    algorithm: dict[str, object] | None = None
+    if isinstance(election.tally_result, dict):
+        algo = election.tally_result.get("algorithm")
+        if isinstance(algo, dict):
+            algorithm = algo
+
+    if algorithm is None and election.status == Election.Status.tallied:
+        algorithm = {
+            "name": ELECTION_TALLY_ALGORITHM_NAME,
+            "version": ELECTION_TALLY_ALGORITHM_VERSION,
+            "specification": {
+                "doc": ELECTION_TALLY_ALGORITHM_SPEC_DOC,
+                "url_path": reverse("election-algorithm"),
+            },
+        }
+
     return {
         "election_id": election.id,
+        "algorithm": algorithm,
         "audit_log": rows,
     }
 
@@ -336,6 +358,7 @@ def send_vote_receipt_email(
         "election_number_of_seats": election.number_of_seats,
         "ballot_hash": receipt.ballot.ballot_hash,
         "nonce": receipt.nonce,
+        "weight": receipt.ballot.weight,
         "previous_chain_hash": receipt.ballot.previous_chain_hash,
         "chain_hash": receipt.ballot.chain_hash,
         "verify_url": ballot_verify_url(request=request, ballot_hash=receipt.ballot.ballot_hash),
@@ -997,6 +1020,15 @@ def tally_election(*, election: Election, actor: str | None = None) -> dict[str,
         )
         result = _jsonify_tally_result(raw_result)
 
+        result["algorithm"] = {
+            "name": ELECTION_TALLY_ALGORITHM_NAME,
+            "version": ELECTION_TALLY_ALGORITHM_VERSION,
+            "specification": {
+                "doc": ELECTION_TALLY_ALGORITHM_SPEC_DOC,
+                "url_path": reverse("election-algorithm"),
+            },
+        }
+
         election.tally_result = result
         election.status = Election.Status.tallied
         election.save(update_fields=["tally_result", "status"])
@@ -1020,6 +1052,7 @@ def tally_election(*, election: Election, actor: str | None = None) -> dict[str,
             "eliminated": result.get("eliminated"),
             "forced_excluded": result.get("forced_excluded"),
             "method": "meek",
+            "algorithm": result.get("algorithm"),
         }
         if actor:
             tally_completed_payload["actor"] = actor

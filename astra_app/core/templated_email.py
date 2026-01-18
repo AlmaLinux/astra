@@ -39,6 +39,8 @@ _MAX_INLINE_IMAGE_BYTES: int = 10 * 1024 * 1024
 
 logger = logging.getLogger(__name__)
 
+_REQUIRED_TEMPLATE_VAR_PATTERN = re.compile(r"{{\s*(?P<var>[A-Za-z0-9_]+)\b")
+
 
 def configured_email_template_names() -> frozenset[str]:
     """Return template names referenced by Django settings.
@@ -256,6 +258,21 @@ def queue_templated_email(
     """
 
     template = EmailTemplate.objects.get(name=template_name)
+
+    # Templates are editable via the django-post-office UI. For critical workflows,
+    # warn operators if the effective template stops rendering required variables.
+    if template_name == settings.ELECTION_VOTE_RECEIPT_EMAIL_TEMPLATE_NAME:
+        sources = (template.subject or "", template.content or "", template.html_content or "")
+        rendered_vars = {
+            m.group("var")
+            for src in sources
+            for m in _REQUIRED_TEMPLATE_VAR_PATTERN.finditer(src)
+        }
+        for var in ["ballot_hash", "nonce", "weight", "chain_hash", "previous_chain_hash"]:
+            if var not in rendered_vars:
+                logger.warning(
+                    f"Vote receipt EmailTemplate is missing required variable: {var} (template={template_name})",
+                )
 
     staged_files: list[str] = []
     try:

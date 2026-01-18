@@ -1101,6 +1101,7 @@ class ElectionVoteEndpointTests(TestCase):
         self.assertEqual(ctx.get("nonce"), payload.get("nonce"))
         self.assertEqual(ctx.get("previous_chain_hash"), payload.get("previous_chain_hash"))
         self.assertEqual(ctx.get("chain_hash"), payload.get("chain_hash"))
+        self.assertEqual(ctx.get("weight"), 2)
         self.assertIn(str(payload.get("ballot_hash") or ""), str(ctx.get("verify_url") or ""))
         self.assertNotIn("ranking", ctx)
 

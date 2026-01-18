@@ -116,6 +116,7 @@ def ballot_verify(request):
             Ballot.objects.select_related("election", "superseded_by")
             .only(
                 "ballot_hash",
+                "credential_public_id",
                 "created_at",
                 "is_counted",
                 "superseded_by_id",
@@ -136,7 +137,7 @@ def ballot_verify(request):
     is_superseded = bool(ballot is not None and ballot.superseded_by_id)
     is_final_ballot = bool(found and not is_superseded)
 
-    # Privacy guardrail: never reveal ranking, credential IDs, IPs, or precise timestamps.
+    # Privacy guardrail: never reveal ranking, IPs, or precise timestamps.
     submitted_date = ballot.created_at.date().isoformat() if ballot is not None else ""
 
     public_ballots_url = ""
@@ -149,6 +150,24 @@ def ballot_verify(request):
         if election is not None and election.status == Election.Status.tallied
         else ""
     )
+
+    verification_snippet = ""
+    if found and election is not None and ballot is not None:
+        candidate_rows = Candidate.objects.filter(election=election).values_list("freeipa_username", "id")
+        candidate_ids_by_username = {str(username): int(cid) for username, cid in candidate_rows}
+
+        lines: list[str] = [
+            "# Copy/paste these values into verify-ballot-hash.py",
+            f"election_id = {election.id}",
+            f'credential_public_id = "{ballot.credential_public_id}"',
+            "candidate_ids_by_username = {",
+        ]
+        for username in sorted(candidate_ids_by_username.keys(), key=str.lower):
+            cid = candidate_ids_by_username[username]
+            lines.append(f'    "{username}": {cid},')
+        lines.append("}")
+
+        verification_snippet = "\n".join(lines)
 
     return render(
         request,
@@ -166,7 +185,17 @@ def ballot_verify(request):
             "public_ballots_url": public_ballots_url,
             "audit_log_url": audit_log_url,
             "rate_limited": False,
+            "verification_snippet": verification_snippet,
         },
+    )
+
+
+@require_GET
+def election_algorithm(request):
+    return render(
+        request,
+        "core/election_algorithm.html",
+        {},
     )
 
 

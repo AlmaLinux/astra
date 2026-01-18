@@ -1,0 +1,117 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Election algorithm{% endblock %}
+
+{% block header %}
+  <h1 class="m-0">Election algorithm</h1>
+{% endblock %}
+
+{% block content %}
+  <div class="row justify-content-center">
+    <div class="col-md-10 col-lg-9">
+      <div class="card card-outline card-info">
+        <div class="card-header">
+          <h3 class="card-title">Meek STV (High-Precision Variant)</h3>
+        </div>
+        <div class="card-body">
+          <h4>What is Meek STV?</h4>
+          <p>
+            Meek STV is a way to elect multiple winners using ranked ballots.
+          </p>
+          <ul>
+            <li>You rank candidates in the order you prefer.</li>
+            <li>The election has a target threshold (the quota).</li>
+            <li>When a candidate has more votes than needed, they only keep what they need to reach the quota and the rest of that vote weight transfers onward to voters' next choices.</li>
+            <li>This transfer process repeats until all seats are filled or no more candidates can be elected.</li>
+          </ul>
+          <p>
+            The key idea is that surplus transfers happen fractionally and continuously: instead of moving a fixed "pile" of surplus ballots, each elected candidate keeps only a fraction of every incoming vote.
+          </p>
+
+          <h4>What is the High-Precision Variant?</h4>
+          <p>
+            Our system uses a high-precision, deterministic implementation:
+          </p>
+          <ul>
+            <li>It uses fixed-point arithmetic (80-digit precision) to avoid floating-point rounding surprises.</li>
+            <li>It uses a conservative, widely used quota (Droop quota).</li>
+            <li>It uses deterministic tie-breaking rules (including a UUID-based final fallback), so recounts are repeatable.</li>
+          </ul>
+          <p>
+            This is still a Meek-family STV method, but it is not the PRF reference implementation. We disclose this as "Meek STV (High-Precision Variant)" so auditors know exactly which rules were used.
+          </p>
+
+          <h4>Why it's better than alternatives (in plain terms)</h4>
+          <p>
+            Compared to simpler STV methods:
+          </p>
+          <ul>
+            <li>Meek STV reduces sensitivity to which ballots happen to be chosen when transferring a surplus.</li>
+            <li>It produces a more smoothly proportional result because surpluses are shared fractionally.</li>
+          </ul>
+          <p>
+            Compared to floating-point implementations:
+          </p>
+          <ul>
+            <li>High precision makes it much harder for tiny rounding effects to change outcomes.</li>
+            <li>Deterministic tie-breaking avoids any "black box randomness".</li>
+          </ul>
+
+          <h4>How to verify results</h4>
+          <p>
+            You can verify an election in three main ways:
+          </p>
+          <p><strong>1) Verify your ballot receipt exists</strong></p>
+          <ul>
+            <li>When you vote, you receive a receipt hash.</li>
+            <li>You can enter this receipt into the ballot verification page.</li>
+            <li>The page confirms whether the ballot was recorded and whether it was superseded.</li>
+          </ul>
+
+          <p><strong>2) Verify the published ballots export is tamper-evident</strong></p>
+          <ul>
+            <li>The public ballots export contains hashes for each ballot and a chain hash that links ballots together.</li>
+            <li>Because each ballot's chain hash depends on the previous ballot's chain hash, modifying or removing a ballot breaks the chain.</li>
+            <li>The export also includes a per-election genesis hash that prevents mixing ballots from different elections.</li>
+          </ul>
+
+          <p><strong>3) Verify the published audit log and recount</strong></p>
+          <ul>
+            <li>The public audit log includes a per-iteration record of what happened (who met quota, who was elected/eliminated, tie-break reasons).</li>
+            <li>An auditor can re-run the tally algorithm on the published ballots and confirm the same winners.</li>
+          </ul>
+
+          <h4>Independent verification tools</h4>
+          <p>
+            For maximum transparency, you can download and run these verification scripts locally:
+          </p>
+          <ul>
+            <li>
+              <a href="{% static 'verify-ballot-hash.py' %}">verify-ballot-hash.py</a>
+              — Verify your ballot hash matches your voting intent (uses values from your receipt)
+            </li>
+            <li>
+              <a href="{% static 'verify-ballot-chain.py' %}">verify-ballot-chain.py</a>
+              — Verify the complete ballot chain is unbroken and includes your ballot
+            </li>
+          </ul>
+          <p>
+            These scripts run locally on your computer and use the same algorithms as the election system.
+            They do not contact any server.
+          </p>
+
+          <h4>What makes it trustworthy</h4>
+          <p>
+            Trust is built from repeatability and transparency:
+          </p>
+          <ul>
+            <li>Deterministic rules: the same inputs always give the same result.</li>
+            <li>Published artifacts: ballots (without voter identities) and a public audit log.</li>
+            <li>Tie-break explanations: when ties occur, the system records which rule resolved them.</li>
+            <li>Tamper evidence: ballots are chained so alteration is detectable.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

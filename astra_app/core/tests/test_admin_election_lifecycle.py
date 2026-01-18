@@ -7,6 +7,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from core import elections_services
 from core.backends import FreeIPAUser
 from core.models import AuditLogEntry, Ballot, Candidate, Election, Membership, MembershipType, VotingCredential
 from core.tests.ballot_chain import compute_chain_hash
@@ -107,6 +108,29 @@ class AdminElectionLifecycleActionTests(TestCase):
         election.refresh_from_db()
         self.assertEqual(election.status, Election.Status.tallied)
         self.assertIn("elected", election.tally_result)
+
+        algo = election.tally_result.get("algorithm")
+        self.assertIsInstance(algo, dict)
+        self.assertEqual(algo.get("name"), "Meek STV (High-Precision Variant)")
+        self.assertEqual(algo.get("version"), "1.0")
+
+        completed = AuditLogEntry.objects.filter(
+            election=election,
+            event_type="tally_completed",
+            is_public=True,
+        ).order_by("timestamp", "id").last()
+        self.assertIsNotNone(completed)
+        completed_payload = completed.payload if isinstance(completed.payload, dict) else {}
+        completed_algo = completed_payload.get("algorithm")
+        self.assertIsInstance(completed_algo, dict)
+        self.assertEqual(completed_algo.get("name"), "Meek STV (High-Precision Variant)")
+        self.assertEqual(completed_algo.get("version"), "1.0")
+
+        public_export = elections_services.build_public_audit_export(election=election)
+        self.assertIsInstance(public_export.get("algorithm"), dict)
+        self.assertEqual(public_export.get("algorithm", {}).get("name"), "Meek STV (High-Precision Variant)")
+        self.assertEqual(public_export.get("algorithm", {}).get("version"), "1.0")
+
         self.assertTrue(
             AuditLogEntry.objects.filter(election=election, event_type="tally_round", is_public=True).exists()
         )

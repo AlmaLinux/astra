@@ -39,6 +39,23 @@
         </div>
       </div>
 
+      <div class="card card-outline card-info">
+        <div class="card-header">
+          <h3 class="card-title">How votes are counted</h3>
+        </div>
+        <div class="card-body">
+          <p class="mb-2">Winners are selected using <strong>Meek STV (High-Precision Variant)</strong>, a ranked-choice, multi-winner method.</p>
+
+          <ul class="mb-3">
+            <li><strong>How it works:</strong> you rank candidates. Votes start with your top choice and can transfer to your next choices as candidates are elected or eliminated.</li>
+            <li><strong>How this variant differs:</strong> standard Meek STV uses fractional arithmetic and implementations often rely on rounding. Astra uses <strong>fixed-point arithmetic (80-digit precision)</strong> to eliminate rounding errors and ambiguity.</li>
+            <li><strong>Why you can trust it:</strong> the tally is <strong>deterministic</strong> and produces a public audit trail. Independent observers can verify the final result using the published ballots ledger and audit log.</li>
+          </ul>
+
+          <p class="mb-2">For full details and verification artifacts, see the <a href="{% url 'election-audit-log' election.id %}"><strong>audit log</strong></a> and the downloadable <a href="{% url 'election-public-ballots' election.id %}"><strong>ballots ledger (JSON)</strong></a> and <a href="{% url 'election-public-audit' election.id %}"><strong>audit log (JSON)</strong></a>.</p>
+        </div>
+      </div>
+
     </div>
 
     <div class="col-lg-4">

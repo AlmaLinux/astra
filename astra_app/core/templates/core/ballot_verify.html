@@ -1,5 +1,7 @@
 {% extends 'core/base.html' %}
 
+{% load static %}
+
 {% block title %}Verify ballot receipt{% endblock %}
 
 {% block header %}<h1 class="m-0">Verify ballot receipt</h1>{% endblock %}
@@ -23,6 +25,22 @@
           Enter the 64-character receipt you received after submitting your ballot. This page confirms whether a ballot
           with that receipt is recorded. It does not show your selections, your identity, or exact timestamps.
         </p>
+
+        <p class="text-muted">
+          After the election closes, we will publish an anonymized ballots ledger and a public audit log so the final result can be independently verified. The winner calculation uses <strong>Meek STV (High-Precision Variant)</strong>, implemented with <strong>80-digit precision</strong> to eliminate rounding ambiguity and ensure deterministic recounts.
+        </p>
+
+        <div class="alert alert-info" role="alert">
+          <strong>Local verification scripts</strong>
+          <div>
+            <a href="{% static 'verify-ballot-hash.py' %}" download>Download verify-ballot-hash.py</a>
+            <span class="text-muted">(recompute your ballot hash locally)</span>
+          </div>
+          <div>
+            <a href="{% static 'verify-ballot-chain.py' %}" download>Download verify-ballot-chain.py</a>
+            <span class="text-muted">(verify the public ballot chain after the election closes)</span>
+          </div>
+        </div>
 
         <form method="get" action="{% url 'ballot-verify' %}" class="mb-4" novalidate>
           <div class="form-group">
@@ -109,6 +127,16 @@
                     {% endif %}
                   </li>
                 </ul>
+
+                {% if verification_snippet %}
+                  <h5>Copy/paste constants for local verification</h5>
+                  <p class="text-muted">
+                    Copy/paste the block below into <strong>verify-ballot-hash.py</strong>. It includes the election ID,
+                    candidate username-to-ID mapping, and your credential public ID. You still need to enter your own vote choices
+                    in the script (vote choices are secret and are not shown on this page).
+                  </p>
+                  <pre class="bg-light p-3"><code>{{ verification_snippet }}</code></pre>
+                {% endif %}
 
               </div>
             </div>

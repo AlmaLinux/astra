@@ -50,6 +50,7 @@ urlpatterns = [
     path("search/", views_search.global_search, name="global-search"),
 
     path("elections/", views_elections.elections_list, name="elections"),
+    path("elections/algorithm/", views_elections.election_algorithm, name="election-algorithm"),
     path("elections/ballot/verify/", views_elections.ballot_verify, name="ballot-verify"),
     path("elections/<int:election_id>/edit/", views_elections.election_edit, name="election-edit"),
     path(

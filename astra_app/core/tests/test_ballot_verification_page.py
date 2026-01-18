@@ -218,6 +218,39 @@ class BallotVerificationPageTests(TestCase):
         # Must not leak the replacement receipt.
         self.assertNotContains(resp, ballot2.ballot_hash)
 
+    def test_verify_page_found_includes_script_link_and_copy_paste_constants(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Open election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+        c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="n")
+        c2 = Candidate.objects.create(election=election, freeipa_username="bob", nominated_by="n")
+
+        created_at = timezone.make_aware(datetime.datetime(2026, 1, 2, 12, 34, 56))
+        ballot = self._create_ballot(
+            election=election,
+            credential_public_id="cred-1",
+            ranking=[c1.id, c2.id],
+            weight=1,
+            previous_chain_hash=election_genesis_chain_hash(election.id),
+            created_at=created_at,
+        )
+
+        url = reverse("ballot-verify")
+        resp = self.client.get(url, data={"receipt": ballot.ballot_hash})
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "verify-ballot-hash.py")
+        self.assertContains(resp, "Copy/paste")
+        self.assertContains(resp, f"election_id = {election.id}")
+        self.assertContains(resp, "credential_public_id = &quot;cred-1&quot;")
+        self.assertContains(resp, f"&quot;alice&quot;: {c1.id}")
+        self.assertContains(resp, f"&quot;bob&quot;: {c2.id}")
+
     @override_settings(
         ELECTION_RATE_LIMIT_BALLOT_VERIFY_LIMIT=1,
         ELECTION_RATE_LIMIT_BALLOT_VERIFY_WINDOW_SECONDS=60,
