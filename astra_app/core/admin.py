@@ -1651,7 +1651,7 @@ class MembershipCSVImportLinkAdmin(ImportMixin, admin.ModelAdmin):
 class OrganizationAdmin(admin.ModelAdmin):
     class OrganizationAdminForm(forms.ModelForm):
         representative = forms.ChoiceField(
-            required=False,
+            required=True,
             widget=forms.Select(attrs={"class": "form-control", "size": 12}),
             help_text="Select the FreeIPA user who is the organization's representative.",
         )
@@ -1712,6 +1712,13 @@ class OrganizationAdmin(admin.ModelAdmin):
             users_by_username = {u.username: u for u in users if u.username}
             usernames = sorted(users_by_username, key=str.lower)
 
+            taken_representatives = set(
+                Organization.objects.exclude(representative="")
+                .exclude(pk=self.instance.pk)
+                .values_list("representative", flat=True)
+            )
+            usernames = [u for u in usernames if u not in taken_representatives]
+
             current = str(self.initial.get("representative") or "").strip()
             if not current and self.instance:
                 current = str(self.instance.representative or "").strip()
@@ -1727,6 +1734,31 @@ class OrganizationAdmin(admin.ModelAdmin):
                     for u in merged
                 ],
             ]
+
+        def clean_representative(self) -> str:
+            username = str(self.cleaned_data.get("representative") or "").strip()
+
+            if not username:
+                raise forms.ValidationError("A representative is required.", code="required")
+
+            if FreeIPAUser.get(username) is None:
+                raise forms.ValidationError(
+                    f"Unknown user: {username}",
+                    code="unknown_representative",
+                )
+
+            conflict_exists = (
+                Organization.objects.filter(representative=username)
+                .exclude(pk=self.instance.pk)
+                .exists()
+            )
+            if conflict_exists:
+                raise forms.ValidationError(
+                    "That user is already the representative of another organization.",
+                    code="representative_not_unique",
+                )
+
+            return username
 
     form = OrganizationAdminForm
 

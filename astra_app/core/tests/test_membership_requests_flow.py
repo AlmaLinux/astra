@@ -823,7 +823,7 @@ class MembershipRequestsFlowTests(TestCase):
             },
         )
 
-        org = Organization.objects.create(name="CERN", business_contact_email="cern@example.com")
+        org = Organization.objects.create(name="CERN", business_contact_email="cern@example.com", representative="bob")
         req = MembershipRequest.objects.create(
             requested_username="",
             requested_organization=org,
@@ -888,7 +888,7 @@ class MembershipRequestsFlowTests(TestCase):
             },
         )
 
-        org = Organization.objects.create(name="CERN", business_contact_email="cern@example.com")
+        org = Organization.objects.create(name="CERN", business_contact_email="cern@example.com", representative="bob")
         req = MembershipRequest.objects.create(
             requested_username="",
             requested_organization=org,

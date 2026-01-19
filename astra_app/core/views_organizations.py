@@ -7,6 +7,7 @@ from typing import override
 from django import forms
 from django.conf import settings
 from django.contrib import messages
+from django.db import IntegrityError
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -14,6 +15,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_GET
 
 from core.backends import FreeIPAUser
+from core.membership_notes import add_note
 from core.membership_request_workflow import record_membership_request_created
 from core.models import MembershipLog, MembershipRequest, MembershipType, Organization, OrganizationSponsorship
 from core.permissions import (
@@ -186,6 +188,18 @@ class OrganizationEditForm(forms.ModelForm):
                 code="unknown_representative",
             )
 
+        # Avoid leaking which org they represent; just state the rule.
+        conflict_exists = (
+            Organization.objects.filter(representative=username)
+            .exclude(pk=self.instance.pk)
+            .exists()
+        )
+        if conflict_exists:
+            raise forms.ValidationError(
+                "That user is already the representative of another organization.",
+                code="representative_not_unique",
+            )
+
         return username
 
 
@@ -238,6 +252,13 @@ def organization_create(request: HttpRequest) -> HttpResponse:
 
     can_select_representatives = request.user.has_perm(ASTRA_ADD_MEMBERSHIP)
 
+    if not can_select_representatives and Organization.objects.filter(representative=username).exists():
+        messages.error(
+            request,
+            "You already represent an organization and cannot create another. Contact the membership committee if you need to create an additional organization.",
+        )
+        return redirect("organizations")
+
     if request.method == "POST":
         form = OrganizationEditForm(
             request.POST,
@@ -253,11 +274,51 @@ def organization_create(request: HttpRequest) -> HttpResponse:
 
             if can_select_representatives:
                 selected = form.cleaned_data.get("representative") or ""
+                if not selected and Organization.objects.filter(representative=username).exists():
+                    form.add_error(
+                        "representative",
+                        "You already represent an organization. Select a different representative.",
+                    )
+                    return render(
+                        request,
+                        "core/organization_form.html",
+                        {
+                            "form": form,
+                            "cancel_url": reverse("organizations"),
+                            "is_create": True,
+                            "organization": None,
+                            "show_representatives": "representative" in form.fields,
+                        },
+                    )
+
                 organization.representative = selected or username
             else:
                 organization.representative = username
 
-            organization.save()
+            try:
+                organization.save()
+            except IntegrityError:
+                if can_select_representatives and "representative" in form.fields:
+                    form.add_error(
+                        "representative",
+                        "That user is already the representative of another organization.",
+                    )
+                else:
+                    form.add_error(
+                        None,
+                        "You already represent an organization and cannot create another. Contact the membership committee if you need to create an additional organization.",
+                    )
+                return render(
+                    request,
+                    "core/organization_form.html",
+                    {
+                        "form": form,
+                        "cancel_url": reverse("organizations"),
+                        "is_create": True,
+                        "organization": None,
+                        "show_representatives": "representative" in form.fields,
+                    },
+                )
             messages.success(request, "Organization created.")
             if organization.representative == username:
                 return redirect("organization-sponsorship-manage", organization_id=organization.pk)
@@ -295,9 +356,24 @@ def organization_representatives_search(request: HttpRequest) -> HttpResponse:
 
     q_lower = q.lower()
 
+    taken_representatives = set(
+        Organization.objects.exclude(representative="").values_list("representative", flat=True)
+    )
+
+    organization_id = _normalize_str(request.GET.get("organization_id"))
+    if organization_id and organization_id.isdigit():
+        org = Organization.objects.filter(pk=int(organization_id)).only("representative").first()
+        if org is not None:
+            current_rep = str(org.representative or "").strip()
+            if current_rep:
+                taken_representatives.discard(current_rep)
+
     results: list[dict[str, str]] = []
     for u in FreeIPAUser.all():
         if not u.username:
+            continue
+
+        if u.username in taken_representatives:
             continue
 
         full_name = u.full_name
@@ -572,10 +648,18 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
         initial=initial,
     )
     if can_select_representatives and "representative" in form.fields:
-        form.fields["representative"].widget.attrs["data-ajax-url"] = reverse("organization-representatives-search")
+        form.fields["representative"].widget.attrs["data-ajax-url"] = (
+            reverse("organization-representatives-search") + f"?organization_id={organization.pk}"
+        )
 
     if request.method == "POST" and form.is_valid():
         updated_org = form.save(commit=False)
+
+        old_representative = ""
+        new_representative = ""
+        group_cn = ""
+        sponsorship_active = False
+        synced_groups = False
 
         if can_select_representatives and "representative" in form.fields:
             representative = form.cleaned_data.get("representative") or ""
@@ -594,11 +678,11 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
                 )
 
             old_representative = organization.representative
+            new_representative = representative
             updated_org.representative = representative
 
             # If the org currently has an active sponsorship, keep FreeIPA group membership
             # aligned with the current representative.
-            group_cn = ""
             if original_membership_level_id:
                 current_level = MembershipType.objects.filter(pk=original_membership_level_id).only("group_cn").first()
                 group_cn = str(current_level.group_cn or "").strip() if current_level is not None else ""
@@ -635,6 +719,7 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
                             old_rep.remove_from_group(group_name=group_cn)
                         if group_cn not in new_rep.groups_list:
                             new_rep.add_to_group(group_name=group_cn)
+                        synced_groups = True
                     except Exception:
                         logger.exception(
                             "organization_edit: failed to sync representative group org_id=%s old=%r new=%r group_cn=%r",
@@ -669,7 +754,94 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
                             },
                         )
 
-        updated_org.save()
+        try:
+            updated_org.save()
+        except IntegrityError:
+            # Race-condition safety: DB is the source of truth.
+            # Best-effort rollback if we already changed FreeIPA groups.
+            if synced_groups and group_cn and old_representative and new_representative and old_representative != new_representative:
+                try:
+                    old_rep = FreeIPAUser.get(old_representative)
+                    new_rep = FreeIPAUser.get(new_representative)
+                    if new_rep is not None and group_cn in new_rep.groups_list:
+                        new_rep.remove_from_group(group_name=group_cn)
+                    if old_rep is not None and group_cn not in old_rep.groups_list:
+                        old_rep.add_to_group(group_name=group_cn)
+                except Exception:
+                    logger.exception(
+                        "organization_edit: failed to rollback representative group after IntegrityError org_id=%s old=%r new=%r group_cn=%r",
+                        organization.pk,
+                        old_representative,
+                        new_representative,
+                        group_cn,
+                    )
+
+            form.add_error(
+                "representative",
+                "That user is already the representative of another organization.",
+            )
+            return render(
+                request,
+                "core/organization_form.html",
+                {
+                    "organization": organization,
+                    "form": form,
+                    "is_create": False,
+                    "cancel_url": "",
+                    "show_representatives": True,
+                },
+            )
+
+        if old_representative and new_representative and old_representative != new_representative:
+            pending_requests = list(
+                MembershipRequest.objects.select_related("membership_type").filter(
+                    requested_organization=organization,
+                    status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
+                )
+            )
+            if pending_requests:
+                actor_username = str(request.user.get_username() or "").strip()
+                MembershipLog.objects.bulk_create(
+                    [
+                        MembershipLog(
+                            actor_username=actor_username,
+                            target_username="",
+                            target_organization=organization,
+                            membership_type=mr.membership_type,
+                            membership_request=mr,
+                            action=MembershipLog.Action.representative_changed,
+                        )
+                        for mr in pending_requests
+                    ]
+                )
+
+                if actor_username:
+                    for mr in pending_requests:
+                        try:
+                            add_note(
+                                membership_request=mr,
+                                username=actor_username,
+                                content=None,
+                                action={
+                                    "type": "representative_changed",
+                                    "old": old_representative,
+                                    "new": new_representative,
+                                },
+                            )
+                        except Exception:
+                            logger.exception(
+                                "organization_edit: failed to create representative_changed note org_id=%s request_id=%s actor=%r old=%r new=%r",
+                                organization.pk,
+                                mr.pk,
+                                actor_username,
+                                old_representative,
+                                new_representative,
+                            )
+                else:
+                    logger.warning(
+                        "organization_edit: missing actor username for representative_changed notes org_id=%s",
+                        organization.pk,
+                    )
 
         messages.success(request, "Organization details updated.")
 

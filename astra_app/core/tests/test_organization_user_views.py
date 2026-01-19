@@ -9,6 +9,7 @@ from unittest.mock import patch
 from django.conf import settings
 from django.contrib.staticfiles import finders
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import IntegrityError, transaction
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -25,6 +26,334 @@ class OrganizationUserViewsTests(TestCase):
         session = self.client.session
         session["_freeipa_username"] = username
         session.save()
+
+    def _valid_org_payload(self, *, name: str) -> dict[str, str]:
+        return {
+            "name": name,
+            "business_contact_name": "Business",
+            "business_contact_email": "business@example.com",
+            "business_contact_phone": "",
+            "pr_marketing_contact_name": "Marketing",
+            "pr_marketing_contact_email": "marketing@example.com",
+            "pr_marketing_contact_phone": "",
+            "technical_contact_name": "Tech",
+            "technical_contact_email": "tech@example.com",
+            "technical_contact_phone": "",
+            "website_logo": "https://example.com/logo-options",
+            "website": "https://example.com/",
+            "additional_information": "",
+        }
+
+    def test_non_committee_representative_cannot_create_second_org(self) -> None:
+        from core.models import Organization
+
+        Organization.objects.create(
+            name="Existing Org",
+            representative="bob",
+        )
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        self._login_as_freeipa_user("bob")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            resp = self.client.get(reverse("organization-create"), follow=False)
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], reverse("organizations"))
+
+        payload = self._valid_org_payload(name="Second Org")
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            resp = self.client.post(reverse("organization-create"), data=payload, follow=False)
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], reverse("organizations"))
+        self.assertFalse(Organization.objects.filter(name="Second Org").exists())
+
+    def test_committee_can_create_org_for_other_rep_even_if_already_rep(self) -> None:
+        from core.models import Organization
+
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_ADD_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        Organization.objects.create(
+            name="Reviewer Org",
+            representative="reviewer",
+        )
+
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+
+        def fake_get(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "bob":
+                return bob
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        payload = self._valid_org_payload(name="New Org")
+        payload["representative"] = "bob"
+
+        with patch("core.backends.FreeIPAUser.get", side_effect=fake_get):
+            resp = self.client.post(reverse("organization-create"), data=payload, follow=False)
+
+        self.assertEqual(resp.status_code, 302)
+        created = Organization.objects.get(name="New Org")
+        self.assertEqual(created.representative, "bob")
+
+    def test_representatives_search_excludes_existing_reps_except_current_org(self) -> None:
+        from core.models import Organization
+
+        org = Organization.objects.create(
+            name="Org",
+            representative="bob",
+        )
+
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_CHANGE_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": []})
+        self._login_as_freeipa_user("reviewer")
+
+        bob_user = FreeIPAUser("bob", {"uid": ["bob"], "displayname": ["Bob Example"], "memberof_group": []})
+        bobby_user = FreeIPAUser("bobby", {"uid": ["bobby"], "displayname": ["Bobby Example"], "memberof_group": []})
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.backends.FreeIPAUser.all", return_value=[bobby_user, bob_user]),
+        ):
+            url = reverse("organization-representatives-search")
+            resp = self.client.get(url, {"q": "bo"})
+            self.assertEqual(resp.status_code, 200)
+            ids = [r.get("id") for r in resp.json().get("results")]
+            self.assertEqual(ids, ["bobby"])
+
+            resp = self.client.get(url, {"q": "bo", "organization_id": str(org.pk)})
+            self.assertEqual(resp.status_code, 200)
+            ids = [r.get("id") for r in resp.json().get("results")]
+            self.assertEqual(ids, ["bob", "bobby"])
+
+    def test_committee_cannot_set_representative_to_user_already_representing_other_org(self) -> None:
+        from core.models import Organization
+
+        Organization.objects.create(
+            name="Org 1",
+            representative="bob",
+        )
+
+        org2 = Organization.objects.create(
+            name="Org 2",
+            business_contact_name="Business",
+            business_contact_email="business@example.com",
+            pr_marketing_contact_name="Marketing",
+            pr_marketing_contact_email="marketing@example.com",
+            technical_contact_name="Tech",
+            technical_contact_email="tech@example.com",
+            website_logo="https://example.com/logo",
+            website="https://example.com/",
+            representative="carol",
+        )
+
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_CHANGE_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        carol = FreeIPAUser("carol", {"uid": ["carol"], "memberof_group": []})
+        self._login_as_freeipa_user("reviewer")
+
+        def fake_get(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "bob":
+                return bob
+            if username == "carol":
+                return carol
+            return None
+
+        payload = self._valid_org_payload(name="Org 2")
+        payload["representative"] = "bob"
+
+        with patch("core.backends.FreeIPAUser.get", side_effect=fake_get):
+            resp = self.client.post(reverse("organization-edit", args=[org2.pk]), data=payload, follow=False)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "already the representative of another organization")
+        org2.refresh_from_db()
+        self.assertEqual(org2.representative, "carol")
+
+    def test_db_unique_constraint_prevents_duplicate_representatives(self) -> None:
+        from core.models import Organization
+
+        Organization.objects.create(
+            name="Org 1",
+            representative="bob",
+        )
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Organization.objects.create(
+                    name="Org 2",
+                    representative="bob",
+                )
+
+    def test_representative_change_creates_membershiplog_for_pending_org_request(self) -> None:
+        from core.models import MembershipLog, MembershipRequest, MembershipType, Note, Organization
+
+        org = Organization.objects.create(
+            name="Org",
+            representative="carol",
+        )
+
+        membership_type, _ = MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "description": "Silver Sponsor Member",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        mr = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type=membership_type,
+            status=MembershipRequest.Status.pending,
+        )
+
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_CHANGE_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        carol = FreeIPAUser("carol", {"uid": ["carol"], "memberof_group": []})
+        self._login_as_freeipa_user("reviewer")
+
+        def fake_get(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "bob":
+                return bob
+            if username == "carol":
+                return carol
+            return None
+
+        payload = self._valid_org_payload(name="Org")
+        payload["representative"] = "bob"
+
+        with patch("core.backends.FreeIPAUser.get", side_effect=fake_get):
+            resp = self.client.post(reverse("organization-edit", args=[org.pk]), data=payload, follow=False)
+
+        self.assertEqual(resp.status_code, 302)
+        org.refresh_from_db()
+        self.assertEqual(org.representative, "bob")
+
+        log = MembershipLog.objects.filter(
+            membership_request=mr,
+            target_organization=org,
+            action=MembershipLog.Action.representative_changed,
+        ).first()
+        self.assertIsNotNone(log)
+        assert log is not None
+        self.assertEqual(log.actor_username, "reviewer")
+        self.assertEqual(log.target_username, "")
+        self.assertEqual(log.membership_type_id, membership_type.pk)
+
+        notes = list(Note.objects.filter(membership_request=mr).order_by("timestamp", "pk"))
+        self.assertEqual(len(notes), 1)
+        note = notes[0]
+        self.assertEqual(note.username, "reviewer")
+        self.assertIsInstance(note.action, dict)
+        assert isinstance(note.action, dict)
+        self.assertEqual(note.action.get("type"), "representative_changed")
+        self.assertEqual(note.action.get("old"), "carol")
+        self.assertEqual(note.action.get("new"), "bob")
+
+        with patch("core.backends.FreeIPAUser.get", side_effect=fake_get):
+            resp = self.client.get(reverse("membership-request-detail", args=[mr.pk]), follow=False)
+        self.assertEqual(resp.status_code, 200)
+        from html import unescape
+
+        self.assertIn("Representative changed from carol to bob", unescape(resp.content.decode()))
+
+    def test_representative_change_does_not_create_membershiplog_when_no_pending_requests(self) -> None:
+        from core.models import MembershipLog, MembershipType, Note, Organization
+
+        org = Organization.objects.create(
+            name="Org",
+            representative="carol",
+        )
+
+        membership_type, _ = MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "description": "Silver Sponsor Member",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_CHANGE_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        carol = FreeIPAUser("carol", {"uid": ["carol"], "memberof_group": []})
+        self._login_as_freeipa_user("reviewer")
+
+        def fake_get(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "bob":
+                return bob
+            if username == "carol":
+                return carol
+            return None
+
+        payload = self._valid_org_payload(name="Org")
+        payload["representative"] = "bob"
+
+        with patch("core.backends.FreeIPAUser.get", side_effect=fake_get):
+            resp = self.client.post(reverse("organization-edit", args=[org.pk]), data=payload, follow=False)
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(
+            MembershipLog.objects.filter(
+                target_organization=org,
+                membership_type=membership_type,
+                action=MembershipLog.Action.representative_changed,
+            ).exists()
+        )
+
+        self.assertEqual(Note.objects.count(), 0)
 
     def test_representative_can_view_org_pages_notes_hidden(self) -> None:
         from core.models import MembershipType, Organization

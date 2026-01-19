@@ -108,6 +108,13 @@ def note_action_label(action: dict[str, Any]) -> str:
     if action_type == "contacted":
         return "User contacted"
 
+    if action_type == "representative_changed":
+        old = str(action.get("old") or "").strip()
+        new = str(action.get("new") or "").strip()
+        if old and new:
+            return f"Representative changed from {old} to {new}"
+        return "Representative changed"
+
     return str(action_type or "Action")
 
 
@@ -140,5 +147,8 @@ def note_action_icon(action: dict[str, Any]) -> str:
         return "fa-rotate-right"
     if action_type == "request_rescinded":
         return "fa-ban"
+
+    if action_type == "representative_changed":
+        return "fa-user-check"
 
     return "fa-bolt"

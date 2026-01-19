@@ -180,10 +180,21 @@ class Organization(models.Model):
     )
 
     additional_information = models.TextField(blank=True, default="")
-    representative = models.CharField(max_length=255, blank=True, default="")
+    representative = models.CharField(max_length=255)
 
     class Meta:
         ordering = ("name", "id")
+        constraints = [
+            models.CheckConstraint(
+                condition=~models.Q(representative=""),
+                name="core_organization_representative_not_empty",
+            ),
+            models.UniqueConstraint(
+                fields=["representative"],
+                condition=~models.Q(representative=""),
+                name="core_organization_unique_representative",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"{self.name}"
@@ -419,6 +430,7 @@ class MembershipLog(models.Model):
         rejected = "rejected", "Rejected"
         ignored = "ignored", "Ignored"
         rescinded = "rescinded", "Rescinded"
+        representative_changed = "representative_changed", "Representative changed"
         expiry_changed = "expiry_changed", "Expiry changed"
         terminated = "terminated", "Terminated"
 
