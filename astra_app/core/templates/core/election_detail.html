@@ -14,7 +14,7 @@
         <div class="card-body">
           <dl class="row mb-0">
             <dt class="col-sm-4">Status</dt>
-            <dd class="col-sm-8">{{ election.status }}</dd>
+            <dd class="col-sm-8">{% if election.status == 'open' %}Open{% elif election.status == 'closed' %}Closed{% elif election.status == 'tallied' %}Tallied{% else %}{{ election.status }}{% endif %}</dd>
             <dt class="col-sm-4">Voting window</dt>
               <dd class="col-sm-8">
                 {{ election.start_datetime|date:"Y-m-d H:i T" }} → {{ election.end_datetime|date:"Y-m-d H:i T" }}
