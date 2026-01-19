@@ -353,7 +353,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
                         resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Extend")
+        self.assertContains(resp, "Request renewal")
         self.assertContains(resp, reverse("membership-request") + "?membership_type=individual")
 
         with patch("core.backends.FreeIPAUser.get", return_value=alice):

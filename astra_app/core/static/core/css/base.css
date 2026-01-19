@@ -305,3 +305,93 @@ a:hover {
   padding: 0.2rem 0.45rem;
   line-height: 1;
 }
+
+/* Organization pages (create/edit/detail). */
+.organization-page {
+  max-width: 1080px;
+  margin: 1.5rem auto 2rem;
+}
+
+.organization-page .card {
+  border: 1px solid var(--alx-border);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+}
+
+.organization-hero .card-body {
+  padding: 1.25rem;
+}
+
+.organization-hero-logo {
+  flex: 0 0 auto;
+  width: 64px;
+  height: 64px;
+}
+
+.organization-hero-logo img {
+  width: 64px;
+  height: 64px;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: #fff;
+  object-fit: contain;
+}
+
+.organization-hero-logo--placeholder {
+  width: 64px;
+  height: 64px;
+  border-radius: 0.5rem;
+  border: 1px dashed rgba(0, 0, 0, 0.18);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(0, 0, 0, 0.55);
+  background: rgba(0, 0, 0, 0.02);
+  font-size: 1.4rem;
+}
+
+.organization-branding-logo {
+  max-height: 120px;
+  max-width: 100%;
+}
+
+.organization-page .nav-tabs .nav-link.alx-tab-error {
+  color: #b02a37;
+  font-weight: 600;
+  position: relative;
+}
+
+.organization-page .nav-tabs .nav-link.alx-tab-error::after {
+  content: "";
+  position: absolute;
+  left: 0.75rem;
+  right: 0.75rem;
+  bottom: 0.2rem;
+  height: 2px;
+  background: #dc3545;
+  border-radius: 2px;
+}
+
+.organization-page .nav-tabs .nav-link.alx-tab-error.active {
+  color: #b02a37;
+}
+
+.alx-status-badge {
+  display: inline-flex;
+  align-items: center;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  border-radius: 999px;
+  padding: 0.35rem 0.6rem;
+}
+
+a.alx-status-badge {
+  text-decoration: none;
+}
+
+a.alx-status-badge:hover {
+  text-decoration: underline;
+}
+
+.organization-form-footer .card-footer {
+  background: rgba(0, 0, 0, 0.02);
+}

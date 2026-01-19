@@ -4,8 +4,7 @@ import datetime
 from unittest.mock import patch
 
 from django.core.cache import cache
-from django.test import TestCase
-from django.test import override_settings
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 

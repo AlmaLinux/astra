@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from django.conf import settings
-
 import datetime
 import re
 from unittest.mock import patch
 
+from django.conf import settings
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone

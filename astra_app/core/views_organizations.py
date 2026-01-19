@@ -34,7 +34,15 @@ def _can_access_organization(request: HttpRequest, organization: Organization) -
     if not username:
         return False
 
-    if request.user.has_perm(ASTRA_VIEW_MEMBERSHIP):
+    if any(
+        request.user.has_perm(p)
+        for p in (
+            ASTRA_VIEW_MEMBERSHIP,
+            ASTRA_ADD_MEMBERSHIP,
+            ASTRA_CHANGE_MEMBERSHIP,
+            ASTRA_DELETE_MEMBERSHIP,
+        )
+    ):
         return True
 
     return username == organization.representative
@@ -80,7 +88,7 @@ class OrganizationEditForm(forms.ModelForm):
                 "data-placeholder": "Search users…",
             }
         ),
-        help_text="Select the FreeIPA user who will be the organization's representative.",
+        help_text="Select the user who will be the organization's representative.",
     )
 
     class Meta:
@@ -95,12 +103,10 @@ class OrganizationEditForm(forms.ModelForm):
             "technical_contact_name",
             "technical_contact_email",
             "technical_contact_phone",
-            "membership_level",
             "name",
             "website_logo",
             "website",
             "logo",
-            "additional_information",
         )
 
         labels = {
@@ -113,17 +119,16 @@ class OrganizationEditForm(forms.ModelForm):
             "technical_contact_name": "Name",
             "technical_contact_email": "Email",
             "technical_contact_phone": "Phone",
-            "membership_level": "Sponsorship Level",
-            "name": "Legal/Official name of the sponsor to be listed",
-            "website_logo": "High-quality logo that you would like used on the website",
-            "website": "URL we should link to",
-            "logo": "Logo upload for AlmaLinux Accounts",
-            "additional_information": "Please provide any additional information the Membership Committee should take into account",
+            "name": "Organization name",
+            "website_logo": "Website logo (URL)",
+            "website": "Website URL",
+            "logo": "Accounts logo (upload)",
         }
 
         help_texts = {
-            "website_logo": "Please provide a white logo, or a link to all of your logo options",
-            "website": "Please provide the exact URL that you would like the logo to link to - this can be a dedicated page or just your primary URL",
+            "name": "This is the name we will display publicly for sponsor recognition.",
+            "website_logo": "Share a direct link to your logo file, or a link to your brand assets.",
+            "website": "Enter the URL you want your logo to link to (homepage or a dedicated landing page).",
         }
 
     @override
@@ -131,22 +136,12 @@ class OrganizationEditForm(forms.ModelForm):
         self.can_select_representatives: bool = bool(kwargs.pop("can_select_representatives", False))
         super().__init__(*args, **kwargs)
 
-        self.fields["membership_level"].queryset = MembershipType.objects.filter(isOrganization=True).order_by(
-            "sort_order",
-            "code",
-        )
-
-        self.fields["membership_level"].label_from_instance = (
-            lambda membership_type: membership_type.description or membership_type.name
-        )
-
         self.fields["business_contact_name"].required = True
         self.fields["business_contact_email"].required = True
         self.fields["pr_marketing_contact_name"].required = True
         self.fields["pr_marketing_contact_email"].required = True
         self.fields["technical_contact_name"].required = True
         self.fields["technical_contact_email"].required = True
-        self.fields["membership_level"].required = False
         self.fields["name"].required = True
         self.fields["website_logo"].required = True
         self.fields["website"].required = True
@@ -264,7 +259,11 @@ def organization_create(request: HttpRequest) -> HttpResponse:
 
             organization.save()
             messages.success(request, "Organization created.")
-            return redirect("organizations")
+            if organization.representative == username:
+                return redirect("organization-sponsorship-manage", organization_id=organization.pk)
+
+            messages.info(request, "Sponsorship requests must be submitted by the organization's representative.")
+            return redirect("organization-detail", organization_id=organization.pk)
     else:
         form = OrganizationEditForm(
             can_select_representatives=can_select_representatives,
@@ -378,6 +377,10 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
 
     can_edit_organization = _can_edit_organization(request, organization)
 
+    membership_level_badge_text = ""
+    if organization.membership_level_id:
+        membership_level_badge_text = str(organization.membership_level_id).replace("_", " ").title()
+
     return render(
         request,
         "core/organization_detail.html",
@@ -391,6 +394,7 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
             "sponsorship_request_id": sponsorship_request_id,
             "is_representative": is_representative,
             "can_edit_organization": can_edit_organization,
+            "membership_level_badge_text": membership_level_badge_text,
         },
     )
 
@@ -458,6 +462,96 @@ def organization_sponsorship_extend(request: HttpRequest, organization_id: int) 
     return redirect("organization-detail", organization_id=organization.pk)
 
 
+class OrganizationSponsorshipRequestForm(forms.Form):
+    membership_level = forms.ModelChoiceField(
+        queryset=MembershipType.objects.none(),
+        required=True,
+        label="Sponsorship level",
+        empty_label="Select a sponsorship level…",
+        widget=forms.Select(attrs={"class": "form-control"}),
+    )
+    additional_information = forms.CharField(
+        required=False,
+        label="Additional information",
+        widget=forms.Textarea(attrs={"class": "form-control", "rows": 4}),
+    )
+
+    @override
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["membership_level"].queryset = MembershipType.objects.filter(isOrganization=True).order_by(
+            "sort_order",
+            "code",
+        )
+
+
+def organization_sponsorship_manage(request: HttpRequest, organization_id: int) -> HttpResponse:
+    organization = get_object_or_404(Organization, pk=organization_id)
+    _require_representative(request, organization)
+
+    pending_membership_level_request = (
+        MembershipRequest.objects.select_related("membership_type")
+        .filter(
+            requested_organization=organization,
+            status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
+        )
+        .order_by("-requested_at")
+        .first()
+    )
+
+    if request.method == "POST":
+        form = OrganizationSponsorshipRequestForm(request.POST)
+
+        if pending_membership_level_request is not None:
+            messages.info(request, "A sponsorship request is already pending.")
+            return redirect("organization-detail", organization_id=organization.pk)
+
+        if not form.is_valid():
+            messages.error(request, "Please correct the errors below.")
+        else:
+            requested_membership_level: MembershipType = form.cleaned_data["membership_level"]
+            additional_information = str(form.cleaned_data.get("additional_information") or "").strip()
+
+            responses: list[dict[str, str]] = []
+            if additional_information:
+                responses.append({"Additional Information": additional_information})
+
+            mr = MembershipRequest.objects.create(
+                requested_username="",
+                requested_organization=organization,
+                membership_type=requested_membership_level,
+                status=MembershipRequest.Status.pending,
+                responses=responses,
+            )
+
+            record_membership_request_created(
+                membership_request=mr,
+                actor_username=str(request.user.get_username() or "").strip(),
+                send_submitted_email=False,
+            )
+
+            if organization.membership_level_id and requested_membership_level.code != organization.membership_level_id:
+                messages.success(request, "Sponsorship level change submitted for review.")
+            else:
+                messages.success(request, "Sponsorship request submitted for review.")
+            return redirect("organization-detail", organization_id=organization.pk)
+    else:
+        initial: dict[str, object] = {}
+        if organization.membership_level_id:
+            initial["membership_level"] = organization.membership_level_id
+        form = OrganizationSponsorshipRequestForm(initial=initial)
+
+    return render(
+        request,
+        "core/organization_sponsorship_manage.html",
+        {
+            "organization": organization,
+            "pending_membership_level_request": pending_membership_level_request,
+            "form": form,
+        },
+    )
+
+
 def organization_edit(request: HttpRequest, organization_id: int) -> HttpResponse:
     organization = get_object_or_404(Organization, pk=organization_id)
     _require_organization_edit_access(request, organization)
@@ -482,8 +576,6 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
 
     if request.method == "POST" and form.is_valid():
         updated_org = form.save(commit=False)
-
-        requested_membership_level: MembershipType | None = updated_org.membership_level
 
         if can_select_representatives and "representative" in form.fields:
             representative = form.cleaned_data.get("representative") or ""
@@ -577,44 +669,9 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
                             },
                         )
 
-        # Membership level changes are reviewed by the committee; do not apply directly.
-        updated_org.membership_level_id = original_membership_level_id
         updated_org.save()
 
-        if (
-            requested_membership_level is not None
-            and requested_membership_level.code != original_membership_level_id
-        ):
-            existing = (
-                MembershipRequest.objects.filter(
-                    requested_organization=organization,
-                    status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
-                )
-                .order_by("-requested_at")
-                .first()
-            )
-            if existing is None:
-                responses: list[dict[str, str]] = []
-                if updated_org.additional_information.strip():
-                    responses.append({"Additional Information": updated_org.additional_information.strip()})
-
-                mr = MembershipRequest.objects.create(
-                    requested_username="",
-                    requested_organization=organization,
-                    membership_type=requested_membership_level,
-                    status=MembershipRequest.Status.pending,
-                    responses=responses,
-                )
-
-                record_membership_request_created(
-                    membership_request=mr,
-                    actor_username=str(request.user.get_username() or "").strip(),
-                    send_submitted_email=False,
-                )
-
-                messages.success(request, "Sponsorship level change submitted for review.")
-            else:
-                messages.info(request, "A sponsorship request is already pending.")
+        messages.success(request, "Organization details updated.")
 
         return redirect("organization-detail", organization_id=organization.pk)
 

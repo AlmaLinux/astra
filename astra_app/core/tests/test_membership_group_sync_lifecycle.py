@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from django.conf import settings
-
 import datetime
 from unittest.mock import patch
 
+from django.conf import settings
 from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse

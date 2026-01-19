@@ -10,6 +10,7 @@ from email.message import EmailMessage
 from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 
+import post_office.mail
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
@@ -17,7 +18,6 @@ from django.core.files.storage import default_storage
 from django.http import HttpRequest, JsonResponse
 from django.template import Context, Template, engines
 from django.template.exceptions import TemplateSyntaxError
-import post_office.mail
 from post_office.models import Email, EmailTemplate
 
 _VAR_PATTERN = re.compile(r"{{\s*([A-Za-z0-9_]+)")

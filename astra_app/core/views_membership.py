@@ -1377,11 +1377,6 @@ def organization_sponsorship_set_expiry(request: HttpRequest, organization_id: i
         messages.error(request, "That organization does not currently have an active sponsorship of that type.")
         return redirect("organization-detail", organization_id=organization.pk)
 
-    sponsorship = OrganizationSponsorship.objects.filter(organization=organization, membership_type=membership_type).first()
-    if sponsorship is None or sponsorship.expires_at is None or sponsorship.expires_at <= timezone.now():
-        messages.error(request, "That organization does not currently have an active sponsorship of that type.")
-        return redirect("organization-detail", organization_id=organization.pk)
-
     next_url = str(request.POST.get("next") or "").strip()
     if next_url and url_has_allowed_host_and_scheme(
         url=next_url,
@@ -1460,7 +1455,7 @@ def organization_sponsorship_terminate(request: HttpRequest, organization_id: in
         return redirect("organization-detail", organization_id=organization.pk)
 
     sponsorship = OrganizationSponsorship.objects.filter(organization=organization, membership_type=membership_type).first()
-    if sponsorship is None or sponsorship.expires_at is None or sponsorship.expires_at <= timezone.now():
+    if sponsorship is not None and sponsorship.expires_at is not None and sponsorship.expires_at <= timezone.now():
         messages.error(request, "That organization does not currently have an active sponsorship of that type.")
         return redirect("organization-detail", organization_id=organization.pk)
 
@@ -1488,6 +1483,8 @@ def organization_sponsorship_terminate(request: HttpRequest, organization_id: in
     )
     organization.membership_level = None
     organization.save(update_fields=["membership_level"])
+
+    OrganizationSponsorship.objects.filter(organization=organization).delete()
 
     messages.success(request, "Sponsorship terminated.")
     return redirect("organization-detail", organization_id=organization.pk)

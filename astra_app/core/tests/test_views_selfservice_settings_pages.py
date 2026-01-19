@@ -9,7 +9,6 @@ from django.contrib.sessions.middleware import SessionMiddleware
 from django.http import HttpResponse
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
-
 from python_freeipa import exceptions
 
 from core import views_settings

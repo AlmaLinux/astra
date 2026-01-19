@@ -7,6 +7,7 @@ from tempfile import mkdtemp
 from unittest.mock import patch
 
 from django.conf import settings
+from django.contrib.staticfiles import finders
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -60,7 +61,7 @@ class OrganizationUserViewsTests(TestCase):
         with patch("core.backends.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organizations"))
             self.assertEqual(resp.status_code, 200)
-            self.assertContains(resp, "Only create an organization")
+            self.assertContains(resp, "Create an organization profile only")
 
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
             self.assertEqual(resp.status_code, 200)
@@ -290,10 +291,12 @@ class OrganizationUserViewsTests(TestCase):
             resp = self.client.get(reverse("organization-edit", args=[org.pk]))
             self.assertEqual(resp.status_code, 200)
             self.assertContains(resp, "AlmaLinux")
-            self.assertContains(resp, 'id="id_additional_information"')
-            self.assertContains(resp, "Annual dues: $2,500 USD")
             self.assertContains(resp, 'id="id_website_logo"')
             self.assertNotContains(resp, 'textarea name="website_logo"')
+
+            # Sponsorship requests are handled on the separate manage page.
+            self.assertNotContains(resp, 'id="id_membership_level"')
+            self.assertNotContains(resp, 'id="id_additional_information"')
 
             resp = self.client.post(
                 reverse("organization-edit", args=[org.pk]),
@@ -307,11 +310,9 @@ class OrganizationUserViewsTests(TestCase):
                     "technical_contact_name": "Tech Person Updated",
                     "technical_contact_email": "tech-updated@almalinux.org",
                     "technical_contact_phone": "",
-                    "membership_level": "silver",
                     "name": "AlmaLinux Updated",
                     "website_logo": "https://example.com/logo-options-updated",
                     "website": "https://example.com/",
-                    "additional_information": "Some extra info",
                 },
                 follow=False,
             )
@@ -321,7 +322,47 @@ class OrganizationUserViewsTests(TestCase):
         self.assertEqual(org.name, "AlmaLinux Updated")
         self.assertEqual(org.business_contact_email, "hello@almalinux.org")
         self.assertEqual(org.website, "https://example.com/")
-        self.assertEqual(org.additional_information, "Some extra info")
+
+
+    def test_org_detail_header_shows_separate_actions_and_level_badge(self) -> None:
+        from core.models import MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "description": "Gold Sponsor Member (Annual dues: $20,000 USD)",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(
+            name="AlmaLinux",
+            membership_level_id="gold",
+            website="https://almalinux.org/",
+            representative="bob",
+        )
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        self._login_as_freeipa_user("bob")
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Edit details")
+        self.assertContains(resp, reverse("organization-edit", args=[org.pk]))
+        self.assertContains(resp, "Change sponsorship tier")
+        self.assertContains(resp, reverse("organization-sponsorship-manage", args=[org.pk]))
+
+        self.assertNotContains(resp, "Active sponsor")
+        self.assertContains(resp, 'alx-status-badge--active">Gold')
+
+        body = resp.content.decode("utf-8")
+        self.assertLess(body.find('class="col-md-7"'), body.find('id="org-contacts-tabs"'))
+        self.assertLess(body.find('class="col-md-5"'), body.find("Branding"))
 
     @override_settings(
         STORAGES={
@@ -465,21 +506,9 @@ class OrganizationUserViewsTests(TestCase):
 
         with patch("core.backends.FreeIPAUser.get", return_value=bob):
             resp = self.client.post(
-                reverse("organization-edit", args=[org.pk]),
+                reverse("organization-sponsorship-manage", args=[org.pk]),
                 data={
-                    "business_contact_name": "Business Person",
-                    "business_contact_email": "contact@almalinux.org",
-                    "business_contact_phone": "",
-                    "pr_marketing_contact_name": "PR Person",
-                    "pr_marketing_contact_email": "pr@almalinux.org",
-                    "pr_marketing_contact_phone": "",
-                    "technical_contact_name": "Tech Person",
-                    "technical_contact_email": "tech@almalinux.org",
-                    "technical_contact_phone": "",
                     "membership_level": "gold",
-                    "name": "AlmaLinux",
-                    "website_logo": "https://example.com/logo-options",
-                    "website": "https://almalinux.org/",
                     "additional_information": "Please consider our updated sponsorship level.",
                 },
                 follow=False,
@@ -509,60 +538,179 @@ class OrganizationUserViewsTests(TestCase):
         with patch("core.backends.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
             self.assertEqual(resp.status_code, 200)
-            self.assertContains(resp, "In Review")
+            self.assertContains(resp, "Under review")
             self.assertContains(resp, "Annual dues: $20,000 USD")
 
+
+    def test_membership_admin_can_set_org_sponsorship_expiry_when_missing(self) -> None:
+        import datetime
+
+        from core.models import MembershipType, Organization, OrganizationSponsorship
+        from core.permissions import ASTRA_CHANGE_MEMBERSHIP
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold",
+                "description": "Gold",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="Acme", membership_level_id="gold", representative="bob")
+        sponsorship = OrganizationSponsorship.objects.create(
+            organization=org,
+            membership_type_id="gold",
+            expires_at=None,
+        )
+
         FreeIPAPermissionGrant.objects.create(
-            permission=ASTRA_ADD_MEMBERSHIP,
+            permission=ASTRA_CHANGE_MEMBERSHIP,
             principal_type=FreeIPAPermissionGrant.PrincipalType.user,
             principal_name="reviewer",
         )
 
-        FreeIPAPermissionGrant.objects.create(
-            permission=ASTRA_VIEW_MEMBERSHIP,
-            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
-            principal_name="reviewer",
-        )
-
-        reviewer = FreeIPAUser(
-            "reviewer",
-            {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": []},
-        )
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": []})
         self._login_as_freeipa_user("reviewer")
 
-        def _get_user(username: str) -> FreeIPAUser | None:
-            return {"reviewer": reviewer, "bob": bob}.get(username)
+        new_expires_on = datetime.date(2030, 1, 31)
 
         with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
-            resp = self.client.get(reverse("membership-requests"))
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Membership Committee Notes")
-        self.assertContains(resp, "Request responses")
-        self.assertContains(resp, "Please consider our updated sponsorship level.")
+            resp = self.client.post(
+                reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"]),
+                data={
+                    "expires_on": new_expires_on.isoformat(),
+                    "next": reverse("organization-detail", args=[org.pk]),
+                },
+                follow=False,
+            )
 
-        with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
-            patch.object(FreeIPAUser, "add_to_group", autospec=True),
-        ):
-            resp = self.client.post(reverse("membership-request-approve", args=[req.pk]), follow=False)
         self.assertEqual(resp.status_code, 302)
+        sponsorship.refresh_from_db()
+        self.assertEqual(
+            sponsorship.expires_at,
+            datetime.datetime(2030, 1, 31, 23, 59, 59, tzinfo=datetime.UTC),
+        )
 
-        org.refresh_from_db()
-        req.refresh_from_db()
-        self.assertEqual(req.status, MembershipRequest.Status.approved)
-        self.assertEqual(org.membership_level_id, "gold")
+    def test_membership_admin_can_set_org_sponsorship_expiry_creates_row_when_absent(self) -> None:
+        import datetime
 
-        approval_log = MembershipLog.objects.get(action=MembershipLog.Action.approved, target_organization=org)
-        self.assertEqual(approval_log.membership_type_id, "gold")
-        self.assertEqual(approval_log.membership_request_id, req.pk)
+        from core.models import FreeIPAPermissionGrant, MembershipType, Organization, OrganizationSponsorship
+        from core.permissions import ASTRA_CHANGE_MEMBERSHIP
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold",
+                "description": "Gold",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="Acme", membership_level_id="gold", representative="bob")
+        OrganizationSponsorship.objects.filter(organization=org).delete()
+
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_CHANGE_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": []})
+        self._login_as_freeipa_user("reviewer")
+
+        new_expires_on = datetime.date(2030, 1, 31)
 
         with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
-            resp = self.client.get(reverse("membership-audit-log-organization", args=[org.pk]))
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Membership Audit Log")
-        self.assertContains(resp, "AlmaLinux")
-        self.assertContains(resp, "Approved")
-        self.assertContains(resp, reverse("membership-request-detail", args=[req.pk]))
+            resp = self.client.post(
+                reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"]),
+                data={
+                    "expires_on": new_expires_on.isoformat(),
+                    "next": reverse("organization-detail", args=[org.pk]),
+                },
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 302)
+        sponsorship = OrganizationSponsorship.objects.get(organization=org)
+        self.assertEqual(
+            sponsorship.expires_at,
+            datetime.datetime(2030, 1, 31, 23, 59, 59, tzinfo=datetime.UTC),
+        )
+
+    def test_membership_admin_can_set_org_sponsorship_expiry_when_membership_type_mismatch(self) -> None:
+        import datetime
+
+        from core.models import MembershipType, Organization, OrganizationSponsorship
+        from core.permissions import ASTRA_CHANGE_MEMBERSHIP
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold",
+                "description": "Gold",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver",
+                "description": "Silver",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="Acme", membership_level_id="gold", representative="bob")
+
+        # Simulate drift: the current-state sponsorship row exists but points at a different
+        # membership_type than the org's current membership_level.
+        OrganizationSponsorship.objects.create(
+            organization=org,
+            membership_type_id="silver",
+            expires_at=None,
+        )
+
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_CHANGE_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": []})
+        self._login_as_freeipa_user("reviewer")
+
+        new_expires_on = datetime.date(2030, 1, 31)
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.post(
+                reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"]),
+                data={
+                    "expires_on": new_expires_on.isoformat(),
+                    "next": reverse("organization-detail", args=[org.pk]),
+                },
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 302)
+        sponsorship = OrganizationSponsorship.objects.get(organization=org)
+        self.assertEqual(sponsorship.membership_type_id, "gold")
+        self.assertEqual(
+            sponsorship.expires_at,
+            datetime.datetime(2030, 1, 31, 23, 59, 59, tzinfo=datetime.UTC),
+        )
 
     def test_organization_detail_shows_committee_notes_with_request_link(self) -> None:
         from core.models import MembershipRequest, MembershipType, Note, Organization
@@ -743,7 +891,7 @@ class OrganizationUserViewsTests(TestCase):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Expires")
-        self.assertContains(resp, "Extend")
+        self.assertContains(resp, "Request renewal")
 
         with patch("core.backends.FreeIPAUser.get", return_value=bob):
             resp = self.client.post(reverse("organization-sponsorship-extend", args=[org.pk]), follow=False)
@@ -825,25 +973,15 @@ class OrganizationUserViewsTests(TestCase):
             1,
         )
 
-        payload = {
-            "name": org.name,
-            "business_contact_name": org.business_contact_name,
-            "business_contact_email": org.business_contact_email,
-            "business_contact_phone": org.business_contact_phone,
-            "pr_marketing_contact_name": org.pr_marketing_contact_name,
-            "pr_marketing_contact_email": org.pr_marketing_contact_email,
-            "pr_marketing_contact_phone": org.pr_marketing_contact_phone,
-            "technical_contact_name": org.technical_contact_name,
-            "technical_contact_email": org.technical_contact_email,
-            "technical_contact_phone": org.technical_contact_phone,
-            "membership_level": "silver",
-            "website_logo": org.website_logo,
-            "website": org.website,
-            "additional_information": org.additional_information,
-        }
-
         with patch("core.backends.FreeIPAUser.get", return_value=bob):
-            resp = self.client.post(reverse("organization-edit", args=[org.pk]), data=payload, follow=True)
+            resp = self.client.post(
+                reverse("organization-sponsorship-manage", args=[org.pk]),
+                data={
+                    "membership_level": "silver",
+                    "additional_information": "Please review our sponsorship request.",
+                },
+                follow=True,
+            )
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "A sponsorship request is already pending.")
@@ -1355,3 +1493,175 @@ class OrganizationUserViewsTests(TestCase):
             resp = self.client.get(reverse("organizations"))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, reverse("organization-detail", args=[created.pk]))
+
+    def test_organization_create_redirects_creator_to_sponsorship_manage(self) -> None:
+        from core.models import MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "description": "Silver Sponsor Member (Annual dues: $2,500 USD)",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        self._login_as_freeipa_user("bob")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            resp = self.client.post(
+                reverse("organization-create"),
+                data={
+                    "name": "AlmaLinux",
+                    "business_contact_name": "Business Person",
+                    "business_contact_email": "contact@almalinux.org",
+                    "business_contact_phone": "",
+                    "pr_marketing_contact_name": "PR Person",
+                    "pr_marketing_contact_email": "pr@almalinux.org",
+                    "pr_marketing_contact_phone": "",
+                    "technical_contact_name": "Tech Person",
+                    "technical_contact_email": "tech@almalinux.org",
+                    "technical_contact_phone": "",
+                    "website_logo": "https://example.com/logo-options",
+                    "website": "https://almalinux.org/",
+                },
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 302)
+        created = Organization.objects.get(name="AlmaLinux")
+        self.assertEqual(created.representative, "bob")
+        self.assertEqual(
+            resp["Location"],
+            reverse("organization-sponsorship-manage", args=[created.pk]),
+        )
+
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            manage_resp = self.client.get(reverse("organization-sponsorship-manage", args=[created.pk]))
+        self.assertEqual(manage_resp.status_code, 200)
+        self.assertContains(manage_resp, "Manage sponsorship")
+
+    def test_org_edit_highlights_contact_tabs_with_validation_errors(self) -> None:
+        from core.models import Organization
+
+        org = Organization.objects.create(
+            name="Acme",
+            website_logo="https://example.com/logo",
+            website="https://example.com/",
+            representative="bob",
+        )
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        self._login_as_freeipa_user("bob")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            resp = self.client.post(
+                reverse("organization-edit", args=[org.pk]),
+                data={
+                    # Intentionally omit required contact fields in non-active tabs.
+                    "name": "Acme",
+                    "website_logo": "https://example.com/logo",
+                    "website": "https://example.com/",
+                },
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode("utf-8")
+
+        for tab_id in (
+            'id="contacts-business-tab"',
+            'id="contacts-marketing-tab"',
+            'id="contacts-technical-tab"',
+        ):
+            idx = body.find(tab_id)
+            self.assertNotEqual(idx, -1)
+            window = body[max(0, idx - 200) : idx + 200]
+            self.assertIn("alx-tab-error", window)
+
+    def test_membership_admin_creating_org_for_other_rep_redirects_to_detail_not_manage(self) -> None:
+        from core.models import FreeIPAPermissionGrant, Organization
+
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_ADD_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        self._login_as_freeipa_user("reviewer")
+
+        def fake_get(username: str):
+            if username == "reviewer":
+                return reviewer
+            if username == "bob":
+                return bob
+            return None
+
+        with patch("core.backends.FreeIPAUser.get", side_effect=fake_get):
+            resp = self.client.post(
+                reverse("organization-create"),
+                data={
+                    "representative": "bob",
+                    "name": "Acme",
+                    "business_contact_name": "Business Person",
+                    "business_contact_email": "contact@example.com",
+                    "business_contact_phone": "",
+                    "pr_marketing_contact_name": "PR Person",
+                    "pr_marketing_contact_email": "pr@example.com",
+                    "pr_marketing_contact_phone": "",
+                    "technical_contact_name": "Tech Person",
+                    "technical_contact_email": "tech@example.com",
+                    "technical_contact_phone": "",
+                    "website_logo": "https://example.com/logo-options",
+                    "website": "https://example.com/",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        created = Organization.objects.get(name="Acme")
+        self.assertEqual(created.representative, "bob")
+        self.assertContains(resp, reverse("organization-detail", args=[created.pk]))
+        self.assertContains(resp, "Sponsorship Level")
+
+    def test_org_create_highlights_contact_tabs_with_validation_errors(self) -> None:
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        self._login_as_freeipa_user("bob")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            resp = self.client.post(
+                reverse("organization-create"),
+                data={
+                    # Intentionally omit required contact fields in non-active tabs.
+                    "name": "AlmaLinux",
+                    "website_logo": "https://example.com/logo-options",
+                    "website": "https://almalinux.org/",
+                },
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode("utf-8")
+
+        for tab_id in (
+            'id="contacts-business-tab"',
+            'id="contacts-marketing-tab"',
+            'id="contacts-technical-tab"',
+        ):
+            idx = body.find(tab_id)
+            self.assertNotEqual(idx, -1)
+            window = body[max(0, idx - 200) : idx + 200]
+            self.assertIn("alx-tab-error", window)
+
+    def test_contacts_tab_error_style_defined(self) -> None:
+        css_path = finders.find("core/css/base.css")
+        self.assertIsNotNone(css_path)
+
+        css = Path(css_path).read_text(encoding="utf-8")
+        self.assertIn(".nav-tabs .nav-link.alx-tab-error", css)

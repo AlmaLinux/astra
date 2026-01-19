@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from django.conf import settings
-
 from unittest.mock import patch
 
+from django.conf import settings
 from django.test import TestCase
 from django.test.client import RequestFactory
 

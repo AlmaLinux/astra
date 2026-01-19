@@ -233,7 +233,7 @@
             </div>
             <div class="d-flex align-items-center justify-content-end flex-wrap" style="gap: .5rem;">
               {% if is_self and m.is_expiring_soon %}
-                <a href="{{ m.extend_url }}" class="btn btn-sm btn-primary">Extend</a>
+                <a href="{{ m.extend_url }}" class="btn btn-sm btn-primary">Request renewal</a>
               {% else %}
                 {% if membership_can_view and m.request_id %}
                   <a class="badge badge-success" href="{% url 'membership-request-detail' m.request_id %}">Active</a>

@@ -6,7 +6,7 @@
       {% if show_representatives %}
         <li class="nav-item">
           <a
-            class="nav-link {% if active_contact == 'representative' %}active{% endif %}"
+            class="nav-link {% if active_contact == 'representative' %}active{% endif %}{% if form.representative.errors %} alx-tab-error{% endif %}"
             id="contacts-representative-tab"
             data-toggle="pill"
             href="#contacts-representative"
@@ -19,7 +19,7 @@
 
       <li class="nav-item">
         <a
-          class="nav-link {% if active_contact == 'business' %}active{% endif %}"
+          class="nav-link {% if active_contact == 'business' %}active{% endif %}{% if form.business_contact_name.errors or form.business_contact_email.errors or form.business_contact_phone.errors %} alx-tab-error{% endif %}"
           id="contacts-business-tab"
           data-toggle="pill"
           href="#contacts-business"
@@ -31,19 +31,19 @@
 
       <li class="nav-item">
         <a
-          class="nav-link {% if active_contact == 'marketing' %}active{% endif %}"
+          class="nav-link {% if active_contact == 'marketing' %}active{% endif %}{% if form.pr_marketing_contact_name.errors or form.pr_marketing_contact_email.errors or form.pr_marketing_contact_phone.errors %} alx-tab-error{% endif %}"
           id="contacts-marketing-tab"
           data-toggle="pill"
           href="#contacts-marketing"
           role="tab"
           aria-controls="contacts-marketing"
           aria-selected="{% if active_contact == 'marketing' %}true{% else %}false{% endif %}"
-        >PR / Marketing</a>
+        >PR and marketing</a>
       </li>
 
       <li class="nav-item">
         <a
-          class="nav-link {% if active_contact == 'technical' %}active{% endif %}"
+          class="nav-link {% if active_contact == 'technical' %}active{% endif %}{% if form.technical_contact_name.errors or form.technical_contact_email.errors or form.technical_contact_phone.errors %} alx-tab-error{% endif %}"
           id="contacts-technical-tab"
           data-toggle="pill"
           href="#contacts-technical"
@@ -65,9 +65,9 @@
           aria-labelledby="contacts-representative-tab"
         >
           <p class="text-muted mb-3">
-            The representative is the primary point of contact for the member organization and is authorized
-            to act on behalf of the organization in all matters related to the AlmaLinux OS Foundation, including
-            voting on elections, changing sponsorship levels, and other official business.
+            The representative is the primary point of contact for the sponsoring organization and is authorized
+            to act on behalf of the organization in matters related to the AlmaLinux OS Foundation, including
+            voting in elections, changing sponsorship levels, and other official business.
           </p>
 
           <div class="form-group mb-0">
@@ -86,7 +86,7 @@
         aria-labelledby="contacts-business-tab"
       >
         <p class="text-muted mb-3">
-          All legal and financial notices from AlmaLinux OS Foundation to the member will be sent to this e-mail address unless the member directs otherwise
+          We will send legal and billing notices to this email address, unless you tell us otherwise.
         </p>
 
         <div class="form-group">
@@ -112,7 +112,7 @@
         role="tabpanel"
         aria-labelledby="contacts-marketing-tab"
       >
-        <p class="text-muted mb-3">This person will be contacted for press release and marketing benefit reasons</p>
+        <p class="text-muted mb-3">We will contact this person about press releases and sponsor marketing benefits.</p>
 
         <div class="form-group">
           <label for="{{ form.pr_marketing_contact_name.id_for_label }}">{{ form.pr_marketing_contact_name.label }} <span class="text-danger">(required)</span></label>
@@ -138,7 +138,7 @@
         aria-labelledby="contacts-technical-tab"
       >
         <p class="text-muted mb-3">
-          All technical notices from AlmaLinux OS Foundation to the member will be sent to this e-mail address unless the member directs otherwise
+          We will send technical notices to this email address, unless you tell us otherwise.
         </p>
 
         <div class="form-group">

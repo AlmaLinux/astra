@@ -101,7 +101,7 @@ final_chain_hash = "final-chain-hash-from-election-page"  # After election close
 # Download ballots.json from the election page and keep it next to this script.
 ballots_file = "ballots.json"
 if __name__ == "__main__":
-    with open(ballots_file, "r", encoding="utf-8") as f:
+    with open(ballots_file, encoding="utf-8") as f:
         export = json.load(f)
 
     if not isinstance(export, dict):

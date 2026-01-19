@@ -172,7 +172,7 @@ class ElectionCredentialAndBallotTests(TestCase):
 
     def test_credential_cannot_be_used_across_elections(self) -> None:
         """Regression test: credentials are election-scoped and cannot be reused."""
-        from core.elections_services import submit_ballot, InvalidCredentialError
+        from core.elections_services import InvalidCredentialError, submit_ballot
 
         now = timezone.now()
         election_a = Election.objects.create(
