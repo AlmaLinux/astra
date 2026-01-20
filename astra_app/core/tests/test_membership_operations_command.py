@@ -20,6 +20,7 @@ class MembershipOperationsCommandTests(TestCase):
                 call("membership_expiration_notifications", force=False),
                 call("organization_sponsorship_expired_cleanup"),
                 call("membership_pending_requests", force=False),
+                call("membership_embargoed_members", force=False),
             ],
         )
 
@@ -36,5 +37,6 @@ class MembershipOperationsCommandTests(TestCase):
                 call("membership_expiration_notifications", force=True),
                 call("organization_sponsorship_expired_cleanup"),
                 call("membership_pending_requests", force=True),
+                call("membership_embargoed_members", force=True),
             ],
         )

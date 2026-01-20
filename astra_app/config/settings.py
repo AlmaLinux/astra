@@ -353,6 +353,11 @@ MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME = _env_str(
     default="membership-committee-pending-requests",
 ) or "membership-committee-pending-requests"
 
+MEMBERSHIP_COMMITTEE_EMBARGOED_MEMBERS_EMAIL_TEMPLATE_NAME = _env_str(
+    "MEMBERSHIP_COMMITTEE_EMBARGOED_MEMBERS_EMAIL_TEMPLATE_NAME",
+    default="membership-committee-embargoed-members",
+) or "membership-committee-embargoed-members"
+
 PASSWORD_RESET_TOKEN_TTL_SECONDS = _env_int("PASSWORD_RESET_TOKEN_TTL_SECONDS", default=60 * 60)
 PASSWORD_RESET_EMAIL_TEMPLATE_NAME = _env_str(
     "PASSWORD_RESET_EMAIL_TEMPLATE_NAME",

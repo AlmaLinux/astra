@@ -47,3 +47,19 @@ def country_code_status_from_user_data(user_data: dict | None) -> CountryCodeSta
         return CountryCodeStatus(code=None, is_valid=False)
 
     return CountryCodeStatus(code=code, is_valid=is_valid_country_alpha2(code))
+
+
+def embargoed_country_codes_from_settings() -> set[str]:
+    codes: set[str] = set()
+    for raw in settings.MEMBERSHIP_EMBARGOED_COUNTRY_CODES or []:
+        code = str(raw or "").strip().upper()
+        if code and is_valid_country_alpha2(code):
+            codes.add(code)
+    return codes
+
+
+def country_name_from_code(code: str) -> str:
+    record = pycountry.countries.get(alpha_2=str(code or "").strip().upper())
+    if record is None:
+        return code
+    return str(record.name or code)

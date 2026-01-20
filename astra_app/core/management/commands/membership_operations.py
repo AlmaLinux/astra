@@ -9,7 +9,7 @@ from django.core.management.base import BaseCommand
 class Command(BaseCommand):
     help = (
         "Run the membership cron operations: expiration warnings, expired cleanup, "
-        "and committee pending-request notifications."
+        "committee pending-request notifications, and embargoed-members notifications."
     )
 
     @override
@@ -28,3 +28,4 @@ class Command(BaseCommand):
         call_command("membership_expiration_notifications", force=force)
         call_command("organization_sponsorship_expired_cleanup")
         call_command("membership_pending_requests", force=force)
+        call_command("membership_embargoed_members", force=force)

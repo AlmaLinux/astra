@@ -17,7 +17,7 @@ from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 
 from core.backends import FreeIPAUser
-from core.country_codes import country_code_status_from_user_data, is_valid_country_alpha2
+from core.country_codes import country_code_status_from_user_data, embargoed_country_codes_from_settings
 from core.email_context import freeform_message_email_context, organization_sponsor_email_context
 from core.forms_membership import (
     MembershipRejectForm,
@@ -53,15 +53,6 @@ from core.permissions import (
 from core.views_utils import _normalize_str, block_action_without_country_code
 
 logger = logging.getLogger(__name__)
-
-
-def _embargoed_country_codes() -> set[str]:
-    codes: set[str] = set()
-    for raw in settings.MEMBERSHIP_EMBARGOED_COUNTRY_CODES or []:
-        code = str(raw or "").strip().upper()
-        if code and is_valid_country_alpha2(code):
-            codes.add(code)
-    return codes
 
 
 def _membership_request_target_label(membership_request: MembershipRequest) -> str:
@@ -609,7 +600,7 @@ def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
         if target_user is not None:
             target_full_name = target_user.full_name
             status = country_code_status_from_user_data(target_user._user_data)
-            embargoed_country_codes = _embargoed_country_codes()
+            embargoed_country_codes = embargoed_country_codes_from_settings()
             if status.is_valid and status.code in embargoed_country_codes:
                 embargoed_country_code = status.code
 
