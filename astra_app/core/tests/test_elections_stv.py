@@ -9,6 +9,36 @@ from django.utils import timezone
 
 
 class STVTallyTests(TestCase):
+    def test_wikipedia_example(self) -> None:
+        from core.elections_meek import tally_meek
+
+        # Replicating the example from Wikipedia:
+        # https://en.wikipedia.org/wiki/Single_transferable_vote#Example_for_a_non-partisan_election
+        candidates = [
+            {"id": 10, "name": "Orange", "tiebreak_uuid": uuid.UUID("00000000-0000-0000-0000-000000000010")},
+            {"id": 11, "name": "Pear", "tiebreak_uuid": uuid.UUID("00000000-0000-0000-0000-000000000011")},
+            {"id": 12, "name": "Strawberry", "tiebreak_uuid": uuid.UUID("00000000-0000-0000-0000-000000000012")},
+            {"id": 13, "name": "Cake", "tiebreak_uuid": uuid.UUID("00000000-0000-0000-0000-000000000013")},
+            {"id": 14, "name": "Chocolate", "tiebreak_uuid": uuid.UUID("00000000-0000-0000-0000-000000000014")},
+            {"id": 15, "name": "Hamburger", "tiebreak_uuid": uuid.UUID("00000000-0000-0000-0000-000000000015")},
+            {"id": 16, "name": "Chicken", "tiebreak_uuid": uuid.UUID("00000000-0000-0000-0000-000000000016")},
+        ]
+        ballots = [
+            {"weight": 3, "ranking": [10, 11]},
+            {"weight": 8, "ranking": [11, 12, 13]},
+            {"weight": 1, "ranking": [12, 10, 11]},
+            {"weight": 3, "ranking": [13, 14]},
+            {"weight": 1, "ranking": [14, 13, 15]},
+            {"weight": 4, "ranking": [15, 16]},
+            {"weight": 3, "ranking": [16, 14, 15]},
+        ]
+
+        result = tally_meek(ballots=ballots, candidates=candidates, seats=3)
+        rounds = list(result.get("rounds") or [])
+
+        self.assertGreaterEqual(len(rounds), 1)
+        self.assertEqual(result["elected"], [11, 13, 15])
+
     def test_meek_does_not_elect_more_than_seats_in_single_iteration(self) -> None:
         from core.elections_meek import tally_meek
 
