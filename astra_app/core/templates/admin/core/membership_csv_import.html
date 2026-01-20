@@ -1,5 +1,10 @@
 {% extends "admin/import_export/import.html" %}
 
+{% load admin_urls %}
+{% load i18n %}
+{% load jazzmin %}
+{% get_jazzmin_ui_tweaks as jazzmin_ui %}
+
 {% block extrastyle %}
   {{ block.super }}
   <style>
@@ -8,77 +13,51 @@
       foreground/link contrast matches Django admin themes. Force readable
       colors in the preview table.
     */
-    /* table.import-preview {
+    table.import-preview {
       font-size: 14px;
       line-height: 1.35;
       width: 100%;
       table-layout: fixed;
+      background-color: var(--body-bg, #fff);
+      color: var(--body-color, #212529);
     }
 
     table.import-preview th,
     table.import-preview td {
-      overflow-wrap: anywhere;
-      word-break: break-word;
-      white-space: pre-wrap;
+      padding: 0.5rem;
       vertical-align: top;
-      color: var(--body-fg);
+      word-break: break-word;
+      color: var(--body-color, #212529);
     }
 
-    table.import-preview a,
-    table.import-preview a:visited {
-      color: var(--link-fg);
+    table.import-preview td ins {
+      background-color: #e6ffe6 !important;
     }
 
-    html[data-theme="dark"] table.import-preview tr.skip,
-    html[data-theme="dark"] table.import-preview tr.new,
-    html[data-theme="dark"] table.import-preview tr.update,
-    html[data-theme="dark"] table.import-preview tr.delete {
-      color: var(--body-fg);
+    table.import-preview a {
+      color: inherit;
+      text-decoration: underline;
     }
 
-    html[data-theme="dark"] table.import-preview td ins {
-      background-color: #183a18 !important;
-      color: var(--body-fg) !important;
+    table.import-preview tr.new {
+      background-color: rgba(25, 135, 84, 0.08);
     }
 
-    html[data-theme="dark"] table.import-preview td del {
-      background-color: #3a1818 !important;
-      color: var(--body-fg) !important;
+    table.import-preview tr.update {
+      background-color: rgba(255, 193, 7, 0.08);
     }
 
-    table.import-preview {
-      display: block;
-      overflow-x: auto;
-    } */
+    table.import-preview tr.delete {
+      background-color: rgba(220, 53, 69, 0.08);
+    }
 
     table.import-preview tr.skip {
-        background-color: lightgray;
-    }
-    table.import-preview tr.new {
-        background-color: lightblue;
-    }
-    table.import-preview td ins {
-        background-color: initial !important;
+      background-color: rgba(0, 0, 0, 0.03);
     }
   </style>
 {% endblock %}
 
 {% block extrahead %}
-  <script>
-    // Jazzmin's scripts assume a global `django` object (typically present on
-    // stock Django admin pages). The import-export pages don't always provide
-    // it, which can crash initialization and prevent subsequent JS from running.
-    window.django = window.django || {};
-    if (!window.django.jQuery && window.jQuery) {
-      window.django.jQuery = window.jQuery;
-    }
-  </script>
-  <script type="text/javascript" src="{% url 'admin:jsi18n' %}"></script>
-  {% if confirm_form %}
-    {{ confirm_form.media }}
-  {% else %}
-    {{ form.media }}
-  {% endif %}
   {{ block.super }}
   <script>
     (function () {
@@ -87,14 +66,14 @@
       }
 
       function chooseDelimiter(line) {
-        const candidates = [",", ";", "\t", "|"];
+        const candidates = [",", "\t", ";", "|"];
         let best = ",";
         let bestCount = -1;
-        for (const d of candidates) {
-          const count = (line.split(d).length - 1);
+        for (const delimiter of candidates) {
+          const count = (line.split(delimiter).length - 1);
           if (count > bestCount) {
             bestCount = count;
-            best = d;
+            best = delimiter;
           }
         }
         return best;
@@ -102,211 +81,182 @@
 
       function parseCsvRow(line, delimiter) {
         const out = [];
-        let cur = "";
+        let current = "";
         let inQuotes = false;
-        for (let i = 0; i < line.length; i++) {
+        for (let i = 0; i < line.length; i += 1) {
           const ch = line[i];
-          if (inQuotes) {
-            if (ch === '"') {
-              if (line[i + 1] === '"') {
-                cur += '"';
-                i++;
-              } else {
-                inQuotes = false;
-              }
-            } else {
-              cur += ch;
+          if (ch === '"') {
+            if (inQuotes && line[i + 1] === '"') {
+              current += '"';
+              i += 1;
+              continue;
             }
-          } else {
-            if (ch === '"') {
-              inQuotes = true;
-            } else if (ch === delimiter) {
-              out.push(cur.trim());
-              cur = "";
-            } else {
-              cur += ch;
-            }
+            inQuotes = !inQuotes;
+            continue;
           }
+          if (ch === delimiter && !inQuotes) {
+            out.push(current.trim());
+            current = "";
+            continue;
+          }
+          current += ch;
         }
-        out.push(cur.trim());
+        if (current || line.endsWith(delimiter)) {
+          out.push(current.trim());
+        }
         return out.filter(Boolean);
       }
 
       function pickHeader(headers, preferredNorms) {
-        const byNorm = new Map();
-        for (const h of headers) {
-          byNorm.set(norm(h), h);
-        }
-        for (const token of preferredNorms) {
-          const found = byNorm.get(token);
-          if (found) {
-            return found;
+        const normalized = headers.map((h) => ({ raw: h, norm: norm(h) }));
+        for (const preferred of preferredNorms) {
+          const match = normalized.find((item) => item.norm === norm(preferred));
+          if (match) {
+            return match.raw;
           }
         }
         return "";
       }
 
-      function setSelectOptions(selectEl, headers) {
-        while (selectEl.options.length) {
-          selectEl.remove(0);
+      function questionFieldVisibilityIsConsistent(questionRows, selectedType) {
+        if (!questionRows.length) {
+          return true;
         }
-        selectEl.add(new Option("Auto-detect", ""));
-        for (const h of headers) {
-          selectEl.add(new Option(h, h));
+        return questionRows.every((row) => {
+          const allowedRaw = row.dataset.membershipTypes || "";
+          if (!allowedRaw.trim()) {
+            return true;
+          }
+          const allowed = allowedRaw.split(",").map((v) => v.trim()).filter(Boolean);
+          const shouldShow = !selectedType || allowed.includes(selectedType);
+          return shouldShow === (row.style.display !== "none");
+        });
+      }
+
+      function toggleQuestionFields(questionRows, selectedType) {
+        if (!questionRows.length) {
+          return;
+        }
+        for (const row of questionRows) {
+          const allowedRaw = row.dataset.membershipTypes || "";
+          if (!allowedRaw.trim()) {
+            row.style.display = "";
+            continue;
+          }
+          const allowed = allowedRaw.split(",").map((v) => v.trim()).filter(Boolean);
+          const shouldShow = !selectedType || allowed.includes(selectedType);
+          row.style.display = shouldShow ? "" : "none";
         }
       }
 
       function initWhenReady() {
         const membershipTypeSelect = document.getElementById("id_membership_type");
-        if (!membershipTypeSelect) {
-          return false;
-        }
-
-        function currentMembershipTypeValue() {
-          if (membershipTypeSelect && membershipTypeSelect.value) {
-            return membershipTypeSelect.value;
-          }
-
-          // Select2 can temporarily leave the underlying <select> with an empty
-          // value while it initializes. Fall back to the rendered selection.
-          const rendered = document.getElementById("select2-id_membership_type-container");
-          const renderedNorm = rendered ? norm(rendered.textContent) : "";
-          if (renderedNorm.includes("mirror")) {
-            return "mirror";
-          }
-          if (renderedNorm.includes("individual")) {
-            return "individual";
-          }
-          return "";
-        }
-
-        function fieldRowForId(fieldId) {
-          const el = document.getElementById(fieldId);
-          if (!el) {
-            return null;
-          }
-
-          // django-import-export's import template uses Django admin-ish markup,
-          // but not always the exact same wrappers. We want to hide/show the
-          // whole row (label + widget + help), not just the <select> wrapper.
-          const byClosest =
-            (el.closest && (el.closest(".form-row") || el.closest(".form-group"))) ||
-            null;
-          if (byClosest) {
-            return byClosest;
-          }
-
-          const label = document.querySelector("label[for='" + fieldId + "']");
-          if (label) {
-            const labelRow =
-              (label.closest && (label.closest(".form-row") || label.closest(".form-group"))) ||
-              null;
-            if (labelRow) {
-              return labelRow;
-            }
-            return label.parentElement;
-          }
-
-          return el.parentElement;
-        }
-
-        function toggleQuestionFields() {
-          if (!membershipTypeSelect) {
-            return;
-          }
-
-          const isMirror = currentMembershipTypeValue() === "mirror";
-
-          const contributionsRow = fieldRowForId("id_q_contributions_column");
-          const domainRow = fieldRowForId("id_q_domain_column");
-          const pullRequestRow = fieldRowForId("id_q_pull_request_column");
-          const additionalInfoRow = fieldRowForId("id_q_additional_info_column");
-
-          if (contributionsRow) {
-            contributionsRow.style.display = isMirror ? "none" : "";
-          }
-          if (domainRow) {
-            domainRow.style.display = isMirror ? "" : "none";
-          }
-          if (pullRequestRow) {
-            pullRequestRow.style.display = isMirror ? "" : "none";
-          }
-          if (additionalInfoRow) {
-            additionalInfoRow.style.display = isMirror ? "" : "none";
-          }
-        }
-
-        function questionFieldVisibilityIsConsistent() {
-          const isMirror = currentMembershipTypeValue() === "mirror";
-          const contributionsRow = fieldRowForId("id_q_contributions_column");
-          const domainRow = fieldRowForId("id_q_domain_column");
-          const pullRequestRow = fieldRowForId("id_q_pull_request_column");
-          const additionalInfoRow = fieldRowForId("id_q_additional_info_column");
-
-          // If fields aren't present on this page, don't block.
-          if (!contributionsRow && !domainRow && !pullRequestRow && !additionalInfoRow) {
-            return true;
-          }
-
-          if (isMirror) {
-            const mirrorRows = [domainRow, pullRequestRow, additionalInfoRow].filter(Boolean);
-            if (!mirrorRows.length) {
-              return true;
-            }
-            return mirrorRows.every((r) => r.style.display !== "none");
-          }
-
-          if (contributionsRow) {
-            return contributionsRow.style.display !== "none";
-          }
-          return true;
-        }
-
-        const fields = {
-          email: document.getElementById("id_email_column"),
-          name: document.getElementById("id_name_column"),
-          active: document.getElementById("id_active_member_column"),
-          start: document.getElementById("id_membership_start_date_column"),
-          notes: document.getElementById("id_committee_notes_column"),
-          type: document.getElementById("id_membership_type_column"),
-        };
-
+        const fileInput = document.getElementById("id_import_file");
+        const formatSelect = document.getElementById("id_format");
         const headerList = document.getElementById("csv-header-preview");
         const headerListItems = document.getElementById("csv-header-preview-items");
 
-        function applyHeaders(headers) {
-          const selects = Array.from(document.querySelectorAll("select[id$='_column']"));
-          for (const sel of selects) {
-            setSelectOptions(sel, headers);
-          }
+        const fieldIds = {
+          email: "id_email_column",
+          name: "id_name_column",
+          active: "id_active_member_column",
+          start: "id_membership_start_date_column",
+          notes: "id_committee_notes_column",
+          type: "id_membership_type_column",
+        };
 
-          if (fields.email && !fields.email.value) {
-            fields.email.value = pickHeader(headers, ["email", "emailaddress", "mail"]);
+        const fields = {
+          email: document.getElementById(fieldIds.email),
+          name: document.getElementById(fieldIds.name),
+          active: document.getElementById(fieldIds.active),
+          start: document.getElementById(fieldIds.start),
+          notes: document.getElementById(fieldIds.notes),
+          type: document.getElementById(fieldIds.type),
+        };
+
+        const selects = Array.from(document.querySelectorAll("select[data-preferred-norms]"));
+        const questionRows = Array.from(document.querySelectorAll("[data-membership-types]"));
+
+        if (!fileInput && !selects.length && !membershipTypeSelect && !formatSelect) {
+          return false;
+        }
+
+        function ensureCsvFormatSelected() {
+          if (!formatSelect) {
+            return;
           }
-          if (fields.name && !fields.name.value) {
-            fields.name.value = pickHeader(headers, ["name", "fullname", "fullname", "displayname"]);
+          const options = Array.from(formatSelect.options || []);
+          const csvOption = options.find((opt) => {
+            const valueNorm = norm(opt.value);
+            const labelNorm = norm(opt.text || opt.label || "");
+            return valueNorm.includes("csv") || labelNorm.includes("csv");
+          });
+          if (csvOption) {
+            formatSelect.value = csvOption.value;
           }
-          if (fields.active && !fields.active.value) {
-            fields.active.value = pickHeader(headers, ["activemember", "active", "status", "memberstatus"]);
+        }
+
+        function populateSelectOptions(headers) {
+          const optionTargets = Array.from(new Set([...Object.values(fields).filter(Boolean), ...selects]));
+          for (const select of optionTargets) {
+            const current = select.value;
+            select.options.length = 0;
+            const autoOption = document.createElement("option");
+            autoOption.value = "";
+            autoOption.textContent = "Auto-detect";
+            select.appendChild(autoOption);
+            for (const header of headers) {
+              const opt = document.createElement("option");
+              opt.value = header;
+              opt.textContent = header;
+              select.appendChild(opt);
+            }
+            if (current) {
+              select.value = current;
+            }
+            if (window.jQuery) {
+              try {
+                window.jQuery(select).trigger("change.select2");
+              } catch (e) {
+                // Ignore if select2 is not bound.
+              }
+            }
           }
-          if (fields.start && !fields.start.value) {
-            fields.start.value = pickHeader(headers, ["membershipstartdate", "startdate", "memberstartdate"]);
-          }
-          if (fields.notes && !fields.notes.value) {
-            fields.notes.value = pickHeader(headers, ["committeenotes", "notes", "committee"]);
-          }
-          if (fields.type && !fields.type.value) {
-            fields.type.value = pickHeader(headers, ["membershiptype", "type", "level"]);
+        }
+
+        function applyHeaders(headers) {
+          populateSelectOptions(headers);
+          const picks = {
+            email: ["email", "emailaddress", "mail"],
+            name: ["name", "fullname", "displayname"],
+            active: ["activemember", "active", "status", "memberstatus"],
+            start: ["membershipstartdate", "startdate", "memberstartdate"],
+            notes: ["committeenotes", "notes", "committee"],
+            type: ["membershiptype", "type", "level"],
+          };
+
+          for (const key of Object.keys(fields)) {
+            const field = fields[key];
+            if (!field || field.tagName !== "SELECT" || field.value) {
+              continue;
+            }
+            const picked = pickHeader(headers, picks[key] || []);
+            if (picked) {
+              field.value = picked;
+            }
           }
 
           for (const sel of selects) {
             if (sel.value) {
               continue;
             }
-            const preferred = (sel.dataset && sel.dataset.preferredNorms) ? sel.dataset.preferredNorms : "";
+            const preferred = sel.dataset.preferredNorms || "";
             const preferredNorms = preferred.split("|").map(norm).filter(Boolean);
             if (preferredNorms.length) {
-              sel.value = pickHeader(headers, preferredNorms);
+              const picked = pickHeader(headers, preferredNorms);
+              if (picked) {
+                sel.value = picked;
+              }
             }
           }
 
@@ -316,7 +266,6 @@
           }
         }
 
-        const fileInput = document.getElementById("id_import_file");
         if (fileInput) {
           fileInput.addEventListener("change", function () {
             const file = fileInput.files && fileInput.files[0];
@@ -324,6 +273,7 @@
               return;
             }
 
+            ensureCsvFormatSelected();
             const reader = new FileReader();
             reader.onload = function () {
               const text = (reader.result || "").toString();
@@ -342,33 +292,30 @@
           });
         }
 
-        membershipTypeSelect.addEventListener("change", toggleQuestionFields);
+        function updateQuestionVisibility() {
+          const selected = membershipTypeSelect ? membershipTypeSelect.value : "";
+          toggleQuestionFields(questionRows, selected);
+        }
 
-        // If Select2 is present, it emits events via jQuery rather than the DOM.
-        if (window.jQuery) {
-          try {
-            window.jQuery(membershipTypeSelect).on("change select2:select select2:clear", toggleQuestionFields);
-          } catch (e) {
-            // If jQuery is present but can't bind for any reason, ignore.
+        if (membershipTypeSelect) {
+          membershipTypeSelect.addEventListener("change", updateQuestionVisibility);
+          if (window.jQuery) {
+            try {
+              window.jQuery(membershipTypeSelect).on("change select2:select select2:clear", updateQuestionVisibility);
+            } catch (e) {
+              // Ignore binding errors.
+            }
           }
         }
 
-        toggleQuestionFields();
+        updateQuestionVisibility();
+        ensureCsvFormatSelected();
 
-        // Also re-run once Select2 has had a chance to initialize the original
-        // <select> value from the rendered selection.
-        setTimeout(toggleQuestionFields, 0);
-        setTimeout(toggleQuestionFields, 250);
-
-        // Select2 initialization timing is inconsistent across admin themes.
-        // Keep re-applying the toggle briefly until the UI matches the selected
-        // membership type.
         let toggleAttempts = 0;
         const toggleTimer = setInterval(function () {
           toggleAttempts += 1;
-          toggleQuestionFields();
-
-          if (questionFieldVisibilityIsConsistent() || toggleAttempts >= 30) {
+          updateQuestionVisibility();
+          if (questionFieldVisibilityIsConsistent(questionRows, membershipTypeSelect ? membershipTypeSelect.value : "") || toggleAttempts >= 30) {
             clearInterval(toggleTimer);
           }
         }, 100);
@@ -377,8 +324,6 @@
       }
 
       function boot() {
-        // If this script executes after DOMContentLoaded, we still need to
-        // initialize. Retry briefly until the form fields exist.
         let attempts = 0;
         const timer = setInterval(function () {
           attempts += 1;
@@ -395,6 +340,114 @@
       }
     })();
   </script>
+
+  {% if confirm_form %}
+    <script>
+      (function () {
+        function parseSelected(raw) {
+          const out = new Set();
+          if (!raw) {
+            return out;
+          }
+          for (const part of raw.split(",")) {
+            const trimmed = (part || "").toString().trim();
+            if (!trimmed) {
+              continue;
+            }
+            const n = Number.parseInt(trimmed, 10);
+            if (Number.isFinite(n) && n > 0) {
+              out.add(n);
+            }
+          }
+          return out;
+        }
+
+        function setToCsv(set) {
+          return Array.from(set).sort((a, b) => a - b).join(",");
+        }
+
+        function bootSelection() {
+          const selectedInput = document.querySelector("input[name='selected_row_numbers']");
+          if (!selectedInput) {
+            return;
+          }
+
+          const allMatchInput = document.getElementById("id_all_match_row_numbers");
+          const allMatchCsv = allMatchInput ? (allMatchInput.value || "") : "";
+          const selectAll = document.getElementById("id_select_all_matches");
+          const checkboxes = Array.from(document.querySelectorAll("input.js-match-select[data-row-number]"));
+
+          function applySelectedToCheckboxes(selected) {
+            for (const cb of checkboxes) {
+              const n = Number.parseInt(cb.dataset.rowNumber || "", 10);
+              cb.checked = Number.isFinite(n) ? selected.has(n) : false;
+            }
+          }
+
+          function updateSelectAllState(selected) {
+            if (!selectAll) {
+              return;
+            }
+            const allSet = parseSelected(allMatchCsv);
+            selectAll.checked = allSet.size > 0 && allSet.size === selected.size;
+          }
+
+          function saveSelected(selected) {
+            selectedInput.value = setToCsv(selected);
+            updateSelectAllState(selected);
+          }
+
+          let selected = parseSelected(selectedInput.value);
+          applySelectedToCheckboxes(selected);
+          updateSelectAllState(selected);
+
+          for (const cb of checkboxes) {
+            cb.addEventListener("change", function () {
+              const n = Number.parseInt(cb.dataset.rowNumber || "", 10);
+              if (!Number.isFinite(n) || n <= 0) {
+                return;
+              }
+              if (cb.checked) {
+                selected.add(n);
+              } else {
+                selected.delete(n);
+              }
+              saveSelected(selected);
+            });
+          }
+
+          if (selectAll) {
+            selectAll.addEventListener("change", function () {
+              selected = selectAll.checked ? parseSelected(allMatchCsv) : new Set();
+              applySelectedToCheckboxes(selected);
+              saveSelected(selected);
+            });
+          }
+
+          for (const link of Array.from(document.querySelectorAll("a.js-preview-page-link"))) {
+            link.addEventListener("click", function () {
+              if (!selectedInput.value) {
+                return;
+              }
+              try {
+                const url = new URL(link.href, window.location.href);
+                url.searchParams.set("selected_row_numbers", selectedInput.value);
+                link.href = url.toString();
+              } catch (err) {
+                // If URL manipulation fails, fall back to the original link.
+              }
+            });
+          }
+        }
+
+        if (document.readyState === "loading") {
+          document.addEventListener("DOMContentLoaded", bootSelection);
+        } else {
+          bootSelection();
+        }
+      })();
+    </script>
+  {% endif %}
 {% endblock %}
 
 {% block import_form_additional_info %}
@@ -402,18 +455,314 @@
 {% endblock %}
 
 {% block content %}
-  {% if not confirm_form %}
-    {# Jazzmin's import-export template doesn't render `import_form_additional_info`. #}
-    {% include "admin/core/_membership_csv_import_additional_info.html" %}
-  {% endif %}
+  <div class="col-12">
+    {% if unmatched_download_url %}
+      <div class="messagelist">
+        <ul class="messagelist">
+          <li class="warning">Unmatched users export: <a href="{{ unmatched_download_url }}">download CSV</a></li>
+        </ul>
+      </div>
+    {% endif %}
 
-  {% if unmatched_download_url %}
-    <div class="messagelist">
-      <ul class="messagelist">
-        <li class="warning">Unmatched users export: <a href="{{ unmatched_download_url }}">download CSV</a></li>
-      </ul>
-    </div>
-  {% endif %}
+    {% if confirm_form %}
+      <form action="{% url opts|admin_urlname:"process_import" %}" method="POST">
+        {% csrf_token %}
+        <div class="row">
+          <div class="col-12 col-lg-9">
+            <div class="card">
+              <div class="card-header">
+                <div class="card-title">{% trans 'Confirm Import' %}</div>
+              </div>
+              <div class="card-body">
+                {{ confirm_form.as_p }}
+                <p>
+                  {% trans "Below is a preview of data to be imported. If you are satisfied with the results, click 'Confirm import'" %}
+                </p>
+              </div>
+            </div>
+          </div>
+          <div class="col-12 col-lg-3">
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">
+                  <i class="fas fa-edit"></i>
+                  {% trans 'Actions' %}
+                </h3>
+              </div>
+              <div class="card-body">
+                <div class="form-group">
+                  <input type="submit" class="btn {{ jazzmin_ui.button_classes.success }} form-control" name="confirm" value="{% trans 'Confirm import' %}">
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
 
-  {{ block.super }}
+        <input type="hidden" id="id_all_match_row_numbers" value="{{ all_match_row_numbers_csv|default:"" }}">
+
+        {% if csv_stats %}
+          <div class="row mt-3">
+            <div class="col-12">
+              <div class="card">
+                <div class="card-header">
+                  <div class="card-title">CSV match stats</div>
+                </div>
+                <div class="card-body">
+                  Total rows: <strong>{{ csv_stats.total_records }}</strong><br>
+                  Matched: <strong>{{ csv_stats.matched_total }}</strong> ({{ csv_stats.matched_total_percent }}%)<br>
+                  Matched by email: <strong>{{ csv_stats.matched_by_email }}</strong><br>
+                  Matched by name: <strong>{{ csv_stats.matched_by_name }}</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+        {% endif %}
+
+        {% if result %}
+          {% if result.has_errors or result.has_validation_errors %}
+            <div class="row mt-3">
+              <div class="col-12">
+                <div class="card">
+                  <div class="card-header">
+                    <div class="card-title">Import errors</div>
+                  </div>
+                  <div class="card-body">
+                    {% if result.has_errors %}
+                      <strong>Errors</strong>
+                      <ul>
+                        {% for error in result.base_errors %}
+                          <li>{{ error.error }}</li>
+                        {% endfor %}
+                        {% for line, errors in result.row_errors %}
+                          {% for error in errors %}
+                            <li>Line {{ line }}: {{ error.error }}</li>
+                          {% endfor %}
+                        {% endfor %}
+                      </ul>
+                    {% endif %}
+
+                    {% if result.has_validation_errors %}
+                      <strong>Validation errors</strong>
+                      <ul>
+                        {% for error in result.invalid_rows %}
+                          <li>Line {{ error.number }}: {{ error.error }}</li>
+                        {% endfor %}
+                      </ul>
+                    {% endif %}
+                  </div>
+                </div>
+              </div>
+            </div>
+          {% else %}
+            <div class="row mt-3">
+              <div class="col-12">
+                <div class="card">
+                  <div class="card-header">
+                    <div class="card-title">Matches</div>
+                  </div>
+                  <div class="card-body">
+                    <div class="form-group">
+                      <label for="id_select_all_matches" style="display: inline-block; margin-right: 0.5rem;">Select all</label>
+                      <input id="id_select_all_matches" type="checkbox">
+                    </div>
+
+                    <table class="import-preview">
+                      <thead>
+                        <tr>
+                          <th></th>
+                          <th>Row</th>
+                          <th></th>
+                          {% for field in result.diff_headers %}
+                            <th>{{ field }}</th>
+                          {% endfor %}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {% for row in matches_page_obj %}
+                          <tr class="{{ row.import_type }}">
+                            <td>
+                              <input class="js-match-select" type="checkbox" data-row-number="{{ row.astra_row_number }}">
+                            </td>
+                            <td>{{ row.astra_row_number }}</td>
+                            <td class="import-type">
+                              {% if row.import_type == 'new' %}
+                                New
+                              {% elif row.import_type == 'skip' %}
+                                Skipped
+                              {% elif row.import_type == 'delete' %}
+                                Delete
+                              {% elif row.import_type == 'update' %}
+                                Update
+                              {% endif %}
+                            </td>
+                            {% for field in row.diff %}
+                              <td>{{ field }}</td>
+                            {% endfor %}
+                          </tr>
+                        {% empty %}
+                          <tr>
+                            <td colspan="{{ result.diff_headers|length|add:3 }}">No matches.</td>
+                          </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+
+                    {% if matches_page_obj and matches_page_obj.paginator.num_pages|default:0 > 1 %}
+                      <div class="paginator">
+                        {% if matches_page_obj.has_previous %}
+                          <a class="js-preview-page-link" href="?matches_page={{ matches_page_obj.previous_page_number }}&skipped_page={{ skipped_page_obj.number|default:1 }}">Previous</a>
+                        {% endif %}
+                        <span>Page {{ matches_page_obj.number }} of {{ matches_page_obj.paginator.num_pages }}</span>
+                        {% if matches_page_obj.has_next %}
+                          <a class="js-preview-page-link" href="?matches_page={{ matches_page_obj.next_page_number }}&skipped_page={{ skipped_page_obj.number|default:1 }}">Next</a>
+                        {% endif %}
+                      </div>
+                    {% endif %}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="row mt-3">
+              <div class="col-12">
+                <div class="card">
+                  <div class="card-header">
+                    <div class="card-title">Skipped</div>
+                  </div>
+                  <div class="card-body">
+                    <table class="import-preview">
+                      <thead>
+                        <tr>
+                          <th>Row</th>
+                          <th></th>
+                          {% for field in result.diff_headers %}
+                            <th>{{ field }}</th>
+                          {% endfor %}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {% for row in skipped_page_obj %}
+                          <tr class="{{ row.import_type }}">
+                            <td>{{ row.astra_row_number }}</td>
+                            <td class="import-type">
+                              {% if row.import_type == 'new' %}
+                                New
+                              {% elif row.import_type == 'skip' %}
+                                Skipped
+                              {% elif row.import_type == 'delete' %}
+                                Delete
+                              {% elif row.import_type == 'update' %}
+                                Update
+                              {% endif %}
+                            </td>
+                            {% for field in row.diff %}
+                              <td>{{ field }}</td>
+                            {% endfor %}
+                          </tr>
+                        {% empty %}
+                          <tr>
+                            <td colspan="{{ result.diff_headers|length|add:2 }}">No skipped rows.</td>
+                          </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+
+                    {% if skipped_page_obj and skipped_page_obj.paginator.num_pages|default:0 > 1 %}
+                      <div class="paginator">
+                        {% if skipped_page_obj.has_previous %}
+                          <a class="js-preview-page-link" href="?matches_page={{ matches_page_obj.number|default:1 }}&skipped_page={{ skipped_page_obj.previous_page_number }}">Previous</a>
+                        {% endif %}
+                        <span>Page {{ skipped_page_obj.number }} of {{ skipped_page_obj.paginator.num_pages }}</span>
+                        {% if skipped_page_obj.has_next %}
+                          <a class="js-preview-page-link" href="?matches_page={{ matches_page_obj.number|default:1 }}&skipped_page={{ skipped_page_obj.next_page_number }}">Next</a>
+                        {% endif %}
+                      </div>
+                    {% endif %}
+                  </div>
+                </div>
+              </div>
+            </div>
+          {% endif %}
+        {% endif %}
+      </form>
+    {% else %}
+      <form action="" method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div class="row">
+          <div class="col-12 col-lg-9">
+            <div class="card">
+              <div class="card-header">
+                <div class="card-title">{% trans 'Confirm Import' %}</div>
+              </div>
+              <div class="card-body">
+                {% for field in form %}
+                  {% if field.name == "format" %}
+                    {# Format is inferred; skip rendering. #}
+                  {% elif field.name == "import_file" %}
+                    <div class="form-group field-name">
+                      <div class="row">
+                        {{ field.errors }}
+                        <div class="col-sm-2 text-left">{{ field.label_tag }}</div>
+                        <div class="col-sm-10 text-left">
+                          {{ field }}
+                          <div id="csv-header-preview" class="help mt-1" style="display: none;">
+                            <strong>Detected CSV headers:</strong>
+                            <span id="csv-header-preview-items"></span>
+                          </div>
+                        </div>
+                        <div class="help-block red">
+                          {% if field.field.help_text %}
+                            {{ field.field.help_text|safe }}
+                          {% endif %}
+                        </div>
+                      </div>
+                    </div>
+                  {% else %}
+                    <div class="form-group field-name">
+                      <div class="row">
+                        {{ field.errors }}
+                        <div class="col-sm-2 text-left">{{ field.label_tag }}</div>
+                        <div class="col-sm-10 text-left">{{ field }}</div>
+                        <div class="help-block red">
+                          {% if field.field.help_text %}
+                            {{ field.field.help_text|safe }}
+                          {% endif %}
+                        </div>
+                      </div>
+                    </div>
+                  {% endif %}
+                {% endfor %}
+                {% include "admin/core/_membership_csv_import_additional_info.html" %}
+                {% if fields %}
+                  <p>
+                    <b>{% trans "This importer will import the following fields: " %}</b>
+                    <ul>
+                      {% for field in fields %}
+                        <li>{{ field }}</li>
+                      {% endfor %}
+                    </ul>
+                  </p>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+          <div class="col-12 col-lg-3">
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">
+                  <i class="fas fa-edit"></i>
+                  {% trans 'Actions' %}
+                </h3>
+              </div>
+              <div class="card-body">
+                <div class="form-group">
+                  <input type="submit" class="btn {{ jazzmin_ui.button_classes.success }} form-control" name="confirm" value="{% trans 'Submit' %}">
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </form>
+    {% endif %}
+  </div>
 {% endblock %}

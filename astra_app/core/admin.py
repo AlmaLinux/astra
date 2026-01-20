@@ -14,6 +14,7 @@ from django.contrib.auth.models import User as DjangoUser
 from django.contrib.contenttypes.models import ContentType
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied
+from django.core.paginator import Paginator
 from django.http import Http404, HttpRequest, HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import redirect
 from django.template.response import TemplateResponse
@@ -21,7 +22,9 @@ from django.urls import path, reverse
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 from import_export.admin import ImportMixin
+from import_export.formats import base_formats
 from python_freeipa import exceptions
+from tablib import Dataset
 
 from core.agreements import missing_required_agreements_for_user_in_group
 from core.chatnicknames import normalize_chat_channels_text
@@ -1486,6 +1489,10 @@ class MembershipCSVImportLinkAdmin(ImportMixin, admin.ModelAdmin):
     @override
     def has_add_permission(self, request: HttpRequest) -> bool:
         return False
+    
+    @override
+    def get_import_formats(self) -> list[type[base_formats.Format]]:
+        return [base_formats.CSV]
 
     @override
     def has_delete_permission(self, request: HttpRequest, obj: object | None = None) -> bool:
@@ -1542,6 +1549,9 @@ class MembershipCSVImportLinkAdmin(ImportMixin, admin.ModelAdmin):
                 and value
             ):
                 initial[key] = value
+
+        if import_form.cleaned_data.get("enable_name_matching"):
+            initial["enable_name_matching"] = "on"
         return initial
 
     @override
@@ -1577,6 +1587,12 @@ class MembershipCSVImportLinkAdmin(ImportMixin, admin.ModelAdmin):
                 if value:
                     extra[key] = value
 
+            raw_enable = cleaned_data.get("enable_name_matching")
+            if isinstance(raw_enable, bool):
+                extra["enable_name_matching"] = raw_enable
+            elif isinstance(raw_enable, str):
+                extra["enable_name_matching"] = raw_enable.strip().lower() in {"1", "y", "yes", "true", "t", "on"}
+
         question_column_overrides: dict[str, str] = {}
         if isinstance(cleaned_data, dict):
             for key, value in cleaned_data.items():
@@ -1598,6 +1614,43 @@ class MembershipCSVImportLinkAdmin(ImportMixin, admin.ModelAdmin):
         }
 
     @override
+    def process_dataset(self, dataset: Any, confirm_form: forms.Form, request: HttpRequest, **kwargs: Any) -> Any:
+        cleaned_data = getattr(confirm_form, "cleaned_data", None)
+        selected_raw = cleaned_data.get("selected_row_numbers") if isinstance(cleaned_data, dict) else ""
+        selected_numbers: list[int] = []
+        if isinstance(selected_raw, str):
+            for part in selected_raw.split(","):
+                part = part.strip()
+                if not part:
+                    continue
+                try:
+                    selected_numbers.append(int(part))
+                except ValueError:
+                    continue
+
+        # If selection is blank (or invalid), keep default behavior.
+        if not selected_numbers:
+            return super().process_dataset(dataset, confirm_form, request, **kwargs)
+
+        # import-export row numbers are 1-based; Dataset rows are 0-based.
+        try:
+            headers = list(dataset.headers or [])
+        except Exception:
+            headers = []
+
+        filtered = Dataset(headers=headers)
+        for n in sorted(set(selected_numbers)):
+            if n <= 0:
+                continue
+            idx = n - 1
+            try:
+                filtered.append(dataset[idx])
+            except Exception:
+                continue
+
+        return super().process_dataset(filtered, confirm_form, request, **kwargs)
+
+    @override
     def import_action(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         response = super().import_action(request, *args, **kwargs)
         if isinstance(response, TemplateResponse):
@@ -1605,6 +1658,78 @@ class MembershipCSVImportLinkAdmin(ImportMixin, admin.ModelAdmin):
             unmatched_url = getattr(result, "unmatched_download_url", "") if result is not None else ""
             if unmatched_url:
                 response.context_data["unmatched_download_url"] = unmatched_url
+
+            confirm_form = response.context_data.get("confirm_form") if response.context_data else None
+            if result is not None and response.context_data is not None:
+                response.context_data["csv_stats"] = {
+                    "total_records": getattr(result, "csv_total_records", 0),
+                    "matched_by_email": getattr(result, "matched_by_email", 0),
+                    "matched_by_name": getattr(result, "matched_by_name", 0),
+                    "matched_total": getattr(result, "matched_total", 0),
+                    "matched_total_percent": getattr(result, "matched_total_percent", 0.0),
+                }
+
+            if result is not None and confirm_form is not None and response.context_data is not None:
+                valid_rows_obj = getattr(result, "valid_rows", None)
+                if callable(valid_rows_obj):
+                    valid_rows = list(valid_rows_obj() or [])
+                else:
+                    valid_rows = list(valid_rows_obj or [])
+                matches: list[Any] = []
+                skipped: list[Any] = []
+                match_row_numbers: list[int] = []
+
+                for idx, row_result in enumerate(valid_rows, start=1):
+                    instance = row_result.instance if hasattr(row_result, "instance") else None
+                    import_type = row_result.import_type if hasattr(row_result, "import_type") else ""
+                    if import_type:
+                        is_match = import_type != "skip"
+                    elif instance is not None and hasattr(instance, "_decision"):
+                        is_match = instance._decision == "IMPORT"
+                    else:
+                        is_match = False
+
+                    number = getattr(row_result, "number", None)
+                    if number is None:
+                        number = getattr(getattr(row_result, "row", None), "number", None)
+                    if number is None:
+                        number = getattr(getattr(row_result, "original", None), "number", None)
+                    if number is None:
+                        number = idx
+                    try:
+                        row_result.astra_row_number = int(number)
+                    except (TypeError, ValueError):
+                        row_result.astra_row_number = idx
+
+                    if is_match:
+                        matches.append(row_result)
+                        match_row_numbers.append(row_result.astra_row_number)
+                    else:
+                        skipped.append(row_result)
+
+                try:
+                    per_page = int(request.GET.get("per_page", "50"))
+                except ValueError:
+                    per_page = 50
+                per_page = max(per_page, 50)
+
+                matches_paginator = Paginator(matches, per_page)
+                skipped_paginator = Paginator(skipped, per_page)
+
+                matches_page_number = request.GET.get("matches_page") or "1"
+                skipped_page_number = request.GET.get("skipped_page") or "1"
+                response.context_data["matches_page_obj"] = matches_paginator.get_page(matches_page_number)
+                response.context_data["skipped_page_obj"] = skipped_paginator.get_page(skipped_page_number)
+
+                if match_row_numbers:
+                    selected_default = ",".join(str(n) for n in sorted(set(match_row_numbers)))
+                    response.context_data["all_match_row_numbers_csv"] = selected_default
+
+                    selected_from_query = request.GET.get("selected_row_numbers", "")
+                    if selected_from_query:
+                        confirm_form.initial["selected_row_numbers"] = selected_from_query
+                    else:
+                        confirm_form.initial.setdefault("selected_row_numbers", selected_default)
         return response
 
     @override

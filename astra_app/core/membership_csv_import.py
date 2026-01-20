@@ -35,6 +35,11 @@ def _normalize_email(value: object) -> str:
     return _normalize_str(value).lower()
 
 
+def _normalize_name(value: object) -> str:
+    raw = _normalize_str(value).lower()
+    return "".join(ch for ch in raw if ch.isalnum())
+
+
 def _parse_bool(value: object) -> bool:
     normalized = _normalize_str(value).lower()
     if not normalized:
@@ -135,9 +140,23 @@ class MembershipCSVImportForm(ImportForm):
         help_text="Optional: select the CSV header for the membership type column. Leave as Auto-detect to infer.",
     )
 
+    enable_name_matching = forms.BooleanField(
+        required=False,
+        initial=False,
+        help_text=(
+            "Optional: after attempting email matching, also attempt to match remaining rows by name. "
+            "This is flakier and is best used as a second pass on the unmatched export."
+        ),
+    )
+
     @override
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
+
+        format_field = self.fields.get("format")
+        if format_field is not None and len(format_field.choices) == 1:
+            format_field.initial = format_field.choices[0][0]
+            format_field.widget = forms.HiddenInput()
 
         # Always show question-mapping dropdowns on the initial form. Choices
         # are populated client-side (via JS) and server-side (once a file is
@@ -208,6 +227,9 @@ class MembershipCSVConfirmImportForm(ConfirmImportForm):
     committee_notes_column = forms.CharField(required=False, widget=forms.HiddenInput)
     membership_type_column = forms.CharField(required=False, widget=forms.HiddenInput)
 
+    enable_name_matching = forms.CharField(required=False, widget=forms.HiddenInput)
+    selected_row_numbers = forms.CharField(required=False, widget=forms.HiddenInput)
+
     @override
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -251,6 +273,7 @@ class MembershipCSVImportResource(resources.ModelResource):
         *,
         membership_type: MembershipType | None = None,
         actor_username: str = "",
+        enable_name_matching: bool = False,
         email_column: str = "",
         name_column: str = "",
         active_member_column: str = "",
@@ -262,6 +285,8 @@ class MembershipCSVImportResource(resources.ModelResource):
         super().__init__()
         self._membership_type = membership_type
         self._actor_username = actor_username
+
+        self._enable_name_matching = bool(enable_name_matching)
 
         self._email_column_override = email_column
         self._name_column_override = name_column
@@ -284,6 +309,12 @@ class MembershipCSVImportResource(resources.ModelResource):
         self._email_to_usernames: dict[str, set[str]] = {}
         self._email_lookup_cache: dict[str, set[str]] = {}
         self._unmatched: list[dict[str, str]] = []
+
+        self._name_to_usernames: dict[str, set[str]] = {}
+
+        self._csv_total_records = 0
+        self._matched_by_email = 0
+        self._matched_by_name = 0
 
         # Operator visibility: keep counts so we can summarize why rows are skipped.
         self._decision_counts: dict[str, int] = {}
@@ -357,6 +388,13 @@ class MembershipCSVImportResource(resources.ModelResource):
         self._decision_counts = {}
         self._skip_reason_counts = {}
 
+        try:
+            self._csv_total_records = len(dataset)
+        except Exception:
+            self._csv_total_records = 0
+        self._matched_by_email = 0
+        self._matched_by_name = 0
+
         headers = list(dataset.headers or [])
         if not headers:
             raise ValueError("CSV has no headers")
@@ -427,6 +465,7 @@ class MembershipCSVImportResource(resources.ModelResource):
         # Prefer a full (cached) directory scan for large imports, but fall
         # back to per-email search if listing is unavailable in this deployment.
         self._email_to_usernames = {}
+        self._name_to_usernames = {}
         users = FreeIPAUser.all()
         if not users:
             logger.warning(
@@ -438,6 +477,11 @@ class MembershipCSVImportResource(resources.ModelResource):
             if not email or not username:
                 continue
             self._email_to_usernames.setdefault(email, set()).add(username)
+
+            if self._enable_name_matching:
+                key = _normalize_name(user.full_name)
+                if key:
+                    self._name_to_usernames.setdefault(key, set()).add(username)
 
         logger.info(
             "Membership CSV import: headers=%d email_header=%r name_header=%r active_header=%r start_header=%r note_header=%r type_header=%r freeipa_users=%d unique_emails=%d",
@@ -498,6 +542,42 @@ class MembershipCSVImportResource(resources.ModelResource):
         )
         return usernames
 
+    def _usernames_for_name(self, name: str) -> set[str]:
+        if not self._enable_name_matching:
+            return set()
+
+        key = _normalize_name(name)
+        if not key:
+            return set()
+        return set(self._name_to_usernames.get(key, set()))
+
+    def _match_username_for_row(self, row: Any) -> tuple[str, str, str]:
+        """Return (username, method, reason).
+
+        method is "email" or "name".
+        """
+
+        email = self._row_email(row)
+        usernames = self._usernames_for_email(email)
+        if usernames:
+            if len(usernames) > 1:
+                return ("", "email", f"Ambiguous email (matches {len(usernames)} users)")
+            return (next(iter(usernames)), "email", "")
+
+        if not self._enable_name_matching:
+            return ("", "", "No FreeIPA user with this email")
+
+        name = self._row_name(row)
+        if not name:
+            return ("", "", "No FreeIPA user with this email")
+
+        usernames = self._usernames_for_name(name)
+        if not usernames:
+            return ("", "", "No FreeIPA user with this email or name")
+        if len(usernames) > 1:
+            return ("", "name", f"Ambiguous name (matches {len(usernames)} users)")
+        return (next(iter(usernames)), "name", "")
+
     def _row_value(self, row: Any, header: str | None) -> object:
         if header is None:
             return ""
@@ -544,16 +624,13 @@ class MembershipCSVImportResource(resources.ModelResource):
         if not email:
             return ("SKIP", "Missing Email")
 
-        usernames = self._usernames_for_email(email)
-        if not usernames:
-            return ("SKIP", "No FreeIPA user with this email")
-        if len(usernames) > 1:
-            return ("SKIP", f"Ambiguous email (matches {len(usernames)} users)")
+        username, _method, reason = self._match_username_for_row(row)
+        if not username:
+            return ("SKIP", reason or "No match")
 
         if not self._row_is_active(row):
             return ("SKIP", "Not an Active Member")
 
-        username = next(iter(usernames))
         now = timezone.now()
         if Membership.objects.filter(
             target_username=username,
@@ -632,14 +709,8 @@ class MembershipCSVImportResource(resources.ModelResource):
         return responses
 
     def _row_username(self, row: Any) -> str:
-        email = self._row_email(row)
-        if not email:
-            return ""
-
-        usernames = self._usernames_for_email(email)
-        if len(usernames) == 1:
-            return next(iter(usernames))
-        return ""
+        username, _method, _reason = self._match_username_for_row(row)
+        return username
 
     def _record_unmatched(self, *, row: Any, reason: str) -> None:
         item: dict[str, str] = {}
@@ -658,7 +729,8 @@ class MembershipCSVImportResource(resources.ModelResource):
             # Treat blank/empty lines as no-ops.
             return
 
-        usernames = self._usernames_for_email(email)
+        username, method, reason = self._match_username_for_row(row)
+        usernames = {username} if username else set()
         if isinstance(row_number, int) and row_number <= 50:
             # Email is PII; keep this at DEBUG level.
             logger.debug(
@@ -667,11 +739,14 @@ class MembershipCSVImportResource(resources.ModelResource):
                 email,
                 sorted(usernames),
             )
-        if not usernames:
-            self._record_unmatched(row=row, reason="No FreeIPA user with this email")
-            return
-        if len(usernames) > 1:
-            self._record_unmatched(row=row, reason=f"Ambiguous: {sorted(usernames)!r}")
+
+        if username and method == "email":
+            self._matched_by_email += 1
+        elif username and method == "name":
+            self._matched_by_name += 1
+
+        if not username:
+            self._record_unmatched(row=row, reason=reason or "No match")
             return
 
         # Don't block the import preview/confirm flow for per-row business rules.
@@ -721,12 +796,9 @@ class MembershipCSVImportResource(resources.ModelResource):
         if membership_type is None:
             raise ValueError("membership_type is required")
 
-        email = self._row_email(row)
-        usernames = self._usernames_for_email(email)
-        if len(usernames) != 1:
+        username, _method, _reason = self._match_username_for_row(row)
+        if not username:
             return
-
-        username = next(iter(usernames))
 
         responses = self._row_responses(row)
 
@@ -813,13 +885,6 @@ class MembershipCSVImportResource(resources.ModelResource):
                     send_submitted_email=False,
                 )
 
-            approve_membership_request(
-                membership_request=instance,
-                actor_username=self._actor_username,
-                send_approved_email=False,
-                decided_at=decided_at,
-            )
-
             csv_note = self._row_note(row)
             if csv_note:
                 add_note(
@@ -827,6 +892,13 @@ class MembershipCSVImportResource(resources.ModelResource):
                     username=self._actor_username,
                     content=f"[Import] {csv_note}",
                 )
+
+            approve_membership_request(
+                membership_request=instance,
+                actor_username=self._actor_username,
+                send_approved_email=False,
+                decided_at=decided_at,
+            )
 
             # requested_at is auto_now_add, so Django overwrites it on create.
             # For CSV imports we want request time to reflect the CSV start date
@@ -906,6 +978,15 @@ class MembershipCSVImportResource(resources.ModelResource):
     @override
     def after_import(self, dataset: Dataset, result: Any, **kwargs: Any) -> None:
         super().after_import(dataset, result, **kwargs)
+
+        matched_total = self._matched_by_email + self._matched_by_name
+        total = int(self._csv_total_records or 0)
+        percent = round((matched_total / total) * 100.0, 1) if total > 0 else 0.0
+        setattr(result, "csv_total_records", total)
+        setattr(result, "matched_by_email", int(self._matched_by_email))
+        setattr(result, "matched_by_name", int(self._matched_by_name))
+        setattr(result, "matched_total", int(matched_total))
+        setattr(result, "matched_total_percent", float(percent))
 
         try:
             totals = dict(getattr(result, "totals", {}) or {})
