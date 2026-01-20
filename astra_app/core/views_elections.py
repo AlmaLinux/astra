@@ -11,7 +11,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import permission_required
 from django.core.paginator import Paginator
-from django.db.models import Count, Max, Min, Prefetch, Sum
+from django.db.models import Count, Max, Min, Prefetch, Q, Sum
 from django.db.models.functions import TruncDate
 from django.http import Http404, HttpRequest, HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import redirect, render
@@ -25,6 +25,7 @@ from core.backends import FreeIPAUser
 from core.elections_services import (
     ElectionError,
     ElectionNotOpenError,
+    InvalidBallotError,
     InvalidCredentialError,
     election_genesis_chain_hash,
     election_quorum_status,
@@ -47,6 +48,8 @@ from core.models import (
     Election,
     ExclusionGroup,
     ExclusionGroupCandidate,
+    Membership,
+    OrganizationSponsorship,
     VotingCredential,
 )
 from core.permissions import ASTRA_ADD_ELECTION, json_permission_required
@@ -1180,6 +1183,11 @@ def election_detail(request, election_id: int):
 
     can_vote = election.status == Election.Status.open and bool(voter_votes and voter_votes > 0)
 
+    show_turnout_chart = bool(
+        can_manage_elections
+        and election.status in {Election.Status.open, Election.Status.closed, Election.Status.tallied}
+    )
+
     turnout_stats: dict[str, object] = {}
     turnout_chart_data: dict[str, object] = {}
     if can_manage_elections or election.status == Election.Status.tallied:
@@ -1218,7 +1226,7 @@ def election_detail(request, election_id: int):
             "participating_vote_weight_percent": participating_vote_weight_percent,
         }
 
-        if can_manage_elections and election.status == Election.Status.open:
+        if show_turnout_chart:
             rows = (
                 AuditLogEntry.objects.filter(election=election, event_type="ballot_submitted")
                 .annotate(day=TruncDate("timestamp"))
@@ -1235,7 +1243,10 @@ def election_detail(request, election_id: int):
                 counts_by_day[day] = int(row.get("count") or 0)
 
             start_day = timezone.localdate(election.start_datetime)
-            end_day = timezone.localdate()
+            if election.status == Election.Status.open:
+                end_day = timezone.localdate()
+            else:
+                end_day = timezone.localdate(election.end_datetime)
             if end_day < start_day:
                 end_day = start_day
 
@@ -1261,6 +1272,7 @@ def election_detail(request, election_id: int):
             "candidate_cards": candidate_cards,
             "can_manage_elections": can_manage_elections,
             "can_vote": can_vote,
+            "show_turnout_chart": show_turnout_chart,
             "eligibility_min_membership_age_days": settings.ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS,
             **admin_context,
             "turnout_stats": turnout_stats,
@@ -1279,8 +1291,151 @@ def _eligible_voters_context(*, request, election: Election, enabled: bool) -> d
 
     eligible = eligible_voters_from_memberships(election=election)
 
-    usernames = [v.username for v in eligible]
-    grid_items = [{"kind": "user", "username": username} for username in usernames]
+    eligible_q = str(request.GET.get("eligible_q") or "").strip()
+    eligible_q_lower = eligible_q.lower()
+    eligible_for_grid = (
+        [v for v in eligible if eligible_q_lower in str(v.username or "").lower()]
+        if eligible_q_lower
+        else list(eligible)
+    )
+
+    reference_datetime = election.start_datetime
+    if election.status == Election.Status.draft:
+        reference_datetime = max(election.start_datetime, timezone.now())
+
+    eligible_usernames_lower = {v.username.lower() for v in eligible if str(v.username).strip()}
+
+    # Build an electorate set for ineligible reporting.
+    #
+    # - If election.eligible_group_cn is set, we use the FreeIPA group membership as the electorate,
+    #   which includes users with no membership/sponsorship rows.
+    # - Otherwise, we restrict the electorate to users who have any vote-bearing membership/sponsorship
+    #   rows to avoid enumerating all FreeIPA users.
+    term_start_by_username: dict[str, datetime.datetime] = {}
+    has_any_vote_eligible: set[str] = set()
+    has_active_vote_eligible_at_reference: set[str] = set()
+
+    memberships = Membership.objects.filter(
+        membership_type__isIndividual=True,
+        membership_type__enabled=True,
+        membership_type__votes__gt=0,
+    ).values("target_username", "created_at", "expires_at")
+    for row in memberships:
+        username = str(row.get("target_username") or "").strip()
+        if not username:
+            continue
+        username = username.lower()
+
+        has_any_vote_eligible.add(username)
+
+        start_at = row.get("created_at")
+        if isinstance(start_at, datetime.datetime):
+            if username not in term_start_by_username or start_at < term_start_by_username[username]:
+                term_start_by_username[username] = start_at
+
+        expires_at = row.get("expires_at")
+        if expires_at is None or (
+            isinstance(expires_at, datetime.datetime) and expires_at >= reference_datetime
+        ):
+            has_active_vote_eligible_at_reference.add(username)
+
+    sponsorships = OrganizationSponsorship.objects.select_related("organization").filter(
+        membership_type__enabled=True,
+        membership_type__votes__gt=0,
+    )
+    for sponsorship in sponsorships.only("organization__representative", "created_at", "expires_at"):
+        username = str(sponsorship.organization.representative or "").strip()
+        if not username:
+            continue
+        username = username.lower()
+
+        has_any_vote_eligible.add(username)
+
+        start_at = sponsorship.created_at
+        if isinstance(start_at, datetime.datetime):
+            if username not in term_start_by_username or start_at < term_start_by_username[username]:
+                term_start_by_username[username] = start_at
+
+        expires_at = sponsorship.expires_at
+        if expires_at is None or expires_at >= reference_datetime:
+            has_active_vote_eligible_at_reference.add(username)
+
+    group_cn = str(election.eligible_group_cn or "").strip()
+    if group_cn:
+        electorate = {u.lower() for u in elections_services._freeipa_group_recursive_member_usernames(group_cn=group_cn)}
+    else:
+        electorate = {
+            str(u.username).strip().lower()
+            for u in FreeIPAUser.all()
+            if str(u.username).strip()
+        }
+
+    min_age_days = int(settings.ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS)
+    election_start_day = timezone.localtime(election.start_datetime).date()
+    reference_day = timezone.localtime(reference_datetime).date()
+
+    ineligible_voters: list[dict[str, object]] = []
+    for username in sorted(electorate):
+        if username in eligible_usernames_lower:
+            continue
+
+        term_start_date: str = "Unknown"
+        days_at_start: int | str = ""
+        days_short: int | str = ""
+
+        start_at = term_start_by_username.get(username)
+        term_start_day: datetime.date | None = None
+        if isinstance(start_at, datetime.datetime):
+            term_start_day = timezone.localtime(start_at).date()
+            term_start_date = term_start_day.isoformat()
+            days_at_start = (election_start_day - term_start_day).days
+
+        if username not in has_any_vote_eligible:
+            reason = "no_membership"
+        elif username not in has_active_vote_eligible_at_reference:
+            reason = "expired"
+        else:
+            reason = "too_new"
+            if term_start_day is not None:
+                days_at_reference = (reference_day - term_start_day).days
+                days_short = max(0, min_age_days - days_at_reference)
+
+        ineligible_voters.append(
+            {
+                "username": username,
+                "reason": reason,
+                "term_start_date": term_start_date,
+                "election_start_date": election_start_day.isoformat(),
+                "days_at_start": days_at_start,
+                "days_short": days_short,
+            }
+        )
+
+    ineligible_q = str(request.GET.get("ineligible_q") or "").strip()
+    if ineligible_q:
+        ineligible_q_lower = ineligible_q.lower()
+        ineligible_voters = [
+            v
+            for v in ineligible_voters
+            if ineligible_q_lower in str(v.get("username") or "").lower()
+        ]
+
+    ineligible_voter_details_by_username = {
+        str(v["username"]): {
+            "reason": str(v["reason"]),
+            "term_start_date": str(v["term_start_date"]),
+            "election_start_date": str(v["election_start_date"]),
+            "days_at_start": v["days_at_start"],
+            "days_short": v["days_short"],
+        }
+        for v in ineligible_voters
+        if str(v.get("username") or "").strip()
+    }
+
+    usernames = [v.username for v in eligible_for_grid]
+
+    grid_usernames = [v.username for v in eligible_for_grid]
+    grid_items = [{"kind": "user", "username": username} for username in grid_usernames]
 
     paginator = Paginator(grid_items, per_page=24)
     page_number = str(request.GET.get("eligible_page") or "1").strip()
@@ -1303,9 +1458,48 @@ def _eligible_voters_context(*, request, election: Election, enabled: bool) -> d
     qs.pop("eligible_page", None)
     page_url_prefix = f"?{urlencode(qs)}&eligible_page=" if qs else "?eligible_page="
 
+    ineligible_grid_items = [
+        {"kind": "user", "username": str(v["username"])} for v in ineligible_voters if str(v.get("username") or "").strip()
+    ]
+    ineligible_paginator = Paginator(ineligible_grid_items, per_page=24)
+    ineligible_page_number = str(request.GET.get("ineligible_page") or "1").strip()
+    ineligible_page_obj = ineligible_paginator.get_page(ineligible_page_number)
+
+    ineligible_total_pages = ineligible_paginator.num_pages
+    ineligible_current_page = ineligible_page_obj.number
+    if ineligible_total_pages <= 10:
+        ineligible_page_numbers = list(range(1, ineligible_total_pages + 1))
+        ineligible_show_first = False
+        ineligible_show_last = False
+    else:
+        ineligible_start = max(1, ineligible_current_page - 2)
+        ineligible_end = min(ineligible_total_pages, ineligible_current_page + 2)
+        ineligible_page_numbers = list(range(ineligible_start, ineligible_end + 1))
+        ineligible_show_first = 1 not in ineligible_page_numbers
+        ineligible_show_last = ineligible_total_pages not in ineligible_page_numbers
+
+    ineligible_qs = dict(request.GET.items())
+    ineligible_qs.pop("ineligible_page", None)
+    ineligible_page_url_prefix = (
+        f"?{urlencode(ineligible_qs)}&ineligible_page=" if ineligible_qs else "?ineligible_page="
+    )
+
     return {
         "eligible_voters": eligible,
         "eligible_voter_usernames": usernames,
+        "eligible_q": eligible_q,
+        "ineligible_voters": ineligible_voters,
+        "ineligible_voter_details_by_username": ineligible_voter_details_by_username,
+        "ineligible_q": ineligible_q,
+        "ineligible_grid_items": list(ineligible_page_obj),
+        "ineligible_paginator": ineligible_paginator,
+        "ineligible_page_obj": ineligible_page_obj,
+        "ineligible_is_paginated": ineligible_paginator.num_pages > 1,
+        "ineligible_page_numbers": ineligible_page_numbers,
+        "ineligible_show_first": ineligible_show_first,
+        "ineligible_show_last": ineligible_show_last,
+        "ineligible_page_url_prefix": ineligible_page_url_prefix,
+        "ineligible_empty_label": "No ineligible voters found.",
         "grid_items": list(page_obj),
         "paginator": paginator,
         "page_obj": page_obj,
@@ -1973,10 +2167,12 @@ def _parse_vote_payload(request, *, election: Election) -> tuple[str, list[int]]
                     )
                 )
                 by_username = {u.lower(): int(cid) for u, cid in candidates}
+                unknown = sorted({u for u in usernames if u not in by_username})
+                if unknown:
+                    raise ValueError("Invalid ranking: contains usernames that are not candidates")
+
                 for u in usernames:
-                    cid = by_username.get(u)
-                    if cid is not None:
-                        ranking.append(cid)
+                    ranking.append(by_username[u])
     else:
         raise ValueError("ranking must be a list")
 
@@ -2048,7 +2244,7 @@ def election_vote_submit(request, election_id: int):
             credential_public_id=credential_public_id,
             ranking=ranking,
         )
-    except (InvalidCredentialError, ElectionNotOpenError) as exc:
+    except (InvalidBallotError, InvalidCredentialError, ElectionNotOpenError) as exc:
         return JsonResponse({"ok": False, "error": str(exc)}, status=400)
 
     freeipa_user = FreeIPAUser.get(username)

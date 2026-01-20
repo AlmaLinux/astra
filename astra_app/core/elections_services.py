@@ -52,6 +52,10 @@ class InvalidCredentialError(ElectionError):
     pass
 
 
+class InvalidBallotError(ElectionError):
+    pass
+
+
 class ElectionNotClosedError(ElectionError):
     pass
 
@@ -300,16 +304,29 @@ def _sanitize_ranking(*, election: Election, ranking: list[int]) -> list[int]:
         )
     )
 
-    sanitized: list[int] = []
+    if not ranking:
+        raise InvalidBallotError("Invalid ballot: ranking is required")
+
     seen: set[int] = set()
+    duplicates: set[int] = set()
+    invalid: set[int] = set()
+
     for cid in ranking:
-        if cid not in allowed:
-            continue
         if cid in seen:
-            continue
-        seen.add(cid)
-        sanitized.append(cid)
-    return sanitized
+            duplicates.add(cid)
+        else:
+            seen.add(cid)
+
+        if cid not in allowed:
+            invalid.add(cid)
+
+    if invalid:
+        raise InvalidBallotError("Invalid ballot: contains candidates not in this election")
+
+    if duplicates:
+        raise InvalidBallotError("Invalid ballot: duplicate candidates")
+
+    return ranking
 
 
 def election_vote_url(*, request: HttpRequest | None, election: Election) -> str:
@@ -458,7 +475,11 @@ def build_voting_credential_email_context(
 def _eligible_voters_from_memberships(*, election: Election) -> list[EligibleVoter]:
     # Eligibility: must hold a non-expired individual membership that started at least
     # ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS (configured as 90 days) before election start.
-    cutoff = election.start_datetime - datetime.timedelta(days=settings.ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS)
+    reference_datetime = election.start_datetime
+    if election.status == Election.Status.draft:
+        reference_datetime = max(election.start_datetime, timezone.now())
+
+    cutoff = reference_datetime - datetime.timedelta(days=settings.ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS)
     eligible_qs = (
         Membership.objects.filter(
             membership_type__isIndividual=True,
@@ -466,7 +487,7 @@ def _eligible_voters_from_memberships(*, election: Election) -> list[EligibleVot
             membership_type__votes__gt=0,
             created_at__lte=cutoff,
         )
-        .filter(Q(expires_at__isnull=True) | Q(expires_at__gte=election.start_datetime))
+        .filter(Q(expires_at__isnull=True) | Q(expires_at__gte=reference_datetime))
         .values("target_username")
         .annotate(weight=Sum("membership_type__votes"))
         .order_by("target_username")
@@ -487,7 +508,7 @@ def _eligible_voters_from_memberships(*, election: Election) -> list[EligibleVot
             membership_type__votes__gt=0,
             created_at__lte=cutoff,
         )
-        .filter(Q(expires_at__isnull=True) | Q(expires_at__gte=election.start_datetime))
+        .filter(Q(expires_at__isnull=True) | Q(expires_at__gte=reference_datetime))
         .only(
             "organization__representative",
             "membership_type__votes",
@@ -581,7 +602,11 @@ def eligible_vote_weight_for_username(*, election: Election, username: str) -> i
         if not eligible_usernames or username.lower() not in eligible_usernames:
             return 0
 
-    cutoff = election.start_datetime - datetime.timedelta(days=settings.ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS)
+    reference_datetime = election.start_datetime
+    if election.status == Election.Status.draft:
+        reference_datetime = max(election.start_datetime, timezone.now())
+
+    cutoff = reference_datetime - datetime.timedelta(days=settings.ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS)
     membership_weight = (
         Membership.objects.filter(
             target_username=username,
@@ -590,7 +615,7 @@ def eligible_vote_weight_for_username(*, election: Election, username: str) -> i
             membership_type__votes__gt=0,
             created_at__lte=cutoff,
         )
-        .filter(Q(expires_at__isnull=True) | Q(expires_at__gte=election.start_datetime))
+        .filter(Q(expires_at__isnull=True) | Q(expires_at__gte=reference_datetime))
         .aggregate(weight=Sum("membership_type__votes"))
         .get("weight")
         or 0
@@ -605,7 +630,7 @@ def eligible_vote_weight_for_username(*, election: Election, username: str) -> i
             membership_type__votes__gt=0,
             created_at__lte=cutoff,
         )
-        .filter(Q(expires_at__isnull=True) | Q(expires_at__gte=election.start_datetime))
+        .filter(Q(expires_at__isnull=True) | Q(expires_at__gte=reference_datetime))
         .only(
             "organization__representative",
             "membership_type__votes",

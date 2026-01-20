@@ -1,6 +1,39 @@
 {% extends 'core/base.html' %}
 {% load static %}
 
+{% block extra_head %}
+  {{ block.super }}
+  <style>
+    /* Keep header tools aligned across collapsed/expanded cards. */
+    .election-collapsible-card > .card-header {
+      display: flex;
+      align-items: center;
+    }
+
+    .election-collapsible-card > .card-header .card-title {
+      margin-bottom: 0;
+    }
+
+    .election-collapsible-card > .card-header .card-tools {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      float: none;
+      margin-left: auto;
+      margin-right: 0;
+    }
+
+    .election-voter-card .card-tools .js-card-search {
+      display: flex;
+      align-items: center;
+    }
+
+    .election-voter-card.collapsed-card .card-tools .js-card-search {
+      display: none;
+    }
+  </style>
+{% endblock %}
+
 {% block title %}Election{% endblock %}
 
 {% block header %}
@@ -36,23 +69,6 @@
               <a href="{{ election.url }}" target="_blank" rel="noopener noreferrer">{{ election.url }}</a>
             </p>
           {% endif %}
-        </div>
-      </div>
-
-      <div class="card card-outline card-info">
-        <div class="card-header">
-          <h3 class="card-title">How votes are counted</h3>
-        </div>
-        <div class="card-body">
-          <p class="mb-2">Winners are selected using <strong>Meek STV (High-Precision Variant)</strong>, a ranked-choice, multi-winner method.</p>
-
-          <ul class="mb-3">
-            <li><strong>How it works:</strong> you rank candidates. Votes start with your top choice and can transfer to your next choices as candidates are elected or eliminated.</li>
-            <li><strong>How this variant differs:</strong> standard Meek STV uses fractional arithmetic and implementations often rely on rounding. Astra uses <strong>fixed-point arithmetic (80-digit precision)</strong> to eliminate rounding errors and ambiguity.</li>
-            <li><strong>Why you can trust it:</strong> the tally is <strong>deterministic</strong> and produces a public audit trail. Independent observers can verify the final result using the published ballots ledger and audit log.</li>
-          </ul>
-
-          <p class="mb-2">For full details and verification artifacts, see the <a href="{% url 'election-audit-log' election.id %}"><strong>audit log</strong></a> and the downloadable <a href="{% url 'election-public-ballots' election.id %}"><strong>ballots ledger (JSON)</strong></a> and <a href="{% url 'election-public-audit' election.id %}"><strong>audit log (JSON)</strong></a>.</p>
         </div>
       </div>
 
@@ -251,7 +267,7 @@
     </div>
   </div>
 
-  {% if can_manage_elections and turnout_stats and election.status == 'open' %}
+  {% if show_turnout_chart and turnout_stats %}
     <div class="row">
       <div class="col-12">
         <div class="card card-outline card-secondary">
@@ -461,14 +477,73 @@
     </div>
   </div>
 
+  <div class="row">
+    <div class="col-12">
+      <div class="card card-outline card-info collapsed-card election-collapsible-card">
+        <div class="card-header">
+          <h3 class="card-title">How votes are counted</h3>
+
+          <div class="card-tools">
+            <button type="button" class="btn btn-tool" data-card-widget="collapse">
+              <i class="fas fa-plus"></i>
+            </button>
+          </div>
+        </div>
+        <div class="card-body" style="display: none;">
+          <p class="mb-2">Winners are selected using <strong>Meek STV (High-Precision Variant)</strong>, a ranked-choice, multi-winner method.</p>
+
+          <ul class="mb-3">
+            <li><strong>How it works:</strong> you rank candidates. Votes start with your top choice and can transfer to your next choices as candidates are elected or eliminated.</li>
+            <li><strong>How this variant differs:</strong> standard Meek STV uses fractional arithmetic and implementations often rely on rounding. Astra uses <strong>fixed-point arithmetic (80-digit precision)</strong> to eliminate rounding errors and ambiguity.</li>
+            <li><strong>Why you can trust it:</strong> the tally is <strong>deterministic</strong> and produces a public audit trail. Independent observers can verify the final result using the published ballots ledger and audit log.</li>
+          </ul>
+
+          {% if election.status == 'closed' or election.status == 'tallied' %}
+            <p class="mb-2">For full details and verification artifacts, see the <a href="{% url 'election-audit-log' election.id %}"><strong>audit log</strong></a> and the downloadable <a href="{% url 'election-public-ballots' election.id %}"><strong>ballots ledger (JSON)</strong></a> and <a href="{% url 'election-public-audit' election.id %}"><strong>audit log (JSON)</strong></a>.</p>
+          {% else %}
+            <p class="mb-2">For full details and verification artifacts, the audit log and downloadable ballots ledger will be published when the election ends.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
   {% if can_manage_elections %}
     <div class="row">
       <div class="col-12">
-        <div class="card card-outline card-primary collapsed-card">
+        <div class="card card-outline card-primary collapsed-card election-voter-card election-collapsible-card">
           <div class="card-header">
             <h3 class="card-title">Eligible voters</h3>
 
             <div class="card-tools">
+              <div class="js-card-search">
+                <form method="get" class="input-group input-group-sm" style="width: 220px;">
+                  <input
+                    type="text"
+                    name="eligible_q"
+                    class="form-control float-right"
+                    placeholder="Search users..."
+                    value="{{ eligible_q }}"
+                    aria-label="Search users"
+                  >
+                  <div class="input-group-append">
+                    {% if eligible_q %}
+                      <button
+                        type="button"
+                        class="btn btn-default"
+                        aria-label="Clear search"
+                        onclick="var i=this.form.querySelector('input[name=\'eligible_q\']'); if(i){i.value='';} this.form.submit();"
+                      >
+                        <i class="fas fa-times"></i>
+                      </button>
+                    {% endif %}
+                    <button type="submit" class="btn btn-default" aria-label="Search">
+                      <i class="fas fa-search"></i>
+                    </button>
+                  </div>
+                </form>
+              </div>
+
               <button type="button" class="btn btn-tool" data-card-widget="collapse">
                 <i class="fas fa-plus"></i>
               </button>
@@ -518,13 +593,188 @@
         </div>
       </div>
     </div>
+
+    <div class="row">
+      <div class="col-12">
+        <div id="ineligible-voters-card" class="card card-outline card-warning collapsed-card election-voter-card election-collapsible-card">
+          <span style="display: none;"></span>
+          <div class="card-header">
+            <h3 class="card-title">Ineligible voters</h3>
+
+            <div class="card-tools">
+              <div class="js-card-search">
+                <form method="get" class="input-group input-group-sm" style="width: 220px;">
+                  <input
+                    type="text"
+                    name="ineligible_q"
+                    class="form-control float-right"
+                    placeholder="Search users..."
+                    value="{{ ineligible_q }}"
+                    aria-label="Search users"
+                  >
+                  <div class="input-group-append">
+                    {% if ineligible_q %}
+                      <button
+                        type="button"
+                        class="btn btn-default"
+                        aria-label="Clear search"
+                        onclick="var i=this.form.querySelector('input[name=\'ineligible_q\']'); if(i){i.value='';} this.form.submit();"
+                      >
+                        <i class="fas fa-times"></i>
+                      </button>
+                    {% endif %}
+                    <button type="submit" class="btn btn-default" aria-label="Search">
+                      <i class="fas fa-search"></i>
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              <button type="button" class="btn btn-tool" data-card-widget="collapse">
+                <i class="fas fa-plus"></i>
+              </button>
+            </div>
+          </div>
+
+          <div class="card-body" style="display: none;">
+              <p class="text-muted small mb-3">Click a username to view eligibility details.</p>
+
+              {{ ineligible_voter_details_by_username|json_script:"ineligible-voter-details" }}
+
+              {% include 'core/_widget_grid.html' with grid_items=ineligible_grid_items paginator=ineligible_paginator page_obj=ineligible_page_obj is_paginated=ineligible_is_paginated page_numbers=ineligible_page_numbers show_first=ineligible_show_first show_last=ineligible_show_last page_url_prefix=ineligible_page_url_prefix empty_label=ineligible_empty_label %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div
+      class="modal fade"
+      id="ineligible-voter-modal"
+      tabindex="-1"
+      role="dialog"
+      aria-labelledby="ineligible-voter-modal-label"
+      aria-hidden="true"
+    >
+      <div class="modal-dialog" role="document">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="ineligible-voter-modal-label">Ineligible voter details</h5>
+            <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+              <span aria-hidden="true">&times;</span>
+            </button>
+          </div>
+          <div class="modal-body">
+            <div class="mb-2"><strong class="js-ineligible-username"></strong></div>
+
+            <div class="text-muted small mb-3 js-ineligible-reason"></div>
+
+            <dl class="row mb-0">
+              <dt class="col-sm-5">Membership start</dt>
+              <dd class="col-sm-7 js-ineligible-term-start"></dd>
+
+              <dt class="col-sm-5">Election start</dt>
+              <dd class="col-sm-7 js-ineligible-election-start"></dd>
+
+              <dt class="col-sm-5">Days of membership at election start</dt>
+              <dd class="col-sm-7 js-ineligible-days-at-start"></dd>
+
+              <dt class="col-sm-5">Days short</dt>
+              <dd class="col-sm-7 js-ineligible-days-short"></dd>
+            </dl>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-dismiss="modal">Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
   {% endif %}
 {% endblock %}
 
 {% block scripts %}
   {{ block.super }}
-  {% if can_manage_elections and turnout_stats and election.status == 'open' %}
+  {% if show_turnout_chart and turnout_stats %}
     <script src="{% static 'core/vendor/chartjs/chart.umd.min.js' %}"></script>
     <script src="{% static 'core/js/election_turnout_chart.js' %}"></script>
+  {% endif %}
+
+  {% if can_manage_elections %}
+    <script>
+      (function () {
+        var jq = window.jQuery;
+        if (!jq || !jq.fn) return;
+
+        var detailsEl = document.getElementById('ineligible-voter-details');
+        if (!detailsEl) return;
+
+        var details = {};
+        try {
+          details = JSON.parse(detailsEl.textContent || '{}');
+        } catch (e) {
+          details = {};
+        }
+
+        function reasonText(reason) {
+          if (reason === 'no_membership') return 'No qualifying membership or sponsorship found.';
+          if (reason === 'expired') return 'Membership or sponsorship was not active at the reference date.';
+          if (reason === 'too_new') return 'Membership or sponsorship is active, but too new at the reference date.';
+          return reason || '';
+        }
+
+        function openModal(username) {
+          var modalEl = document.getElementById('ineligible-voter-modal');
+          if (!modalEl) return;
+
+          var d = details && username ? details[username] : null;
+          if (!d) return;
+
+          var usernameEl = modalEl.querySelector('.js-ineligible-username');
+          if (usernameEl) usernameEl.textContent = username;
+
+          var reasonEl = modalEl.querySelector('.js-ineligible-reason');
+          if (reasonEl) reasonEl.textContent = reasonText(String(d.reason || ''));
+
+          var termEl = modalEl.querySelector('.js-ineligible-term-start');
+          if (termEl) termEl.textContent = String(d.term_start_date || '');
+
+          var electionEl = modalEl.querySelector('.js-ineligible-election-start');
+          if (electionEl) electionEl.textContent = String(d.election_start_date || '');
+
+          var daysAtStartEl = modalEl.querySelector('.js-ineligible-days-at-start');
+          if (daysAtStartEl) daysAtStartEl.textContent = String(d.days_at_start || '');
+
+          var daysShortEl = modalEl.querySelector('.js-ineligible-days-short');
+          if (daysShortEl) daysShortEl.textContent = String(d.days_short || '');
+
+          jq(modalEl).modal('show');
+        }
+
+        var card = document.getElementById('ineligible-voters-card');
+        if (!card || !card.addEventListener) return;
+
+        card.addEventListener('click', function (evt) {
+          var target = evt && evt.target ? evt.target : null;
+          if (!target || !target.closest) return;
+
+          var link = target.closest('a[href]');
+          if (!link) return;
+
+          var href = String(link.getAttribute('href') || '');
+          var match = href.match(/\/user\/([^\/]+)\/?$/);
+          if (!match || !match[1]) return;
+
+          var username = '';
+          try {
+            username = decodeURIComponent(match[1]);
+          } catch (e) {
+            username = match[1];
+          }
+
+          if (!username || !Object.prototype.hasOwnProperty.call(details, username)) return;
+          evt.preventDefault();
+          openModal(username);
+        });
+      })();
+    </script>
   {% endif %}
 {% endblock %}

@@ -327,7 +327,10 @@ class ElectionDetailManagerUIStatsTests(TestCase):
                 return admin
             return None
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with (
+            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.views_elections.FreeIPAUser.all", return_value=[]),
+        ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Participation so far")
@@ -423,6 +426,7 @@ class ElectionDetailManagerUIStatsTests(TestCase):
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=admin),
+            patch("core.views_elections.FreeIPAUser.all", return_value=[]),
             patch("core.views_elections.timezone.localdate", side_effect=_localdate_side_effect),
         ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
@@ -445,6 +449,475 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             ["2025-12-30", "2025-12-31", "2026-01-01", "2026-01-02"],
         )
         self.assertEqual(payload.get("counts"), [1, 0, 1, 0])
+
+    def test_turnout_chart_uses_election_end_day_after_close(self) -> None:
+        # When an election is closed, the votes-per-day chart should extend only
+        # through election.end_datetime (not through "today").
+        today = datetime.date(2026, 1, 2)
+        now = timezone.make_aware(datetime.datetime(2026, 1, 2, 12, 0, 0))
+        start_dt = timezone.make_aware(datetime.datetime(2025, 12, 30, 9, 0, 0))
+        end_dt = timezone.make_aware(datetime.datetime(2026, 1, 1, 10, 0, 0))
+
+        election = Election.objects.create(
+            name="Turnout chart closed",
+            description="",
+            start_datetime=start_dt,
+            end_datetime=end_dt,
+            number_of_seats=1,
+            status=Election.Status.closed,
+        )
+
+        mt = MembershipType.objects.create(
+            code="voter",
+            name="Voter",
+            votes=1,
+            isIndividual=True,
+            enabled=True,
+        )
+        m = Membership.objects.create(
+            target_username="voter1",
+            membership_type=mt,
+            expires_at=now + datetime.timedelta(days=365),
+        )
+        Membership.objects.filter(pk=m.pk).update(created_at=start_dt - datetime.timedelta(days=10))
+
+        e0 = AuditLogEntry.objects.create(election=election, event_type="ballot_submitted", payload={}, is_public=False)
+        # 2025-12-30
+        AuditLogEntry.objects.filter(pk=e0.pk).update(timestamp=start_dt)
+
+        self._login_as_freeipa_user("admin")
+        self._grant_manage_permission("admin")
+        admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+
+        def _localdate_side_effect(dt: datetime.datetime | None = None) -> datetime.date:
+            if dt is None:
+                return today
+            return timezone.localtime(dt).date()
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=admin),
+            patch("core.views_elections.FreeIPAUser.all", return_value=[]),
+            patch("core.views_elections.timezone.localdate", side_effect=_localdate_side_effect),
+        ):
+            resp = self.client.get(reverse("election-detail", args=[election.id]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Participation so far")
+
+        marker = 'id="election-turnout-chart-data"'
+        html = resp.content.decode("utf-8")
+        idx = html.find(marker)
+        self.assertNotEqual(idx, -1)
+        start = html.find(">", idx)
+        end = html.find("</script>", start)
+        payload = json.loads(html[start + 1 : end])
+
+        # The chart should end at 2026-01-01 (election end), not 2026-01-02 (today).
+        self.assertEqual(payload.get("labels"), ["2025-12-30", "2025-12-31", "2026-01-01"])
+        self.assertEqual(payload.get("counts"), [1, 0, 0])
+
+    def test_turnout_chart_renders_for_tallied_election_for_manager(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Turnout tallied",
+            description="",
+            start_datetime=now - datetime.timedelta(days=2),
+            end_datetime=now - datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.tallied,
+            tally_result={"elected": []},
+        )
+
+        mt = MembershipType.objects.create(
+            code="voter",
+            name="Voter",
+            votes=1,
+            isIndividual=True,
+            enabled=True,
+        )
+        m = Membership.objects.create(
+            target_username="voter1",
+            membership_type=mt,
+            expires_at=now + datetime.timedelta(days=365),
+        )
+        Membership.objects.filter(pk=m.pk).update(created_at=now - datetime.timedelta(days=365))
+
+        self._login_as_freeipa_user("admin")
+        self._grant_manage_permission("admin")
+        admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=admin),
+            patch("core.views_elections.FreeIPAUser.all", return_value=[]),
+        ):
+            resp = self.client.get(reverse("election-detail", args=[election.id]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Participation so far")
+        self.assertContains(resp, 'id="election-turnout-chart"')
+        self.assertContains(resp, 'id="election-turnout-chart-data"')
+        self.assertContains(resp, 'src="/static/core/vendor/chartjs/chart.umd.min.js"')
+        self.assertContains(resp, "election_turnout_chart.js", html=False)
+
+    @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=30)
+    def test_ineligible_voters_render_with_modal_details_for_manager(self) -> None:
+        now = timezone.make_aware(datetime.datetime(2026, 2, 1, 12, 0, 0))
+        start_dt = timezone.make_aware(datetime.datetime(2026, 2, 10, 12, 0, 0))
+
+        election = Election.objects.create(
+            name="Ineligible voter UI election",
+            description="",
+            start_datetime=start_dt,
+            end_datetime=start_dt + datetime.timedelta(days=7),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+
+        mt = MembershipType.objects.create(
+            code="voter",
+            name="Voter",
+            votes=1,
+            isIndividual=True,
+            enabled=True,
+        )
+
+        m = Membership.objects.create(
+            target_username="bob",
+            membership_type=mt,
+            expires_at=start_dt + datetime.timedelta(days=365),
+        )
+        # Term start too recent for a 30-day minimum at election start.
+        Membership.objects.filter(pk=m.pk).update(created_at=now)
+
+        self._login_as_freeipa_user("admin")
+        self._grant_manage_permission("admin")
+        admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+
+        freeipa_users = [
+            FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []}),
+            FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []}),
+        ]
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=admin),
+            patch("core.views_elections.FreeIPAUser.all", return_value=freeipa_users),
+        ):
+            resp = self.client.get(reverse("election-detail", args=[election.id]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Eligible voters")
+
+        # New UI: managers can see ineligible voters and click to view details.
+        self.assertContains(resp, "Ineligible voters")
+        self.assertContains(resp, 'id="ineligible-voters-card"')
+        self.assertContains(resp, 'name="ineligible_q"')
+        self.assertContains(resp, 'id="ineligible-voter-details"')
+        self.assertContains(resp, "bob")
+
+        # Modal should include the membership term start and election start date.
+        self.assertContains(resp, "Membership start")
+        self.assertContains(resp, "Election start")
+        self.assertContains(resp, "2026-02-01")
+        self.assertContains(resp, "2026-02-10")
+
+    @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=30)
+    def test_ineligible_voters_card_is_visible_and_renders_when_empty_for_manager(self) -> None:
+        now = timezone.make_aware(datetime.datetime(2026, 2, 1, 12, 0, 0))
+        start_dt = timezone.make_aware(datetime.datetime(2026, 2, 10, 12, 0, 0))
+
+        election = Election.objects.create(
+            name="Eligible only election",
+            description="",
+            start_datetime=start_dt,
+            end_datetime=start_dt + datetime.timedelta(days=7),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+
+        mt = MembershipType.objects.create(
+            code="voter",
+            name="Voter",
+            votes=1,
+            isIndividual=True,
+            enabled=True,
+        )
+
+        m = Membership.objects.create(
+            target_username="alice",
+            membership_type=mt,
+            expires_at=start_dt + datetime.timedelta(days=365),
+        )
+        # Eligible: membership term start is old enough.
+        Membership.objects.filter(pk=m.pk).update(created_at=now - datetime.timedelta(days=365))
+
+        self._login_as_freeipa_user("admin")
+        self._grant_manage_permission("admin")
+        admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+
+        freeipa_users = [FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": []})]
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=admin),
+            patch("core.views_elections.FreeIPAUser.all", return_value=freeipa_users),
+        ):
+            resp = self.client.get(reverse("election-detail", args=[election.id]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Ineligible voters")
+        self.assertContains(resp, 'id="ineligible-voters-card"')
+        self.assertContains(resp, "No ineligible voters found.")
+
+        html = resp.content.decode("utf-8")
+        idx = html.find('id="ineligible-voters-card"')
+        self.assertNotEqual(idx, -1)
+        card_snippet = html[idx : idx + 800]
+        self.assertIn("collapsed-card", card_snippet)
+        self.assertIn('style="display: none;"', card_snippet)
+
+    @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=30)
+    def test_ineligible_voters_username_search_filters_before_pagination(self) -> None:
+        now = timezone.make_aware(datetime.datetime(2026, 2, 1, 12, 0, 0))
+        start_dt = timezone.make_aware(datetime.datetime(2026, 2, 10, 12, 0, 0))
+
+        election = Election.objects.create(
+            name="Ineligible voter search election",
+            description="",
+            start_datetime=start_dt,
+            end_datetime=start_dt + datetime.timedelta(days=7),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+
+        mt = MembershipType.objects.create(
+            code="voter",
+            name="Voter",
+            votes=1,
+            isIndividual=True,
+            enabled=True,
+        )
+
+        bob = Membership.objects.create(
+            target_username="bob",
+            membership_type=mt,
+            expires_at=start_dt + datetime.timedelta(days=365),
+        )
+        alice = Membership.objects.create(
+            target_username="alice",
+            membership_type=mt,
+            expires_at=start_dt + datetime.timedelta(days=365),
+        )
+        Membership.objects.filter(pk__in=[bob.pk, alice.pk]).update(created_at=now)
+
+        self._login_as_freeipa_user("admin")
+        self._grant_manage_permission("admin")
+        admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+
+        freeipa_users = [
+            FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": []}),
+            FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []}),
+        ]
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=admin),
+            patch("core.views_elections.FreeIPAUser.all", return_value=freeipa_users),
+        ):
+            resp = self.client.get(
+                reverse("election-detail", args=[election.id]),
+                {"ineligible_q": "bo"},
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'name="ineligible_q"')
+        self.assertContains(resp, "bob")
+        self.assertNotContains(resp, "alice")
+
+    def test_eligible_voters_username_search_filters_grid(self) -> None:
+        now = timezone.make_aware(datetime.datetime(2026, 2, 1, 12, 0, 0))
+        start_dt = timezone.make_aware(datetime.datetime(2026, 2, 10, 12, 0, 0))
+
+        election = Election.objects.create(
+            name="Eligible voter search election",
+            description="",
+            start_datetime=start_dt,
+            end_datetime=start_dt + datetime.timedelta(days=7),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+
+        mt = MembershipType.objects.create(
+            code="voter",
+            name="Voter",
+            votes=1,
+            isIndividual=True,
+            enabled=True,
+        )
+
+        alice = Membership.objects.create(
+            target_username="alice",
+            membership_type=mt,
+            expires_at=start_dt + datetime.timedelta(days=365),
+        )
+        bob = Membership.objects.create(
+            target_username="bob",
+            membership_type=mt,
+            expires_at=start_dt + datetime.timedelta(days=365),
+        )
+        Membership.objects.filter(pk__in=[alice.pk, bob.pk]).update(created_at=now - datetime.timedelta(days=365))
+
+        self._login_as_freeipa_user("admin")
+        self._grant_manage_permission("admin")
+        admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+
+        freeipa_users = [
+            FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": []}),
+            FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []}),
+        ]
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=admin),
+            patch("core.views_elections.FreeIPAUser.all", return_value=freeipa_users),
+        ):
+            resp = self.client.get(
+                reverse("election-detail", args=[election.id]),
+                {"eligible_q": "ali"},
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'name="eligible_q"')
+        self.assertContains(resp, 'value="ali"')
+        self.assertContains(resp, "alice")
+        self.assertNotContains(resp, "bob")
+
+    def test_ineligible_voters_include_group_member_with_no_membership(self) -> None:
+        now = timezone.make_aware(datetime.datetime(2026, 2, 1, 12, 0, 0))
+        start_dt = timezone.make_aware(datetime.datetime(2026, 2, 10, 12, 0, 0))
+
+        election = Election.objects.create(
+            name="Ineligible no-membership electorate",
+            description="",
+            start_datetime=start_dt,
+            end_datetime=start_dt + datetime.timedelta(days=7),
+            number_of_seats=1,
+            status=Election.Status.open,
+            eligible_group_cn="election-electorate",
+        )
+
+        # Ensure there is at least one configured vote-bearing membership type.
+        MembershipType.objects.create(
+            code="voter",
+            name="Voter",
+            votes=1,
+            isIndividual=True,
+            enabled=True,
+        )
+
+        self._login_as_freeipa_user("admin")
+        self._grant_manage_permission("admin")
+        admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=admin),
+            patch(
+                "core.views_elections.elections_services._freeipa_group_recursive_member_usernames",
+                return_value={"nomember"},
+            ),
+            patch("core.views_elections.FreeIPAUser.all", return_value=[]),
+            patch("core.views_elections.timezone.now", return_value=now),
+        ):
+            resp = self.client.get(reverse("election-detail", args=[election.id]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Ineligible voters")
+        self.assertContains(resp, 'id="ineligible-voter-details"')
+        self.assertContains(resp, '"nomember"')
+        self.assertContains(resp, '"no_membership"')
+
+    def test_ineligible_voters_include_freeipa_user_with_no_membership_when_no_group_cn(self) -> None:
+        now = timezone.make_aware(datetime.datetime(2026, 2, 1, 12, 0, 0))
+        start_dt = timezone.make_aware(datetime.datetime(2026, 2, 10, 12, 0, 0))
+
+        election = Election.objects.create(
+            name="Ineligible FreeIPA electorate",
+            description="",
+            start_datetime=start_dt,
+            end_datetime=start_dt + datetime.timedelta(days=7),
+            number_of_seats=1,
+            status=Election.Status.open,
+            eligible_group_cn="",
+        )
+
+        # Ensure there is at least one configured vote-bearing membership type.
+        MembershipType.objects.create(
+            code="voter",
+            name="Voter",
+            votes=1,
+            isIndividual=True,
+            enabled=True,
+        )
+
+        self._login_as_freeipa_user("admin")
+        self._grant_manage_permission("admin")
+        admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+
+        freeipa_users = [FreeIPAUser("nomember", {"uid": ["nomember"], "memberof_group": []})]
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=admin),
+            patch("core.views_elections.FreeIPAUser.all", return_value=freeipa_users),
+            patch("core.views_elections.timezone.now", return_value=now),
+        ):
+            resp = self.client.get(reverse("election-detail", args=[election.id]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Ineligible voters")
+        self.assertContains(resp, 'id="ineligible-voter-details"')
+        self.assertContains(resp, '"nomember"')
+        self.assertContains(resp, '"no_membership"')
+
+    def test_ineligible_voters_include_expired_membership_reason_expired(self) -> None:
+        now = timezone.make_aware(datetime.datetime(2026, 2, 1, 12, 0, 0))
+        start_dt = timezone.make_aware(datetime.datetime(2026, 2, 10, 12, 0, 0))
+
+        election = Election.objects.create(
+            name="Ineligible expired membership electorate",
+            description="",
+            start_datetime=start_dt,
+            end_datetime=start_dt + datetime.timedelta(days=7),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+
+        mt = MembershipType.objects.create(
+            code="voter",
+            name="Voter",
+            votes=1,
+            isIndividual=True,
+            enabled=True,
+        )
+        m = Membership.objects.create(
+            target_username="expireduser",
+            membership_type=mt,
+            expires_at=start_dt - datetime.timedelta(days=1),
+        )
+        Membership.objects.filter(pk=m.pk).update(created_at=now - datetime.timedelta(days=365))
+
+        self._login_as_freeipa_user("admin")
+        self._grant_manage_permission("admin")
+        admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+
+        freeipa_users = [FreeIPAUser("expireduser", {"uid": ["expireduser"], "memberof_group": []})]
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=admin),
+            patch("core.views_elections.FreeIPAUser.all", return_value=freeipa_users),
+        ):
+            resp = self.client.get(reverse("election-detail", args=[election.id]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Ineligible voters")
+        self.assertContains(resp, 'id="ineligible-voter-details"')
+        self.assertContains(resp, '"expireduser"')
+        self.assertContains(resp, '"expired"')
 
     def test_exclusion_group_warning_renders_when_groups_exist(self) -> None:
         self._login_as_freeipa_user("admin")
@@ -487,7 +960,10 @@ class ElectionDetailManagerUIStatsTests(TestCase):
                 return admin
             return None
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with (
+            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.views_elections.FreeIPAUser.all", return_value=[]),
+        ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)
@@ -548,7 +1024,10 @@ class ElectionDetailConcludeElectionTests(TestCase):
                 return admin
             return None
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with (
+            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.views_elections.FreeIPAUser.all", return_value=[]),
+        ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Conclude Election")
@@ -688,7 +1167,10 @@ class ElectionDetailExtendElectionTests(TestCase):
         self._login_as_freeipa_user("admin")
         self._grant_manage_permission("admin")
         admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
-        with patch("core.backends.FreeIPAUser.get", return_value=admin):
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=admin),
+            patch("core.views_elections.FreeIPAUser.all", return_value=[]),
+        ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Extend Election")
