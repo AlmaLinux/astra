@@ -574,6 +574,20 @@ FREEIPA_ADMIN_GROUP = _env_str("FREEIPA_ADMIN_GROUP", default="admins") or "admi
 FREEIPA_MEMBERSHIP_COMMITTEE_GROUP = _env_str("FREEIPA_MEMBERSHIP_COMMITTEE_GROUP", default="membership-committee") or "membership-committee"
 FREEIPA_ELECTION_COMMITTEE_GROUP = _env_str("FREEIPA_ELECTION_COMMITTEE_GROUP", default="election-committee") or "election-committee"
 
+# Users to exclude from directory listings/searches (these accounts can still log in).
+# This prevents service/admin accounts from appearing in user pickers, search results, etc.
+_freeipa_filtered_usernames_raw = _env_str("FREEIPA_FILTERED_USERNAMES", default="") or ""
+_freeipa_filtered_usernames_extra = {
+    u.strip().lower() for u in _freeipa_filtered_usernames_raw.split(",") if u.strip()
+}
+FREEIPA_FILTERED_USERNAMES = frozenset(
+    {
+        "admin",
+        str(FREEIPA_SERVICE_USER or "").strip().lower(),
+        *_freeipa_filtered_usernames_extra,
+    }
+)
+
 # Reuse the FreeIPA service-account client across requests (per worker thread).
 # This avoids repeated logins for admin/selfservice pages that trigger multiple
 # FreeIPA reads, and retries automatically if the session expires.

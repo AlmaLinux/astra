@@ -595,7 +595,26 @@ class FreeIPAUser:
         try:
             users = cache.get_or_set(_users_list_cache_key(), _fetch_users) or []
             # Cache may legitimately contain an empty list; treat that as a hit.
-            return [cls(u['uid'][0], u) for u in users]
+            excluded = {str(u).strip().lower() for u in settings.FREEIPA_FILTERED_USERNAMES}
+            out: list[FreeIPAUser] = []
+            for user_data in users:
+                if not isinstance(user_data, dict):
+                    continue
+
+                uid = user_data.get("uid")
+                if isinstance(uid, list):
+                    username = uid[0] if uid else ""
+                else:
+                    username = uid or ""
+                username = str(username).strip()
+                if not username:
+                    continue
+
+                if username.lower() in excluded:
+                    continue
+
+                out.append(cls(username, user_data))
+            return out
         except Exception as e:
             # On failure, avoid poisoning the cache with an empty list.
             logger.exception(f"Failed to list users: {e}")
