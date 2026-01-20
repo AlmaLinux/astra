@@ -120,6 +120,7 @@ def _extra_context_from_query(query: QueryDict) -> dict[str, str]:
         "type",
         "to",
         "cc",
+        "action_status",
     }
 
     raw_items: list[tuple[str, str]] = []
@@ -524,6 +525,22 @@ def send_mail(request: HttpRequest) -> HttpResponse:
     selected_recipient_mode = ""
     deep_link_autoload_recipients = False
     extra_context = _extra_context_from_query(request.GET)
+    action_status = str(request.POST.get("action_status") or request.GET.get("action_status") or "").strip().lower()
+    action_notice = ""
+    if action_status:
+        action_label = {
+            "approved": "approved",
+            "accepted": "approved",
+            "rejected": "rejected",
+            "rfi": "placed on hold",
+            "on_hold": "placed on hold",
+        }.get(action_status)
+        if action_label:
+            action_notice = (
+                f"This request has already been {action_label}. "
+                "No email has been sent yet. It is important to notify the requester, "
+                "so please send the custom email now."
+            )
 
     if request.method != "POST":
         template_key = str(request.GET.get("template") or "").strip()
@@ -743,6 +760,10 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                         messages.success(request, f"Queued {sent} email{'s' if sent != 1 else ''}.")
                     if failures:
                         messages.error(request, f"Failed to queue {failures} email{'s' if failures != 1 else ''}.")
+                    if sent or failures:
+                        # Clear the reminder once we've queued at least one email.
+                        action_notice = ""
+                        action_status = ""
 
             # Re-render the page with current field values.
             initial.update(
@@ -860,6 +881,8 @@ def send_mail(request: HttpRequest) -> HttpResponse:
             "has_saved_csv_recipients": bool(request.session.get(_CSV_SESSION_KEY)),
             "created_template_id": created_template_id,
             "selected_recipient_mode": selected_recipient_mode,
+            "action_notice": action_notice,
+            "action_status": action_status,
         },
     )
 

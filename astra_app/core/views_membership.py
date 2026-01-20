@@ -63,13 +63,22 @@ def _membership_request_target_label(membership_request: MembershipRequest) -> s
     return org.name if org is not None else (membership_request.requested_organization_name or "organization")
 
 
-def _send_mail_url(*, to_type: str, to: str, template_name: str, extra_context: dict[str, str]) -> str:
+def _send_mail_url(
+    *,
+    to_type: str,
+    to: str,
+    template_name: str,
+    extra_context: dict[str, str],
+    action_status: str = "",
+) -> str:
     query_params = {
         "type": to_type,
         "to": to,
         "template": template_name,
         **extra_context,
     }
+    if action_status:
+        query_params["action_status"] = action_status
     send_mail_url = reverse("send-mail")
     return f"{send_mail_url}?{urlencode(query_params)}"
 
@@ -109,6 +118,7 @@ def _custom_email_redirect(
     template_name: str,
     extra_context: dict[str, str],
     redirect_to: str,
+    action_status: str,
 ) -> HttpResponse:
     recipient = _custom_email_recipient_for_request(membership_request)
     if recipient is None:
@@ -124,6 +134,7 @@ def _custom_email_redirect(
             to=to,
             template_name=template_name,
             extra_context=merged_context,
+            action_status=action_status,
         )
     )
 
@@ -1030,6 +1041,7 @@ def membership_request_approve(request: HttpRequest, pk: int) -> HttpResponse:
                     "membership_type_code": membership_type.code,
                 },
                 redirect_to=redirect_to,
+                action_status="approved",
             )
         return redirect(redirect_to)
 
@@ -1044,6 +1056,7 @@ def membership_request_approve(request: HttpRequest, pk: int) -> HttpResponse:
                 "group_cn": membership_type.group_cn,
             },
             redirect_to=redirect_to,
+            action_status="approved",
         )
     return redirect(redirect_to)
 
@@ -1111,6 +1124,7 @@ def membership_request_reject(request: HttpRequest, pk: int) -> HttpResponse:
                     **freeform_message_email_context(key="rejection_reason", value=reason),
                 },
                 redirect_to=redirect_to,
+                action_status="rejected",
             )
         return redirect(redirect_to)
 
@@ -1125,6 +1139,7 @@ def membership_request_reject(request: HttpRequest, pk: int) -> HttpResponse:
                 **freeform_message_email_context(key="rejection_reason", value=reason),
             },
             redirect_to=redirect_to,
+            action_status="rejected",
         )
     return redirect(redirect_to)
 
@@ -1186,6 +1201,7 @@ def membership_request_rfi(request: HttpRequest, pk: int) -> HttpResponse:
             template_name=settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME,
             extra_context=extra_context,
             redirect_to=redirect_to,
+            action_status="on_hold",
         )
 
     target_label = _membership_request_target_label(req)

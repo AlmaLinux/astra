@@ -283,6 +283,50 @@ class SendMailTests(TestCase):
         self.assertContains(resp, "{{ email }}")
         self.assertContains(resp, "jim@example.com")
 
+    def test_get_shows_membership_action_notice(self) -> None:
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+        ):
+            resp = self.client.get(reverse("send-mail") + "?type=manual&to=alice@example.com&action_status=approved")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "already been approved")
+        self.assertContains(resp, "No email has been sent yet")
+        self.assertContains(resp, "notify the requester")
+
+    def test_post_send_clears_membership_action_notice(self) -> None:
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.backends.FreeIPAUser.all", return_value=[]),
+            patch("core.views_send_mail.EmailMultiAlternatives.send", return_value=1),
+        ):
+            resp = self.client.post(
+                reverse("send-mail"),
+                data={
+                    "recipient_mode": "manual",
+                    "manual_to": "alice@example.com",
+                    "action": "send",
+                    "subject": "Hello {{ email }}",
+                    "html_content": "",
+                    "text_content": "Hi {{ email }}",
+                    "action_status": "approved",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Queued 1 email")
+        self.assertNotContains(resp, "already been approved")
+        self.assertNotContains(resp, "No email has been sent yet")
+
     def test_get_extra_query_params_are_added_to_context(self) -> None:
         self._login_as_freeipa_user("reviewer")
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
