@@ -132,14 +132,23 @@
             title="Rendered HTML preview"
             sandbox="allow-popups"
             referrerpolicy="no-referrer"
-            style="display:block;width:100%;height:320px;border:0;background:#fff;"
+            style="display:block;width:100%;height:400px;border:0;background:#fff;"
             srcdoc="{% if rendered_preview.html %}{{ rendered_preview.html|escape }}{% else %}&lt;span class=&quot;text-muted&quot;&gt;No preview yet.&lt;/span&gt;{% endif %}"
           ></iframe>
         </div>
       </div>
       <div class="col-md-6">
         <h5>Rendered preview (text, first recipient)</h5>
-        <pre class="border rounded p-2 bg-light" style="min-height: 140px; white-space: pre-wrap;" data-compose-preview="text">{% if rendered_preview.text %}{{ rendered_preview.text }}{% else %}No preview yet.{% endif %}</pre>
+        <div class="border rounded p-2 bg-white" style="min-height: 140px;" data-compose-preview="text">
+          <iframe
+            data-compose-preview-iframe="1"
+            title="Rendered text preview"
+            sandbox="allow-popups"
+            referrerpolicy="no-referrer"
+            style="display:block;width:100%;height:400px;border:0;background:#fff;"
+            srcdoc="{% if rendered_preview.text %}&lt;pre style=&quot;margin:0;white-space:pre-wrap;font-family:inherit;&quot;&gt;{{ rendered_preview.text|escape }}&lt;/pre&gt;{% else %}&lt;span class=&quot;text-muted&quot;&gt;No preview yet.&lt;/span&gt;{% endif %}"
+          ></iframe>
+        </div>
       </div>
     </div>
     </div>

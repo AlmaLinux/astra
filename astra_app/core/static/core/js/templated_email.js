@@ -780,6 +780,21 @@
     );
   }
 
+  function wrapTextForIframe(text) {
+    var body = String(text || '');
+    return (
+      '<!doctype html>' +
+      '<html>' +
+      '<head>' +
+      '<meta charset="utf-8">' +
+      '<meta name="viewport" content="width=device-width, initial-scale=1">' +
+      '<style>html,body{margin:0;padding:0;background:#fff;}body{padding:8px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.35;}pre{margin:0;white-space:pre-wrap;font-family:inherit;}</style>' +
+      '</head>' +
+      '<body><pre>' + body + '</pre></body>' +
+      '</html>'
+    );
+  }
+
   function ensurePreviewIframe(box) {
     if (!box) return null;
 
@@ -807,7 +822,7 @@
     iframe.setAttribute('referrerpolicy', 'no-referrer');
     iframe.style.display = 'block';
     iframe.style.width = '100%';
-    iframe.style.height = '320px';
+    iframe.style.height = '400px';
     iframe.style.border = '0';
     iframe.style.background = '#fff';
 
@@ -856,7 +871,30 @@
   function setPreviewText(compose, text) {
     var box = getPreviewBox(compose, 'text');
     if (!box) return;
-    box.textContent = text || 'No preview yet.';
+
+    var iframe = ensurePreviewIframe(box);
+    if (!iframe) {
+      box.textContent = text || 'No preview yet.';
+      return;
+    }
+
+    var content = text || 'No preview yet.';
+    var doc = wrapTextForIframe(content);
+
+    if (supportsSrcdoc(iframe)) {
+      iframe.srcdoc = doc;
+      return;
+    }
+
+    try {
+      var w = iframe.contentWindow;
+      if (!w || !w.document) throw new Error('no document');
+      w.document.open();
+      w.document.write(doc);
+      w.document.close();
+    } catch (_e) {
+      box.textContent = content;
+    }
   }
 
   function getPreviewUrl(compose) {
