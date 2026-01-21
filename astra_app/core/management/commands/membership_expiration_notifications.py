@@ -31,7 +31,8 @@ class Command(BaseCommand):
         now = timezone.now()
         today_utc = now.astimezone(datetime.UTC).date()
 
-        schedule_divisors = (1, 2, 4, 8, 16, 32)
+        NUMBER_OF_SCHEDULED_NOTIFICATIONS = 7
+        schedule_divisors = (2**i for i in range(NUMBER_OF_SCHEDULED_NOTIFICATIONS))
         schedule_days = [
             math.floor(settings.MEMBERSHIP_EXPIRING_SOON_DAYS / divisor)
             for divisor in schedule_divisors
