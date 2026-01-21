@@ -10,8 +10,8 @@ from django.utils import timezone
 from core.backends import FreeIPAGroup, FreeIPAUser
 from core.country_codes import (
     country_code_status_from_user_data,
-    embargoed_country_codes_from_settings,
     country_name_from_code,
+    embargoed_country_codes_from_settings,
 )
 from core.models import FreeIPAPermissionGrant, Membership
 from core.permissions import ASTRA_ADD_MEMBERSHIP

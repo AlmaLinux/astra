@@ -11,7 +11,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import permission_required
 from django.core.paginator import Paginator
-from django.db.models import Count, Max, Min, Prefetch, Q, Sum
+from django.db.models import Count, Max, Min, Prefetch, Sum
 from django.db.models.functions import TruncDate
 from django.http import Http404, HttpRequest, HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import redirect, render

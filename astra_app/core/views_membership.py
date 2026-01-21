@@ -6,10 +6,12 @@ from urllib.parse import urlencode
 
 from django.conf import settings
 from django.contrib import messages
-from django.contrib.auth.decorators import permission_required
+from django.contrib.auth.decorators import permission_required, user_passes_test
+from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
-from django.db.models import Prefetch, Q
+from django.db.models import Count, Prefetch, Q
+from django.db.models.functions import TruncMonth
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
@@ -37,6 +39,7 @@ from core.membership_request_workflow import (
     resubmit_membership_request,
 )
 from core.models import (
+    Membership,
     MembershipLog,
     MembershipRequest,
     MembershipType,
@@ -49,6 +52,9 @@ from core.permissions import (
     ASTRA_CHANGE_MEMBERSHIP,
     ASTRA_DELETE_MEMBERSHIP,
     ASTRA_VIEW_MEMBERSHIP,
+    MEMBERSHIP_PERMISSIONS,
+    has_any_membership_permission,
+    json_permission_required_any,
 )
 from core.views_utils import _normalize_str, block_action_without_country_code
 
@@ -225,7 +231,7 @@ def membership_request(request: HttpRequest) -> HttpResponse:
 
                 try:
                     status = country_code_status_from_user_data(fu._user_data)
-                    if status.is_valid and status.code in _embargoed_country_codes():
+                    if status.is_valid and status.code in embargoed_country_codes_from_settings():
                         add_note(
                             membership_request=mr,
                             username=CUSTOS,
@@ -1495,3 +1501,176 @@ def organization_sponsorship_terminate(request: HttpRequest, organization_id: in
 
     messages.success(request, "Sponsorship terminated.")
     return redirect("organization-detail", organization_id=organization.pk)
+
+
+@user_passes_test(has_any_membership_permission, login_url=reverse_lazy("users"))
+def membership_stats(request: HttpRequest) -> HttpResponse:
+    return render(
+        request,
+        "core/membership_stats.html",
+        {
+            "stats_data_url": reverse("membership-stats-data"),
+        },
+    )
+
+
+@json_permission_required_any(MEMBERSHIP_PERMISSIONS)
+def membership_stats_data(_request: HttpRequest) -> HttpResponse:
+    now = timezone.now()
+
+    def compute_payload() -> dict[str, object]:
+        # Keep the payload stable and purely aggregate (no per-user PII).
+        all_freeipa_users = FreeIPAUser.all()
+        users_by_username = {u.username: u for u in all_freeipa_users if u.username}
+        active_freeipa_users = [u for u in all_freeipa_users if u.is_active]
+
+        active_memberships = Membership.objects.filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
+
+        summary: dict[str, int] = {
+            "total_freeipa_users": len(all_freeipa_users),
+            "active_individual_memberships": active_memberships.filter(
+                membership_type__isIndividual=True
+            )
+            .values("target_username")
+            .distinct()
+            .count(),
+            "pending_requests": MembershipRequest.objects.filter(
+                status=MembershipRequest.Status.pending
+            ).count(),
+            "on_hold_requests": MembershipRequest.objects.filter(
+                status=MembershipRequest.Status.on_hold
+            ).count(),
+            "expiring_soon_30_days": active_memberships.filter(expires_at__lte=now + datetime.timedelta(days=30))
+            .exclude(expires_at__isnull=True)
+            .values("target_username")
+            .distinct()
+            .count(),
+            "expiring_soon_60_days": active_memberships.filter(expires_at__lte=now + datetime.timedelta(days=60))
+            .exclude(expires_at__isnull=True)
+            .values("target_username")
+            .distinct()
+            .count(),
+            "expiring_soon_90_days": active_memberships.filter(expires_at__lte=now + datetime.timedelta(days=90))
+            .exclude(expires_at__isnull=True)
+            .values("target_username")
+            .distinct()
+            .count(),
+            "active_org_sponsorships": OrganizationSponsorship.objects.filter(
+                Q(expires_at__isnull=True) | Q(expires_at__gt=now)
+            ).count(),
+        }
+
+        # Membership type distribution (active memberships; distinct users per type).
+        membership_type_rows = (
+            active_memberships.values("membership_type_id", "membership_type__name")
+            .annotate(count=Count("target_username", distinct=True))
+            .order_by("membership_type__name")
+        )
+        membership_type_labels: list[str] = [r["membership_type__name"] for r in membership_type_rows]
+        membership_type_counts: list[int] = [int(r["count"]) for r in membership_type_rows]
+
+        # Requests trend (last 12 months).
+        start = now - datetime.timedelta(days=365)
+        request_rows = (
+            MembershipRequest.objects.filter(requested_at__gte=start)
+            .annotate(period=TruncMonth("requested_at"))
+            .values("period")
+            .annotate(count=Count("id"))
+            .order_by("period")
+        )
+        requests_labels = [timezone.localtime(r["period"]).strftime("%Y-%m") for r in request_rows if r["period"]]
+        requests_counts = [int(r["count"]) for r in request_rows]
+
+        # Decisions outcomes trend (last 12 months), using decided_at on requests.
+        decision_statuses = [
+            MembershipRequest.Status.approved,
+            MembershipRequest.Status.rejected,
+            MembershipRequest.Status.ignored,
+            MembershipRequest.Status.rescinded,
+        ]
+        decision_rows = (
+            MembershipRequest.objects.filter(decided_at__isnull=False, decided_at__gte=start)
+            .filter(status__in=decision_statuses)
+            .annotate(period=TruncMonth("decided_at"))
+            .values("period", "status")
+            .annotate(count=Count("id"))
+            .order_by("period", "status")
+        )
+        decision_periods = sorted({r["period"] for r in decision_rows if r["period"]})
+        decision_labels = [timezone.localtime(p).strftime("%Y-%m") for p in decision_periods]
+        decision_index = {(r["period"], r["status"]): int(r["count"]) for r in decision_rows}
+        decision_datasets: list[dict[str, object]] = []
+        for status in decision_statuses:
+            decision_datasets.append(
+                {
+                    "label": str(status),
+                    "data": [decision_index.get((p, status), 0) for p in decision_periods],
+                }
+            )
+
+        # Expirations upcoming (next 12 months).
+        exp_rows = (
+            Membership.objects.filter(expires_at__isnull=False, expires_at__gte=now, expires_at__lte=now + datetime.timedelta(days=365))
+            .annotate(period=TruncMonth("expires_at"))
+            .values("period")
+            .annotate(count=Count("target_username", distinct=True))
+            .order_by("period")
+        )
+        exp_labels = [timezone.localtime(r["period"]).strftime("%Y-%m") for r in exp_rows if r["period"]]
+        exp_counts = [int(r["count"]) for r in exp_rows]
+
+        charts: dict[str, object] = {
+            "membership_types": {
+                "labels": membership_type_labels,
+                "counts": membership_type_counts,
+            },
+            "requests_trend": {
+                "labels": requests_labels,
+                "counts": requests_counts,
+            },
+            "decisions_trend": {
+                "labels": decision_labels,
+                "datasets": decision_datasets,
+            },
+            "expirations_upcoming": {
+                "labels": exp_labels,
+                "counts": exp_counts,
+            },
+        }
+
+        def nationality_distribution(users: list[FreeIPAUser]) -> dict[str, list[object]]:
+            counts: dict[str, int] = {}
+            for user in users:
+                status = country_code_status_from_user_data(user._user_data)
+                if not status.is_valid or not status.code:
+                    code = "Unknown/Unset"
+                else:
+                    code = status.code
+                counts[code] = counts.get(code, 0) + 1
+
+            ordered = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+            return {
+                "labels": [k for k, _v in ordered],
+                "counts": [v for _k, v in ordered],
+            }
+
+        active_member_usernames = set(active_memberships.values_list("target_username", flat=True).distinct())
+        active_member_users: list[FreeIPAUser] = []
+        for username in sorted(active_member_usernames):
+            user = users_by_username.get(username)
+            if user is None:
+                user = FreeIPAUser.get(username)
+            if user is not None and user.is_active:
+                active_member_users.append(user)
+
+        charts["nationality_all_users"] = nationality_distribution(active_freeipa_users)
+        charts["nationality_active_members"] = nationality_distribution(active_member_users)
+
+        return {
+            "generated_at": timezone.localtime(now).isoformat(),
+            "summary": summary,
+            "charts": charts,
+        }
+
+    payload = cache.get_or_set("membership_stats:data:v3", compute_payload, timeout=300)
+    return JsonResponse(payload)

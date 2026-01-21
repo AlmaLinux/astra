@@ -885,14 +885,6 @@ class MembershipCSVImportResource(resources.ModelResource):
                     send_submitted_email=False,
                 )
 
-            csv_note = self._row_note(row)
-            if csv_note:
-                add_note(
-                    membership_request=instance,
-                    username=self._actor_username,
-                    content=f"[Import] {csv_note}",
-                )
-
             approve_membership_request(
                 membership_request=instance,
                 actor_username=self._actor_username,
@@ -910,6 +902,17 @@ class MembershipCSVImportResource(resources.ModelResource):
                 target_username=instance.requested_username,
                 membership_type=instance.membership_type,
             ).update(created_at=start_at)
+
+            # Only record the import note after a fully successful apply. This
+            # avoids leaving misleading "[Import]" notes behind when approval
+            # fails (e.g. FreeIPA group add failure).
+            csv_note = self._row_note(row)
+            if csv_note:
+                add_note(
+                    membership_request=instance,
+                    username=self._actor_username,
+                    content=f"[Import] {csv_note}",
+                )
         except Exception:
             logger.exception(
                 "Membership CSV import: apply failed row=%s email=%r username=%r membership_type=%s",

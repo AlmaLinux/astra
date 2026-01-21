@@ -227,6 +227,13 @@ urlpatterns = [
         name="membership-audit-log-user",
     ),
 
+    path("membership/stats/", views_membership.membership_stats, name="membership-stats"),
+    path(
+        "membership/stats/data/",
+        views_membership.membership_stats_data,
+        name="membership-stats-data",
+    ),
+
     path(
         "membership/manage/<str:username>/<str:membership_type_code>/expiry/",
         views_membership.membership_set_expiry,

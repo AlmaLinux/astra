@@ -1,0 +1,189 @@
+{% extends "core/base.html" %}
+{% load static %}
+
+{% block title %}Membership Statistics{% endblock %}
+
+{% block header %}
+<h1>Membership Statistics</h1>
+{% endblock %}
+
+{% block extra_head %}
+  {{ block.super }}
+  <style>
+    /* Bootstrap grid has no 5-across column size; make the 5 summary cards 20% each on desktop. */
+    @media (min-width: 992px) {
+      .membership-stats-summary .membership-stats-summary-col {
+        flex: 0 0 20%;
+        max-width: 20%;
+      }
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+<div id="membership-stats-root" data-url="{{ stats_data_url }}">
+  <div class="row membership-stats-summary">
+    <div class="col-12 col-sm-6 col-md-4 membership-stats-summary-col">
+      <div class="info-box">
+        <span class="info-box-icon bg-primary"><i class="fas fa-users"></i></span>
+        <div class="info-box-content">
+          <span class="info-box-text">Total FreeIPA Users</span>
+          <span class="info-box-number" data-stat-key="total_freeipa_users">
+            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12 col-sm-6 col-md-4 membership-stats-summary-col">
+      <div class="info-box">
+        <span class="info-box-icon bg-info"><i class="fas fa-id-card"></i></span>
+        <div class="info-box-content">
+          <span class="info-box-text">Active Individual Members</span>
+          <span class="info-box-number" data-stat-key="active_individual_memberships">
+            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12 col-sm-6 col-md-4 membership-stats-summary-col">
+      <div class="info-box">
+        <span class="info-box-icon bg-warning"><i class="fas fa-hourglass-half"></i></span>
+        <div class="info-box-content">
+          <span class="info-box-text">Pending Requests</span>
+          <span class="info-box-number" data-stat-key="pending_requests">
+            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12 col-sm-6 col-md-4 membership-stats-summary-col">
+      <div class="info-box">
+        <span class="info-box-icon bg-secondary"><i class="fas fa-pause-circle"></i></span>
+        <div class="info-box-content">
+          <span class="info-box-text">On Hold Requests</span>
+          <span class="info-box-number" data-stat-key="on_hold_requests">
+            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12 col-sm-6 col-md-4 membership-stats-summary-col">
+      <div class="info-box">
+        <span class="info-box-icon bg-danger"><i class="fas fa-calendar-times"></i></span>
+        <div class="info-box-content">
+          <span class="info-box-text">Expiring (≤ 90 days)</span>
+          <span class="info-box-number" data-stat-key="expiring_soon_90_days">
+            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="col-lg-6">
+      <div class="card">
+        <div class="card-header"><h3 class="card-title">Membership Types (Active)</h3></div>
+        <div class="card-body" style="position: relative; min-height: 320px;">
+          <div class="d-flex align-items-center justify-content-center" data-chart-loading="membership-types" style="position:absolute; inset:0;">
+            <div class="text-center">
+              <div class="spinner-border" role="status" aria-hidden="true"></div>
+              <div class="mt-2 text-muted">Loading…</div>
+            </div>
+          </div>
+          <canvas id="membership-types-chart" height="260"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-6">
+      <div class="card">
+        <div class="card-header"><h3 class="card-title">Requests Trend</h3></div>
+        <div class="card-body" style="position: relative; min-height: 320px;">
+          <div class="d-flex align-items-center justify-content-center" data-chart-loading="requests-trend" style="position:absolute; inset:0;">
+            <div class="text-center">
+              <div class="spinner-border" role="status" aria-hidden="true"></div>
+              <div class="mt-2 text-muted">Loading…</div>
+            </div>
+          </div>
+          <canvas id="requests-trend-chart" height="260"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="col-lg-6">
+      <div class="card">
+        <div class="card-header"><h3 class="card-title">Decision Outcomes</h3></div>
+        <div class="card-body" style="position: relative; min-height: 320px;">
+          <div class="d-flex align-items-center justify-content-center" data-chart-loading="decisions-trend" style="position:absolute; inset:0;">
+            <div class="text-center">
+              <div class="spinner-border" role="status" aria-hidden="true"></div>
+              <div class="mt-2 text-muted">Loading…</div>
+            </div>
+          </div>
+          <canvas id="decisions-trend-chart" height="260"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-6">
+      <div class="card">
+        <div class="card-header"><h3 class="card-title">Expirations Upcoming</h3></div>
+        <div class="card-body" style="position: relative; min-height: 320px;">
+          <div class="d-flex align-items-center justify-content-center" data-chart-loading="expirations-upcoming" style="position:absolute; inset:0;">
+            <div class="text-center">
+              <div class="spinner-border" role="status" aria-hidden="true"></div>
+              <div class="mt-2 text-muted">Loading…</div>
+            </div>
+          </div>
+          <canvas id="expirations-upcoming-chart" height="260"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="col-lg-6">
+      <div class="card">
+        <div class="card-header"><h3 class="card-title">User Distribution by Country (All Users)</h3></div>
+        <div class="card-body" style="position: relative; min-height: 320px;">
+          <div class="d-flex align-items-center justify-content-center" data-chart-loading="nationality-all-users" style="position:absolute; inset:0;">
+            <div class="text-center">
+              <div class="spinner-border" role="status" aria-hidden="true"></div>
+              <div class="mt-2 text-muted">Loading…</div>
+            </div>
+          </div>
+          <canvas id="nationality-all-users-chart" height="260"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-6">
+      <div class="card">
+        <div class="card-header"><h3 class="card-title">Nationality (Active Members)</h3></div>
+        <div class="card-body" style="position: relative; min-height: 320px;">
+          <div class="d-flex align-items-center justify-content-center" data-chart-loading="nationality-active-members" style="position:absolute; inset:0;">
+            <div class="text-center">
+              <div class="spinner-border" role="status" aria-hidden="true"></div>
+              <div class="mt-2 text-muted">Loading…</div>
+            </div>
+          </div>
+          <canvas id="nationality-active-members-chart" height="260"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ block.super }}
+<script src="{% static 'core/vendor/chartjs/chart.umd.min.js' %}"></script>
+<script src="{% static 'core/js/membership_stats.js' %}"></script>
+{% endblock %}

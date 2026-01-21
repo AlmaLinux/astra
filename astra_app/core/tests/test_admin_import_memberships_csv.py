@@ -3,15 +3,15 @@ from __future__ import annotations
 import csv
 import datetime
 import io
-from unittest.mock import patch
 from types import SimpleNamespace
+from typing import Any
+from unittest.mock import patch
 
+from django import forms
 from django.contrib.admin.sites import AdminSite
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django import forms
 from django.template.response import TemplateResponse
-from django.test import TestCase
-from django.test import RequestFactory
+from django.test import RequestFactory, TestCase
 from django.urls import reverse
 from django.utils import timezone
 from import_export.formats import base_formats
