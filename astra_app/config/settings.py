@@ -403,6 +403,7 @@ POST_OFFICE = {
 # Also provides a stats dashboard and an SNS event webhook (bounces, complaints,
 # deliveries, opens, clicks).
 AWS_SES_REGION_NAME = _env_str("AWS_SES_REGION_NAME", default="us-east-1") or "us-east-1"
+AWS_SES_REGION_ENDPOINT = os.environ.get("AWS_SES_REGION_ENDPOINT", f"email.{AWS_SES_REGION_NAME}.amazonaws.com")
 
 # Signature verification is recommended for production SNS webhooks. For local
 # dev, allowing unsigned test payloads is convenient.
