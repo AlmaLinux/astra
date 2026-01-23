@@ -6,7 +6,7 @@ from django.contrib.admin.models import ADDITION, LogEntry
 from django.test import TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAGroup, FreeIPAUser
+from core.backends import FreeIPAGroup, FreeIPAUser, clear_current_viewer_username, set_current_viewer_username
 
 
 class AdminIPAGroupCRUDTests(TestCase):
@@ -204,7 +204,7 @@ class AdminIPAGroupCRUDTests(TestCase):
         mock_delete.assert_called_once()
 
         # Logging is enabled for unmanaged models with ContentType created in setUp
-    
+
     def test_create_group_with_fasgroup(self):
         self._login_as_freeipa_admin("alice")
         admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})
@@ -259,9 +259,13 @@ class AdminIPAGroupCRUDTests(TestCase):
             )
         self.assertEqual(resp.status_code, 302)
         # Creation should request FAS support at create-time via the boolean
-        # `fasgroup` kwarg rather than a post-create `group_mod`.
+        # (backend may encode it either via `fasgroup=True` or by adding the
+        # fasGroup objectClass at creation time).
         self.assertTrue(
-            any(call_kwargs.get("fasgroup") is True or call_kwargs.get("o_addattr") == ["objectClass=fasGroup"] for _cn, call_kwargs in fake_client.group_add_calls)
+            any(
+                call_kwargs.get("fasgroup") is True or call_kwargs.get("o_addattr") == ["objectClass=fasGroup"]
+                for _cn, call_kwargs in fake_client.group_add_calls
+            )
         )
 
     def test_edit_group_toggle_fasgroup(self):
@@ -339,3 +343,166 @@ class AdminIPAGroupCRUDTests(TestCase):
             )
             self.assertEqual(resp.status_code, 302)
             self.assertFalse(fake_client.group_mod_calls)
+
+
+class AdminIPAGroupEmailsCSVTests(TestCase):
+    def _login_as_freeipa_admin(self, username: str = "alice") -> None:
+        session = self.client.session
+        session["_freeipa_username"] = username
+        session.save()
+
+    def test_change_form_includes_download_emails_button(self) -> None:
+        self._login_as_freeipa_admin("alice")
+
+        admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"], "mail": ["alice@example.com"]})
+        group = FreeIPAGroup(
+            "testgroup",
+            {
+                "cn": ["testgroup"],
+                "description": ["A test group"],
+                "member_user": ["bob"],
+                "membermanager_user": ["carol"],
+            },
+        )
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=admin_user),
+            patch("core.backends.FreeIPAGroup.all", return_value=[group]),
+            patch("core.backends.FreeIPAGroup.get", return_value=group),
+        ):
+            url = reverse("admin:auth_ipagroup_change", args=["testgroup"])
+            resp = self.client.get(url)
+
+        self.assertEqual(resp.status_code, 200)
+        download_url = reverse("admin:auth_ipagroup_download_emails", args=["testgroup"])
+        self.assertContains(resp, download_url)
+        self.assertContains(resp, "Download member/sponsor emails (CSV)")
+
+    def test_download_emails_csv_contains_unique_member_and_sponsor_emails(self) -> None:
+        self._login_as_freeipa_admin("alice")
+
+        admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"], "mail": ["alice@example.com"]})
+
+        root_group = FreeIPAGroup(
+            "testgroup",
+            {
+                "cn": ["testgroup"],
+                "member_user": ["bob", "dave"],
+                "member_group": ["child-members"],
+                "membermanager_user": ["carol", "bob"],
+                "membermanager_group": ["child-sponsors"],
+            },
+        )
+        child_members = FreeIPAGroup(
+            "child-members",
+            {
+                "cn": ["child-members"],
+                "member_user": ["erin"],
+            },
+        )
+        child_sponsors = FreeIPAGroup(
+            "child-sponsors",
+            {
+                "cn": ["child-sponsors"],
+                "member_user": ["frank", "dave"],
+            },
+        )
+
+        def _fake_group_get(cn: str):
+            if cn == "testgroup":
+                return root_group
+            if cn == "child-members":
+                return child_members
+            if cn == "child-sponsors":
+                return child_sponsors
+            return None
+
+        def _fake_user_get(username: str):
+            if username == "alice":
+                return admin_user
+            if username == "bob":
+                return FreeIPAUser("bob", {"uid": ["bob"], "mail": ["shared@example.com"]})
+            if username == "carol":
+                return FreeIPAUser("carol", {"uid": ["carol"], "mail": ["carol@example.com"]})
+            if username == "dave":
+                return FreeIPAUser("dave", {"uid": ["dave"], "mail": ["shared@example.com"]})
+            if username == "erin":
+                return FreeIPAUser("erin", {"uid": ["erin"], "mail": [""]})
+            if username == "frank":
+                return FreeIPAUser("frank", {"uid": ["frank"], "mail": ["frank@example.com"]})
+            return FreeIPAUser(username, {"uid": [username], "mail": [""]})
+
+        with (
+            patch("core.backends.FreeIPAUser.get", side_effect=_fake_user_get),
+            patch("core.backends.FreeIPAGroup.all", return_value=[root_group]),
+            patch("core.backends.FreeIPAGroup.get", side_effect=_fake_group_get),
+        ):
+            url = reverse("admin:auth_ipagroup_download_emails", args=["testgroup"])
+            resp = self.client.get(url)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp["Content-Type"], "text/csv; charset=utf-8")
+        self.assertIn("attachment;", resp["Content-Disposition"])
+
+        lines = resp.content.decode("utf-8").splitlines()
+        self.assertGreaterEqual(len(lines), 1)
+        self.assertEqual(lines[0].strip(), "email")
+
+        emails = [line.strip() for line in lines[1:] if line.strip()]
+        self.assertEqual(
+            emails,
+            [
+                "carol@example.com",
+                "frank@example.com",
+                "shared@example.com",
+            ],
+        )
+
+    def test_download_emails_csv_includes_private_profile_emails_for_admins(self) -> None:
+        self._login_as_freeipa_admin("alice")
+
+        # Simulate the normal request middleware setting a viewer (which would
+        # trigger anonymization for private users).
+        set_current_viewer_username("alice")
+        try:
+            admin_user = FreeIPAUser(
+                "alice",
+                {"uid": ["alice"], "memberof_group": ["admins"], "mail": ["alice@example.com"]},
+            )
+            group = FreeIPAGroup(
+                "testgroup",
+                {
+                    "cn": ["testgroup"],
+                    "member_user": ["privateuser"],
+                },
+            )
+
+            def _fake_user_get(username: str):
+                if username == "alice":
+                    return admin_user
+                if username == "privateuser":
+                    return FreeIPAUser(
+                        "privateuser",
+                        {
+                            "uid": ["privateuser"],
+                            "mail": ["private@example.com"],
+                            "fasIsPrivate": ["TRUE"],
+                        },
+                    )
+                return FreeIPAUser(username, {"uid": [username], "mail": [""]})
+
+            with (
+                patch("core.backends.FreeIPAUser.get", side_effect=_fake_user_get),
+                patch("core.backends.FreeIPAGroup.all", return_value=[group]),
+                patch("core.backends.FreeIPAGroup.get", return_value=group),
+            ):
+                url = reverse("admin:auth_ipagroup_download_emails", args=["testgroup"])
+                resp = self.client.get(url)
+
+            self.assertEqual(resp.status_code, 200)
+            lines = resp.content.decode("utf-8").splitlines()
+            self.assertEqual(lines[0].strip(), "email")
+            emails = [line.strip() for line in lines[1:] if line.strip()]
+            self.assertEqual(emails, ["private@example.com"])
+        finally:
+            clear_current_viewer_username()

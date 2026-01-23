@@ -1,0 +1,14 @@
+{% extends "admin/change_form.html" %}
+
+{% block object-tools-items %}
+  {% if change and has_change_permission %}
+    {% url 'admin:auth_ipagroup_download_emails' original.pk as admin_download_emails_url %}
+    <a
+      class="btn btn-block btn-outline-primary btn-sm"
+      href="{{ admin_download_emails_url }}"
+    >
+      Download member/sponsor emails (CSV)
+    </a>
+  {% endif %}
+  {{ block.super }}
+{% endblock %}

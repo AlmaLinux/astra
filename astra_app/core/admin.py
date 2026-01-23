@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 import logging
 from collections.abc import Callable
 from typing import Any, override
@@ -50,6 +52,8 @@ from .backends import (
     FreeIPAGroup,
     FreeIPAOperationFailed,
     FreeIPAUser,
+    clear_current_viewer_username,
+    set_current_viewer_username,
     _invalidate_agreement_cache,
     _invalidate_agreements_list_cache,
 )
@@ -1062,6 +1066,88 @@ class IPAGroupAdmin(FreeIPAModelAdmin):
     list_display = ("cn", "description", "fas_group", "fas_url", "fas_mailing_list")
     ordering = ("cn",)
     search_fields = ("cn", "description")
+    change_form_template = "admin/core/ipagroup/change_form.html"
+
+    @override
+    def get_urls(self):
+        urls = super().get_urls()
+        custom = [
+            path(
+                "<path:object_id>/download-emails/",
+                self.admin_site.admin_view(self.download_emails_view),
+                name="auth_ipagroup_download_emails",
+            ),
+        ]
+        return custom + urls
+
+    def download_emails_view(self, request: HttpRequest, object_id: str) -> HttpResponse:
+        obj = self.get_object(request, object_id)
+        if obj is None:
+            raise Http404
+        if not self.has_change_permission(request, obj=obj):
+            raise PermissionDenied
+
+        group_cn = _normalize_str(obj.pk)
+        if not group_cn:
+            raise Http404
+
+        group = FreeIPAGroup.get(group_cn)
+        if group is None:
+            raise Http404
+
+        usernames: set[str] = set()
+        try:
+            usernames |= set(group.member_usernames_recursive())
+        except Exception:
+            logger.exception("Failed to expand member usernames group=%s", group_cn)
+            usernames |= set(group.members)
+
+        usernames |= set(group.sponsors)
+
+        for sponsor_group_cn in group.sponsor_groups:
+            sponsor_group = FreeIPAGroup.get(sponsor_group_cn)
+            if sponsor_group is None:
+                continue
+            try:
+                usernames |= set(sponsor_group.member_usernames_recursive())
+            except Exception:
+                logger.exception(
+                    "Failed to expand sponsor group member usernames group=%s sponsor_group=%s",
+                    group_cn,
+                    sponsor_group_cn,
+                )
+                usernames |= set(sponsor_group.members)
+
+        request_username = _normalize_str(getattr(request.user, "username", ""))
+
+        # This export is an admin-only operation. Admins must be able to export
+        # contact data for operational reasons, even when a user opted into a
+        # private profile.
+        clear_current_viewer_username()
+        try:
+            emails: set[str] = set()
+            for username in sorted(usernames, key=str.lower):
+                user = FreeIPAUser.get(username)
+                if user is None:
+                    continue
+                email = _normalize_str(user.email).lower()
+                if email:
+                    emails.add(email)
+        finally:
+            if request_username:
+                set_current_viewer_username(request_username)
+            else:
+                clear_current_viewer_username()
+
+        buf = io.StringIO(newline="")
+        writer = csv.writer(buf)
+        writer.writerow(["email"])
+        for email in sorted(emails):
+            writer.writerow([email])
+
+        resp = HttpResponse(buf.getvalue(), content_type="text/csv; charset=utf-8")
+        resp["Content-Disposition"] = f'attachment; filename="{group_cn}_emails.csv"'
+        return resp
 
     @override
     def save_model(self, request, obj, form, change):
@@ -1489,7 +1575,7 @@ class MembershipCSVImportLinkAdmin(ImportMixin, admin.ModelAdmin):
     @override
     def has_add_permission(self, request: HttpRequest) -> bool:
         return False
-    
+
     @override
     def get_import_formats(self) -> list[type[base_formats.Format]]:
         return [base_formats.CSV]
