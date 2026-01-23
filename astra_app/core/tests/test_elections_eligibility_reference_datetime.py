@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from django.test import TestCase, override_settings
 
-from core.elections_services import eligible_vote_weight_for_username, eligible_voters_from_memberships
+from core.elections_eligibility import eligible_vote_weight_for_username, eligible_voters_from_memberships
 from core.models import Election, Membership, MembershipLog, MembershipType
 
 

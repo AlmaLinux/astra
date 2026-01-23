@@ -61,7 +61,7 @@
           <div class="card-body">
             {% if tally_elected_users %}
               <p class="mb-2"><strong>Elected:</strong></p>
-              <ul class="pl-3">
+              <ul class="pl-3 ml-2">
                 {% for u in tally_elected_users %}
                   <li><a href="{{ u.profile_url }}">{{ u.username }}</a></li>
                 {% endfor %}
@@ -240,9 +240,17 @@
                           <dt class="col-sm-5">Quorum voters required</dt>
                           <dd class="col-sm-7">{{ ev.payload.required_participating_voter_count }}</dd>
                         {% endif %}
+                        {% if ev.payload.required_participating_vote_weight_total %}
+                          <dt class="col-sm-5">Quorum vote weight required</dt>
+                          <dd class="col-sm-7">{{ ev.payload.required_participating_vote_weight_total }}</dd>
+                        {% endif %}
                         {% if ev.payload.participating_voter_count %}
                           <dt class="col-sm-5">Voters participated</dt>
                           <dd class="col-sm-7">{{ ev.payload.participating_voter_count }}</dd>
+                        {% endif %}
+                        {% if ev.payload.participating_vote_weight_total %}
+                          <dt class="col-sm-5">Vote weight participated</dt>
+                          <dd class="col-sm-7">{{ ev.payload.participating_vote_weight_total }}</dd>
                         {% endif %}
                       </dl>
 
@@ -257,9 +265,17 @@
                           <dt class="col-sm-5">Voters required</dt>
                           <dd class="col-sm-7">{{ ev.payload.required_participating_voter_count }}</dd>
                         {% endif %}
+                        {% if ev.payload.required_participating_vote_weight_total %}
+                          <dt class="col-sm-5">Vote weight required</dt>
+                          <dd class="col-sm-7">{{ ev.payload.required_participating_vote_weight_total }}</dd>
+                        {% endif %}
                         {% if ev.payload.participating_voter_count %}
                           <dt class="col-sm-5">Voters participated</dt>
                           <dd class="col-sm-7">{{ ev.payload.participating_voter_count }}</dd>
+                        {% endif %}
+                        {% if ev.payload.participating_vote_weight_total %}
+                          <dt class="col-sm-5">Vote weight participated</dt>
+                          <dd class="col-sm-7">{{ ev.payload.participating_vote_weight_total }}</dd>
                         {% endif %}
                         {% if ev.payload.eligible_voter_count %}
                           <dt class="col-sm-5">Eligible voters</dt>
@@ -309,7 +325,7 @@
                       {% if ev.event_type == 'tally_completed' %}
                         {% if ev.elected_users %}
                           <p class="mb-2"><strong>Elected:</strong></p>
-                          <ul class="pl-3">
+                          <ul class="pl-3 ml-2">
                             {% for u in ev.elected_users %}
                               <li><a href="{{ u.profile_url }}">{{ u.username }}</a></li>
                             {% endfor %}
@@ -318,12 +334,6 @@
                         {% if empty_seats > 0 %}
                           <p class="mt-2"><strong>Empty seats:</strong> {{ empty_seats }}</p>
                         {% endif %}
-                      {% endif %}
-
-                      {% if ev.payload %}
-                        <pre class="mb-0">{{ ev.payload|pprint }}</pre>
-                      {% else %}
-                        <p class="text-muted mb-0">No details recorded.</p>
                       {% endif %}
                     {% endif %}
                   </div>

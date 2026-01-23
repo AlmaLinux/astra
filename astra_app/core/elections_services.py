@@ -4,7 +4,6 @@ import datetime
 import json
 import secrets
 from dataclasses import dataclass
-from decimal import Decimal
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
@@ -13,26 +12,23 @@ from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, Sum
 from django.http import HttpRequest
-from django.template import Context, Template
-from django.template.exceptions import TemplateSyntaxError
 from django.urls import reverse
 from django.utils import timezone
 from post_office.models import Email
 
-from core.backends import FreeIPAGroup, FreeIPAUser
+from core.backends import FreeIPAUser
+from core.elections_eligibility import eligible_voters_from_memberships
 from core.email_context import user_email_context, user_email_context_from_user
 from core.models import (
     AuditLogEntry,
     Ballot,
     Candidate,
     Election,
-    Membership,
-    OrganizationSponsorship,
     VotingCredential,
 )
-from core.templated_email import queue_templated_email
+from core.templated_email import queue_templated_email, render_template_string
 from core.tokens import election_chain_next_hash, election_genesis_chain_hash
 
 ELECTION_TALLY_ALGORITHM_NAME = "Meek STV (High-Precision Variant)"
@@ -94,7 +90,7 @@ def extend_election_end_datetime(
     }
     if actor:
         payload["actor"] = actor
-    
+
     AuditLogEntry.objects.create(
         election=locked,
         event_type="election_end_extended",
@@ -109,76 +105,58 @@ class BallotReceipt:
     nonce: str
 
 
-@dataclass(frozen=True)
-class EligibleVoter:
-    username: str
-    weight: int
-
-
 def _post_office_json_context(context: dict[str, object]) -> dict[str, object]:
-    # django-post-office stores template context in a DB JSON field and runs
-    # model validation before saving. Canonicalizing through DjangoJSONEncoder
-    # ensures all values are JSON-safe (e.g. datetimes), avoiding runtime 500s.
+    """Coerce context values to JSON-safe payloads for django-post-office."""
     encoded = json.dumps(context, cls=DjangoJSONEncoder)
     decoded = json.loads(encoded)
-    if not isinstance(decoded, dict):
-        raise ElectionError("email context must serialize to a JSON object")
-    return decoded
+    if isinstance(decoded, dict):
+        return {str(k): v for k, v in decoded.items()}
+    return {}
 
 
-def _format_datetime_in_timezone(*, dt: datetime.datetime, tz_name: str | None) -> str:
-    """Format an aware datetime in a user-selected IANA timezone.
+def _format_datetime_in_timezone(*, dt: datetime.datetime | None, tz_name: str | None = None) -> str:
+    if dt is None:
+        return ""
 
-    We format to a human-friendly string and include the timezone name so emails
-    are unambiguous.
-    """
+    value = dt
+    if timezone.is_naive(value):
+        value = timezone.make_aware(value, timezone=timezone.UTC)
 
-    target_tz_name = str(tz_name or "").strip() or "UTC"
-    try:
-        tzinfo = ZoneInfo(target_tz_name)
-    except Exception:
-        target_tz_name = "UTC"
-        tzinfo = ZoneInfo("UTC")
+    tz_label = ""
+    if tz_name:
+        try:
+            tz = ZoneInfo(str(tz_name))
+        except Exception:
+            tz = None
 
-    local = timezone.localtime(dt, timezone=tzinfo)
-    return f"{local.strftime('%b %d, %Y %H:%M')} ({target_tz_name})"
+        if tz is not None:
+            value = value.astimezone(tz)
+            tz_label = f" ({tz_name})"
 
-
-def _render_template_string(value: str, context: dict[str, object]) -> str:
-    try:
-        return Template(value or "").render(Context(context))
-    except TemplateSyntaxError as exc:
-        raise ElectionError(str(exc)) from exc
+    return f"{value.strftime('%Y-%m-%d %H:%M')}{tz_label}"
 
 
-def _jsonify_tally_result(result: dict[str, object]) -> dict[str, object]:
-    quota = result.get("quota")
-    if isinstance(quota, Decimal):
-        quota_json: object = str(quota)
-    else:
-        quota_json = quota
-
-    return {
-        "quota": quota_json,
-        "elected": list(result.get("elected") or []),
-        "eliminated": list(result.get("eliminated") or []),
-        "forced_excluded": list(result.get("forced_excluded") or []),
-        "rounds": list(result.get("rounds") or []),
-    }
+def _jsonify_tally_result(result: object) -> dict[str, object]:
+    """Normalize tally output (Decimal, tuples) to JSON-safe types."""
+    serialized = json.dumps(result, cls=DjangoJSONEncoder)
+    normalized = json.loads(serialized)
+    if isinstance(normalized, dict):
+        return normalized
+    raise ElectionError("Tally result serialization failed")
 
 
 def build_public_ballots_export(*, election: Election) -> dict[str, object]:
-    candidate_usernames_by_id = dict(
-        Candidate.objects.filter(election=election).values_list(
-            "id",
-            "freeipa_username",
-        )
-    )
+    candidates = Candidate.objects.filter(election=election).only("id", "freeipa_username")
+    candidate_name_by_id: dict[int, str] = {
+        int(c.id): str(c.freeipa_username or "").strip()
+        for c in candidates
+        if str(c.freeipa_username or "").strip()
+    }
 
-    ballots = list(
+    ballots_qs = (
         Ballot.objects.filter(election=election)
-        .order_by("created_at", "id")
-        .values(
+        .select_related("superseded_by")
+        .only(
             "ranking",
             "weight",
             "ballot_hash",
@@ -186,70 +164,74 @@ def build_public_ballots_export(*, election: Election) -> dict[str, object]:
             "chain_hash",
             "previous_chain_hash",
             "superseded_by__ballot_hash",
+            "created_at",
         )
+        .order_by("created_at", "id")
     )
-    for row in ballots:
-        ranking_ids = row.get("ranking") or []
-        if isinstance(ranking_ids, list):
-            ranking_usernames: list[str] = []
-            for cid in ranking_ids:
-                try:
-                    candidate_id = int(cid)
-                except (TypeError, ValueError):
-                    continue
 
-                username = str(candidate_usernames_by_id.get(candidate_id) or candidate_id).strip()
-                if username:
-                    ranking_usernames.append(username)
-            row["ranking"] = ranking_usernames
+    ballots_payload: list[dict[str, object]] = []
+    for ballot in ballots_qs:
+        ranking_usernames: list[str] = []
+        for cid in ballot.ranking or []:
+            try:
+                candidate_id = int(cid)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            name = candidate_name_by_id.get(candidate_id)
+            ranking_usernames.append(name if name else str(candidate_id))
 
-        row["superseded_by"] = row.pop("superseded_by__ballot_hash")
+        ballots_payload.append(
+            {
+                "ranking": ranking_usernames,
+                "weight": int(ballot.weight or 0),
+                "ballot_hash": str(ballot.ballot_hash or ""),
+                "is_counted": bool(ballot.is_counted),
+                "chain_hash": str(ballot.chain_hash or ""),
+                "previous_chain_hash": str(ballot.previous_chain_hash or ""),
+                "superseded_by": (
+                    str(ballot.superseded_by.ballot_hash)
+                    if ballot.superseded_by and ballot.superseded_by.ballot_hash
+                    else None
+                ),
+            }
+        )
 
-    genesis_hash = election_genesis_chain_hash(election.id)
-    chain_head = ballots[-1]["chain_hash"] if ballots else genesis_hash
+    last_chain_hash = ballots_qs.values_list("chain_hash", flat=True).last()
+    chain_head = str(last_chain_hash or election_genesis_chain_hash(election.id))
 
     return {
-        "election_id": election.id,
-        "ballots": ballots,
+        "ballots": ballots_payload,
         "chain_head": chain_head,
-        "genesis_hash": genesis_hash,
     }
 
 
 def build_public_audit_export(*, election: Election) -> dict[str, object]:
-    rows = list(
+    entries = (
         AuditLogEntry.objects.filter(election=election, is_public=True)
+        .only("timestamp", "event_type", "payload")
         .order_by("timestamp", "id")
-        .values(
-            "timestamp",
-            "event_type",
-            "payload",
-        )
     )
-    for row in rows:
-        # Privacy: export only a coarse date, not a precise timestamp.
-        row["timestamp"] = row["timestamp"].date().isoformat()
 
-    algorithm: dict[str, object] | None = None
+    audit_log: list[dict[str, object]] = []
+    for entry in entries:
+        payload = entry.payload if isinstance(entry.payload, dict) else {"data": entry.payload}
+        audit_log.append(
+            {
+                "timestamp": entry.timestamp.date().isoformat(),
+                "event_type": str(entry.event_type),
+                "payload": payload,
+            }
+        )
+
+    algorithm = {}
     if isinstance(election.tally_result, dict):
         algo = election.tally_result.get("algorithm")
         if isinstance(algo, dict):
             algorithm = algo
 
-    if algorithm is None and election.status == Election.Status.tallied:
-        algorithm = {
-            "name": ELECTION_TALLY_ALGORITHM_NAME,
-            "version": ELECTION_TALLY_ALGORITHM_VERSION,
-            "specification": {
-                "doc": ELECTION_TALLY_ALGORITHM_SPEC_DOC,
-                "url_path": reverse("election-algorithm"),
-            },
-        }
-
     return {
-        "election_id": election.id,
         "algorithm": algorithm,
-        "audit_log": rows,
+        "audit_log": audit_log,
     }
 
 
@@ -257,43 +239,18 @@ def persist_public_election_artifacts(*, election: Election) -> None:
     ballots_payload = build_public_ballots_export(election=election)
     audit_payload = build_public_audit_export(election=election)
 
-    ballots_json = json.dumps(ballots_payload, sort_keys=True, cls=DjangoJSONEncoder, ensure_ascii=False).encode(
-        "utf-8"
+    ballots_content = ContentFile(
+        json.dumps(ballots_payload, cls=DjangoJSONEncoder, sort_keys=True).encode("utf-8")
     )
-    audit_json = json.dumps(audit_payload, sort_keys=True, cls=DjangoJSONEncoder, ensure_ascii=False).encode("utf-8")
+    audit_content = ContentFile(
+        json.dumps(audit_payload, cls=DjangoJSONEncoder, sort_keys=True).encode("utf-8")
+    )
 
-    try:
-        if election.public_ballots_file:
-            election.public_ballots_file.delete(save=False)
-        if election.public_audit_file:
-            election.public_audit_file.delete(save=False)
+    election.public_ballots_file.save("public-ballots.json", ballots_content, save=False)
+    election.public_audit_file.save("public-audit.json", audit_content, save=False)
+    election.artifacts_generated_at = timezone.now()
+    election.save(update_fields=["public_ballots_file", "public_audit_file", "artifacts_generated_at"])
 
-        election.public_ballots_file.save("public_ballots.json", ContentFile(ballots_json), save=False)
-        election.public_audit_file.save("public_audit_log.json", ContentFile(audit_json), save=False)
-
-        election.artifacts_generated_at = timezone.now()
-        election.save(
-            update_fields=[
-                "public_ballots_file",
-                "public_audit_file",
-                "artifacts_generated_at",
-                "updated_at",
-            ]
-        )
-    except Exception as exc:
-        # Best effort: avoid leaving orphaned artifact keys referenced by the DB.
-        election.public_ballots_file = ""
-        election.public_audit_file = ""
-        election.artifacts_generated_at = None
-        election.save(
-            update_fields=[
-                "public_ballots_file",
-                "public_audit_file",
-                "artifacts_generated_at",
-                "updated_at",
-            ]
-        )
-        raise ElectionError(f"Failed to store election artifacts: {exc}") from exc
 
 
 def _sanitize_ranking(*, election: Election, ranking: list[int]) -> list[int]:
@@ -411,9 +368,9 @@ def send_voting_credential_email(
     )
 
     if subject_template is not None or html_template is not None or text_template is not None:
-        rendered_subject = _render_template_string(subject_template or "", context)
-        rendered_html = _render_template_string(html_template or "", context)
-        rendered_text = _render_template_string(text_template or "", context)
+        rendered_subject = render_template_string(subject_template or "", context)
+        rendered_html = render_template_string(html_template or "", context)
+        rendered_text = render_template_string(text_template or "", context)
         post_office.mail.send(
             recipients=[email],
             sender=settings.DEFAULT_FROM_EMAIL,
@@ -472,181 +429,6 @@ def build_voting_credential_email_context(
     }
 
 
-def _eligible_voters_from_memberships(*, election: Election) -> list[EligibleVoter]:
-    # Eligibility: must hold a non-expired individual membership that started at least
-    # ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS (configured as 90 days) before election start.
-    reference_datetime = election.start_datetime
-    if election.status == Election.Status.draft:
-        reference_datetime = max(election.start_datetime, timezone.now())
-
-    cutoff = reference_datetime - datetime.timedelta(days=settings.ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS)
-    eligible_qs = (
-        Membership.objects.filter(
-            membership_type__isIndividual=True,
-            membership_type__enabled=True,
-            membership_type__votes__gt=0,
-            created_at__lte=cutoff,
-        )
-        .filter(Q(expires_at__isnull=True) | Q(expires_at__gte=reference_datetime))
-        .values("target_username")
-        .annotate(weight=Sum("membership_type__votes"))
-        .order_by("target_username")
-    )
-
-    weights_by_username: dict[str, int] = {}
-    for row in eligible_qs:
-        username = str(row["target_username"])
-        weight = int(row["weight"] or 0)
-        if not username.strip() or weight <= 0:
-            continue
-        weights_by_username[username] = weights_by_username.get(username, 0) + weight
-
-    sponsorships = (
-        OrganizationSponsorship.objects.select_related("organization", "membership_type")
-        .filter(
-            membership_type__enabled=True,
-            membership_type__votes__gt=0,
-            created_at__lte=cutoff,
-        )
-        .filter(Q(expires_at__isnull=True) | Q(expires_at__gte=reference_datetime))
-        .only(
-            "organization__representative",
-            "membership_type__votes",
-        )
-    )
-
-    for sponsorship in sponsorships:
-        votes = int(sponsorship.membership_type.votes or 0)
-        if votes <= 0:
-            continue
-
-        username = str(sponsorship.organization.representative or "").strip()
-        if not username:
-            continue
-        weights_by_username[username] = weights_by_username.get(username, 0) + votes
-
-    eligible: list[EligibleVoter] = [
-        EligibleVoter(username=username, weight=weight)
-        for username, weight in sorted(weights_by_username.items(), key=lambda kv: kv[0].lower())
-        if weight > 0
-    ]
-    return eligible
-
-
-def _freeipa_group_recursive_member_usernames(*, group_cn: str) -> set[str]:
-    """Return lowercased usernames in the given FreeIPA group, including nested groups."""
-
-    root = str(group_cn or "").strip()
-    if not root:
-        return set()
-
-    seen_groups: set[str] = set()
-    members: set[str] = set()
-    pending: list[str] = [root]
-
-    while pending:
-        cn = str(pending.pop() or "").strip()
-        if not cn:
-            continue
-        cn_key = cn.lower()
-        if cn_key in seen_groups:
-            continue
-        seen_groups.add(cn_key)
-
-        group = FreeIPAGroup.get(cn)
-        if group is None:
-            continue
-
-        for username_raw in (group.members or []):
-            username = str(username_raw or "").strip()
-            if username:
-                members.add(username.lower())
-
-        for nested_cn_raw in (group.member_groups or []):
-            nested_cn = str(nested_cn_raw or "").strip()
-            if nested_cn:
-                pending.append(nested_cn)
-
-    return members
-
-
-def eligible_voters_from_memberships(*, election: Election) -> list[EligibleVoter]:
-    """Compute the eligible voters for an election from memberships.
-
-    This is used both for issuing credentials and for admin visibility.
-    """
-
-    eligible = _eligible_voters_from_memberships(election=election)
-
-    group_cn = str(election.eligible_group_cn or "").strip()
-    if not group_cn:
-        return eligible
-
-    eligible_usernames = _freeipa_group_recursive_member_usernames(group_cn=group_cn)
-    if not eligible_usernames:
-        return []
-
-    return [v for v in eligible if v.username.lower() in eligible_usernames]
-
-
-def eligible_vote_weight_for_username(*, election: Election, username: str) -> int:
-    """Return the election vote weight for a specific user, or 0 if ineligible."""
-
-    username = str(username or "").strip()
-    if not username:
-        return 0
-
-    group_cn = str(election.eligible_group_cn or "").strip()
-    if group_cn:
-        eligible_usernames = _freeipa_group_recursive_member_usernames(group_cn=group_cn)
-        if not eligible_usernames or username.lower() not in eligible_usernames:
-            return 0
-
-    reference_datetime = election.start_datetime
-    if election.status == Election.Status.draft:
-        reference_datetime = max(election.start_datetime, timezone.now())
-
-    cutoff = reference_datetime - datetime.timedelta(days=settings.ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS)
-    membership_weight = (
-        Membership.objects.filter(
-            target_username=username,
-            membership_type__isIndividual=True,
-            membership_type__enabled=True,
-            membership_type__votes__gt=0,
-            created_at__lte=cutoff,
-        )
-        .filter(Q(expires_at__isnull=True) | Q(expires_at__gte=reference_datetime))
-        .aggregate(weight=Sum("membership_type__votes"))
-        .get("weight")
-        or 0
-    )
-
-    sponsorship_weight = 0
-
-    sponsorships = (
-        OrganizationSponsorship.objects.select_related("organization", "membership_type")
-        .filter(
-            membership_type__enabled=True,
-            membership_type__votes__gt=0,
-            created_at__lte=cutoff,
-        )
-        .filter(Q(expires_at__isnull=True) | Q(expires_at__gte=reference_datetime))
-        .only(
-            "organization__representative",
-            "membership_type__votes",
-        )
-    )
-    for sponsorship in sponsorships:
-        votes = int(sponsorship.membership_type.votes or 0)
-        if votes <= 0:
-            continue
-
-        if sponsorship.organization.representative == username:
-            sponsorship_weight += votes
-
-    return int(membership_weight) + sponsorship_weight
-
-
 def election_quorum_status(*, election: Election) -> dict[str, int | bool]:
     """Return the election's current quorum/turnout status.
 
@@ -674,21 +456,30 @@ def election_quorum_status(*, election: Election) -> dict[str, int | bool]:
     participating_vote_weight_total = int(ballot_agg.get("weight_total") or 0)
 
     required_participating_voter_count = 0
+    required_participating_vote_weight_total = 0
     if quorum_percent > 0 and eligible_voter_count > 0:
         # Ceil(eligible * pct / 100) with integer arithmetic.
         required_participating_voter_count = (
             eligible_voter_count * quorum_percent + 99
         ) // 100
+    if quorum_percent > 0 and eligible_vote_weight_total > 0:
+        required_participating_vote_weight_total = (
+            eligible_vote_weight_total * quorum_percent + 99
+        ) // 100
 
     quorum_met = bool(
         required_participating_voter_count
+        and required_participating_vote_weight_total
         and participating_voter_count >= required_participating_voter_count
+        and participating_vote_weight_total >= required_participating_vote_weight_total
     )
 
     return {
         "quorum_percent": quorum_percent,
+        "quorum_required": bool(quorum_percent > 0),
         "quorum_met": quorum_met,
         "required_participating_voter_count": required_participating_voter_count,
+        "required_participating_vote_weight_total": required_participating_vote_weight_total,
         "eligible_voter_count": eligible_voter_count,
         "eligible_vote_weight_total": eligible_vote_weight_total,
         "participating_voter_count": participating_voter_count,
@@ -801,8 +592,9 @@ def submit_ballot(*, election: Election, credential_public_id: str, ranking: lis
 
     status = election_quorum_status(election=election)
     required_participating_voter_count = int(status.get("required_participating_voter_count") or 0)
+    required_participating_vote_weight_total = int(status.get("required_participating_vote_weight_total") or 0)
     quorum_met = bool(status.get("quorum_met"))
-    if required_participating_voter_count and quorum_met:
+    if required_participating_voter_count and required_participating_vote_weight_total and quorum_met:
         already_logged = AuditLogEntry.objects.filter(election=election, event_type="quorum_reached").exists()
         if not already_logged:
             AuditLogEntry.objects.create(
@@ -954,7 +746,7 @@ def close_election(*, election: Election, actor: str | None = None) -> None:
         payload = {"chain_head": chain_head}
         if actor:
             payload["actor"] = actor
-        
+
         AuditLogEntry.objects.create(
             election=election,
             event_type="election_closed",
@@ -968,7 +760,7 @@ def close_election(*, election: Election, actor: str | None = None) -> None:
         }
         if actor:
             failure_payload["actor"] = actor
-        
+
         # Use autonomous transaction to persist audit log even if outer transaction rolls back
         try:
             with transaction.atomic():
@@ -980,7 +772,7 @@ def close_election(*, election: Election, actor: str | None = None) -> None:
                 )
         except Exception:
             pass  # Don't let audit log failure mask original error
-        
+
         raise ElectionError(
             f"Failed to close election: {exc}. "
             "Recovery: Verify database connectivity and election state, then retry. "
@@ -1080,7 +872,7 @@ def tally_election(*, election: Election, actor: str | None = None) -> dict[str,
         }
         if actor:
             tally_completed_payload["actor"] = actor
-        
+
         AuditLogEntry.objects.create(
             election=election,
             event_type="tally_completed",
@@ -1096,7 +888,7 @@ def tally_election(*, election: Election, actor: str | None = None) -> dict[str,
         }
         if actor:
             failure_payload["actor"] = actor
-        
+
         # Use autonomous transaction to persist audit log even if outer transaction rolls back
         try:
             with transaction.atomic():
@@ -1108,7 +900,7 @@ def tally_election(*, election: Election, actor: str | None = None) -> dict[str,
                 )
         except Exception:
             pass  # Don't let audit log failure mask original error
-        
+
         raise ElectionError(
             f"Failed to tally election: {exc}. "
             "Recovery: Verify ballot data integrity and candidate configuration, then retry from the election detail page. "

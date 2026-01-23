@@ -5,7 +5,7 @@ import datetime
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from core.elections_services import eligible_voters_from_memberships
+from core.elections_eligibility import eligible_voters_from_memberships
 from core.models import Election, MembershipType, Organization, OrganizationSponsorship
 
 

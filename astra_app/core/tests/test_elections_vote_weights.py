@@ -10,9 +10,9 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.backends import FreeIPAUser
+from core.elections_eligibility import eligible_voters_from_memberships
 from core.elections_services import (
     close_election,
-    eligible_voters_from_memberships,
     issue_voting_credentials_from_memberships_detailed,
     submit_ballot,
     tally_election,

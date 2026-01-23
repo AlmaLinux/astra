@@ -136,6 +136,39 @@
     });
   }
 
+  function normalizeUsername(value) {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  function clearSelectValue(selectEl) {
+    if (!selectEl) return;
+    var jq = window.jQuery;
+    if (jq) {
+      jq(selectEl).val(null).trigger('change');
+      return;
+    }
+    selectEl.value = '';
+    try {
+      selectEl.dispatchEvent(new window.Event('change', { bubbles: true }));
+    } catch (_e) {
+      // Ignore unsupported browsers.
+    }
+  }
+
+  function enforceNoSelfNomination(row) {
+    if (!row || !row.querySelector) return;
+
+    var candidateEl = row.querySelector('select[name$="-freeipa_username"]');
+    var nominatorEl = row.querySelector('select[name$="-nominated_by"]');
+    if (!candidateEl || !nominatorEl) return;
+
+    var candidate = normalizeUsername(candidateEl.value);
+    var nominator = normalizeUsername(nominatorEl.value);
+    if (!candidate || !nominator || candidate !== nominator) return;
+
+    clearSelectValue(nominatorEl);
+  }
+
   async function saveTemplate(templateId) {
     if (!templateId) {
       try { window.alert('Select a template to save, or use Save as.'); } catch (_e) { /* noop */ }
@@ -516,6 +549,25 @@
     if (jq) {
       jq(document).on('change', 'select[name^="candidates-"][name$="-freeipa_username"], input[name^="candidates-"][name$="-DELETE"]', function () {
         syncGroupCandidateOptions(document);
+        var row = this && this.closest ? this.closest('tr') : null;
+        if (!row) row = jq(this).closest('tr')[0] || null;
+        enforceNoSelfNomination(row);
+      });
+      jq(document).on('change', 'select[name^="candidates-"][name$="-nominated_by"]', function () {
+        var row = this && this.closest ? this.closest('tr') : null;
+        if (!row) row = jq(this).closest('tr')[0] || null;
+        enforceNoSelfNomination(row);
+      });
+    } else {
+      document.addEventListener('change', function (e) {
+        var target = e && e.target ? e.target : null;
+        if (!target || !target.name) return;
+        var name = String(target.name || '');
+        if (!/^candidates-\d+-freeipa_username$/.test(name) && !/^candidates-\d+-nominated_by$/.test(name)) {
+          return;
+        }
+        var row = target.closest ? target.closest('tr') : null;
+        enforceNoSelfNomination(row);
       });
     }
 

@@ -621,6 +621,56 @@ class ElectionDetailManagerUIStatsTests(TestCase):
         self.assertContains(resp, "2026-02-10")
 
     @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=30)
+    def test_ineligible_voter_modal_preserves_zero_days_at_start(self) -> None:
+        start_dt = timezone.make_aware(datetime.datetime(2026, 2, 10, 12, 0, 0))
+
+        election = Election.objects.create(
+            name="Zero days election",
+            description="",
+            start_datetime=start_dt,
+            end_datetime=start_dt + datetime.timedelta(days=7),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+
+        mt = MembershipType.objects.create(
+            code="voter",
+            name="Voter",
+            votes=1,
+            isIndividual=True,
+            enabled=True,
+        )
+
+        m = Membership.objects.create(
+            target_username="bob",
+            membership_type=mt,
+            expires_at=start_dt + datetime.timedelta(days=365),
+        )
+        Membership.objects.filter(pk=m.pk).update(created_at=start_dt)
+
+        self._login_as_freeipa_user("admin")
+        self._grant_manage_permission("admin")
+        admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+
+        freeipa_users = [
+            FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []}),
+            FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []}),
+        ]
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=admin),
+            patch("core.views_elections.FreeIPAUser.all", return_value=freeipa_users),
+        ):
+            resp = self.client.get(reverse("election-detail", args=[election.id]))
+
+        self.assertEqual(resp.status_code, 200)
+
+        html = resp.content.decode("utf-8")
+        self.assertIn('"days_at_start": 0', html)
+        self.assertIn("d.days_at_start == null ? '' : d.days_at_start", html)
+        self.assertIn("d.days_short == null ? '' : d.days_short", html)
+
+    @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=30)
     def test_ineligible_voters_card_is_visible_and_renders_when_empty_for_manager(self) -> None:
         now = timezone.make_aware(datetime.datetime(2026, 2, 1, 12, 0, 0))
         start_dt = timezone.make_aware(datetime.datetime(2026, 2, 10, 12, 0, 0))
@@ -818,7 +868,7 @@ class ElectionDetailManagerUIStatsTests(TestCase):
         with (
             patch("core.backends.FreeIPAUser.get", return_value=admin),
             patch(
-                "core.views_elections.elections_services._freeipa_group_recursive_member_usernames",
+                "core.views_elections.elections_eligibility._freeipa_group_recursive_member_usernames",
                 return_value={"nomember"},
             ),
             patch("core.views_elections.FreeIPAUser.all", return_value=[]),
@@ -1032,6 +1082,10 @@ class ElectionDetailConcludeElectionTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Conclude Election")
         self.assertContains(resp, "Close election, but do not tally votes")
+        self.assertContains(resp, "Type the election name to confirm")
+        self.assertNotContains(resp, "Election ID")
+        self.assertContains(resp, 'id="conclude-submit"')
+        self.assertContains(resp, 'id="conclude-submit" disabled')
 
     def test_conclude_post_closes_and_tallies_by_default(self) -> None:
         now = timezone.now()
@@ -1072,7 +1126,7 @@ class ElectionDetailConcludeElectionTests(TestCase):
         admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
 
         with patch("core.backends.FreeIPAUser.get", return_value=admin):
-            resp = self.client.post(reverse("election-conclude", args=[election.id]), data={"confirm": str(election.id)})
+            resp = self.client.post(reverse("election-conclude", args=[election.id]), data={"confirm": election.name})
         self.assertEqual(resp.status_code, 302)
 
         election.refresh_from_db()
@@ -1102,7 +1156,7 @@ class ElectionDetailConcludeElectionTests(TestCase):
         with patch("core.backends.FreeIPAUser.get", return_value=admin):
             resp = self.client.post(
                 reverse("election-conclude", args=[election.id]),
-                data={"skip_tally": "on", "confirm": str(election.id)},
+                data={"skip_tally": "on", "confirm": election.name},
             )
         self.assertEqual(resp.status_code, 302)
 
@@ -1175,6 +1229,10 @@ class ElectionDetailExtendElectionTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Extend Election")
         self.assertContains(resp, "Conclude Election")
+        self.assertContains(resp, "Type the election name to confirm")
+        self.assertNotContains(resp, "Election ID")
+        self.assertContains(resp, 'id="extend-submit"')
+        self.assertContains(resp, 'id="extend-submit" disabled')
 
         body = resp.content.decode("utf-8")
         self.assertLess(body.find("Extend Election"), body.find("Conclude Election"))
@@ -1200,7 +1258,7 @@ class ElectionDetailExtendElectionTests(TestCase):
         with patch("core.backends.FreeIPAUser.get", return_value=admin):
             resp = self.client.post(
                 reverse("election-extend-end", args=[election.id]),
-                {"end_datetime": timezone.localtime(same_end).strftime("%Y-%m-%dT%H:%M"), "confirm": str(election.id)},
+                {"end_datetime": timezone.localtime(same_end).strftime("%Y-%m-%dT%H:%M"), "confirm": election.name},
             )
         self.assertEqual(resp.status_code, 302)
         election.refresh_from_db()
@@ -1216,7 +1274,7 @@ class ElectionDetailExtendElectionTests(TestCase):
         with patch("core.backends.FreeIPAUser.get", return_value=admin):
             resp = self.client.post(
                 reverse("election-extend-end", args=[election.id]),
-                {"end_datetime": timezone.localtime(new_end).strftime("%Y-%m-%dT%H:%M"), "confirm": str(election.id)},
+                {"end_datetime": timezone.localtime(new_end).strftime("%Y-%m-%dT%H:%M"), "confirm": election.name},
             )
         self.assertEqual(resp.status_code, 302)
 

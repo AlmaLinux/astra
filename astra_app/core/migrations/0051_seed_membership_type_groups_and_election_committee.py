@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import sys
 
 from django.conf import settings
 from django.db import migrations
@@ -54,6 +56,9 @@ def _seed_election_committee_permission(apps, schema_editor) -> None:
 
 
 def _ensure_freeipa_groups_exist(apps, schema_editor) -> None:
+    if "test" in sys.argv and os.environ.get("ASTRA_HERMETIC_MIGRATIONS", "1") != "0":
+        # Hermetic tests must avoid FreeIPA side effects.
+        return
     # Import lazily so migrations can be imported without pulling in the FreeIPA
     # client unless the migration actually executes.
     from core.backends import FreeIPAGroup  # noqa: PLC0415

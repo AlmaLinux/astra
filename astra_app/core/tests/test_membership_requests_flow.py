@@ -173,7 +173,6 @@ class MembershipRequestsFlowTests(TestCase):
                 "memberof_group": [committee_cn],
             },
         )
-
         alice = FreeIPAUser(
             "alice",
             {
@@ -839,11 +838,27 @@ class MembershipRequestsFlowTests(TestCase):
                 "memberof_group": [committee_cn],
             },
         )
+        bob = FreeIPAUser(
+            "bob",
+            {
+                "uid": ["bob"],
+                "mail": ["bob@example.com"],
+                "memberof_group": [],
+            },
+        )
 
         self._login_as_freeipa_user("reviewer")
 
         reason = "Missing paperwork"
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "bob":
+                return bob
+            return None
+
+        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
             with patch("post_office.mail.send", autospec=True) as send_mock:
                 resp = self.client.post(
                     reverse("membership-request-reject", args=[req.pk]),
@@ -868,8 +883,8 @@ class MembershipRequestsFlowTests(TestCase):
         redirect_url = str(resp["Location"])
         self.assertTrue(redirect_url.startswith(reverse("send-mail") + "?"))
         qs = parse_qs(urlsplit(redirect_url).query)
-        self.assertEqual(qs.get("type"), ["manual"])
-        self.assertEqual(qs.get("to"), ["cern@example.com"])
+        self.assertEqual(qs.get("type"), ["users"])
+        self.assertEqual(qs.get("to"), ["bob"])
         self.assertEqual(qs.get("template"), [settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME])
         self.assertEqual(qs.get("rejection_reason"), [reason])
 
@@ -904,9 +919,24 @@ class MembershipRequestsFlowTests(TestCase):
                 "memberof_group": [committee_cn],
             },
         )
+        bob = FreeIPAUser(
+            "bob",
+            {
+                "uid": ["bob"],
+                "mail": ["bob@example.com"],
+                "memberof_group": [],
+            },
+        )
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "bob":
+                return bob
+            return None
+
+        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
             with patch("post_office.mail.send", autospec=True) as send_mock:
                 resp = self.client.post(
                     reverse("membership-requests-bulk"),
@@ -917,7 +947,7 @@ class MembershipRequestsFlowTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         send_mock.assert_called_once()
         _, kwargs = send_mock.call_args
-        self.assertEqual(kwargs["recipients"], ["cern@example.com"])
+        self.assertEqual(kwargs["recipients"], ["bob@example.com"])
         self.assertEqual(kwargs["template"], settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME)
 
     def test_bulk_actions_send_org_approve_email(self) -> None:

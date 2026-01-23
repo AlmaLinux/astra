@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import sys
 from pathlib import Path
 
 from django.conf import settings
@@ -32,6 +34,9 @@ def _load_coc_text() -> str:
 
 
 def reset_fas_agreements_to_almalinux_coc(apps, schema_editor) -> None:
+    if "test" in sys.argv and os.environ.get("ASTRA_HERMETIC_MIGRATIONS", "1") != "0":
+        # Hermetic tests must avoid FreeIPA and file IO side effects.
+        return
     # Agreements are stored in FreeIPA (freeipa-fas plugin). We intentionally use
     # the FreeIPA-backed backend here rather than Django models.
     from core.backends import FreeIPAFASAgreement

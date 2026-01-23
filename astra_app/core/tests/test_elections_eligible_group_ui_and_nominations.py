@@ -4,12 +4,26 @@ import datetime
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from django.conf import settings
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
+from core.backends import FreeIPAMisconfiguredError
 from core.models import Candidate, Election, FreeIPAPermissionGrant, Membership, MembershipType
 from core.permissions import ASTRA_ADD_ELECTION
+
+
+def _group_lookup_by_cn(*groups: SimpleNamespace):
+    by_cn = {str(group.cn): group for group in groups}
+
+    def _get_group(*, cn: str, require_fresh: bool = False) -> SimpleNamespace:
+        group = by_cn.get(str(cn))
+        if group is None:
+            raise FreeIPAMisconfiguredError("Unknown group")
+        return group
+
+    return _get_group
 
 
 @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=1)
@@ -68,8 +82,18 @@ class ElectionEligibleGroupUiAndNominationTests(TestCase):
             member_groups=[],
             fas_group=False,
         )
+        committee_group = SimpleNamespace(
+            cn=settings.FREEIPA_ELECTION_COMMITTEE_GROUP,
+            description="",
+            members=[],
+            member_groups=[],
+            fas_group=False,
+        )
 
-        with patch("core.backends.FreeIPAGroup.get", return_value=restricted_group):
+        with patch(
+            "core.backends.get_freeipa_group_for_elections",
+            side_effect=_group_lookup_by_cn(restricted_group, committee_group),
+        ):
             url = reverse("election-eligible-users-search", args=[election.id])
             resp = self.client.get(url, {"count_only": "1", "eligible_group_cn": "restricted"})
 
@@ -102,8 +126,18 @@ class ElectionEligibleGroupUiAndNominationTests(TestCase):
             member_groups=[],
             fas_group=False,
         )
+        committee_group = SimpleNamespace(
+            cn=settings.FREEIPA_ELECTION_COMMITTEE_GROUP,
+            description="",
+            members=[],
+            member_groups=[],
+            fas_group=False,
+        )
 
-        with patch("core.backends.FreeIPAGroup.get", return_value=restricted_group):
+        with patch(
+            "core.backends.get_freeipa_group_for_elections",
+            side_effect=_group_lookup_by_cn(restricted_group, committee_group),
+        ):
             url = reverse("election-eligible-users-search", args=[election.id])
             resp = self.client.get(url, {"count_only": "1", "eligible_group_cn": ""})
 
@@ -138,6 +172,13 @@ class ElectionEligibleGroupUiAndNominationTests(TestCase):
             member_groups=[],
             fas_group=False,
         )
+        committee_group = SimpleNamespace(
+            cn=settings.FREEIPA_ELECTION_COMMITTEE_GROUP,
+            description="",
+            members=[],
+            member_groups=[],
+            fas_group=False,
+        )
 
         start_local = timezone.localtime(election.start_datetime).replace(tzinfo=None)
         end_local = timezone.localtime(election.end_datetime).replace(tzinfo=None)
@@ -169,7 +210,10 @@ class ElectionEligibleGroupUiAndNominationTests(TestCase):
             "groups-MAX_NUM_FORMS": "1000",
         }
 
-        with patch("core.backends.FreeIPAGroup.get", return_value=restricted_group):
+        with patch(
+            "core.backends.get_freeipa_group_for_elections",
+            side_effect=_group_lookup_by_cn(restricted_group, committee_group),
+        ):
             resp = self.client.post(reverse("election-edit", args=[election.id]), data=post_data)
 
         self.assertEqual(resp.status_code, 302)

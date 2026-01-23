@@ -98,21 +98,21 @@ your_ballot_hash = "your-ballot-hash-from-receipt"
 your_previous_chain_hash = "previous-chain-hash-from-receipt"  # Optional
 final_chain_hash = "final-chain-hash-from-election-page"  # After election closed
 
-# Download ballots.json from the election page and keep it next to this script.
-ballots_file = "ballots.json"
+# Download public-ballots.json from the election page and keep it next to this script.
+ballots_file = "public-ballots.json"
 if __name__ == "__main__":
     with open(ballots_file, encoding="utf-8") as f:
         export = json.load(f)
 
     if not isinstance(export, dict):
-        raise SystemExit("ballots.json must contain a JSON object")
+        raise SystemExit("public-ballots.json must contain a JSON object")
 
     export_election_id = export.get("election_id")
     if export_election_id is not None:
         try:
             export_election_id = int(export_election_id)
         except (TypeError, ValueError):
-            raise SystemExit("ballots.json election_id must be an integer")
+            raise SystemExit("public-ballots.json election_id must be an integer")
 
     if export_election_id is not None and export_election_id != election_id:
         raise SystemExit(
@@ -130,17 +130,17 @@ if __name__ == "__main__":
 
     expected_head = str(export.get("chain_head") or "").strip()
     if not expected_head:
-        raise SystemExit("ballots.json missing chain_head")
+        raise SystemExit("public-ballots.json missing chain_head")
     if str(final_chain_hash or "").strip() and str(final_chain_hash).strip() != expected_head:
         raise SystemExit(f"final chain hash mismatch: election page={final_chain_hash} export={expected_head}")
 
     ballots_raw = export.get("ballots")
     if not isinstance(ballots_raw, list):
-        raise SystemExit("ballots.json ballots must be a list")
+        raise SystemExit("public-ballots.json ballots must be a list")
     ballots: list[dict[str, object]] = []
     for row in ballots_raw:
         if not isinstance(row, dict):
-            raise SystemExit("ballots.json ballots entries must be objects")
+            raise SystemExit("public-ballots.json ballots entries must be objects")
         ballots.append(row)
 
     ordered = reconstruct_chain_order(ballots=ballots, genesis_hash=genesis)

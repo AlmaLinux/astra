@@ -32,14 +32,10 @@
 
         <div class="alert alert-info" role="alert">
           <strong>Local verification scripts</strong>
-          <div>
-            <a href="{% static 'verify-ballot-hash.py' %}" download>Download verify-ballot-hash.py</a>
-            <span class="text-muted">(recompute your ballot hash locally)</span>
-          </div>
-          <div>
-            <a href="{% static 'verify-ballot-chain.py' %}" download>Download verify-ballot-chain.py</a>
-            <span class="text-muted">(verify the public ballot chain after the election closes)</span>
-          </div>
+          <ul>
+            <li>Recompute your ballot hash locally: <a href="{% static 'verify-ballot-hash.py' %}" download>Download verify-ballot-hash.py</a></li>
+            <li>Verify the public ballot chain after the election closes: <a href="{% static 'verify-ballot-chain.py' %}" download>Download verify-ballot-chain.py</a></li>
+          </ul>
         </div>
 
         <form method="get" action="{% url 'ballot-verify' %}" class="mb-4" novalidate>

@@ -8,7 +8,7 @@ from django.conf import settings
 from django.forms import modelformset_factory
 from django.utils import timezone
 
-from core.backends import FreeIPAGroup
+from core import backends
 from core.models import Candidate, Election, ExclusionGroup
 
 _DATETIME_LOCAL_INPUT_FORMATS: list[str] = [
@@ -120,9 +120,15 @@ class ElectionDetailsForm(forms.ModelForm):
         if not cn:
             return ""
 
-        group = FreeIPAGroup.get(cn)
-        if group is None:
-            raise forms.ValidationError("Unknown group.", code="unknown_group")
+        try:
+            backends.get_freeipa_group_for_elections(cn=cn, require_fresh=False)
+        except backends.FreeIPAUnavailableError as exc:
+            raise forms.ValidationError(
+                "FreeIPA is currently unavailable. Try again later.",
+                code="freeipa_unavailable",
+            ) from exc
+        except backends.FreeIPAMisconfiguredError as exc:
+            raise forms.ValidationError("Unknown group.", code="unknown_group") from exc
 
         return cn
 
@@ -187,6 +193,17 @@ class CandidateWizardForm(forms.ModelForm):
             "description": forms.Textarea(attrs={"class": "form-control", "rows": 2, "spellcheck": "true"}),
             "url": forms.URLInput(attrs={"class": "form-control"}),
         }
+
+    @override
+    def clean(self) -> dict[str, object]:
+        cleaned = super().clean()
+
+        candidate = str(cleaned.get("freeipa_username") or "").strip()
+        nominator = str(cleaned.get("nominated_by") or "").strip()
+        if candidate and nominator and candidate.lower() == nominator.lower():
+            self.add_error("nominated_by", "Candidates cannot nominate themselves.")
+
+        return cleaned
 
 
 CandidateWizardFormSet = modelformset_factory(

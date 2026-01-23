@@ -25,6 +25,12 @@ class GlobalSearchTests(TestCase):
     def test_search_returns_users_and_groups(self) -> None:
         self._login_as_freeipa("admin")
 
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_VIEW_USER_DIRECTORY,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+        )
+
         users = [
             SimpleNamespace(username="jim", full_name="Jim Jones"),
             SimpleNamespace(username="jimbo", full_name="Jimbo Jones"),
@@ -65,6 +71,12 @@ class GlobalSearchTests(TestCase):
 
     def test_search_does_not_match_private_user_by_full_name(self) -> None:
         self._login_as_freeipa("admin")
+
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_VIEW_USER_DIRECTORY,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+        )
 
         alice = FreeIPAUser(
             "alice",

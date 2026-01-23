@@ -4,11 +4,12 @@ import datetime
 import re
 from unittest.mock import patch
 
+from django.conf import settings
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from core.backends import FreeIPAUser
+from core.backends import FreeIPAGroup, FreeIPAMisconfiguredError, FreeIPAUser
 from core.models import (
     Candidate,
     Election,
@@ -294,6 +295,79 @@ class ElectionDraftDeletionTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Number of seats")
         self.assertContains(resp, "Ensure this value is greater than or equal to 1")
+
+    @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=1)
+    def test_save_draft_rejects_self_nomination_and_does_not_save_candidate(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        mt = MembershipType.objects.create(
+            code="voter",
+            name="Voter",
+            votes=1,
+            isIndividual=True,
+            enabled=True,
+        )
+        membership = Membership.objects.create(
+            target_username="alice",
+            membership_type=mt,
+            expires_at=now + datetime.timedelta(days=365),
+        )
+        Membership.objects.filter(pk=membership.pk).update(created_at=now - datetime.timedelta(days=10))
+
+        committee_group = FreeIPAGroup(
+            settings.FREEIPA_ELECTION_COMMITTEE_GROUP,
+            {"member_user": []},
+        )
+
+        def _get_group(*, cn: str, require_fresh: bool = False) -> FreeIPAGroup:
+            if cn != committee_group.cn:
+                raise FreeIPAMisconfiguredError("Unknown group")
+            return committee_group
+
+        with patch("core.backends.get_freeipa_group_for_elections", side_effect=_get_group):
+            resp = self.client.post(
+                reverse("election-edit", args=[0]),
+                data={
+                    "action": "save_draft",
+                    "name": "Invalid self nomination",
+                    "description": "",
+                    "url": "",
+                    "start_datetime": (now + datetime.timedelta(days=10)).strftime("%Y-%m-%dT%H:%M"),
+                    "end_datetime": (now + datetime.timedelta(days=11)).strftime("%Y-%m-%dT%H:%M"),
+                    "number_of_seats": "1",
+                    "quorum": "10",
+                    "eligible_group_cn": "",
+                    "email_template_id": "",
+                    "subject": "",
+                    "html_content": "",
+                    "text_content": "",
+                    "candidates-TOTAL_FORMS": "1",
+                    "candidates-INITIAL_FORMS": "0",
+                    "candidates-MIN_NUM_FORMS": "0",
+                    "candidates-MAX_NUM_FORMS": "1000",
+                    "candidates-0-id": "",
+                    "candidates-0-freeipa_username": "alice",
+                    "candidates-0-nominated_by": "alice",
+                    "candidates-0-description": "",
+                    "candidates-0-url": "",
+                    "candidates-0-DELETE": "",
+                    "groups-TOTAL_FORMS": "0",
+                    "groups-INITIAL_FORMS": "0",
+                    "groups-MIN_NUM_FORMS": "0",
+                    "groups-MAX_NUM_FORMS": "1000",
+                },
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Candidates cannot nominate themselves.")
+        self.assertEqual(Candidate.objects.count(), 0)
 
     def test_new_election_includes_scripts_in_correct_order_for_select2(self) -> None:
         self._login_as_freeipa_user("admin")
@@ -675,45 +749,63 @@ class ElectionEditCreateModeGroupSelectionTests(TestCase):
         )
         Membership.objects.filter(pk=membership.pk).update(created_at=now - datetime.timedelta(days=30))
 
-        resp = self.client.post(
-            reverse("election-edit", args=[0]),
-            data={
-                "action": "save_draft",
-                "name": "New draft",
-                "description": "",
-                "url": "",
-                "start_datetime": (now + datetime.timedelta(days=10)).strftime("%Y-%m-%dT%H:%M"),
-                "end_datetime": (now + datetime.timedelta(days=11)).strftime("%Y-%m-%dT%H:%M"),
-                "number_of_seats": "1",
-                "quorum": "50",
-                "email_template_id": "",
-                "subject": "",
-                "html_content": "",
-                "text_content": "",
-                # Candidate formset
-                "candidates-TOTAL_FORMS": "1",
-                "candidates-INITIAL_FORMS": "0",
-                "candidates-MIN_NUM_FORMS": "0",
-                "candidates-MAX_NUM_FORMS": "1000",
-                "candidates-0-id": "",
-                "candidates-0-freeipa_username": "alex",
-                "candidates-0-nominated_by": "alex",
-                "candidates-0-description": "",
-                "candidates-0-url": "",
-                "candidates-0-DELETE": "",
-                # Exclusion groups formset
-                "groups-TOTAL_FORMS": "1",
-                "groups-INITIAL_FORMS": "0",
-                "groups-MIN_NUM_FORMS": "0",
-                "groups-MAX_NUM_FORMS": "1000",
-                "groups-0-id": "",
-                "groups-0-name": "Employees of X",
-                "groups-0-max_elected": "1",
-                "groups-0-candidate_usernames": ["alex"],
-                "groups-0-DELETE": "",
-            },
-            follow=False,
+        nominator_membership = Membership.objects.create(
+            target_username="sam",
+            membership_type=mt,
+            expires_at=now + datetime.timedelta(days=365),
         )
+        Membership.objects.filter(pk=nominator_membership.pk).update(created_at=now - datetime.timedelta(days=30))
+
+        committee_group = FreeIPAGroup(
+            settings.FREEIPA_ELECTION_COMMITTEE_GROUP,
+            {"member_user": []},
+        )
+
+        def _get_group(*, cn: str, require_fresh: bool = False) -> FreeIPAGroup:
+            if str(cn) != committee_group.cn:
+                raise FreeIPAMisconfiguredError("Unknown group")
+            return committee_group
+
+        with patch("core.backends.get_freeipa_group_for_elections", side_effect=_get_group):
+            resp = self.client.post(
+                reverse("election-edit", args=[0]),
+                data={
+                    "action": "save_draft",
+                    "name": "New draft",
+                    "description": "",
+                    "url": "",
+                    "start_datetime": (now + datetime.timedelta(days=10)).strftime("%Y-%m-%dT%H:%M"),
+                    "end_datetime": (now + datetime.timedelta(days=11)).strftime("%Y-%m-%dT%H:%M"),
+                    "number_of_seats": "1",
+                    "quorum": "50",
+                    "email_template_id": "",
+                    "subject": "",
+                    "html_content": "",
+                    "text_content": "",
+                    # Candidate formset
+                    "candidates-TOTAL_FORMS": "1",
+                    "candidates-INITIAL_FORMS": "0",
+                    "candidates-MIN_NUM_FORMS": "0",
+                    "candidates-MAX_NUM_FORMS": "1000",
+                    "candidates-0-id": "",
+                    "candidates-0-freeipa_username": "alex",
+                    "candidates-0-nominated_by": "sam",
+                    "candidates-0-description": "",
+                    "candidates-0-url": "",
+                    "candidates-0-DELETE": "",
+                    # Exclusion groups formset
+                    "groups-TOTAL_FORMS": "1",
+                    "groups-INITIAL_FORMS": "0",
+                    "groups-MIN_NUM_FORMS": "0",
+                    "groups-MAX_NUM_FORMS": "1000",
+                    "groups-0-id": "",
+                    "groups-0-name": "Employees of X",
+                    "groups-0-max_elected": "1",
+                    "groups-0-candidate_usernames": ["alex"],
+                    "groups-0-DELETE": "",
+                },
+                follow=False,
+            )
 
         self.assertEqual(resp.status_code, 302)
         election = Election.objects.get(name="New draft")
@@ -724,3 +816,164 @@ class ElectionEditCreateModeGroupSelectionTests(TestCase):
             ExclusionGroupCandidate.objects.filter(exclusion_group=group, candidate=candidate).count(),
             1,
         )
+
+
+@override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=1)
+class ElectionCommitteeDisqualificationDraftTests(TestCase):
+    def _login_as_freeipa_user(self, username: str) -> None:
+        session = self.client.session
+        session["_freeipa_username"] = username
+        session.save()
+
+    def _create_membership(self, *, username: str, now: datetime.datetime) -> None:
+        mt, _created = MembershipType.objects.update_or_create(
+            code="voter",
+            defaults={
+                "name": "Voter",
+                "votes": 1,
+                "isIndividual": True,
+                "enabled": True,
+            },
+        )
+        membership = Membership.objects.create(
+            target_username=username,
+            membership_type=mt,
+            expires_at=now + datetime.timedelta(days=365),
+        )
+        Membership.objects.filter(pk=membership.pk).update(created_at=now - datetime.timedelta(days=30))
+
+    def test_save_draft_rejects_committee_member_candidate(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        self._create_membership(username="alice", now=now)
+        self._create_membership(username="bob", now=now)
+
+        committee_group = FreeIPAGroup(
+            settings.FREEIPA_ELECTION_COMMITTEE_GROUP,
+            {"member_user": ["alice"]},
+        )
+
+        def _get_group(*, cn: str, require_fresh: bool = False) -> FreeIPAGroup:
+            if str(cn) != committee_group.cn:
+                raise FreeIPAMisconfiguredError("Unknown group")
+            return committee_group
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            return FreeIPAUser(username, {"uid": [username], "memberof_group": []})
+
+        with (
+            patch("core.backends.get_freeipa_group_for_elections", side_effect=_get_group),
+            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+        ):
+            resp = self.client.post(
+                reverse("election-edit", args=[0]),
+                data={
+                    "action": "save_draft",
+                    "name": "New draft",
+                    "description": "",
+                    "url": "",
+                    "start_datetime": (now + datetime.timedelta(days=10)).strftime("%Y-%m-%dT%H:%M"),
+                    "end_datetime": (now + datetime.timedelta(days=11)).strftime("%Y-%m-%dT%H:%M"),
+                    "number_of_seats": "1",
+                    "quorum": "50",
+                    "email_template_id": "",
+                    "subject": "",
+                    "html_content": "",
+                    "text_content": "",
+                    # Candidate formset
+                    "candidates-TOTAL_FORMS": "1",
+                    "candidates-INITIAL_FORMS": "0",
+                    "candidates-MIN_NUM_FORMS": "0",
+                    "candidates-MAX_NUM_FORMS": "1000",
+                    "candidates-0-id": "",
+                    "candidates-0-freeipa_username": "alice",
+                    "candidates-0-nominated_by": "bob",
+                    "candidates-0-description": "",
+                    "candidates-0-url": "",
+                    "candidates-0-DELETE": "",
+                    # Exclusion groups formset
+                    "groups-TOTAL_FORMS": "0",
+                    "groups-INITIAL_FORMS": "0",
+                    "groups-MIN_NUM_FORMS": "0",
+                    "groups-MAX_NUM_FORMS": "1000",
+                },
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Election committee members cannot be candidates")
+        self.assertFalse(Candidate.objects.filter(freeipa_username="alice").exists())
+
+    def test_save_draft_rejects_committee_member_nominator(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        self._create_membership(username="alice", now=now)
+        self._create_membership(username="bob", now=now)
+
+        committee_group = FreeIPAGroup(
+            settings.FREEIPA_ELECTION_COMMITTEE_GROUP,
+            {"member_user": ["bob"]},
+        )
+
+        def _get_group(*, cn: str, require_fresh: bool = False) -> FreeIPAGroup:
+            if str(cn) != committee_group.cn:
+                raise FreeIPAMisconfiguredError("Unknown group")
+            return committee_group
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            return FreeIPAUser(username, {"uid": [username], "memberof_group": []})
+
+        with (
+            patch("core.backends.get_freeipa_group_for_elections", side_effect=_get_group),
+            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+        ):
+            resp = self.client.post(
+                reverse("election-edit", args=[0]),
+                data={
+                    "action": "save_draft",
+                    "name": "New draft",
+                    "description": "",
+                    "url": "",
+                    "start_datetime": (now + datetime.timedelta(days=10)).strftime("%Y-%m-%dT%H:%M"),
+                    "end_datetime": (now + datetime.timedelta(days=11)).strftime("%Y-%m-%dT%H:%M"),
+                    "number_of_seats": "1",
+                    "quorum": "50",
+                    "email_template_id": "",
+                    "subject": "",
+                    "html_content": "",
+                    "text_content": "",
+                    # Candidate formset
+                    "candidates-TOTAL_FORMS": "1",
+                    "candidates-INITIAL_FORMS": "0",
+                    "candidates-MIN_NUM_FORMS": "0",
+                    "candidates-MAX_NUM_FORMS": "1000",
+                    "candidates-0-id": "",
+                    "candidates-0-freeipa_username": "alice",
+                    "candidates-0-nominated_by": "bob",
+                    "candidates-0-description": "",
+                    "candidates-0-url": "",
+                    "candidates-0-DELETE": "",
+                    # Exclusion groups formset
+                    "groups-TOTAL_FORMS": "0",
+                    "groups-INITIAL_FORMS": "0",
+                    "groups-MIN_NUM_FORMS": "0",
+                    "groups-MAX_NUM_FORMS": "1000",
+                },
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Election committee members cannot nominate candidates")
+        self.assertFalse(Candidate.objects.filter(freeipa_username="alice").exists())

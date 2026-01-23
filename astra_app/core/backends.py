@@ -78,6 +78,14 @@ class FreeIPAOperationFailed(RuntimeError):
     """Raised when FreeIPA returns a structured failure without raising."""
 
 
+class FreeIPAUnavailableError(RuntimeError):
+    """Raised when elections-critical FreeIPA lookups cannot be completed."""
+
+
+class FreeIPAMisconfiguredError(RuntimeError):
+    """Raised when elections-critical FreeIPA configuration is missing."""
+
+
 def _compact_repr(value: object, *, limit: int = 400) -> str:
     rendered = repr(value)
     if len(rendered) > limit:
@@ -341,6 +349,62 @@ def _invalidate_user_cache(username: str) -> None:
 
 def _invalidate_group_cache(cn: str) -> None:
     cache.delete(_group_cache_key(cn))
+
+
+_ELECTIONS_FREEIPA_CIRCUIT_CACHE_KEY = "freeipa_elections_circuit_open"
+
+
+def _elections_freeipa_circuit_open() -> bool:
+    return bool(cache.get(_ELECTIONS_FREEIPA_CIRCUIT_CACHE_KEY))
+
+
+def _open_elections_freeipa_circuit() -> None:
+    cache.set(
+        _ELECTIONS_FREEIPA_CIRCUIT_CACHE_KEY,
+        True,
+        timeout=settings.ELECTION_FREEIPA_CIRCUIT_BREAKER_SECONDS,
+    )
+
+
+def get_freeipa_group_for_elections(*, cn: str, require_fresh: bool = False) -> FreeIPAGroup:
+    """Fetch a FreeIPA group for elections-critical checks.
+
+    Uses a circuit breaker to fail closed when FreeIPA is unavailable and
+    distinguishes missing groups from transient failures.
+    """
+
+    group_cn = str(cn or "").strip()
+    if not group_cn:
+        raise FreeIPAMisconfiguredError("FreeIPA group cn is required")
+
+    if _elections_freeipa_circuit_open():
+        raise FreeIPAUnavailableError("FreeIPA circuit breaker is open")
+
+    cache_key = _group_cache_key(group_cn)
+    if not require_fresh:
+        cached_data = cache.get(cache_key)
+        if cached_data is not None:
+            return FreeIPAGroup(group_cn, cached_data)
+
+    try:
+        result = _with_freeipa_service_client_retry(
+            FreeIPAGroup.get_client,
+            lambda client: client.group_find(o_cn=group_cn, o_all=True, o_no_members=False),
+        )
+    except Exception as exc:
+        _open_elections_freeipa_circuit()
+        logger.exception("FreeIPA elections group lookup failed cn=%s: %s", group_cn, exc)
+        raise FreeIPAUnavailableError("FreeIPA group lookup failed") from exc
+
+    if not isinstance(result, dict) or result.get("count", 0) <= 0:
+        raise FreeIPAMisconfiguredError(f"FreeIPA group not found: {group_cn}")
+
+    group_data = (result.get("result") or [None])[0]
+    if not isinstance(group_data, dict):
+        raise FreeIPAMisconfiguredError(f"FreeIPA group not found: {group_cn}")
+
+    cache.set(cache_key, group_data)
+    return FreeIPAGroup(group_cn, group_data)
 
 
 def _agreement_cache_key(cn: str) -> str:

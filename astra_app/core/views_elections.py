@@ -20,8 +20,9 @@ from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 from post_office.models import EmailTemplate
 
-from core import elections_services
+from core import elections_eligibility, elections_services
 from core.backends import FreeIPAUser
+from core.elections_eligibility import ElectionEligibilityError
 from core.elections_services import (
     ElectionError,
     ElectionNotOpenError,
@@ -29,7 +30,6 @@ from core.elections_services import (
     InvalidCredentialError,
     election_genesis_chain_hash,
     election_quorum_status,
-    eligible_voters_from_memberships,
     issue_voting_credentials_from_memberships_detailed,
     submit_ballot,
 )
@@ -371,16 +371,22 @@ def election_eligible_users_search(request, election_id: int):
         if election is None:
             raise Http404
 
+    group_override: str | None = None
     if "eligible_group_cn" in request.GET:
         # Allow the edit UI to preview eligibility before the draft is saved.
         # This must also support clearing the field (empty string).
-        election.eligible_group_cn = eligible_group_cn
+        group_override = eligible_group_cn
 
     q = str(request.GET.get("q") or "").strip()
     q_lower = q.lower()
 
-    eligible = eligible_voters_from_memberships(election=election)
-    eligible_usernames = {v.username for v in eligible}
+    try:
+        eligible_usernames = elections_eligibility.eligible_candidate_usernames(
+            election=election,
+            eligible_group_cn=group_override,
+        )
+    except ElectionEligibilityError as exc:
+        return JsonResponse({"error": str(exc)}, status=exc.status_code)
 
     count_only = str(request.GET.get("count_only") or "").strip()
     if count_only in {"1", "true", "True", "yes", "on"}:
@@ -449,13 +455,14 @@ def election_nomination_users_search(request, election_id: int):
             raise Http404
 
         # Do not apply the voting restriction when searching for candidates/nominators.
-        election.eligible_group_cn = ""
 
     q = str(request.GET.get("q") or "").strip()
     q_lower = q.lower()
 
-    eligible = eligible_voters_from_memberships(election=election)
-    eligible_usernames = {v.username for v in eligible}
+    try:
+        eligible_usernames = elections_eligibility.eligible_nominator_usernames(election=election)
+    except ElectionEligibilityError as exc:
+        return JsonResponse({"error": str(exc)}, status=exc.status_code)
 
     results: list[dict[str, str]] = []
     for username in sorted(eligible_usernames, key=str.lower):
@@ -489,21 +496,28 @@ def election_edit(request, election_id: int):
     templates = list(EmailTemplate.objects.all().order_by("name"))
     default_template = EmailTemplate.objects.filter(name=settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME).first()
 
+    def _membership_eligibility_sets(for_election: Election) -> tuple[set[str], set[str]]:
+        try:
+            eligible_usernames = {
+                v.username for v in elections_eligibility.eligible_voters_from_memberships(election=for_election)
+            }
+            nomination_usernames = {
+                v.username
+                for v in elections_eligibility.eligible_voters_from_memberships(
+                    election=for_election,
+                    eligible_group_cn="",
+                )
+            }
+        except ElectionEligibilityError as exc:
+            messages.error(request, str(exc))
+            return set(), set()
+
+        return eligible_usernames, nomination_usernames
+
     eligible_voter_usernames: set[str] = set()
     nomination_eligible_usernames: set[str] = set()
     if election is not None:
-        eligible_voter_usernames = {v.username for v in eligible_voters_from_memberships(election=election)}
-        election_for_nomination = Election(
-            name="",
-            description="",
-            url="",
-            start_datetime=election.start_datetime,
-            end_datetime=election.end_datetime,
-            number_of_seats=election.number_of_seats,
-            status=election.status,
-            eligible_group_cn="",
-        )
-        nomination_eligible_usernames = {v.username for v in eligible_voters_from_memberships(election=election_for_nomination)}
+        eligible_voter_usernames, nomination_eligible_usernames = _membership_eligibility_sets(election)
 
     def _user_choice(username: str) -> tuple[str, str]:
         return user_choice_from_freeipa(username)
@@ -548,7 +562,7 @@ def election_edit(request, election_id: int):
                 request.POST,
                 queryset=(
                     Candidate.objects.filter(election=election).order_by("id")
-                    if election is not None
+                    if election is not None and election.pk is not None
                     else Candidate.objects.none()
                 ),
                 prefix="candidates",
@@ -557,7 +571,7 @@ def election_edit(request, election_id: int):
                 request.POST,
                 queryset=(
                     ExclusionGroup.objects.filter(election=election).order_by("name", "id")
-                    if election is not None
+                    if election is not None and election.pk is not None
                     else ExclusionGroup.objects.none()
                 ),
                 prefix="groups",
@@ -566,7 +580,7 @@ def election_edit(request, election_id: int):
             candidate_formset = CandidateWizardFormSet(
                 queryset=(
                     Candidate.objects.filter(election=election).order_by("id")
-                    if election is not None
+                    if election is not None and election.pk is not None
                     else Candidate.objects.none()
                 ),
                 prefix="candidates",
@@ -574,7 +588,7 @@ def election_edit(request, election_id: int):
             group_formset = ExclusionGroupWizardFormSet(
                 queryset=(
                     ExclusionGroup.objects.filter(election=election).order_by("name", "id")
-                    if election is not None
+                    if election is not None and election.pk is not None
                     else ExclusionGroup.objects.none()
                 ),
                 prefix="groups",
@@ -584,21 +598,10 @@ def election_edit(request, election_id: int):
             group_formset = ExclusionGroupWizardFormSet(queryset=ExclusionGroup.objects.none(), prefix="groups")
 
         if election is not None:
-            eligible_voter_usernames = {v.username for v in eligible_voters_from_memberships(election=election)}
-            election_for_nomination = Election(
-                name="",
-                description="",
-                url="",
-                start_datetime=election.start_datetime,
-                end_datetime=election.end_datetime,
-                number_of_seats=election.number_of_seats,
-                status=election.status,
-                eligible_group_cn="",
-            )
-            nomination_eligible_usernames = {v.username for v in eligible_voters_from_memberships(election=election_for_nomination)}
+            eligible_voter_usernames, nomination_eligible_usernames = _membership_eligibility_sets(election)
 
         def _configure_candidate_form_choices() -> None:
-            ajax_election_id = election.id if election is not None else 0
+            ajax_election_id = election.id if election is not None and election.pk is not None else 0
             ajax_url_candidate = request.build_absolute_uri(
                 reverse("election-eligible-users-search", args=[ajax_election_id])
             )
@@ -634,7 +637,7 @@ def election_edit(request, election_id: int):
             candidate_formset.empty_form.fields["nominated_by"].widget.attrs["data-start-datetime-source"] = "id_start_datetime"
 
         def _configure_group_choices() -> None:
-            if election is None:
+            if election is None or election.pk is None:
                 # Create-mode: candidates aren't in the DB yet. Accept selections for candidates
                 # that are being submitted in the same POST.
                 total_raw = str(request.POST.get("candidates-TOTAL_FORMS") or "0").strip()
@@ -681,9 +684,24 @@ def election_edit(request, election_id: int):
                 for field in form.fields.values():
                     field.disabled = True
 
+        candidate_usernames: list[str] = []
+        nominator_usernames: list[str] = []
         formsets_ok = True
         if action == "save_draft":
             formsets_ok = bool(candidate_formset.is_valid() and group_formset.is_valid())
+            if formsets_ok:
+                for form in candidate_formset.forms:
+                    if not hasattr(form, "cleaned_data"):
+                        continue
+                    if form.cleaned_data.get("DELETE"):
+                        continue
+
+                    username = str(form.cleaned_data.get("freeipa_username") or "").strip()
+                    nominator = str(form.cleaned_data.get("nominated_by") or "").strip()
+                    if username:
+                        candidate_usernames.append(username)
+                    if nominator:
+                        nominator_usernames.append(nominator)
 
         if action == "save_draft" and election is not None and election.status != Election.Status.draft:
             messages.error(request, "This election is no longer in draft; draft changes are locked.")
@@ -720,88 +738,109 @@ def election_edit(request, election_id: int):
 
         if action == "save_draft" and details_form.is_valid() and email_form.is_valid() and formsets_ok:
             election = details_form.save(commit=False)
-            election.status = Election.Status.draft
 
-            if election_id == 0 or email_save_mode != "keep_existing":
-                template_id = email_form.cleaned_data.get("email_template_id")
-                template = EmailTemplate.objects.filter(pk=int(template_id)).first() if template_id else None
-                election.voting_email_template = template
-                election.voting_email_subject = str(email_form.cleaned_data.get("subject") or "")
-                election.voting_email_html = str(email_form.cleaned_data.get("html_content") or "")
-                election.voting_email_text = str(email_form.cleaned_data.get("text_content") or "")
-
-            election.save()
-
-            eligible_voter_usernames = {v.username for v in eligible_voters_from_memberships(election=election)}
-            election_for_nomination = Election(
-                name="",
-                description="",
-                url="",
-                start_datetime=election.start_datetime,
-                end_datetime=election.end_datetime,
-                number_of_seats=election.number_of_seats,
-                status=election.status,
-                eligible_group_cn="",
-            )
-            nomination_eligible_usernames = {v.username for v in eligible_voters_from_memberships(election=election_for_nomination)}
-
-            # Candidates
-            for form in candidate_formset.forms:
-                if not hasattr(form, "cleaned_data"):
-                    continue
-                if form.cleaned_data.get("DELETE"):
-                    if form.instance.pk:
-                        form.instance.delete()
-                    continue
-
-                username = str(form.cleaned_data.get("freeipa_username") or "").strip()
-                nominator = str(form.cleaned_data.get("nominated_by") or "").strip()
-                if not username:
-                    continue
-                if username not in eligible_voter_usernames:
-                    form.add_error("freeipa_username", "User is not eligible.")
-                    continue
-                if nominator and nominator not in nomination_eligible_usernames:
-                    form.add_error("nominated_by", "User is not eligible.")
-                    continue
-
-                candidate = form.save(commit=False)
-                candidate.election = election
-                candidate.save()
-
-            # Exclusion groups
-            for form in group_formset.forms:
-                if not hasattr(form, "cleaned_data"):
-                    continue
-                if form.cleaned_data.get("DELETE"):
-                    if form.instance.pk:
-                        form.instance.delete()
-                    continue
-
-                group_name = str(form.cleaned_data.get("name") or "").strip()
-                if not group_name:
-                    continue
-
-                group = form.save(commit=False)
-                group.election = election
-                group.save()
-
-                selected_usernames = [str(u).strip() for u in (form.cleaned_data.get("candidate_usernames") or [])]
-                selected_usernames = [u for u in selected_usernames if u]
-                candidates = list(
-                    Candidate.objects.filter(election=election, freeipa_username__in=selected_usernames).only("id")
+            try:
+                validation = elections_eligibility.validate_candidates_for_election(
+                    election=election,
+                    candidate_usernames=candidate_usernames,
+                    nominator_usernames=nominator_usernames,
+                    eligible_group_cn=str(election.eligible_group_cn or "").strip(),
                 )
-                by_username = {c.freeipa_username: c for c in candidates}
-
-                ExclusionGroupCandidate.objects.filter(exclusion_group=group).delete()
-                for u in selected_usernames:
-                    c = by_username.get(u)
-                    if c is None:
+            except ElectionEligibilityError as exc:
+                messages.error(request, str(exc))
+                formsets_ok = False
+            else:
+                for form in candidate_formset.forms:
+                    if not hasattr(form, "cleaned_data"):
                         continue
-                    ExclusionGroupCandidate.objects.create(exclusion_group=group, candidate=c)
+                    if form.cleaned_data.get("DELETE"):
+                        continue
+                    username = str(form.cleaned_data.get("freeipa_username") or "").strip()
+                    nominator = str(form.cleaned_data.get("nominated_by") or "").strip()
+                    if username and username in validation.disqualified_candidates:
+                        form.add_error(
+                            "freeipa_username",
+                            "Election committee members cannot be candidates for this election.",
+                        )
+                        formsets_ok = False
+                    elif username and username in validation.ineligible_candidates:
+                        form.add_error("freeipa_username", "User is not eligible.")
+                        formsets_ok = False
+                    if nominator and nominator in validation.disqualified_nominators:
+                        form.add_error(
+                            "nominated_by",
+                            "Election committee members cannot nominate candidates for this election.",
+                        )
+                        formsets_ok = False
+                    elif nominator and nominator in validation.ineligible_nominators:
+                        form.add_error("nominated_by", "User is not eligible.")
+                        formsets_ok = False
 
-            messages.success(request, "Draft saved.")
-            return redirect("election-edit", election_id=election.id)
+            if formsets_ok:
+                election.status = Election.Status.draft
+
+                if election_id == 0 or email_save_mode != "keep_existing":
+                    template_id = email_form.cleaned_data.get("email_template_id")
+                    template = EmailTemplate.objects.filter(pk=int(template_id)).first() if template_id else None
+                    election.voting_email_template = template
+                    election.voting_email_subject = str(email_form.cleaned_data.get("subject") or "")
+                    election.voting_email_html = str(email_form.cleaned_data.get("html_content") or "")
+                    election.voting_email_text = str(email_form.cleaned_data.get("text_content") or "")
+
+                election.save()
+
+                # Candidates
+                for form in candidate_formset.forms:
+                    if not hasattr(form, "cleaned_data"):
+                        continue
+                    if form.cleaned_data.get("DELETE"):
+                        if form.instance.pk:
+                            form.instance.delete()
+                        continue
+
+                    username = str(form.cleaned_data.get("freeipa_username") or "").strip()
+                    if not username:
+                        continue
+
+                    candidate = form.save(commit=False)
+                    candidate.election = election
+                    candidate.save()
+
+                # Exclusion groups
+                for form in group_formset.forms:
+                    if not hasattr(form, "cleaned_data"):
+                        continue
+                    if form.cleaned_data.get("DELETE"):
+                        if form.instance.pk:
+                            form.instance.delete()
+                        continue
+
+                    group_name = str(form.cleaned_data.get("name") or "").strip()
+                    if not group_name:
+                        continue
+
+                    group = form.save(commit=False)
+                    group.election = election
+                    group.save()
+
+                    selected_usernames = [
+                        str(u).strip() for u in (form.cleaned_data.get("candidate_usernames") or [])
+                    ]
+                    selected_usernames = [u for u in selected_usernames if u]
+                    candidates = list(
+                        Candidate.objects.filter(election=election, freeipa_username__in=selected_usernames).only("id")
+                    )
+                    by_username = {c.freeipa_username: c for c in candidates}
+
+                    ExclusionGroupCandidate.objects.filter(exclusion_group=group).delete()
+                    for u in selected_usernames:
+                        c = by_username.get(u)
+                        if c is None:
+                            continue
+                        ExclusionGroupCandidate.objects.create(exclusion_group=group, candidate=c)
+
+                messages.success(request, "Draft saved.")
+                return redirect("election-edit", election_id=election.id)
 
         if action == "start_election":
             if election is None:
@@ -813,86 +852,167 @@ def election_edit(request, election_id: int):
             elif not Candidate.objects.filter(election=election).exists():
                 messages.error(request, "Add at least one candidate before starting the election.")
             else:
-                election = details_form.save(commit=False)
-
-                # Align the published start timestamp with when the election actually opens.
-                # The draft's start_datetime is only a planned window and may drift from real operations.
-                election.start_datetime = timezone.now()
-
-                template_id = email_form.cleaned_data.get("email_template_id")
-                template = EmailTemplate.objects.filter(pk=int(template_id)).first() if template_id else None
-                election.voting_email_template = template
-                election.voting_email_subject = str(email_form.cleaned_data.get("subject") or "")
-                election.voting_email_html = str(email_form.cleaned_data.get("html_content") or "")
-                election.voting_email_text = str(email_form.cleaned_data.get("text_content") or "")
-
-                election.status = Election.Status.open
-                election.save()
-
-                credentials = issue_voting_credentials_from_memberships_detailed(election=election)
-                emailed = 0
-                skipped = 0
-                failures = 0
-
-                subject_template = election.voting_email_subject
-                html_template = election.voting_email_html
-                text_template = election.voting_email_text
-                use_snapshot = bool(subject_template.strip() or html_template.strip() or text_template.strip())
-
-                for cred in credentials:
-                    username = str(cred.freeipa_username or "").strip()
-                    if not username:
-                        skipped += 1
-                        continue
-
-                    try:
-                        user = FreeIPAUser.get(username)
-                    except Exception:
-                        failures += 1
-                        continue
-                    if user is None or not user.email:
-                        skipped += 1
-                        continue
-
-                    tz_name = _get_freeipa_timezone_name(user)
-
-                    try:
-                        elections_services.send_voting_credential_email(
-                            request=request,
-                            election=election,
-                            username=username,
-                            email=user.email,
-                            credential_public_id=str(cred.public_id),
-                            tz_name=tz_name,
-                            subject_template=subject_template if use_snapshot else None,
-                            html_template=html_template if use_snapshot else None,
-                            text_template=text_template if use_snapshot else None,
-                        )
-                    except Exception:
-                        failures += 1
-                        continue
-                    emailed += 1
-
-                AuditLogEntry.objects.create(
-                    election=election,
-                    event_type="election_started",
-                    payload={
-                        "eligible_voters": len(credentials),
-                        "emailed": emailed,
-                        "skipped": skipped,
-                        "failures": failures,
-                        "genesis_chain_hash": election_genesis_chain_hash(election.id),
-                    },
-                    is_public=True,
+                candidates = list(
+                    Candidate.objects.filter(election=election).only("freeipa_username", "nominated_by")
                 )
+                self_nominations = sorted(
+                    {
+                        str(c.freeipa_username or "").strip()
+                        for c in candidates
+                        if str(c.freeipa_username or "").strip()
+                        and str(c.nominated_by or "").strip()
+                        and str(c.freeipa_username or "").strip().lower()
+                        == str(c.nominated_by or "").strip().lower()
+                    },
+                    key=str.lower,
+                )
+                candidate_usernames = [
+                    str(c.freeipa_username or "").strip()
+                    for c in candidates
+                    if str(c.freeipa_username or "").strip()
+                ]
+                nominator_usernames = [
+                    str(c.nominated_by or "").strip()
+                    for c in candidates
+                    if str(c.nominated_by or "").strip()
+                ]
+                if self_nominations:
+                    messages.error(request, "Candidates cannot nominate themselves.")
+                    validation = None
+                    no_eligible_voters = False
+                else:
+                    try:
+                        eligible_voter_usernames = {
+                            v.username
+                            for v in elections_eligibility.eligible_voters_from_memberships(
+                                election=election,
+                                require_fresh=True,
+                            )
+                        }
+                        no_eligible_voters = not eligible_voter_usernames
+                        validation = elections_eligibility.validate_candidates_for_election(
+                            election=election,
+                            candidate_usernames=candidate_usernames,
+                            nominator_usernames=nominator_usernames,
+                            eligible_group_cn=str(election.eligible_group_cn or "").strip(),
+                            require_fresh=True,
+                        )
+                    except ElectionEligibilityError as exc:
+                        messages.error(request, str(exc))
+                        no_eligible_voters = False
+                        validation = None
+                if validation is None:
+                    if no_eligible_voters:
+                        messages.error(request, "No eligible voters were found for this election.")
+                elif (
+                    validation.disqualified_candidates
+                    or validation.disqualified_nominators
+                    or validation.ineligible_candidates
+                    or validation.ineligible_nominators
+                ):
+                    if validation.disqualified_candidates:
+                        names = ", ".join(sorted(validation.disqualified_candidates, key=str.lower))
+                        messages.error(
+                            request,
+                            "Election committee members cannot be candidates for this election: " + names,
+                        )
+                    if validation.disqualified_nominators:
+                        names = ", ".join(sorted(validation.disqualified_nominators, key=str.lower))
+                        messages.error(
+                            request,
+                            "Election committee members cannot nominate candidates for this election: " + names,
+                        )
+                    if validation.ineligible_candidates:
+                        names = ", ".join(sorted(validation.ineligible_candidates, key=str.lower))
+                        messages.error(request, "Candidate is not eligible: " + names)
+                    if validation.ineligible_nominators:
+                        names = ", ".join(sorted(validation.ineligible_nominators, key=str.lower))
+                        messages.error(request, "Nominator is not eligible: " + names)
+                    if no_eligible_voters:
+                        messages.error(request, "No eligible voters were found for this election.")
+                elif no_eligible_voters:
+                    messages.error(request, "No eligible voters were found for this election.")
+                else:
+                    election = details_form.save(commit=False)
 
-                if emailed:
-                    messages.success(request, f"Election started; emailed {emailed} voter(s).")
-                if skipped:
-                    messages.warning(request, f"Skipped {skipped} voter(s) (missing user/email).")
-                if failures:
-                    messages.error(request, f"Failed to email {failures} voter(s).")
-                return redirect("election-detail", election_id=election.id)
+                    # Align the published start timestamp with when the election actually opens.
+                    # The draft's start_datetime is only a planned window and may drift from real operations.
+                    election.start_datetime = timezone.now()
+
+                    template_id = email_form.cleaned_data.get("email_template_id")
+                    template = EmailTemplate.objects.filter(pk=int(template_id)).first() if template_id else None
+                    election.voting_email_template = template
+                    election.voting_email_subject = str(email_form.cleaned_data.get("subject") or "")
+                    election.voting_email_html = str(email_form.cleaned_data.get("html_content") or "")
+                    election.voting_email_text = str(email_form.cleaned_data.get("text_content") or "")
+
+                    election.status = Election.Status.open
+                    election.save()
+
+                    credentials = issue_voting_credentials_from_memberships_detailed(election=election)
+                    emailed = 0
+                    skipped = 0
+                    failures = 0
+
+                    subject_template = election.voting_email_subject
+                    html_template = election.voting_email_html
+                    text_template = election.voting_email_text
+                    use_snapshot = bool(subject_template.strip() or html_template.strip() or text_template.strip())
+
+                    for cred in credentials:
+                        username = str(cred.freeipa_username or "").strip()
+                        if not username:
+                            skipped += 1
+                            continue
+
+                        try:
+                            user = FreeIPAUser.get(username)
+                        except Exception:
+                            failures += 1
+                            continue
+                        if user is None or not user.email:
+                            skipped += 1
+                            continue
+
+                        tz_name = _get_freeipa_timezone_name(user)
+
+                        try:
+                            elections_services.send_voting_credential_email(
+                                request=request,
+                                election=election,
+                                username=username,
+                                email=user.email,
+                                credential_public_id=str(cred.public_id),
+                                tz_name=tz_name,
+                                subject_template=subject_template if use_snapshot else None,
+                                html_template=html_template if use_snapshot else None,
+                                text_template=text_template if use_snapshot else None,
+                            )
+                        except Exception:
+                            failures += 1
+                            continue
+                        emailed += 1
+
+                    AuditLogEntry.objects.create(
+                        election=election,
+                        event_type="election_started",
+                        payload={
+                            "eligible_voters": len(credentials),
+                            "emailed": emailed,
+                            "skipped": skipped,
+                            "failures": failures,
+                            "genesis_chain_hash": election_genesis_chain_hash(election.id),
+                        },
+                        is_public=True,
+                    )
+
+                    if emailed:
+                        messages.success(request, f"Election started; emailed {emailed} voter(s).")
+                    if skipped:
+                        messages.warning(request, f"Skipped {skipped} voter(s) (missing user/email).")
+                    if failures:
+                        messages.error(request, f"Failed to email {failures} voter(s).")
+                    return redirect("election-detail", election_id=election.id)
 
         messages.error(request, "Please correct the errors below.")
     else:
@@ -938,11 +1058,15 @@ def election_edit(request, election_id: int):
         email_form = ElectionVotingEmailForm(initial=initial_email)
 
         candidate_formset = CandidateWizardFormSet(
-            queryset=Candidate.objects.filter(election=election).order_by("id") if election else Candidate.objects.none(),
+            queryset=Candidate.objects.filter(election=election).order_by("id")
+            if election is not None and election.pk is not None
+            else Candidate.objects.none(),
             prefix="candidates",
         )
         group_formset = ExclusionGroupWizardFormSet(
-            queryset=ExclusionGroup.objects.filter(election=election).order_by("name", "id") if election else ExclusionGroup.objects.none(),
+            queryset=ExclusionGroup.objects.filter(election=election).order_by("name", "id")
+            if election is not None and election.pk is not None
+            else ExclusionGroup.objects.none(),
             prefix="groups",
         )
 
@@ -975,7 +1099,7 @@ def election_edit(request, election_id: int):
         candidate_formset.empty_form.fields["freeipa_username"].widget.attrs["data-start-datetime-source"] = "id_start_datetime"
         candidate_formset.empty_form.fields["nominated_by"].widget.attrs["data-start-datetime-source"] = "id_start_datetime"
 
-        if election is not None:
+        if election is not None and election.pk is not None:
             candidates_qs = Candidate.objects.filter(election=election).only("freeipa_username")
             choices = [
                 user_choice_from_freeipa(c.freeipa_username)
@@ -997,6 +1121,8 @@ def election_edit(request, election_id: int):
     email_template_variables: list[tuple[str, str]] = []
 
     preview_election = election if election is not None else Election(id=0)
+    preview_election_id = int(preview_election.id or 0)
+    preview_url_election = Election(id=preview_election_id)
     username = str(request.user.get_username() or "").strip() or "preview"
     user_context = user_email_context(username=username)
 
@@ -1011,10 +1137,10 @@ def election_edit(request, election_id: int):
             "election_end_datetime": details_form.instance.end_datetime or "",
             "election_number_of_seats": details_form.instance.number_of_seats or "",
             "credential_public_id": "PREVIEW",
-            "vote_url": elections_services.election_vote_url(request=request, election=preview_election),
+            "vote_url": elections_services.election_vote_url(request=request, election=preview_url_election),
             "vote_url_with_credential_fragment": elections_services.election_vote_url_with_credential_fragment(
                 request=request,
-                election=preview_election,
+                election=preview_url_election,
                 credential_public_id="PREVIEW",
             ),
         }
@@ -1039,7 +1165,7 @@ def election_edit(request, election_id: int):
     # Ensure that empty form has candidate options, even if the formset recreates
     # `empty_form` instances when accessed from the template.
     group_empty_form = group_formset.empty_form
-    if election is not None:
+    if election is not None and election.pk is not None:
         candidates_qs = Candidate.objects.filter(election=election).only("freeipa_username")
         candidate_choices = [
             user_choice_from_freeipa(c.freeipa_username)
@@ -1195,9 +1321,13 @@ def election_detail(request, election_id: int):
         eligible_voter_count = int(status.get("eligible_voter_count") or 0)
         eligible_vote_weight_total = int(status.get("eligible_vote_weight_total") or 0)
         required_participating_voter_count = int(status.get("required_participating_voter_count") or 0)
+        required_participating_vote_weight_total = int(
+            status.get("required_participating_vote_weight_total") or 0
+        )
         participating_voter_count = int(status.get("participating_voter_count") or 0)
         participating_vote_weight_total = int(status.get("participating_vote_weight_total") or 0)
         quorum_met = bool(status.get("quorum_met"))
+        quorum_required = bool(status.get("quorum_required"))
         quorum_percent = int(status.get("quorum_percent") or 0)
 
         participating_voter_percent = 0
@@ -1220,8 +1350,10 @@ def election_detail(request, election_id: int):
             "eligible_voter_count": eligible_voter_count,
             "eligible_vote_weight_total": eligible_vote_weight_total,
             "required_participating_voter_count": required_participating_voter_count,
+            "required_participating_vote_weight_total": required_participating_vote_weight_total,
             "quorum_met": quorum_met,
             "quorum_percent": quorum_percent,
+            "quorum_required": quorum_required,
             "participating_voter_percent": participating_voter_percent,
             "participating_vote_weight_percent": participating_vote_weight_percent,
         }
@@ -1289,7 +1421,11 @@ def _eligible_voters_context(*, request, election: Election, enabled: bool) -> d
     if not enabled:
         return {}
 
-    eligible = eligible_voters_from_memberships(election=election)
+    try:
+        eligible = elections_eligibility.eligible_voters_from_memberships(election=election)
+    except ElectionEligibilityError as exc:
+        messages.error(request, str(exc))
+        return {}
 
     eligible_q = str(request.GET.get("eligible_q") or "").strip()
     eligible_q_lower = eligible_q.lower()
@@ -1362,7 +1498,18 @@ def _eligible_voters_context(*, request, election: Election, enabled: bool) -> d
 
     group_cn = str(election.eligible_group_cn or "").strip()
     if group_cn:
-        electorate = {u.lower() for u in elections_services._freeipa_group_recursive_member_usernames(group_cn=group_cn)}
+        try:
+            electorate = {
+                u.lower()
+                for u in elections_eligibility._freeipa_group_recursive_member_usernames(
+                    group_cn=group_cn,
+                    require_fresh=False,
+                    missing_message=elections_eligibility.ELIGIBLE_GROUP_MISSING_MESSAGE,
+                )
+            }
+        except ElectionEligibilityError as exc:
+            messages.error(request, str(exc))
+            return {}
     else:
         electorate = {
             str(u.username).strip().lower()
@@ -1616,9 +1763,10 @@ def _confirm_election_action(*, request: HttpRequest, election: Election) -> boo
     raw = str(request.POST.get("confirm") or "").strip()
     if not raw:
         return False
-    if raw == str(election.id):
-        return True
-    return raw.casefold() == str(election.name or "").strip().casefold()
+    expected = str(election.name or "").strip()
+    if not expected:
+        return False
+    return raw.casefold() == expected.casefold()
 
 
 @require_POST

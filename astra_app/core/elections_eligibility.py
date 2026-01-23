@@ -1,0 +1,369 @@
+from __future__ import annotations
+
+import datetime
+import logging
+from collections.abc import Iterable
+from dataclasses import dataclass
+
+from django.conf import settings
+from django.db.models import Q, Sum
+from django.utils import timezone
+
+from core import backends
+from core.backends import FreeIPAGroup, FreeIPAMisconfiguredError, FreeIPAUnavailableError
+from core.models import Election, Membership, OrganizationSponsorship
+
+FREEIPA_UNAVAILABLE_MESSAGE = "FreeIPA is currently unavailable. Try again later."
+COMMITTEE_GROUP_MISSING_MESSAGE = (
+    "Election committee group is not available in FreeIPA. Contact an administrator."
+)
+ELIGIBLE_GROUP_MISSING_MESSAGE = "Eligible voters group is not available in FreeIPA. Contact an administrator."
+
+logger = logging.getLogger(__name__)
+
+
+class ElectionEligibilityError(RuntimeError):
+    def __init__(self, message: str, *, status_code: int) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+@dataclass(frozen=True)
+class EligibleVoter:
+    username: str
+    weight: int
+
+
+@dataclass(frozen=True)
+class CandidateValidationResult:
+    eligible_candidates: set[str]
+    eligible_nominators: set[str]
+    disqualified_candidates: set[str]
+    disqualified_nominators: set[str]
+    ineligible_candidates: set[str]
+    ineligible_nominators: set[str]
+
+
+def _raise_unavailable(exc: Exception) -> None:
+    raise ElectionEligibilityError(FREEIPA_UNAVAILABLE_MESSAGE, status_code=503) from exc
+
+
+def _raise_misconfigured(message: str, exc: Exception | None = None) -> None:
+    if exc is None:
+        raise ElectionEligibilityError(message, status_code=400)
+    raise ElectionEligibilityError(message, status_code=400) from exc
+
+
+def _get_required_group(*, group_cn: str, require_fresh: bool, missing_message: str) -> FreeIPAGroup:
+    try:
+        return backends.get_freeipa_group_for_elections(cn=group_cn, require_fresh=require_fresh)
+    except FreeIPAUnavailableError as exc:
+        _raise_unavailable(exc)
+    except FreeIPAMisconfiguredError as exc:
+        _raise_misconfigured(missing_message, exc)
+
+
+def _eligible_voters_from_memberships(*, election: Election) -> list[EligibleVoter]:
+    reference_datetime = election.start_datetime
+    if election.status == Election.Status.draft:
+        reference_datetime = max(election.start_datetime, timezone.now())
+
+    cutoff = reference_datetime - datetime.timedelta(days=settings.ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS)
+    eligible_qs = (
+        Membership.objects.filter(
+            membership_type__isIndividual=True,
+            membership_type__enabled=True,
+            membership_type__votes__gt=0,
+            created_at__lte=cutoff,
+        )
+        .filter(Q(expires_at__isnull=True) | Q(expires_at__gte=reference_datetime))
+        .values("target_username")
+        .annotate(weight=Sum("membership_type__votes"))
+        .order_by("target_username")
+    )
+
+    weights_by_username: dict[str, int] = {}
+    for row in eligible_qs:
+        username = str(row["target_username"])
+        weight = int(row["weight"] or 0)
+        if not username.strip() or weight <= 0:
+            continue
+        weights_by_username[username] = weights_by_username.get(username, 0) + weight
+
+    sponsorships = (
+        OrganizationSponsorship.objects.select_related("organization", "membership_type")
+        .filter(
+            membership_type__enabled=True,
+            membership_type__votes__gt=0,
+            created_at__lte=cutoff,
+        )
+        .filter(Q(expires_at__isnull=True) | Q(expires_at__gte=reference_datetime))
+        .only(
+            "organization__representative",
+            "membership_type__votes",
+        )
+    )
+
+    for sponsorship in sponsorships:
+        votes = int(sponsorship.membership_type.votes or 0)
+        if votes <= 0:
+            continue
+
+        username = str(sponsorship.organization.representative or "").strip()
+        if not username:
+            continue
+        weights_by_username[username] = weights_by_username.get(username, 0) + votes
+
+    return [
+        EligibleVoter(username=username, weight=weight)
+        for username, weight in sorted(weights_by_username.items(), key=lambda kv: kv[0].lower())
+        if weight > 0
+    ]
+
+
+def _freeipa_group_recursive_member_usernames(
+    *,
+    group_cn: str,
+    require_fresh: bool,
+    missing_message: str,
+) -> set[str]:
+    root = str(group_cn or "").strip()
+    if not root:
+        return set()
+
+    seen_groups: set[str] = set()
+    members: set[str] = set()
+    pending: list[str] = [root]
+
+    while pending:
+        cn = str(pending.pop() or "").strip()
+        if not cn:
+            continue
+        cn_key = cn.lower()
+        if cn_key in seen_groups:
+            continue
+        seen_groups.add(cn_key)
+
+        group = _get_required_group(group_cn=cn, require_fresh=require_fresh, missing_message=missing_message)
+        for username_raw in (group.members or []):
+            username = str(username_raw or "").strip()
+            if username:
+                members.add(username.lower())
+
+        for nested_cn_raw in (group.member_groups or []):
+            nested_cn = str(nested_cn_raw or "").strip()
+            if nested_cn:
+                pending.append(nested_cn)
+
+    return members
+
+
+def eligible_voters_from_memberships(
+    *,
+    election: Election,
+    eligible_group_cn: str | None = None,
+    require_fresh: bool = False,
+) -> list[EligibleVoter]:
+    eligible = _eligible_voters_from_memberships(election=election)
+
+    group_cn = str(eligible_group_cn) if eligible_group_cn is not None else str(election.eligible_group_cn or "")
+    group_cn = group_cn.strip()
+    if not group_cn:
+        return eligible
+
+    eligible_usernames = _freeipa_group_recursive_member_usernames(
+        group_cn=group_cn,
+        require_fresh=require_fresh,
+        missing_message=ELIGIBLE_GROUP_MISSING_MESSAGE,
+    )
+    if not eligible_usernames:
+        return []
+
+    return [v for v in eligible if v.username.lower() in eligible_usernames]
+
+
+def eligible_vote_weight_for_username(*, election: Election, username: str) -> int:
+    username = str(username or "").strip()
+    if not username:
+        return 0
+
+    group_cn = str(election.eligible_group_cn or "").strip()
+    if group_cn:
+        eligible_usernames = _freeipa_group_recursive_member_usernames(
+            group_cn=group_cn,
+            require_fresh=False,
+            missing_message=ELIGIBLE_GROUP_MISSING_MESSAGE,
+        )
+        if not eligible_usernames or username.lower() not in eligible_usernames:
+            return 0
+
+    reference_datetime = election.start_datetime
+    if election.status == Election.Status.draft:
+        reference_datetime = max(election.start_datetime, timezone.now())
+
+    cutoff = reference_datetime - datetime.timedelta(days=settings.ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS)
+    membership_weight = (
+        Membership.objects.filter(
+            target_username=username,
+            membership_type__isIndividual=True,
+            membership_type__enabled=True,
+            membership_type__votes__gt=0,
+            created_at__lte=cutoff,
+        )
+        .filter(Q(expires_at__isnull=True) | Q(expires_at__gte=reference_datetime))
+        .aggregate(weight=Sum("membership_type__votes"))
+        .get("weight")
+        or 0
+    )
+
+    sponsorship_weight = 0
+
+    sponsorships = (
+        OrganizationSponsorship.objects.select_related("organization", "membership_type")
+        .filter(
+            membership_type__enabled=True,
+            membership_type__votes__gt=0,
+            created_at__lte=cutoff,
+        )
+        .filter(Q(expires_at__isnull=True) | Q(expires_at__gte=reference_datetime))
+        .only(
+            "organization__representative",
+            "membership_type__votes",
+        )
+    )
+
+    for sponsorship in sponsorships:
+        votes = int(sponsorship.membership_type.votes or 0)
+        if votes <= 0:
+            continue
+        sponsor_username = str(sponsorship.organization.representative or "").strip()
+        if sponsor_username.lower() != username.lower():
+            continue
+        sponsorship_weight += votes
+
+    return int(membership_weight) + int(sponsorship_weight)
+
+
+def election_committee_disqualification(
+    *,
+    candidate_usernames: Iterable[str],
+    nominator_usernames: Iterable[str],
+    require_fresh: bool = False,
+) -> tuple[set[str], set[str]]:
+    committee_group = str(settings.FREEIPA_ELECTION_COMMITTEE_GROUP or "").strip()
+    if not committee_group:
+        _raise_misconfigured(COMMITTEE_GROUP_MISSING_MESSAGE)
+
+    committee_usernames = _freeipa_group_recursive_member_usernames(
+        group_cn=committee_group,
+        require_fresh=require_fresh,
+        missing_message=COMMITTEE_GROUP_MISSING_MESSAGE,
+    )
+    if not committee_usernames:
+        return set(), set()
+
+    candidate_conflicts = {
+        str(username or "").strip()
+        for username in candidate_usernames
+        if str(username or "").strip().lower() in committee_usernames
+    }
+    nominator_conflicts = {
+        str(username or "").strip()
+        for username in nominator_usernames
+        if str(username or "").strip().lower() in committee_usernames
+    }
+
+    return candidate_conflicts, nominator_conflicts
+
+
+def _normalized_usernames(values: Iterable[str]) -> list[str]:
+    normalized: list[str] = []
+    for value in values:
+        username = str(value or "").strip()
+        if username:
+            normalized.append(username)
+    return normalized
+
+
+def eligible_candidate_usernames(
+    *,
+    election: Election,
+    eligible_group_cn: str | None = None,
+    require_fresh: bool = False,
+) -> set[str]:
+    eligible_usernames = {
+        voter.username
+        for voter in eligible_voters_from_memberships(
+            election=election,
+            eligible_group_cn=eligible_group_cn,
+            require_fresh=require_fresh,
+        )
+    }
+
+    disqualified_candidates, _disqualified_nominators = election_committee_disqualification(
+        candidate_usernames=eligible_usernames,
+        nominator_usernames=(),
+        require_fresh=require_fresh,
+    )
+    disqualified_lower = {username.lower() for username in disqualified_candidates}
+    filtered = {username for username in eligible_usernames if username.lower() not in disqualified_lower}
+    logger.debug(
+        "Eligible candidate usernames resolved: eligible=%s disqualified=%s filtered=%s",
+        len(eligible_usernames),
+        len(disqualified_candidates),
+        len(filtered),
+    )
+    if disqualified_candidates:
+        logger.debug(
+            "Committee-disqualified candidates filtered from eligibility: %s",
+            sorted(disqualified_candidates, key=str.lower),
+        )
+    return filtered
+
+
+def eligible_nominator_usernames(*, election: Election, require_fresh: bool = False) -> set[str]:
+    return eligible_candidate_usernames(
+        election=election,
+        eligible_group_cn="",
+        require_fresh=require_fresh,
+    )
+
+
+def validate_candidates_for_election(
+    *,
+    election: Election,
+    candidate_usernames: Iterable[str],
+    nominator_usernames: Iterable[str],
+    eligible_group_cn: str | None = None,
+    require_fresh: bool = False,
+) -> CandidateValidationResult:
+    candidates = _normalized_usernames(candidate_usernames)
+    nominators = _normalized_usernames(nominator_usernames)
+
+    eligible_candidates = eligible_candidate_usernames(
+        election=election,
+        eligible_group_cn=eligible_group_cn,
+        require_fresh=require_fresh,
+    )
+    eligible_nominators = eligible_nominator_usernames(
+        election=election,
+        require_fresh=require_fresh,
+    )
+
+    disqualified_candidates, disqualified_nominators = election_committee_disqualification(
+        candidate_usernames=candidates,
+        nominator_usernames=nominators,
+        require_fresh=require_fresh,
+    )
+
+    ineligible_candidates = {u for u in candidates if u not in eligible_candidates}
+    ineligible_nominators = {u for u in nominators if u not in eligible_nominators}
+
+    return CandidateValidationResult(
+        eligible_candidates=eligible_candidates,
+        eligible_nominators=eligible_nominators,
+        disqualified_candidates=disqualified_candidates,
+        disqualified_nominators=disqualified_nominators,
+        ineligible_candidates=ineligible_candidates,
+        ineligible_nominators=ineligible_nominators,
+    )

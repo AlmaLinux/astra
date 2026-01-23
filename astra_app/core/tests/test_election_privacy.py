@@ -62,13 +62,6 @@ class ElectionPrivacyTest(TestCase):
         self.assertIn(cred.public_id, str(cred_email.context))
 
         # 2. Submit Vote
-        receipt = submit_ballot(
-            election=self.election,
-            credential_public_id=cred.public_id,
-            ranking=[1], # Assuming candidate ID 1 exists or validation is mocked/bypassed? 
-                         # Wait, submit_ballot validates ranking. I need a candidate.
-        )
-        # Wait, I need a candidate.
         from core.models import Candidate
         candidate = Candidate.objects.create(election=self.election, freeipa_username="bob")
         receipt = submit_ballot(

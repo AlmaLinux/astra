@@ -42,7 +42,7 @@ class OrganizationCreateRepresentativesTests(TestCase):
         with patch("core.backends.FreeIPAUser.get", side_effect=get_user):
             resp = self.client.get(reverse("organization-create"))
             self.assertEqual(resp.status_code, 200)
-            self.assertContains(resp, "Only create an organization")
+            self.assertContains(resp, "Create an organization profile only")
             self.assertNotContains(resp, 'name="representative"')
 
             payload = self._valid_create_payload(name="AliceCo")
@@ -68,7 +68,7 @@ class OrganizationCreateRepresentativesTests(TestCase):
         with patch("core.backends.FreeIPAUser.get", side_effect=get_user):
             resp = self.client.get(reverse("organization-create"))
             self.assertEqual(resp.status_code, 200)
-            self.assertContains(resp, "Only create an organization")
+            self.assertContains(resp, "Create an organization profile only")
             self.assertContains(resp, 'name="representative"')
             # User-facing pages should load Select2 assets so the reps picker works and
             # matches the admin UI styling.

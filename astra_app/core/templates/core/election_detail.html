@@ -164,9 +164,8 @@
                       <hr />
 
                       <div class="form-group mb-0">
-                        <label for="extend-confirm">Type the election ID or name to confirm</label>
+                        <label for="extend-confirm">Type the election name to confirm</label>
                         <div class="text-muted small mb-2">
-                          <strong>Election ID:</strong> {{ election.id }}<br>
                           <strong>Election name:</strong> {{ election.name }}
                         </div>
                         <input
@@ -174,14 +173,15 @@
                           name="confirm"
                           type="text"
                           class="form-control"
-                          placeholder="e.g. {{ election.id }} or {{ election.name }}"
+                          placeholder="{{ election.name }}"
+                          data-confirm-name="{{ election.name|escapejs }}"
                           required
                         >
                       </div>
                     </div>
                     <div class="modal-footer">
                       <button type="button" class="btn btn-outline-secondary" data-dismiss="modal">Cancel</button>
-                      <button type="submit" class="btn btn-warning">Extend Election</button>
+                      <button id="extend-submit" disabled type="submit" class="btn btn-warning" aria-disabled="true">Extend Election</button>
                     </div>
                   </form>
                 </div>
@@ -238,9 +238,8 @@
                       <hr />
 
                       <div class="form-group mb-0">
-                        <label for="conclude-confirm">Type the election ID or name to confirm</label>
+                        <label for="conclude-confirm">Type the election name to confirm</label>
                         <div class="text-muted small mb-2">
-                          <strong>Election ID:</strong> {{ election.id }}<br>
                           <strong>Election name:</strong> {{ election.name }}
                         </div>
                         <input
@@ -248,14 +247,15 @@
                           name="confirm"
                           type="text"
                           class="form-control"
-                          placeholder="e.g. {{ election.id }} or {{ election.name }}"
+                          placeholder="{{ election.name }}"
+                          data-confirm-name="{{ election.name|escapejs }}"
                           required
                         >
                       </div>
                     </div>
                     <div class="modal-footer">
                       <button type="button" class="btn btn-outline-secondary" data-dismiss="modal">Cancel</button>
-                      <button type="submit" class="btn btn-danger">Conclude Election</button>
+                      <button id="conclude-submit" disabled type="submit" class="btn btn-danger" aria-disabled="true">Conclude Election</button>
                     </div>
                   </form>
                 </div>
@@ -266,78 +266,6 @@
       </div>
     </div>
   </div>
-
-  {% if show_turnout_chart and turnout_stats %}
-    <div class="row">
-      <div class="col-12">
-        <div class="card card-outline card-secondary">
-          <div class="card-header">
-            <h3 class="card-title">Participation so far</h3>
-          </div>
-          <div class="card-body">
-            <div class="row">
-              <div class="col-12 col-lg-5">
-                <div class="mb-2">
-                  <strong>Number of unique voters</strong>
-                  —
-                  {{ turnout_stats.participating_voter_count }} / {{ turnout_stats.eligible_voter_count }} ({{ turnout_stats.participating_voter_percent }}%)
-                </div>
-
-                <div class="progress mb-2">
-                  <div
-                    class="progress-bar bg-success"
-                    role="progressbar"
-                    aria-valuenow="{{ turnout_stats.participating_voter_count }}"
-                    aria-valuemin="0"
-                    aria-valuemax="{{ turnout_stats.eligible_voter_count }}"
-                    style="width: {{ turnout_stats.participating_voter_percent }}%"
-                  >
-                    <span class="sr-only">{{ turnout_stats.participating_voter_percent }}% Complete</span>
-                  </div>
-                </div>
-
-                <div class="mb-3 text-muted">
-                  Quorum:
-                  {{ turnout_stats.required_participating_voter_count }} voters ({{ turnout_stats.quorum_percent }}%)
-                  {% if turnout_stats.quorum_met %}
-                    <span class="ml-1 badge badge-success">met</span>
-                  {% else %}
-                    <span class="ml-1 badge badge-danger">not met</span>
-                  {% endif %}
-                </div>
-
-                <div class="mb-2">
-                  <strong>Votes cast</strong>
-                  —
-                  {{ turnout_stats.participating_vote_weight_total }} / {{ turnout_stats.eligible_vote_weight_total }} ({{ turnout_stats.participating_vote_weight_percent }}%)
-                </div>
-                <div class="progress mb-0">
-                  <div
-                    class="progress-bar bg-info"
-                    role="progressbar"
-                    aria-valuenow="{{ turnout_stats.participating_vote_weight_total }}"
-                    aria-valuemin="0"
-                    aria-valuemax="{{ turnout_stats.eligible_vote_weight_total }}"
-                    style="width: {{ turnout_stats.participating_vote_weight_percent }}%"
-                  >
-                    <span class="sr-only">{{ turnout_stats.participating_vote_weight_percent }}% Complete</span>
-                  </div>
-                </div>
-              </div>
-
-              <div class="col-12 col-lg-7 mt-3 mt-lg-0">
-                <p class="mb-2"><strong>Ballots submitted over time (including superseded ballots)</strong></p>
-                {{ turnout_chart_data|json_script:"election-turnout-chart-data" }}
-                <div class="chart">
-                  <canvas id="election-turnout-chart" style="min-height: 250px; height: 250px; max-height: 250px; max-width: 100%;"></canvas>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  {% endif %}
 
   {% if election.status == 'tallied' %}
     <div class="row">
@@ -365,6 +293,22 @@
             {% if turnout_stats %}
               <h5 class="mb-2"><strong>Participation</strong></h5>
 
+              <div class="mb-3 text-muted">
+                Quorum:
+                {% if turnout_stats.quorum_required %}
+                  {{ turnout_stats.required_participating_voter_count }} voters and
+                  {{ turnout_stats.required_participating_vote_weight_total }} vote weight
+                  ({{ turnout_stats.quorum_percent }}%)
+                  {% if turnout_stats.quorum_met %}
+                    <span class="ml-1 badge badge-success">met</span>
+                  {% else %}
+                    <span class="ml-1 badge badge-danger">not met</span>
+                  {% endif %}
+                {% else %}
+                  not required
+                {% endif %}
+              </div>
+
               <div class="mb-2">
                 <strong>Number of unique voters</strong>
                 —
@@ -382,16 +326,6 @@
                 >
                   <span class="sr-only">{{ turnout_stats.participating_voter_percent }}% Complete</span>
                 </div>
-              </div>
-
-              <div class="mb-3 text-muted">
-                Quorum:
-                {{ turnout_stats.required_participating_voter_count }} voters ({{ turnout_stats.quorum_percent }}%)
-                {% if turnout_stats.quorum_met %}
-                  <span class="ml-1 badge badge-success">met</span>
-                {% else %}
-                  <span class="ml-1 badge badge-danger">not met</span>
-                {% endif %}
               </div>
 
               <div class="mb-2">
@@ -412,6 +346,86 @@
                 </div>
               </div>
             {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+
+  {% if show_turnout_chart and turnout_stats %}
+    <div class="row">
+      <div class="col-12">
+        <div class="card card-outline card-secondary">
+          <div class="card-header">
+            <h3 class="card-title">Participation{% if election.status == 'open' %} so far{% endif %}</h3>
+          </div>
+          <div class="card-body">
+            <div class="row">
+              {% if election.status == 'open' %}
+                <div class="col-12 col-lg-4">
+                <div class="mb-3 text-muted">
+                    Quorum:
+                    {% if turnout_stats.quorum_required %}
+                      {{ turnout_stats.required_participating_voter_count }} voters and
+                      {{ turnout_stats.required_participating_vote_weight_total }} vote weight
+                      ({{ turnout_stats.quorum_percent }}%)
+                      {% if turnout_stats.quorum_met %}
+                        <span class="ml-1 badge badge-success">met</span>
+                      {% else %}
+                        <span class="ml-1 badge badge-danger">not met</span>
+                      {% endif %}
+                    {% else %}
+                      not required
+                    {% endif %}
+                  </div>
+
+                  <div class="mb-2">
+                    <strong>Number of unique voters</strong>
+                    —
+                    {{ turnout_stats.participating_voter_count }} / {{ turnout_stats.eligible_voter_count }} ({{ turnout_stats.participating_voter_percent }}%)
+                  </div>
+
+                  <div class="progress mb-2">
+                    <div
+                      class="progress-bar bg-success"
+                      role="progressbar"
+                      aria-valuenow="{{ turnout_stats.participating_voter_count }}"
+                      aria-valuemin="0"
+                      aria-valuemax="{{ turnout_stats.eligible_voter_count }}"
+                      style="width: {{ turnout_stats.participating_voter_percent }}%"
+                    >
+                      <span class="sr-only">{{ turnout_stats.participating_voter_percent }}% Complete</span>
+                    </div>
+                  </div>
+
+                  <div class="mb-2">
+                    <strong>Votes cast</strong>
+                    —
+                    {{ turnout_stats.participating_vote_weight_total }} / {{ turnout_stats.eligible_vote_weight_total }} ({{ turnout_stats.participating_vote_weight_percent }}%)
+                  </div>
+                  <div class="progress mb-0">
+                    <div
+                      class="progress-bar bg-info"
+                      role="progressbar"
+                      aria-valuenow="{{ turnout_stats.participating_vote_weight_total }}"
+                      aria-valuemin="0"
+                      aria-valuemax="{{ turnout_stats.eligible_vote_weight_total }}"
+                      style="width: {{ turnout_stats.participating_vote_weight_percent }}%"
+                    >
+                      <span class="sr-only">{{ turnout_stats.participating_vote_weight_percent }}% Complete</span>
+                    </div>
+                  </div>
+                </div>
+              {% endif %}
+
+              <div class="col-12 {% if election.status == 'open' %}col-lg-8{% endif %} mt-3 mt-lg-0">
+                <p class="mb-2"><strong>Ballots submitted over time (including superseded ballots)</strong></p>
+                {{ turnout_chart_data|json_script:"election-turnout-chart-data" }}
+                <div class="chart">
+                  <canvas id="election-turnout-chart" style="min-height: 250px; height: 250px; max-height: 250px; max-width: 100%;"></canvas>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -741,10 +755,10 @@
           if (electionEl) electionEl.textContent = String(d.election_start_date || '');
 
           var daysAtStartEl = modalEl.querySelector('.js-ineligible-days-at-start');
-          if (daysAtStartEl) daysAtStartEl.textContent = String(d.days_at_start || '');
+          if (daysAtStartEl) daysAtStartEl.textContent = String(d.days_at_start == null ? '' : d.days_at_start);
 
           var daysShortEl = modalEl.querySelector('.js-ineligible-days-short');
-          if (daysShortEl) daysShortEl.textContent = String(d.days_short || '');
+          if (daysShortEl) daysShortEl.textContent = String(d.days_short == null ? '' : d.days_short);
 
           jq(modalEl).modal('show');
         }
@@ -774,6 +788,75 @@
           evt.preventDefault();
           openModal(username);
         });
+      })();
+    </script>
+
+    <script>
+      (function () {
+        'use strict';
+
+        function normalizeConfirmValue(value) {
+          return (value || '').trim().toLocaleLowerCase();
+        }
+
+        function setSubmitEnabled(submitButton, enabled) {
+          submitButton.disabled = !enabled;
+          submitButton.setAttribute('aria-disabled', String(!enabled));
+        }
+
+        function resetConfirm(input, submitButton) {
+          input.value = '';
+          setSubmitEnabled(submitButton, false);
+        }
+
+        function bindNameConfirm(inputId, submitId) {
+          var input = document.getElementById(inputId);
+          var submitButton = document.getElementById(submitId);
+          if (!input || !submitButton) {
+            return;
+          }
+
+          var expectedName = normalizeConfirmValue(input.dataset.confirmName);
+          resetConfirm(input, submitButton);
+
+          input.addEventListener('input', function () {
+            var actual = normalizeConfirmValue(input.value);
+            setSubmitEnabled(submitButton, actual === expectedName);
+          });
+
+          var jq = window.jQuery;
+          if (jq && jq.fn) {
+            var modal = input.closest('.modal');
+            if (modal) {
+              jq(modal).on('show.bs.modal', function () {
+                resetConfirm(input, submitButton);
+              });
+            }
+            return;
+          }
+
+          var modalEl = input.closest('.modal');
+          if (!modalEl || !modalEl.id) {
+            return;
+          }
+
+          var selector = '[data-toggle="modal"][data-target="#' + modalEl.id + '"]';
+          document.querySelectorAll(selector).forEach(function (trigger) {
+            trigger.addEventListener('click', function () {
+              resetConfirm(input, submitButton);
+            });
+          });
+        }
+
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', function () {
+            bindNameConfirm('extend-confirm', 'extend-submit');
+            bindNameConfirm('conclude-confirm', 'conclude-submit');
+          });
+        } else {
+          bindNameConfirm('extend-confirm', 'extend-submit');
+          bindNameConfirm('conclude-confirm', 'conclude-submit');
+        }
       })();
     </script>
   {% endif %}

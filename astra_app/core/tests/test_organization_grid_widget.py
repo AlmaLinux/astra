@@ -58,7 +58,7 @@ class OrganizationGridTemplateTagTests(TestCase):
                     technical_contact_email="tech@example.com",
                     website_logo="https://example.com/logo",
                     website="https://example.com/",
-                    representative="alice",
+                    representative=f"rep{i:03d}",
                 )
             )
 
