@@ -574,6 +574,10 @@ AUTHENTICATION_BACKENDS = [
     'core.backends.FreeIPAAuthBackend',
 ]
 
+# If behind a proxy that sets X-Forwarded-Proto, ensure Django knows to
+# treat those requests as secure.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
 # FreeIPA Configuration
 FREEIPA_HOST = _env_str("FREEIPA_HOST", default="ipa.demo1.freeipa.org") or "ipa.demo1.freeipa.org"
 FREEIPA_VERIFY_SSL = _env_bool("FREEIPA_VERIFY_SSL", default=True)
