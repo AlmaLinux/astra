@@ -85,6 +85,49 @@ a:hover {
   color: #304b5e;
 }
 
+/* Make regular in-content links clearly identifiable.
+   Exclude component-like links (buttons, badges, nav items, dropdown/list items)
+   that already have strong affordances. */
+.content-wrapper a:not(.btn):not(.btn-link):not(.badge):not(.nav-link):not(.dropdown-item):not(.list-group-item):not(.page-link):not(.navbar-brand):not(.brand-link):not(.alx-status-badge) {
+  text-decoration: underline;
+  text-decoration-color: currentColor; /* fallback */
+  text-decoration-color: color-mix(in srgb, currentColor 70%, transparent);
+  text-decoration-thickness: max(1px, 0.08em);
+  text-underline-offset: 0.14em;
+}
+
+.content-wrapper a:not(.btn):not(.btn-link):not(.badge):not(.nav-link):not(.dropdown-item):not(.list-group-item):not(.page-link):not(.navbar-brand):not(.brand-link):not(.alx-status-badge):hover {
+  color: var(--alx-blue);
+  text-decoration-thickness: max(2px, 0.12em);
+  text-decoration-color: currentColor;
+}
+
+/* Visited links: subtle but detectable. */
+.content-wrapper a:not(.btn):not(.btn-link):not(.badge):not(.nav-link):not(.dropdown-item):not(.list-group-item):not(.page-link):not(.navbar-brand):not(.brand-link):not(.alx-status-badge):visited {
+  color: #4b3a74; /* fallback */
+  color: color-mix(in srgb, var(--alx-link) 70%, #6f42c1 30%);
+}
+
+/* Keyboard accessibility: clear focus ring for links. */
+.content-wrapper a:not(.btn):not(.btn-link):not(.badge):not(.nav-link):not(.dropdown-item):not(.list-group-item):not(.page-link):not(.navbar-brand):not(.brand-link):not(.alx-status-badge):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--alx-blue) 70%, white);
+  outline-offset: 2px;
+  border-radius: 0.15rem;
+}
+
+.content-wrapper a.list-group-item.list-group-item-action {
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--alx-blue) 25%, transparent);
+}
+
+.content-wrapper a.list-group-item.list-group-item-action:hover {
+  box-shadow: inset 3px 0 0 var(--alx-blue);
+}
+
+.content-wrapper a.list-group-item.list-group-item-action:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--alx-blue) 70%, white);
+  outline-offset: 2px;
+}
+
 .btn.btn-primary,
 .btn.btn-outline-primary {
   color: #264154;
@@ -174,11 +217,13 @@ a:hover {
 
 .profile-page #user_mail a {
   color: inherit;
-  text-decoration: none;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 0.14em;
 }
 
 .profile-page #user_mail a:hover {
-  text-decoration: underline;
+  text-decoration-style: solid;
 }
 
 .profile-page #user_attributes {
@@ -211,11 +256,13 @@ a:hover {
 
 .profile-page .profile-attr-value a {
   color: var(--alx-link);
-  text-decoration: none;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 0.14em;
 }
 
 .profile-page .profile-attr-value a:hover {
-  text-decoration: underline;
+  text-decoration-style: solid;
 }
 
 .profile-page .profile-chat-item a {
@@ -290,6 +337,26 @@ a:hover {
 
 .profile-page .profile-group-name {
   font-weight: 600;
+}
+
+.profile-page .profile-memberships .profile-group-name > a {
+  color: var(--alx-link);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 65%, transparent);
+  text-decoration-thickness: max(1px, 0.08em);
+  text-underline-offset: 0.14em;
+}
+
+.profile-page .profile-memberships .profile-group-name > a:hover {
+  color: var(--alx-blue);
+  text-decoration-thickness: max(2px, 0.12em);
+  text-decoration-color: currentColor;
+}
+
+.profile-page .profile-memberships .profile-group-name > a:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--alx-blue) 70%, white);
+  outline-offset: 2px;
+  border-radius: 0.15rem;
 }
 
 /* Settings: Noggin-like chat nicknames editor. */
@@ -386,10 +453,17 @@ a:hover {
 
 a.alx-status-badge {
   text-decoration: none;
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, currentColor 55%, transparent);
 }
 
 a.alx-status-badge:hover {
-  text-decoration: underline;
+  color: var(--alx-blue);
+  box-shadow: inset 0 -2px 0 currentColor;
+}
+
+a.alx-status-badge:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--alx-blue) 70%, white);
+  outline-offset: 2px;
 }
 
 .organization-form-footer .card-footer {
