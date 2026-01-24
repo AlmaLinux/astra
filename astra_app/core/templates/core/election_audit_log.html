@@ -1,9 +1,28 @@
 {% extends 'core/base.html' %}
+{% load static %}
 
 {% block title %}Election Audit Log{% endblock %}
 
 {% block header %}
   <h1 class="m-0">Election Audit Log</h1>
+{% endblock %}
+
+{% block extra_head %}
+  {{ block.super }}
+  {% if sankey_flows %}
+    <style>
+      .chart {
+        max-width: 800px;
+        max-height: 600px;
+      }
+
+      canvas {
+        -moz-user-select: none;
+        -webkit-user-select: none;
+        -ms-user-select: none;
+      }
+    </style>
+  {% endif %}
 {% endblock %}
 
 {% block content %}
@@ -350,6 +369,21 @@
                       {% if empty_seats > 0 %}
                         <p class="mt-2"><strong>Empty seats:</strong> {{ empty_seats }}</p>
                       {% endif %}
+                      {% if sankey_flows %}
+                        <div class="mt-3">
+                          <div class="chart">
+                            <canvas
+                              id="tally-sankey-chart"
+                              data-sankey-chart
+                              data-sankey-data-id="tally-sankey-data"
+                              data-sankey-elected-id="tally-sankey-elected"
+                              data-sankey-eliminated-id="tally-sankey-eliminated"
+                              aria-label="Vote flow by round"
+                              role="img"
+                            ></canvas>
+                          </div>
+                        </div>
+                      {% endif %}
                     {% endif %}
                   </div>
                 </div>
@@ -383,6 +417,14 @@
 
 {% block scripts %}
   {{ block.super }}
+  {% if sankey_flows %}
+    <script src="{% static 'core/vendor/chartjs/chart.umd.min.js' %}"></script>
+    <script src="{% static 'core/vendor/chartjs/chartjs-chart-sankey.js' %}"></script>
+    <script src="{% static 'core/js/election_sankey.js' %}"></script>
+    {{ sankey_flows|json_script:"tally-sankey-data" }}
+    {{ sankey_elected_nodes|json_script:"tally-sankey-elected" }}
+    {{ sankey_eliminated_nodes|json_script:"tally-sankey-eliminated" }}
+  {% endif %}
   <script>
     (function () {
       function copyText(text) {

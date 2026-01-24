@@ -29,10 +29,11 @@ urlpatterns = [
 if settings.DEBUG:
     from django.conf.urls.static import static
 
-    from core.debug_views import cache_debug_view
+    from core.debug_views import cache_debug_view, sankey_debug_view
 
     urlpatterns += [
         path('__debug__/cache/', cache_debug_view, name='cache-debug'),
+        path('__debug__/sankey/', sankey_debug_view, name='sankey-debug'),
     ]
 
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

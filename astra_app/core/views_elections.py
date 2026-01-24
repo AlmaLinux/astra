@@ -23,6 +23,7 @@ from post_office.models import EmailTemplate
 from core import elections_eligibility, elections_services
 from core.backends import FreeIPAUser
 from core.elections_eligibility import ElectionEligibilityError
+from core.elections_sankey import build_sankey_flows
 from core.elections_services import (
     ElectionError,
     ElectionNotOpenError,
@@ -2026,6 +2027,16 @@ def election_audit_log(request, election_id: int):
 
     tally_result = election.tally_result or {}
 
+    sankey_flows: list[dict[str, object]] = []
+    sankey_elected_nodes: list[str] = []
+    sankey_eliminated_nodes: list[str] = []
+    if election.status == Election.Status.tallied:
+        sankey_flows, sankey_elected_nodes, sankey_eliminated_nodes = build_sankey_flows(
+            tally_result=tally_result,
+            candidate_username_by_id=candidate_username_by_id,
+            votes_cast=votes_cast,
+        )
+
     def _icon_for_event(event_type: str) -> tuple[str, str]:
         match event_type:
             case "election_started":
@@ -2272,6 +2283,9 @@ def election_audit_log(request, election_id: int):
             "quota": tally_result.get("quota"),
             "tally_elected_users": tally_elected_users,
             "empty_seats": empty_seats,
+            "sankey_flows": sankey_flows,
+            "sankey_elected_nodes": sankey_elected_nodes,
+            "sankey_eliminated_nodes": sankey_eliminated_nodes,
         },
     )
 

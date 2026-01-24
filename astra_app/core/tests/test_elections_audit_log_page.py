@@ -123,6 +123,56 @@ class ElectionAuditLogPageTests(TestCase):
         # Quota is floor(total/(seats+1)) + 1 = floor(1/2) + 1 = 1.
         self.assertContains(resp, "1.0000")
 
+    def test_audit_log_page_renders_tally_sankey_chart(self) -> None:
+        self._login_as_freeipa_user("viewer")
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Audit log sankey",
+            description="",
+            start_datetime=now - datetime.timedelta(days=2),
+            end_datetime=now - datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.closed,
+        )
+        c1 = Candidate.objects.create(
+            election=election,
+            freeipa_username="alice",
+            nominated_by="nominator",
+        )
+        ballot_hash = Ballot.compute_hash(
+            election_id=election.id,
+            credential_public_id="cred-1",
+            ranking=[c1.id],
+            weight=1,
+            nonce="0" * 32,
+        )
+        genesis_hash = election_genesis_chain_hash(election.id)
+        chain_hash = compute_chain_hash(previous_chain_hash=genesis_hash, ballot_hash=ballot_hash)
+        Ballot.objects.create(
+            election=election,
+            credential_public_id="cred-1",
+            ranking=[c1.id],
+            weight=1,
+            ballot_hash=ballot_hash,
+            previous_chain_hash=genesis_hash,
+            chain_hash=chain_hash,
+        )
+
+        elections_services.tally_election(election=election)
+        election.refresh_from_db()
+        self.assertEqual(election.status, Election.Status.tallied)
+
+        viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "memberof_group": []})
+        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+            resp = self.client.get(reverse("election-audit-log", args=[election.id]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "tally-sankey-chart")
+        self.assertContains(resp, "tally-sankey-data")
+        self.assertContains(resp, "Voters")
+        self.assertContains(resp, "Round 1")
+
     def test_audit_log_groups_ballot_submissions_by_day_for_managers(self) -> None:
         self._login_as_freeipa_user("admin")
         FreeIPAPermissionGrant.objects.create(
@@ -221,12 +271,12 @@ class ElectionAuditLogPageTests(TestCase):
             resp = self.client.get(reverse("election-audit-log", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)
-        
+
         # Check election_closed renders prettily
         self.assertContains(resp, "Election closed")
         self.assertContains(resp, "Final chain head:")
         self.assertContains(resp, "aaaaaaaaaaaaaaaa")  # truncated chain head
-        
+
         # Check election_anonymized renders prettily
         self.assertContains(resp, "Election anonymized")
         self.assertContains(resp, "Voter credentials anonymized and sensitive emails scrubbed")
@@ -234,7 +284,7 @@ class ElectionAuditLogPageTests(TestCase):
         self.assertContains(resp, "Emails scrubbed")
         self.assertContains(resp, "5")  # credentials count
         self.assertContains(resp, "10")  # emails count
-        
+
         # Verify raw payload is not shown
         self.assertNotContains(resp, "&#x27;chain_head&#x27;:")
         self.assertNotContains(resp, "&#x27;credentials_affected&#x27;:")

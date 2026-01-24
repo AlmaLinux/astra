@@ -1,0 +1,186 @@
+{% extends 'core/base.html' %}
+{% load static %}
+
+{% block title %}Sankey Debug{% endblock %}
+
+{% block header %}
+  <h1 class="m-0">Sankey Debug</h1>
+{% endblock %}
+
+{% block extra_head %}
+  {{ block.super }}
+  {% if sankey_flows %}
+    <style>
+      .chart {
+        max-width: 1000px;
+        max-height: 700px;
+      }
+
+      canvas {
+        -moz-user-select: none;
+        -webkit-user-select: none;
+        -ms-user-select: none;
+      }
+    </style>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+  <div class="row">
+    <div class="col-lg-4">
+      <div class="card card-outline card-primary">
+        <div class="card-header">
+          <h3 class="card-title">Example</h3>
+        </div>
+        <div class="card-body">
+          <p class="mb-2"><strong>{{ example_label }}</strong></p>
+          <dl class="row mb-0">
+            <dt class="col-sm-5">Votes cast</dt>
+            <dd class="col-sm-7">{{ votes_cast }}</dd>
+            <dt class="col-sm-5">Seats</dt>
+            <dd class="col-sm-7">{{ tally_result.seats|default:"3" }}</dd>
+            <dt class="col-sm-5">Elected</dt>
+            <dd class="col-sm-7">
+              {% if tally_result.elected %}
+                {{ tally_result.elected|join:", " }}
+              {% else %}
+                None
+              {% endif %}
+            </dd>
+          </dl>
+
+          <hr class="my-3" />
+
+          <p class="mb-1 text-muted">Candidates</p>
+          <ul class="pl-3 mb-0">
+            {% for c in candidates %}
+              <li>{{ c.name }} ({{ c.id }})</li>
+            {% empty %}
+              <li class="text-muted">No candidates loaded.</li>
+            {% endfor %}
+          </ul>
+
+          <details class="mt-3">
+            <summary class="text-muted">Show ballots</summary>
+            <ul class="pl-3 mt-2">
+              {% for b in ballots %}
+                <li>Weight {{ b.weight }}: {{ b.ranking|join:", " }}</li>
+              {% empty %}
+                <li class="text-muted">No ballots loaded.</li>
+              {% endfor %}
+            </ul>
+          </details>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-8">
+      <div class="card card-outline card-success">
+        <div class="card-header">
+          <h3 class="card-title">Tally completed</h3>
+        </div>
+        <div class="card-body">
+          {% if tally_elected_labels %}
+            <p class="mb-2"><strong>Elected:</strong></p>
+            <ul class="pl-3 ml-2">
+              {% for name in tally_elected_labels %}
+                <li>{{ name }}</li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p class="mb-0">No elected list was recorded.</p>
+          {% endif %}
+
+          {% if sankey_flows %}
+            <div class="chart mb-3">
+              <canvas
+                id="debug-sankey-chart"
+                data-sankey-chart
+                data-sankey-data-id="debug-sankey-data"
+                data-sankey-elected-id="debug-sankey-elected"
+                data-sankey-eliminated-id="debug-sankey-eliminated"
+                aria-label="Sankey debug view"
+                role="img"
+              ></canvas>
+            </div>
+          {% else %}
+            <p class="text-muted mb-3">No Sankey data available.</p>
+          {% endif %}
+        </div>
+      </div>
+
+      {% if debug_rounds %}
+        {% for r in debug_rounds %}
+          <div class="card card-outline card-info">
+            <div class="card-header">
+              <h3 class="card-title">{{ r.round_label }}</h3>
+            </div>
+            <div class="card-body">
+              {% if r.summary_text %}
+                <p class="mb-2">{{ r.summary_text|linebreaksbr }}</p>
+              {% endif %}
+
+              {% if r.rows %}
+                <div class="table-responsive">
+                  <table class="table table-sm table-striped mb-2">
+                    <thead>
+                      <tr>
+                        <th>Candidate</th>
+                        <th class="text-right">Retained total</th>
+                        <th class="text-right">Retention factor</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% for row in r.rows %}
+                        <tr>
+                          <td>{{ row.candidate_label }}</td>
+                          <td class="text-right">{{ row.retained_total|floatformat:4 }}</td>
+                          <td class="text-right">{{ row.retention_factor|floatformat:4 }}</td>
+                          <td>
+                            {% if row.is_elected %}
+                              <span class="badge badge-success">elected</span>
+                            {% elif row.is_eliminated %}
+                              <span class="badge badge-danger">eliminated</span>
+                            {% else %}
+                              <span class="badge badge-secondary">continuing</span>
+                            {% endif %}
+                          </td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              {% endif %}
+
+              {% if r.audit_text %}
+                <div class="mb-0">{{ r.audit_text|linebreaksbr }}</div>
+              {% endif %}
+            </div>
+          </div>
+        {% endfor %}
+      {% else %}
+        <div class="card card-outline card-info">
+          <div class="card-header">
+            <h3 class="card-title">Tally rounds</h3>
+          </div>
+          <div class="card-body">
+            <p class="text-muted mb-0">No tally rounds recorded.</p>
+          </div>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ block.super }}
+  {% if sankey_flows %}
+    <script src="{% static 'core/vendor/chartjs/chart.umd.min.js' %}"></script>
+    <script src="{% static 'core/vendor/chartjs/chartjs-chart-sankey.js' %}"></script>
+    <script src="{% static 'core/js/election_sankey.js' %}"></script>
+    {{ sankey_flows|json_script:"debug-sankey-data" }}
+    {{ sankey_elected_nodes|json_script:"debug-sankey-elected" }}
+    {{ sankey_eliminated_nodes|json_script:"debug-sankey-eliminated" }}
+  {% endif %}
+{% endblock %}
