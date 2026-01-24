@@ -283,30 +283,47 @@
                         {% endif %}
                       </dl>
 
+                    {% elif ev.event_type == 'election_started' %}
+                      <p class="mb-2">
+                        <strong>Genesis chain head:</strong>
+                        <code title="{{ ev.payload.genesis_chain_hash }}">
+                          {% if ev.payload.genesis_chain_hash|length > 16 %}
+                            {{ ev.payload.genesis_chain_hash|slice:":16" }}…
+                          {% else %}
+                            {{ ev.payload.genesis_chain_hash }}
+                          {% endif %}
+                        </code>
+                        <button
+                          type="button"
+                          class="btn btn-outline-secondary btn-xs ml-2 js-copy-hash"
+                          data-hash="{{ ev.payload.genesis_chain_hash }}"
+                          aria-label="Copy genesis chain head"
+                          title="Copy genesis chain head"
+                        >
+                          <i class="fas fa-copy" aria-hidden="true"></i>
+                        </button>
+                      </p>
+
                     {% elif ev.event_type == 'election_closed' %}
-                      {% if ev.payload.chain_head %}
-                        <p class="mb-2">
-                          <strong>Final chain head:</strong>
-                          <code title="{{ ev.payload.chain_head }}">
-                            {% if ev.payload.chain_head|length > 16 %}
-                              {{ ev.payload.chain_head|slice:":16" }}…
-                            {% else %}
-                              {{ ev.payload.chain_head }}
-                            {% endif %}
-                          </code>
-                          <button
-                            type="button"
-                            class="btn btn-outline-secondary btn-xs ml-2 js-copy-hash"
-                            data-hash="{{ ev.payload.chain_head }}"
-                            aria-label="Copy final chain head"
-                            title="Copy final chain head"
-                          >
-                            <i class="fas fa-copy" aria-hidden="true"></i>
-                          </button>
-                        </p>
-                      {% else %}
-                        <p class="text-muted mb-0">No chain head recorded.</p>
-                      {% endif %}
+                      <p class="mb-2">
+                        <strong>Final chain head:</strong>
+                        <code title="{{ ev.payload.chain_head }}">
+                          {% if ev.payload.chain_head|length > 16 %}
+                            {{ ev.payload.chain_head|slice:":16" }}…
+                          {% else %}
+                            {{ ev.payload.chain_head }}
+                          {% endif %}
+                        </code>
+                        <button
+                          type="button"
+                          class="btn btn-outline-secondary btn-xs ml-2 js-copy-hash"
+                          data-hash="{{ ev.payload.chain_head }}"
+                          aria-label="Copy final chain head"
+                          title="Copy final chain head"
+                        >
+                          <i class="fas fa-copy" aria-hidden="true"></i>
+                        </button>
+                      </p>
 
                     {% elif ev.event_type == 'election_anonymized' %}
                       <p class="mb-2">Voter credentials anonymized and sensitive emails scrubbed.</p>
@@ -321,19 +338,17 @@
                         {% endif %}
                       </dl>
 
-                    {% else %}
-                      {% if ev.event_type == 'tally_completed' %}
-                        {% if ev.elected_users %}
-                          <p class="mb-2"><strong>Elected:</strong></p>
-                          <ul class="pl-3 ml-2">
-                            {% for u in ev.elected_users %}
-                              <li><a href="{{ u.profile_url }}">{{ u.username }}</a></li>
-                            {% endfor %}
-                          </ul>
-                        {% endif %}
-                        {% if empty_seats > 0 %}
-                          <p class="mt-2"><strong>Empty seats:</strong> {{ empty_seats }}</p>
-                        {% endif %}
+                    {% elif ev.event_type == 'tally_completed' %}
+                      {% if ev.elected_users %}
+                        <p class="mb-2"><strong>Elected:</strong></p>
+                        <ul class="pl-3 ml-2">
+                          {% for u in ev.elected_users %}
+                            <li><a href="{{ u.profile_url }}">{{ u.username }}</a></li>
+                          {% endfor %}
+                        </ul>
+                      {% endif %}
+                      {% if empty_seats > 0 %}
+                        <p class="mt-2"><strong>Empty seats:</strong> {{ empty_seats }}</p>
                       {% endif %}
                     {% endif %}
                   </div>
