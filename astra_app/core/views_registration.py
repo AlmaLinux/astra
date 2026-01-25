@@ -108,23 +108,26 @@ def register(request: HttpRequest) -> HttpResponse:
             _ = result
         except exceptions.DuplicateEntry:
             form.add_error(None, f"The username '{username}' or the email address '{email}' are already taken.")
-            return render(request, "core/register.html", {"form": form})
+            return render(request, "core/register.html", {"form": form, "registration_open": settings.REGISTRATION_OPEN})
         except exceptions.ValidationError as e:
             # FreeIPA often encodes field name inside the message; keep it generic.
             logger.info("Registration validation error username=%s error=%s", username, e)
             form.add_error(None, str(e))
-            return render(request, "core/register.html", {"form": form})
+            return render(request, "core/register.html", {"form": form, "registration_open": settings.REGISTRATION_OPEN})
         except exceptions.FreeIPAError as e:
             logger.warning("Registration FreeIPA error username=%s error=%s", username, e)
-            form.add_error(None, "An error occurred while creating the account, please try again.")
-            return render(request, "core/register.html", {"form": form})
+            if settings.DEBUG:
+                form.add_error(None, f"An error occurred while creating the account (debug): {e}")
+            else:
+                form.add_error(None, "An error occurred while creating the account, please try again.")
+            return render(request, "core/register.html", {"form": form, "registration_open": settings.REGISTRATION_OPEN})
         except Exception as e:
             logger.exception("Registration unexpected error username=%s", username)
             if settings.DEBUG:
                 form.add_error(None, f"Unable to create account (debug): {e}")
             else:
                 form.add_error(None, "Unable to create account due to an internal error.")
-            return render(request, "core/register.html", {"form": form})
+            return render(request, "core/register.html", {"form": form, "registration_open": settings.REGISTRATION_OPEN})
 
         try:
             _send_registration_email(request, username=username, email=email, first_name=first_name, last_name=last_name)
