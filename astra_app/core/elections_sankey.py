@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from decimal import Decimal, InvalidOperation
-from typing import Mapping
 
 
 def _round_label(idx: int, round_data: Mapping[str, object]) -> str:

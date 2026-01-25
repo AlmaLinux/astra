@@ -43,6 +43,12 @@ class FreeIPALoginView(auth_views.LoginView):
     authentication_form = FreeIPAAuthenticationForm
 
     @override
+    def dispatch(self, request: HttpRequest, *args, **kwargs) -> HttpResponse:
+        if request.user.is_authenticated:
+            return redirect("home")
+        return super().dispatch(request, *args, **kwargs)
+
+    @override
     def get_success_url(self) -> str:
         user = getattr(self.request, "user", None)
         get_username = getattr(user, "get_username", None)
@@ -244,6 +250,9 @@ def password_expired(request: HttpRequest) -> HttpResponse:
     This uses python-freeipa's `change_password` endpoint (does not require an authenticated session).
     """
 
+    if request.user.is_authenticated:
+        return redirect("home")
+
     initial_username = None
     try:
         initial_username = request.session.get("_freeipa_pwexp_username")
@@ -303,6 +312,9 @@ def otp_sync(request: HttpRequest) -> HttpResponse:
     POST https://<host>/ipa/session/sync_token
     with form data: user, password, first_code, second_code, token (optional).
     """
+
+    if request.user.is_authenticated:
+        return redirect("home")
 
     form = SyncTokenForm(request.POST or None)
 

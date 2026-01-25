@@ -52,10 +52,10 @@ from .backends import (
     FreeIPAGroup,
     FreeIPAOperationFailed,
     FreeIPAUser,
-    clear_current_viewer_username,
-    set_current_viewer_username,
     _invalidate_agreement_cache,
     _invalidate_agreements_list_cache,
+    clear_current_viewer_username,
+    set_current_viewer_username,
 )
 from .listbacked_queryset import _ListBackedQuerySet
 from .models import (
