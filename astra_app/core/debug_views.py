@@ -126,7 +126,7 @@ def sankey_debug_view(request: HttpRequest) -> HttpResponse:
     if example != "wikipedia":
         return HttpResponseBadRequest("Unknown sankey example")
 
-    seats, candidates, ballots, votes_cast, candidate_name_by_id, exclusions = _exclusion_example()
+    seats, candidates, ballots, votes_cast, candidate_name_by_id, exclusions = _wikipedia_example()
     tally_result = tally_meek(seats=seats, ballots=ballots, candidates=candidates, exclusion_groups=exclusions)
     sankey_flows, elected_nodes, eliminated_nodes = build_sankey_flows(
         tally_result=tally_result,
