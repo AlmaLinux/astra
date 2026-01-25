@@ -85,5 +85,5 @@ def build_info(_request) -> dict[str, object]:
     build_sha = get_build_sha()
     build_label = "Powered by AlmaLinux Astra"
     if build_sha:
-        build_label = f"{build_label} ({build_sha})"
+        build_label = f'{build_label} (<a href="https://github.com/AlmaLinux/astra/tree/{build_sha}">{build_sha}</a>)'
     return {"build_sha": build_sha, "build_label": build_label}
