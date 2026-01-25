@@ -58,11 +58,7 @@ fi
 podman pull "$APP_IMAGE"
 
 migration_container="astra-migrate-$(date +%s)"
-if ! podman run --rm --name "$migration_container" --env-file "$ENV_FILE" "$APP_IMAGE" python manage.py createcachetable; then
-  echo "Createcachetable failed; containers were not restarted." >&2
-  exit 1
-fi
-if ! podman run --rm --name "$migration_container" --env-file "$ENV_FILE" "$APP_IMAGE" python manage.py migrate --noinput; then
+if ! podman run --rm --name "$migration_container" --env-file "$ENV_FILE" "$APP_IMAGE" migrate.sh; then
   echo "Migration failed; containers were not restarted." >&2
   exit 1
 fi
