@@ -157,6 +157,17 @@ def _storage_key_from_inline_image_arg(raw: str) -> str:
         if bucket and str(parts.netloc or "").startswith(f"{bucket}."):
             return path
 
+        custom_domain = str(settings.AWS_S3_CUSTOM_DOMAIN or "").strip()
+        if custom_domain:
+            custom_parts = urlsplit(custom_domain) if "://" in custom_domain else urlsplit(f"https://{custom_domain}")
+            if str(parts.netloc or "") == str(custom_parts.netloc or ""):
+                custom_path = str(custom_parts.path or "").strip("/")
+                if custom_path:
+                    if path.startswith(f"{custom_path}/"):
+                        return path[len(custom_path) + 1 :]
+                else:
+                    return path
+
         raise ValueError(
             "inline_image URLs must point to the configured storage bucket; "
             f"could not infer storage key from: {value}"

@@ -527,10 +527,12 @@ else:
 _aws_s3_domain = urlsplit(_aws_s3_domain_raw)
 AWS_S3_URL_PROTOCOL = f"{_aws_s3_domain.scheme}:"
 _aws_s3_base_domain = (_aws_s3_domain.netloc + _aws_s3_domain.path.rstrip("/")).strip("/")
-AWS_S3_CUSTOM_DOMAIN = f"{_aws_s3_base_domain}/{AWS_STORAGE_BUCKET_NAME}"
-
 # MinIO compatibility and predictable URLs.
 AWS_S3_ADDRESSING_STYLE = _env_str("AWS_S3_ADDRESSING_STYLE", default="path") or "path"
+if AWS_S3_ADDRESSING_STYLE == "virtual":
+    AWS_S3_CUSTOM_DOMAIN = _aws_s3_base_domain
+else:
+    AWS_S3_CUSTOM_DOMAIN = f"{_aws_s3_base_domain}/{AWS_STORAGE_BUCKET_NAME}"
 AWS_QUERYSTRING_AUTH = _env_bool("AWS_QUERYSTRING_AUTH", default=False)
 AWS_DEFAULT_ACL = None
 

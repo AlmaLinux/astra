@@ -6,6 +6,19 @@ from django.test import TestCase, override_settings
 
 
 class TemplatedEmailInlineImagesTests(TestCase):
+    @override_settings(
+        AWS_STORAGE_BUCKET_NAME="almalinux-astra",
+        AWS_S3_CUSTOM_DOMAIN="static.astra.almalinux.org",
+    )
+    def test_storage_key_accepts_custom_domain_without_bucket(self) -> None:
+        from core.templated_email import _storage_key_from_inline_image_arg
+
+        key = _storage_key_from_inline_image_arg(
+            "https://static.astra.almalinux.org/mail-images/logo.svg"
+        )
+
+        self.assertEqual(key, "mail-images/logo.svg")
+
     @override_settings(AWS_STORAGE_BUCKET_NAME="astra-media")
     def test_queue_templated_email_drops_missing_inline_image_in_storage(self):
         """Missing inline images must not block email queuing.
