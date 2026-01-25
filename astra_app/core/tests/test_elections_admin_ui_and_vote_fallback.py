@@ -295,7 +295,7 @@ class ElectionDetailAdminControlsTests(TestCase):
         self.assertEqual(election.status, Election.Status.open)
 
         with patch("core.backends.FreeIPAUser.get", return_value=viewer):
-            resp2 = self.client.post(url, data={"skip_tally": "1", "confirm": str(election.id)})
+            resp2 = self.client.post(url, data={"skip_tally": "1", "confirm": election.name})
         self.assertEqual(resp2.status_code, 302)
         election.refresh_from_db()
         self.assertEqual(election.status, Election.Status.closed)
@@ -332,7 +332,7 @@ class ElectionDetailAdminControlsTests(TestCase):
         self.assertEqual(election.end_datetime, original_end)
 
         with patch("core.backends.FreeIPAUser.get", return_value=viewer):
-            resp2 = self.client.post(url, data={"end_datetime": new_end_local, "confirm": str(election.id)})
+            resp2 = self.client.post(url, data={"end_datetime": new_end_local, "confirm": election.name})
         self.assertEqual(resp2.status_code, 302)
         election.refresh_from_db()
         self.assertGreater(election.end_datetime, original_end)

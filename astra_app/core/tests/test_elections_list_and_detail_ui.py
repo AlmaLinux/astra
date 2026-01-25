@@ -333,7 +333,7 @@ class ElectionDetailManagerUIStatsTests(TestCase):
         ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Participation so far")
+        self.assertContains(resp, "Participation")
         self.assertContains(resp, "Number of unique voters")
         self.assertContains(resp, "Votes cast")
         self.assertContains(resp, "Quorum")
@@ -502,7 +502,7 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Participation so far")
+        self.assertContains(resp, "Participation")
 
         marker = 'id="election-turnout-chart-data"'
         html = resp.content.decode("utf-8")
@@ -553,7 +553,7 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Participation so far")
+        self.assertContains(resp, "Participation")
         self.assertContains(resp, 'id="election-turnout-chart"')
         self.assertContains(resp, 'id="election-turnout-chart-data"')
         self.assertContains(resp, 'src="/static/core/vendor/chartjs/chart.umd.min.js"')
