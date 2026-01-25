@@ -33,4 +33,4 @@ RUN cd astra_app && python manage.py collectstatic --noinput
 EXPOSE 8000 9000
 
 ENTRYPOINT ["/usr/local/bin/astra-entrypoint"]
-CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--access-logfile", "-", "--error-logfile", "-", "--capture-output", "--log-level", "info", "--forwarded-allow-ips", "*", "--access-logformat", "%(x-forwarded-for)i %(l)s %(u)s %(t)s \"%(r)s\" %(s)s %(b)s \"%(f)s\" \"%(a)s\""]
+CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--access-logfile", "-", "--error-logfile", "-", "--capture-output", "--log-level", "info", "--forwarded-allow-ips", "*", "--access-logformat", "%({x-forwarded-for}i)s %(l)s %(u)s %(t)s \"%(r)s\" %(s)s %(b)s \"%(f)s\" \"%(a)s\""]
