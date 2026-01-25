@@ -105,7 +105,7 @@
           </form>
         </li>
       </ul>
-      
+
     </nav>
     <!-- /.navbar -->
   {% else %}
@@ -244,7 +244,7 @@
                 </ul>
               </li>
             {% endif %}
-            
+
             {% if send_mail_can_add %}
               <li class="nav-item {% if current_url_name == 'email-templates' or current_url_name == 'email-template-create' or current_url_name == 'email-template-edit' or current_url_name == 'send-mail' or current_url_name == 'email-images' %}menu-open{% endif %}">
                 <a href="#" class="nav-link d-flex align-items-start {% if current_url_name == 'email-templates' or current_url_name == 'email-template-create' or current_url_name == 'email-template-edit' or current_url_name == 'send-mail' or current_url_name == 'email-images' %}active{% endif %}">
@@ -262,7 +262,7 @@
                       <p>Send Mail</p>
                     </a>
                   </li>
-                  
+
                   <li class="nav-item">
                     <a href="{% url 'email-templates' %}" class="nav-link {% if current_url_name == 'email-templates' or current_url_name == 'email-template-create' or current_url_name == 'email-template-edit' %}active{% endif %}">
                       <i class="nav-icon fas fa-file-alt"></i>
@@ -330,25 +330,16 @@
   </div>
 
   <footer class="main-footer">
-    {% if request.user.is_authenticated %}
-      <!-- <div class="float-right d-none d-sm-inline">Powered by AlmaLinux Astra</div> -->
-      <!-- <strong>Powered by AlmaLinux Astra</strong> -->
-      <div class="container text-right">
-        <small class="text-muted">
-          <a class="text-muted" href="{% url 'privacy-policy' %}">Privacy Policy</a>
-          <span class="mx-2">·</span>
-          {{ build_label }}
-        </small>
-      </div>
-    {% else %}
-      <div class="container text-center">
-        <small class="text-muted">
-          <a class="text-muted" href="{% url 'privacy-policy' %}">Privacy Policy</a>
-          <span class="mx-2">·</span>
-          {{ build_label }}
-        </small>
-      </div>
-    {% endif %}
+    <div class="container {% if request.user.is_authenticated %}text-right{% else %}text-center{% endif %}">
+      <small class="text-muted">
+        <a class="text-muted" href="{% url 'privacy-policy' %}">Privacy Policy</a>
+        <span class="mx-2">·</span>
+        Powered by AlmaLinux Astra
+        {% if build_sha %}
+          (<a class="text-muted" href="https://github.com/AlmaLinux/astra/tree/{{ build_sha }}">{{ build_sha }}</a>)
+        {% endif %}
+      </small>
+    </div>
   </footer>
 </div>
 {% endwith %}
