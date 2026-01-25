@@ -334,11 +334,19 @@
       <!-- <div class="float-right d-none d-sm-inline">Powered by AlmaLinux Astra</div> -->
       <!-- <strong>Powered by AlmaLinux Astra</strong> -->
       <div class="container text-right">
-        <small class="text-muted">{{ build_label }}</small>
+        <small class="text-muted">
+          <a class="text-muted" href="{% url 'privacy-policy' %}">Privacy Policy</a>
+          <span class="mx-2">·</span>
+          {{ build_label }}
+        </small>
       </div>
     {% else %}
       <div class="container text-center">
-        <small class="text-muted">{{ build_label }}</small>
+        <small class="text-muted">
+          <a class="text-muted" href="{% url 'privacy-policy' %}">Privacy Policy</a>
+          <span class="mx-2">·</span>
+          {{ build_label }}
+        </small>
       </div>
     {% endif %}
   </footer>

@@ -180,6 +180,7 @@ class LoginRequiredMiddleware:
             "/register/",
             "/elections/ballot/verify/",
             "/ses/event-webhook/",
+            "/privacy-policy/",
         )
 
     def __call__(self, request):

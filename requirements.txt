@@ -8,6 +8,7 @@ django-post-office
 django-logentry-admin
 gunicorn
 whitenoise
+Markdown
 Pillow
 python-freeipa
 django-avatar

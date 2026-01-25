@@ -3,6 +3,7 @@ from django.urls import path
 from core import (
     views_elections,
     views_groups,
+    views_legal,
     views_mail_images,
     views_membership,
     views_organizations,
@@ -53,6 +54,8 @@ urlpatterns = [
     path("organization/<int:organization_id>/edit/", views_organizations.organization_edit, name="organization-edit"),
 
     path("search/", views_search.global_search, name="global-search"),
+
+    path("privacy-policy/", views_legal.privacy_policy, name="privacy-policy"),
 
     path("elections/", views_elections.elections_list, name="elections"),
     path("elections/algorithm/", views_elections.election_algorithm, name="election-algorithm"),
