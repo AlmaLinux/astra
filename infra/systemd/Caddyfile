@@ -1,11 +1,4 @@
-:80 {
-    redir https://{host}{uri} permanent
-}
 
-:443 {
-    # Reference config only.
-    # Provisioning uses `Caddyfile.j2` so Caddy can bind to the instance public DNS name.
-    tls internal
-
+astra.almalinux.org {
     reverse_proxy 127.0.0.1:8001 127.0.0.1:8002
 }

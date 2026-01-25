@@ -5,12 +5,16 @@ Requires=astra-app@1.service astra-app@2.service
 Wants=network-online.target
 
 [Service]
+StandardOutput=null
+StandardError=null
 EnvironmentFile=/etc/astra/caddy.env
 ExecStartPre=-/usr/bin/podman rm -f astra-caddy
-ExecStart=/usr/bin/podman run --rm --name astra-caddy --network host -v /etc/astra/Caddyfile:/etc/caddy/Caddyfile:ro,Z -v /var/lib/caddy:/data:Z ${CADDY_IMAGE}
+ExecStart=/usr/bin/podman run --rm --name astra-caddy --network host -v /etc/astra/Caddyfile:/etc/caddy/Caddyfile:ro -v /var/lib/caddy:/data --log-driver=journald ${CADDY_IMAGE}
 ExecStop=/usr/bin/podman stop -t 10 astra-caddy
 Restart=always
 RestartSec=5
+User=root
+Group=root
 
 [Install]
 WantedBy=multi-user.target
