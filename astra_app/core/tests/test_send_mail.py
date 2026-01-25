@@ -774,6 +774,35 @@ class SendMailTests(TestCase):
         args, _kwargs = email_cls.call_args
         self.assertEqual(args[0], "Hello Atomic")
 
+    @override_settings(PUBLIC_BASE_URL="https://astra.almalinux.org")
+    def test_send_emails_renders_system_context_vars(self) -> None:
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.views_send_mail.EmailMultiAlternatives", autospec=True) as email_cls,
+        ):
+            email_cls.return_value.send.return_value = 1
+            resp = self.client.post(
+                reverse("send-mail"),
+                data={
+                    "recipient_mode": "manual",
+                    "manual_to": "jim@example.com",
+                    "subject": "Join {{ register_url }}",
+                    "text_content": "Hi",
+                    "html_content": "<p>Hi</p>",
+                    "action": "send",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        email_cls.assert_called_once()
+        args, _kwargs = email_cls.call_args
+        self.assertEqual(args[0], "Join https://astra.almalinux.org/register/")
+
     def test_send_mail_attaches_related_inline_images(self) -> None:
         self._login_as_freeipa_user("reviewer")
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})

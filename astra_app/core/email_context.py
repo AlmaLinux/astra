@@ -3,6 +3,8 @@ from __future__ import annotations
 import html
 from typing import TYPE_CHECKING
 
+from django.conf import settings
+from django.urls import reverse
 from django.utils.safestring import SafeString, mark_safe
 
 from core.backends import FreeIPAUser
@@ -91,6 +93,27 @@ def organization_sponsor_email_context(*, organization: Organization) -> dict[st
         representative_context = user_email_context(username="")
 
     return organization_email_context_from_organization(organization=organization) | representative_context
+
+
+def _absolute_url(path: str) -> str:
+    base = str(settings.PUBLIC_BASE_URL or "").strip().rstrip("/")
+    normalized = str(path or "").strip()
+    if not base or not normalized:
+        return ""
+    if not normalized.startswith("/"):
+        normalized = f"/{normalized}"
+    return f"{base}{normalized}"
+
+
+def system_email_context() -> dict[str, str]:
+    public_base_url = str(settings.PUBLIC_BASE_URL or "").strip().rstrip("/")
+    register_url = _absolute_url(reverse("register"))
+    login_url = _absolute_url(reverse("login"))
+    return {
+        "public_base_url": public_base_url,
+        "register_url": register_url,
+        "login_url": login_url,
+    }
 
 
 def freeform_message_email_context(*, key: str, value: str) -> dict[str, str | SafeString]:

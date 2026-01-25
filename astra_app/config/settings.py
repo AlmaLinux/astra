@@ -635,6 +635,10 @@ EMAIL_VALIDATION_TOKEN_TTL_SECONDS = _env_int(
 )
 REGISTRATION_EMAIL_TEMPLATE_NAME = "registration-email-validation"
 EMAIL_VALIDATION_EMAIL_TEMPLATE_NAME = "settings-email-validation"
+ACCOUNT_INVITE_EMAIL_TEMPLATE_NAME = _env_str(
+    "ACCOUNT_INVITE_EMAIL_TEMPLATE_NAME",
+    default="account-invite",
+) or "account-invite"
 
 # Map FreeIPA groups to Django permissions
 # Format: {'freeipa_group_name': {'app_label.permission_codename', ...}}

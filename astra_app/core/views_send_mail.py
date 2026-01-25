@@ -23,7 +23,7 @@ from django.views.decorators.http import require_POST
 from post_office.models import EmailTemplate
 
 from core.backends import FreeIPAGroup, FreeIPAUser
-from core.email_context import user_email_context_from_user
+from core.email_context import system_email_context, user_email_context_from_user
 from core.membership_notes import add_note
 from core.models import MembershipRequest
 from core.permissions import ASTRA_ADD_SEND_MAIL, json_permission_required
@@ -524,7 +524,9 @@ def send_mail(request: HttpRequest) -> HttpResponse:
     initial: dict[str, object] = {}
     selected_recipient_mode = ""
     deep_link_autoload_recipients = False
+    system_context = system_email_context()
     extra_context = _extra_context_from_query(request.GET)
+    extra_context = {**extra_context, **system_context}
     action_status = str(request.POST.get("action_status") or request.GET.get("action_status") or "").strip().lower()
     action_notice = ""
     if action_status:
@@ -602,6 +604,7 @@ def send_mail(request: HttpRequest) -> HttpResponse:
             bcc = form.cleaned_data.get("bcc") or []
 
             posted_extra_context = form.cleaned_data.get("extra_context_json") or {}
+            posted_extra_context = {**posted_extra_context, **system_context}
 
             try:
                 if recipient_mode == SendMailForm.RECIPIENT_MODE_GROUP:

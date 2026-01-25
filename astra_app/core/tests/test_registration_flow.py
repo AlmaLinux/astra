@@ -14,6 +14,11 @@ class RegistrationFlowTests(TestCase):
 
         self.assertTrue(EmailTemplate.objects.filter(name="registration-email-validation").exists())
 
+    def test_account_invite_email_template_exists(self):
+        from post_office.models import EmailTemplate
+
+        self.assertTrue(EmailTemplate.objects.filter(name="account-invite").exists())
+
     @override_settings(REGISTRATION_OPEN=True)
     def test_register_get_renders(self):
         client = Client()
