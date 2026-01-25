@@ -8,6 +8,7 @@ from typing import Any, override
 from urllib.parse import urlparse
 
 from django import forms
+from django.conf import settings
 from django.contrib import admin, messages
 from django.contrib.admin import helpers
 from django.contrib.admin.utils import model_ngettext
@@ -622,7 +623,7 @@ class IPAGroupForm(forms.ModelForm):
     )
     fas_irc_channels = forms.CharField(
         required=False,
-        widget=forms.Textarea(attrs={"rows": 3}),
+        widget=forms.Textarea(attrs={"rows": 3, "data-chat-channels-editor": "1"}),
         help_text="One per line (or comma-separated).",
         label="FAS IRC Channels",
     )
@@ -1067,6 +1068,12 @@ class IPAGroupAdmin(FreeIPAModelAdmin):
     ordering = ("cn",)
     search_fields = ("cn", "description")
     change_form_template = "admin/core/ipagroup/change_form.html"
+
+    @override
+    def changeform_view(self, request: HttpRequest, object_id: str | None = None, form_url: str = "", extra_context: dict[str, object] | None = None):
+        extra = extra_context or {}
+        extra["chat_networks"] = settings.CHAT_NETWORKS
+        return super().changeform_view(request, object_id=object_id, form_url=form_url, extra_context=extra)
 
     @override
     def get_urls(self):

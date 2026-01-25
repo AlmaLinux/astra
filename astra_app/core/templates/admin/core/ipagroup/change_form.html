@@ -1,5 +1,13 @@
 {% extends "admin/change_form.html" %}
 
+{% load static %}
+
+{% block extrahead %}
+  {{ block.super }}
+  {{ chat_networks|json_script:"admin-chat-networks" }}
+  <script src="{% static 'core/js/chat_channels_editor.js' %}"></script>
+{% endblock %}
+
 {% block object-tools-items %}
   {% if change and has_change_permission %}
     {% url 'admin:auth_ipagroup_download_emails' original.pk as admin_download_emails_url %}
@@ -12,3 +20,4 @@
   {% endif %}
   {{ block.super }}
 {% endblock %}
+

@@ -11,6 +11,8 @@
     const raw = String(line || '').trim();
     if (!raw) return null;
 
+    try {
+
     const lower = raw.toLowerCase();
     const startsWithScheme =
       lower.startsWith('mattermost:') ||
@@ -92,10 +94,40 @@
     }
 
     // Plain forms.
-    if (raw.startsWith('~')) return { scheme: 'mattermost', value: raw };
-    if (raw.startsWith('#')) return { scheme: 'irc', value: raw };
+      if (raw.startsWith('~')) return { scheme: 'mattermost', value: raw };
+      if (raw.startsWith('#')) return { scheme: 'irc', value: raw };
 
-    return { scheme: 'irc', value: raw };
+      return { scheme: 'irc', value: raw };
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function readChatNetworksDefaults() {
+    const fallback = {
+      mattermostServer: 'chat.almalinux.org',
+      mattermostTeam: 'almalinux',
+      irc: 'irc.libera.chat',
+      matrix: 'matrix.org'
+    };
+
+    const script = document.getElementById('admin-chat-networks');
+    if (!script) return fallback;
+
+    try {
+      const data = JSON.parse(script.textContent || '{}');
+      const mattermost = (data && data.mattermost) || {};
+      const irc = (data && data.irc) || {};
+      const matrix = (data && data.matrix) || {};
+      return {
+        mattermostServer: mattermost.default_server || fallback.mattermostServer,
+        mattermostTeam: mattermost.default_team || fallback.mattermostTeam,
+        irc: irc.default_server || fallback.irc,
+        matrix: matrix.default_server || fallback.matrix
+      };
+    } catch (err) {
+      return fallback;
+    }
   }
 
   function toStoredLine(scheme, value, defaults) {
@@ -185,6 +217,14 @@
     const schemeEl = tr.querySelector('.chat-channels-scheme');
     const valueEl = tr.querySelector('.chat-channels-value');
 
+    function enhanceSelect(el) {
+      const jq = (window.django && window.django.jQuery) ? window.django.jQuery : window.jQuery;
+      if (!jq || !jq.fn || !jq.fn.select2) return;
+      const wrapped = jq(el);
+      if (wrapped.hasClass('select2-hidden-accessible')) return;
+      wrapped.select2({ width: 'element' });
+    }
+
     function setPlaceholder() {
       valueEl.placeholder = (schemeEl.value === 'mattermost') ? '~channel' : '#channel';
     }
@@ -192,6 +232,8 @@
     schemeEl.value = rowData.scheme;
     valueEl.value = rowData.value;
     setPlaceholder();
+
+    enhanceSelect(schemeEl);
 
     schemeEl.addEventListener('change', setPlaceholder);
     return tr;
@@ -253,7 +295,7 @@
       .filter(Boolean);
 
     if (existing.length === 0) {
-      existing.push({ scheme: 'irc', value: '' });
+      existing.push({ scheme: 'mattermost', value: '' });
     }
 
     for (const rowData of existing) {
@@ -261,7 +303,7 @@
     }
 
     addBtn.addEventListener('click', function () {
-      addRow({ scheme: 'irc', value: '' });
+      addRow({ scheme: 'mattermost', value: '' });
       const lastInput = tableBody.querySelector('tr.chat-channels-row:last-child .chat-channels-value');
       if (lastInput) lastInput.focus();
     });
@@ -277,10 +319,55 @@
     root.classList.remove('d-none');
   }
 
+  function initChatChannelsEditorForTextarea(textarea, defaults) {
+    if (!textarea || !textarea.id) return;
+    if (textarea.getAttribute('data-chat-channels-bound') === '1') return;
+
+    const fallbackId = `chat-channels-fallback-${textarea.id}`;
+    const existingFallback = document.getElementById(fallbackId);
+    if (!existingFallback) {
+      const wrapper = document.createElement('div');
+      wrapper.id = fallbackId;
+      textarea.parentNode.insertBefore(wrapper, textarea);
+      wrapper.appendChild(textarea);
+    }
+
+    const root = document.createElement('div');
+    root.className = 'd-none js-chat-channels-editor';
+    root.setAttribute('data-textarea-id', textarea.id);
+    root.setAttribute('data-fallback-id', fallbackId);
+    root.setAttribute('data-mattermost-default-server', defaults.mattermostServer);
+    root.setAttribute('data-mattermost-default-team', defaults.mattermostTeam);
+    root.setAttribute('data-irc-default-server', defaults.irc);
+    root.setAttribute('data-matrix-default-server', defaults.matrix);
+
+    root.innerHTML = `
+      <div class="table-responsive">
+        <table class="table table-sm table-bordered align-middle mb-2">
+          <tbody></tbody>
+        </table>
+      </div>
+      <button type="button" class="btn btn-sm btn-outline-secondary js-chat-channels-add">Add channel</button>
+    `;
+
+    const fallback = document.getElementById(fallbackId);
+    fallback.parentNode.insertBefore(root, fallback.nextSibling);
+    initChatChannelsEditor(root);
+    textarea.setAttribute('data-chat-channels-bound', '1');
+  }
+
   onReady(function () {
     const roots = document.querySelectorAll('.js-chat-channels-editor');
     for (const root of roots) {
       initChatChannelsEditor(root);
+    }
+
+    const defaults = readChatNetworksDefaults();
+    const adminTextareas = document.querySelectorAll(
+      'textarea[data-chat-channels-editor="1"], textarea[name="fas_irc_channels"], textarea#id_fas_irc_channels'
+    );
+    for (const textarea of adminTextareas) {
+      initChatChannelsEditorForTextarea(textarea, defaults);
     }
   });
 })();

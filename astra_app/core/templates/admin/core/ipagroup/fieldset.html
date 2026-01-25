@@ -1,0 +1,75 @@
+<fieldset class="module aligned {{ fieldset.classes }}"{% if fieldset.name %} aria-labelledby="{{ prefix }}-{{ id_prefix}}-{{ id_suffix }}-heading"{% endif %}>
+    {% if fieldset.name %}
+        {% if fieldset.is_collapsible %}<details><summary>{% endif %}
+        <h{{ heading_level|default:2 }} id="{{ prefix }}-{{ id_prefix}}-{{ id_suffix }}-heading" class="fieldset-heading">{{ fieldset.name }}</h{{ heading_level|default:2 }}>
+        {% if fieldset.is_collapsible %}</summary>{% endif %}
+    {% endif %}
+    {% if fieldset.description %}
+        <div class="description">{{ fieldset.description|safe }}</div>
+    {% endif %}
+    {% for line in fieldset %}
+        <div class="form-row{% if line.fields|length == 1 and line.errors %} errors{% endif %}{% if not line.has_visible_field %} hidden{% endif %}{% for field in line %}{% if field.field.name %} field-{{ field.field.name }}{% endif %}{% endfor %}">
+            {% if line.fields|length == 1 %}{{ line.errors }}{% else %}<div class="flex-container form-multiline">{% endif %}
+            {% for field in line %}
+                {% if field.is_fieldset %}<fieldset{% if field.field.help_text %} aria-describedby="{{ field.field.id_for_label }}_helptext"{% endif %}>{{ field.label_tag }}{% endif %}
+                <div>
+                    {% if not line.fields|length == 1 and not field.is_readonly %}{{ field.errors }}{% endif %}
+                        <div class="flex-container{% if not line.fields|length == 1 %} fieldBox{% if field.field.name %} field-{{ field.field.name }}{% endif %}{% if not field.is_readonly and field.errors %} errors{% endif %}{% if field.field.is_hidden %} hidden{% endif %}{% endif %}{% if field.is_checkbox %} checkbox-row{% endif %}">
+                            {% if field.is_checkbox %}
+                                {{ field.field }}{% if not field.is_fieldset %}{{ field.label_tag }}{% endif %}
+                            {% else %}
+                                {% if not field.is_fieldset %}{{ field.label_tag }}{% endif %}
+                                {% if field.is_readonly %}
+                                    <div class="readonly">{{ field.contents }}</div>
+                                {% else %}
+                                    {% if field.field.name == "fas_irc_channels" %}
+                                      <div id="admin-fas-irc-channels-fallback">
+                                        {{ field.field }}
+                                      </div>
+                                    {% else %}
+                                        {{ field.field }}
+                                    {% endif %}
+                                {% endif %}
+                            {% endif %}
+                        </div>
+                    {% if field.field.help_text and field.field.name != "fas_irc_channels" %}
+                        <div class="help{% if field.field.is_hidden %} hidden{% endif %}"{% if field.field.id_for_label %} id="{{ field.field.id_for_label }}_helptext"{% endif %}>
+                            <div>{{ field.field.help_text|safe }}</div>
+                        </div>
+                    {% endif %}
+                    {% if field.field.name == "fas_irc_channels" %}
+                      <div class="help">
+                        Chat channels:
+                        <ul class="mb-0">
+                          <li>Mattermost: <strong>~channel</strong> or <strong>~channel:server.name:team</strong> (default <strong>{{ chat_networks.mattermost.default_server }}</strong>, team <strong>{{ chat_networks.mattermost.default_team }}</strong>)</li>
+                          <li>IRC: <strong>#channel</strong> or <strong>#channel:server.name</strong> (default <strong>{{ chat_networks.irc.default_server }}</strong>)</li>
+                          <li>Matrix: <strong>matrix:/#channel</strong> or <strong>matrix://server.name/#channel</strong> (default <strong>{{ chat_networks.matrix.default_server }}</strong>)</li>
+                        </ul>
+                      </div>
+
+                      <div
+                        id="admin-fas-irc-channels-widget"
+                        class="d-none js-chat-channels-editor"
+                        data-textarea-id="{{ field.field.id_for_label }}"
+                        data-fallback-id="admin-fas-irc-channels-fallback"
+                        data-mattermost-default-server="{{ chat_networks.mattermost.default_server }}"
+                        data-mattermost-default-team="{{ chat_networks.mattermost.default_team }}"
+                        data-irc-default-server="{{ chat_networks.irc.default_server }}"
+                        data-matrix-default-server="{{ chat_networks.matrix.default_server }}"
+                      >
+                        <div class="table-responsive">
+                          <table class="table table-sm table-bordered align-middle mb-2" id="admin-fas-irc-channels-table">
+                            <tbody></tbody>
+                          </table>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary js-chat-channels-add" id="admin-fas-irc-channels-add">Add channel</button>
+                      </div>
+                    {% endif %}
+                </div>
+                {% if field.is_fieldset %}</fieldset>{% endif %}
+            {% endfor %}
+            {% if not line.fields|length == 1 %}</div>{% endif %}
+        </div>
+    {% endfor %}
+    {% if fieldset.name and fieldset.is_collapsible %}</details>{% endif %}
+</fieldset>
