@@ -1,0 +1,142 @@
+from __future__ import annotations
+
+import csv
+import io
+import logging
+from collections.abc import Callable
+
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
+
+from core.backends import FreeIPAUser
+
+logger = logging.getLogger(__name__)
+
+
+def normalize_invitation_email(value: str) -> str:
+    return str(value or "").strip().lower()
+
+
+def parse_invitation_csv(content: str, *, max_rows: int) -> list[dict[str, str]]:
+    raw = str(content or "")
+    if not raw.strip():
+        raise ValueError("CSV is empty.")
+
+    sample = raw[:64 * 1024]
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|")
+    except Exception:
+        dialect = csv.excel
+
+    reader = csv.reader(io.StringIO(raw), dialect)
+    rows = [row for row in reader if any(str(cell or "").strip() for cell in row)]
+    if not rows:
+        raise ValueError("CSV is empty.")
+
+    header = ["".join(ch for ch in str(cell or "").strip().lower() if ch.isalnum()) for cell in rows[0]]
+
+    header_map: dict[int, str] = {}
+    if "email" in header:
+        for idx, name in enumerate(header):
+            if name == "email":
+                header_map[idx] = "email"
+            elif name == "fullname":
+                header_map[idx] = "full_name"
+            elif name in {"note", "notes"}:
+                header_map[idx] = "note"
+    else:
+        header_map = {0: "email", 1: "full_name", 2: "note"}
+
+    data_rows = rows[1:] if "email" in header else rows
+    if max_rows > 0 and len(data_rows) > max_rows:
+        raise ValueError(f"CSV exceeds the maximum of {max_rows} rows.")
+
+    parsed: list[dict[str, str]] = []
+    for row in data_rows:
+        entry: dict[str, str] = {"email": "", "full_name": "", "note": ""}
+        for idx, key in header_map.items():
+            if idx >= len(row):
+                continue
+            entry[key] = str(row[idx] or "").strip()
+        parsed.append(entry)
+
+    return parsed
+
+
+def classify_invitation_rows(
+    rows: list[dict[str, str]],
+    *,
+    existing_invitations: dict[str, object],
+    freeipa_lookup: Callable[[str], list[str]],
+) -> tuple[list[dict[str, object]], dict[str, int]]:
+    preview_rows: list[dict[str, object]] = []
+    counts: dict[str, int] = {"new": 0, "resend": 0, "accepted": 0, "invalid": 0, "duplicate": 0}
+    seen: set[str] = set()
+    freeipa_cache: dict[str, list[str]] = {}
+
+    for row in rows:
+        email_raw = str(row.get("email") or "")
+        full_name = str(row.get("full_name") or "")
+        note = str(row.get("note") or "")
+        normalized = normalize_invitation_email(email_raw)
+
+        status = ""
+        reason = ""
+        matches: list[str] = []
+
+        if not normalized:
+            status = "invalid"
+            reason = "Missing email"
+        elif normalized in seen:
+            status = "duplicate"
+            reason = "Duplicate email in upload"
+        else:
+            seen.add(normalized)
+            try:
+                validate_email(normalized)
+            except ValidationError:
+                status = "invalid"
+                reason = "Invalid email"
+            else:
+                cached = freeipa_cache.get(normalized)
+                if cached is None:
+                    cached = sorted(
+                        {str(u or "").strip().lower() for u in freeipa_lookup(normalized) if str(u or "").strip()}
+                    )
+                    freeipa_cache[normalized] = cached
+                matches = cached
+
+                if matches:
+                    status = "accepted"
+                else:
+                    existing = existing_invitations.get(normalized)
+                    status = "resend" if existing is not None else "new"
+
+        counts[status] = counts.get(status, 0) + 1
+        preview_rows.append(
+            {
+                "email": normalized or email_raw,
+                "full_name": full_name,
+                "note": note,
+                "status": status,
+                "reason": reason,
+                "freeipa_usernames": matches,
+                "has_multiple_matches": len(matches) > 1,
+            }
+        )
+
+    return preview_rows, counts
+
+
+def find_account_invitation_matches(email: str) -> list[str]:
+    normalized = normalize_invitation_email(email)
+    if not normalized:
+        return []
+
+    try:
+        matches = FreeIPAUser.find_usernames_by_email(normalized)
+    except Exception:
+        logger.exception("Account invitation FreeIPA email lookup failed")
+        return []
+
+    return sorted({str(value or "").strip().lower() for value in matches if str(value or "").strip()})

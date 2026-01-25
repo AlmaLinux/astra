@@ -197,8 +197,8 @@
             </li>
 
             {% if membership_can_add or membership_can_view %}
-              <li class="nav-item {% if current_url_name == 'membership-requests' or current_url_name == 'membership-audit-log' or current_url_name == 'membership-audit-log-user' or current_url_name == 'membership-stats' %}menu-open{% endif %}">
-                <a href="#" class="nav-link d-flex align-items-start {% if current_url_name == 'membership-requests' or current_url_name == 'membership-audit-log' or current_url_name == 'membership-audit-log-user' or current_url_name == 'membership-stats' %}active{% endif %}">
+              <li class="nav-item {% if current_url_name == 'membership-requests' or current_url_name == 'account-invitations' or current_url_name == 'account-invitations-upload' or current_url_name == 'account-invitations-send' or current_url_name == 'membership-audit-log' or current_url_name == 'membership-audit-log-user' or current_url_name == 'membership-stats' %}menu-open{% endif %}">
+                <a href="#" class="nav-link d-flex align-items-start {% if current_url_name == 'membership-requests' or current_url_name == 'account-invitations' or current_url_name == 'account-invitations-upload' or current_url_name == 'account-invitations-send' or current_url_name == 'membership-audit-log' or current_url_name == 'membership-audit-log-user' or current_url_name == 'membership-stats' %}active{% endif %}">
                   <i class="nav-icon fas fa-users-gear mt-1"></i>
                   <p class="mb-0 ml-2 flex-grow-1">
                     Membership Management
@@ -206,7 +206,7 @@
                   </p>
                 </a>
 
-                <ul class="nav nav-treeview" {% if current_url_name == 'membership-requests' or current_url_name == 'membership-audit-log' or current_url_name == 'membership-audit-log-user' or current_url_name == 'membership-stats' %}style="display: block;"{% endif %}>
+                <ul class="nav nav-treeview" {% if current_url_name == 'membership-requests' or current_url_name == 'account-invitations' or current_url_name == 'account-invitations-upload' or current_url_name == 'account-invitations-send' or current_url_name == 'membership-audit-log' or current_url_name == 'membership-audit-log-user' or current_url_name == 'membership-stats' %}style="display: block;"{% endif %}>
                   {% if membership_can_add %}
                     <li class="nav-item">
                       <a href="{% url 'membership-requests' %}" class="nav-link d-flex align-items-start {% if current_url_name == 'membership-requests' %}active{% endif %}">
@@ -221,6 +221,13 @@
                             <span class="badge badge-success ml-2 align-self-start">0</span>
                           {% endif %}
                         </p>
+                      </a>
+                    </li>
+
+                    <li class="nav-item">
+                      <a href="{% url 'account-invitations' %}" class="nav-link d-flex align-items-start {% if current_url_name == 'account-invitations' or current_url_name == 'account-invitations-upload' or current_url_name == 'account-invitations-send' %}active{% endif %}">
+                        <i class="nav-icon fas fa-user-plus mt-1"></i>
+                        <p class="mb-0 ml-2">Invitations</p>
                       </a>
                     </li>
                   {% endif %}

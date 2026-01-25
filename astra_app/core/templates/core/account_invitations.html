@@ -1,0 +1,122 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Account Invitations{% endblock %}
+
+{% block header %}
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <h1 class="m-0">Account Invitations</h1>
+    <div class="d-flex gap-2">
+      <a href="{% url 'account-invitations-upload' %}" class="btn btn-primary">Upload CSV</a>
+    </div>
+  </div>
+{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <strong>Accepted Invitations</strong>
+      <div class="ml-auto d-flex align-items-center">
+        <span class="text-muted">{{ accepted_invitations|length }}</span>
+      </div>
+    </div>
+    <div class="card-body p-0">
+      <table class="table table-striped mb-0">
+        <thead>
+          <tr>
+            <th>Email</th>
+            <th>Full name</th>
+            <th>Note</th>
+            <th>Status</th>
+            <th>Accepted at</th>
+            <th class="text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for invitation in accepted_invitations %}
+            <tr>
+              <td>{{ invitation.email }}</td>
+              <td>{{ invitation.full_name }}</td>
+              <td>{{ invitation.note }}</td>
+              <td>
+                {% if invitation.freeipa_matched_usernames|length > 1 %}
+                  Accepted (multiple matches)
+                  <div class="text-muted small">{{ invitation.freeipa_matched_usernames|join:", " }}</div>
+                {% else %}
+                  Accepted
+                {% endif %}
+              </td>
+              <td>{{ invitation.accepted_at }}</td>
+              <td class="text-right">
+                <form method="post" action="{% url 'account-invitation-dismiss' invitation.pk %}" class="d-inline">
+                  {% csrf_token %}
+                  <button type="submit" class="btn btn-sm btn-outline-secondary">Dismiss</button>
+                </form>
+              </td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="6" class="text-muted text-center py-3">No accepted invitations.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card mb-4 collapsed-card">
+    <div class="card-header">
+      <div class="d-flex align-items-center w-100">
+        <strong>Pending Invitations</strong>
+        <div class="ml-auto d-flex align-items-center">
+          <span class="text-muted mr-2">{{ pending_invitations|length }}</span>
+          <button type="button" class="btn btn-tool" data-card-widget="collapse" aria-label="Toggle pending invitations">
+            <i class="fas fa-plus"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+    <div class="card-body p-0" style="display: none;">
+      <table class="table table-striped mb-0">
+        <thead>
+          <tr>
+            <th>Email</th>
+            <th>Full name</th>
+            <th>Note</th>
+            <th>Invited by</th>
+            <th>Invited at</th>
+            <th>Last sent</th>
+            <th>Send count</th>
+            <th class="text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for invitation in pending_invitations %}
+            <tr>
+              <td>{{ invitation.email }}</td>
+              <td>{{ invitation.full_name }}</td>
+              <td>{{ invitation.note }}</td>
+              <td>{{ invitation.invited_by_username }}</td>
+              <td>{{ invitation.invited_at }}</td>
+              <td>{{ invitation.last_sent_at|default:"-" }}</td>
+              <td>{{ invitation.send_count }}</td>
+              <td class="text-right">
+                <form method="post" action="{% url 'account-invitation-resend' invitation.pk %}" class="d-inline">
+                  {% csrf_token %}
+                  <button type="submit" class="btn btn-sm btn-outline-primary">Resend</button>
+                </form>
+                <form method="post" action="{% url 'account-invitation-dismiss' invitation.pk %}" class="d-inline">
+                  {% csrf_token %}
+                  <button type="submit" class="btn btn-sm btn-outline-secondary">Dismiss</button>
+                </form>
+              </td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="8" class="text-muted text-center py-3">No pending invitations.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}

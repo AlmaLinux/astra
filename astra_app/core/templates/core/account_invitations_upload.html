@@ -1,0 +1,39 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Upload Account Invitations{% endblock %}
+
+{% block header %}
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <h1 class="m-0">Upload Account Invitations</h1>
+    <a href="{% url 'account-invitations' %}" class="btn btn-outline-secondary">Back to invitations</a>
+  </div>
+{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <div class="card-body">
+      <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+
+        <div class="form-group">
+          <label for="id_csv_file">CSV file</label>
+          {{ form.csv_file }}
+          {% if form.csv_file.errors %}
+            <div class="text-danger small mt-1">{{ form.csv_file.errors }}</div>
+          {% endif %}
+          <div class="text-muted small mt-1">Columns: email, full_name, note.</div>
+        </div>
+
+        <div class="form-group">
+          <label for="id_email_template">Email template</label>
+          {{ form.email_template }}
+          {% if form.email_template.errors %}
+            <div class="text-danger small mt-1">{{ form.email_template.errors }}</div>
+          {% endif %}
+        </div>
+
+        <button type="submit" class="btn btn-primary">Preview invitations</button>
+      </form>
+    </div>
+  </div>
+{% endblock %}

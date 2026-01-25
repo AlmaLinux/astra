@@ -1,0 +1,293 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from django.conf import settings
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import TestCase, override_settings
+from django.urls import reverse
+from post_office.models import EmailTemplate
+
+from core.account_invitations import find_account_invitation_matches
+from core.backends import FreeIPAUser
+from core.models import AccountInvitation, AccountInvitationSend, FreeIPAPermissionGrant
+from core.permissions import ASTRA_ADD_MEMBERSHIP
+
+
+class AccountInvitationFreeIPAServiceTests(TestCase):
+    def test_find_account_invitation_matches_returns_sorted_unique(self) -> None:
+        response = {
+            "count": 2,
+            "result": [
+                {"uid": ["Bob"]},
+                {"uid": "alice"},
+                {"uid": ["bob"]},
+            ],
+        }
+
+        with patch("core.backends._with_freeipa_service_client_retry", return_value=response):
+            usernames = find_account_invitation_matches("team@example.com")
+
+        self.assertEqual(usernames, ["alice", "bob"])
+
+
+class AccountInvitationViewsTests(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_ADD_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.group,
+            principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
+        )
+
+    def _login_as_freeipa_user(self, username: str) -> None:
+        session = self.client.session
+        session["_freeipa_username"] = username
+        session.save()
+
+    def _committee_user(self) -> FreeIPAUser:
+        return FreeIPAUser(
+            "committee",
+            {
+                "uid": ["committee"],
+                "mail": ["committee@example.com"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+            },
+        )
+
+    def test_account_invitations_invalid_email_in_preview(self) -> None:
+        self._login_as_freeipa_user("committee")
+
+        upload = SimpleUploadedFile(
+            "invites.csv",
+            b"email,full_name,note\nnot-an-email,Alice Example,Hello\n",
+            content_type="text/csv",
+        )
+
+        with patch("core.backends.FreeIPAUser.get", return_value=self._committee_user()):
+            resp = self.client.post(
+                reverse("account-invitations-upload"),
+                data={
+                    "csv_file": upload,
+                    "email_template": settings.ACCOUNT_INVITE_EMAIL_TEMPLATE_NAME,
+                },
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Invalid")
+
+    def test_account_invitations_upload_preview_and_send(self) -> None:
+        self._login_as_freeipa_user("committee")
+
+        upload = SimpleUploadedFile(
+            "invites.csv",
+            b"email,full_name,note\nalice@example.com,Alice Example,Hello\n",
+            content_type="text/csv",
+        )
+
+        queued_email = SimpleNamespace(id=123)
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=self._committee_user()),
+            patch("core.views_account_invitations.find_account_invitation_matches", return_value=[]),
+            patch("core.views_account_invitations.queue_templated_email", return_value=queued_email) as queue_mock,
+        ):
+            preview_resp = self.client.post(
+                reverse("account-invitations-upload"),
+                data={
+                    "csv_file": upload,
+                    "email_template": settings.ACCOUNT_INVITE_EMAIL_TEMPLATE_NAME,
+                },
+            )
+
+            self.assertEqual(preview_resp.status_code, 200)
+            self.assertContains(preview_resp, "Invitation Preview")
+
+            send_resp = self.client.post(
+                reverse("account-invitations-send"),
+                data={
+                    "confirm": "1",
+                    "email_template": settings.ACCOUNT_INVITE_EMAIL_TEMPLATE_NAME,
+                },
+            )
+
+        self.assertEqual(send_resp.status_code, 302)
+        invitation = AccountInvitation.objects.get(email="alice@example.com")
+        self.assertEqual(invitation.send_count, 1)
+        self.assertTrue(AccountInvitationSend.objects.filter(invitation=invitation).exists())
+        _, kwargs = queue_mock.call_args
+        self.assertNotIn("note", kwargs["context"])
+
+    @override_settings(ACCOUNT_INVITATION_EMAIL_TEMPLATE_NAMES=["account-invite", "account-invite-alt"])
+    def test_account_invitations_allows_alternate_template_and_stores(self) -> None:
+        self._login_as_freeipa_user("committee")
+
+        EmailTemplate.objects.update_or_create(
+            name="account-invite-alt",
+            defaults={
+                "subject": "Alt invite",
+                "content": "Hello {{ email }}",
+                "html_content": "<p>Hello {{ email }}</p>",
+            },
+        )
+
+        upload = SimpleUploadedFile(
+            "invites.csv",
+            b"email,full_name,note\nalice@example.com,Alice Example,Hello\n",
+            content_type="text/csv",
+        )
+
+        queued_email = SimpleNamespace(id=789)
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=self._committee_user()),
+            patch("core.views_account_invitations.find_account_invitation_matches", return_value=[]),
+            patch("core.views_account_invitations.queue_templated_email", return_value=queued_email) as queue_mock,
+        ):
+            preview_resp = self.client.post(
+                reverse("account-invitations-upload"),
+                data={
+                    "csv_file": upload,
+                    "email_template": "account-invite-alt",
+                },
+            )
+            self.assertEqual(preview_resp.status_code, 200)
+
+            send_resp = self.client.post(
+                reverse("account-invitations-send"),
+                data={
+                    "confirm": "1",
+                    "email_template": "account-invite-alt",
+                },
+            )
+
+        self.assertEqual(send_resp.status_code, 302)
+        invitation = AccountInvitation.objects.get(email="alice@example.com")
+        self.assertEqual(invitation.email_template_name, "account-invite-alt")
+        self.assertTrue(
+            AccountInvitationSend.objects.filter(invitation=invitation, template_name="account-invite-alt").exists()
+        )
+        _, kwargs = queue_mock.call_args
+        self.assertEqual(kwargs["template_name"], "account-invite-alt")
+
+    @override_settings(ACCOUNT_INVITATION_EMAIL_TEMPLATE_NAMES=["account-invite", "account-invite-alt"])
+    def test_account_invitation_resend_uses_stored_template(self) -> None:
+        self._login_as_freeipa_user("committee")
+
+        EmailTemplate.objects.update_or_create(
+            name="account-invite-alt",
+            defaults={
+                "subject": "Alt invite",
+                "content": "Hello {{ email }}",
+                "html_content": "<p>Hello {{ email }}</p>",
+            },
+        )
+
+        invitation = AccountInvitation.objects.create(
+            email="bob@example.com",
+            full_name="Bob Example",
+            note="",
+            invited_by_username="committee",
+            email_template_name="account-invite-alt",
+        )
+
+        queued_email = SimpleNamespace(id=456)
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=self._committee_user()),
+            patch("core.views_account_invitations.find_account_invitation_matches", return_value=[]),
+            patch("core.views_account_invitations.queue_templated_email", return_value=queued_email) as queue_mock,
+        ):
+            resend_resp = self.client.post(reverse("account-invitation-resend", args=[invitation.pk]))
+
+        self.assertEqual(resend_resp.status_code, 302)
+        _, kwargs = queue_mock.call_args
+        self.assertEqual(kwargs["template_name"], "account-invite-alt")
+
+    def test_account_invitations_send_marks_accepted_without_sending(self) -> None:
+        self._login_as_freeipa_user("committee")
+
+        upload = SimpleUploadedFile(
+            "invites.csv",
+            b"email,full_name,note\naccepted@example.com,Alice Example,Hello\n",
+            content_type="text/csv",
+        )
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=self._committee_user()),
+            patch("core.views_account_invitations.find_account_invitation_matches", return_value=["alice"]),
+        ):
+            preview_resp = self.client.post(
+                reverse("account-invitations-upload"),
+                data={
+                    "csv_file": upload,
+                    "email_template": settings.ACCOUNT_INVITE_EMAIL_TEMPLATE_NAME,
+                },
+            )
+            self.assertEqual(preview_resp.status_code, 200)
+
+            send_resp = self.client.post(
+                reverse("account-invitations-send"),
+                data={
+                    "confirm": "1",
+                    "email_template": settings.ACCOUNT_INVITE_EMAIL_TEMPLATE_NAME,
+                },
+            )
+
+        self.assertEqual(send_resp.status_code, 302)
+        invitation = AccountInvitation.objects.get(email="accepted@example.com")
+        self.assertIsNotNone(invitation.accepted_at)
+        self.assertEqual(invitation.freeipa_matched_usernames, ["alice"])
+        self.assertEqual(invitation.send_count, 0)
+        self.assertFalse(AccountInvitationSend.objects.filter(invitation=invitation).exists())
+
+    def test_account_invitations_get_refreshes_pending_acceptance(self) -> None:
+        self._login_as_freeipa_user("committee")
+
+        invitation = AccountInvitation.objects.create(
+            email="pending@example.com",
+            full_name="Pending User",
+            note="",
+            invited_by_username="committee",
+        )
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=self._committee_user()),
+            patch("core.views_account_invitations.find_account_invitation_matches", return_value=["pendinguser"]),
+        ):
+            resp = self.client.get(reverse("account-invitations"))
+
+        self.assertEqual(resp.status_code, 200)
+        invitation.refresh_from_db()
+        self.assertIsNotNone(invitation.accepted_at)
+        self.assertEqual(invitation.freeipa_matched_usernames, ["pendinguser"])
+
+    def test_account_invitation_resend_and_dismiss(self) -> None:
+        invitation = AccountInvitation.objects.create(
+            email="bob@example.com",
+            full_name="Bob Example",
+            note="",
+            invited_by_username="committee",
+        )
+
+        self._login_as_freeipa_user("committee")
+
+        queued_email = SimpleNamespace(id=456)
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=self._committee_user()),
+            patch("core.views_account_invitations.find_account_invitation_matches", return_value=[]),
+            patch("core.views_account_invitations.queue_templated_email", return_value=queued_email),
+        ):
+            resend_resp = self.client.post(reverse("account-invitation-resend", args=[invitation.pk]))
+            self.assertEqual(resend_resp.status_code, 302)
+
+            dismiss_resp = self.client.post(reverse("account-invitation-dismiss", args=[invitation.pk]))
+            self.assertEqual(dismiss_resp.status_code, 302)
+
+        invitation.refresh_from_db()
+        self.assertIsNotNone(invitation.dismissed_at)
+        self.assertEqual(invitation.send_count, 1)
+        self.assertTrue(AccountInvitationSend.objects.filter(invitation=invitation).exists())

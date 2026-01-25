@@ -782,6 +782,44 @@ class FreeIPAUser:
             return None
 
     @classmethod
+    def find_usernames_by_email(cls, email: str) -> list[str]:
+        normalized = (email or "").strip().lower()
+        if not normalized:
+            return []
+
+        def _do(client: ClientMeta):
+            return client.user_find(o_mail=normalized, o_all=True, o_no_members=False)
+
+        try:
+            res = _with_freeipa_service_client_retry(cls.get_client, _do)
+        except Exception:
+            logger.exception("Failed to find users by email")
+            return []
+
+        if not isinstance(res, dict) or res.get("count", 0) <= 0:
+            return []
+
+        results = res.get("result")
+        if not isinstance(results, list):
+            return []
+
+        usernames: set[str] = set()
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            uid = item.get("uid")
+            if isinstance(uid, list):
+                values = uid
+            else:
+                values = [uid]
+            for value in values:
+                name = str(value or "").strip().lower()
+                if name:
+                    usernames.add(name)
+
+        return sorted(usernames)
+
+    @classmethod
     def create(cls, username, **kwargs):
         """
         Create a new user in FreeIPA.

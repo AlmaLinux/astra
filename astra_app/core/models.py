@@ -349,6 +349,160 @@ class MembershipRequest(models.Model):
         return f"{self.requested_username} → {self.membership_type_id}"
 
 
+class MembershipInvitation(models.Model):
+    email = models.EmailField(unique=True)
+    full_name = models.CharField(max_length=255, blank=True, default="")
+    note = models.TextField(blank=True, default="")
+    invited_by_username = models.CharField(max_length=255)
+    invited_at = models.DateTimeField(auto_now_add=True)
+    email_template_name = models.CharField(max_length=255, blank=True, default="")
+    last_sent_at = models.DateTimeField(blank=True, null=True)
+    send_count = models.PositiveIntegerField(default=0)
+    dismissed_at = models.DateTimeField(blank=True, null=True)
+    dismissed_by_username = models.CharField(max_length=255, blank=True, default="")
+    accepted_at = models.DateTimeField(blank=True, null=True)
+    freeipa_matched_usernames = models.JSONField(blank=True, default=list)
+    freeipa_last_checked_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        ordering = ("-invited_at", "email")
+        indexes = [
+            models.Index(fields=["accepted_at"], name="inv_accept_at"),
+            models.Index(fields=["dismissed_at"], name="inv_dismiss_at"),
+        ]
+
+    @override
+    def save(self, *args, **kwargs) -> None:
+        self.email = str(self.email or "").strip().lower()
+        self.full_name = str(self.full_name or "").strip()
+        self.note = str(self.note or "").strip()
+        self.invited_by_username = str(self.invited_by_username or "").strip()
+        self.email_template_name = str(self.email_template_name or "").strip()
+        self.dismissed_by_username = str(self.dismissed_by_username or "").strip()
+        if not isinstance(self.freeipa_matched_usernames, list):
+            self.freeipa_matched_usernames = []
+        else:
+            self.freeipa_matched_usernames = [
+                str(item or "").strip().lower()
+                for item in self.freeipa_matched_usernames
+                if str(item or "").strip()
+            ]
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"invite:{self.email}"
+
+
+class MembershipInvitationSend(models.Model):
+    class Result(models.TextChoices):
+        queued = "queued", "Queued"
+        failed = "failed", "Failed"
+
+    invitation = models.ForeignKey(
+        MembershipInvitation,
+        on_delete=models.CASCADE,
+        related_name="sends",
+    )
+    sent_by_username = models.CharField(max_length=255)
+    sent_at = models.DateTimeField(default=timezone.now)
+    template_name = models.CharField(max_length=255)
+    post_office_email_id = models.BigIntegerField(blank=True, null=True)
+    result = models.CharField(max_length=16, choices=Result.choices)
+    error_category = models.CharField(max_length=64, blank=True, default="")
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["sent_at"], name="inv_send_at"),
+        ]
+
+    @override
+    def save(self, *args, **kwargs) -> None:
+        self.sent_by_username = str(self.sent_by_username or "").strip()
+        self.template_name = str(self.template_name or "").strip()
+        self.error_category = str(self.error_category or "").strip()
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"invite-send:{self.invitation_id}:{self.sent_at.isoformat()}"
+
+
+class AccountInvitation(models.Model):
+    email = models.EmailField(unique=True)
+    full_name = models.CharField(max_length=255, blank=True, default="")
+    note = models.TextField(blank=True, default="")
+    invited_by_username = models.CharField(max_length=255)
+    invited_at = models.DateTimeField(auto_now_add=True)
+    email_template_name = models.CharField(max_length=255, blank=True, default="")
+    last_sent_at = models.DateTimeField(blank=True, null=True)
+    send_count = models.PositiveIntegerField(default=0)
+    dismissed_at = models.DateTimeField(blank=True, null=True)
+    dismissed_by_username = models.CharField(max_length=255, blank=True, default="")
+    accepted_at = models.DateTimeField(blank=True, null=True)
+    freeipa_matched_usernames = models.JSONField(blank=True, default=list)
+    freeipa_last_checked_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        ordering = ("-invited_at", "email")
+        indexes = [
+            models.Index(fields=["accepted_at"], name="acct_inv_accept_at"),
+            models.Index(fields=["dismissed_at"], name="acct_inv_dismiss_at"),
+        ]
+
+    @override
+    def save(self, *args, **kwargs) -> None:
+        self.email = str(self.email or "").strip().lower()
+        self.full_name = str(self.full_name or "").strip()
+        self.note = str(self.note or "").strip()
+        self.invited_by_username = str(self.invited_by_username or "").strip()
+        self.email_template_name = str(self.email_template_name or "").strip()
+        self.dismissed_by_username = str(self.dismissed_by_username or "").strip()
+        if not isinstance(self.freeipa_matched_usernames, list):
+            self.freeipa_matched_usernames = []
+        else:
+            self.freeipa_matched_usernames = [
+                str(item or "").strip().lower()
+                for item in self.freeipa_matched_usernames
+                if str(item or "").strip()
+            ]
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"account-invite:{self.email}"
+
+
+class AccountInvitationSend(models.Model):
+    class Result(models.TextChoices):
+        queued = "queued", "Queued"
+        failed = "failed", "Failed"
+
+    invitation = models.ForeignKey(
+        AccountInvitation,
+        on_delete=models.CASCADE,
+        related_name="sends",
+    )
+    sent_by_username = models.CharField(max_length=255)
+    sent_at = models.DateTimeField(default=timezone.now)
+    template_name = models.CharField(max_length=255)
+    post_office_email_id = models.BigIntegerField(blank=True, null=True)
+    result = models.CharField(max_length=16, choices=Result.choices)
+    error_category = models.CharField(max_length=64, blank=True, default="")
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["sent_at"], name="acct_inv_send_at"),
+        ]
+
+    @override
+    def save(self, *args, **kwargs) -> None:
+        self.sent_by_username = str(self.sent_by_username or "").strip()
+        self.template_name = str(self.template_name or "").strip()
+        self.error_category = str(self.error_category or "").strip()
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"account-invite-send:{self.invitation_id}:{self.sent_at.isoformat()}"
+
+
 class Note(models.Model):
     """Membership committee notes and actions tied to a specific membership request."""
 

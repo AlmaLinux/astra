@@ -1,6 +1,7 @@
 from django.urls import path
 
 from core import (
+    views_account_invitations,
     views_elections,
     views_groups,
     views_legal,
@@ -216,6 +217,31 @@ urlpatterns = [
         "membership/requests/<int:pk>/ignore/",
         views_membership.membership_request_ignore,
         name="membership-request-ignore",
+    ),
+    path(
+        "membership/account-invitations/",
+        views_account_invitations.account_invitations,
+        name="account-invitations",
+    ),
+    path(
+        "membership/account-invitations/upload/",
+        views_account_invitations.account_invitations_upload,
+        name="account-invitations-upload",
+    ),
+    path(
+        "membership/account-invitations/send/",
+        views_account_invitations.account_invitations_send,
+        name="account-invitations-send",
+    ),
+    path(
+        "membership/account-invitations/<int:invitation_id>/resend/",
+        views_account_invitations.account_invitation_resend,
+        name="account-invitation-resend",
+    ),
+    path(
+        "membership/account-invitations/<int:invitation_id>/dismiss/",
+        views_account_invitations.account_invitation_dismiss,
+        name="account-invitation-dismiss",
     ),
 
     path("membership/log/", views_membership.membership_audit_log, name="membership-audit-log"),
