@@ -648,7 +648,7 @@ CACHES = {
     'default': {
         'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
         'LOCATION': 'astra_cache',
-        'TIMEOUT': 300,
+        'TIMEOUT': 300 if DEBUG else 3600,
     }
 }
 
