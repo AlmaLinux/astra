@@ -1616,8 +1616,29 @@ def membership_stats_data(_request: HttpRequest) -> HttpResponse:
             .annotate(count=Count("target_username", distinct=True))
             .order_by("period")
         )
-        exp_labels = [timezone.localtime(r["period"]).strftime("%Y-%m") for r in exp_rows if r["period"]]
-        exp_counts = [int(r["count"]) for r in exp_rows]
+
+        def _next_month(period: datetime.datetime) -> datetime.datetime:
+            year = period.year
+            month = period.month
+            if month == 12:
+                year += 1
+                month = 1
+            else:
+                month += 1
+            return period.replace(year=year, month=month, day=1)
+
+        exp_index = {r["period"]: int(r["count"]) for r in exp_rows if r["period"]}
+        exp_periods = sorted(exp_index)
+        exp_labels: list[str] = []
+        exp_counts: list[int] = []
+        if exp_periods:
+            current_local = timezone.localtime(now)
+            current = current_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            end = exp_periods[-1]
+            while current <= end:
+                exp_labels.append(timezone.localtime(current).strftime("%Y-%m"))
+                exp_counts.append(exp_index.get(current, 0))
+                current = _next_month(current)
 
         charts: dict[str, object] = {
             "membership_types": {
@@ -1672,5 +1693,5 @@ def membership_stats_data(_request: HttpRequest) -> HttpResponse:
             "charts": charts,
         }
 
-    payload = cache.get_or_set("membership_stats:data:v3", compute_payload, timeout=300)
+    payload = cache.get_or_set("membership_stats:data:v4", compute_payload, timeout=300)
     return JsonResponse(payload)
