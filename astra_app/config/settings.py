@@ -646,8 +646,8 @@ FREEIPA_GROUP_PERMISSIONS = {
 # Caching
 CACHES = {
     'default': {
-        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-        'LOCATION': 'unique-snowflake',
+        'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
+        'LOCATION': 'astra_cache',
         'TIMEOUT': 300,
     }
 }

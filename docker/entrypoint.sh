@@ -15,10 +15,10 @@ fi
 if [[ "${DJANGO_AUTO_MIGRATE:-0}" == "1" ]]; then
   echo "[entrypoint] Running migrations (with retry)..."
   for i in $(seq 1 "${DJANGO_MIGRATE_RETRIES:-30}"); do
-    if python manage.py migrate --noinput; then
+    if python manage.py createcachetable && python manage.py migrate --noinput; then
       break
     fi
-    echo "[entrypoint] migrate failed; retry ${i}/${DJANGO_MIGRATE_RETRIES:-30} in 2s"
+    echo "[entrypoint] createcachetable/migrate failed; retry ${i}/${DJANGO_MIGRATE_RETRIES:-30} in 2s"
     sleep 2
   done
 fi
