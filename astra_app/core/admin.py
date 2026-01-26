@@ -16,6 +16,7 @@ from django.contrib.auth.models import Group as DjangoGroup
 from django.contrib.auth.models import User as DjangoUser
 from django.contrib.contenttypes.models import ContentType
 from django.core.cache import cache
+from urllib.parse import urlparse
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.http import Http404, HttpRequest, HttpResponse, HttpResponseRedirect, JsonResponse
@@ -1751,6 +1752,16 @@ class MembershipCSVImportLinkAdmin(ImportMixin, admin.ModelAdmin):
             unmatched_url = getattr(result, "unmatched_download_url", "") if result is not None else ""
             if unmatched_url:
                 response.context_data["unmatched_download_url"] = unmatched_url
+                parsed = urlparse(unmatched_url)
+                token = parsed.path.rstrip("/").split("/")[-1] if parsed.path else ""
+                if token:
+                    cache_key = f"membership-import-unmatched:{token}"
+                    content = cache.get(cache_key)
+                    if content is None and result is not None:
+                        # Optional attribute supplied by the import resource.
+                        content = getattr(result, "unmatched_csv_content", None)
+                    if content is not None:
+                        request.session[cache_key] = content
 
             confirm_form = response.context_data.get("confirm_form") if response.context_data else None
             if result is not None and response.context_data is not None:
@@ -1853,6 +1864,11 @@ class MembershipCSVImportLinkAdmin(ImportMixin, admin.ModelAdmin):
 
         cache_key = f"membership-import-unmatched:{token}"
         content = cache.get(cache_key)
+        if content is None:
+            content = request.session.get(cache_key)
+            if content is not None:
+                request.session.pop(cache_key, None)
+
         if content is None:
             raise Http404("Export expired")
 

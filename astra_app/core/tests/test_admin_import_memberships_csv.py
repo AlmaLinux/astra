@@ -6,6 +6,7 @@ import io
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
+from urllib.parse import urlparse
 
 from django import forms
 from django.contrib.admin.sites import AdminSite
@@ -344,6 +345,88 @@ class AdminImportMembershipsCSVTests(TestCase):
         self.assertIsNotNone(skipped_page_obj)
         self.assertGreaterEqual(matches_page_obj.paginator.per_page, 50)
         self.assertGreaterEqual(skipped_page_obj.paginator.per_page, 50)
+
+    def test_unmatched_download_falls_back_to_session_cache(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "enabled": True,
+                "sort_order": 0,
+            },
+        )
+
+        self._login_as_freeipa_admin("alex")
+
+        csv_content = (
+            b"Name,Email,Active Member,Membership Start Date,Membership Type\n"
+            b"Alice,alice@example.org,Active Member,2024-01-02,individual\n"
+            b"Bob,bob@example.org,Active Member,2024-01-02,individual\n"
+        )
+        uploaded = SimpleUploadedFile("members.csv", csv_content, content_type="text/csv")
+
+        admin_user = FreeIPAUser(
+            "alex",
+            {
+                "uid": ["alex"],
+                "mail": ["alex@example.org"],
+                "memberof_group": ["admins"],
+            },
+        )
+        alice_user = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.org"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "alex":
+                return admin_user
+            if username == "alice":
+                return alice_user
+            return None
+
+        with (
+            patch("core.membership_csv_import.FreeIPAUser.all", return_value=[admin_user, alice_user]),
+            patch("core.membership_csv_import.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+        ):
+            url = reverse("admin:core_membershipcsvimportlink_import")
+            resp = self.client.post(
+                url,
+                data={
+                    "resource": "0",
+                    "format": "0",
+                    "membership_type": "individual",
+                    "import_file": uploaded,
+                },
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        download_url = resp.context.get("unmatched_download_url")
+        self.assertTrue(download_url)
+
+        parsed = urlparse(download_url)
+        token = parsed.path.rstrip("/").split("/")[-1]
+        cache_key = f"membership-import-unmatched:{token}"
+        session = self.client.session
+        self.assertIn(cache_key, session)
+
+        with (
+            patch("core.admin.cache.get", return_value=None),
+            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+        ):
+            download_resp = self.client.get(download_url)
+
+        self.assertEqual(download_resp.status_code, 200)
+        self.assertIn("bob@example.org", download_resp.content.decode("utf-8"))
 
     def test_import_can_select_subset_of_matches(self) -> None:
         MembershipType.objects.update_or_create(

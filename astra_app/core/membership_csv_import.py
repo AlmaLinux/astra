@@ -1126,10 +1126,12 @@ class MembershipCSVImportResource(resources.ModelResource):
 
         token = secrets.token_urlsafe(16)
         cache_key = f"membership-import-unmatched:{token}"
-        cache.set(cache_key, out.export("csv"), timeout=60 * 60)
+        csv_content = out.export("csv")
+        cache.set(cache_key, csv_content, timeout=60 * 60)
 
         download_url = reverse(
             "admin:core_membershipcsvimportlink_download_unmatched",
             kwargs={"token": token},
         )
+        setattr(result, "unmatched_csv_content", csv_content)
         setattr(result, "unmatched_download_url", download_url)
