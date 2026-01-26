@@ -67,6 +67,8 @@
                 <span class="badge badge-danger navbar-badge">{{ membership_requests_pending_count }}</span>
               {% elif membership_requests_on_hold_count > 0 %}
                 <span class="badge badge-warning navbar-badge">{{ membership_requests_on_hold_count }}</span>
+              {% elif account_invitations_accepted_count > 0 %}
+                <span class="badge badge-success navbar-badge">{{ account_invitations_accepted_count }}</span>
               {% endif %}
             </a>
             <div class="dropdown-menu dropdown-menu-lg dropdown-menu-right">
@@ -86,7 +88,14 @@
                 </a>
               {% endif %}
 
-              {% if membership_requests_pending_count == 0 and membership_requests_on_hold_count == 0 %}
+              {% if account_invitations_accepted_count > 0 %}
+                <a href="{% url 'account-invitations' %}" class="dropdown-item">
+                  <i class="fas fa-user-check mr-2 text-success"></i> Accepted invitations
+                  <span class="float-right text-muted text-sm">{{ account_invitations_accepted_count }}</span>
+                </a>
+              {% endif %}
+
+              {% if membership_requests_pending_count == 0 and membership_requests_on_hold_count == 0 and account_invitations_accepted_count == 0 %}
                 <span class="dropdown-item text-muted">
                   <i class="far fa-bell mr-2"></i> No new notifications
                 </span>
@@ -227,7 +236,12 @@
                     <li class="nav-item">
                       <a href="{% url 'account-invitations' %}" class="nav-link d-flex align-items-start {% if current_url_name == 'account-invitations' or current_url_name == 'account-invitations-upload' or current_url_name == 'account-invitations-send' %}active{% endif %}">
                         <i class="nav-icon fas fa-user-plus mt-1"></i>
-                        <p class="mb-0 ml-2">Invitations</p>
+                        <p class="mb-0 ml-2 d-flex align-items-start justify-content-between flex-grow-1">
+                          <span class="mr-2">Invitations</span>
+                          {% if account_invitations_accepted_count %}
+                            <span class="badge badge-success ml-2 align-self-start">{{ account_invitations_accepted_count }}</span>
+                          {% endif %}
+                        </p>
                       </a>
                     </li>
                   {% endif %}

@@ -234,6 +234,11 @@ urlpatterns = [
         name="account-invitations-send",
     ),
     path(
+        "membership/account-invitations/bulk/",
+        views_account_invitations.account_invitations_bulk,
+        name="account-invitations-bulk",
+    ),
+    path(
         "membership/account-invitations/<int:invitation_id>/resend/",
         views_account_invitations.account_invitation_resend,
         name="account-invitation-resend",

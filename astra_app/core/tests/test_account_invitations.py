@@ -7,6 +7,7 @@ from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 from post_office.models import EmailTemplate
 
 from core.account_invitations import find_account_invitation_matches
@@ -291,3 +292,66 @@ class AccountInvitationViewsTests(TestCase):
         self.assertIsNotNone(invitation.dismissed_at)
         self.assertEqual(invitation.send_count, 1)
         self.assertTrue(AccountInvitationSend.objects.filter(invitation=invitation).exists())
+
+    def test_account_invitations_bulk_resend(self) -> None:
+        self._login_as_freeipa_user("committee")
+
+        first = AccountInvitation.objects.create(
+            email="first@example.com",
+            full_name="First Example",
+            note="",
+            invited_by_username="committee",
+        )
+        second = AccountInvitation.objects.create(
+            email="second@example.com",
+            full_name="Second Example",
+            note="",
+            invited_by_username="committee",
+        )
+
+        queued_email = SimpleNamespace(id=456)
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=self._committee_user()),
+            patch("core.views_account_invitations.find_account_invitation_matches", return_value=[]),
+            patch("core.views_account_invitations.queue_templated_email", return_value=queued_email),
+        ):
+            resp = self.client.post(
+                reverse("account-invitations-bulk"),
+                data={
+                    "bulk_action": "resend",
+                    "selected": [str(first.pk), str(second.pk)],
+                },
+            )
+
+        self.assertEqual(resp.status_code, 302)
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(first.send_count, 1)
+        self.assertEqual(second.send_count, 1)
+        self.assertEqual(AccountInvitationSend.objects.filter(invitation__in=[first, second]).count(), 2)
+
+    def test_account_invitations_bulk_dismiss_accepted(self) -> None:
+        self._login_as_freeipa_user("committee")
+
+        invitation = AccountInvitation.objects.create(
+            email="accepted@example.com",
+            full_name="Accepted User",
+            note="",
+            invited_by_username="committee",
+            accepted_at=timezone.now(),
+        )
+
+        with patch("core.backends.FreeIPAUser.get", return_value=self._committee_user()):
+            resp = self.client.post(
+                reverse("account-invitations-bulk"),
+                data={
+                    "bulk_action": "dismiss",
+                    "bulk_scope": "accepted",
+                    "selected": [str(invitation.pk)],
+                },
+            )
+
+        self.assertEqual(resp.status_code, 302)
+        invitation.refresh_from_db()
+        self.assertIsNotNone(invitation.dismissed_at)

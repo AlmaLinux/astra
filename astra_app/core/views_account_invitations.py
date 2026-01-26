@@ -32,6 +32,24 @@ logger = logging.getLogger(__name__)
 _PREVIEW_SESSION_KEY = "account_invitation_preview_v1"
 
 
+def _invitation_template_names() -> list[str]:
+    return [str(name).strip() for name in settings.ACCOUNT_INVITATION_EMAIL_TEMPLATE_NAMES if str(name).strip()]
+
+
+def _select_invitation_template_name(
+    *,
+    template_names: list[str],
+    selected_name: str | None,
+    allow_default: bool,
+) -> str | None:
+    selected = str(selected_name or "").strip()
+    if selected:
+        return selected if selected in template_names else None
+    if allow_default and template_names:
+        return template_names[0]
+    return None
+
+
 def _refresh_pending_invitations(*, pending: list[AccountInvitation], now: timezone.datetime) -> tuple[int, int]:
     updated = 0
     checked = 0
@@ -49,6 +67,76 @@ def _refresh_pending_invitations(*, pending: list[AccountInvitation], now: timez
             invitation.freeipa_last_checked_at = now
             invitation.save(update_fields=["freeipa_matched_usernames", "freeipa_last_checked_at"])
     return updated, checked
+
+
+def _resend_invitation(
+    *,
+    invitation: AccountInvitation,
+    actor_username: str,
+    template_names: list[str],
+    now: timezone.datetime,
+) -> str:
+    matches = find_account_invitation_matches(invitation.email)
+    if matches:
+        invitation.accepted_at = invitation.accepted_at or now
+        invitation.freeipa_matched_usernames = matches
+        invitation.freeipa_last_checked_at = now
+        invitation.save(update_fields=["accepted_at", "freeipa_matched_usernames", "freeipa_last_checked_at"])
+        return "accepted"
+
+    if not template_names:
+        return "template_missing"
+
+    template_name = _select_invitation_template_name(
+        template_names=template_names,
+        selected_name=invitation.email_template_name,
+        allow_default=True,
+    )
+    if not template_name:
+        return "template_invalid"
+
+    if not EmailTemplate.objects.filter(name=template_name).exists():
+        return "template_missing"
+
+    try:
+        email = queue_templated_email(
+            recipients=[invitation.email],
+            sender=settings.DEFAULT_FROM_EMAIL,
+            template_name=template_name,
+            context={
+                "full_name": invitation.full_name,
+                "email": invitation.email,
+                "invited_by_username": actor_username,
+                **system_email_context(),
+            },
+        )
+    except Exception:
+        logger.exception("Failed to resend account invitation")
+        AccountInvitationSend.objects.create(
+            invitation=invitation,
+            sent_by_username=actor_username,
+            sent_at=now,
+            template_name=template_name,
+            result=AccountInvitationSend.Result.failed,
+            error_category="send_error",
+        )
+        return "failed"
+
+    invitation.last_sent_at = now
+    invitation.send_count += 1
+    invitation.email_template_name = template_name
+    invitation.save(update_fields=["last_sent_at", "send_count", "email_template_name"])
+
+    AccountInvitationSend.objects.create(
+        invitation=invitation,
+        sent_by_username=actor_username,
+        sent_at=now,
+        template_name=template_name,
+        post_office_email_id=email.id if email else None,
+        result=AccountInvitationSend.Result.queued,
+    )
+
+    return "queued"
 
 
 class AccountInvitationUploadForm(forms.Form):
@@ -93,11 +181,7 @@ def account_invitations(request: HttpRequest) -> HttpResponse:
 
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
 def account_invitations_upload(request: HttpRequest) -> HttpResponse:
-    template_names = [
-        str(name).strip()
-        for name in settings.ACCOUNT_INVITATION_EMAIL_TEMPLATE_NAMES
-        if str(name).strip()
-    ]
+    template_names = _invitation_template_names()
     email_templates = list(EmailTemplate.objects.filter(name__in=template_names).order_by("name"))
     template_choices = [(tpl.name, tpl.name) for tpl in email_templates]
 
@@ -105,11 +189,15 @@ def account_invitations_upload(request: HttpRequest) -> HttpResponse:
         form = AccountInvitationUploadForm(request.POST, request.FILES, template_choices=template_choices)
         if form.is_valid():
             uploaded: UploadedFile = form.cleaned_data["csv_file"]
-            selected_template = str(form.cleaned_data["email_template"] or "").strip()
+            selected_template = _select_invitation_template_name(
+                template_names=template_names,
+                selected_name=form.cleaned_data["email_template"],
+                allow_default=False,
+            )
 
             if not template_names:
                 form.add_error("email_template", "No invitation templates are configured.")
-            elif selected_template not in template_names:
+            elif not selected_template:
                 form.add_error("email_template", "Select a valid email template.")
             elif not email_templates:
                 form.add_error("email_template", "No invitation templates are configured.")
@@ -198,16 +286,16 @@ def account_invitations_send(request: HttpRequest) -> HttpResponse:
         messages.error(request, "Invitation preview data is missing. Please upload the CSV again.")
         return redirect("account-invitations")
 
-    template_names = [
-        str(name).strip()
-        for name in settings.ACCOUNT_INVITATION_EMAIL_TEMPLATE_NAMES
-        if str(name).strip()
-    ]
-    template_name = str(request.POST.get("email_template") or payload.get("template_name") or "").strip()
+    template_names = _invitation_template_names()
+    template_name = _select_invitation_template_name(
+        template_names=template_names,
+        selected_name=str(request.POST.get("email_template") or payload.get("template_name") or "").strip(),
+        allow_default=False,
+    )
     if not template_names:
         messages.error(request, "No invitation templates are configured.")
         return redirect("account-invitations")
-    if template_name not in template_names:
+    if not template_name:
         messages.error(request, "Select a valid email template.")
         return redirect("account-invitations")
 
@@ -367,6 +455,102 @@ def account_invitations_send(request: HttpRequest) -> HttpResponse:
 
 
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
+def account_invitations_bulk(request: HttpRequest) -> HttpResponse:
+    if request.method != "POST":
+        raise Http404("Not found")
+
+    action = str(request.POST.get("bulk_action") or "").strip().lower()
+    scope = str(request.POST.get("bulk_scope") or "pending").strip().lower()
+    selected = [str(value).strip() for value in request.POST.getlist("selected") if str(value).strip()]
+
+    if not selected:
+        messages.error(request, "Select at least one invitation.")
+        return redirect("account-invitations")
+
+    if scope not in {"pending", "accepted"}:
+        messages.error(request, "Select a valid bulk scope.")
+        return redirect("account-invitations")
+
+    if action not in {"resend", "dismiss"}:
+        messages.error(request, "Select a valid bulk action.")
+        return redirect("account-invitations")
+
+    if scope == "accepted" and action != "dismiss":
+        messages.error(request, "Accepted invitations can only be dismissed.")
+        return redirect("account-invitations")
+
+    base_qs = AccountInvitation.objects.filter(pk__in=selected, dismissed_at__isnull=True)
+    if scope == "pending":
+        invitations = list(base_qs.filter(accepted_at__isnull=True))
+    else:
+        invitations = list(base_qs.filter(accepted_at__isnull=False))
+
+    if not invitations:
+        messages.error(request, "No invitations matched your selection.")
+        return redirect("account-invitations")
+
+    actor_username = request.user.get_username()
+    now = timezone.now()
+
+    if action == "dismiss":
+        updated = 0
+        for invitation in invitations:
+            invitation.dismissed_at = now
+            invitation.dismissed_by_username = actor_username
+            invitation.save(update_fields=["dismissed_at", "dismissed_by_username"])
+            updated += 1
+
+        messages.success(request, f"Dismissed {updated} invitation(s).")
+        return redirect("account-invitations")
+
+    if not allow_request(
+        scope="account_invitation_bulk_resend",
+        key_parts=[actor_username],
+        limit=settings.ACCOUNT_INVITATION_RESEND_LIMIT,
+        window_seconds=settings.ACCOUNT_INVITATION_RESEND_WINDOW_SECONDS,
+    ):
+        messages.error(request, "Too many resend attempts. Try again shortly.")
+        return redirect("account-invitations")
+
+    template_names = _invitation_template_names()
+    if not template_names:
+        messages.error(request, "No invitation templates are configured.")
+        return redirect("account-invitations")
+
+    queued = 0
+    accepted = 0
+    failed = 0
+    template_error = 0
+
+    for invitation in invitations:
+        result = _resend_invitation(
+            invitation=invitation,
+            actor_username=actor_username,
+            template_names=template_names,
+            now=now,
+        )
+        if result == "queued":
+            queued += 1
+        elif result == "accepted":
+            accepted += 1
+        elif result == "failed":
+            failed += 1
+        else:
+            template_error += 1
+
+    if queued:
+        messages.success(request, f"Resent {queued} invitation(s).")
+    if accepted:
+        messages.info(request, f"Skipped {accepted} already accepted invitation(s).")
+    if failed:
+        messages.error(request, f"Failed to resend {failed} invitation(s).")
+    if template_error:
+        messages.error(request, "One or more invitations could not be resent due to template configuration.")
+
+    return redirect("account-invitations")
+
+
+@permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
 def account_invitation_resend(request: HttpRequest, invitation_id: int) -> HttpResponse:
     if request.method != "POST":
         raise Http404("Not found")
@@ -385,77 +569,27 @@ def account_invitation_resend(request: HttpRequest, invitation_id: int) -> HttpR
         messages.error(request, "That invitation has been dismissed.")
         return redirect("account-invitations")
 
-    matches = find_account_invitation_matches(invitation.email)
-    if matches:
-        now = timezone.now()
-        invitation.accepted_at = invitation.accepted_at or now
-        invitation.freeipa_matched_usernames = matches
-        invitation.freeipa_last_checked_at = now
-        invitation.save(update_fields=["accepted_at", "freeipa_matched_usernames", "freeipa_last_checked_at"])
-        messages.info(request, "That invitation is already accepted.")
-        return redirect("account-invitations")
-
-    template_names = [
-        str(name).strip()
-        for name in settings.ACCOUNT_INVITATION_EMAIL_TEMPLATE_NAMES
-        if str(name).strip()
-    ]
+    template_names = _invitation_template_names()
     if not template_names:
-        messages.error(request, "No invitation templates are configured.")
-        return redirect("account-invitations")
-
-    template_name = str(invitation.email_template_name or "").strip() or template_names[0]
-    if template_name not in template_names:
-        messages.error(request, "Select a valid email template.")
-        return redirect("account-invitations")
-
-    if not EmailTemplate.objects.filter(name=template_name).exists():
         messages.error(request, "No invitation templates are configured.")
         return redirect("account-invitations")
 
     actor_username = request.user.get_username()
     now = timezone.now()
-
-    try:
-        email = queue_templated_email(
-            recipients=[invitation.email],
-            sender=settings.DEFAULT_FROM_EMAIL,
-            template_name=template_name,
-            context={
-                "full_name": invitation.full_name,
-                "email": invitation.email,
-                "invited_by_username": actor_username,
-                **system_email_context(),
-            },
-        )
-    except Exception:
-        logger.exception("Failed to resend account invitation")
-        AccountInvitationSend.objects.create(
-            invitation=invitation,
-            sent_by_username=actor_username,
-            sent_at=now,
-            template_name=template_name,
-            result=AccountInvitationSend.Result.failed,
-            error_category="send_error",
-        )
-        messages.error(request, "Failed to resend the invitation.")
-        return redirect("account-invitations")
-
-    invitation.last_sent_at = now
-    invitation.send_count += 1
-    invitation.email_template_name = template_name
-    invitation.save(update_fields=["last_sent_at", "send_count", "email_template_name"])
-
-    AccountInvitationSend.objects.create(
+    result = _resend_invitation(
         invitation=invitation,
-        sent_by_username=actor_username,
-        sent_at=now,
-        template_name=template_name,
-        post_office_email_id=email.id if email else None,
-        result=AccountInvitationSend.Result.queued,
+        actor_username=actor_username,
+        template_names=template_names,
+        now=now,
     )
-
-    messages.success(request, "Invitation resent.")
+    if result == "accepted":
+        messages.info(request, "That invitation is already accepted.")
+    elif result == "queued":
+        messages.success(request, "Invitation resent.")
+    elif result == "failed":
+        messages.error(request, "Failed to resend the invitation.")
+    else:
+        messages.error(request, "No invitation templates are configured.")
     return redirect("account-invitations")
 
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from django.conf import settings
 
 from core.build_info import get_build_sha
-from core.models import MembershipRequest
+from core.models import AccountInvitation, MembershipRequest
 from core.permissions import (
     ASTRA_ADD_MEMBERSHIP,
     ASTRA_ADD_SEND_MAIL,
@@ -24,6 +24,7 @@ def membership_review(request) -> dict[str, object]:
             "send_mail_can_add": False,
             "membership_requests_pending_count": 0,
             "membership_requests_on_hold_count": 0,
+            "account_invitations_accepted_count": 0,
         }
 
     user = request.user
@@ -44,9 +45,14 @@ def membership_review(request) -> dict[str, object]:
     # Requests UI + approve/reject/ignore is guarded by "add".
     pending_count = 0
     on_hold_count = 0
+    accepted_invitations_count = 0
     if membership_can_add:
         pending_count = MembershipRequest.objects.filter(status=MembershipRequest.Status.pending).count()
         on_hold_count = MembershipRequest.objects.filter(status=MembershipRequest.Status.on_hold).count()
+        accepted_invitations_count = AccountInvitation.objects.filter(
+            dismissed_at__isnull=True,
+            accepted_at__isnull=False,
+        ).count()
 
     return {
         "membership_can_add": membership_can_add,
@@ -56,6 +62,7 @@ def membership_review(request) -> dict[str, object]:
         "send_mail_can_add": send_mail_can_add,
         "membership_requests_pending_count": pending_count,
         "membership_requests_on_hold_count": on_hold_count,
+        "account_invitations_accepted_count": accepted_invitations_count,
     }
 
 

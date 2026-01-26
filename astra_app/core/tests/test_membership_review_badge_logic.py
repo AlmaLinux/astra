@@ -5,10 +5,11 @@ from unittest.mock import patch
 from django.conf import settings
 from django.test import TestCase
 from django.test.client import RequestFactory
+from django.utils import timezone
 
 from core.backends import FreeIPAUser
 from core.context_processors import membership_review
-from core.models import FreeIPAPermissionGrant, MembershipRequest, MembershipType
+from core.models import AccountInvitation, FreeIPAPermissionGrant, MembershipRequest, MembershipType
 from core.permissions import ASTRA_ADD_MEMBERSHIP
 
 
@@ -43,6 +44,13 @@ class MembershipReviewBadgeLogicTests(TestCase):
             membership_type_id="individual",
             status=MembershipRequest.Status.on_hold,
         )
+        AccountInvitation.objects.create(
+            email="accepted@example.com",
+            full_name="Accepted User",
+            note="",
+            invited_by_username="committee",
+            accepted_at=timezone.now(),
+        )
 
         reviewer = FreeIPAUser(
             "reviewer",
@@ -62,3 +70,4 @@ class MembershipReviewBadgeLogicTests(TestCase):
 
         self.assertEqual(ctx["membership_requests_pending_count"], 0)
         self.assertEqual(ctx["membership_requests_on_hold_count"], 2)
+        self.assertEqual(ctx["account_invitations_accepted_count"], 1)
