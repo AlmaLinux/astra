@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from urllib.parse import quote
 from unittest.mock import patch
 
 from django.conf import settings
@@ -72,12 +73,68 @@ class AccountInvitationViewsTests(TestCase):
                 reverse("account-invitations-upload"),
                 data={
                     "csv_file": upload,
-                    "email_template": settings.ACCOUNT_INVITE_EMAIL_TEMPLATE_NAME,
                 },
             )
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Invalid")
+
+    def test_account_invitations_preview_marks_existing_users(self) -> None:
+        self._login_as_freeipa_user("committee")
+
+        upload = SimpleUploadedFile(
+            "invites.csv",
+            b"email,full_name,note\nexisting@example.com,Existing User,Hello\n",
+            content_type="text/csv",
+        )
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=self._committee_user()),
+            patch("core.views_account_invitations.find_account_invitation_matches", return_value=["existinguser"]),
+        ):
+            resp = self.client.post(
+                reverse("account-invitations-upload"),
+                data={
+                    "csv_file": upload,
+                },
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Already exists")
+        self.assertContains(resp, "existinguser")
+
+    def test_account_invitations_preview_uses_existing_accepted_invitation(self) -> None:
+        self._login_as_freeipa_user("committee")
+
+        AccountInvitation.objects.create(
+            email="accepted@example.com",
+            full_name="Accepted User",
+            note="",
+            invited_by_username="committee",
+            accepted_at=timezone.now(),
+            freeipa_matched_usernames=["accepteduser"],
+        )
+
+        upload = SimpleUploadedFile(
+            "invites.csv",
+            b"email,full_name,note\naccepted@example.com,Accepted User,Hello\n",
+            content_type="text/csv",
+        )
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=self._committee_user()),
+            patch("core.views_account_invitations.find_account_invitation_matches", return_value=[]),
+        ):
+            resp = self.client.post(
+                reverse("account-invitations-upload"),
+                data={
+                    "csv_file": upload,
+                },
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Already exists")
+        self.assertContains(resp, "accepteduser")
 
     def test_account_invitations_upload_preview_and_send(self) -> None:
         self._login_as_freeipa_user("committee")
@@ -99,7 +156,6 @@ class AccountInvitationViewsTests(TestCase):
                 reverse("account-invitations-upload"),
                 data={
                     "csv_file": upload,
-                    "email_template": settings.ACCOUNT_INVITE_EMAIL_TEMPLATE_NAME,
                 },
             )
 
@@ -110,7 +166,6 @@ class AccountInvitationViewsTests(TestCase):
                 reverse("account-invitations-send"),
                 data={
                     "confirm": "1",
-                    "email_template": settings.ACCOUNT_INVITE_EMAIL_TEMPLATE_NAME,
                 },
             )
 
@@ -120,6 +175,13 @@ class AccountInvitationViewsTests(TestCase):
         self.assertTrue(AccountInvitationSend.objects.filter(invitation=invitation).exists())
         _, kwargs = queue_mock.call_args
         self.assertNotIn("note", kwargs["context"])
+        self.assertIn("invitation_token", kwargs["context"])
+        self.assertEqual(kwargs["context"]["invitation_token"], str(invitation.invitation_token))
+        self.assertIn("register_url", kwargs["context"])
+        encoded_token = quote(str(invitation.invitation_token))
+        self.assertIn(f"invite={encoded_token}", kwargs["context"]["register_url"])
+        self.assertIn("login_url", kwargs["context"])
+        self.assertIn(f"invite={encoded_token}", kwargs["context"]["login_url"])
 
     @override_settings(ACCOUNT_INVITATION_EMAIL_TEMPLATE_NAMES=["account-invite", "account-invite-alt"])
     def test_account_invitations_allows_alternate_template_and_stores(self) -> None:
@@ -151,7 +213,6 @@ class AccountInvitationViewsTests(TestCase):
                 reverse("account-invitations-upload"),
                 data={
                     "csv_file": upload,
-                    "email_template": "account-invite-alt",
                 },
             )
             self.assertEqual(preview_resp.status_code, 200)
@@ -207,7 +268,7 @@ class AccountInvitationViewsTests(TestCase):
         _, kwargs = queue_mock.call_args
         self.assertEqual(kwargs["template_name"], "account-invite-alt")
 
-    def test_account_invitations_send_marks_accepted_without_sending(self) -> None:
+    def test_account_invitations_send_skips_existing_users(self) -> None:
         self._login_as_freeipa_user("committee")
 
         upload = SimpleUploadedFile(
@@ -224,7 +285,6 @@ class AccountInvitationViewsTests(TestCase):
                 reverse("account-invitations-upload"),
                 data={
                     "csv_file": upload,
-                    "email_template": settings.ACCOUNT_INVITE_EMAIL_TEMPLATE_NAME,
                 },
             )
             self.assertEqual(preview_resp.status_code, 200)
@@ -233,16 +293,11 @@ class AccountInvitationViewsTests(TestCase):
                 reverse("account-invitations-send"),
                 data={
                     "confirm": "1",
-                    "email_template": settings.ACCOUNT_INVITE_EMAIL_TEMPLATE_NAME,
                 },
             )
 
         self.assertEqual(send_resp.status_code, 302)
-        invitation = AccountInvitation.objects.get(email="accepted@example.com")
-        self.assertIsNotNone(invitation.accepted_at)
-        self.assertEqual(invitation.freeipa_matched_usernames, ["alice"])
-        self.assertEqual(invitation.send_count, 0)
-        self.assertFalse(AccountInvitationSend.objects.filter(invitation=invitation).exists())
+        self.assertFalse(AccountInvitation.objects.filter(email="accepted@example.com").exists())
 
     def test_account_invitations_get_refreshes_pending_acceptance(self) -> None:
         self._login_as_freeipa_user("committee")
@@ -264,6 +319,29 @@ class AccountInvitationViewsTests(TestCase):
         invitation.refresh_from_db()
         self.assertIsNotNone(invitation.accepted_at)
         self.assertEqual(invitation.freeipa_matched_usernames, ["pendinguser"])
+
+    def test_account_invitations_clears_stale_accepted(self) -> None:
+        self._login_as_freeipa_user("committee")
+
+        invitation = AccountInvitation.objects.create(
+            email="stale@example.com",
+            full_name="Stale User",
+            note="",
+            invited_by_username="committee",
+            accepted_at=timezone.now(),
+            freeipa_matched_usernames=["staleuser"],
+        )
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=self._committee_user()),
+            patch("core.views_account_invitations.confirm_existing_usernames", return_value=([], True)),
+        ):
+            resp = self.client.get(reverse("account-invitations"))
+
+        self.assertEqual(resp.status_code, 200)
+        invitation.refresh_from_db()
+        self.assertIsNone(invitation.accepted_at)
+        self.assertEqual(invitation.freeipa_matched_usernames, [])
 
     def test_account_invitation_resend_and_dismiss(self) -> None:
         invitation = AccountInvitation.objects.create(

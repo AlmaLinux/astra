@@ -7,6 +7,9 @@ from unittest.mock import patch
 from django.contrib.messages import get_messages
 from django.test import Client, TestCase, override_settings
 
+from core.models import AccountInvitation
+from core.backends import FreeIPAUser
+
 
 class RegistrationFlowTests(TestCase):
     def test_registration_email_template_exists(self):
@@ -88,6 +91,80 @@ class RegistrationFlowTests(TestCase):
         post_office_send_mock.assert_not_called()
 
     @override_settings(REGISTRATION_OPEN=True, DEFAULT_FROM_EMAIL="noreply@example.com")
+    def test_register_post_links_invitation_by_token_on_activate(self):
+        client = Client()
+
+        invitation = AccountInvitation.objects.create(
+            email="invitee@example.com",
+            full_name="Invitee",
+            note="",
+            invited_by_username="committee",
+        )
+        token = str(invitation.invitation_token)
+
+        ipa_client = SimpleNamespace()
+        ipa_client.stageuser_add = lambda *args, **kwargs: {
+            "result": {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["different@example.com"],
+            }
+        }
+
+        with patch("core.views_registration.FreeIPAUser.get_client", autospec=True, return_value=ipa_client):
+            with patch("post_office.mail.send", autospec=True) as post_office_send_mock:
+                resp = client.post(
+                    f"/register/?invite={token}",
+                    data={
+                        "username": "alice",
+                        "first_name": "Alice",
+                        "last_name": "User",
+                        "email": "different@example.com",
+                        "over_16": "on",
+                        "invitation_token": token,
+                    },
+                    follow=False,
+                )
+
+        self.assertEqual(resp.status_code, 302)
+        invitation.refresh_from_db()
+        self.assertIsNone(invitation.accepted_at)
+        activate_url = post_office_send_mock.call_args.kwargs.get("context", {}).get("activate_url", "")
+        token_match = re.search(r"token=([^\s&]+)", activate_url)
+        self.assertIsNotNone(token_match)
+        assert token_match is not None
+        activation_token = token_match.group(1)
+
+        ipa_client2 = SimpleNamespace()
+        ipa_client2.stageuser_show = lambda *args, **kwargs: {
+            "result": {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["different@example.com"],
+            }
+        }
+        ipa_client2.stageuser_activate = lambda *args, **kwargs: {"result": {"uid": ["alice"]}}
+        ipa_client2.user_mod = lambda *args, **kwargs: {"result": {"uid": ["alice"]}}
+
+        with patch("core.views_registration.FreeIPAUser.get_client", autospec=True, return_value=ipa_client2):
+            with patch("core.views_registration.ClientMeta", autospec=True) as client_meta_cls:
+                client_meta = client_meta_cls.return_value
+                client_meta.change_password.return_value = None
+
+                activation_post = client.post(
+                    f"/register/activate/?token={activation_token}",
+                    data={"password": "S3curePassword!", "password_confirm": "S3curePassword!"},
+                    follow=False,
+                )
+
+        self.assertEqual(activation_post.status_code, 302)
+        invitation.refresh_from_db()
+        self.assertIsNotNone(invitation.accepted_at)
+        self.assertIn("alice", invitation.freeipa_matched_usernames)
+
+    @override_settings(REGISTRATION_OPEN=True, DEFAULT_FROM_EMAIL="noreply@example.com")
     def test_activate_flow_happy_path(self):
         client = Client()
 
@@ -153,3 +230,40 @@ class RegistrationFlowTests(TestCase):
         follow = client.get(activation_post["Location"])
         msgs = [m.message for m in get_messages(follow.wsgi_request)]
         self.assertTrue(any("account" in m.lower() and "created" in m.lower() for m in msgs))
+
+    def test_login_with_invite_token_links_invitation(self) -> None:
+        client = Client()
+
+        invitation = AccountInvitation.objects.create(
+            email="invitee@example.com",
+            full_name="Invitee",
+            note="",
+            invited_by_username="committee",
+        )
+        token = str(invitation.invitation_token)
+
+        user = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["alice@example.com"],
+            },
+        )
+
+        with patch("django.contrib.auth.forms.authenticate", return_value=user):
+            resp = client.post(
+                f"/login/?invite={token}",
+                data={
+                    "username": "alice",
+                    "password": "pw",
+                    "invite": token,
+                },
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 302)
+        invitation.refresh_from_db()
+        self.assertIsNotNone(invitation.accepted_at)
+        self.assertIn("alice", invitation.freeipa_matched_usernames)

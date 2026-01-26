@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from core.tokens import make_signed_token
+
 import datetime
 import hashlib
 import json
@@ -430,6 +432,7 @@ class AccountInvitation(models.Model):
     email = models.EmailField(unique=True)
     full_name = models.CharField(max_length=255, blank=True, default="")
     note = models.TextField(blank=True, default="")
+    invitation_token = models.CharField(max_length=512, unique=True, editable=False)
     invited_by_username = models.CharField(max_length=255)
     invited_at = models.DateTimeField(auto_now_add=True)
     email_template_name = models.CharField(max_length=255, blank=True, default="")
@@ -450,6 +453,7 @@ class AccountInvitation(models.Model):
 
     @override
     def save(self, *args, **kwargs) -> None:
+        is_new = self.pk is None
         self.email = str(self.email or "").strip().lower()
         self.full_name = str(self.full_name or "").strip()
         self.note = str(self.note or "").strip()
@@ -465,6 +469,11 @@ class AccountInvitation(models.Model):
                 if str(item or "").strip()
             ]
         super().save(*args, **kwargs)
+
+        if not self.invitation_token:
+            token = make_signed_token({"invitation_id": self.pk})
+            type(self).objects.filter(pk=self.pk).update(invitation_token=token)
+            self.invitation_token = token
 
     def __str__(self) -> str:
         return f"account-invite:{self.email}"

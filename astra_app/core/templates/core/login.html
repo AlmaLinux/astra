@@ -28,6 +28,9 @@
 
       <form method="post" novalidate>
         {% csrf_token %}
+        {% if request.GET.invite %}
+          <input type="hidden" name="invite" value="{{ request.GET.invite }}">
+        {% endif %}
         <div class="card-body">
           {% if form.non_field_errors %}
             <div class="alert alert-danger">{{ form.non_field_errors }}</div>

@@ -34,6 +34,7 @@
       {% else %}
         <form method="post" novalidate>
           {% csrf_token %}
+          {{ form.invitation_token }}
           <div class="card-body">
             {% if form.non_field_errors %}
               <div class="alert alert-danger">{{ form.non_field_errors }}</div>

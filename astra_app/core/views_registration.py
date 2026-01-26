@@ -19,6 +19,7 @@ from core.views_utils import _normalize_str
 
 from .backends import FreeIPAUser
 from .forms_registration import PasswordSetForm, RegistrationForm, ResendRegistrationEmailForm
+from .models import AccountInvitation
 from .tokens import make_signed_token, read_signed_token
 
 logger = logging.getLogger(__name__)
@@ -44,8 +45,20 @@ def _stageuser_activate(client, username: str):
         return client.stageuser_activate(a_uid=username)
 
 
-def _send_registration_email(request: HttpRequest, *, username: str, email: str, first_name: str, last_name: str) -> None:
-    token = make_signed_token({"u": username, "e": email})
+def _send_registration_email(
+    request: HttpRequest,
+    *,
+    username: str,
+    email: str,
+    first_name: str,
+    last_name: str,
+    invitation_token: str | None = None,
+) -> None:
+    payload = {"u": username, "e": email}
+    normalized_invitation_token = _normalize_str(invitation_token)
+    if normalized_invitation_token:
+        payload["i"] = normalized_invitation_token
+    token = make_signed_token(payload)
     activate_url = request.build_absolute_uri(reverse("register-activate")) + f"?token={quote(token)}"
     confirm_url = request.build_absolute_uri(reverse("register-confirm")) + f"?username={quote(username)}"
 
@@ -83,13 +96,36 @@ def register(request: HttpRequest) -> HttpResponse:
         messages.warning(request, "Registration is closed at the moment.")
         return redirect("login")
 
-    form = RegistrationForm(request.POST or None)
+    invite_token = _normalize_str(request.GET.get("invite"))
+    invitation_token = ""
+    if invite_token:
+        try:
+            payload = signing.loads(invite_token, salt=settings.SECRET_KEY)
+        except signing.BadSignature:
+            payload = None
+        if isinstance(payload, dict):
+            invitation_id = payload.get("invitation_id")
+            try:
+                invitation_id = int(invitation_id)
+            except (TypeError, ValueError):
+                invitation_id = None
+            if invitation_id:
+                invitation = AccountInvitation.objects.filter(
+                    pk=invitation_id,
+                    invitation_token=invite_token,
+                    dismissed_at__isnull=True,
+                ).first()
+                if invitation is not None:
+                    invitation_token = invite_token
+
+    form = RegistrationForm(request.POST or None, initial={"invitation_token": invitation_token})
 
     if request.method == "POST" and form.is_valid():
         username = form.cleaned_data["username"]
         first_name = form.cleaned_data["first_name"].strip()
         last_name = form.cleaned_data["last_name"].strip()
         email = form.cleaned_data["email"]
+        invitation_token = _normalize_str(form.cleaned_data.get("invitation_token"))
 
         common_name = f"{first_name} {last_name}".strip() or username
 
@@ -130,7 +166,14 @@ def register(request: HttpRequest) -> HttpResponse:
             return render(request, "core/register.html", {"form": form, "registration_open": settings.REGISTRATION_OPEN})
 
         try:
-            _send_registration_email(request, username=username, email=email, first_name=first_name, last_name=last_name)
+            _send_registration_email(
+                request,
+                username=username,
+                email=email,
+                first_name=first_name,
+                last_name=last_name,
+                invitation_token=invitation_token,
+            )
         except (ConnectionRefusedError, SMTPRecipientsRefused) as e:
             logger.error("Registration email send failed username=%s email=%s error=%s", username, email, e)
             messages.error(request, "We could not send you the address validation email, please retry later")
@@ -221,6 +264,7 @@ def activate(request: HttpRequest) -> HttpResponse:
 
     username = _normalize_str(token.get("u"))
     token_email = _normalize_str(token.get("e")).lower()
+    invitation_token = _normalize_str(token.get("i"))
 
     client = FreeIPAUser.get_client()
     try:
@@ -290,6 +334,34 @@ def activate(request: HttpRequest) -> HttpResponse:
             else:
                 form.add_error(None, "Something went wrong while creating your account, please try again later.")
         else:
+            if invitation_token:
+                try:
+                    payload = signing.loads(invitation_token, salt=settings.SECRET_KEY)
+                except signing.BadSignature:
+                    payload = None
+                if isinstance(payload, dict):
+                    invitation_id = payload.get("invitation_id")
+                    try:
+                        invitation_id = int(invitation_id)
+                    except (TypeError, ValueError):
+                        invitation_id = None
+                    if invitation_id:
+                        invitation = AccountInvitation.objects.filter(
+                            pk=invitation_id,
+                            invitation_token=invitation_token,
+                            dismissed_at__isnull=True,
+                        ).first()
+                        if invitation is not None:
+                            now = timezone.now()
+                            invitation.accepted_at = invitation.accepted_at or now
+                            usernames = set(invitation.freeipa_matched_usernames)
+                            usernames.add(username)
+                            invitation.freeipa_matched_usernames = sorted(usernames)
+                            invitation.freeipa_last_checked_at = now
+                            invitation.save(
+                                update_fields=["accepted_at", "freeipa_matched_usernames", "freeipa_last_checked_at"]
+                            )
+
             messages.success(request, "Congratulations, your account has been created! Go ahead and sign in to proceed.")
             return redirect("login")
 

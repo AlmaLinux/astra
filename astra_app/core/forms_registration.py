@@ -26,6 +26,8 @@ class RegistrationForm(forms.Form):
         error_messages={"required": "You must be over 16 years old to create an account"},
     )
 
+    invitation_token = forms.CharField(required=False, widget=forms.HiddenInput())
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         for field in self.fields.values():

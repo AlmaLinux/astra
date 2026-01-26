@@ -12,9 +12,11 @@ from django.core import signing
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from python_freeipa import ClientMeta, exceptions
 
 from core.backends import FreeIPAUser
+from core.models import AccountInvitation
 from core.tokens import make_signed_token
 from core.views_utils import _normalize_str
 
@@ -73,6 +75,58 @@ class FreeIPALoginView(auth_views.LoginView):
             form.add_error(None, msg)
 
         return super().form_invalid(form)
+
+    def form_valid(self, form) -> HttpResponse:
+        response = super().form_valid(form)
+
+        invite_token = _normalize_str(self.request.POST.get("invite") or self.request.GET.get("invite"))
+        if not invite_token:
+            return response
+
+        try:
+            payload = signing.loads(invite_token, salt=settings.SECRET_KEY)
+        except signing.BadSignature:
+            return response
+
+        if not isinstance(payload, dict):
+            return response
+
+        invitation_id = payload.get("invitation_id")
+        try:
+            invitation_id = int(invitation_id)
+        except (TypeError, ValueError):
+            return response
+
+        invitation = AccountInvitation.objects.filter(
+            pk=invitation_id,
+            invitation_token=invite_token,
+            dismissed_at__isnull=True,
+        ).first()
+        if invitation is None:
+            return response
+
+        user = getattr(self.request, "user", None)
+        get_username = getattr(user, "get_username", None)
+        if not callable(get_username):
+            return response
+
+        try:
+            username = str(get_username()).strip()
+        except Exception:
+            return response
+
+        if not username:
+            return response
+
+        now = timezone.now()
+        invitation.accepted_at = invitation.accepted_at or now
+        usernames = set(invitation.freeipa_matched_usernames)
+        usernames.add(username)
+        invitation.freeipa_matched_usernames = sorted(usernames)
+        invitation.freeipa_last_checked_at = now
+        invitation.save(update_fields=["accepted_at", "freeipa_matched_usernames", "freeipa_last_checked_at"])
+
+        return response
 
 
 def password_reset_request(request: HttpRequest) -> HttpResponse:

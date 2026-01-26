@@ -70,7 +70,7 @@ def classify_invitation_rows(
     freeipa_lookup: Callable[[str], list[str]],
 ) -> tuple[list[dict[str, object]], dict[str, int]]:
     preview_rows: list[dict[str, object]] = []
-    counts: dict[str, int] = {"new": 0, "resend": 0, "accepted": 0, "invalid": 0, "duplicate": 0}
+    counts: dict[str, int] = {"new": 0, "resend": 0, "existing": 0, "invalid": 0, "duplicate": 0}
     seen: set[str] = set()
     freeipa_cache: dict[str, list[str]] = {}
 
@@ -107,10 +107,17 @@ def classify_invitation_rows(
                 matches = cached
 
                 if matches:
-                    status = "accepted"
+                    status = "existing"
+                    reason = "Already has an account"
                 else:
                     existing = existing_invitations.get(normalized)
-                    status = "resend" if existing is not None else "new"
+                    if existing is not None and getattr(existing, "accepted_at", None):
+                        status = "existing"
+                        reason = "Accepted invitation"
+                        existing_usernames = getattr(existing, "freeipa_matched_usernames", [])
+                        matches = [str(u or "").strip().lower() for u in existing_usernames if str(u or "").strip()]
+                    else:
+                        status = "resend" if existing is not None else "new"
 
         counts[status] = counts.get(status, 0) + 1
         preview_rows.append(
@@ -128,6 +135,27 @@ def classify_invitation_rows(
     return preview_rows, counts
 
 
+def confirm_existing_usernames(usernames: list[str]) -> tuple[list[str], bool]:
+    confirmed: list[str] = []
+    seen: set[str] = set()
+
+    for username in usernames:
+        normalized = str(username or "").strip().lower()
+        if not normalized or normalized in seen:
+            continue
+        try:
+            user = FreeIPAUser.get(normalized)
+        except Exception:
+            logger.exception("Account invitation FreeIPA user lookup failed")
+            return [], False
+        if user is None:
+            continue
+        confirmed.append(normalized)
+        seen.add(normalized)
+
+    return sorted(confirmed), True
+
+
 def find_account_invitation_matches(email: str) -> list[str]:
     normalized = normalize_invitation_email(email)
     if not normalized:
@@ -139,4 +167,7 @@ def find_account_invitation_matches(email: str) -> list[str]:
         logger.exception("Account invitation FreeIPA email lookup failed")
         return []
 
-    return sorted({str(value or "").strip().lower() for value in matches if str(value or "").strip()})
+    confirmed, ok = confirm_existing_usernames(matches)
+    if not ok:
+        return []
+    return confirmed

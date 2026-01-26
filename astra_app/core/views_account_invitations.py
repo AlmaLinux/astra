@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from urllib.parse import urlencode
 
 from django import forms
 from django.conf import settings
@@ -11,12 +12,13 @@ from django.core.files.uploadedfile import UploadedFile
 from django.core.validators import validate_email
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.urls import reverse_lazy
+from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from post_office.models import EmailTemplate
 
 from core.account_invitations import (
     classify_invitation_rows,
+    confirm_existing_usernames,
     find_account_invitation_matches,
     normalize_invitation_email,
     parse_invitation_csv,
@@ -50,6 +52,30 @@ def _select_invitation_template_name(
     return None
 
 
+def _invitation_register_url(*, token: str) -> str:
+    base = str(settings.PUBLIC_BASE_URL or "").strip().rstrip("/")
+    path = reverse("register")
+    if not base or not path:
+        return ""
+    url = f"{base}{path}"
+    normalized_token = str(token or "").strip()
+    if normalized_token:
+        url = f"{url}?{urlencode({'invite': normalized_token})}"
+    return url
+
+
+def _invitation_login_url(*, token: str) -> str:
+    base = str(settings.PUBLIC_BASE_URL or "").strip().rstrip("/")
+    path = reverse("login")
+    if not base or not path:
+        return ""
+    url = f"{base}{path}"
+    normalized_token = str(token or "").strip()
+    if normalized_token:
+        url = f"{url}?{urlencode({'invite': normalized_token})}"
+    return url
+
+
 def _refresh_pending_invitations(*, pending: list[AccountInvitation], now: timezone.datetime) -> tuple[int, int]:
     updated = 0
     checked = 0
@@ -67,6 +93,29 @@ def _refresh_pending_invitations(*, pending: list[AccountInvitation], now: timez
             invitation.freeipa_last_checked_at = now
             invitation.save(update_fields=["freeipa_matched_usernames", "freeipa_last_checked_at"])
     return updated, checked
+
+
+def _refresh_accepted_invitations(*, accepted: list[AccountInvitation], now: timezone.datetime) -> int:
+    updated = 0
+    for invitation in accepted:
+        if not invitation.freeipa_matched_usernames:
+            continue
+        confirmed, ok = confirm_existing_usernames(invitation.freeipa_matched_usernames)
+        if not ok:
+            continue
+        if not confirmed:
+            invitation.accepted_at = None
+            invitation.freeipa_matched_usernames = []
+            invitation.freeipa_last_checked_at = now
+            invitation.save(update_fields=["accepted_at", "freeipa_matched_usernames", "freeipa_last_checked_at"])
+            updated += 1
+            continue
+        if confirmed != invitation.freeipa_matched_usernames:
+            invitation.freeipa_matched_usernames = confirmed
+            invitation.freeipa_last_checked_at = now
+            invitation.save(update_fields=["freeipa_matched_usernames", "freeipa_last_checked_at"])
+            updated += 1
+    return updated
 
 
 def _resend_invitation(
@@ -98,6 +147,7 @@ def _resend_invitation(
     if not EmailTemplate.objects.filter(name=template_name).exists():
         return "template_missing"
 
+    invitation_token = str(invitation.invitation_token or "").strip()
     try:
         email = queue_templated_email(
             recipients=[invitation.email],
@@ -107,7 +157,10 @@ def _resend_invitation(
                 "full_name": invitation.full_name,
                 "email": invitation.email,
                 "invited_by_username": actor_username,
+                "invitation_token": invitation_token,
                 **system_email_context(),
+                "register_url": _invitation_register_url(token=invitation_token),
+                "login_url": _invitation_login_url(token=invitation_token),
             },
         )
     except Exception:
@@ -141,12 +194,9 @@ def _resend_invitation(
 
 class AccountInvitationUploadForm(forms.Form):
     csv_file = forms.FileField(required=True)
-    email_template = forms.ChoiceField(required=True)
 
     def __init__(self, *args, **kwargs) -> None:
-        template_choices = kwargs.pop("template_choices", [])
         super().__init__(*args, **kwargs)
-        self.fields["email_template"].choices = template_choices
 
 
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
@@ -168,6 +218,14 @@ def account_invitations(request: HttpRequest) -> HttpResponse:
         .order_by("-accepted_at", "-invited_at")
         .all()
     )
+    accepted_list = list(accepted_invitations)
+    if accepted_list:
+        _refresh_accepted_invitations(accepted=accepted_list, now=timezone.now())
+        accepted_invitations = (
+            AccountInvitation.objects.filter(dismissed_at__isnull=True, accepted_at__isnull=False)
+            .order_by("-accepted_at", "-invited_at")
+            .all()
+        )
 
     return render(
         request,
@@ -183,26 +241,15 @@ def account_invitations(request: HttpRequest) -> HttpResponse:
 def account_invitations_upload(request: HttpRequest) -> HttpResponse:
     template_names = _invitation_template_names()
     email_templates = list(EmailTemplate.objects.filter(name__in=template_names).order_by("name"))
-    template_choices = [(tpl.name, tpl.name) for tpl in email_templates]
 
     if request.method == "POST":
-        form = AccountInvitationUploadForm(request.POST, request.FILES, template_choices=template_choices)
+        form = AccountInvitationUploadForm(request.POST, request.FILES)
         if form.is_valid():
             uploaded: UploadedFile = form.cleaned_data["csv_file"]
-            selected_template = _select_invitation_template_name(
-                template_names=template_names,
-                selected_name=form.cleaned_data["email_template"],
-                allow_default=False,
-            )
-
             if not template_names:
-                form.add_error("email_template", "No invitation templates are configured.")
-            elif not selected_template:
-                form.add_error("email_template", "Select a valid email template.")
+                form.add_error("csv_file", "No invitation templates are configured.")
             elif not email_templates:
-                form.add_error("email_template", "No invitation templates are configured.")
-            elif not EmailTemplate.objects.filter(name=selected_template).exists():
-                form.add_error("email_template", "The selected email template is not available.")
+                form.add_error("csv_file", "No invitation templates are configured.")
             elif uploaded.size and uploaded.size > settings.ACCOUNT_INVITATION_MAX_UPLOAD_BYTES:
                 form.add_error("csv_file", "CSV file is too large.")
             else:
@@ -230,7 +277,6 @@ def account_invitations_upload(request: HttpRequest) -> HttpResponse:
 
                     request.session[_PREVIEW_SESSION_KEY] = {
                         "rows": rows,
-                        "template_name": selected_template,
                     }
 
                     return render(
@@ -240,11 +286,11 @@ def account_invitations_upload(request: HttpRequest) -> HttpResponse:
                             "preview_rows": preview_rows,
                             "counts": counts,
                             "email_templates": email_templates,
-                            "default_template_name": selected_template,
+                            "default_template_name": email_templates[0].name if email_templates else "",
                         },
                     )
     else:
-        form = AccountInvitationUploadForm(template_choices=template_choices)
+        form = AccountInvitationUploadForm()
 
     return render(
         request,
@@ -252,7 +298,7 @@ def account_invitations_upload(request: HttpRequest) -> HttpResponse:
         {
             "form": form,
             "email_templates": email_templates,
-            "default_template_name": template_choices[0][0] if template_choices else "",
+            "default_template_name": email_templates[0].name if email_templates else "",
         },
     )
 
@@ -307,7 +353,7 @@ def account_invitations_send(request: HttpRequest) -> HttpResponse:
     now = timezone.now()
 
     sent = 0
-    accepted = 0
+    existing = 0
     invalid = 0
     skipped_duplicate = 0
     failed = 0
@@ -342,6 +388,10 @@ def account_invitations_send(request: HttpRequest) -> HttpResponse:
             matches = find_account_invitation_matches(normalized)
             lookup_cache[normalized] = matches
 
+        if matches:
+            existing += 1
+            continue
+
         invitation, _created = AccountInvitation.objects.get_or_create(
             email=normalized,
             defaults={
@@ -359,24 +409,7 @@ def account_invitations_send(request: HttpRequest) -> HttpResponse:
         invitation.invited_by_username = actor_username
         invitation.email_template_name = template_name
 
-        if matches:
-            invitation.accepted_at = invitation.accepted_at or now
-            invitation.freeipa_matched_usernames = matches
-            invitation.freeipa_last_checked_at = now
-            invitation.save(
-                update_fields=[
-                    "full_name",
-                    "note",
-                    "invited_by_username",
-                    "email_template_name",
-                    "accepted_at",
-                    "freeipa_matched_usernames",
-                    "freeipa_last_checked_at",
-                ]
-            )
-            accepted += 1
-            continue
-
+        invitation_token = str(invitation.invitation_token or "").strip()
         try:
             email = queue_templated_email(
                 recipients=[normalized],
@@ -386,7 +419,10 @@ def account_invitations_send(request: HttpRequest) -> HttpResponse:
                     "full_name": full_name,
                     "email": normalized,
                     "invited_by_username": actor_username,
+                    "invitation_token": invitation_token,
                     **system_email_context(),
+                    "register_url": _invitation_register_url(token=invitation_token),
+                    "login_url": _invitation_login_url(token=invitation_token),
                 },
             )
         except Exception:
@@ -432,9 +468,9 @@ def account_invitations_send(request: HttpRequest) -> HttpResponse:
     request.session.pop(_PREVIEW_SESSION_KEY, None)
 
     logger.info(
-        "Account invitation bulk send queued=%s accepted=%s invalid=%s duplicate=%s failed=%s",
+        "Account invitation bulk send queued=%s existing=%s invalid=%s duplicate=%s failed=%s",
         sent,
-        accepted,
+        existing,
         invalid,
         skipped_duplicate,
         failed,
@@ -442,8 +478,8 @@ def account_invitations_send(request: HttpRequest) -> HttpResponse:
 
     if sent:
         messages.success(request, f"Queued {sent} invitation(s).")
-    if accepted:
-        messages.info(request, f"Skipped {accepted} already accepted invitation(s).")
+    if existing:
+        messages.info(request, f"Skipped {existing} existing account(s).")
     if skipped_duplicate:
         messages.info(request, f"Skipped {skipped_duplicate} duplicate row(s).")
     if invalid:

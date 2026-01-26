@@ -15,7 +15,7 @@
       <div class="d-flex flex-wrap gap-3">
         <div class="mr-2"><strong>New:</strong> {{ counts.new }}</div>
         <div class="mr-2"><strong>Resend:</strong> {{ counts.resend }}</div>
-        <div class="mr-2"><strong>Accepted:</strong> {{ counts.accepted }}</div>
+        <div class="mr-2"><strong>Existing:</strong> {{ counts.existing }}</div>
         <div class="mr-2"><strong>Invalid:</strong> {{ counts.invalid }}</div>
         <div class="mr-2"><strong>Duplicates:</strong> {{ counts.duplicate }}</div>
       </div>
@@ -44,11 +44,11 @@
               <td>{{ row.full_name }}</td>
               <td>{{ row.note }}</td>
               <td>
-                {% if row.status == 'accepted' %}
+                {% if row.status == 'existing' %}
                   {% if row.has_multiple_matches %}
-                    Accepted (multiple matches)
+                    Already exists (multiple matches)
                   {% else %}
-                    Accepted
+                    Already exists
                   {% endif %}
                 {% elif row.status == 'resend' %}
                   Resend
@@ -61,8 +61,12 @@
                 {% endif %}
               </td>
               <td>
-                {% if row.status == 'accepted' and row.freeipa_usernames %}
-                  <span class="text-muted small">{{ row.freeipa_usernames|join:", " }}</span>
+                {% if row.status == 'existing' and row.freeipa_usernames %}
+                  <span class="text-muted small">
+                    {% for username in row.freeipa_usernames %}
+                      <a href="{% url 'user-profile' username %}">{{ username }}</a>{% if not forloop.last %}, {% endif %}
+                    {% endfor %}
+                  </span>
                 {% elif row.reason %}
                   <span class="text-muted small">{{ row.reason }}</span>
                 {% endif %}
@@ -90,7 +94,7 @@
         <div class="modal-body">
           <p>
             This will queue <strong>{{ counts.new|add:counts.resend }}</strong> emails.
-            Accepted and invalid rows will be skipped.
+            Existing and invalid rows will be skipped.
           </p>
 
           <form method="post" action="{% url 'account-invitations-send' %}">
