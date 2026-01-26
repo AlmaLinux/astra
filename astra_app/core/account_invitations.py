@@ -17,6 +17,25 @@ def normalize_invitation_email(value: str) -> str:
     return str(value or "").strip().lower()
 
 
+def build_freeipa_email_lookup() -> dict[str, set[str]]:
+    users = FreeIPAUser.all()
+    if not users:
+        logger.warning(
+            "Account invitation FreeIPA lookup: FreeIPAUser.all() returned 0 users; falling back to per-email lookup"
+        )
+        return {}
+
+    mapping: dict[str, set[str]] = {}
+    for user in users:
+        email = normalize_invitation_email(user.email)
+        username = str(user.username or "").strip().lower()
+        if not email or not username:
+            continue
+        mapping.setdefault(email, set()).add(username)
+
+    return mapping
+
+
 def parse_invitation_csv(content: str, *, max_rows: int) -> list[dict[str, str]]:
     raw = str(content or "")
     if not raw.strip():

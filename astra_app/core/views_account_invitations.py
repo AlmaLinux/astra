@@ -17,6 +17,7 @@ from django.utils import timezone
 from post_office.models import EmailTemplate
 
 from core.account_invitations import (
+    build_freeipa_email_lookup,
     classify_invitation_rows,
     confirm_existing_usernames,
     find_account_invitation_matches,
@@ -269,10 +270,20 @@ def account_invitations_upload(request: HttpRequest) -> HttpResponse:
                         inv.email: inv
                         for inv in AccountInvitation.objects.filter(email__in=[e for e in emails if e]).all()
                     }
+                    email_map = build_freeipa_email_lookup()
+
+                    def _bulk_lookup(email: str) -> list[str]:
+                        normalized = normalize_invitation_email(email)
+                        if not normalized:
+                            return []
+                        if email_map:
+                            return sorted(email_map.get(normalized, set()))
+                        return find_account_invitation_matches(normalized)
+
                     preview_rows, counts = classify_invitation_rows(
                         rows,
                         existing_invitations=existing,
-                        freeipa_lookup=find_account_invitation_matches,
+                        freeipa_lookup=_bulk_lookup,
                     )
 
                     request.session[_PREVIEW_SESSION_KEY] = {
@@ -359,6 +370,7 @@ def account_invitations_send(request: HttpRequest) -> HttpResponse:
     failed = 0
     seen: set[str] = set()
     lookup_cache: dict[str, list[str]] = {}
+    email_map = build_freeipa_email_lookup()
 
     for row in rows:
         if not isinstance(row, dict):
@@ -385,7 +397,10 @@ def account_invitations_send(request: HttpRequest) -> HttpResponse:
 
         matches = lookup_cache.get(normalized)
         if matches is None:
-            matches = find_account_invitation_matches(normalized)
+            if email_map:
+                matches = sorted(email_map.get(normalized, set()))
+            else:
+                matches = find_account_invitation_matches(normalized)
             lookup_cache[normalized] = matches
 
         if matches:

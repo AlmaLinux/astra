@@ -103,6 +103,43 @@ class AccountInvitationViewsTests(TestCase):
         self.assertContains(resp, "Already exists")
         self.assertContains(resp, "existinguser")
 
+    def test_account_invitations_preview_uses_bulk_freeipa_lookup(self) -> None:
+        self._login_as_freeipa_user("committee")
+
+        upload = SimpleUploadedFile(
+            "invites.csv",
+            b"email,full_name,note\nexisting@example.com,Existing User,Hello\n",
+            content_type="text/csv",
+        )
+
+        freeipa_user = FreeIPAUser(
+            "existinguser",
+            {
+                "uid": ["existinguser"],
+                "mail": ["existing@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=self._committee_user()),
+            patch("core.account_invitations.FreeIPAUser.all", return_value=[freeipa_user]),
+            patch(
+                "core.account_invitations.FreeIPAUser.find_usernames_by_email",
+                side_effect=AssertionError("per-email lookup should not run"),
+            ),
+        ):
+            resp = self.client.post(
+                reverse("account-invitations-upload"),
+                data={
+                    "csv_file": upload,
+                },
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Already exists")
+        self.assertContains(resp, "existinguser")
+
     def test_account_invitations_preview_uses_existing_accepted_invitation(self) -> None:
         self._login_as_freeipa_user("committee")
 
