@@ -181,6 +181,7 @@ class LoginRequiredMiddleware:
             "/elections/ballot/verify/",
             "/ses/event-webhook/",
             "/privacy-policy/",
+            "/robots.txt",
         )
 
     def __call__(self, request):

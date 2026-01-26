@@ -4,13 +4,13 @@ from core import (
     views_account_invitations,
     views_elections,
     views_groups,
-    views_legal,
     views_mail_images,
     views_membership,
     views_organizations,
     views_search,
     views_send_mail,
     views_settings,
+    views_static,
     views_templated_email,
     views_users,
 )
@@ -56,7 +56,8 @@ urlpatterns = [
 
     path("search/", views_search.global_search, name="global-search"),
 
-    path("privacy-policy/", views_legal.privacy_policy, name="privacy-policy"),
+    path("privacy-policy/", views_static.privacy_policy, name="privacy-policy"),
+    path("robots.txt", views_static.robots_txt, name="robots-txt"),
 
     path("elections/", views_elections.elections_list, name="elections"),
     path("elections/algorithm/", views_elections.election_algorithm, name="election-algorithm"),

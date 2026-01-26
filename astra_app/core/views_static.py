@@ -28,3 +28,8 @@ def privacy_policy(request: HttpRequest) -> HttpResponse:
             "content_html": mark_safe(html),
         },
     )
+
+
+@require_GET
+def robots_txt(_request: HttpRequest) -> HttpResponse:
+    return HttpResponse("User-agent: *\nDisallow: /\n", content_type="text/plain")
