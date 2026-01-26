@@ -121,6 +121,25 @@ class AdminImportMembershipsCSVTests(TestCase):
         formats = admin_instance.get_import_formats()
         self.assertEqual(formats, [base_formats.CSV])
 
+    def test_import_page_includes_format_field(self) -> None:
+        self._login_as_freeipa_admin("alex")
+
+        admin_user = FreeIPAUser(
+            "alex",
+            {
+                "uid": ["alex"],
+                "mail": ["alex@example.org"],
+                "memberof_group": ["admins"],
+            },
+        )
+
+        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+            url = reverse("admin:core_membershipcsvimportlink_import")
+            resp = self.client.get(url)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'name="format"')
+
     def test_live_import_creates_membership_and_unmatched_export(self) -> None:
         MembershipType.objects.update_or_create(
             code="individual",

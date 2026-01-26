@@ -696,8 +696,8 @@
               </div>
               <div class="card-body">
                 {% for field in form %}
-                  {% if field.name == "format" %}
-                    {# Format is inferred; skip rendering. #}
+                  {% if field.is_hidden %}
+                    {{ field }}
                   {% elif field.name == "import_file" %}
                     <div class="form-group field-name">
                       <div class="row">
