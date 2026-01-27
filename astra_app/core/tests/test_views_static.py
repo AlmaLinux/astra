@@ -14,5 +14,5 @@ class StaticViewsTests(TestCase):
     def test_favicon_redirects_to_static(self) -> None:
         resp = self.client.get("/favicon.ico")
         self.assertEqual(resp.status_code, 301)
-        expected = staticfiles_storage.url("core/images/favicon.ico")
+        expected = staticfiles_storage.url("core/images/fav/favicon.ico")
         self.assertEqual(resp["Location"], expected)
