@@ -1,4 +1,5 @@
 import datetime
+import logging
 import os
 import sys
 from pathlib import Path
@@ -684,10 +685,22 @@ CACHES = {
 
 # Logging
 # Ensure app logs (including FreeIPA integration) are visible in container stdout.
+class HealthEndpointFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        if "/healthz" in message or "/readyz" in message:
+            return " 200 " not in message
+        return True
+
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
-    'filters': {},
+    'filters': {
+        'health_endpoint': {
+            '()': 'config.settings.HealthEndpointFilter',
+        },
+    },
     'formatters': {
         'console': {
             'format': '[{asctime}] {levelname} {name}: {message}',
@@ -723,6 +736,7 @@ LOGGING = {
         'django.server': {
             'handlers': ['console'],
             'level': 'INFO',
+            'filters': ['health_endpoint'],
             'propagate': False,
         },
         # Django security events

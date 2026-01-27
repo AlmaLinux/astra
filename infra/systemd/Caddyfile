@@ -11,8 +11,5 @@ astra.almalinux.org {
         lb_retries 2
 
         health_uri /readyz
-        health_interval 10s
-        health_timeout 5s
-        health_up_status 200
     }
 }
