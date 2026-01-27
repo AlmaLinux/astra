@@ -5,7 +5,7 @@ errorlog = "-"
 capture_output = True
 loglevel = "info"
 forwarded_allow_ips = "*"
-access_log_format = '%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s"'
+access_log_format = '%({x-forwarded-for}i)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s"'
 
 logconfig_dict = {
     "version": 1,
