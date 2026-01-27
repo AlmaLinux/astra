@@ -1,4 +1,6 @@
+from django.contrib.staticfiles.storage import staticfiles_storage
 from django.urls import path
+from django.views.generic import RedirectView
 
 from core import (
     views_account_invitations,
@@ -17,6 +19,7 @@ from core import (
 
 urlpatterns = [
     path("", views_users.home, name="home"),
+    path("favicon.ico", RedirectView.as_view(url=staticfiles_storage.url("core/images/favicon.ico"), permanent=True)),
     path("users/", views_users.users, name="users"),
     path("user/<str:username>/", views_users.user_profile, name="user-profile"),
     path("groups/", views_groups.groups, name="groups"),

@@ -182,6 +182,7 @@ class LoginRequiredMiddleware:
             "/ses/event-webhook/",
             "/privacy-policy/",
             "/robots.txt",
+            "/favicon.ico",
         )
 
     def __call__(self, request):

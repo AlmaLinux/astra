@@ -1,0 +1,7 @@
+--2026-01-27 09:06:33--  https://accounts.almalinux.org/favicon.ico
+Loaded CA certificate '/etc/ssl/certs/ca-certificates.crt'
+Resolving accounts.almalinux.org (accounts.almalinux.org)... 2606:4700:20::681a:6e1, 2606:4700:20::681a:7e1, 2606:4700:20::ac43:4796, ...
+Connecting to accounts.almalinux.org (accounts.almalinux.org)|2606:4700:20::681a:6e1|:443... connected.
+HTTP request sent, awaiting response... 404 Not Found
+2026-01-27 09:06:33 ERROR 404: Not Found.
+

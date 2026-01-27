@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from django.contrib.staticfiles.storage import staticfiles_storage
 from django.test import TestCase
 
 
@@ -9,3 +10,9 @@ class StaticViewsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp["Content-Type"], "text/plain")
         self.assertEqual(resp.content.decode("utf-8"), "User-agent: *\nDisallow: /\n")
+
+    def test_favicon_redirects_to_static(self) -> None:
+        resp = self.client.get("/favicon.ico")
+        self.assertEqual(resp.status_code, 301)
+        expected = staticfiles_storage.url("core/images/favicon.ico")
+        self.assertEqual(resp["Location"], expected)
