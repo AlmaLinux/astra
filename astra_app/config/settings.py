@@ -1,5 +1,4 @@
 import datetime
-import logging
 import os
 import sys
 from pathlib import Path
@@ -685,20 +684,12 @@ CACHES = {
 
 # Logging
 # Ensure app logs (including FreeIPA integration) are visible in container stdout.
-class HealthEndpointFilter(logging.Filter):
-    def filter(self, record: logging.LogRecord) -> bool:
-        message = record.getMessage()
-        if "/healthz" in message or "/readyz" in message:
-            return " 200 " not in message
-        return True
-
-
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
     'filters': {
         'health_endpoint': {
-            '()': 'config.settings.HealthEndpointFilter',
+            '()': 'config.logging_filters.HealthEndpointFilter',
         },
     },
     'formatters': {

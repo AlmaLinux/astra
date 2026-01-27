@@ -7,7 +7,7 @@ from django.test import SimpleTestCase
 
 class LoggingFilterTests(SimpleTestCase):
     def test_health_endpoint_filter(self) -> None:
-        from config.settings import HealthEndpointFilter
+        from config.logging_filters import HealthEndpointFilter
 
         filt = HealthEndpointFilter()
 
@@ -43,3 +43,19 @@ class LoggingFilterTests(SimpleTestCase):
             exc_info=None,
         )
         self.assertTrue(filt.filter(record_other))
+
+    def test_health_endpoint_filter_handles_gunicorn_format(self) -> None:
+        from config.logging_filters import HealthEndpointFilter
+
+        filt = HealthEndpointFilter()
+
+        record_ok = logging.LogRecord(
+            name="gunicorn.access",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg='- - - [27/Jan/2026:10:49:08 +0000] "GET /readyz HTTP/1.1" 200 37 "-" "Go-http-client/1.1"',
+            args=(),
+            exc_info=None,
+        )
+        self.assertFalse(filt.filter(record_ok))
