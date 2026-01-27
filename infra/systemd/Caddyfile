@@ -1,4 +1,18 @@
 
 astra.almalinux.org {
-    reverse_proxy 127.0.0.1:8001 127.0.0.1:8002
+    @blocked_health {
+        path /healthz /readyz
+        not remote_ip 127.0.0.1 ::1
+    }
+    respond @blocked_health 404
+
+    reverse_proxy 127.0.0.1:8001 127.0.0.1:8002 {
+        lb_policy least_conn
+        lb_retries 2
+
+        health_uri /readyz
+        health_interval 10s
+        health_timeout 5s
+        health_up_status 200
+    }
 }

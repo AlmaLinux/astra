@@ -183,6 +183,8 @@ class LoginRequiredMiddleware:
             "/privacy-policy/",
             "/robots.txt",
             "/favicon.ico",
+            "/healthz",
+            "/readyz",
         )
 
     def __call__(self, request):

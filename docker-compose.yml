@@ -68,14 +68,13 @@ services:
       - .:/app:z
     ports:
       - "8000:8000"
-      - "9090:9000"
     healthcheck:
       test:
         [
           "CMD",
           "python",
           "-c",
-          "import sys, requests; r = requests.get('http://127.0.0.1:9000/readyz', timeout=2); sys.exit(0 if (r.status_code == 200 and r.json().get('status') == 'ready') else 1)",
+          "import sys, requests; r = requests.get('http://127.0.0.1:8000/readyz', timeout=2); sys.exit(0 if (r.status_code == 200 and r.json().get('status') == 'ready') else 1)",
         ]
       interval: 5s
       timeout: 3s

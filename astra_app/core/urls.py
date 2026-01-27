@@ -2,6 +2,7 @@ from django.contrib.staticfiles.storage import staticfiles_storage
 from django.urls import path
 from django.views.generic import RedirectView
 
+from django.views.generic import RedirectView
 from core import (
     views_account_invitations,
     views_elections,
@@ -15,6 +16,7 @@ from core import (
     views_static,
     views_templated_email,
     views_users,
+    views_health,
 )
 
 urlpatterns = [
@@ -301,4 +303,6 @@ urlpatterns = [
     path("settings/security/otp/disable/", views_settings.security_otp_disable, name="security-otp-disable"),
     path("settings/security/otp/delete/", views_settings.security_otp_delete, name="security-otp-delete"),
     path("settings/security/otp/rename/", views_settings.security_otp_rename, name="security-otp-rename"),
+    path("healthz", views_health.healthz, name="healthz"),
+    path("readyz", views_health.readyz, name="readyz"),
 ]
