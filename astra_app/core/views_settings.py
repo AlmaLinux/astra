@@ -579,6 +579,8 @@ def settings_root(request: HttpRequest) -> HttpResponse:
             return render(request, "core/settings.html", context)
 
         # --- Build changes for each tab ---
+        old_country = str(profile_initial.get("country_code") or "").strip().upper()
+        new_country = ""
         profile_direct_updates: dict[str, object] = {}
         profile_addattrs: list[str] = []
         profile_setattrs: list[str] = []
@@ -685,9 +687,6 @@ def settings_root(request: HttpRequest) -> HttpResponse:
             new_private = profile_form.cleaned_data["fasIsPrivate"]
             if current_private != new_private:
                 profile_setattrs.append(f"fasIsPrivate={_bool_to_ipa(new_private)}")
-
-        old_country = str(profile_initial.get("country_code") or "").strip().upper()
-        new_country = ""
 
         emails_direct_updates: dict[str, object] = {}
         emails_setattrs: list[str] = []
