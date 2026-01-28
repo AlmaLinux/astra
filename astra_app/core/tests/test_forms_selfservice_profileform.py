@@ -2,15 +2,54 @@ from __future__ import annotations
 
 from django.test import SimpleTestCase
 
-from core.forms_selfservice import ProfileForm
+from core.forms_selfservice import ProfileForm, _get_country_choices
 
 
 class ProfileFormValidationTests(SimpleTestCase):
+    def test_country_code_choices_include_placeholder_and_us(self):
+        choices = _get_country_choices()
+        self.assertGreater(len(choices), 1)
+        self.assertEqual(choices[0], ("", "Select a country..."))
+        self.assertTrue(any(code == "US" and label.endswith(" - US") for code, label in choices))
+
+    def test_country_code_accepts_valid_alpha2_choice(self):
+        form = ProfileForm(
+            data={
+                "givenname": "Alice",
+                "sn": "User",
+                "country_code": "US",
+            }
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["country_code"], "US")
+
+    def test_country_code_rejects_invalid_alpha2(self):
+        form = ProfileForm(
+            data={
+                "givenname": "Alice",
+                "sn": "User",
+                "country_code": "ZZZ",
+            }
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn("country_code", form.errors)
+
+    def test_country_code_is_required(self):
+        form = ProfileForm(
+            data={
+                "givenname": "Alice",
+                "sn": "User",
+            }
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn("country_code", form.errors)
+
     def test_github_username_strips_at_and_validates(self):
         form = ProfileForm(
             data={
                 "givenname": "Alice",
                 "sn": "User",
+                "country_code": "US",
                 "fasGitHubUsername": "@octocat",
             }
         )
@@ -22,6 +61,7 @@ class ProfileFormValidationTests(SimpleTestCase):
             data={
                 "givenname": "Alice",
                 "sn": "User",
+                "country_code": "US",
                 "fasGitHubUsername": "-bad-",
             }
         )
@@ -33,6 +73,7 @@ class ProfileFormValidationTests(SimpleTestCase):
             data={
                 "givenname": "Alice",
                 "sn": "User",
+                "country_code": "US",
                 "fasGitLabUsername": "@good.name",
             }
         )
@@ -44,6 +85,7 @@ class ProfileFormValidationTests(SimpleTestCase):
             data={
                 "givenname": "Alice",
                 "sn": "User",
+                "country_code": "US",
                 "fasIRCNick": "matrix://matrix.example/alice\nmatrix:/bob",
             }
         )
@@ -60,6 +102,7 @@ class ProfileFormValidationTests(SimpleTestCase):
             data={
                 "givenname": "Alice",
                 "sn": "User",
+                "country_code": "US",
                 "fasIRCNick": "mattermost://chat.almalinux.org/almalinux/alice\nmattermost:/bob",
             }
         )
@@ -74,6 +117,7 @@ class ProfileFormValidationTests(SimpleTestCase):
             data={
                 "givenname": "Alice",
                 "sn": "User",
+                "country_code": "US",
                 "fasIRCNick": "mattermost://chat.example.org/alice",
             }
         )
@@ -86,6 +130,7 @@ class ProfileFormValidationTests(SimpleTestCase):
             data={
                 "givenname": "Alice",
                 "sn": "User",
+                "country_code": "US",
                 "fasTimezone": "UTC",
             }
         )
@@ -97,6 +142,7 @@ class ProfileFormValidationTests(SimpleTestCase):
             data={
                 "givenname": "Alice",
                 "sn": "User",
+                "country_code": "US",
                 "fasTimezone": "Not/AZone",
             }
         )
@@ -108,6 +154,7 @@ class ProfileFormValidationTests(SimpleTestCase):
             data={
                 "givenname": "Alice",
                 "sn": "User",
+                "country_code": "US",
                 "fasWebsiteUrl": "ftp://example.org",
             }
         )
@@ -119,6 +166,7 @@ class ProfileFormValidationTests(SimpleTestCase):
             data={
                 "givenname": "Alice",
                 "sn": "User",
+                "country_code": "US",
                 "fasWebsiteUrl": "https://example.org, https://example.com\nhttps://example.net",
             }
         )
@@ -129,6 +177,7 @@ class ProfileFormValidationTests(SimpleTestCase):
             data={
                 "givenname": "Alice",
                 "sn": "User",
+                "country_code": "US",
                 "fasIRCNick": "nick\nnick:irc.example.org",
             }
         )
@@ -139,6 +188,7 @@ class ProfileFormValidationTests(SimpleTestCase):
             data={
                 "givenname": "Alice",
                 "sn": "User",
+                "country_code": "US",
                 "fasIRCNick": "irc://irc.example.org/nick",
             }
         )

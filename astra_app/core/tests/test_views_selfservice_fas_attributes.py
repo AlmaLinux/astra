@@ -10,7 +10,7 @@ from django.contrib.sessions.middleware import SessionMiddleware
 from django.http import HttpResponse
 from django.test import RequestFactory, TestCase, override_settings
 
-from core.views_settings import settings_address_lookup, settings_address_suggest, settings_root
+from core.views_settings import settings_root
 from core.views_users import user_profile
 
 
@@ -180,6 +180,7 @@ class FASAttributesTests(TestCase):
                 "tab": "profile",
                 "givenname": "Alice",
                 "sn": "User",
+                "country_code": "US",
                 "fasPronoun": "she/her",
                 "fasLocale": "en-US",
                 "fasTimezone": "UTC",
@@ -230,12 +231,16 @@ class FASAttributesTests(TestCase):
         self.assertEqual(after["fu"].full_name, "Alice User")
 
     @override_settings(SELF_SERVICE_ADDRESS_COUNTRY_ATTR="fasstatusnote")
-    def test_address_set_fields_uses_configured_country_attr(self):
+    def test_profile_country_set_uses_configured_country_attr(self):
         fu = _DummyFreeIPAUser(
             first_name="Alice",
             last_name="User",
             email="alice@example.com",
-            _user_data={},
+            _user_data={
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "cn": ["Alice User"],
+            },
         )
 
         client = SimpleNamespace(user_mod=Mock())
@@ -244,12 +249,19 @@ class FASAttributesTests(TestCase):
         req = self.factory.post(
             "/settings/",
             data={
-                "tab": "address",
-                "street": "Main St 5",
-                "l": "Springfield",
-                "st": "Illinois",
-                "postalcode": "62701",
-                "c": "us",
+                "tab": "profile",
+                "givenname": "Alice",
+                "sn": "User",
+                "country_code": "us",
+                "fasPronoun": "",
+                "fasLocale": "",
+                "fasTimezone": "",
+                "fasWebsiteUrl": "",
+                "fasRssUrl": "",
+                "fasIRCNick": "",
+                "fasGitHubUsername": "",
+                "fasGitLabUsername": "",
+                "fasIsPrivate": "",
             },
         )
         self._add_session_and_messages(req)
@@ -265,84 +277,14 @@ class FASAttributesTests(TestCase):
             client.user_mod,
             "alice",
             set_={
-                "street=Main St 5",
-                "l=Springfield",
-                "st=Illinois",
-                "postalcode=62701",
                 "fasstatusnote=US",
             },
             add=set(),
             del_=set(),
             direct={},
         )
-
-        self.assertEqual((fu._user_data or {}).get("street"), ["Main St 5"])
-        self.assertEqual((fu._user_data or {}).get("l"), ["Springfield"])
-        self.assertEqual((fu._user_data or {}).get("st"), ["Illinois"])
-        self.assertEqual((fu._user_data or {}).get("postalcode"), ["62701"])
         self.assertEqual((fu._user_data or {}).get("fasstatusnote"), ["US"])
 
-    def test_address_photon_suggest_returns_options(self):
-        req = self.factory.get("/settings/address/suggest/?q=Main%20St")
-        self._add_session_and_messages(req)
-        req.user = self._auth_user("alice")
-
-        photon_payload = {
-            "features": [
-                {
-                    "type": "Feature",
-                    "properties": {
-                        "street": "Main St",
-                        "housenumber": "5",
-                        "postcode": "62701",
-                        "city": "Springfield",
-                        "state": "Illinois",
-                        "countrycode": "us",
-                    },
-                },
-                {
-                    "type": "Feature",
-                    "properties": {
-                        "street": "Main St",
-                        "housenumber": "6",
-                        "postcode": "62701",
-                        "city": "Springfield",
-                        "state": "Illinois",
-                        "countrycode": "us",
-                    },
-                },
-            ]
-        }
-
-        class _FakeResp:
-            def __init__(self, payload: dict):
-                import json
-
-                self._data = json.dumps(payload).encode("utf-8")
-
-            def read(self) -> bytes:
-                return self._data
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, exc_type, exc, tb):
-                return False
-
-        with patch("core.views_settings.urlopen", autospec=True, return_value=_FakeResp(photon_payload)):
-            resp = settings_address_suggest(req)
-
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp["Content-Type"], "application/json")
-        import json
-
-        data = json.loads(resp.content.decode("utf-8"))
-        self.assertTrue(data.get("found"))
-        options = data.get("options")
-        self.assertIsInstance(options, list)
-        self.assertEqual(len(options), 2)
-        self.assertEqual(options[0].get("street"), "Main St 5")
-        self.assertEqual(options[0].get("c"), "US")
 
     @patch("core.views_users.render", autospec=True)
     @override_settings(SELF_SERVICE_ADDRESS_COUNTRY_ATTR="fasstatusnote")
@@ -382,56 +324,6 @@ class FASAttributesTests(TestCase):
         self.assertTrue(ctx.get("is_self"))
         self.assertTrue(ctx.get("country_code_missing_or_invalid"))
 
-    def test_address_photon_lookup_parses_result(self):
-        req = self.factory.get("/settings/address/lookup/?q=Main%20St%205%20Springfield")
-        self._add_session_and_messages(req)
-        req.user = self._auth_user("alice")
-
-        photon_payload = {
-            "features": [
-                {
-                    "type": "Feature",
-                    "properties": {
-                        "street": "Main St",
-                        "housenumber": "5",
-                        "postcode": "62701",
-                        "city": "Springfield",
-                        "state": "Illinois",
-                        "countrycode": "us",
-                    },
-                }
-            ]
-        }
-
-        class _FakeResp:
-            def __init__(self, payload: dict):
-                import json
-
-                self._data = json.dumps(payload).encode("utf-8")
-
-            def read(self) -> bytes:
-                return self._data
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, exc_type, exc, tb):
-                return False
-
-        with patch("core.views_settings.urlopen", autospec=True, return_value=_FakeResp(photon_payload)):
-            resp = settings_address_lookup(req)
-
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp["Content-Type"], "application/json")
-        import json
-
-        data = json.loads(resp.content.decode("utf-8"))
-        self.assertTrue(data.get("found"))
-        self.assertEqual(data.get("street"), "Main St 5")
-        self.assertEqual(data.get("l"), "Springfield")
-        self.assertEqual(data.get("st"), "Illinois")
-        self.assertEqual(data.get("postalcode"), "62701")
-        self.assertEqual(data.get("c"), "US")
 
     @patch("core.forms_selfservice.get_timezone_options", autospec=True, return_value=["UTC", "Europe/Paris"])
     @patch("core.forms_selfservice.get_locale_options", autospec=True, return_value=["en-US", "fr-FR"])
@@ -469,6 +361,7 @@ class FASAttributesTests(TestCase):
                 "tab": "profile",
                 "givenname": "Alicia",
                 "sn": "User",
+                "country_code": "US",
                 "fasPronoun": "they/them",
                 "fasLocale": "fr-FR",
                 "fasTimezone": "Europe/Paris",
@@ -558,6 +451,7 @@ class FASAttributesTests(TestCase):
                 "tab": "profile",
                 "givenname": "Alice",
                 "sn": "User",
+                "country_code": "US",
                 "fasPronoun": "",
                 "fasLocale": "",
                 "fasTimezone": "",

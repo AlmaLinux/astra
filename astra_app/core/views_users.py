@@ -294,7 +294,7 @@ def _profile_context_for_user(
                 {
                     "id": "country-code-missing-alert",
                     "label": "Add a valid ISO 3166-1 alpha-2 country code",
-                    "url": f"{reverse('settings')}#address",
+                    "url": f"{reverse('settings')}#profile",
                     "url_label": "Set country code",
                 }
             )

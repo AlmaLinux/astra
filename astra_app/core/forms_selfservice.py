@@ -7,6 +7,7 @@ from functools import lru_cache
 from typing import override
 from urllib.parse import urlparse
 
+import pycountry
 import pyotp
 from django import forms
 
@@ -129,6 +130,15 @@ def _is_valid_locale_code(value: str) -> bool:
     return any(c in aliases for c in candidates)
 
 
+def _get_country_choices() -> list[tuple[str, str]]:
+    choices = [("", "Select a country...")]
+    countries = sorted(
+        [(c.alpha_2, f"{c.name} - {c.alpha_2}") for c in pycountry.countries],
+        key=lambda x: x[1],
+    )
+    return choices + countries
+
+
 class _StyledForm(forms.Form):
     """Apply AdminLTE-friendly CSS classes to widgets."""
 
@@ -171,6 +181,13 @@ class ProfileForm(_StyledForm):
         label="Last Name",
         required=True,
         widget=forms.TextInput(attrs={"autocomplete": "family-name"}),
+    )
+    country_code = forms.ChoiceField(
+        label="Country",
+        required=True,
+        choices=_get_country_choices(),
+        help_text="Required for compliance checks.",
+        widget=forms.Select(attrs={"autocomplete": "country"}),
     )
 
     # Fedora freeipa-fas schema (attribute names are case-insensitive in LDAP)
@@ -391,42 +408,8 @@ class ProfileForm(_StyledForm):
             raise forms.ValidationError("GitLab username is not valid")
         return value
 
-
-class AddressForm(_StyledForm):
-    street = forms.CharField(
-        label="Street address",
-        required=False,
-        max_length=255,
-        widget=forms.TextInput(attrs={"autocomplete": "street-address"}),
-    )
-    l = forms.CharField(  # noqa: E741
-        label="City",
-        required=False,
-        max_length=255,
-        widget=forms.TextInput(attrs={"autocomplete": "address-level2"}),
-    )
-    st = forms.CharField(
-        label="State / Province",
-        required=False,
-        max_length=255,
-        widget=forms.TextInput(attrs={"autocomplete": "address-level1"}),
-    )
-    postalcode = forms.CharField(
-        label="Postal code",
-        required=False,
-        max_length=40,
-        widget=forms.TextInput(attrs={"autocomplete": "postal-code"}),
-    )
-    c = forms.CharField(
-        label="Country code",
-        required=True,
-        max_length=2,
-        help_text="ISO 3166-1 alpha-2 (example: US)",
-        widget=forms.TextInput(attrs={"autocomplete": "country"}),
-    )
-
-    def clean_c(self) -> str:
-        value = normalize_country_alpha2(self.cleaned_data.get("c"))
+    def clean_country_code(self) -> str:
+        value = normalize_country_alpha2(self.cleaned_data.get("country_code"))
         if not value:
             raise forms.ValidationError("Country code is required")
         if not is_valid_country_alpha2(value):

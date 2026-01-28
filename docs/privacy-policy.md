@@ -1,6 +1,6 @@
 # AlmaLinux Accounts Privacy Policy
 
-*Last updated: 2026-01-24*
+*Last updated: 2026-01-28*
 
 This Privacy Policy explains how **AlmaLinux Accounts** (known internally as Astra) collects, uses, shares, and protects personal data.
 
@@ -9,6 +9,7 @@ This policy applies to AlmaLinux Accounts. It does not cover third-party sites l
 ### Key points
 
 - **Public by default:** Some profile information may be visible to other users (and in some contexts to the public). You can enable a “private profile” to reduce what others can see.
+- **Data minimization:** We collect the minimum location data we need. For compliance checks, this is a country code (not a full postal address).
 - **Retention:** We retain your personal data until you delete your account.
 - **Privacy contact:** privacy@almalinux.org
 
@@ -44,7 +45,7 @@ AlmaLinux Accounts is not a discussion forum. If you participate in AlmaLinux co
 
 ## Personal data we collect
 
-AlmaLinux Accounts uses a combination of (1) a directory and authentication system (**FreeIPA**) and (2) AlmaLinux Accounts’s application database for workflows like memberships and elections.
+AlmaLinux Accounts uses a combination of (1) a directory and authentication system (**FreeIPA**) and (2) the AlmaLinux Accounts application database for workflows like memberships and elections.
 
 ### Account and identity data
 
@@ -64,14 +65,11 @@ AlmaLinux Accounts uses a combination of (1) a directory and authentication syst
 - Bug tracker email address (Bugzilla)
 - A “private profile” setting that controls how your profile is displayed to others
 
-### Address and location data (optional)
+### Country code (required for some workflows)
 
-Address details are optional in general. However, when you submit a membership request, AlmaLinux Accounts requires your country code to perform embargo/sanctions compliance checks.
+AlmaLinux Accounts collects a country code (ISO 3166-1 alpha-2) when needed for embargo/sanctions compliance checks. In particular, a valid country code is required when you submit a membership request.
 
-If you choose to provide additional address details, AlmaLinux Accounts may store and use:
-
-- Street, city, state/province, postal/ZIP code
-- Country code (required for membership requests; used for embargo/sanctions compliance checks)
+We do not collect or store full postal address details (such as street address, city, state/province, or postal/ZIP code) through AlmaLinux Accounts.
 
 ### Keys and security data
 
@@ -110,7 +108,7 @@ If you participate in elections run through AlmaLinux Accounts, the system may p
 
 AlmaLinux Accounts sends operational and workflow emails (for example, account verification, membership status updates, election notifications).
 
-For reliability and administration, AlmaLinux Accounts’s email queue stores:
+For reliability and administration, the AlmaLinux Accounts email queue stores:
 
 - Recipient email address
 - Email subject and content
@@ -167,8 +165,7 @@ AlmaLinux Accounts relies on service providers to run the service:
 - **FreeIPA (directory/authentication):** AlmaLinux Accounts uses FreeIPA to store and manage key account attributes (profile fields, groups, OTP, SSH keys) and to authenticate users.
 - **Email delivery (AWS SES):** email messages are delivered via Amazon Simple Email Service (SES) in production.
 - **Email delivery status events:** we may receive email delivery status events (for example, bounces and complaints) to help us monitor deliverability. These events may include your email address and delivery status information.
-- **Email queueing (django-post-office):** email messages and related metadata are stored in AlmaLinux Accounts’s database for delivery and administration.
-- **Address autocomplete/geocoding (Komoot Photon):** if you use address lookup features, your address search input is sent to the Photon service at `https://photon.komoot.io`.
+- **Email queueing (django-post-office):** email messages and related metadata are stored in the AlmaLinux Accounts database for delivery and administration.
 - **Avatar services (Gravatar/LibRAvatar):** if enabled, AlmaLinux Accounts may query avatar providers using an email-derived hash to display a profile image.
 - **File/object storage:** uploaded media (such as organization logos) may be stored in an S3-compatible object storage system.
 
@@ -188,7 +185,7 @@ We may disclose personal data if we believe it is reasonably necessary to:
 
 ## International transfers
 
-AlmaLinux Accounts’s operators and service providers may process data in countries outside your own. Where GDPR applies and personal data is transferred internationally, we use appropriate safeguards as required by law (for example, standard contractual clauses where applicable).
+AlmaLinux Accounts operators and service providers may process data in countries outside your own. Where GDPR applies and personal data is transferred internationally, we use appropriate safeguards as required by law (for example, standard contractual clauses where applicable).
 
 ## How long we keep data
 

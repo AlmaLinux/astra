@@ -54,6 +54,13 @@
 		</div>
 
 		<div class="form-group">
+			{{ profile_form.country_code.label_tag }}
+			{{ profile_form.country_code }}
+			{% if profile_form.country_code.errors %}<div class="invalid-feedback d-block">{{ profile_form.country_code.errors }}</div>{% endif %}
+			{% if profile_form.country_code.help_text %}<small class="form-text text-muted">{{ profile_form.country_code.help_text }}</small>{% endif %}
+		</div>
+
+		<div class="form-group">
 			{{ profile_form.fasLocale.label_tag }}
 			{{ profile_form.fasLocale }}
 			{% if profile_form.fasLocale.errors %}<div class="invalid-feedback d-block">{{ profile_form.fasLocale.errors }}</div>{% endif %}

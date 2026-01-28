@@ -105,7 +105,7 @@ def _parse_email_url(email_url: str) -> dict[str, Any]:
 
 DEBUG = _env_bool("DEBUG", default=False)
 
-# Self-service Address settings: where to store the ISO 3166-1 country code.
+# Self-service country settings: where to store the ISO 3166-1 country code.
 # Some FreeIPA dev schemas don't allow writing to the LDAP "c" attribute.
 # Configure in devel via SELF_SERVICE_ADDRESS_COUNTRY_ATTR=fasstatusnote
 SELF_SERVICE_ADDRESS_COUNTRY_ATTR = (

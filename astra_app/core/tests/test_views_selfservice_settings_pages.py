@@ -109,7 +109,7 @@ class SelfServiceSettingsPagesTests(TestCase):
     def test_settings_save_all_invalid_form_forces_tab_visible(self):
         """When save-all validation fails, ensure the response forces the tab with errors.
 
-        Without this, the URL hash (e.g. #address) can keep the user on the wrong
+        Without this, the URL hash (e.g. #profile) can keep the user on the wrong
         tab, hiding errors and making it look like the save silently did nothing.
         """
 
@@ -133,10 +133,10 @@ class SelfServiceSettingsPagesTests(TestCase):
         request = factory.post(
             "/settings/",
             data={
-                # Save-all address submit
-                "tab": "address",
+                # Save-all profile submit
+                "tab": "profile",
                 "save_all": "1",
-                "c": "CH",
+                "country_code": "CH",
                 # Keep emails unchanged so we don't fail there.
                 "mail": "alice@example.org",
                 "fasRHBZEmail": "",
@@ -185,6 +185,7 @@ class SelfServiceSettingsPagesTests(TestCase):
                 "givenname": ["Alice"],
                 "sn": ["User"],
                 "cn": ["Alice User"],
+                "c": ["US"],
                 "fasLocale": ["en_US"],
                 "fasTimezone": ["UTC"],
                 "fasIsPrivate": ["FALSE"],
@@ -197,6 +198,7 @@ class SelfServiceSettingsPagesTests(TestCase):
                 "tab": "profile",
                 "givenname": "Alice",
                 "sn": "User",
+                "country_code": "US",
                 "fasPronoun": "",
                 "fasLocale": "en_US",
                 "fasTimezone": "UTC",
@@ -255,6 +257,7 @@ class SelfServiceSettingsPagesTests(TestCase):
                 # Profile
                 "givenname": "Alicia",
                 "sn": "User",
+                "country_code": "US",
                 "fasPronoun": "",
                 "fasLocale": "",
                 "fasTimezone": "",
@@ -264,12 +267,6 @@ class SelfServiceSettingsPagesTests(TestCase):
                 "fasGitHubUsername": "",
                 "fasGitLabUsername": "",
                 "fasIsPrivate": "",
-                # Address (required country)
-                "street": "",
-                "l": "",
-                "st": "",
-                "postalcode": "",
-                "c": "US",
                 # Emails (required mail)
                 "mail": "a@example.org",
                 "fasRHBZEmail": "a@example.org",
@@ -323,6 +320,7 @@ class SelfServiceSettingsPagesTests(TestCase):
                 # Profile change
                 "givenname": "Alicia",
                 "sn": "User",
+                "country_code": "US",
                 "fasPronoun": "",
                 "fasLocale": "",
                 "fasTimezone": "",
@@ -332,12 +330,6 @@ class SelfServiceSettingsPagesTests(TestCase):
                 "fasGitHubUsername": "",
                 "fasGitLabUsername": "",
                 "fasIsPrivate": "",
-                # Address change provides a valid country code
-                "street": "",
-                "l": "",
-                "st": "",
-                "postalcode": "",
-                "c": "US",
                 # Emails required
                 "mail": "a@example.org",
                 "fasRHBZEmail": "a@example.org",
@@ -365,7 +357,7 @@ class SelfServiceSettingsPagesTests(TestCase):
         FREEIPA_SERVICE_PASSWORD="pw",
         SELF_SERVICE_ADDRESS_COUNTRY_ATTR="c",
     )
-    def test_settings_save_all_address_can_save_when_other_tabs_invalid_but_unchanged(self):
+    def test_settings_save_all_profile_country_can_save_when_other_tabs_invalid_but_unchanged(self):
         factory = RequestFactory()
 
         fake_user = SimpleNamespace(
@@ -373,10 +365,10 @@ class SelfServiceSettingsPagesTests(TestCase):
             email="a@example.org",
             is_authenticated=True,
             _user_data={
-                # Profile required fields exist but empty (would be invalid if validated).
-                "givenname": [""],
-                "sn": [""],
-                "cn": [""],
+                # Profile required fields exist but unchanged.
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "cn": ["Alice User"],
                 # Emails required field is missing/empty.
                 "mail": [""],
                 "fasRHBZEmail": [""],
@@ -389,16 +381,12 @@ class SelfServiceSettingsPagesTests(TestCase):
             "/settings/",
             data={
                 "save_all": "1",
-                "tab": "address",
-                # Address: set country code
-                "street": "",
-                "l": "",
-                "st": "",
-                "postalcode": "",
-                "c": "ES",
+                "tab": "profile",
+                # Profile: set country code
+                "country_code": "ES",
                 # Other tabs are submitted (as in the real page) but unchanged/empty
-                "givenname": "",
-                "sn": "",
+                "givenname": "Alice",
+                "sn": "User",
                 "fasPronoun": "",
                 "fasLocale": "",
                 "fasTimezone": "",
@@ -423,7 +411,7 @@ class SelfServiceSettingsPagesTests(TestCase):
                 response = views_settings.settings_root(request)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], reverse("settings") + "#address")
+        self.assertEqual(response["Location"], reverse("settings") + "#profile")
         self.assertEqual(mocked_update.call_count, 1)
 
     @override_settings(
@@ -433,7 +421,7 @@ class SelfServiceSettingsPagesTests(TestCase):
         FREEIPA_SERVICE_PASSWORD="pw",
         SELF_SERVICE_ADDRESS_COUNTRY_ATTR="fasstatusnote",
     )
-    def test_settings_save_all_address_accepts_bcp47_locale_from_freeipa(self):
+    def test_settings_save_all_profile_accepts_bcp47_locale_from_freeipa(self):
         factory = RequestFactory()
 
         fake_user = SimpleNamespace(
@@ -457,16 +445,12 @@ class SelfServiceSettingsPagesTests(TestCase):
             "/settings/",
             data={
                 "save_all": "1",
-                "tab": "address",
-                # Address change provides a valid country code.
-                "street": "",
-                "l": "",
-                "st": "",
-                "postalcode": "",
-                "c": "CH",
+                "tab": "profile",
+                # Profile change provides a valid country code.
                 # Profile values are submitted (combined form post) but unchanged.
                 "givenname": "Alice",
                 "sn": "User",
+                "country_code": "CH",
                 "fasPronoun": "",
                 "fasLocale": "en-US",
                 "fasTimezone": "Australia/Brisbane",
@@ -493,7 +477,7 @@ class SelfServiceSettingsPagesTests(TestCase):
                 response = views_settings.settings_root(request)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], reverse("settings") + "#address")
+        self.assertEqual(response["Location"], reverse("settings") + "#profile")
         self.assertEqual(mocked_update.call_count, 1)
 
     @override_settings(
@@ -543,16 +527,23 @@ class SelfServiceSettingsPagesTests(TestCase):
         self._add_session_and_messages(request)
         request.user = self._auth_user("alice")
 
+        captured: dict[str, object] = {}
+
+        def fake_render(_request, template, context):
+            captured["template"] = template
+            captured["context"] = context
+            return HttpResponse("ok")
+
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
             with patch("core.views_settings._update_user_attrs", autospec=True) as mocked_update:
-                response = views_settings.settings_root(request)
+                with patch("core.views_settings.render", autospec=True, side_effect=fake_render):
+                    response = views_settings.settings_root(request)
 
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], reverse("settings") + "#address")
+        self.assertEqual(response.status_code, 200)
         mocked_update.assert_not_called()
-
-        msgs = [m.message for m in get_messages(request)]
-        self.assertTrue(any("country" in m.lower() for m in msgs))
+        ctx = captured["context"]
+        form = ctx["profile_form"]
+        self.assertIn("country_code", form.errors)
 
     @override_settings(
         FREEIPA_HOST="ipa.test",

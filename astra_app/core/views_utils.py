@@ -42,9 +42,9 @@ def block_action_without_country_code(
 
     messages.error(
         request,
-        f"A valid country code is required before you can {action_label}. Please set it on the Address tab.",
+        f"A valid country code is required before you can {action_label}. Please set it on the Profile tab.",
     )
-    return redirect(f"{reverse('settings')}#address")
+    return redirect(f"{reverse('settings')}#profile")
 
 
 _ATTR_NOT_ALLOWED_RE = re.compile(r"attribute\s+['\"]?([a-zA-Z0-9_-]+)['\"]?\s+not\s+allowed", re.IGNORECASE)

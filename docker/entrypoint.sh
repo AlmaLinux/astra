@@ -13,7 +13,9 @@ else
 fi
 
 if [[ "${DJANGO_AUTO_MIGRATE:-0}" == "1" ]]; then
-  ./migrate.sh
+  pwd
+  ls -lR
+  migrate.sh
 fi
 
 exec "$@"

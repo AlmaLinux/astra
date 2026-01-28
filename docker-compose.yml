@@ -88,7 +88,7 @@ services:
     environment:
       - DEBUG=True
       - SECRET_KEY=dev_secret_key
-      - DJANGO_AUTO_MIGRATE=1
+      #- DJANGO_AUTO_MIGRATE=1
       - DATABASE_URL=postgres://postgres:postgres@almalinux_db2:5432/almalinux_members
       - EMAIL_URL=smtp://almalinux_mailhog:1025
       - FREEIPA_HOST=ipa.tinystage.test
