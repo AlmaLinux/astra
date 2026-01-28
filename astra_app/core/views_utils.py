@@ -9,9 +9,10 @@ from django.contrib import messages
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
 from django.urls import reverse
+from urllib.parse import quote
 
 from core.agreements import has_enabled_agreements
-from core.backends import FreeIPAUser, _invalidate_user_cache, _invalidate_users_list_cache
+from core.backends import FreeIPAFASAgreement, FreeIPAUser, _invalidate_user_cache, _invalidate_users_list_cache
 from core.country_codes import country_code_status_from_user_data
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,51 @@ def block_action_without_country_code(
         f"A valid country code is required before you can {action_label}. Please set it on the Profile tab.",
     )
     return redirect(f"{reverse('settings')}#profile")
+
+
+def _coc_settings_url() -> str:
+    agreement_cn = str(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN or "").strip()
+    if not agreement_cn:
+        return f"{reverse('settings')}#agreements"
+    return f"{reverse('settings')}?agreement={quote(agreement_cn)}#agreements"
+
+
+def _coc_agreement_for_user(username: str) -> FreeIPAFASAgreement | None:
+    agreement_cn = str(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN or "").strip()
+    if not agreement_cn:
+        return None
+    try:
+        return FreeIPAFASAgreement.get(agreement_cn)
+    except Exception:
+        logger.exception("Failed to load Code of Conduct agreement")
+        return None
+
+
+def has_signed_coc(username: str) -> bool:
+    username = username.strip()
+    if not username:
+        return False
+    agreement = _coc_agreement_for_user(username)
+    if agreement is None or not agreement.enabled:
+        return False
+    return username in set(agreement.users)
+
+
+def block_action_without_coc(
+    request: HttpRequest,
+    *,
+    username: str,
+    action_label: str,
+) -> HttpResponse | None:
+    """Enforce signing the Community Code of Conduct before actions."""
+
+    if has_signed_coc(username):
+        return None
+
+    agreement_cn = str(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN or "").strip()
+    label = agreement_cn or "Community Code of Conduct"
+    messages.error(request, f"You must sign the {label} before you can {action_label}.")
+    return redirect(_coc_settings_url())
 
 
 _ATTR_NOT_ALLOWED_RE = re.compile(r"attribute\s+['\"]?([a-zA-Z0-9_-]+)['\"]?\s+not\s+allowed", re.IGNORECASE)

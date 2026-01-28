@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+from urllib.parse import quote
 from unittest.mock import patch
 
 from django.test import TestCase
@@ -9,6 +10,7 @@ from django.utils import timezone
 
 from core.backends import FreeIPAUser
 from core.models import Candidate, Election
+from django.conf import settings
 
 
 class ElectionsSidebarLinkTests(TestCase):
@@ -33,6 +35,47 @@ class ElectionsSidebarLinkTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, f'href="{reverse("elections")}"')
         self.assertContains(resp, ">Elections<")
+
+
+class ElectionsVoteAccessTests(TestCase):
+    def _login_as_freeipa_user(self, username: str) -> None:
+        session = self.client.session
+        session["_freeipa_username"] = username
+        session.save()
+
+    def test_vote_page_requires_signed_coc(self) -> None:
+        from core.backends import FreeIPAFASAgreement
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Board election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+
+        coc = FreeIPAFASAgreement(
+            settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN,
+            {
+                "cn": [settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN],
+                "ipaenabledflag": ["TRUE"],
+                "memberuser_user": [],
+            },
+        )
+
+        self._login_as_freeipa_user("voter1")
+        voter = FreeIPAUser("voter1", {"uid": ["voter1"], "memberof_group": []})
+        with patch("core.backends.FreeIPAUser.get", autospec=True, return_value=voter):
+            with patch("core.views_utils.FreeIPAFASAgreement.get", autospec=True, return_value=coc):
+                resp = self.client.get(reverse("election-vote", args=[election.id]), follow=False)
+
+        self.assertEqual(resp.status_code, 302)
+        expected = (
+            f"{reverse('settings')}?agreement={quote(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN)}#agreements"
+        )
+        self.assertEqual(resp["Location"], expected)
 
 
 class ElectionsDetailCandidateCardsTests(TestCase):

@@ -18,6 +18,8 @@ from django.shortcuts import redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
+
+from core.views_utils import _normalize_str, block_action_without_coc, has_signed_coc, settings_context
 from post_office.models import EmailTemplate
 
 from core import elections_eligibility, elections_services
@@ -2366,6 +2368,15 @@ def election_vote_submit(request, election_id: int):
     if not username:
         return JsonResponse({"ok": False, "error": "Authentication required."}, status=403)
 
+    if not has_signed_coc(username):
+        return JsonResponse(
+            {
+                "ok": False,
+                "error": f"You must sign the {settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN} before you can vote.",
+            },
+            status=403,
+        )
+
     if not allow_request(
         scope="elections.vote_submit",
         key_parts=[str(election.id), username],
@@ -2455,6 +2466,15 @@ def election_vote(request, election_id: int):
     username = str(request.session.get("_freeipa_username") or "").strip()
     if not username:
         username = str(request.user.get_username() or "").strip()
+
+    if username:
+        blocked = block_action_without_coc(
+            request,
+            username=username,
+            action_label="vote in elections",
+        )
+        if blocked is not None:
+            return blocked
 
     voter_votes: int | None = None
     if username:

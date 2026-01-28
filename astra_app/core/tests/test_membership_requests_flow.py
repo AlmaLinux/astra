@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from unittest.mock import patch
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 from django.conf import settings
 from django.test import TestCase, override_settings
@@ -95,6 +95,63 @@ class MembershipRequestsFlowTests(TestCase):
         self.assertIn("full_name", kwargs["context"])
         self.assertNotIn("displayname", kwargs["context"])
         self.assertEqual(kwargs["context"]["membership_type"], "Individual")
+
+    def test_membership_request_requires_signed_coc(self) -> None:
+        from core.backends import FreeIPAFASAgreement
+        from core.models import MembershipRequest, MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "acceptance_template": None,
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["alice@example.com"],
+                "fasstatusnote": ["US"],
+                "memberof_group": [],
+            },
+        )
+        self._login_as_freeipa_user("alice")
+
+        coc = FreeIPAFASAgreement(
+            settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN,
+            {
+                "cn": [settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN],
+                "ipaenabledflag": ["TRUE"],
+                "memberuser_user": [],
+            },
+        )
+
+        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+            with patch("core.views_utils.FreeIPAFASAgreement.get", autospec=True, return_value=coc):
+                resp = self.client.post(
+                    reverse("membership-request"),
+                    data={
+                        "membership_type": "individual",
+                        "q_contributions": "I contributed docs and CI improvements.",
+                    },
+                    follow=False,
+                )
+
+        self.assertEqual(resp.status_code, 302)
+        expected = (
+            f"{reverse('settings')}?agreement={quote(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN)}#agreements"
+        )
+        self.assertEqual(resp["Location"], expected)
+        self.assertEqual(MembershipRequest.objects.count(), 0)
 
     def test_membership_request_form_hides_membership_types_with_pending_request(self) -> None:
         from core.models import MembershipRequest, MembershipType

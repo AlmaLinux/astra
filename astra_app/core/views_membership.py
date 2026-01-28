@@ -56,7 +56,7 @@ from core.permissions import (
     has_any_membership_permission,
     json_permission_required_any,
 )
-from core.views_utils import _normalize_str, block_action_without_country_code
+from core.views_utils import _normalize_str, block_action_without_coc, block_action_without_country_code
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +181,14 @@ def membership_request(request: HttpRequest) -> HttpResponse:
     if fu is None:
         messages.error(request, "Unable to load your FreeIPA profile.")
         return redirect("user-profile", username=username)
+
+    blocked = block_action_without_coc(
+        request,
+        username=username,
+        action_label="request or renew memberships",
+    )
+    if blocked is not None:
+        return blocked
 
     blocked = block_action_without_country_code(
         request,

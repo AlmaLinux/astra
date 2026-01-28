@@ -4,6 +4,7 @@ import datetime
 import json
 from unittest.mock import patch
 
+from django.conf import settings
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -150,4 +151,56 @@ class ElectionBallotValidationTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 400)
+        self.assertEqual(Ballot.objects.filter(election=election).count(), 0)
+
+    def test_vote_submit_requires_signed_coc(self) -> None:
+        from core.backends import FreeIPAFASAgreement
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="CoC vote",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            quorum=0,
+            status=Election.Status.open,
+        )
+        c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
+
+        VotingCredential.objects.create(
+            election=election,
+            public_id="cred-1",
+            freeipa_username="voter1",
+            weight=1,
+        )
+
+        coc = FreeIPAFASAgreement(
+            settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN,
+            {
+                "cn": [settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN],
+                "ipaenabledflag": ["TRUE"],
+                "memberuser_user": [],
+            },
+        )
+
+        self._login_as_freeipa_user("voter1")
+        voter = FreeIPAUser(
+            "voter1",
+            {
+                "uid": ["voter1"],
+                "mail": [],
+                "memberof_group": [],
+                "memberofindirect_group": [],
+            },
+        )
+        with patch("core.backends.FreeIPAUser.get", autospec=True, return_value=voter):
+            with patch("core.views_utils.FreeIPAFASAgreement.get", autospec=True, return_value=coc):
+                resp = self.client.post(
+                    reverse("election-vote-submit", args=[election.id]),
+                    data=json.dumps({"credential_public_id": "cred-1", "ranking": [c1.id]}),
+                    content_type="application/json",
+                )
+
+        self.assertEqual(resp.status_code, 403)
         self.assertEqual(Ballot.objects.filter(election=election).count(), 0)

@@ -26,7 +26,7 @@ from core.permissions import (
     json_permission_required_any,
 )
 from core.user_labels import user_choice_from_freeipa
-from core.views_utils import _normalize_str
+from core.views_utils import _normalize_str, block_action_without_coc
 
 logger = logging.getLogger(__name__)
 
@@ -249,6 +249,14 @@ def organization_create(request: HttpRequest) -> HttpResponse:
     username = str(request.user.get_username() or "").strip()
     if not username:
         raise Http404
+
+    blocked = block_action_without_coc(
+        request,
+        username=username,
+        action_label="create an organization",
+    )
+    if blocked is not None:
+        return blocked
 
     can_select_representatives = request.user.has_perm(ASTRA_ADD_MEMBERSHIP)
 
@@ -482,6 +490,14 @@ def organization_sponsorship_extend(request: HttpRequest, organization_id: int) 
     organization = get_object_or_404(Organization, pk=organization_id)
     _require_representative(request, organization)
 
+    blocked = block_action_without_coc(
+        request,
+        username=str(request.user.get_username() or "").strip(),
+        action_label="request sponsorships",
+    )
+    if blocked is not None:
+        return blocked
+
     if organization.membership_level_id is None:
         messages.error(request, "No sponsorship level set to extend.")
         return redirect("organization-detail", organization_id=organization.pk)
@@ -564,6 +580,14 @@ class OrganizationSponsorshipRequestForm(forms.Form):
 def organization_sponsorship_manage(request: HttpRequest, organization_id: int) -> HttpResponse:
     organization = get_object_or_404(Organization, pk=organization_id)
     _require_representative(request, organization)
+
+    blocked = block_action_without_coc(
+        request,
+        username=str(request.user.get_username() or "").strip(),
+        action_label="request sponsorships",
+    )
+    if blocked is not None:
+        return blocked
 
     pending_membership_level_request = (
         MembershipRequest.objects.select_related("membership_type")

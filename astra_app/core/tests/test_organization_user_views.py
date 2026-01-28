@@ -5,6 +5,7 @@ from io import BytesIO
 from pathlib import Path
 from tempfile import mkdtemp
 from unittest.mock import patch
+from urllib.parse import quote
 
 from django.conf import settings
 from django.contrib.staticfiles import finders
@@ -68,6 +69,34 @@ class OrganizationUserViewsTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(resp["Location"], reverse("organizations"))
         self.assertFalse(Organization.objects.filter(name="Second Org").exists())
+
+    def test_organization_create_requires_signed_coc(self) -> None:
+        from core.backends import FreeIPAFASAgreement
+        from core.models import Organization
+
+        self._login_as_freeipa_user("alice")
+
+        coc = FreeIPAFASAgreement(
+            settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN,
+            {
+                "cn": [settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN],
+                "ipaenabledflag": ["TRUE"],
+                "memberuser_user": [],
+            },
+        )
+
+        payload = self._valid_org_payload(name="Blocked Org")
+        alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": []})
+        with patch("core.backends.FreeIPAUser.get", autospec=True, return_value=alice):
+            with patch("core.views_utils.FreeIPAFASAgreement.get", autospec=True, return_value=coc):
+                resp = self.client.post(reverse("organization-create"), data=payload, follow=False)
+
+        self.assertEqual(resp.status_code, 302)
+        expected = (
+            f"{reverse('settings')}?agreement={quote(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN)}#agreements"
+        )
+        self.assertEqual(resp["Location"], expected)
+        self.assertFalse(Organization.objects.filter(name="Blocked Org").exists())
 
     def test_committee_can_create_org_for_other_rep_even_if_already_rep(self) -> None:
         from core.models import Organization
@@ -869,6 +898,66 @@ class OrganizationUserViewsTests(TestCase):
             self.assertEqual(resp.status_code, 200)
             self.assertContains(resp, "Under review")
             self.assertContains(resp, "Annual dues: $20,000 USD")
+
+    def test_sponsorship_manage_requires_signed_coc(self) -> None:
+        from core.backends import FreeIPAFASAgreement
+        from core.models import MembershipRequest, MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "description": "Silver Sponsor Member",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(
+            name="Blocked Sponsorship",
+            business_contact_name="Business Person",
+            business_contact_email="contact@example.org",
+            pr_marketing_contact_name="PR Person",
+            pr_marketing_contact_email="pr@example.org",
+            technical_contact_name="Tech Person",
+            technical_contact_email="tech@example.org",
+            membership_level_id="silver",
+            website_logo="https://example.com/logo-options",
+            website="https://example.com/",
+            representative="bob",
+        )
+
+        self._login_as_freeipa_user("bob")
+
+        coc = FreeIPAFASAgreement(
+            settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN,
+            {
+                "cn": [settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN],
+                "ipaenabledflag": ["TRUE"],
+                "memberuser_user": [],
+            },
+        )
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        with patch("core.backends.FreeIPAUser.get", autospec=True, return_value=bob):
+            with patch("core.views_utils.FreeIPAFASAgreement.get", autospec=True, return_value=coc):
+                resp = self.client.post(
+                    reverse("organization-sponsorship-manage", args=[org.pk]),
+                    data={
+                        "membership_level": "silver",
+                        "additional_information": "Please renew.",
+                    },
+                    follow=False,
+                )
+
+        self.assertEqual(resp.status_code, 302)
+        expected = (
+            f"{reverse('settings')}?agreement={quote(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN)}#agreements"
+        )
+        self.assertEqual(resp["Location"], expected)
+        self.assertEqual(MembershipRequest.objects.count(), 0)
 
 
     def test_membership_admin_can_set_org_sponsorship_expiry_when_missing(self) -> None:
