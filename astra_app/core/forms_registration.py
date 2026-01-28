@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from django import forms
 
+from core.profanity import validate_no_profanity_or_hate_speech
 from core.views_utils import _normalize_str
 
 _USERNAME_RE = r"^[a-z0-9](?:[a-z0-9-]{3,30})[a-z0-9]$"  # length 5..32, no leading/trailing '-'
@@ -40,10 +41,36 @@ class RegistrationForm(forms.Form):
         username = _normalize_str(self.cleaned_data.get("username"))
         if username != username.lower():
             raise forms.ValidationError("Mixed case is not allowed; use lowercase.")
-        return username
+        return validate_no_profanity_or_hate_speech(username, field_label="Username")
 
     def clean_email(self) -> str:
-        return _normalize_str(self.cleaned_data.get("email")).lower()
+        email = _normalize_str(self.cleaned_data.get("email")).lower()
+        return validate_no_profanity_or_hate_speech(email, field_label="Email address")
+
+    def clean_first_name(self) -> str:
+        value = _normalize_str(self.cleaned_data.get("first_name"))
+        return validate_no_profanity_or_hate_speech(value, field_label="First name")
+
+    def clean_last_name(self) -> str:
+        value = _normalize_str(self.cleaned_data.get("last_name"))
+        return validate_no_profanity_or_hate_speech(value, field_label="Last name")
+
+    def clean(self) -> dict[str, object]:
+        cleaned_data = super().clean()
+        for field_name, field_label in (
+            ("username", "Username"),
+            ("email", "Email address"),
+        ):
+            raw_value = _normalize_str(self.data.get(field_name))
+            if not raw_value:
+                continue
+            try:
+                validate_no_profanity_or_hate_speech(raw_value, field_label=field_label)
+            except forms.ValidationError as exc:
+                if field_name in self.errors:
+                    del self.errors[field_name]
+                self.add_error(field_name, exc)
+        return cleaned_data
 
 
 class ResendRegistrationEmailForm(forms.Form):

@@ -1,0 +1,2 @@
+# Custom profanity list for ValX (one word per line; '#' for comments)
+мразь

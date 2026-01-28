@@ -44,6 +44,28 @@ class ProfileFormValidationTests(SimpleTestCase):
         self.assertFalse(form.is_valid())
         self.assertIn("country_code", form.errors)
 
+    def test_givenname_rejects_profanity(self):
+        form = ProfileForm(
+            data={
+                "givenname": "shit",
+                "sn": "User",
+                "country_code": "US",
+            }
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn("givenname", form.errors)
+
+    def test_sn_rejects_profanity(self):
+        form = ProfileForm(
+            data={
+                "givenname": "Alice",
+                "sn": "shit",
+                "country_code": "US",
+            }
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn("sn", form.errors)
+
     def test_github_username_strips_at_and_validates(self):
         form = ProfileForm(
             data={

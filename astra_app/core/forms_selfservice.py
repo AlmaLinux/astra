@@ -13,6 +13,7 @@ from django import forms
 
 from core.chatnicknames import normalize_chat_nicknames_text
 from core.country_codes import is_valid_country_alpha2, normalize_country_alpha2
+from core.profanity import validate_no_profanity_or_hate_speech
 from core.views_utils import _normalize_str
 
 # GitHub username rules (close enough for validation UX)
@@ -408,6 +409,14 @@ class ProfileForm(_StyledForm):
             raise forms.ValidationError("GitLab username is not valid")
         return value
 
+    def clean_givenname(self):
+        value = _normalize_str(self.cleaned_data.get("givenname"))
+        return validate_no_profanity_or_hate_speech(value, field_label="First name")
+
+    def clean_sn(self):
+        value = _normalize_str(self.cleaned_data.get("sn"))
+        return validate_no_profanity_or_hate_speech(value, field_label="Last name")
+
     def clean_country_code(self) -> str:
         value = normalize_country_alpha2(self.cleaned_data.get("country_code"))
         if not value:
@@ -421,9 +430,16 @@ class EmailsForm(_StyledForm):
     mail = forms.EmailField(label="E-mail Address", required=True)
     fasRHBZEmail = forms.EmailField(label="Red Hat Bugzilla Email", required=False, max_length=255)
 
+    def clean_mail(self):
+        value = _normalize_str(self.cleaned_data.get("mail")).lower()
+        return validate_no_profanity_or_hate_speech(value, field_label="Email address")
+
     def clean_fasRHBZEmail(self):
         # Matches freeipa-fas userfas.check_fasuser_attr and baseruserfas normalizer strip
-        return _normalize_str(self.cleaned_data.get("fasRHBZEmail"))
+        value = _normalize_str(self.cleaned_data.get("fasRHBZEmail")).lower()
+        if not value:
+            return ""
+        return validate_no_profanity_or_hate_speech(value, field_label="Bugzilla email")
 
 
 class KeysForm(_StyledForm):

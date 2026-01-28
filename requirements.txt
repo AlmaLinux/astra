@@ -15,4 +15,6 @@ django-avatar
 pyotp
 qrcode
 pycountry
+scikit-learn>=1.3.0
+valx
 ruff
