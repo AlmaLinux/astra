@@ -13,6 +13,7 @@ from django.urls import reverse
 from core import views_membership, views_settings
 from core.membership_notes import CUSTOS
 from core.models import MembershipRequest, MembershipType, Note
+from core.country_codes import country_code_status_from_user_data
 
 
 class MembershipCountryRequirementsTests(TestCase):
@@ -88,6 +89,12 @@ class MembershipCountryRequirementsTests(TestCase):
         self.assertEqual(response["Location"], reverse("settings") + "#profile")
         msgs = [m.message for m in get_messages(request)]
         self.assertTrue(any("country" in m.lower() for m in msgs))
+
+    @override_settings(SELF_SERVICE_ADDRESS_COUNTRY_ATTR="c")
+    def test_country_code_status_accepts_case_insensitive_attr(self) -> None:
+        status = country_code_status_from_user_data({"C": ["US"]})
+        self.assertTrue(status.is_valid)
+        self.assertEqual(status.code, "US")
 
     @override_settings(MEMBERSHIP_EMBARGOED_COUNTRY_CODES=["RU", "IR"])
     def test_membership_request_does_not_warn_user_when_country_embargoed(self) -> None:

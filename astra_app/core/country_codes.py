@@ -42,6 +42,10 @@ def country_code_status_from_user_data(user_data: dict | None) -> CountryCodeSta
 
     attr = country_attr_name()
     raw = user_data.get(attr)
+    if raw is None:
+        raw = user_data.get(attr.lower())
+    if raw is None:
+        raw = user_data.get(attr.upper())
     code = normalize_country_alpha2(raw)
     if not code:
         return CountryCodeStatus(code=None, is_valid=False)
