@@ -455,6 +455,63 @@ class SelfServiceSettingsPagesTests(TestCase):
         FREEIPA_VERIFY_SSL=False,
         FREEIPA_SERVICE_USER="svc",
         FREEIPA_SERVICE_PASSWORD="pw",
+        SELF_SERVICE_ADDRESS_COUNTRY_ATTR="st",
+    )
+    def test_settings_profile_country_uses_direct_attr_update_for_st(self):
+        factory = RequestFactory()
+
+        fake_user = SimpleNamespace(
+            username="alice",
+            email="a@example.org",
+            is_authenticated=True,
+            _user_data={
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "cn": ["Alice User"],
+                "st": ["CH"],
+            },
+        )
+
+        request = factory.post(
+            "/settings/",
+            data={
+                "tab": "profile",
+                "givenname": "Alice",
+                "sn": "User",
+                "country_code": "US",
+                "fasPronoun": "",
+                "fasLocale": "",
+                "fasTimezone": "",
+                "fasWebsiteUrl": "",
+                "fasRssUrl": "",
+                "fasIRCNick": "",
+                "fasGitHubUsername": "",
+                "fasGitLabUsername": "",
+                "fasIsPrivate": "",
+            },
+        )
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            with patch("core.views_settings._update_user_attrs", autospec=True) as mocked_update:
+                mocked_update.return_value = ([], True)
+                response = views_settings.settings_root(request)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("settings") + "#profile")
+
+        kwargs = mocked_update.call_args.kwargs
+        direct_updates = kwargs.get("direct_updates", {})
+        setattrs = kwargs.get("setattrs", [])
+        self.assertEqual(direct_updates.get("o_st"), "US")
+        self.assertNotIn("st=US", setattrs)
+
+    @override_settings(
+        FREEIPA_HOST="ipa.test",
+        FREEIPA_VERIFY_SSL=False,
+        FREEIPA_SERVICE_USER="svc",
+        FREEIPA_SERVICE_PASSWORD="pw",
         SELF_SERVICE_ADDRESS_COUNTRY_ATTR="fasstatusnote",
     )
     def test_settings_save_all_profile_accepts_bcp47_locale_from_freeipa(self):

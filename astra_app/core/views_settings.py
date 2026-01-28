@@ -197,6 +197,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
     data = fu._user_data
 
     country_attr = str(settings.SELF_SERVICE_ADDRESS_COUNTRY_ATTR).strip() or "c"
+    country_attr_lower = country_attr.lower()
 
     # --- Profile ---
     # Use the FreeIPA attribute data as the source of truth. This avoids relying on
@@ -674,14 +675,24 @@ def settings_root(request: HttpRequest) -> HttpResponse:
                 current_value=profile_initial.get("fasGitLabUsername"),
                 new_value=profile_form.cleaned_data["fasGitLabUsername"],
             )
-            _add_change_setattr(
-                setattrs=profile_setattrs,
-                delattrs=profile_delattrs,
-                attr=country_attr,
-                current_value=profile_initial.get("country_code"),
-                new_value=profile_form.cleaned_data["country_code"],
-                transform=str.upper,
-            )
+            if country_attr_lower in {"c", "st", "l", "postalcode"}:
+                _add_change(
+                    updates=profile_direct_updates,
+                    delattrs=profile_delattrs,
+                    attr=country_attr_lower,
+                    current_value=profile_initial.get("country_code"),
+                    new_value=profile_form.cleaned_data["country_code"],
+                    transform=str.upper,
+                )
+            else:
+                _add_change_setattr(
+                    setattrs=profile_setattrs,
+                    delattrs=profile_delattrs,
+                    attr=country_attr,
+                    current_value=profile_initial.get("country_code"),
+                    new_value=profile_form.cleaned_data["country_code"],
+                    transform=str.upper,
+                )
 
             current_private = profile_initial["fasIsPrivate"]
             new_private = profile_form.cleaned_data["fasIsPrivate"]
@@ -973,14 +984,24 @@ def settings_root(request: HttpRequest) -> HttpResponse:
             current_value=profile_initial.get("fasGitLabUsername"),
             new_value=profile_form.cleaned_data["fasGitLabUsername"],
         )
-        _add_change_setattr(
-            setattrs=setattrs,
-            delattrs=delattrs,
-            attr=country_attr,
-            current_value=profile_initial.get("country_code"),
-            new_value=profile_form.cleaned_data["country_code"],
-            transform=str.upper,
-        )
+        if country_attr_lower in {"c", "st", "l", "postalcode"}:
+            _add_change(
+                updates=direct_updates,
+                delattrs=delattrs,
+                attr=country_attr_lower,
+                current_value=profile_initial.get("country_code"),
+                new_value=profile_form.cleaned_data["country_code"],
+                transform=str.upper,
+            )
+        else:
+            _add_change_setattr(
+                setattrs=setattrs,
+                delattrs=delattrs,
+                attr=country_attr,
+                current_value=profile_initial.get("country_code"),
+                new_value=profile_form.cleaned_data["country_code"],
+                transform=str.upper,
+            )
 
         current_private = profile_initial["fasIsPrivate"]
         new_private = profile_form.cleaned_data["fasIsPrivate"]
