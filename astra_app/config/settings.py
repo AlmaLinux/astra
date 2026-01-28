@@ -441,6 +441,7 @@ AWS_SES_REGION_ENDPOINT = os.environ.get("AWS_SES_REGION_ENDPOINT", f"email.{AWS
 # Signature verification is recommended for production SNS webhooks. For local
 # dev, allowing unsigned test payloads is convenient.
 AWS_SES_VERIFY_EVENT_SIGNATURES = _env_bool("AWS_SES_VERIFY_EVENT_SIGNATURES", default=not DEBUG)
+USE_SES_V2 = True
 
 # Restrict certificate download domains for SNS signature verification.
 # Prefer the full SNS domain for your region.
