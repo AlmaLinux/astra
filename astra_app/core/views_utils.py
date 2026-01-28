@@ -108,7 +108,13 @@ def _data_get(data: dict[str, Any], attr: str, default: Any = None) -> Any:
     # FreeIPA/JSON results typically use lower-case keys, but LDAP attr names are case-insensitive.
     if attr in data:
         return data.get(attr, default)
-    return data.get(attr.lower(), default)
+    lowered = attr.lower()
+    if lowered in data:
+        return data.get(lowered, default)
+    uppered = attr.upper()
+    if uppered in data:
+        return data.get(uppered, default)
+    return default
 
 
 def _first(data: dict[str, Any], key: str, default: Any = None) -> Any:

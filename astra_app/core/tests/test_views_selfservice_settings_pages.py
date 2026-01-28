@@ -99,6 +99,42 @@ class SelfServiceSettingsPagesTests(TestCase):
         form = ctx["form"]
         self.assertTrue(form.initial.get("fasIsPrivate"))
 
+    @override_settings(SELF_SERVICE_ADDRESS_COUNTRY_ATTR="st")
+    def test_settings_profile_get_accepts_uppercase_country_attr(self):
+        factory = RequestFactory()
+
+        fake_user = SimpleNamespace(
+            username="alice",
+            email="a@example.org",
+            is_authenticated=True,
+            _user_data={
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "cn": ["Alice User"],
+                "ST": ["US"],
+            },
+        )
+
+        request = factory.get("/settings/")
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        captured: dict[str, object] = {}
+
+        def fake_render(_request, template, context):
+            captured["template"] = template
+            captured["context"] = context
+            return HttpResponse("ok")
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            with patch("core.views_settings.render", autospec=True, side_effect=fake_render):
+                response = views_settings.settings_root(request)
+
+        self.assertEqual(response.status_code, 200)
+        ctx = captured["context"]
+        form = ctx["profile_form"]
+        self.assertEqual(form.initial.get("country_code"), "US")
+
     @override_settings(
         FREEIPA_HOST="ipa.test",
         FREEIPA_VERIFY_SSL=False,
