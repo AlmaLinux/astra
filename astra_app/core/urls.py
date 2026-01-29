@@ -37,6 +37,7 @@ urlpatterns = [
         name="organization-representatives-search",
     ),
     path("organization/<int:organization_id>/", views_organizations.organization_detail, name="organization-detail"),
+    path("organization/<int:organization_id>/delete/", views_organizations.organization_delete, name="organization-delete"),
     path(
         "organization/<int:organization_id>/sponsorship/extend/",
         views_organizations.organization_sponsorship_extend,

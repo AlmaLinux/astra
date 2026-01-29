@@ -76,6 +76,17 @@ def _can_edit_organization(request: HttpRequest, organization: Organization) -> 
     return username == organization.representative
 
 
+def _can_delete_organization(request: HttpRequest, organization: Organization) -> bool:
+    if request.user.has_perm(ASTRA_DELETE_MEMBERSHIP):
+        return True
+
+    username = str(request.user.get_username() or "").strip()
+    if not username:
+        return False
+
+    return username == organization.representative
+
+
 def _require_organization_edit_access(request: HttpRequest, organization: Organization) -> None:
     if not _can_edit_organization(request, organization):
         raise Http404
@@ -460,6 +471,7 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
                 sponsorship_request_id = int(approved_req.pk)
 
     can_edit_organization = _can_edit_organization(request, organization)
+    can_delete_organization = _can_delete_organization(request, organization)
 
     membership_level_badge_text = ""
     if organization.membership_level_id:
@@ -479,8 +491,47 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
             "is_representative": is_representative,
             "can_edit_organization": can_edit_organization,
             "membership_level_badge_text": membership_level_badge_text,
+            "can_delete_organization": can_delete_organization,
         },
     )
+
+
+def organization_delete(request: HttpRequest, organization_id: int) -> HttpResponse:
+    if request.method != "POST":
+        raise Http404("Not found")
+
+    organization = get_object_or_404(Organization, pk=organization_id)
+    if not _can_delete_organization(request, organization):
+        raise Http404
+
+    membership_type = organization.membership_level
+    if membership_type is not None:
+        group_cn = str(membership_type.group_cn or "").strip()
+        rep_username = str(organization.representative or "").strip()
+        if group_cn and rep_username:
+            rep = FreeIPAUser.get(rep_username)
+            if rep is not None and group_cn in rep.groups_list:
+                try:
+                    rep.remove_from_group(group_name=group_cn)
+                except Exception:
+                    logger.exception(
+                        "organization_delete: failed to remove representative from group org_id=%s rep=%r group_cn=%r",
+                        organization.pk,
+                        rep_username,
+                        group_cn,
+                    )
+                    messages.error(request, "Failed to remove the representative from the FreeIPA group.")
+                    return redirect("organization-detail", organization_id=organization.pk)
+
+        MembershipLog.create_for_org_termination(
+            actor_username=str(request.user.get_username() or "").strip(),
+            target_organization=organization,
+            membership_type=membership_type,
+        )
+
+    organization.delete()
+    messages.success(request, "Organization deleted.")
+    return redirect("organizations")
 
 
 def organization_sponsorship_extend(request: HttpRequest, organization_id: int) -> HttpResponse:

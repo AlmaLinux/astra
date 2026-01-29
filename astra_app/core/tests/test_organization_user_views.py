@@ -17,7 +17,7 @@ from django.utils import timezone
 
 from core.backends import FreeIPAUser
 from core.models import FreeIPAPermissionGrant
-from core.permissions import ASTRA_ADD_MEMBERSHIP, ASTRA_CHANGE_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP
+from core.permissions import ASTRA_ADD_MEMBERSHIP, ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP
 
 
 class OrganizationUserViewsTests(TestCase):
@@ -1536,6 +1536,90 @@ class OrganizationUserViewsTests(TestCase):
                 membership_type_id="gold",
             ).exists()
         )
+
+    def test_representative_can_delete_org_and_terminates_sponsorship(self) -> None:
+        from core.models import MembershipLog, MembershipType, Organization, OrganizationSponsorship
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "isOrganization": True,
+                "isIndividual": False,
+                "sort_order": 2,
+                "enabled": True,
+                "group_cn": "sponsor-group",
+            },
+        )
+
+        org = Organization.objects.create(
+            name="AlmaLinux",
+            business_contact_name="Business Person",
+            business_contact_email="contact@almalinux.org",
+            pr_marketing_contact_name="PR Person",
+            pr_marketing_contact_email="pr@almalinux.org",
+            technical_contact_name="Tech Person",
+            technical_contact_email="tech@almalinux.org",
+            membership_level_id="gold",
+            website="https://almalinux.org/",
+            representative="bob",
+        )
+
+        OrganizationSponsorship.objects.create(
+            organization=org,
+            membership_type_id="gold",
+            expires_at=timezone.now() + datetime.timedelta(days=90),
+        )
+
+        bob = FreeIPAUser(
+            "bob",
+            {
+                "uid": ["bob"],
+                "mail": ["bob@example.com"],
+                "memberof_group": ["sponsor-group"],
+            },
+        )
+        self._login_as_freeipa_user("bob")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_from_group,
+        ):
+            resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+            self.assertEqual(resp.status_code, 200)
+            self.assertContains(resp, 'data-target="#organization-delete-modal"')
+            self.assertContains(resp, 'id="organization-delete-modal"')
+
+            resp = self.client.post(reverse("organization-delete", args=[org.pk]), follow=False)
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], reverse("organizations"))
+        self.assertFalse(Organization.objects.filter(pk=org.pk).exists())
+        self.assertTrue(
+            MembershipLog.objects.filter(
+                action=MembershipLog.Action.terminated,
+                target_organization_code=str(org.pk),
+                membership_type_id="gold",
+            ).exists()
+        )
+        remove_from_group.assert_called_once_with(bob, group_name="sponsor-group")
+
+    def test_non_representative_cannot_delete_org(self) -> None:
+        from core.models import Organization
+
+        org = Organization.objects.create(
+            name="AlmaLinux",
+            representative="bob",
+        )
+
+        alice = FreeIPAUser("alice", {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []})
+        self._login_as_freeipa_user("alice")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+            resp = self.client.post(reverse("organization-delete", args=[org.pk]), follow=False)
+
+        self.assertEqual(resp.status_code, 404)
+        self.assertTrue(Organization.objects.filter(pk=org.pk).exists())
 
     def test_sponsorship_uninterrupted_extension_preserves_created_at(self) -> None:
         import datetime

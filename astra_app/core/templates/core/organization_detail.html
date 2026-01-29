@@ -15,11 +15,15 @@
             <i class="fas fa-edit mr-1"></i> Edit details
           </a>
         {% endif %}
-        {% if is_representative %}
-          <a class="btn btn-sm btn-outline-primary" href="{% url 'organization-sponsorship-manage' organization.pk %}">
-            <i class="fas fa-hand-holding-heart mr-1"></i>
-            {% if organization.membership_level %}Change sponsorship tier{% else %}Request sponsorship{% endif %}
-          </a>
+        {% if can_delete_organization %}
+          <button
+            type="button"
+            class="btn btn-sm btn-outline-danger"
+            data-toggle="modal"
+            data-target="#organization-delete-modal"
+          >
+            <i class="fas fa-trash mr-1"></i> Delete organization
+          </button>
         {% endif %}
       </div>
     {% endif %}
@@ -27,6 +31,9 @@
 {% endblock %}
 
 {% block content %}
+  {% if can_delete_organization %}
+    {% url 'organization-delete' organization.pk as organization_delete_url %}
+  {% endif %}
   <div class="organization-page">
     <div class="card organization-hero">
       <div class="card-body">
@@ -392,4 +399,8 @@
     </div>
   </div>
   </div>
+
+  {% if can_delete_organization %}
+    {% include 'core/_modal_confirm.html' with modal_id='organization-delete-modal' title='Delete organization?' body_prefix='Delete organization ' body_emphasis=organization.name body_suffix='? This will terminate the sponsorship and remove the representative from the sponsor group. This cannot be undone.' action_url=organization_delete_url submit_label='Delete organization' submit_class='btn-danger' %}
+  {% endif %}
 {% endblock %}
