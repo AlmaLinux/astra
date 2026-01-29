@@ -190,6 +190,7 @@ def _profile_context_for_user(
         memberships.append(
             {
                 "membership_type": membership.membership_type,
+                "created_at": membership.created_at,
                 "expires_at": expires_at,
                 "is_expiring_soon": is_expiring_soon,
                 "extend_url": f"{membership_request_url}?membership_type={membership.membership_type.code}",

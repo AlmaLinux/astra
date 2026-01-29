@@ -210,6 +210,13 @@
           <li class="list-group-item d-flex justify-content-between align-items-center">
             <div>
               <div class="font-weight-bold">{{ m.membership_type.name }}</div>
+              <div class="text-muted small">
+                {% with tz=timezone_name|default:"UTC" %}
+                  {% timezone tz %}
+                    Member since {{ m.created_at|date:"F Y" }}
+                  {% endtimezone %}
+                {% endwith %}
+              </div>
               {% if is_self or membership_can_view %}
                 {% if m.is_expiring_soon %}
                   <div class="text-danger small">
