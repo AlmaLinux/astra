@@ -282,7 +282,7 @@ EMAIL_CONFIG = _parse_email_url(_email_url_raw) if _email_url_raw else None
 if EMAIL_CONFIG:
     globals().update(EMAIL_CONFIG)
 
-DEFAULT_FROM_EMAIL = _env_str("DEFAULT_FROM_EMAIL", default="webmaster@localhost") or "webmaster@localhost"
+DEFAULT_FROM_EMAIL = _env_str("DEFAULT_FROM_EMAIL", default="AlmaLinux Accounts <astra@almalinux.org>")
 
 # Public base URL used for absolute links in email (cron jobs don't have a request
 # context). Example: https://accounts.almalinux.org
