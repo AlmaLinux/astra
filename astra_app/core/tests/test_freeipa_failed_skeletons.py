@@ -18,3 +18,12 @@ class FreeIPAFailedSkeletonTests(SimpleTestCase):
         res = {"failed": {"member": {"group": ["someerror"]}}}
         with self.assertRaises(FreeIPAOperationFailed):
             _raise_if_freeipa_failed(res, action="fasagreement_add_group", subject="agreement=a group=g")
+
+    def test_fasagreement_add_user_already_member_is_not_error(self):
+        res = {"failed": {"memberuser": {"user": ["This entry is already a member"]}}}
+        _raise_if_freeipa_failed(res, action="fasagreement_add_user", subject="agreement=a user=u")
+
+    def test_fasagreement_add_user_unexpected_message_is_error(self):
+        res = {"failed": {"memberuser": {"user": ["someerror"]}}}
+        with self.assertRaises(FreeIPAOperationFailed):
+            _raise_if_freeipa_failed(res, action="fasagreement_add_user", subject="agreement=a user=u")

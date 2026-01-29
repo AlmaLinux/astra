@@ -175,13 +175,42 @@ def _raise_if_freeipa_failed(result: object, *, action: str, subject: str) -> No
         "fasagreement_add_user",
         "fasagreement_remove_user",
     } and isinstance(failed, dict):
+        def _is_benign_agreement_member_message(value: object, *, is_add: bool) -> bool:
+            # Treat idempotent membership operations as success:
+            # - add: "This entry is already a member"
+            # - remove: "This entry is not a member"
+            text = str(value or "").strip().lower()
+            if not text:
+                return True
+            if is_add:
+                return "already" in text and "member" in text
+            return "not" in text and "member" in text
+
+        def _clean_member_bucket(value: object, *, is_add: bool) -> object:
+            if isinstance(value, list) and value:
+                if all(_is_benign_agreement_member_message(v, is_add=is_add) for v in value):
+                    return []
+            return value
+
         buckets: list[object] = []
         member = failed.get("member")
         if isinstance(member, dict):
-            buckets.extend([member.get("group"), member.get("user")])
+            member_user = member.get("user")
+            if action in {"fasagreement_add_user", "fasagreement_remove_user"}:
+                member_user = _clean_member_bucket(
+                    member_user,
+                    is_add=(action == "fasagreement_add_user"),
+                )
+            buckets.extend([member.get("group"), member_user])
         memberuser = failed.get("memberuser")
         if isinstance(memberuser, dict):
-            buckets.extend([memberuser.get("user")])
+            memberuser_user = memberuser.get("user")
+            if action in {"fasagreement_add_user", "fasagreement_remove_user"}:
+                memberuser_user = _clean_member_bucket(
+                    memberuser_user,
+                    is_add=(action == "fasagreement_add_user"),
+                )
+            buckets.extend([memberuser_user])
 
         if buckets and not any(_has_truthy_failure(b) for b in buckets):
             return
