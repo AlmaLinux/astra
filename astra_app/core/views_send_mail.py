@@ -120,6 +120,7 @@ def _extra_context_from_query(query: QueryDict) -> dict[str, str]:
         "type",
         "to",
         "cc",
+        "reply_to",
         "action_status",
     }
 
@@ -403,6 +404,12 @@ class SendMailForm(forms.Form):
         required=False,
         widget=forms.TextInput(attrs={"class": "form-control", "placeholder": "bcc1@example.com, bcc2@example.com"}),
     )
+    reply_to = forms.CharField(
+        required=False,
+        widget=forms.TextInput(
+            attrs={"class": "form-control", "placeholder": "replies@example.com, support@example.com"}
+        ),
+    )
 
     email_template_id = forms.IntegerField(required=False)
     subject = forms.CharField(required=False, widget=forms.TextInput(attrs={"class": "form-control"}))
@@ -437,6 +444,12 @@ class SendMailForm(forms.Form):
             return _parse_email_list(str(self.cleaned_data.get("bcc") or ""))
         except Exception as e:
             raise forms.ValidationError(f"Invalid BCC address list: {e}") from e
+
+    def clean_reply_to(self) -> list[str]:
+        try:
+            return _parse_email_list(str(self.cleaned_data.get("reply_to") or ""))
+        except Exception as e:
+            raise forms.ValidationError(f"Invalid Reply-To address list: {e}") from e
 
     def clean_manual_to(self) -> list[str]:
         try:
@@ -588,6 +601,10 @@ def send_mail(request: HttpRequest) -> HttpResponse:
         if cc_raw:
             initial["cc"] = cc_raw
 
+        reply_to_raw = str(request.GET.get("reply_to") or "").strip()
+        if reply_to_raw:
+            initial["reply_to"] = reply_to_raw
+
         if extra_context:
             initial["extra_context_json"] = json.dumps(extra_context)
 
@@ -602,6 +619,7 @@ def send_mail(request: HttpRequest) -> HttpResponse:
 
             cc = form.cleaned_data.get("cc") or []
             bcc = form.cleaned_data.get("bcc") or []
+            reply_to = form.cleaned_data.get("reply_to") or []
 
             posted_extra_context = form.cleaned_data.get("extra_context_json") or {}
             posted_extra_context = {**posted_extra_context, **system_context}
@@ -722,6 +740,7 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                                     [to_email],
                                     cc=cc,
                                     bcc=bcc,
+                                    reply_to=reply_to,
                                 )
                                 if rendered_html.strip():
                                     email_message.attach_alternative(rendered_html, "text/html")
@@ -777,6 +796,7 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                     "manual_to": ", ".join(manual_to),
                     "cc": ", ".join(cc),
                     "bcc": ", ".join(bcc),
+                    "reply_to": ", ".join(reply_to),
                     "email_template_id": selected_template.pk if selected_template else selected_template_id,
                     "subject": subject,
                     "html_content": html_content,

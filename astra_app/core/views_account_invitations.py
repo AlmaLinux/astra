@@ -24,7 +24,7 @@ from core.account_invitations import (
     normalize_invitation_email,
     parse_invitation_csv,
 )
-from core.email_context import system_email_context
+from core.email_context import membership_committee_email_context, system_email_context
 from core.models import AccountInvitation, AccountInvitationSend
 from core.permissions import ASTRA_ADD_MEMBERSHIP
 from core.rate_limit import allow_request
@@ -162,7 +162,9 @@ def _resend_invitation(
                 **system_email_context(),
                 "register_url": _invitation_register_url(token=invitation_token),
                 "login_url": _invitation_login_url(token=invitation_token),
+                **membership_committee_email_context(),
             },
+            reply_to=[settings.MEMBERSHIP_COMMITTEE_EMAIL],
         )
     except Exception:
         logger.exception("Failed to resend account invitation")
@@ -438,7 +440,9 @@ def account_invitations_send(request: HttpRequest) -> HttpResponse:
                     **system_email_context(),
                     "register_url": _invitation_register_url(token=invitation_token),
                     "login_url": _invitation_login_url(token=invitation_token),
+                    **membership_committee_email_context(),
                 },
+                reply_to=[settings.MEMBERSHIP_COMMITTEE_EMAIL],
             )
         except Exception:
             logger.exception("Failed to queue account invitation email")

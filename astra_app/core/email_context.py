@@ -95,6 +95,18 @@ def organization_sponsor_email_context(*, organization: Organization) -> dict[st
     return organization_email_context_from_organization(organization=organization) | representative_context
 
 
+def membership_committee_email_context() -> dict[str, str]:
+    return {
+        "membership_committee_email": str(settings.MEMBERSHIP_COMMITTEE_EMAIL or "").strip(),
+    }
+
+
+def election_committee_email_context() -> dict[str, str]:
+    return {
+        "election_committee_email": str(settings.ELECTION_COMMITTEE_EMAIL or "").strip(),
+    }
+
+
 def _absolute_url(path: str) -> str:
     base = str(settings.PUBLIC_BASE_URL or "").strip().rstrip("/")
     normalized = str(path or "").strip()

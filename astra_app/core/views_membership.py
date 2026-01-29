@@ -20,7 +20,11 @@ from django.utils.http import url_has_allowed_host_and_scheme
 
 from core.backends import FreeIPAUser
 from core.country_codes import country_code_status_from_user_data, embargoed_country_codes_from_settings
-from core.email_context import freeform_message_email_context, organization_sponsor_email_context
+from core.email_context import (
+    freeform_message_email_context,
+    membership_committee_email_context,
+    organization_sponsor_email_context,
+)
 from core.forms_membership import (
     MembershipRejectForm,
     MembershipRequestForm,
@@ -76,6 +80,7 @@ def _send_mail_url(
     template_name: str,
     extra_context: dict[str, str],
     action_status: str = "",
+    reply_to: str | None = None,
 ) -> str:
     query_params = {
         "type": to_type,
@@ -83,6 +88,9 @@ def _send_mail_url(
         "template": template_name,
         **extra_context,
     }
+    reply_to_value = str(reply_to or "").strip()
+    if reply_to_value:
+        query_params["reply_to"] = reply_to_value
     if action_status:
         query_params["action_status"] = action_status
     send_mail_url = reverse("send-mail")
@@ -134,6 +142,7 @@ def _custom_email_redirect(
     to_type, to = recipient
     merged_context = dict(extra_context)
     merged_context.setdefault("membership_request_id", str(membership_request.pk))
+    merged_context.update(membership_committee_email_context())
     return redirect(
         _send_mail_url(
             to_type=to_type,
@@ -141,6 +150,7 @@ def _custom_email_redirect(
             template_name=template_name,
             extra_context=merged_context,
             action_status=action_status,
+            reply_to=settings.MEMBERSHIP_COMMITTEE_EMAIL,
         )
     )
 
@@ -613,6 +623,7 @@ def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
                 extra_context={
                     "membership_request_id": str(req.pk),
                 },
+                reply_to=settings.MEMBERSHIP_COMMITTEE_EMAIL,
             )
 
     target_user = None

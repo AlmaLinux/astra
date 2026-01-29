@@ -203,6 +203,7 @@ class AccountInvitationViewsTests(TestCase):
                 reverse("account-invitations-send"),
                 data={
                     "confirm": "1",
+                    "email_template": "account-invite",
                 },
             )
 
@@ -219,6 +220,8 @@ class AccountInvitationViewsTests(TestCase):
         self.assertIn(f"invite={encoded_token}", kwargs["context"]["register_url"])
         self.assertIn("login_url", kwargs["context"])
         self.assertIn(f"invite={encoded_token}", kwargs["context"]["login_url"])
+        self.assertEqual(kwargs["context"].get("membership_committee_email"), settings.MEMBERSHIP_COMMITTEE_EMAIL)
+        self.assertEqual(kwargs.get("reply_to"), [settings.MEMBERSHIP_COMMITTEE_EMAIL])
 
     @override_settings(ACCOUNT_INVITATION_EMAIL_TEMPLATE_NAMES=["account-invite", "account-invite-alt"])
     def test_account_invitations_allows_alternate_template_and_stores(self) -> None:
@@ -395,7 +398,7 @@ class AccountInvitationViewsTests(TestCase):
         with (
             patch("core.backends.FreeIPAUser.get", return_value=self._committee_user()),
             patch("core.views_account_invitations.find_account_invitation_matches", return_value=[]),
-            patch("core.views_account_invitations.queue_templated_email", return_value=queued_email),
+            patch("core.views_account_invitations.queue_templated_email", return_value=queued_email) as queue_mock,
         ):
             resend_resp = self.client.post(reverse("account-invitation-resend", args=[invitation.pk]))
             self.assertEqual(resend_resp.status_code, 302)
@@ -407,6 +410,9 @@ class AccountInvitationViewsTests(TestCase):
         self.assertIsNotNone(invitation.dismissed_at)
         self.assertEqual(invitation.send_count, 1)
         self.assertTrue(AccountInvitationSend.objects.filter(invitation=invitation).exists())
+        _args, kwargs = queue_mock.call_args
+        self.assertEqual(kwargs["context"].get("membership_committee_email"), settings.MEMBERSHIP_COMMITTEE_EMAIL)
+        self.assertEqual(kwargs.get("reply_to"), [settings.MEMBERSHIP_COMMITTEE_EMAIL])
 
     def test_account_invitations_bulk_resend(self) -> None:
         self._login_as_freeipa_user("committee")

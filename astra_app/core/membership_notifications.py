@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from django.conf import settings
 from django.utils import timezone
 
-from core.email_context import user_email_context
+from core.email_context import membership_committee_email_context, user_email_context
 from core.models import MembershipType
 from core.templated_email import queue_templated_email
 
@@ -82,12 +82,14 @@ def send_membership_notification(
         template_name=template_name,
         context={
             **base_ctx,
+            **membership_committee_email_context(),
             "membership_type": membership_type.name,
             "membership_type_code": membership_type.code,
             "extend_url": membership_extend_url(membership_type_code=membership_type.code, base_url=base_url),
             "expires_at": _format_expires_at(expires_at=expires_at, tz_name=tz_name),
             "days": days,
         },
+        reply_to=[settings.MEMBERSHIP_COMMITTEE_EMAIL],
     )
 
     return True

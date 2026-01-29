@@ -8,6 +8,7 @@ from django.utils import timezone
 from core.backends import FreeIPAGroup, FreeIPAUser
 from core.models import FreeIPAPermissionGrant, MembershipRequest
 from core.permissions import ASTRA_ADD_MEMBERSHIP
+from core.email_context import membership_committee_email_context
 from core.templated_email import queue_templated_email
 
 
@@ -90,9 +91,11 @@ class Command(BaseCommand):
             sender=settings.DEFAULT_FROM_EMAIL,
             template_name=settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME,
             context={
+                **membership_committee_email_context(),
                 "pending_count": pending_count,
                 "requests_url": _membership_requests_url(base_url=settings.PUBLIC_BASE_URL),
             },
+            reply_to=[settings.MEMBERSHIP_COMMITTEE_EMAIL],
         )
 
         self.stdout.write(f"Queued 1 email to {len(recipients)} recipient(s).")

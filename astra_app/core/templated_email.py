@@ -258,6 +258,7 @@ def queue_templated_email(
     context: Mapping[str, object],
     cc: list[str] | None = None,
     bcc: list[str] | None = None,
+    reply_to: list[str] | None = None,
     strict_inline_images: bool = False,
 ) -> Email:
     """Queue an EmailTemplate with inline_image support and storage-backed images.
@@ -324,6 +325,10 @@ def queue_templated_email(
                 "headers": headers,
             }
 
+        headers: dict[str, str] | None = None
+        if reply_to:
+            headers = {"Reply-To": ", ".join(reply_to)}
+
         email = post_office.mail.send(
             recipients=recipients,
             sender=sender,
@@ -334,6 +339,7 @@ def queue_templated_email(
             render_on_delivery=False,
             cc=cc,
             bcc=bcc,
+            headers=headers,
         )
 
         # Preserve linkage to the EmailTemplate and original context so the admin UI

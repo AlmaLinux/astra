@@ -381,6 +381,9 @@ ACCOUNT_INVITATION_REFRESH_WINDOW_SECONDS = _env_int(
     default=60 * 10,
 )
 
+MEMBERSHIP_COMMITTEE_EMAIL = _env_str("MEMBERSHIP_COMMITTEE_EMAIL",
+    default="membership@almalinux.org") or "membership@almalinux.org"
+
 MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME = _env_str(
     "MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME",
     default="membership-committee-pending-requests",
@@ -400,6 +403,9 @@ PASSWORD_RESET_SUCCESS_EMAIL_TEMPLATE_NAME = _env_str(
     "PASSWORD_RESET_SUCCESS_EMAIL_TEMPLATE_NAME",
     default="password-reset-success",
 ) or "password-reset-success"
+
+ELECTION_COMMITTEE_EMAIL = _env_str("ELECTION_COMMITTEE_EMAIL",
+    default="elections@almalinux.org") or "elections@almalinux.org"
 
 ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME = _env_str(
     "ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME",

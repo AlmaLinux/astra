@@ -15,6 +15,7 @@ from core.country_codes import (
 )
 from core.models import FreeIPAPermissionGrant, Membership
 from core.permissions import ASTRA_ADD_MEMBERSHIP
+from core.email_context import membership_committee_email_context
 from core.templated_email import queue_templated_email
 
 logger = logging.getLogger(__name__)
@@ -135,9 +136,11 @@ class Command(BaseCommand):
             sender=settings.DEFAULT_FROM_EMAIL,
             template_name=settings.MEMBERSHIP_COMMITTEE_EMBARGOED_MEMBERS_EMAIL_TEMPLATE_NAME,
             context={
+                **membership_committee_email_context(),
                 "embargoed_count": len(embargoed_members),
                 "embargoed_members": embargoed_members,
             },
+            reply_to=[settings.MEMBERSHIP_COMMITTEE_EMAIL],
         )
 
         self.stdout.write(f"Queued 1 email to {len(recipients)} recipient(s).")

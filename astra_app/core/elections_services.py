@@ -20,7 +20,11 @@ from post_office.models import Email
 
 from core.backends import FreeIPAUser
 from core.elections_eligibility import eligible_voters_from_memberships
-from core.email_context import user_email_context, user_email_context_from_user
+from core.email_context import (
+    election_committee_email_context,
+    user_email_context,
+    user_email_context_from_user,
+)
 from core.models import (
     AuditLogEntry,
     Ballot,
@@ -322,6 +326,7 @@ def send_vote_receipt_email(
 ) -> None:
     context: dict[str, object] = {
         **user_email_context(username=username),
+        **election_committee_email_context(),
         "election_id": election.id,
         "election_name": election.name,
         "election_description": election.description,
@@ -344,6 +349,7 @@ def send_vote_receipt_email(
         sender=settings.DEFAULT_FROM_EMAIL,
         template_name=settings.ELECTION_VOTE_RECEIPT_EMAIL_TEMPLATE_NAME,
         context=context,
+        reply_to=[settings.ELECTION_COMMITTEE_EMAIL],
     )
 
 
@@ -377,6 +383,7 @@ def send_voting_credential_email(
             subject=rendered_subject,
             html_message=rendered_html,
             message=rendered_text,
+            headers={"Reply-To": settings.ELECTION_COMMITTEE_EMAIL},
             commit=True,
         )
         return
@@ -387,6 +394,7 @@ def send_voting_credential_email(
         sender=settings.DEFAULT_FROM_EMAIL,
         template_name=settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME,
         context=context,
+        reply_to=[settings.ELECTION_COMMITTEE_EMAIL],
     )
 
 
@@ -409,6 +417,7 @@ def build_voting_credential_email_context(
 
     return {
         **user_context,
+        **election_committee_email_context(),
         "election_id": election.id,
         "election_name": election.name,
         "election_description": election.description,

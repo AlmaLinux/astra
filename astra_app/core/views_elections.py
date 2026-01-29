@@ -36,7 +36,7 @@ from core.elections_services import (
     issue_voting_credentials_from_memberships_detailed,
     submit_ballot,
 )
-from core.email_context import user_email_context
+from core.email_context import election_committee_email_context, user_email_context
 from core.forms_elections import (
     CandidateWizardFormSet,
     ElectionDetailsForm,
@@ -278,6 +278,7 @@ def election_email_render_preview(request, election_id: int) -> JsonResponse:
 
     context: dict[str, object] = {
         **user_context,
+        **election_committee_email_context(),
         "election_id": election.id,
         "election_name": election.name,
         "election_description": election.description,
@@ -1758,7 +1759,14 @@ def election_send_mail_credentials(request: HttpRequest, election_id: int) -> Ht
 
     send_mail_url = reverse("send-mail")
     template_name = settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME
-    query = urlencode({"type": "csv", "template": template_name})
+    query = urlencode(
+        {
+            "type": "csv",
+            "template": template_name,
+            "election_committee_email": settings.ELECTION_COMMITTEE_EMAIL,
+            "reply_to": settings.ELECTION_COMMITTEE_EMAIL,
+        }
+    )
     return redirect(f"{send_mail_url}?{query}")
 
 

@@ -6,12 +6,13 @@ from unittest.mock import patch
 from urllib.parse import quote
 
 from django.conf import settings
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 
 from core.backends import FreeIPAUser
 from core.models import FreeIPAPermissionGrant
 from core.permissions import ASTRA_ADD_SEND_MAIL
+from core.views_send_mail import SendMailForm
 
 
 class SendMailTests(TestCase):
@@ -225,6 +226,28 @@ class SendMailTests(TestCase):
         self.assertContains(resp, 'id="id_cc"')
         self.assertContains(resp, f'value="{cc_raw}"')
         # When cc is prefilled, open the Additional recipients section by default.
+        self.assertContains(resp, 'id="send-mail-extra-options-toggle"')
+        self.assertContains(resp, 'aria-expanded="true"')
+        self.assertContains(resp, 'id="send-mail-extra-options"')
+        self.assertContains(resp, 'class="collapse mt-2 show"')
+
+    def test_get_prefills_reply_to_from_query_params(self) -> None:
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
+
+        reply_to_raw = "replies@example.com,support@example.com"
+        url = reverse("send-mail") + f"?reply_to={quote(reply_to_raw)}"
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.backends.FreeIPAUser.all", return_value=[]),
+        ):
+            resp = self.client.get(url)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'id="id_reply_to"')
+        self.assertContains(resp, f'value="{reply_to_raw}"')
         self.assertContains(resp, 'id="send-mail-extra-options-toggle"')
         self.assertContains(resp, 'aria-expanded="true"')
         self.assertContains(resp, 'id="send-mail-extra-options"')
@@ -745,6 +768,71 @@ class SendMailTests(TestCase):
         self.assertEqual(kwargs["cc"], ["cc1@example.com", "cc2@example.com", "cc3@example.com"])
         self.assertEqual(kwargs["bcc"], ["bcc1@example.com", "bcc2@example.com"])
 
+    def test_send_emails_sets_reply_to_header(self) -> None:
+        from post_office.models import EmailTemplate
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
+
+        class _FakeGroup:
+            cn = "example-group"
+            description = ""
+
+            def member_usernames_recursive(self) -> set[str]:
+                return {"alice"}
+
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "displayname": ["Alice User"],
+                "mail": ["alice@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str):
+            if username == "reviewer":
+                return reviewer
+            if username == "alice":
+                return alice
+            return None
+
+        EmailTemplate.objects.create(
+            name="send-mail-test",
+            subject="Hello {{ first_name }}",
+            content="Hi {{ full_name }}",
+            html_content="<p>Hi {{ full_name }}</p>",
+        )
+
+        with (
+            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.backends.FreeIPAGroup.get", return_value=_FakeGroup()),
+            patch("core.backends.FreeIPAGroup.all", return_value=[_FakeGroup()]),
+            patch("core.views_send_mail.EmailMultiAlternatives", autospec=True) as email_cls,
+        ):
+            email_cls.return_value.send.return_value = 1
+            resp = self.client.post(
+                reverse("send-mail"),
+                data={
+                    "recipient_mode": "group",
+                    "group_cn": "example-group",
+                    "subject": "Hello {{ first_name }}",
+                    "text_content": "Hi {{ full_name }}",
+                    "html_content": "<p>Hi {{ full_name }}</p>",
+                    "action": "send",
+                    "reply_to": "replies@example.com, support@example.com",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        email_cls.assert_called_once()
+        _args, kwargs = email_cls.call_args
+        self.assertEqual(kwargs["reply_to"], ["replies@example.com", "support@example.com"])
+
     def test_send_emails_renders_extra_context_vars(self) -> None:
         self._login_as_freeipa_user("reviewer")
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
@@ -1011,3 +1099,10 @@ class UnifiedEmailPreviewSendMailTests(TestCase):
         payload = resp.json()
         self.assertIn(image_url, payload.get("html", ""))
         self.assertNotIn("{% inline_image", payload.get("html", ""))
+
+
+class SendMailFormTests(SimpleTestCase):
+    def test_reply_to_rejects_invalid_addresses(self) -> None:
+        form = SendMailForm(data={"reply_to": "not-an-email"})
+        self.assertFalse(form.is_valid())
+        self.assertIn("reply_to", form.errors)

@@ -12,6 +12,7 @@ from post_office.models import EmailTemplate
 from core.backends import FreeIPAUser
 from core.email_context import (
     freeform_message_email_context,
+    membership_committee_email_context,
     organization_sponsor_email_context,
     user_email_context_from_user,
 )
@@ -195,9 +196,11 @@ def record_membership_request_created(
                             template=settings.MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME,
                             context={
                                 **user_email_context_from_user(user=target),
+                                **membership_committee_email_context(),
                                 "membership_type": membership_type.name,
                                 "membership_type_code": membership_type.code,
                             },
+                            headers={"Reply-To": settings.MEMBERSHIP_COMMITTEE_EMAIL},
                         )
                     except Exception as e:
                         logger.exception(
@@ -468,11 +471,13 @@ def approve_membership_request(
                     sender=settings.DEFAULT_FROM_EMAIL,
                     template=template_name,
                     context={
-                        "organization_name": org.name,
                         **organization_sponsor_email_context(organization=org),
+                        **membership_committee_email_context(),
+                        "organization_name": org.name,
                         "membership_type": membership_type.name,
                         "membership_type_code": membership_type.code,
                     },
+                    headers={"Reply-To": settings.MEMBERSHIP_COMMITTEE_EMAIL},
                 )
             except Exception:
                 logger.exception(
@@ -639,10 +644,12 @@ def approve_membership_request(
                 template=template_name,
                 context={
                     **user_email_context_from_user(user=target),
+                    **membership_committee_email_context(),
                     "membership_type": membership_type.name,
                     "membership_type_code": membership_type.code,
                     "group_cn": membership_type.group_cn,
                 },
+                headers={"Reply-To": settings.MEMBERSHIP_COMMITTEE_EMAIL},
             )
         except Exception:
             logger.exception(
@@ -752,12 +759,14 @@ def reject_membership_request(
                     sender=settings.DEFAULT_FROM_EMAIL,
                     template=settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME,
                     context={
-                        "organization_name": org.name if org is not None else (membership_request.requested_organization_name or ""),
                         **(organization_sponsor_email_context(organization=org) if org is not None else {}),
+                        **membership_committee_email_context(),
+                        **freeform_message_email_context(key="rejection_reason", value=reason),
+                        "organization_name": org.name if org is not None else (membership_request.requested_organization_name or ""),
                         "membership_type": membership_type.name,
                         "membership_type_code": membership_type.code,
-                        **freeform_message_email_context(key="rejection_reason", value=reason),
                     },
+                    headers={"Reply-To": settings.MEMBERSHIP_COMMITTEE_EMAIL},
                 )
             except Exception as e:
                 logger.exception(
@@ -819,10 +828,12 @@ def reject_membership_request(
                 template=settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME,
                 context={
                     **user_email_context_from_user(user=target),
+                    **freeform_message_email_context(key="rejection_reason", value=reason),
+                    **membership_committee_email_context(),
                     "membership_type": membership_type.name,
                     "membership_type_code": membership_type.code,
-                    **freeform_message_email_context(key="rejection_reason", value=reason),
                 },
+                headers={"Reply-To": settings.MEMBERSHIP_COMMITTEE_EMAIL},
             )
         except Exception as e:
             logger.exception(
@@ -994,13 +1005,15 @@ def put_membership_request_on_hold(
                     template=settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME,
                     context={
                         **user_context,
-                        "organization_name": org.name if org is not None else (membership_request.requested_organization_name or ""),
                         **(organization_sponsor_email_context(organization=org) if org is not None else {}),
+                        **freeform_message_email_context(key="rfi_message", value=message),
+                        **membership_committee_email_context(),
+                        "organization_name": org.name if org is not None else (membership_request.requested_organization_name or ""),
                         "membership_type": membership_type.name,
                         "membership_type_code": membership_type.code,
-                        **freeform_message_email_context(key="rfi_message", value=message),
                         "application_url": application_url,
                     },
+                    headers={"Reply-To": settings.MEMBERSHIP_COMMITTEE_EMAIL},
                 )
             except Exception as e:
                 logger.exception(
@@ -1033,11 +1046,13 @@ def put_membership_request_on_hold(
                     template=settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME,
                     context={
                         **user_email_context_from_user(user=target),
+                        **freeform_message_email_context(key="rfi_message", value=message),
+                        **membership_committee_email_context(),
                         "membership_type": membership_type.name,
                         "membership_type_code": membership_type.code,
-                        **freeform_message_email_context(key="rfi_message", value=message),
                         "application_url": application_url,
                     },
+                    headers={"Reply-To": settings.MEMBERSHIP_COMMITTEE_EMAIL},
                 )
             except Exception as e:
                 logger.exception(

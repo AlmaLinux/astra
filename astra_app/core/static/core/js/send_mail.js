@@ -208,6 +208,16 @@
       }
     }
 
+    var replyToRaw = String(getField('id_reply_to') || '').trim();
+    if (replyToRaw) {
+      var replyToParsed = validateManualEmails(replyToRaw);
+      if (replyToParsed.invalid.length) {
+        if (evt && evt.preventDefault) evt.preventDefault();
+        showRecipientsWarning('Invalid Reply-To address(es): ' + replyToParsed.invalid.join(', '), 'reply_to');
+        return false;
+      }
+    }
+
     var modeEl = $('send-mail-recipient-mode');
     var mode = modeEl ? String(modeEl.value || '').trim() : '';
 

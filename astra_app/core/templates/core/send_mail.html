@@ -195,20 +195,25 @@
                 <div class="alert alert-warning mt-2 d-none" id="send-mail-recipients-inline-warning" role="alert"></div>
 
                 <div class="mb-2">
-                  <a class="text-muted" id="send-mail-extra-options-toggle" data-toggle="collapse" href="#send-mail-extra-options" role="button" aria-expanded="{% if form.cc.value or form.bcc.value %}true{% else %}false{% endif %}" aria-controls="send-mail-extra-options">
+                  <a class="text-muted" id="send-mail-extra-options-toggle" data-toggle="collapse" href="#send-mail-extra-options" role="button" aria-expanded="{% if form.cc.value or form.bcc.value or form.reply_to.value %}true{% else %}false{% endif %}" aria-controls="send-mail-extra-options">
                     <span aria-hidden="true" class="mr-1 send-mail-collapse-chevron">▸</span>
-                    Additional recipients
+                    Additional options
                   </a>
-                  <div class="collapse mt-2 {% if form.cc.value or form.bcc.value %}show{% endif %}" id="send-mail-extra-options">
+                  <div class="collapse mt-2 {% if form.cc.value or form.bcc.value or form.reply_to.value %}show{% endif %}" id="send-mail-extra-options">
                     <div class="card card-body">
                       <div class="form-group">
                         <label for="id_cc">CC</label>
                         {{ form.cc }}
                         <small class="form-text text-muted">Comma-separated email addresses.</small>
                       </div>
-                      <div class="form-group mb-0">
+                      <div class="form-group">
                         <label for="id_bcc">BCC</label>
                         {{ form.bcc }}
+                        <small class="form-text text-muted">Comma-separated email addresses.</small>
+                      </div>
+                      <div class="form-group mb-0">
+                        <label for="id_reply_to">Reply-To</label>
+                        {{ form.reply_to }}
                         <small class="form-text text-muted">Comma-separated email addresses.</small>
                       </div>
                     </div>
