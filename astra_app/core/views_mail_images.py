@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import posixpath
 from dataclasses import dataclass
 
@@ -102,14 +103,30 @@ def email_images(request: HttpRequest) -> HttpResponse:
                     messages.error(request, f"{filename}: invalid upload path.")
                     continue
 
-                if default_storage.exists(key):
+                try:
+                    key_exists = default_storage.exists(key)
+                except Exception as e:
+                    logging.exception(f"Failed to check if file exists for {filename}: {e}")
+                    messages.error(request, f"{filename}: failed to check if file exists.")
+                    continue
+
+                if key_exists:
                     if not overwrite:
                         messages.error(request, f"{filename}: already exists (enable overwrite to replace it).")
                         continue
-                    default_storage.delete(key)
+                    try:
+                        default_storage.delete(key)
+                    except Exception as e:
+                        logging.exception(f"Failed to delete existing file {filename}: {e}")
+                        messages.error(request, f"{filename}: failed to delete existing file.")
+                        continue
 
-                default_storage.save(key, f)
-                uploaded += 1
+                try:
+                    default_storage.save(key, f)
+                    uploaded += 1
+                except Exception as e:
+                    logging.exception(f"Failed to upload image {filename}: {e}")
+                    messages.error(request, f"{filename}: failed to upload.")
 
             if uploaded:
                 messages.success(request, f"Uploaded {uploaded} image{'s' if uploaded != 1 else ''}.")
@@ -149,8 +166,9 @@ def email_images(request: HttpRequest) -> HttpResponse:
                     modified_at=modified_at,
                 )
             )
-    except Exception:
-        messages.error(request, "Unable to list mail images.")
+    except Exception as e:
+        logging.exception(f"Failed to list mail images: {e}")
+        messages.error(request, "Unable to list mail images")
 
     return render(
         request,
