@@ -31,6 +31,15 @@ from core.models import (
 
 @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=1)
 class ElectionVoteWeightsTests(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self._coc_patcher = patch("core.views_elections.has_signed_coc", return_value=True)
+        self._coc_patcher.start()
+        self.addCleanup(self._coc_patcher.stop)
+        self._coc_block_patcher = patch("core.views_elections.block_action_without_coc", return_value=None)
+        self._coc_block_patcher.start()
+        self.addCleanup(self._coc_block_patcher.stop)
+
     def _login_as_freeipa_user(self, username: str) -> None:
         session = self.client.session
         session["_freeipa_username"] = username

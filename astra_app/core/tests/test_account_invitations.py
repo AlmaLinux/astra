@@ -90,6 +90,7 @@ class AccountInvitationViewsTests(TestCase):
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=self._committee_user()),
+            patch("core.views_account_invitations.build_freeipa_email_lookup", return_value={}),
             patch("core.views_account_invitations.find_account_invitation_matches", return_value=["existinguser"]),
         ):
             resp = self.client.post(

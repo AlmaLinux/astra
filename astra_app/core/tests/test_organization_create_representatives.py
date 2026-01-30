@@ -39,7 +39,10 @@ class OrganizationCreateRepresentativesTests(TestCase):
         def get_user(username: str):
             return FreeIPAUser(username, {"uid": [username], "memberof_group": []})
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=get_user):
+        with (
+            patch("core.backends.FreeIPAUser.get", side_effect=get_user),
+            patch("core.views_utils.has_signed_coc", return_value=True),
+        ):
             resp = self.client.get(reverse("organization-create"))
             self.assertEqual(resp.status_code, 200)
             self.assertContains(resp, "Create an organization profile only")
@@ -65,7 +68,10 @@ class OrganizationCreateRepresentativesTests(TestCase):
         def get_user(username: str):
             return FreeIPAUser(username, {"uid": [username], "memberof_group": []})
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=get_user):
+        with (
+            patch("core.backends.FreeIPAUser.get", side_effect=get_user),
+            patch("core.views_utils.has_signed_coc", return_value=True),
+        ):
             resp = self.client.get(reverse("organization-create"))
             self.assertEqual(resp.status_code, 200)
             self.assertContains(resp, "Create an organization profile only")

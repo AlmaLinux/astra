@@ -19,6 +19,9 @@ from core.country_codes import country_code_status_from_user_data
 class MembershipCountryRequirementsTests(TestCase):
     def setUp(self) -> None:
         self.factory = RequestFactory()
+        self._coc_patcher = patch("core.views_membership.block_action_without_coc", return_value=None)
+        self._coc_patcher.start()
+        self.addCleanup(self._coc_patcher.stop)
 
     def _ensure_membership_type(self) -> MembershipType:
         membership_type, _created = MembershipType.objects.get_or_create(

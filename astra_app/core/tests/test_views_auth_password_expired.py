@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+from django.contrib.auth.models import AnonymousUser
 from django.contrib.messages import get_messages
 from django.contrib.messages.storage.fallback import FallbackStorage
 from django.contrib.sessions.middleware import SessionMiddleware
@@ -32,6 +33,7 @@ class PasswordExpiredViewTests(TestCase):
             },
         )
         self._add_session_and_messages(request)
+        request.user = AnonymousUser()
         request.session["_freeipa_pwexp_username"] = "alice"
         request.session.save()
 
@@ -60,6 +62,7 @@ class PasswordExpiredViewTests(TestCase):
             },
         )
         self._add_session_and_messages(request)
+        request.user = AnonymousUser()
 
         captured = {}
 
@@ -94,6 +97,7 @@ class PasswordExpiredViewTests(TestCase):
             },
         )
         self._add_session_and_messages(request)
+        request.user = AnonymousUser()
 
         captured = {}
 

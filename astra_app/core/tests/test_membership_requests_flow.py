@@ -63,7 +63,10 @@ class MembershipRequestsFlowTests(TestCase):
         )
         self._login_as_freeipa_user("alice")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.views_membership.block_action_without_coc", return_value=None),
+        ):
             with patch("post_office.mail.send", autospec=True) as send_mock:
                 resp = self.client.post(
                     reverse("membership-request"),
@@ -198,6 +201,7 @@ class MembershipRequestsFlowTests(TestCase):
             patch("core.backends.FreeIPAUser.get", return_value=alice),
             patch("core.forms_membership.get_valid_membership_type_codes_for_username", return_value=set()),
             patch("core.forms_membership.get_extendable_membership_type_codes_for_username", return_value=set()),
+            patch("core.views_utils.has_signed_coc", return_value=True),
         ):
             resp = self.client.get(reverse("membership-request"))
 

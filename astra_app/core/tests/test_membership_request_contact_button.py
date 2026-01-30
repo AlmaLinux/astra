@@ -104,7 +104,7 @@ class MembershipRequestRfiButtonTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, ">Contact<")
 
-        expected_href = f"{reverse('send-mail')}?{urlencode({'type': 'users', 'to': 'alice', 'template': '', 'membership_request_id': str(req.pk)})}"
+        expected_href = f"{reverse('send-mail')}?{urlencode({'type': 'users', 'to': 'alice', 'template': '', 'membership_request_id': str(req.pk), 'reply_to': settings.MEMBERSHIP_COMMITTEE_EMAIL})}"
         expected_href_html = expected_href.replace("&", "&amp;")
         self.assertContains(resp, f'href="{expected_href_html}"')
 
@@ -177,6 +177,6 @@ class MembershipRequestRfiButtonTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, ">Contact<")
 
-        expected_href = f"{reverse('send-mail')}?{urlencode({'type': 'users', 'to': 'orgrep', 'template': '', 'membership_request_id': str(req.pk)})}"
+        expected_href = f"{reverse('send-mail')}?{urlencode({'type': 'users', 'to': 'orgrep', 'template': '', 'membership_request_id': str(req.pk), 'reply_to': settings.MEMBERSHIP_COMMITTEE_EMAIL})}"
         expected_href_html = expected_href.replace("&", "&amp;")
         self.assertContains(resp, f'href="{expected_href_html}"')

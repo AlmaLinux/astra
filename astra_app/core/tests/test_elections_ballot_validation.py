@@ -40,7 +40,10 @@ class ElectionBallotValidationTests(TestCase):
         )
 
         self._login_as_freeipa_user("voter1")
-        with patch("core.backends.FreeIPAUser.get") as mocked_get:
+        with (
+            patch("core.backends.FreeIPAUser.get") as mocked_get,
+            patch("core.views_elections.has_signed_coc", return_value=True),
+        ):
             mocked_get.return_value = FreeIPAUser(
                 "voter1",
                 {
@@ -95,7 +98,10 @@ class ElectionBallotValidationTests(TestCase):
         )
 
         self._login_as_freeipa_user("voter1")
-        with patch("core.backends.FreeIPAUser.get") as mocked_get:
+        with (
+            patch("core.backends.FreeIPAUser.get") as mocked_get,
+            patch("core.views_elections.has_signed_coc", return_value=True),
+        ):
             mocked_get.return_value = FreeIPAUser(
                 "voter1",
                 {
@@ -135,7 +141,10 @@ class ElectionBallotValidationTests(TestCase):
         )
 
         self._login_as_freeipa_user("voter1")
-        with patch("core.backends.FreeIPAUser.get") as mocked_get:
+        with (
+            patch("core.backends.FreeIPAUser.get") as mocked_get,
+            patch("core.views_elections.has_signed_coc", return_value=True),
+        ):
             mocked_get.return_value = FreeIPAUser(
                 "voter1",
                 {

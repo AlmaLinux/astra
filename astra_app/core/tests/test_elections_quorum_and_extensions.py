@@ -25,6 +25,12 @@ from core.tokens import election_genesis_chain_hash
 
 
 class ElectionQuorumAuditTests(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self._coc_patcher = patch("core.views_elections.has_signed_coc", return_value=True)
+        self._coc_patcher.start()
+        self.addCleanup(self._coc_patcher.stop)
+
     def _login_as_freeipa_user(self, username: str) -> None:
         session = self.client.session
         session["_freeipa_username"] = username

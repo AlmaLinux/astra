@@ -8,6 +8,7 @@ from unittest.mock import patch
 from urllib.parse import quote
 
 from django.conf import settings
+from django.contrib.messages import get_messages
 from django.contrib.staticfiles import finders
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, transaction
@@ -56,14 +57,20 @@ class OrganizationUserViewsTests(TestCase):
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
         self._login_as_freeipa_user("bob")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.views_utils.has_signed_coc", return_value=True),
+        ):
             resp = self.client.get(reverse("organization-create"), follow=False)
 
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(resp["Location"], reverse("organizations"))
 
         payload = self._valid_org_payload(name="Second Org")
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.views_utils.has_signed_coc", return_value=True),
+        ):
             resp = self.client.post(reverse("organization-create"), data=payload, follow=False)
 
         self.assertEqual(resp.status_code, 302)
@@ -127,7 +134,10 @@ class OrganizationUserViewsTests(TestCase):
         payload = self._valid_org_payload(name="New Org")
         payload["representative"] = "bob"
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=fake_get):
+        with (
+            patch("core.backends.FreeIPAUser.get", side_effect=fake_get),
+            patch("core.views_utils.has_signed_coc", return_value=True),
+        ):
             resp = self.client.post(reverse("organization-create"), data=payload, follow=False)
 
         self.assertEqual(resp.status_code, 302)
@@ -628,6 +638,8 @@ class OrganizationUserViewsTests(TestCase):
             },
         )
 
+        gold = MembershipType.objects.get(code="gold")
+
         org = Organization.objects.create(
             name="AlmaLinux",
             business_contact_name="Business Person",
@@ -697,9 +709,11 @@ class OrganizationUserViewsTests(TestCase):
             },
         )
 
+        gold = MembershipType.objects.get(code="gold")
+
         org = Organization.objects.create(
             name="AlmaLinux",
-            membership_level_id="gold",
+            membership_level=gold,
             website="https://almalinux.org/",
             representative="bob",
         )
@@ -862,7 +876,10 @@ class OrganizationUserViewsTests(TestCase):
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
         self._login_as_freeipa_user("bob")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.views_organizations.block_action_without_coc", return_value=None),
+        ):
             resp = self.client.post(
                 reverse("organization-sponsorship-manage", args=[org.pk]),
                 data={
@@ -1280,6 +1297,8 @@ class OrganizationUserViewsTests(TestCase):
             },
         )
 
+        gold = MembershipType.objects.get(code="gold")
+
         org = Organization.objects.create(
             name="AlmaLinux",
             business_contact_name="Business Person",
@@ -1288,7 +1307,7 @@ class OrganizationUserViewsTests(TestCase):
             pr_marketing_contact_email="pr@almalinux.org",
             technical_contact_name="Tech Person",
             technical_contact_email="tech@almalinux.org",
-            membership_level_id="gold",
+            membership_level=gold,
             website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
             additional_information="Renewal note",
@@ -1298,7 +1317,7 @@ class OrganizationUserViewsTests(TestCase):
         expires_at = timezone.now() + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS - 1)
         OrganizationSponsorship.objects.create(
             organization=org,
-            membership_type_id="gold",
+            membership_type=gold,
             expires_at=expires_at,
         )
 
@@ -1311,9 +1330,14 @@ class OrganizationUserViewsTests(TestCase):
         self.assertContains(resp, "Expires")
         self.assertContains(resp, "Request renewal")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
-            resp = self.client.post(reverse("organization-sponsorship-extend", args=[org.pk]), follow=False)
-        self.assertEqual(resp.status_code, 302)
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.views_organizations.block_action_without_coc", return_value=None),
+        ):
+            resp = self.client.post(reverse("organization-sponsorship-extend", args=[org.pk]), follow=True)
+        self.assertEqual(resp.status_code, 200)
+        messages = [m.message for m in get_messages(resp.wsgi_request)]
+        self.assertIn("Sponsorship renewal request submitted for review.", messages)
 
         req = MembershipRequest.objects.get(status=MembershipRequest.Status.pending)
         self.assertEqual(req.requested_organization_id, org.pk)
@@ -1328,6 +1352,7 @@ class OrganizationUserViewsTests(TestCase):
             ).exists()
         )
 
+    @override_settings(MEMBERSHIP_EXPIRING_SOON_DAYS=90)
     def test_representative_cannot_submit_second_org_membership_request_while_one_open(self) -> None:
         from core.models import MembershipRequest, MembershipType, Organization, OrganizationSponsorship
 
@@ -1354,6 +1379,8 @@ class OrganizationUserViewsTests(TestCase):
             },
         )
 
+        gold = MembershipType.objects.get(code="gold")
+
         org = Organization.objects.create(
             name="AlmaLinux",
             business_contact_name="Business Person",
@@ -1362,7 +1389,7 @@ class OrganizationUserViewsTests(TestCase):
             pr_marketing_contact_email="pr@almalinux.org",
             technical_contact_name="Tech Person",
             technical_contact_email="tech@almalinux.org",
-            membership_level_id="gold",
+            membership_level=gold,
             website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
             additional_information="Renewal note",
@@ -1372,16 +1399,21 @@ class OrganizationUserViewsTests(TestCase):
         expires_at = timezone.now() + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS - 1)
         OrganizationSponsorship.objects.create(
             organization=org,
-            membership_type_id="gold",
+            membership_type=gold,
             expires_at=expires_at,
         )
 
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
         self._login_as_freeipa_user("bob")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
-            resp = self.client.post(reverse("organization-sponsorship-extend", args=[org.pk]), follow=False)
-        self.assertEqual(resp.status_code, 302)
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.views_organizations.block_action_without_coc", return_value=None),
+        ):
+            resp = self.client.post(reverse("organization-sponsorship-extend", args=[org.pk]), follow=True)
+        self.assertEqual(resp.status_code, 200)
+        messages = [m.message for m in get_messages(resp.wsgi_request)]
+        self.assertIn("Sponsorship renewal request submitted for review.", messages)
 
         self.assertEqual(
             MembershipRequest.objects.filter(
@@ -1391,7 +1423,10 @@ class OrganizationUserViewsTests(TestCase):
             1,
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.views_organizations.block_action_without_coc", return_value=None),
+        ):
             resp = self.client.post(
                 reverse("organization-sponsorship-manage", args=[org.pk]),
                 data={
@@ -1432,6 +1467,8 @@ class OrganizationUserViewsTests(TestCase):
             },
         )
 
+        gold = MembershipType.objects.get(code="gold")
+
         org = Organization.objects.create(
             name="AlmaLinux",
             business_contact_name="Business Person",
@@ -1440,7 +1477,7 @@ class OrganizationUserViewsTests(TestCase):
             pr_marketing_contact_email="pr@almalinux.org",
             technical_contact_name="Tech Person",
             technical_contact_email="tech@almalinux.org",
-            membership_level_id="gold",
+            membership_level=gold,
             website="https://almalinux.org/",
             representative="bob",
         )
@@ -1448,7 +1485,7 @@ class OrganizationUserViewsTests(TestCase):
         expires_at = timezone.now() + datetime.timedelta(days=30)
         OrganizationSponsorship.objects.create(
             organization=org,
-            membership_type_id="gold",
+            membership_type=gold,
             expires_at=expires_at,
         )
 
@@ -1552,6 +1589,8 @@ class OrganizationUserViewsTests(TestCase):
             },
         )
 
+        gold = MembershipType.objects.get(code="gold")
+
         org = Organization.objects.create(
             name="AlmaLinux",
             business_contact_name="Business Person",
@@ -1560,14 +1599,14 @@ class OrganizationUserViewsTests(TestCase):
             pr_marketing_contact_email="pr@almalinux.org",
             technical_contact_name="Tech Person",
             technical_contact_email="tech@almalinux.org",
-            membership_level_id="gold",
+            membership_level=gold,
             website="https://almalinux.org/",
             representative="bob",
         )
 
         OrganizationSponsorship.objects.create(
             organization=org,
-            membership_type_id="gold",
+            membership_type=gold,
             expires_at=timezone.now() + datetime.timedelta(days=90),
         )
 
@@ -1959,11 +1998,17 @@ class OrganizationUserViewsTests(TestCase):
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
         self._login_as_freeipa_user("bob")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.views_utils.has_signed_coc", return_value=True),
+        ):
             resp = self.client.get(reverse("organization-create"))
         self.assertEqual(resp.status_code, 200)
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.views_utils.has_signed_coc", return_value=True),
+        ):
             resp = self.client.post(
                 reverse("organization-create"),
                 data={
@@ -2014,7 +2059,10 @@ class OrganizationUserViewsTests(TestCase):
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
         self._login_as_freeipa_user("bob")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.views_utils.has_signed_coc", return_value=True),
+        ):
             resp = self.client.post(
                 reverse("organization-create"),
                 data={
@@ -2042,7 +2090,10 @@ class OrganizationUserViewsTests(TestCase):
             reverse("organization-sponsorship-manage", args=[created.pk]),
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.views_utils.has_signed_coc", return_value=True),
+        ):
             manage_resp = self.client.get(reverse("organization-sponsorship-manage", args=[created.pk]))
         self.assertEqual(manage_resp.status_code, 200)
         self.assertContains(manage_resp, "Manage sponsorship")
@@ -2105,7 +2156,10 @@ class OrganizationUserViewsTests(TestCase):
                 return bob
             return None
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=fake_get):
+        with (
+            patch("core.backends.FreeIPAUser.get", side_effect=fake_get),
+            patch("core.views_utils.has_signed_coc", return_value=True),
+        ):
             resp = self.client.post(
                 reverse("organization-create"),
                 data={
@@ -2136,7 +2190,10 @@ class OrganizationUserViewsTests(TestCase):
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
         self._login_as_freeipa_user("bob")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.views_utils.has_signed_coc", return_value=True),
+        ):
             resp = self.client.post(
                 reverse("organization-create"),
                 data={

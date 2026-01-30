@@ -507,7 +507,10 @@ class ElectionVoteNoJsFallbackTests(TestCase):
 
         voter1 = FreeIPAUser("voter1", {"uid": ["voter1"], "memberof_group": []})
 
-        with patch("core.backends.FreeIPAUser.get", return_value=voter1):
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=voter1),
+            patch("core.views_elections.has_signed_coc", return_value=True),
+        ):
             resp = self.client.post(
                 reverse("election-vote-submit", args=[election.id]),
                 data={

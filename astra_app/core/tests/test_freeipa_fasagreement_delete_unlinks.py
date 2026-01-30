@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from django.test import SimpleTestCase
+from django.test import TestCase
 from python_freeipa import exceptions
 
 from core.backends import FreeIPAFASAgreement
 
 
-class FreeIPAFASAgreementDeleteUnlinksTests(SimpleTestCase):
+class FreeIPAFASAgreementDeleteUnlinksTests(TestCase):
     def test_delete_unlinks_groups_and_users_then_retries(self):
         initial = FreeIPAFASAgreement(
             "test_agreement",

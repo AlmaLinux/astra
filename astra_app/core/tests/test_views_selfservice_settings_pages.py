@@ -207,6 +207,7 @@ class SelfServiceSettingsPagesTests(TestCase):
         FREEIPA_VERIFY_SSL=False,
         FREEIPA_SERVICE_USER="svc",
         FREEIPA_SERVICE_PASSWORD="pw",
+        SELF_SERVICE_ADDRESS_COUNTRY_ATTR="c",
     )
     def test_settings_profile_post_no_changes_short_circuits(self):
         factory = RequestFactory()
@@ -236,7 +237,7 @@ class SelfServiceSettingsPagesTests(TestCase):
                 "sn": "User",
                 "country_code": "US",
                 "fasPronoun": "",
-                "fasLocale": "en_US",
+                "fasLocale": "en-US",
                 "fasTimezone": "UTC",
                 "fasWebsiteUrl": "",
                 "fasRssUrl": "",
@@ -272,6 +273,7 @@ class SelfServiceSettingsPagesTests(TestCase):
         fake_user = SimpleNamespace(
             username="alice",
             email="a@example.org",
+            full_name="Alice User",
             is_authenticated=True,
             _user_data={
                 "givenname": ["Alice"],
@@ -304,8 +306,8 @@ class SelfServiceSettingsPagesTests(TestCase):
                 "fasGitLabUsername": "",
                 "fasIsPrivate": "",
                 # Emails (required mail)
-                "mail": "a@example.org",
-                "fasRHBZEmail": "a@example.org",
+                "mail": "new@example.org",
+                "fasRHBZEmail": "new@example.org",
                 # Keys
                 "fasGPGKeyId": "0123456789ABCDEF\nFEDCBA9876543210",
                 "ipasshpubkey": "ssh-ed25519 AAAA... alice@example",
@@ -316,8 +318,13 @@ class SelfServiceSettingsPagesTests(TestCase):
 
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
             with patch("core.views_settings._update_user_attrs", autospec=True) as mocked_update:
-                mocked_update.side_effect = [([], True), ([], True)]
-                response = views_settings.settings_root(request)
+                with (
+                    patch("core.views_settings._send_email_validation_email", autospec=True),
+                    patch("core.views_settings.list_agreements_for_user", autospec=True, return_value=[]),
+                    patch("core.views_settings.has_enabled_agreements", autospec=True, return_value=False),
+                ):
+                    mocked_update.side_effect = [([], True), ([], True)]
+                    response = views_settings.settings_root(request)
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], reverse("settings") + "#profile")
@@ -337,6 +344,7 @@ class SelfServiceSettingsPagesTests(TestCase):
         fake_user = SimpleNamespace(
             username="alice",
             email="a@example.org",
+            full_name="Alice User",
             is_authenticated=True,
             _user_data={
                 "givenname": ["Alice"],
@@ -367,8 +375,8 @@ class SelfServiceSettingsPagesTests(TestCase):
                 "fasGitLabUsername": "",
                 "fasIsPrivate": "",
                 # Emails required
-                "mail": "a@example.org",
-                "fasRHBZEmail": "a@example.org",
+                "mail": "new@example.org",
+                "fasRHBZEmail": "new@example.org",
                 # Keys present but unchanged
                 "fasGPGKeyId": "",
                 "ipasshpubkey": "",
@@ -379,12 +387,17 @@ class SelfServiceSettingsPagesTests(TestCase):
 
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
             with patch("core.views_settings._update_user_attrs", autospec=True) as mocked_update:
-                mocked_update.side_effect = [([], True), ([], True)]
-                response = views_settings.settings_root(request)
+                with (
+                    patch("core.views_settings._send_email_validation_email", autospec=True),
+                    patch("core.views_settings.list_agreements_for_user", autospec=True, return_value=[]),
+                    patch("core.views_settings.has_enabled_agreements", autospec=True, return_value=False),
+                ):
+                    mocked_update.side_effect = [([], True), ([], True)]
+                    response = views_settings.settings_root(request)
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], reverse("settings") + "#profile")
-        self.assertEqual(mocked_update.call_count, 2)
+        self.assertEqual(mocked_update.call_count, 1)
 
     @override_settings(
         FREEIPA_HOST="ipa.test",
@@ -607,7 +620,7 @@ class SelfServiceSettingsPagesTests(TestCase):
                 "givenname": "Alicia",
                 "sn": "User",
                 "fasPronoun": "",
-                "fasLocale": "en_US",
+                "fasLocale": "en-US",
                 "fasTimezone": "UTC",
                 "fasWebsiteUrl": "",
                 "fasRssUrl": "",

@@ -252,7 +252,7 @@ class FASAttributesTests(TestCase):
                 "tab": "profile",
                 "givenname": "Alice",
                 "sn": "User",
-                "country_code": "us",
+                "country_code": "US",
                 "fasPronoun": "",
                 "fasLocale": "",
                 "fasTimezone": "",

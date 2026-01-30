@@ -22,6 +22,13 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
     def setUp(self) -> None:
         super().setUp()
 
+        self._coc_patcher = patch("core.views_membership.block_action_without_coc", return_value=None)
+        self._coc_patcher.start()
+        self.addCleanup(self._coc_patcher.stop)
+        self._country_patcher = patch("core.views_membership.block_action_without_country_code", return_value=None)
+        self._country_patcher.start()
+        self.addCleanup(self._country_patcher.stop)
+
         for perm in (ASTRA_ADD_MEMBERSHIP, ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP):
             FreeIPAPermissionGrant.objects.get_or_create(
                 permission=perm,

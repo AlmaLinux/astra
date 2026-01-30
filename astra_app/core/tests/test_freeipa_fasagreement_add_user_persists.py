@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from unittest.mock import patch
 
-from django.test import SimpleTestCase
+from django.test import TestCase
 
 from core.backends import FreeIPAFASAgreement
 
@@ -50,7 +50,7 @@ class _DummyClient:
         raise AssertionError(f"Unexpected method: {method}")
 
 
-class FreeIPAFASAgreementAddUserPersistsTests(SimpleTestCase):
+class FreeIPAFASAgreementAddUserPersistsTests(TestCase):
     def test_add_user_calls_freeipa_with_scalar_user_and_verifies_persistence(self) -> None:
         client = _DummyClient(calls=[], agreement_users=set(), agreement_groups=set())
         agreement = FreeIPAFASAgreement("FPCA", {"cn": ["FPCA"], "ipaenabledflag": ["TRUE"], "memberuser_user": []})
