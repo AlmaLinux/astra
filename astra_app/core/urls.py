@@ -288,6 +288,8 @@ urlpatterns = [
 
     path("settings/", views_settings.settings_root, name="settings"),
     path("settings/avatar/", views_settings.avatar_manage, name="avatar-manage"),
+    path("settings/avatar/upload/", views_settings.avatar_upload, name="settings-avatar-upload"),
+    path("settings/avatar/delete/", views_settings.avatar_delete, name="settings-avatar-delete"),
     path("settings/emails/validate/", views_settings.settings_email_validate, name="settings-email-validate"),
     path("settings/security/otp/enable/", views_settings.security_otp_enable, name="security-otp-enable"),
     path("settings/security/otp/disable/", views_settings.security_otp_disable, name="security-otp-disable"),

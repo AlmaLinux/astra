@@ -6,13 +6,17 @@ import io
 import logging
 import os
 from base64 import b32encode
+from types import SimpleNamespace
 from typing import Any, Final
 from urllib.parse import quote
 
 import post_office.mail
 from django.conf import settings
 from django.contrib import messages
+from django.contrib.auth.decorators import login_required
 from django.core import signing
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -21,6 +25,7 @@ from django.utils.module_loading import import_string
 from python_freeipa import ClientMeta, exceptions
 
 from core.agreements import has_enabled_agreements, list_agreements_for_user
+from core.avatar_storage import avatar_path_handler
 from core.backends import FreeIPAFASAgreement, FreeIPAUser
 from core.email_context import user_email_context
 from core.forms_selfservice import (
@@ -160,6 +165,20 @@ def _avatar_manage_url_for_provider(provider_path: str | None) -> str | None:
     return None
 
 
+def _avatar_provider_label(provider_path: str | None) -> str:
+    if not provider_path:
+        return "unknown"
+    if provider_path.endswith("LocalS3AvatarProvider"):
+        return "local"
+    if provider_path.endswith("LibRAvatarProvider"):
+        return "libravatar"
+    if provider_path.endswith("GravatarAvatarProvider"):
+        return "gravatar"
+    if provider_path.endswith("DefaultAvatarProvider"):
+        return "default"
+    return provider_path.rsplit(".", 1)[-1]
+
+
 def avatar_manage(request: HttpRequest) -> HttpResponse:
     """Redirect the user to the appropriate place to manage their avatar."""
 
@@ -169,6 +188,83 @@ def avatar_manage(request: HttpRequest) -> HttpResponse:
         return redirect(manage_url)
 
     messages.info(request, "Your current avatar provider does not support direct avatar updates here.")
+    return redirect(_settings_url("profile"))
+
+
+@login_required
+def avatar_upload(request: HttpRequest) -> HttpResponse:
+    if request.method != "POST":
+        return redirect(_settings_url("profile"))
+
+    upload = request.FILES.get("avatar")
+    if not upload:
+        messages.error(request, "No avatar file provided.")
+        return redirect(_settings_url("profile"))
+
+    try:
+        from PIL import Image, ImageOps
+    except Exception:
+        messages.error(request, "Avatar uploads are unavailable (missing image library).")
+        return redirect(_settings_url("profile"))
+
+    try:
+        img = Image.open(upload)
+        img = ImageOps.exif_transpose(img)
+        if img.mode not in {"RGB", "RGBA"}:
+            img = img.convert("RGBA")
+
+        out = io.BytesIO()
+        img.save(out, format="PNG")
+        png_bytes = out.getvalue()
+    except Exception:
+        messages.error(request, "Invalid image file.")
+        return redirect(_settings_url("profile"))
+
+    key = avatar_path_handler(instance=SimpleNamespace(user=request.user), ext="png")
+
+    # Ensure deterministic overwrite even with storages that would otherwise
+    # auto-rename on collisions (e.g. FileSystemStorage).
+    try:
+        default_storage.delete(key)
+    except Exception:
+        pass
+
+    default_storage.save(key, ContentFile(png_bytes, name="avatar.png"))
+
+    try:
+        from avatar.utils import invalidate_cache
+
+        invalidate_cache(request.user)
+    except Exception:
+        # Best-effort: cache keys depend on the django-avatar runtime and
+        # should never block avatar updates.
+        pass
+
+    messages.success(request, "Avatar updated.")
+    return redirect(_settings_url("profile"))
+
+
+@login_required
+def avatar_delete(request: HttpRequest) -> HttpResponse:
+    if request.method != "POST":
+        return redirect(_settings_url("profile"))
+
+    key = avatar_path_handler(instance=SimpleNamespace(user=request.user), ext="png")
+    try:
+        default_storage.delete(key)
+    except Exception:
+        messages.error(request, "Failed to delete avatar.")
+        return redirect(_settings_url("profile"))
+
+    try:
+        from avatar.utils import invalidate_cache
+
+        invalidate_cache(request.user)
+    except Exception:
+        # Best-effort: cache invalidation should never block deletion.
+        pass
+
+    messages.success(request, "Avatar deleted.")
     return redirect(_settings_url("profile"))
 
 
@@ -515,6 +611,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
         return redirect(_settings_url("profile"))
 
     # Context
+    avatar_provider_path, avatar_url = _detect_avatar_provider(request.user, size=96)
     context = {
         "tabs": list(_SETTINGS_TABS),
         "active_tab": requested_tab,
@@ -534,6 +631,10 @@ def settings_root(request: HttpRequest) -> HttpResponse:
         "agreement_cn": agreement_cn,
         "rename_form": OTPTokenRenameForm(prefix="rename"),
         "show_agreements_tab": show_agreements_tab,
+        "avatar_provider": _avatar_provider_label(avatar_provider_path),
+        "avatar_url": avatar_url,
+        "avatar_is_local": bool(avatar_provider_path and avatar_provider_path.endswith("LocalS3AvatarProvider")),
+        "avatar_manage_url": _avatar_manage_url_for_provider(avatar_provider_path),
     }
 
     # Compatibility: some tests and older code expect `form` to be the active tab's primary form.

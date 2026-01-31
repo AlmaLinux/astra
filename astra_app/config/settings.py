@@ -595,12 +595,14 @@ LOGIN_REDIRECT_URL = '/'
 LOGOUT_REDIRECT_URL = '/login/'
 
 # django-avatar configuration
-# Avoid the PrimaryAvatarProvider (DB-backed Avatar records) to prevent ORM
-# lookups against AUTH_USER_MODEL for request.user objects.
+# Prefer a local, non-DB-backed provider. If no local avatar exists, fall back
+# to the existing external providers.
+AVATAR_STORAGE_DIR = "avatars"
 AVATAR_PROVIDERS = (
-    'avatar.providers.GravatarAvatarProvider',
-    'avatar.providers.LibRAvatarProvider',
-    'avatar.providers.DefaultAvatarProvider',
+    "core.avatar_providers.LocalS3AvatarProvider",
+    "avatar.providers.GravatarAvatarProvider",
+    "avatar.providers.LibRAvatarProvider",
+    "avatar.providers.DefaultAvatarProvider",
 )
 AVATAR_GRAVATAR_DEFAULT = _env_str("AVATAR_GRAVATAR_DEFAULT", default="identicon") or "identicon"
 

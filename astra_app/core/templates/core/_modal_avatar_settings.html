@@ -1,0 +1,52 @@
+{% load static %}
+
+<div class="modal fade" id="avatar-modal" tabindex="-1" role="dialog" aria-hidden="true">
+	<div class="modal-dialog" role="document" style="max-width: 520px;">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h5 class="modal-title">Avatar</h5>
+				<button type="button" class="close" data-dismiss="modal" aria-label="Close">
+					<span aria-hidden="true">&times;</span>
+				</button>
+			</div>
+			<div class="modal-body">
+				<div class="d-flex align-items-center">
+					<div style="width: 96px; height: 96px;">
+						{% if avatar_url %}
+							<img src="{{ avatar_url }}" class="img-fluid img-circle" style="width:96px;height:96px;object-fit:cover;" alt="Avatar" />
+						{% else %}
+							<div class="img-circle bg-light" style="width:96px;height:96px;"></div>
+						{% endif %}
+					</div>
+					<div class="ml-3">
+						<div><strong>Source:</strong> {{ avatar_provider|default:"unknown" }}</div>
+						{% if avatar_manage_url and not avatar_is_local %}
+							<div class="mt-1">
+								<a href="{{ avatar_manage_url }}" target="_blank" rel="noopener">Manage at provider</a>
+							</div>
+						{% endif %}
+					</div>
+				</div>
+
+				<hr />
+
+				<form method="post" action="{% url 'settings-avatar-upload' %}" enctype="multipart/form-data" class="mb-2">
+					{% csrf_token %}
+					<div class="form-group">
+						<label for="id_avatar_upload">Upload a new avatar</label>
+						<input id="id_avatar_upload" name="avatar" type="file" accept="image/*" class="form-control-file" required />
+						<small class="form-text text-muted">Uploading a new avatar replaces the previous one.</small>
+					</div>
+					<button type="submit" class="btn btn-primary">Upload</button>
+				</form>
+
+				{% if avatar_is_local %}
+					<form method="post" action="{% url 'settings-avatar-delete' %}">
+						{% csrf_token %}
+						<button type="submit" class="btn btn-outline-danger">Delete local avatar</button>
+					</form>
+				{% endif %}
+			</div>
+		</div>
+	</div>
+</div>

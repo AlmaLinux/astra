@@ -1,4 +1,3 @@
-{% load avatar_tags %}
 {% load static %}
 
 <form method="post" novalidate class="m-0" data-settings-save-all="1">
@@ -13,16 +12,12 @@
 		<div class="settings-profile-hero mb-4">
 			<div class="d-flex align-items-center">
 				<div class="settings-profile-avatar">
-					{% if request.user.email %}
-						{% avatar request.user 96 class="img-fluid img-circle" style="width:96px;height:96px;object-fit:cover;" alt="Avatar" %}
-					{% else %}
-						<div class="img-circle bg-light" style="width:96px;height:96px;"></div>
-					{% endif %}
+					<img src="{{ avatar_url }}" class="img-fluid img-circle" style="width:96px;height:96px;object-fit:cover;" alt="Avatar" />
 				</div>
 				<div class="ml-3">
-					<a class="btn btn-outline-secondary" href="{% url 'avatar-manage' %}" target="_blank" rel="noopener">Change avatar</a>
+					<button type="button" class="btn btn-outline-secondary" data-toggle="modal" data-target="#avatar-modal">Change avatar</button>
 					<div class="mt-1">
-						<small class="text-muted">We don't host avatar uploads. This sends you to your avatar provider (LibRAvatar/Gravatar).</small>
+						<small class="text-muted">Upload a local avatar, or keep using your current avatar provider.</small>
 					</div>
 				</div>
 			</div>
@@ -183,6 +178,8 @@
 		<button type="submit" class="btn btn-primary">Save</button>
 	</div>
 </form>
+
+{% include 'core/_modal_avatar_settings.html' %}
 
 <script src="{% static 'core/js/chat_nicknames_editor.js' %}"></script>
 
