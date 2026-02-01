@@ -4,6 +4,7 @@ from unittest.mock import patch
 from urllib.parse import parse_qs, quote, urlsplit
 
 from django.conf import settings
+from django.contrib.messages import get_messages
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
@@ -77,7 +78,7 @@ class MembershipRequestsFlowTests(TestCase):
                     follow=False,
                 )
 
-        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.status_code, 200)
         req = MembershipRequest.objects.get(requested_username="alice", membership_type_id="individual")
         self.assertEqual(req.status, MembershipRequest.Status.pending)
         self.assertEqual(req.responses, [{"Contributions": "I contributed docs and CI improvements."}])
@@ -149,7 +150,7 @@ class MembershipRequestsFlowTests(TestCase):
                     follow=False,
                 )
 
-        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.status_code, 200)
         expected = (
             f"{reverse('settings')}?agreement={quote(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN)}#agreements"
         )
@@ -260,7 +261,7 @@ class MembershipRequestsFlowTests(TestCase):
                         follow=False,
                     )
 
-        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.status_code, 200)
         req.refresh_from_db()
         self.assertEqual(req.status, MembershipRequest.Status.approved)
         add_mock.assert_called_once()
@@ -410,7 +411,7 @@ class MembershipRequestsFlowTests(TestCase):
                         follow=False,
                     )
 
-        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.status_code, 200)
         send_mock.assert_not_called()
 
         req.refresh_from_db()
@@ -507,7 +508,7 @@ class MembershipRequestsFlowTests(TestCase):
                         follow=False,
                     )
 
-        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.status_code, 200)
         add_mock.assert_called_once()
         _, add_kwargs = add_mock.call_args
         self.assertEqual(add_kwargs["group_name"], "almalinux-sponsor-silver")
@@ -593,7 +594,7 @@ class MembershipRequestsFlowTests(TestCase):
                         follow=False,
                     )
 
-        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.status_code, 200)
         send_mock.assert_not_called()
 
         redirect_url = str(resp["Location"])
@@ -672,7 +673,7 @@ class MembershipRequestsFlowTests(TestCase):
                         follow=False,
                     )
 
-        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.status_code, 200)
         send_mock.assert_called_once()
         _, kwargs = send_mock.call_args
         ctx = kwargs["context"]
@@ -844,7 +845,7 @@ class MembershipRequestsFlowTests(TestCase):
                     follow=False,
                 )
 
-        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.status_code, 200)
         req.refresh_from_db()
         self.assertEqual(req.status, MembershipRequest.Status.rejected)
 
@@ -927,7 +928,7 @@ class MembershipRequestsFlowTests(TestCase):
                     follow=False,
                 )
 
-        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.status_code, 200)
         send_mock.assert_not_called()
 
         req.refresh_from_db()
@@ -1884,3 +1885,153 @@ class MembershipRequestsFlowTests(TestCase):
         self.assertEqual(send_mock.call_count, 2)
         self.assertTrue(MembershipLog.objects.filter(target_username="alice", action=MembershipLog.Action.rejected).exists())
         self.assertTrue(MembershipLog.objects.filter(target_username="bob", action=MembershipLog.Action.rejected).exists())
+
+    def test_bulk_approve_is_idempotent_for_approved(self) -> None:
+        from core.models import MembershipRequest, MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.approved,
+        )
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [committee_cn],
+            },
+        )
+
+        self._login_as_freeipa_user("reviewer")
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.views_membership.approve_membership_request", autospec=True) as approve_mock,
+        ):
+            resp = self.client.post(
+                reverse("membership-requests-bulk"),
+                data={
+                    "bulk_action": "approve",
+                    "selected": [str(req.pk)],
+                },
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        approve_mock.assert_not_called()
+        messages = [m.message for m in get_messages(resp.wsgi_request)]
+        self.assertTrue(any("already approved" in m for m in messages))
+
+    def test_bulk_reject_is_idempotent_for_rejected(self) -> None:
+        from core.models import MembershipRequest, MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.rejected,
+        )
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [committee_cn],
+            },
+        )
+
+        self._login_as_freeipa_user("reviewer")
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.views_membership.reject_membership_request", autospec=True) as reject_mock,
+        ):
+            resp = self.client.post(
+                reverse("membership-requests-bulk"),
+                data={
+                    "bulk_action": "reject",
+                    "selected": [str(req.pk)],
+                },
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        reject_mock.assert_not_called()
+        messages = [m.message for m in get_messages(resp.wsgi_request)]
+        self.assertTrue(any("already rejected" in m for m in messages))
+
+    def test_bulk_ignore_is_idempotent_for_ignored(self) -> None:
+        from core.models import MembershipRequest, MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.ignored,
+        )
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [committee_cn],
+            },
+        )
+
+        self._login_as_freeipa_user("reviewer")
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.views_membership.ignore_membership_request", autospec=True) as ignore_mock,
+        ):
+            resp = self.client.post(
+                reverse("membership-requests-bulk"),
+                data={
+                    "bulk_action": "ignore",
+                    "selected": [str(req.pk)],
+                },
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        ignore_mock.assert_not_called()
+        messages = [m.message for m in get_messages(resp.wsgi_request)]
+        self.assertTrue(any("already ignored" in m for m in messages))

@@ -926,12 +926,33 @@ def membership_requests_bulk(request: HttpRequest) -> HttpResponse:
         return redirect("membership-requests")
 
     actor_username = request.user.get_username()
-    reqs = list(
+    reqs_all = list(
         MembershipRequest.objects.select_related("membership_type", "requested_organization")
-        .filter(pk__in=selected_ids, status__in=allowed_statuses)
+        .filter(pk__in=selected_ids)
         .order_by("pk")
     )
+    if not reqs_all:
+        messages.error(request, "No matching requests were found.")
+        return redirect("membership-requests")
+
+    target_status = None
+    if action == "approve":
+        target_status = MembershipRequest.Status.approved
+    elif action == "reject":
+        target_status = MembershipRequest.Status.rejected
+    elif action == "ignore":
+        target_status = MembershipRequest.Status.ignored
+
+    already_in_target = []
+    if target_status is not None:
+        already_in_target = [req for req in reqs_all if req.status == target_status]
+
+    reqs = [req for req in reqs_all if req.status in allowed_statuses]
     if not reqs:
+        if already_in_target:
+            status_label = str(target_status).replace("_", " ")
+            messages.info(request, f"Selected request(s) already {status_label}.")
+            return redirect("membership-requests")
         if bulk_scope == "on_hold":
             messages.error(request, "No matching on-hold requests were found.")
         else:
@@ -996,6 +1017,9 @@ def membership_requests_bulk(request: HttpRequest) -> HttpResponse:
         messages.success(request, f"Ignored {ignored} request(s).")
     if failures:
         messages.error(request, f"Failed to process {failures} request(s).")
+    if already_in_target:
+        status_label = str(target_status).replace("_", " ") if target_status is not None else "processed"
+        messages.info(request, f"Selected request(s) already {status_label}.")
 
     return redirect("membership-requests")
 
@@ -1026,6 +1050,11 @@ def membership_request_approve(request: HttpRequest, pk: int) -> HttpResponse:
             require_https=request.is_secure(),
         ):
             redirect_to = reverse("membership-requests")
+
+    if req.status == MembershipRequest.Status.approved:
+        target_label = _membership_request_target_label(req)
+        messages.info(request, f"Request for {target_label} is already approved.")
+        return redirect(redirect_to)
 
     try:
         approve_membership_request(
@@ -1113,6 +1142,11 @@ def membership_request_reject(request: HttpRequest, pk: int) -> HttpResponse:
         ):
             redirect_to = reverse("membership-requests")
 
+    if req.status == MembershipRequest.Status.rejected:
+        target_label = _membership_request_target_label(req)
+        messages.info(request, f"Request for {target_label} is already rejected.")
+        return redirect(redirect_to)
+
     form = MembershipRejectForm(request.POST)
     if not form.is_valid():
         messages.error(request, "Invalid rejection reason.")
@@ -1197,6 +1231,11 @@ def membership_request_rfi(request: HttpRequest, pk: int) -> HttpResponse:
         ):
             redirect_to = reverse("membership-requests")
 
+    if req.status == MembershipRequest.Status.on_hold:
+        target_label = _membership_request_target_label(req)
+        messages.info(request, f"Request for {target_label} is already on hold.")
+        return redirect(redirect_to)
+
     application_url = request.build_absolute_uri(reverse("membership-request-self", args=[req.pk]))
 
     _log, email_error = put_membership_request_on_hold(
@@ -1259,6 +1298,11 @@ def membership_request_ignore(request: HttpRequest, pk: int) -> HttpResponse:
             require_https=request.is_secure(),
         ):
             redirect_to = reverse("membership-requests")
+
+    if req.status == MembershipRequest.Status.ignored:
+        target_label = _membership_request_target_label(req)
+        messages.info(request, f"Request for {target_label} is already ignored.")
+        return redirect(redirect_to)
 
     ignore_membership_request(
         membership_request=req,
