@@ -65,6 +65,11 @@
 		<div class="form-group">
 			{{ profile_form.fasTimezone.label_tag }}
 			{{ profile_form.fasTimezone }}
+			<datalist id="timezone-options">
+				{% for value, label in profile_form.fasTimezone.field.choices %}
+					{% if value %}<option value="{{ value }}"></option>{% endif %}
+				{% endfor %}
+			</datalist>
 			{% if profile_form.fasTimezone.errors %}<div class="invalid-feedback d-block">{{ profile_form.fasTimezone.errors }}</div>{% endif %}
 			{% if profile_form.fasTimezone.help_text %}<small class="form-text text-muted">{{ profile_form.fasTimezone.help_text }}</small>{% endif %}
 		</div>

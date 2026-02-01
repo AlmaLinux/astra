@@ -60,6 +60,41 @@ class SelfServiceSettingsPagesTests(TestCase):
         self.assertEqual(form["sn"].value(), "User")
         self.assertFalse(form.is_bound)
 
+    def test_settings_profile_get_timezone_widget_uses_datalist(self):
+        factory = RequestFactory()
+
+        fake_user = SimpleNamespace(
+            username="alice",
+            email="a@example.org",
+            is_authenticated=True,
+            _user_data={
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "cn": ["Alice User"],
+            },
+        )
+
+        request = factory.get("/settings/")
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        captured: dict[str, object] = {}
+
+        def fake_render(_request, template, context):
+            captured["template"] = template
+            captured["context"] = context
+            return HttpResponse("ok")
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            with patch("core.views_settings.render", autospec=True, side_effect=fake_render):
+                response = views_settings.settings_root(request)
+
+        self.assertEqual(response.status_code, 200)
+        form = captured["context"]["profile_form"]
+        widget_attrs = form.fields["fasTimezone"].widget.attrs
+        self.assertEqual(widget_attrs.get("list"), "timezone-options")
+        self.assertIn("Zurich", widget_attrs.get("placeholder", ""))
+
     def test_settings_profile_get_accepts_boolean_fasisprivate(self):
         factory = RequestFactory()
 

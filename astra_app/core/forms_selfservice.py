@@ -214,8 +214,15 @@ class ProfileForm(_StyledForm):
     fasTimezone = forms.ChoiceField(
         label="Timezone",
         required=False,
-        help_text="IANA timezone like Europe/Paris",
+        help_text="IANA timezone like Europe/Madrid",
         choices=(),
+        widget=forms.TextInput(
+            attrs={
+                "autocomplete": "off",
+                "list": "timezone-options",
+                "placeholder": "Start typing (e.g. Europe/Zurich)",
+            }
+        ),
     )
 
     fasWebsiteUrl = forms.CharField(
