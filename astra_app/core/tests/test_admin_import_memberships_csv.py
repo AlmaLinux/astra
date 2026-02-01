@@ -16,6 +16,7 @@ from django.test import RequestFactory, TestCase
 from django.urls import reverse
 from django.utils import timezone
 from import_export.formats import base_formats
+from tablib import Dataset
 
 from core.admin import MembershipCSVImportLinkAdmin
 from core.backends import FreeIPAUser
@@ -716,6 +717,366 @@ class AdminImportMembershipsCSVTests(TestCase):
         self.assertEqual(matches_page_obj.paginator.count, 1)
         self.assertEqual(skipped_page_obj.paginator.count, 0)
 
+    def test_preview_reason_active_membership_updates_start_date(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "enabled": True,
+                "sort_order": 0,
+            },
+        )
+
+        self._login_as_freeipa_admin("alex")
+
+        now = timezone.now().astimezone(datetime.UTC)
+        membership = Membership.objects.create(
+            target_username="alice",
+            membership_type_id="individual",
+            expires_at=now + datetime.timedelta(days=30),
+        )
+        Membership.objects.filter(pk=membership.pk).update(
+            created_at=datetime.datetime(2020, 1, 1, 0, 0, 0, tzinfo=datetime.UTC)
+        )
+
+        dataset = Dataset(headers=["Email", "Start date", "Notes"])
+        dataset.append(["alice@example.org", "2024-01-02", ""])
+
+        admin_user = FreeIPAUser(
+            "alex",
+            {
+                "uid": ["alex"],
+                "mail": ["alex@example.org"],
+                "memberof_group": ["admins"],
+            },
+        )
+        alice_user = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.org"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "alex":
+                return admin_user
+            if username == "alice":
+                return alice_user
+            return None
+
+        with (
+            patch("core.membership_csv_import.FreeIPAUser.all", return_value=[admin_user, alice_user]),
+            patch("core.membership_csv_import.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
+        ):
+            resource = MembershipCSVImportResource(
+                membership_type=MembershipType.objects.get(code="individual"),
+                actor_username="alex",
+            )
+            resource.before_import(dataset)
+            decision, reason = resource._decision_for_row(dataset.dict[0])
+
+        self.assertEqual(decision, "IMPORT")
+        self.assertEqual(reason, "Active membership, updating start date")
+
+    def test_preview_reason_pending_request_will_be_accepted(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "enabled": True,
+                "sort_order": 0,
+            },
+        )
+
+        self._login_as_freeipa_admin("alex")
+
+        MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.pending,
+            responses=[{"Existing": "Yes"}],
+        )
+
+        dataset = Dataset(headers=["Email", "Start date", "Notes"])
+        dataset.append(["alice@example.org", "2024-01-02", ""])
+
+        admin_user = FreeIPAUser(
+            "alex",
+            {
+                "uid": ["alex"],
+                "mail": ["alex@example.org"],
+                "memberof_group": ["admins"],
+            },
+        )
+        alice_user = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.org"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "alex":
+                return admin_user
+            if username == "alice":
+                return alice_user
+            return None
+
+        with (
+            patch("core.membership_csv_import.FreeIPAUser.all", return_value=[admin_user, alice_user]),
+            patch("core.membership_csv_import.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
+        ):
+            resource = MembershipCSVImportResource(
+                membership_type=MembershipType.objects.get(code="individual"),
+                actor_username="alex",
+            )
+            resource.before_import(dataset)
+            decision, reason = resource._decision_for_row(dataset.dict[0])
+
+        self.assertEqual(decision, "IMPORT")
+        self.assertEqual(reason, "Active request, will be accepted")
+
+    def test_preview_reason_on_hold_request_is_ignored(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "enabled": True,
+                "sort_order": 0,
+            },
+        )
+
+        self._login_as_freeipa_admin("alex")
+
+        MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.on_hold,
+            responses=[{"Existing": "Yes"}],
+        )
+
+        dataset = Dataset(headers=["Email", "Start date", "Notes"])
+        dataset.append(["alice@example.org", "2024-01-02", ""])
+
+        admin_user = FreeIPAUser(
+            "alex",
+            {
+                "uid": ["alex"],
+                "mail": ["alex@example.org"],
+                "memberof_group": ["admins"],
+            },
+        )
+        alice_user = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.org"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "alex":
+                return admin_user
+            if username == "alice":
+                return alice_user
+            return None
+
+        with (
+            patch("core.membership_csv_import.FreeIPAUser.all", return_value=[admin_user, alice_user]),
+            patch("core.membership_csv_import.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
+        ):
+            resource = MembershipCSVImportResource(
+                membership_type=MembershipType.objects.get(code="individual"),
+                actor_username="alex",
+            )
+            resource.before_import(dataset)
+            decision, reason = resource._decision_for_row(dataset.dict[0])
+
+        self.assertEqual(decision, "SKIP")
+        self.assertEqual(reason, "Request on hold, will ignore")
+
+    def test_preview_reason_already_up_to_date_skips(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "enabled": True,
+                "sort_order": 0,
+            },
+        )
+
+        self._login_as_freeipa_admin("alex")
+
+        now = timezone.now().astimezone(datetime.UTC)
+        membership = Membership.objects.create(
+            target_username="alice",
+            membership_type_id="individual",
+            expires_at=now + datetime.timedelta(days=30),
+        )
+        Membership.objects.filter(pk=membership.pk).update(
+            created_at=datetime.datetime(2024, 1, 2, 0, 0, 0, tzinfo=datetime.UTC)
+        )
+
+        dataset = Dataset(headers=["Email", "Start date", "Notes"])
+        dataset.append(["alice@example.org", "2024-01-02", ""])
+
+        admin_user = FreeIPAUser(
+            "alex",
+            {
+                "uid": ["alex"],
+                "mail": ["alex@example.org"],
+                "memberof_group": ["admins"],
+            },
+        )
+        alice_user = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.org"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "alex":
+                return admin_user
+            if username == "alice":
+                return alice_user
+            return None
+
+        with (
+            patch("core.membership_csv_import.FreeIPAUser.all", return_value=[admin_user, alice_user]),
+            patch("core.membership_csv_import.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
+        ):
+            resource = MembershipCSVImportResource(
+                membership_type=MembershipType.objects.get(code="individual"),
+                actor_username="alex",
+            )
+            resource.before_import(dataset)
+            decision, reason = resource._decision_for_row(dataset.dict[0])
+
+        self.assertEqual(decision, "SKIP")
+        self.assertEqual(reason, "Already up-to-date")
+
+    def test_second_import_is_marked_up_to_date(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "enabled": True,
+                "sort_order": 0,
+            },
+        )
+
+        self._login_as_freeipa_admin("alex")
+
+        csv_content = (
+            b"Email,Start date,Notes\n"
+            b"alice@example.org,2024-01-02,Imported note\n"
+        )
+        uploaded = SimpleUploadedFile("members.csv", csv_content, content_type="text/csv")
+
+        admin_user = FreeIPAUser(
+            "alex",
+            {
+                "uid": ["alex"],
+                "mail": ["alex@example.org"],
+                "memberof_group": ["admins"],
+            },
+        )
+        alice_user = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.org"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "alex":
+                return admin_user
+            if username == "alice":
+                return alice_user
+            return None
+
+        with (
+            patch("core.membership_csv_import.FreeIPAUser.all", return_value=[admin_user, alice_user]),
+            patch("core.membership_csv_import.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
+            patch.object(FreeIPAUser, "add_to_group", autospec=True),
+        ):
+            import_url = reverse("admin:core_membershipcsvimportlink_import")
+            preview_resp = self.client.post(
+                import_url,
+                data={
+                    "resource": "0",
+                    "format": "0",
+                    "membership_type": "individual",
+                    "import_file": uploaded,
+                },
+                follow=False,
+            )
+
+            self.assertEqual(preview_resp.status_code, 200)
+            confirm_form = preview_resp.context.get("confirm_form")
+            self.assertIsNotNone(confirm_form)
+
+            process_url = reverse("admin:core_membershipcsvimportlink_process_import")
+            confirm_data = dict(confirm_form.initial)
+            confirm_data["membership_type"] = "individual"
+            resp = self.client.post(process_url, data=confirm_data, follow=False)
+
+        self.assertEqual(resp.status_code, 302)
+
+        dataset = Dataset(headers=["Email", "Start date", "Notes"])
+        dataset.append(["alice@example.org", "2024-01-02", "Imported note"])
+
+        with (
+            patch("core.membership_csv_import.FreeIPAUser.all", return_value=[admin_user, alice_user]),
+            patch("core.membership_csv_import.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
+        ):
+            resource = MembershipCSVImportResource(
+                membership_type=MembershipType.objects.get(code="individual"),
+                actor_username="alex",
+            )
+            resource.before_import(dataset)
+            decision, reason = resource._decision_for_row(dataset.dict[0])
+
+        self.assertEqual(decision, "SKIP")
+        self.assertEqual(reason, "Already up-to-date")
+
     def test_live_import_mirror_question_columns_are_used(self) -> None:
         MembershipType.objects.update_or_create(
             code="mirror",
@@ -1103,6 +1464,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
             patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
             patch.object(FreeIPAUser, "add_to_group", autospec=True),
+            patch("post_office.mail.send", autospec=True) as send_mail,
         ):
             import_url = reverse("admin:core_membershipcsvimportlink_import")
             preview_resp = self.client.post(
@@ -1127,6 +1489,9 @@ class AdminImportMembershipsCSVTests(TestCase):
 
         self.assertEqual(resp.status_code, 302)
 
+        # Existing pending request should be approved via normal workflow, including email.
+        send_mail.assert_called()
+
         # Still one request, not a duplicate.
         self.assertEqual(
             MembershipRequest.objects.filter(
@@ -1146,6 +1511,302 @@ class AdminImportMembershipsCSVTests(TestCase):
 
         self.assertTrue(
             Membership.objects.filter(target_username="alice", membership_type_id="individual").exists()
+        )
+
+    def test_live_import_updates_start_date_for_existing_active_membership(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "enabled": True,
+                "sort_order": 0,
+            },
+        )
+
+        self._login_as_freeipa_admin("alex")
+
+        now = timezone.now().astimezone(datetime.UTC)
+        membership = Membership.objects.create(
+            target_username="alice",
+            membership_type_id="individual",
+            expires_at=now + datetime.timedelta(days=30),
+        )
+        original_expires_at = membership.expires_at
+        Membership.objects.filter(pk=membership.pk).update(
+            created_at=datetime.datetime(2020, 1, 1, 0, 0, 0, tzinfo=datetime.UTC)
+        )
+
+        csv_content = (
+            b"Email,Start date,Notes\n"
+            b"alice@example.org,2024-01-02,Imported note\n"
+        )
+        uploaded = SimpleUploadedFile("members.csv", csv_content, content_type="text/csv")
+
+        admin_user = FreeIPAUser(
+            "alex",
+            {
+                "uid": ["alex"],
+                "mail": ["alex@example.org"],
+                "memberof_group": ["admins"],
+            },
+        )
+        alice_user = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.org"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "alex":
+                return admin_user
+            if username == "alice":
+                return alice_user
+            return None
+
+        with (
+            patch("core.membership_csv_import.FreeIPAUser.all", return_value=[admin_user, alice_user]),
+            patch("core.membership_csv_import.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
+            patch.object(FreeIPAUser, "add_to_group", autospec=True) as add_to_group,
+            patch("post_office.mail.send", autospec=True) as send_mail,
+        ):
+            import_url = reverse("admin:core_membershipcsvimportlink_import")
+            preview_resp = self.client.post(
+                import_url,
+                data={
+                    "resource": "0",
+                    "format": "0",
+                    "membership_type": "individual",
+                    "import_file": uploaded,
+                },
+                follow=False,
+            )
+
+            self.assertEqual(preview_resp.status_code, 200)
+            confirm_form = preview_resp.context.get("confirm_form")
+            self.assertIsNotNone(confirm_form)
+
+            process_url = reverse("admin:core_membershipcsvimportlink_process_import")
+            confirm_data = dict(confirm_form.initial)
+            confirm_data["membership_type"] = "individual"
+            resp = self.client.post(process_url, data=confirm_data, follow=False)
+
+        self.assertEqual(resp.status_code, 302)
+
+        membership.refresh_from_db()
+        expected_start = datetime.datetime(2024, 1, 2, 0, 0, 0, tzinfo=datetime.UTC)
+        self.assertEqual(membership.created_at, expected_start)
+        self.assertEqual(membership.expires_at, original_expires_at)
+
+        add_to_group.assert_called()
+        send_mail.assert_not_called()
+
+    def test_live_import_on_hold_request_adds_note_without_updating_membership(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "enabled": True,
+                "sort_order": 0,
+            },
+        )
+
+        self._login_as_freeipa_admin("alex")
+
+        existing_request = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.on_hold,
+            responses=[{"Existing": "Yes"}],
+        )
+        MembershipRequest.objects.filter(pk=existing_request.pk).update(
+            requested_at=datetime.datetime(2023, 12, 1, 0, 0, 0, tzinfo=datetime.UTC)
+        )
+
+        now = timezone.now().astimezone(datetime.UTC)
+        membership = Membership.objects.create(
+            target_username="alice",
+            membership_type_id="individual",
+            expires_at=now + datetime.timedelta(days=30),
+        )
+        Membership.objects.filter(pk=membership.pk).update(
+            created_at=datetime.datetime(2020, 1, 1, 0, 0, 0, tzinfo=datetime.UTC)
+        )
+
+        csv_content = (
+            b"Email,Start date,Notes\n"
+            b"alice@example.org,2024-01-02,Imported note\n"
+        )
+        uploaded = SimpleUploadedFile("members.csv", csv_content, content_type="text/csv")
+
+        admin_user = FreeIPAUser(
+            "alex",
+            {
+                "uid": ["alex"],
+                "mail": ["alex@example.org"],
+                "memberof_group": ["admins"],
+            },
+        )
+        alice_user = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.org"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "alex":
+                return admin_user
+            if username == "alice":
+                return alice_user
+            return None
+
+        with (
+            patch("core.membership_csv_import.FreeIPAUser.all", return_value=[admin_user, alice_user]),
+            patch("core.membership_csv_import.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
+            patch.object(FreeIPAUser, "add_to_group", autospec=True) as add_to_group,
+            patch("post_office.mail.send", autospec=True) as send_mail,
+        ):
+            import_url = reverse("admin:core_membershipcsvimportlink_import")
+            preview_resp = self.client.post(
+                import_url,
+                data={
+                    "resource": "0",
+                    "format": "0",
+                    "membership_type": "individual",
+                    "import_file": uploaded,
+                },
+                follow=False,
+            )
+
+            self.assertEqual(preview_resp.status_code, 200)
+            confirm_form = preview_resp.context.get("confirm_form")
+            self.assertIsNotNone(confirm_form)
+
+            process_url = reverse("admin:core_membershipcsvimportlink_process_import")
+            confirm_data = dict(confirm_form.initial)
+            confirm_data["membership_type"] = "individual"
+            resp = self.client.post(process_url, data=confirm_data, follow=False)
+
+        self.assertEqual(resp.status_code, 302)
+
+        membership.refresh_from_db()
+        self.assertEqual(
+            membership.created_at,
+            datetime.datetime(2020, 1, 1, 0, 0, 0, tzinfo=datetime.UTC),
+        )
+
+        req = MembershipRequest.objects.get(pk=existing_request.pk)
+        self.assertEqual(req.status, MembershipRequest.Status.on_hold)
+        self.assertEqual(
+            req.requested_at,
+            datetime.datetime(2023, 12, 1, 0, 0, 0, tzinfo=datetime.UTC),
+        )
+
+        self.assertTrue(
+            Note.objects.filter(
+                membership_request=req,
+                username="alex",
+                content="[Import] Imported note",
+            ).exists()
+        )
+
+        add_to_group.assert_not_called()
+        send_mail.assert_not_called()
+
+    def test_live_import_falls_back_to_find_by_email_when_directory_list_missing_email(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "enabled": True,
+                "sort_order": 0,
+            },
+        )
+
+        self._login_as_freeipa_admin("alex")
+
+        csv_content = (
+            b"Email,Start date,Notes\n"
+            b"alex.iribarren@gmail.com,2024-01-02,Imported note\n"
+        )
+        uploaded = SimpleUploadedFile("members.csv", csv_content, content_type="text/csv")
+
+        admin_user = FreeIPAUser(
+            "alex",
+            {
+                "uid": ["alex"],
+                "mail": ["alex@example.org"],
+                "memberof_group": ["admins"],
+            },
+        )
+        imported_user = FreeIPAUser(
+            "alexi",
+            {
+                "uid": ["alexi"],
+                "mail": ["alex.iribarren@gmail.com"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "alex":
+                return admin_user
+            if username == "alexi":
+                return imported_user
+            return None
+
+        with (
+            patch("core.membership_csv_import.FreeIPAUser.all", return_value=[admin_user]),
+            patch("core.membership_csv_import.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.membership_csv_import.FreeIPAUser.find_by_email", return_value=imported_user) as find_by_email,
+            patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
+            patch.object(FreeIPAUser, "add_to_group", autospec=True),
+        ):
+            import_url = reverse("admin:core_membershipcsvimportlink_import")
+            preview_resp = self.client.post(
+                import_url,
+                data={
+                    "resource": "0",
+                    "format": "0",
+                    "membership_type": "individual",
+                    "import_file": uploaded,
+                },
+                follow=False,
+            )
+
+            self.assertEqual(preview_resp.status_code, 200)
+            confirm_form = preview_resp.context.get("confirm_form")
+            self.assertIsNotNone(confirm_form)
+
+            process_url = reverse("admin:core_membershipcsvimportlink_process_import")
+            confirm_data = dict(confirm_form.initial)
+            confirm_data["membership_type"] = "individual"
+            resp = self.client.post(process_url, data=confirm_data, follow=False)
+
+        self.assertEqual(resp.status_code, 302)
+        find_by_email.assert_called_with("alex.iribarren@gmail.com")
+        self.assertGreaterEqual(find_by_email.call_count, 1)
+        self.assertTrue(
+            Membership.objects.filter(target_username="alexi", membership_type_id="individual").exists()
         )
 
     def test_live_import_succeeds_if_user_already_in_freeipa_group(self) -> None:

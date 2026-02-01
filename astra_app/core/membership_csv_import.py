@@ -21,7 +21,7 @@ from core.backends import FreeIPAUser
 from core.forms_membership import MembershipRequestForm
 from core.membership_notes import add_note
 from core.membership_request_workflow import approve_membership_request, record_membership_request_created
-from core.models import Membership, MembershipLog, MembershipRequest, MembershipType
+from core.models import Membership, MembershipLog, MembershipRequest, MembershipType, Note
 from core.views_utils import _normalize_str
 
 logger = logging.getLogger(__name__)
@@ -520,12 +520,26 @@ class MembershipCSVImportResource(resources.ModelResource):
         # If the directory listing worked, use it.
         if self._email_to_usernames:
             usernames = set(self._email_to_usernames.get(normalized, set()))
+            if usernames:
+                self._email_lookup_cache[normalized] = usernames
+                # Email is PII; keep this at DEBUG level.
+                logger.debug(
+                    "Membership CSV import: email lookup via directory email=%r matches=%r",
+                    normalized,
+                    sorted(usernames),
+                )
+                return usernames
+
+            # Fall back to a targeted lookup if the directory listing missed
+            # the email (stale cache or incomplete attribute set).
+            user = FreeIPAUser.find_by_email(normalized)
+            usernames = {user.username} if user and user.username else set()
             self._email_lookup_cache[normalized] = usernames
             # Email is PII; keep this at DEBUG level.
             logger.debug(
-                "Membership CSV import: email lookup via directory email=%r matches=%r",
+                "Membership CSV import: email lookup via directory+find_by_email email=%r match=%r",
                 normalized,
-                sorted(usernames),
+                next(iter(usernames), ""),
             )
             return usernames
 
@@ -631,14 +645,6 @@ class MembershipCSVImportResource(resources.ModelResource):
         if not self._row_is_active(row):
             return ("SKIP", "Not an Active Member")
 
-        now = timezone.now()
-        if Membership.objects.filter(
-            target_username=username,
-            membership_type=membership_type,
-            expires_at__gt=now,
-        ).exists():
-            return ("SKIP", "Active membership already exists")
-
         raw_type = self._row_csv_membership_type(row)
         if raw_type and not _membership_type_matches(raw_type, membership_type):
             return (
@@ -653,7 +659,84 @@ class MembershipCSVImportResource(resources.ModelResource):
                 f"Missing required agreements for '{membership_type.group_cn}': {', '.join(missing)}",
             )
 
-        return ("IMPORT", "")
+        start_at = self._row_approved_at(row)
+        csv_note = self._row_note(row)
+        responses = self._row_responses(row)
+        existing_request = (
+            MembershipRequest.objects.filter(
+                requested_username=username,
+                membership_type=membership_type,
+            )
+            .only("responses", "requested_at")
+            .order_by("-requested_at", "-pk")
+            .first()
+        )
+        note_exists = False
+        if csv_note:
+            note_exists = Note.objects.filter(
+                membership_request__requested_username=username,
+                membership_request__membership_type=membership_type,
+                content=f"[Import] {csv_note}",
+            ).exists()
+
+        responses_have_new = False
+        if responses:
+            existing_responses = []
+            if existing_request is not None and isinstance(existing_request.responses, list):
+                existing_responses = existing_request.responses
+            responses_have_new = any(item not in existing_responses for item in responses)
+
+        has_updates = (bool(csv_note) and not note_exists) or responses_have_new
+        now = timezone.now().astimezone(datetime.UTC)
+
+        open_request = (
+            MembershipRequest.objects.filter(
+                requested_username=username,
+                membership_type=membership_type,
+                status__in=[
+                    MembershipRequest.Status.pending,
+                    MembershipRequest.Status.on_hold,
+                ],
+            )
+            .only("status")
+            .first()
+        )
+
+        if open_request is not None and open_request.status == MembershipRequest.Status.on_hold:
+            if has_updates:
+                return ("IMPORT", "Request on hold, will ignore")
+            return ("SKIP", "Request on hold, will ignore")
+
+        if open_request is not None and open_request.status == MembershipRequest.Status.pending:
+            return ("IMPORT", "Active request, will be accepted")
+
+        existing_membership = (
+            Membership.objects.filter(
+                target_username=username,
+                membership_type=membership_type,
+                expires_at__gt=now,
+            )
+            .only("created_at")
+            .first()
+        )
+        if existing_membership is not None and start_at is not None:
+            if existing_membership.created_at == start_at and not has_updates:
+                return ("SKIP", "Already up-to-date")
+            if existing_membership.created_at != start_at:
+                return ("IMPORT", "Active membership, updating start date")
+
+        if existing_membership is not None and start_at is None:
+            if not has_updates:
+                return ("SKIP", "Already up-to-date")
+            return ("IMPORT", "Active membership, importing updates")
+
+        if existing_membership is not None and has_updates:
+            return ("IMPORT", "Active membership, importing updates")
+
+        if existing_membership is not None:
+            return ("IMPORT", "Active membership, updating start date")
+
+        return ("IMPORT", "New request will be created")
 
     def _populate_preview_fields(self, instance: MembershipRequest, row: Any) -> None:
         instance._csv_name = self._row_name(row)
@@ -802,27 +885,35 @@ class MembershipCSVImportResource(resources.ModelResource):
 
         responses = self._row_responses(row)
 
-        existing_pending = (
+        existing_open = (
             MembershipRequest.objects.filter(
                 requested_username=username,
                 membership_type=membership_type,
-                status=MembershipRequest.Status.pending,
+                status__in=[
+                    MembershipRequest.Status.pending,
+                    MembershipRequest.Status.on_hold,
+                ],
             )
-            # When re-using an existing pending request, we must carry over
-            # requested_at. Otherwise, the import-export save() call will issue
-            # an UPDATE with requested_at=NULL (because this Resource starts
-            # from a fresh instance and then assigns pk).
-            .only("pk", "responses", "requested_at")
+            # When re-using an existing request, we must carry over requested_at.
+            # Otherwise, the import-export save() call will issue an UPDATE with
+            # requested_at=NULL (because this Resource starts from a fresh instance
+            # and then assigns pk).
+            .only("pk", "responses", "requested_at", "status")
             .first()
         )
-        instance._csv_created_request = existing_pending is None
-        if existing_pending is not None:
-            instance.pk = existing_pending.pk
-            instance.requested_at = existing_pending.requested_at
+        instance._csv_created_request = existing_open is None
+        instance._csv_on_hold_request = (
+            existing_open is not None
+            and existing_open.status == MembershipRequest.Status.on_hold
+        )
+        if existing_open is not None:
+            instance.pk = existing_open.pk
+            instance.requested_at = existing_open.requested_at
+            instance.status = existing_open.status
 
         merged_responses: list[dict[str, str]] = []
-        if existing_pending is not None and isinstance(existing_pending.responses, list):
-            merged_responses.extend(existing_pending.responses)
+        if existing_open is not None and isinstance(existing_open.responses, list):
+            merged_responses.extend(existing_open.responses)
         for item in responses:
             if item not in merged_responses:
                 merged_responses.append(item)
@@ -832,7 +923,8 @@ class MembershipCSVImportResource(resources.ModelResource):
         instance.requested_organization_code = ""
         instance.requested_organization_name = ""
         instance.membership_type = membership_type
-        instance.status = MembershipRequest.Status.pending
+        if existing_open is None:
+            instance.status = MembershipRequest.Status.pending
         instance.responses = merged_responses
 
     @override
@@ -862,6 +954,22 @@ class MembershipCSVImportResource(resources.ModelResource):
         if start_at is None:
             start_at = now
 
+        existing_membership = (
+            Membership.objects.filter(
+                target_username=instance.requested_username,
+                membership_type=instance.membership_type,
+            )
+            .only("expires_at")
+            .first()
+        )
+        preserved_expires_at: datetime.datetime | None = None
+        if (
+            existing_membership is not None
+            and existing_membership.expires_at is not None
+            and existing_membership.expires_at > now
+        ):
+            preserved_expires_at = existing_membership.expires_at
+
         # The CSV start date is the membership's "effective since" time.
         # However, if the start date is in the past (e.g. a "member since"
         # field), treating it as the approval timestamp would immediately
@@ -870,6 +978,23 @@ class MembershipCSVImportResource(resources.ModelResource):
         # Use "now" for approval/expiry when the start date is in the past,
         # while still backfilling created/request times from the CSV.
         decided_at = max(start_at, now)
+
+        if instance._csv_on_hold_request:
+            csv_note = self._row_note(row)
+            if csv_note:
+                add_note(
+                    membership_request=instance,
+                    username=self._actor_username,
+                    content=f"[Import] {csv_note}",
+                )
+            logger.info(
+                "Membership CSV import: apply ignored (on-hold) row=%s email=%r username=%r membership_type=%s",
+                row_number,
+                email,
+                username,
+                instance.membership_type_id,
+            )
+            return
 
         try:
             # The importer may re-use an existing pending request for the same
@@ -885,10 +1010,16 @@ class MembershipCSVImportResource(resources.ModelResource):
                     send_submitted_email=False,
                 )
 
+            # If we're reusing an existing pending request (i.e. the user applied
+            # via the UI), approve via the normal workflow including the approval
+            # email. For importer-created requests, keep the historic behavior of
+            # *not* emailing (operators are usually bulk-importing a roster).
+            send_approved_email = not instance._csv_created_request
+
             approve_membership_request(
                 membership_request=instance,
                 actor_username=self._actor_username,
-                send_approved_email=False,
+                send_approved_email=send_approved_email,
                 decided_at=decided_at,
             )
 
@@ -902,6 +1033,12 @@ class MembershipCSVImportResource(resources.ModelResource):
                 target_username=instance.requested_username,
                 membership_type=instance.membership_type,
             ).update(created_at=start_at)
+
+            if preserved_expires_at is not None:
+                Membership.objects.filter(
+                    target_username=instance.requested_username,
+                    membership_type=instance.membership_type,
+                ).update(expires_at=preserved_expires_at)
 
             # Only record the import note after a fully successful apply. This
             # avoids leaving misleading "[Import]" notes behind when approval
