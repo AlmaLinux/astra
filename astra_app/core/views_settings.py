@@ -76,6 +76,7 @@ _SETTINGS_TABS: Final[tuple[str, ...]] = (
 # Must be the same as KEY_LENGTH in ipaserver/plugins/otptoken.py.
 # For maximum compatibility, must be a multiple of 5.
 OTP_KEY_LENGTH: Final[int] = 35
+AVATAR_MAX_SIZE: Final[int] = 512
 
 
 def _settings_fragment(tab: str) -> str:
@@ -212,6 +213,9 @@ def avatar_upload(request: HttpRequest) -> HttpResponse:
         img = ImageOps.exif_transpose(img)
         if img.mode not in {"RGB", "RGBA"}:
             img = img.convert("RGBA")
+
+        if max(img.size) > AVATAR_MAX_SIZE:
+            img.thumbnail((AVATAR_MAX_SIZE, AVATAR_MAX_SIZE), Image.Resampling.LANCZOS)
 
         out = io.BytesIO()
         img.save(out, format="PNG")

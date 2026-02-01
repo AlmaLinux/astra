@@ -35,9 +35,14 @@ class SettingsAvatarUploadAndDeleteTests(TestCase):
             email=email,
         )
 
-    def _make_upload(self, *, color: tuple[int, int, int]) -> SimpleUploadedFile:
+    def _make_upload(
+        self,
+        *,
+        color: tuple[int, int, int],
+        size: tuple[int, int] = (8, 8),
+    ) -> SimpleUploadedFile:
         buf = BytesIO()
-        Image.new("RGB", (8, 8), color=color).save(buf, format="PNG")
+        Image.new("RGB", size, color=color).save(buf, format="PNG")
         return SimpleUploadedFile(
             "avatar.png",
             buf.getvalue(),
@@ -151,3 +156,40 @@ class SettingsAvatarUploadAndDeleteTests(TestCase):
         after = avatar_url(user, 50, 50)
         self.assertTrue(after)
         self.assertNotEqual(before, after)
+
+    @override_settings(
+        STORAGES={
+            "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+            "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+        },
+        MEDIA_ROOT=_test_media_root,
+        AVATAR_STORAGE_DIR="avatars",
+        AVATAR_PROVIDERS=(
+            "core.avatar_providers.LocalS3AvatarProvider",
+            "avatar.providers.GravatarAvatarProvider",
+            "avatar.providers.DefaultAvatarProvider",
+        ),
+    )
+    def test_avatar_upload_resizes_large_images(self) -> None:
+        upload_url = reverse("settings-avatar-upload")
+
+        user = self._auth_user("alice", "alice@example.org")
+
+        key = avatar_path_handler(instance=SimpleNamespace(user=user), ext="png")
+        full_path = Path(default_storage.path(key))
+
+        factory = RequestFactory()
+
+        req = factory.post(
+            upload_url,
+            data={"avatar": self._make_upload(color=(10, 20, 30), size=(2400, 1600))},
+        )
+        req.user = user
+        self._add_session_and_messages(req)
+        resp = views_settings.avatar_upload(req)
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(full_path.exists())
+
+        with Image.open(full_path) as stored:
+            width, height = stored.size
+        self.assertLessEqual(max(width, height), 512)
