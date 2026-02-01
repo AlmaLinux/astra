@@ -26,12 +26,12 @@
       {% endif %}
     </div>
 
-    <div class="flex-grow-1 ms-2">
+    <div class="flex-grow-1 ms-2" style="min-width: 0;">
       <div class="my-0 font-weight-bold">
         <a href="{% url 'user-profile' username %}">{{ username }}</a>
       </div>
       {% if full_name %}
-        <div class="text-truncate">{{ full_name }}</div>
+        <div class="text-truncate w-100">{{ full_name }}</div>
       {% endif %}
     </div>
   </div>
