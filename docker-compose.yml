@@ -88,6 +88,11 @@ services:
     environment:
       - DEBUG=True
       - SECRET_KEY=dev_secret_key
+      # Error reporting (Bugsink is Sentry-compatible). Get the DSN from Bugsink UI.
+      - SENTRY_DSN=http://fed1fa2cb35545a0873e5a36b5865bb8@bugsink:8080/1
+      - SENTRY_ENVIRONMENT=development
+      - SENTRY_RELEASE=dev
+      # - SENTRY_SEND_DEFAULT_PII=False
       #- DJANGO_AUTO_MIGRATE=1
       - DATABASE_URL=postgres://postgres:postgres@almalinux_db2:5432/almalinux_members
       - EMAIL_URL=smtp://almalinux_mailhog:1025
@@ -105,6 +110,19 @@ services:
       - PUBLIC_BASE_URL=http://localhost:8000
       - AWS_S3_DOMAIN=http://localhost:9000
       - SELF_SERVICE_ADDRESS_COUNTRY_ATTR=fasstatusnote
+
+  bugsink:
+    image: bugsink/bugsink:latest
+    container_name: almalinux_bugsink
+    ports:
+      - "8080:8080"
+    environment:
+      #- SINGLE_TEAM=True
+      - SINGLE_USER=True
+      - SECRET_KEY=l1wUWh5R4ZRRVoDi87IvJYVnmtAkbyfPxD5xUWNZNT2A3rYhdt
+      - CREATE_SUPERUSER=admin:password
+      - PORT=8080
+      - DATABASE_URL=postgres://postgres:postgres@almalinux_db2:5432/bugsink
 
 volumes:
   postgres_data2:

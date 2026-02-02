@@ -1,4 +1,5 @@
 import datetime
+import logging
 import os
 import sys
 from pathlib import Path
@@ -104,6 +105,33 @@ def _parse_email_url(email_url: str) -> dict[str, Any]:
     }
 
 DEBUG = _env_bool("DEBUG", default=False)
+
+_sentry_dsn = (_env_str("SENTRY_DSN", default=None) or "").strip()
+if _sentry_dsn:
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.django import DjangoIntegration
+        from sentry_sdk.integrations.logging import LoggingIntegration
+    except ImportError as e:
+        raise ImproperlyConfigured(
+            "SENTRY_DSN is set but sentry-sdk is not installed. "
+            "Add sentry-sdk[django] to requirements."
+        ) from e
+
+    # Capture Django exceptions + log-based errors. Default PII is disabled.
+    sentry_sdk.init(
+        dsn=_sentry_dsn,
+        integrations=[
+            DjangoIntegration(),
+            LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
+        ],
+        environment=_env_str(
+            "SENTRY_ENVIRONMENT",
+            default="development" if DEBUG else "production",
+        ),
+        release=_env_str("SENTRY_RELEASE", default=None),
+        send_default_pii=_env_bool("SENTRY_SEND_DEFAULT_PII", default=False),
+    )
 
 # Self-service country settings: where to store the ISO 3166-1 country code.
 # Some FreeIPA dev schemas don't allow writing to the LDAP "c" attribute.

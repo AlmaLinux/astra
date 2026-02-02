@@ -17,4 +17,5 @@ qrcode
 pycountry
 scikit-learn>=1.3.0
 valx
+sentry-sdk[django]
 ruff
