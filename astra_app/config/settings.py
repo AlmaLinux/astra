@@ -125,12 +125,19 @@ if _sentry_dsn:
             DjangoIntegration(),
             LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
         ],
+        # Bugsink is Sentry-compatible but does not implement all envelope item
+        # types. Disabling these avoids noisy "skipping non-supported envelope
+        # item: sessions" logs without affecting exception reporting.
+        traces_sample_rate=0,
+        send_client_reports=False,
+        auto_session_tracking=False,
         environment=_env_str(
             "SENTRY_ENVIRONMENT",
             default="development" if DEBUG else "production",
         ),
         release=_env_str("SENTRY_RELEASE", default=None),
-        send_default_pii=_env_bool("SENTRY_SEND_DEFAULT_PII", default=False),
+        send_default_pii=_env_bool("SENTRY_SEND_DEFAULT_PII", default=True),
+        max_request_body_size="always",
     )
 
 # Self-service country settings: where to store the ISO 3166-1 country code.

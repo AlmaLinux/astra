@@ -51,6 +51,9 @@ class TestSettingsSentrySdkInit(unittest.TestCase):
             def init(*, dsn=None, **kwargs):
                 print("sentry-init")
                 print(dsn)
+                print(f"traces_sample_rate={kwargs.get('traces_sample_rate')!r}")
+                print(f"send_client_reports={kwargs.get('send_client_reports')!r}")
+                print(f"auto_session_tracking={kwargs.get('auto_session_tracking')!r}")
 
             sentry_sdk.init = init
             sentry_sdk_integrations_django.DjangoIntegration = DjangoIntegration
@@ -84,4 +87,7 @@ class TestSettingsSentrySdkInit(unittest.TestCase):
         lines = [line for line in result.stdout.strip().splitlines() if line]
         self.assertIn("sentry-init", lines)
         self.assertIn("http://public@example.invalid/1", lines)
+        self.assertIn("traces_sample_rate=0", lines)
+        self.assertIn("send_client_reports=False", lines)
+        self.assertIn("auto_session_tracking=False", lines)
         self.assertEqual(lines[-1], "ok")
