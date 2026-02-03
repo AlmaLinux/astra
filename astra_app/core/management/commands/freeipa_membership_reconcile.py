@@ -43,6 +43,11 @@ class Command(BaseCommand):
             default=0,
             help="Limit the number of FreeIPA mutations in fix mode (0 = unlimited).",
         )
+        parser.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Show what would be done without mutating data or sending email.",
+        )
 
     @override
     def handle(self, *args, **options) -> None:
@@ -50,6 +55,7 @@ class Command(BaseCommand):
         fix: bool = bool(options.get("fix"))
         group_cn_filter = str(options.get("group_cn") or "").strip()
         limit: int = int(options.get("limit") or 0)
+        dry_run: bool = bool(options.get("dry_run"))
 
         if report and fix:
             raise CommandError("Choose only one of --report or --fix.")
@@ -57,6 +63,12 @@ class Command(BaseCommand):
             report = True
         if limit < 0:
             raise CommandError("--limit must be zero or a positive integer.")
+
+        if dry_run:
+            if fix:
+                logger.info("freeipa_membership_reconcile: dry-run overrides fix mode")
+            fix = False
+            report = True
 
         mode = "fix" if fix else "report"
         now = timezone.now()
@@ -265,6 +277,17 @@ class Command(BaseCommand):
             "total_extra": total_extra,
             "total_errors": total_errors,
         }
+
+        if dry_run:
+            self.stdout.write(
+                "[dry-run] Would queue alert email to "
+                f"{len(unique_recipients)} recipient(s)."
+            )
+            logger.info(
+                "freeipa_membership_reconcile: dry_run_alert_suppressed recipients=%s",
+                len(unique_recipients),
+            )
+            return
 
         post_office.mail.send(
             recipients=unique_recipients,

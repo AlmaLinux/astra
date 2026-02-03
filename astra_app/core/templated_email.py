@@ -55,6 +55,8 @@ def configured_email_template_names() -> frozenset[str]:
     return frozenset(
         {
             settings.MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+            settings.ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+            settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
             settings.MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
             settings.MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME,
             settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME,

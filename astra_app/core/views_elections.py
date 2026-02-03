@@ -18,8 +18,6 @@ from django.shortcuts import redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
-
-from core.views_utils import _normalize_str, block_action_without_coc, has_signed_coc, settings_context
 from post_office.models import EmailTemplate
 
 from core import elections_eligibility, elections_services
@@ -64,6 +62,7 @@ from core.templated_email import (
 )
 from core.user_labels import user_choice_from_freeipa, user_label
 from core.views_send_mail import _CSV_SESSION_KEY
+from core.views_utils import block_action_without_coc, has_signed_coc
 
 _RECEIPT_RE = re.compile(r"^[0-9a-f]{64}$")
 

@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+from typing import override
+
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.urls import reverse
 from django.utils import timezone
 
 from core.backends import FreeIPAGroup, FreeIPAUser
+from core.email_context import membership_committee_email_context
 from core.models import FreeIPAPermissionGrant, MembershipRequest
 from core.permissions import ASTRA_ADD_MEMBERSHIP
-from core.email_context import membership_committee_email_context
 from core.templated_email import queue_templated_email
 
 
@@ -23,15 +25,23 @@ def _membership_requests_url(*, base_url: str) -> str:
 class Command(BaseCommand):
     help = "Notify the membership committee when pending membership requests exist."
 
+    @override
     def add_arguments(self, parser) -> None:
         parser.add_argument(
             "--force",
             action="store_true",
             help="Send even if an email was already queued today.",
         )
+        parser.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Show what would be done without mutating data or sending email.",
+        )
 
+    @override
     def handle(self, *args, **options) -> None:
         force: bool = bool(options.get("force"))
+        dry_run: bool = bool(options.get("dry_run"))
 
         pending_count = MembershipRequest.objects.filter(status=MembershipRequest.Status.pending).count()
         if pending_count <= 0:
@@ -82,10 +92,20 @@ class Command(BaseCommand):
                 created__date=today,
             ).exists()
             if already_sent:
-                self.stdout.write("Skipped; email already queued today.")
+                if dry_run:
+                    self.stdout.write("[dry-run] Would skip; email already queued today.")
+                else:
+                    self.stdout.write("Skipped; email already queued today.")
                 return
 
         recipients.sort()
+        if dry_run:
+            self.stdout.write(
+                "[dry-run] Would queue 1 email to "
+                f"{len(recipients)} recipient(s): {', '.join(recipients)}."
+            )
+            return
+
         queue_templated_email(
             recipients=recipients,
             sender=settings.DEFAULT_FROM_EMAIL,

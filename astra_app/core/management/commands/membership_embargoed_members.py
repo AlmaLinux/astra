@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import override
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
@@ -13,9 +14,9 @@ from core.country_codes import (
     country_name_from_code,
     embargoed_country_codes_from_settings,
 )
+from core.email_context import membership_committee_email_context
 from core.models import FreeIPAPermissionGrant, Membership
 from core.permissions import ASTRA_ADD_MEMBERSHIP
-from core.email_context import membership_committee_email_context
 from core.templated_email import queue_templated_email
 
 logger = logging.getLogger(__name__)
@@ -24,15 +25,23 @@ logger = logging.getLogger(__name__)
 class Command(BaseCommand):
     help = "Notify the membership committee about active members in embargoed countries."
 
+    @override
     def add_arguments(self, parser) -> None:
         parser.add_argument(
             "--force",
             action="store_true",
             help="Send even if an email was already queued today.",
         )
+        parser.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Show what would be done without mutating data or sending email.",
+        )
 
+    @override
     def handle(self, *args, **options) -> None:
         force: bool = bool(options.get("force"))
+        dry_run: bool = bool(options.get("dry_run"))
 
         embargoed_codes = embargoed_country_codes_from_settings()
         if not embargoed_codes:
@@ -125,11 +134,24 @@ class Command(BaseCommand):
                 created__date=today,
             ).exists()
             if already_sent:
-                self.stdout.write("Skipped; email already queued today.")
+                if dry_run:
+                    self.stdout.write("[dry-run] Would skip; email already queued today.")
+                else:
+                    self.stdout.write("Skipped; email already queued today.")
                 return
 
         embargoed_members.sort(key=lambda row: (row.get("country_code") or "", row.get("username") or ""))
         recipients.sort()
+
+        if dry_run:
+            self.stdout.write(
+                "[dry-run] Would queue 1 email to "
+                f"{len(recipients)} recipient(s): {', '.join(recipients)}."
+            )
+            self.stdout.write(
+                f"[dry-run] Would include {len(embargoed_members)} embargoed member(s)."
+            )
+            return
 
         queue_templated_email(
             recipients=recipients,

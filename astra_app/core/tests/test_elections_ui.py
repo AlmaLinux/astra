@@ -3,7 +3,6 @@ from __future__ import annotations
 import datetime
 from urllib.parse import quote
 from unittest.mock import patch
-
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone

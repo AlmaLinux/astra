@@ -88,3 +88,4 @@ class MembershipCommitteeEmailContextTests(TestCase):
             settings.MEMBERSHIP_COMMITTEE_EMAIL,
         )
         self.assertEqual(kwargs.get("reply_to"), [settings.MEMBERSHIP_COMMITTEE_EMAIL])
+

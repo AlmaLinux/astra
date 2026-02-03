@@ -3,13 +3,13 @@ from __future__ import annotations
 import logging
 import re
 from typing import Any
+from urllib.parse import quote
 
 from django.conf import settings
 from django.contrib import messages
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
 from django.urls import reverse
-from urllib.parse import quote
 
 from core.agreements import has_enabled_agreements
 from core.backends import FreeIPAFASAgreement, FreeIPAUser, _invalidate_user_cache, _invalidate_users_list_cache

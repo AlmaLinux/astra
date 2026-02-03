@@ -206,6 +206,52 @@ class MembershipEmbargoedMembersNotificationCommandTests(TestCase):
         )
 
     @override_settings(MEMBERSHIP_EMBARGOED_COUNTRY_CODES=["RU"])
+    def test_dry_run_does_not_queue_email(self) -> None:
+        frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
+        membership_type = self._create_membership_type()
+
+        Membership.objects.create(
+            target_username="member1",
+            membership_type=membership_type,
+            expires_at=frozen_now + datetime.timedelta(days=10),
+        )
+
+        committee_group = FreeIPAGroup(
+            settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
+            {"member_user": ["alice"]},
+        )
+
+        member1 = FreeIPAUser(
+            "member1",
+            {
+                "uid": ["member1"],
+                "mail": ["member1@example.com"],
+                "displayname": ["Member One"],
+                **self._country_attr_data("RU"),
+            },
+        )
+        alice = FreeIPAUser(
+            "alice",
+            {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []},
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            return {"member1": member1, "alice": alice}.get(username)
+
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
+                with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+                    call_command("membership_embargoed_members", "--dry-run")
+
+        from post_office.models import Email
+
+        self.assertFalse(
+            Email.objects.filter(
+                template__name=settings.MEMBERSHIP_COMMITTEE_EMBARGOED_MEMBERS_EMAIL_TEMPLATE_NAME
+            ).exists()
+        )
+
+    @override_settings(MEMBERSHIP_EMBARGOED_COUNTRY_CODES=["RU"])
     def test_command_dedupes_same_day_without_force(self) -> None:
         frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
         membership_type = self._create_membership_type()

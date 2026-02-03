@@ -95,6 +95,31 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
             ).exists()
         )
 
+    def test_dry_run_does_not_queue_email(self) -> None:
+        frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            self._create_membership_type()
+            MembershipRequest.objects.create(requested_username="req1", membership_type_id="individual")
+
+        committee_group = FreeIPAGroup(settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP, {"member_user": ["alice"]})
+        alice = FreeIPAUser(
+            "alice",
+            {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []},
+        )
+
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
+                with patch("core.backends.FreeIPAUser.get", return_value=alice):
+                    call_command("membership_pending_requests", "--dry-run")
+
+        from post_office.models import Email
+
+        self.assertFalse(
+            Email.objects.filter(
+                template__name=settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME
+            ).exists()
+        )
+
     def test_command_dedupes_same_day_without_force(self) -> None:
         frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
         with patch("django.utils.timezone.now", return_value=frozen_now):

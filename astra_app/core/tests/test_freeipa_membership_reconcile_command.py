@@ -181,3 +181,55 @@ class FreeIPAMembershipReconcileCommandTests(TestCase):
             any("sponsorship_divergence" in line for line in logs.output),
             f"Expected divergence warning, got: {logs.output}",
         )
+
+    def test_dry_run_does_not_queue_alert_email(self) -> None:
+        membership_type, _ = MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        Membership.objects.create(target_username="alice", membership_type=membership_type)
+
+        admin_group = self._group(settings.FREEIPA_ADMIN_GROUP, ["admin"])
+        target_group = self._group("almalinux-individual", [])
+        admin_user = FreeIPAUser(
+            "admin",
+            {
+                "uid": ["admin"],
+                "mail": ["admin@example.com"],
+                "memberof_group": [settings.FREEIPA_ADMIN_GROUP],
+            },
+        )
+
+        def _get_group(cn: str) -> FreeIPAGroup | None:
+            if cn == settings.FREEIPA_ADMIN_GROUP:
+                return admin_group
+            if cn == "almalinux-individual":
+                return target_group
+            return None
+
+        with (
+            patch("core.management.commands.freeipa_membership_reconcile.FreeIPAGroup.get", side_effect=_get_group),
+            patch("core.management.commands.freeipa_membership_reconcile.FreeIPAUser.get", return_value=admin_user),
+            patch("core.management.commands.freeipa_membership_reconcile.FreeIPAGroup.add_member") as add_mock,
+            patch("core.management.commands.freeipa_membership_reconcile.FreeIPAGroup.remove_member") as remove_mock,
+        ):
+            call_command("freeipa_membership_reconcile", "--dry-run")
+
+        add_mock.assert_not_called()
+        remove_mock.assert_not_called()
+
+        from post_office.models import Email
+
+        self.assertFalse(
+            Email.objects.filter(
+                to="admin@example.com",
+                template__name=settings.FREEIPA_MEMBERSHIP_RECONCILE_ALERT_EMAIL_TEMPLATE_NAME,
+            ).exists()
+        )

@@ -8,6 +8,7 @@ from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
+from post_office.models import EmailTemplate
 
 from core.backends import FreeIPAUser
 from core.models import (
@@ -277,10 +278,17 @@ class MembershipGroupSyncLifecycleTests(TestCase):
             },
         )
 
+        EmailTemplate.objects.create(
+            name=settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
+            subject="Your AlmaLinux sponsorship has expired",
+            content="Sponsorship for {{ organization_name }} has expired.",
+            html_content="<p>Sponsorship for {{ organization_name }} has expired.</p>",
+        )
+
         with patch("django.utils.timezone.now", return_value=frozen_now):
             with patch("core.backends.FreeIPAUser.get", return_value=bob):
                 with patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_mock:
-                    call_command("organization_sponsorship_expired_cleanup")
+                    call_command("membership_expired_cleanup")
 
         remove_mock.assert_called_once()
         org.refresh_from_db()
@@ -310,7 +318,7 @@ class MembershipGroupSyncLifecycleTests(TestCase):
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
             with patch("core.backends.FreeIPAUser.get", return_value=None):
-                call_command("organization_sponsorship_expired_cleanup")
+                call_command("membership_expired_cleanup")
 
         org.refresh_from_db()
         self.assertEqual(org.membership_level_id, "gold")

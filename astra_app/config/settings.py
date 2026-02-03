@@ -372,6 +372,14 @@ MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME = _env_str(
     "MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME",
     default="membership-expiring-soon",
 ) or "membership-expiring-soon"
+ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME = _env_str(
+    "ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME",
+    default="organization-sponsorship-expiring-soon",
+) or "organization-sponsorship-expiring-soon"
+ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME = _env_str(
+    "ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME",
+    default="organization-sponsorship-expired",
+) or "organization-sponsorship-expired"
 MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME = _env_str(
     "MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME",
     default="membership-expired",
