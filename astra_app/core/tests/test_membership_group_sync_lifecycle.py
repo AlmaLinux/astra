@@ -286,3 +286,32 @@ class MembershipGroupSyncLifecycleTests(TestCase):
         org.refresh_from_db()
         self.assertIsNone(org.membership_level_id)
         self.assertFalse(OrganizationSponsorship.objects.filter(organization=org).exists())
+
+    def test_org_sponsorship_expired_cleanup_does_not_clear_db_when_freeipa_removal_fails(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor",
+                "group_cn": "almalinux-gold",
+                "isIndividual": False,
+                "isOrganization": True,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
+        org = Organization.objects.create(name="Acme", membership_level_id="gold", representative="bob")
+        OrganizationSponsorship.objects.create(
+            organization=org,
+            membership_type_id="gold",
+            expires_at=frozen_now - datetime.timedelta(days=1),
+        )
+
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            with patch("core.backends.FreeIPAUser.get", return_value=None):
+                call_command("organization_sponsorship_expired_cleanup")
+
+        org.refresh_from_db()
+        self.assertEqual(org.membership_level_id, "gold")
+        self.assertTrue(OrganizationSponsorship.objects.filter(organization=org).exists())

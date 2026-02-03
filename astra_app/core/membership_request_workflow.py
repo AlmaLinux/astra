@@ -9,6 +9,7 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 from post_office.models import EmailTemplate
 
+from core.agreements import missing_required_agreements_for_user_in_group
 from core.backends import FreeIPAUser
 from core.email_context import (
     freeform_message_email_context,
@@ -368,6 +369,25 @@ def approve_membership_request(
             membership_type.code,
         )
 
+        if membership_type.group_cn and org.representative:
+            missing_agreements = missing_required_agreements_for_user_in_group(
+                org.representative,
+                membership_type.group_cn,
+            )
+            if missing_agreements:
+                missing_list = ", ".join(missing_agreements)
+                logger.warning(
+                    "approve_membership_request: missing required agreements (org) request_id=%s org_id=%s representative=%r missing=%s",
+                    membership_request.pk,
+                    org.pk,
+                    org.representative,
+                    missing_list,
+                )
+                raise ValidationError(
+                    "Representative must sign required agreements before approval: "
+                    f"{missing_list}"
+                )
+
         org_email = _organization_notification_email(org)
         if send_approved_email and org_email:
             template_name = settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME
@@ -555,6 +575,23 @@ def approve_membership_request(
         membership_type.group_cn,
         membership_type.code,
     )
+
+    missing_agreements = missing_required_agreements_for_user_in_group(
+        membership_request.requested_username,
+        membership_type.group_cn,
+    )
+    if missing_agreements:
+        missing_list = ", ".join(missing_agreements)
+        logger.warning(
+            "approve_membership_request: missing required agreements request_id=%s target=%r missing=%s",
+            membership_request.pk,
+            membership_request.requested_username,
+            missing_list,
+        )
+        raise ValidationError(
+            "User must sign required agreements before approval: "
+            f"{missing_list}"
+        )
 
     try:
         target = FreeIPAUser.get(membership_request.requested_username)

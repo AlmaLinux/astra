@@ -27,5 +27,6 @@ class Command(BaseCommand):
         call_command("membership_expired_cleanup", force=force)
         call_command("membership_expiration_notifications", force=force)
         call_command("organization_sponsorship_expired_cleanup")
+        call_command("freeipa_membership_reconcile", report=True)
         call_command("membership_pending_requests", force=force)
         call_command("membership_embargoed_members", force=force)

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+import logging
+from typing import override
 
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from core.backends import FreeIPAUser
 from core.models import OrganizationSponsorship
+
+logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
@@ -15,6 +19,7 @@ class Command(BaseCommand):
         "delete OrganizationSponsorship rows, and clear Organization.membership_level when it matches."
     )
 
+    @override
     def handle(self, *args, **options) -> None:
         now = timezone.now()
 
@@ -32,6 +37,7 @@ class Command(BaseCommand):
             membership_type = sponsorship.membership_type
             group_cn = str(membership_type.group_cn or "").strip()
             rep_username = str(org.representative or "").strip()
+            removal_failed = False
 
             self.stdout.write(
                 f"Processing expired sponsorship for org {org.pk} (level={membership_type.code}) rep={rep_username!r}..."
@@ -41,12 +47,33 @@ class Command(BaseCommand):
                 rep = FreeIPAUser.get(rep_username)
                 if rep is None:
                     failed += 1
+                    removal_failed = True
+                    logger.warning(
+                        "organization_sponsorship_expired_cleanup_failure org_id=%s membership_type=%s group_cn=%s representative=%s reason=freeipa_user_missing",
+                        org.pk,
+                        membership_type.code,
+                        group_cn,
+                        rep_username,
+                    )
                 elif group_cn in rep.groups_list:
                     try:
                         rep.remove_from_group(group_name=group_cn)
                     except Exception:
                         failed += 1
-                        continue
+                        removal_failed = True
+                        logger.exception(
+                            "organization_sponsorship_expired_cleanup_failure org_id=%s membership_type=%s group_cn=%s representative=%s reason=freeipa_remove_failed",
+                            org.pk,
+                            membership_type.code,
+                            group_cn,
+                            rep_username,
+                        )
+
+            if removal_failed:
+                self.stdout.write(
+                    f"Skipping expired sponsorship cleanup for org {org.pk}; FreeIPA removal failed."
+                )
+                continue
 
             if org.membership_level_id == membership_type.code:
                 org.membership_level = None

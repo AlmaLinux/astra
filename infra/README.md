@@ -112,3 +112,6 @@ cron_jobs = [
 ```
 
 If `minute` or `hour` are omitted, they default to `0` (midnight local time).
+
+The membership operations job now includes FreeIPA membership reconciliation in report mode by default and alerts
+members of the configured `FREEIPA_ADMIN_GROUP` when drift or failures are detected.

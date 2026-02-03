@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+import logging
+from typing import override
 
 from django.conf import settings
 from django.core.management.base import BaseCommand
@@ -12,6 +14,8 @@ from core.membership_notifications import send_membership_notification
 from core.models import Membership
 from core.views_utils import _first
 
+logger = logging.getLogger(__name__)
+
 
 class Command(BaseCommand):
     help = (
@@ -19,6 +23,7 @@ class Command(BaseCommand):
         "and send expired emails via django-post-office."
     )
 
+    @override
     def add_arguments(self, parser) -> None:
         parser.add_argument(
             "--force",
@@ -26,6 +31,7 @@ class Command(BaseCommand):
             help="Send even if an email was already queued today.",
         )
 
+    @override
     def handle(self, *args, **options) -> None:
         force: bool = bool(options.get("force"))
 
@@ -47,6 +53,12 @@ class Command(BaseCommand):
             self.stdout.write(f"Processing expired membership for user {membership.target_username}...")
             if fu is None:
                 failed += 1
+                logger.warning(
+                    "membership_expired_cleanup_failure user=%s membership_type=%s group_cn=%s reason=freeipa_user_missing",
+                    membership.target_username,
+                    membership.membership_type_id,
+                    membership.membership_type.group_cn,
+                )
                 continue
 
             if membership.membership_type.group_cn:
@@ -54,6 +66,12 @@ class Command(BaseCommand):
                     fu.remove_from_group(group_name=membership.membership_type.group_cn)
                 except Exception:
                     failed += 1
+                    logger.exception(
+                        "membership_expired_cleanup_failure user=%s membership_type=%s group_cn=%s reason=freeipa_remove_failed",
+                        membership.target_username,
+                        membership.membership_type_id,
+                        membership.membership_type.group_cn,
+                    )
                     continue
 
             if fu.email:

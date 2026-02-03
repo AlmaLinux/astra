@@ -429,6 +429,11 @@ MEMBERSHIP_COMMITTEE_EMBARGOED_MEMBERS_EMAIL_TEMPLATE_NAME = _env_str(
     default="membership-committee-embargoed-members",
 ) or "membership-committee-embargoed-members"
 
+FREEIPA_MEMBERSHIP_RECONCILE_ALERT_EMAIL_TEMPLATE_NAME = _env_str(
+    "FREEIPA_MEMBERSHIP_RECONCILE_ALERT_EMAIL_TEMPLATE_NAME",
+    default="freeipa-membership-reconcile-alert",
+) or "freeipa-membership-reconcile-alert"
+
 PASSWORD_RESET_TOKEN_TTL_SECONDS = _env_int("PASSWORD_RESET_TOKEN_TTL_SECONDS", default=60 * 60)
 PASSWORD_RESET_EMAIL_TEMPLATE_NAME = _env_str(
     "PASSWORD_RESET_EMAIL_TEMPLATE_NAME",
