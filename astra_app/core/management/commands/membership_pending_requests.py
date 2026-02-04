@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 from typing import override
 
 from django.conf import settings
@@ -87,15 +88,24 @@ class Command(BaseCommand):
             from post_office.models import Email
 
             today = timezone.localdate()
-            already_sent = Email.objects.filter(
-                template__name=settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME,
-                created__date=today,
-            ).exists()
+            template_name = settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME
+
+            if today.weekday() == 0:
+                already_sent = Email.objects.filter(
+                    template__name=template_name,
+                    created__date=today,
+                ).exists()
+            else:
+                this_weeks_monday = today - datetime.timedelta(days=today.weekday())
+                already_sent = Email.objects.filter(
+                    template__name=template_name,
+                    created__date__gte=this_weeks_monday,
+                ).exists()
             if already_sent:
                 if dry_run:
-                    self.stdout.write("[dry-run] Would skip; email already queued today.")
+                    self.stdout.write("[dry-run] Would skip; email already queued this week.")
                 else:
-                    self.stdout.write("Skipped; email already queued today.")
+                    self.stdout.write("Skipped; email already queued this week.")
                 return
 
         recipients.sort()

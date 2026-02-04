@@ -167,3 +167,62 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
                     second = Email.objects.count()
 
         self.assertEqual(first + 1, second)
+
+    def test_command_skips_if_already_sent_since_monday(self) -> None:
+        frozen_monday = datetime.datetime(2026, 1, 5, 12, tzinfo=datetime.UTC)
+        frozen_tuesday = datetime.datetime(2026, 1, 6, 12, tzinfo=datetime.UTC)
+
+        with patch("django.utils.timezone.now", return_value=frozen_monday):
+            self._create_membership_type()
+            MembershipRequest.objects.create(requested_username="req1", membership_type_id="individual")
+
+        committee_group = FreeIPAGroup(settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP, {"member_user": ["alice"]})
+        alice = FreeIPAUser(
+            "alice",
+            {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []},
+        )
+
+        from post_office.models import Email
+
+        with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
+            with patch("core.backends.FreeIPAUser.get", return_value=alice):
+                with patch("django.utils.timezone.now", return_value=frozen_monday):
+                    call_command("membership_pending_requests")
+                first = Email.objects.count()
+                with patch("django.utils.timezone.now", return_value=frozen_tuesday):
+                    call_command("membership_pending_requests")
+                second = Email.objects.count()
+
+        self.assertEqual(first, second)
+
+    def test_command_sends_midweek_if_monday_had_no_pending(self) -> None:
+        frozen_monday = datetime.datetime(2026, 1, 5, 12, tzinfo=datetime.UTC)
+        frozen_tuesday = datetime.datetime(2026, 1, 6, 12, tzinfo=datetime.UTC)
+
+        with patch("django.utils.timezone.now", return_value=frozen_monday):
+            self._create_membership_type()
+
+        committee_group = FreeIPAGroup(settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP, {"member_user": ["alice"]})
+        alice = FreeIPAUser(
+            "alice",
+            {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []},
+        )
+
+        from post_office.models import Email
+
+        with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
+            with patch("core.backends.FreeIPAUser.get", return_value=alice):
+                with patch("django.utils.timezone.now", return_value=frozen_monday):
+                    call_command("membership_pending_requests")
+                    self.assertEqual(Email.objects.count(), 0)
+
+                with patch("django.utils.timezone.now", return_value=frozen_tuesday):
+                    MembershipRequest.objects.create(requested_username="req1", membership_type_id="individual")
+                    call_command("membership_pending_requests")
+
+        self.assertEqual(
+            Email.objects.filter(
+                template__name=settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME
+            ).count(),
+            1,
+        )
