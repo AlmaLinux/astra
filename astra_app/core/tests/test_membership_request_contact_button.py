@@ -69,6 +69,46 @@ class MembershipRequestRfiButtonTests(TestCase):
         self.assertContains(resp, f'action="{reverse("membership-request-rfi", args=[req.pk])}"')
         self.assertContains(resp, 'name="rfi_message"')
 
+    def test_rfi_modal_includes_message_preset(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]},
+        )
+        alice = FreeIPAUser("alice", {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []})
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "alice":
+                return alice
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+            resp = self.client.get(reverse("membership-request-detail", args=[req.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(
+            resp,
+            "Please provide additional details about your involvement with the AlmaLinux community, including any "
+            "contributions, participation, or other relevant activities.",
+        )
+
     def test_contact_button_links_to_send_mail_for_user_request(self) -> None:
         MembershipType.objects.update_or_create(
             code="individual",
