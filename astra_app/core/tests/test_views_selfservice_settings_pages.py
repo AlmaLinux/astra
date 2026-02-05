@@ -3,9 +3,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import requests
 from django.contrib.messages import get_messages
 from django.contrib.messages.storage.fallback import FallbackStorage
 from django.contrib.sessions.middleware import SessionMiddleware
+from django.core.cache import cache
 from django.http import HttpResponse
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
@@ -15,6 +17,17 @@ from core import views_settings
 
 
 class SelfServiceSettingsPagesTests(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        cache.clear()
+        self._agreements_enabled_patcher = patch(
+            "core.views_settings.has_enabled_agreements",
+            autospec=True,
+            return_value=False,
+        )
+        self._agreements_enabled_patcher.start()
+        self.addCleanup(self._agreements_enabled_patcher.stop)
+
     def _add_session_and_messages(self, request):
         SessionMiddleware(lambda r: None).process_request(request)
         request.session.save()
@@ -133,6 +146,28 @@ class SelfServiceSettingsPagesTests(TestCase):
         self.assertIsNotNone(ctx)
         form = ctx["form"]
         self.assertTrue(form.initial.get("fasIsPrivate"))
+
+    def test_settings_root_connection_error_shows_unavailable_message(self):
+        factory = RequestFactory()
+        request = factory.get("/settings/")
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        with patch(
+            "core.views_settings._get_full_user",
+            autospec=True,
+            side_effect=requests.exceptions.ConnectionError(),
+        ):
+            response = views_settings.settings_root(request)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("home"))
+        msgs = [m.message for m in get_messages(request)]
+        self.assertIn(
+            "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
+            "Please try again later.",
+            msgs,
+        )
 
     @override_settings(SELF_SERVICE_ADDRESS_COUNTRY_ATTR="st")
     def test_settings_profile_get_accepts_uppercase_country_attr(self):
@@ -302,6 +337,247 @@ class SelfServiceSettingsPagesTests(TestCase):
         FREEIPA_SERVICE_PASSWORD="pw",
         SELF_SERVICE_ADDRESS_COUNTRY_ATTR="c",
     )
+    def test_settings_profile_update_connection_error_shows_unavailable_message(self):
+        factory = RequestFactory()
+
+        fake_user = SimpleNamespace(
+            username="alice",
+            first_name="Alice",
+            last_name="User",
+            email="a@example.org",
+            is_authenticated=True,
+            _user_data={
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "cn": ["Alice User"],
+                "c": ["US"],
+                "fasLocale": ["en_US"],
+                "fasTimezone": ["UTC"],
+                "fasIsPrivate": ["FALSE"],
+            },
+        )
+
+        request = factory.post(
+            "/settings/",
+            data={
+                "tab": "profile",
+                "givenname": "Alicia",
+                "sn": "User",
+                "country_code": "US",
+                "fasPronoun": "",
+                "fasLocale": "en-US",
+                "fasTimezone": "UTC",
+                "fasWebsiteUrl": "",
+                "fasRssUrl": "",
+                "fasIRCNick": "",
+                "fasGitHubUsername": "",
+                "fasGitLabUsername": "",
+                "fasIsPrivate": "",
+            },
+        )
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            with patch(
+                "core.views_settings._update_user_attrs",
+                autospec=True,
+                side_effect=requests.exceptions.ConnectionError(),
+            ):
+                response = views_settings.settings_root(request)
+
+        self.assertEqual(response.status_code, 200)
+        msgs = [m.message for m in get_messages(request)]
+        self.assertIn(
+            "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
+            "Please try again later.",
+            msgs,
+        )
+
+    @override_settings(
+        FREEIPA_HOST="ipa.test",
+        FREEIPA_VERIFY_SSL=False,
+        FREEIPA_SERVICE_USER="svc",
+        FREEIPA_SERVICE_PASSWORD="pw",
+        SELF_SERVICE_ADDRESS_COUNTRY_ATTR="c",
+    )
+    def test_settings_emails_update_connection_error_shows_unavailable_message(self):
+        factory = RequestFactory()
+
+        fake_user = SimpleNamespace(
+            username="alice",
+            email="a@example.org",
+            full_name="Alice User",
+            is_authenticated=True,
+            _user_data={
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "cn": ["Alice User"],
+                "c": ["US"],
+                "mail": ["a@example.org"],
+                "fasRHBZEmail": ["rhbz@example.org"],
+            },
+        )
+
+        request = factory.post(
+            "/settings/",
+            data={
+                "tab": "emails",
+                # Trigger a direct update (o_mail) rather than pending validation.
+                "mail": "rhbz@example.org",
+                "fasRHBZEmail": "rhbz@example.org",
+            },
+        )
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            with patch(
+                "core.views_settings._update_user_attrs",
+                autospec=True,
+                side_effect=requests.exceptions.ConnectionError(),
+            ):
+                response = views_settings.settings_root(request)
+
+        self.assertEqual(response.status_code, 200)
+        msgs = [m.message for m in get_messages(request)]
+        self.assertIn(
+            "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
+            "Please try again later.",
+            msgs,
+        )
+
+    @override_settings(
+        FREEIPA_HOST="ipa.test",
+        FREEIPA_VERIFY_SSL=False,
+        FREEIPA_SERVICE_USER="svc",
+        FREEIPA_SERVICE_PASSWORD="pw",
+        SELF_SERVICE_ADDRESS_COUNTRY_ATTR="c",
+    )
+    def test_settings_keys_update_connection_error_shows_unavailable_message(self):
+        factory = RequestFactory()
+
+        fake_user = SimpleNamespace(
+            username="alice",
+            email="a@example.org",
+            full_name="Alice User",
+            is_authenticated=True,
+            _user_data={
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "cn": ["Alice User"],
+                "c": ["US"],
+                "fasGPGKeyId": ["0123456789ABCDEF"],
+                "ipasshpubkey": ["ssh-ed25519 AAAA... alice@example"],
+            },
+        )
+
+        request = factory.post(
+            "/settings/",
+            data={
+                "tab": "keys",
+                "fasGPGKeyId": "0123456789ABCDEF\nFEDCBA9876543210",
+                "ipasshpubkey": "ssh-ed25519 AAAA... alice@example",
+            },
+        )
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            with patch(
+                "core.views_settings._update_user_attrs",
+                autospec=True,
+                side_effect=requests.exceptions.ConnectionError(),
+            ):
+                response = views_settings.settings_root(request)
+
+        self.assertEqual(response.status_code, 200)
+        msgs = [m.message for m in get_messages(request)]
+        self.assertIn(
+            "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
+            "Please try again later.",
+            msgs,
+        )
+
+    @override_settings(
+        FREEIPA_HOST="ipa.test",
+        FREEIPA_VERIFY_SSL=False,
+        FREEIPA_SERVICE_USER="svc",
+        FREEIPA_SERVICE_PASSWORD="pw",
+        SELF_SERVICE_ADDRESS_COUNTRY_ATTR="c",
+    )
+    def test_settings_save_all_connection_error_shows_unavailable_message(self):
+        factory = RequestFactory()
+
+        fake_user = SimpleNamespace(
+            username="alice",
+            email="a@example.org",
+            full_name="Alice User",
+            is_authenticated=True,
+            _user_data={
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "cn": ["Alice User"],
+                "c": ["US"],
+                "mail": ["a@example.org"],
+                "fasRHBZEmail": ["a@example.org"],
+                "fasGPGKeyId": ["0123456789ABCDEF"],
+                "ipasshpubkey": ["ssh-ed25519 AAAA... alice@example"],
+            },
+        )
+
+        request = factory.post(
+            "/settings/",
+            data={
+                "save_all": "1",
+                "tab": "profile",
+                # Profile
+                "givenname": "Alicia",
+                "sn": "User",
+                "country_code": "US",
+                "fasPronoun": "",
+                "fasLocale": "",
+                "fasTimezone": "",
+                "fasWebsiteUrl": "",
+                "fasRssUrl": "",
+                "fasIRCNick": "",
+                "fasGitHubUsername": "",
+                "fasGitLabUsername": "",
+                "fasIsPrivate": "",
+                # Emails
+                "mail": "a@example.org",
+                "fasRHBZEmail": "a@example.org",
+                # Keys
+                "fasGPGKeyId": "0123456789ABCDEF\nFEDCBA9876543210",
+                "ipasshpubkey": "ssh-ed25519 AAAA... alice@example",
+            },
+        )
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            with patch(
+                "core.views_settings._update_user_attrs",
+                autospec=True,
+                side_effect=requests.exceptions.ConnectionError(),
+            ):
+                response = views_settings.settings_root(request)
+
+        self.assertEqual(response.status_code, 200)
+        msgs = [m.message for m in get_messages(request)]
+        self.assertIn(
+            "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
+            "Please try again later.",
+            msgs,
+        )
+
+    @override_settings(
+        FREEIPA_HOST="ipa.test",
+        FREEIPA_VERIFY_SSL=False,
+        FREEIPA_SERVICE_USER="svc",
+        FREEIPA_SERVICE_PASSWORD="pw",
+        SELF_SERVICE_ADDRESS_COUNTRY_ATTR="c",
+    )
     def test_settings_save_all_applies_multiple_tabs(self):
         factory = RequestFactory()
 
@@ -353,11 +629,7 @@ class SelfServiceSettingsPagesTests(TestCase):
 
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
             with patch("core.views_settings._update_user_attrs", autospec=True) as mocked_update:
-                with (
-                    patch("core.views_settings._send_email_validation_email", autospec=True),
-                    patch("core.views_settings.list_agreements_for_user", autospec=True, return_value=[]),
-                    patch("core.views_settings.has_enabled_agreements", autospec=True, return_value=False),
-                ):
+                with patch("core.views_settings._send_email_validation_email", autospec=True):
                     mocked_update.side_effect = [([], True), ([], True)]
                     response = views_settings.settings_root(request)
 
@@ -422,11 +694,7 @@ class SelfServiceSettingsPagesTests(TestCase):
 
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
             with patch("core.views_settings._update_user_attrs", autospec=True) as mocked_update:
-                with (
-                    patch("core.views_settings._send_email_validation_email", autospec=True),
-                    patch("core.views_settings.list_agreements_for_user", autospec=True, return_value=[]),
-                    patch("core.views_settings.has_enabled_agreements", autospec=True, return_value=False),
-                ):
+                with patch("core.views_settings._send_email_validation_email", autospec=True):
                     mocked_update.side_effect = [([], True), ([], True)]
                     response = views_settings.settings_root(request)
 
@@ -729,6 +997,76 @@ class SelfServiceSettingsPagesTests(TestCase):
         FREEIPA_SERVICE_USER="svc",
         FREEIPA_SERVICE_PASSWORD="pw",
     )
+    def test_settings_email_validate_get_connection_error_shows_unavailable_message(self):
+        factory = RequestFactory()
+        request = factory.get("/settings/emails/validate/?token=token")
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        with patch(
+            "core.views_settings.read_signed_token",
+            autospec=True,
+            return_value={"u": "alice", "a": "mail", "v": "new@example.org"},
+        ):
+            with patch(
+                "core.views_settings._get_full_user",
+                autospec=True,
+                side_effect=requests.exceptions.ConnectionError(),
+            ):
+                response = views_settings.settings_email_validate(request)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("settings") + "#emails")
+        msgs = [m.message for m in get_messages(request)]
+        self.assertIn(
+            "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
+            "Please try again later.",
+            msgs,
+        )
+
+    @override_settings(
+        FREEIPA_HOST="ipa.test",
+        FREEIPA_VERIFY_SSL=False,
+        FREEIPA_SERVICE_USER="svc",
+        FREEIPA_SERVICE_PASSWORD="pw",
+    )
+    def test_settings_email_validate_connection_error_shows_unavailable_message(self):
+        factory = RequestFactory()
+        request = factory.post("/settings/email/validate/?token=token")
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        fake_user = SimpleNamespace(
+            username="alice",
+            email="a@example.org",
+            is_authenticated=True,
+            _user_data={"mail": ["a@example.org"]},
+        )
+
+        with patch("core.views_settings.read_signed_token", autospec=True, return_value={"u": "alice", "a": "mail", "v": "new@example.org"}):
+            with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+                with patch(
+                    "core.views_settings._update_user_attrs",
+                    autospec=True,
+                    side_effect=requests.exceptions.ConnectionError(),
+                ):
+                    response = views_settings.settings_email_validate(request)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("settings") + "#emails")
+        msgs = [m.message for m in get_messages(request)]
+        self.assertIn(
+            "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
+            "Please try again later.",
+            msgs,
+        )
+
+    @override_settings(
+        FREEIPA_HOST="ipa.test",
+        FREEIPA_VERIFY_SSL=False,
+        FREEIPA_SERVICE_USER="svc",
+        FREEIPA_SERVICE_PASSWORD="pw",
+    )
     def test_settings_keys_post_no_changes_short_circuits(self):
         factory = RequestFactory()
 
@@ -783,8 +1121,8 @@ class SelfServiceSettingsPagesTests(TestCase):
         fake_user = SimpleNamespace(_user_data={"fasstatusnote": ["US"]})
 
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
-            with patch("core.views_settings.ClientMeta", autospec=True) as mocked_client_cls:
-                mocked_client = mocked_client_cls.return_value
+            with patch("core.views_settings._build_freeipa_client", autospec=True) as mocked_build:
+                mocked_client = mocked_build.return_value
                 mocked_client.change_password.return_value = None
 
                 response = views_settings.settings_root(request)
@@ -815,8 +1153,8 @@ class SelfServiceSettingsPagesTests(TestCase):
         fake_user = SimpleNamespace(_user_data={"fasstatusnote": ["US"]})
 
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
-            with patch("core.views_settings.ClientMeta", autospec=True) as mocked_client_cls:
-                mocked_client = mocked_client_cls.return_value
+            with patch("core.views_settings._build_freeipa_client", autospec=True) as mocked_build:
+                mocked_client = mocked_build.return_value
                 mocked_client.change_password.return_value = None
 
                 response = views_settings.settings_root(request)
@@ -847,8 +1185,8 @@ class SelfServiceSettingsPagesTests(TestCase):
         fake_user = SimpleNamespace(_user_data={"fasstatusnote": ["US"]})
 
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
-            with patch("core.views_settings.ClientMeta", autospec=True) as mocked_client_cls:
-                mocked_client = mocked_client_cls.return_value
+            with patch("core.views_settings._build_freeipa_client", autospec=True) as mocked_build:
+                mocked_client = mocked_build.return_value
                 mocked_client.change_password.side_effect = exceptions.PWChangeInvalidPassword("bad")
 
                 response = views_settings.settings_root(request)

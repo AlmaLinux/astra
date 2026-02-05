@@ -11,6 +11,7 @@ from typing import Any, Final
 from urllib.parse import quote
 
 import post_office.mail
+import requests
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -26,7 +27,14 @@ from python_freeipa import ClientMeta, exceptions
 
 from core.agreements import has_enabled_agreements, list_agreements_for_user
 from core.avatar_storage import avatar_path_handler
-from core.backends import FreeIPAFASAgreement, FreeIPAUser
+from core.backends import (
+    DegradedFreeIPAUser,
+    FreeIPAFASAgreement,
+    FreeIPAUser,
+    _build_freeipa_client,
+    _freeipa_circuit_open,
+    _get_freeipa_client,
+)
 from core.email_context import user_email_context
 from core.forms_selfservice import (
     EmailsForm,
@@ -289,7 +297,25 @@ def settings_root(request: HttpRequest) -> HttpResponse:
 
     is_save_all = request.method == "POST" and _normalize_str(request.POST.get("save_all")) == "1"
 
-    fu = _get_full_user(username)
+    if request.method == "POST" and (
+        isinstance(request.user, DegradedFreeIPAUser) or _freeipa_circuit_open()
+    ):
+        messages.error(
+            request,
+            "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
+            "Please try again later.",
+        )
+        return redirect(_settings_url(requested_tab))
+
+    try:
+        fu = _get_full_user(username)
+    except requests.exceptions.ConnectionError:
+        messages.error(
+            request,
+            "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
+            "Please try again later.",
+        )
+        return redirect("home")
     if not fu:
         messages.error(request, "Unable to load your FreeIPA profile.")
         return redirect("home")
@@ -372,7 +398,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
         new = password_form.cleaned_data["new_password"]
 
         try:
-            client = ClientMeta(host=settings.FREEIPA_HOST, verify_ssl=settings.FREEIPA_VERIFY_SSL)
+            client = _build_freeipa_client()
 
             # Prefer the password-change endpoint: it works for self-service password changes
             # and supports OTP validation.
@@ -436,13 +462,10 @@ def settings_root(request: HttpRequest) -> HttpResponse:
     otp_qr_png_b64: str | None = None
 
     def _service_client() -> ClientMeta:
-        c = ClientMeta(host=settings.FREEIPA_HOST, verify_ssl=settings.FREEIPA_VERIFY_SSL)
-        c.login(settings.FREEIPA_SERVICE_USER, settings.FREEIPA_SERVICE_PASSWORD)
-        return c
+        return _get_freeipa_client(settings.FREEIPA_SERVICE_USER, settings.FREEIPA_SERVICE_PASSWORD)
 
     def _user_can_reauth(password: str) -> bool:
-        c = ClientMeta(host=settings.FREEIPA_HOST, verify_ssl=settings.FREEIPA_VERIFY_SSL)
-        c.login(username, password)
+        _get_freeipa_client(username, password)
         return True
 
     try:
@@ -984,6 +1007,14 @@ def settings_root(request: HttpRequest) -> HttpResponse:
                 else:
                     messages.info(request, "No key changes were applied.")
 
+        except requests.exceptions.ConnectionError:
+            messages.error(
+                request,
+                "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
+                "Please try again later.",
+            )
+            context["force_tab"] = requested_tab
+            return render(request, "core/settings.html", context)
         except Exception as e:
             logger.exception("Failed to update settings username=%s", username)
             if settings.DEBUG:
@@ -1135,6 +1166,14 @@ def settings_root(request: HttpRequest) -> HttpResponse:
                 setattrs=setattrs,
                 delattrs=delattrs,
             )
+        except requests.exceptions.ConnectionError:
+            messages.error(
+                request,
+                "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
+                "Please try again later.",
+            )
+            context["force_tab"] = "profile"
+            return render(request, "core/settings.html", context)
         except Exception as e:
             logger.exception("Failed to update profile username=%s", username)
             if settings.DEBUG:
@@ -1258,6 +1297,14 @@ def settings_root(request: HttpRequest) -> HttpResponse:
                     "We sent you an email to validate your new email address. Please check your inbox.",
                 )
 
+        except requests.exceptions.ConnectionError:
+            messages.error(
+                request,
+                "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
+                "Please try again later.",
+            )
+            context["force_tab"] = "emails"
+            return render(request, "core/settings.html", context)
         except Exception as e:
             logger.exception("Failed to update email settings username=%s", username)
             if settings.DEBUG:
@@ -1308,6 +1355,14 @@ def settings_root(request: HttpRequest) -> HttpResponse:
                 setattrs=setattrs,
                 delattrs=delattrs,
             )
+        except requests.exceptions.ConnectionError:
+            messages.error(
+                request,
+                "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
+                "Please try again later.",
+            )
+            context["force_tab"] = "keys"
+            return render(request, "core/settings.html", context)
         except Exception as e:
             logger.exception("Failed to update keys username=%s", username)
             if settings.DEBUG:
@@ -1487,7 +1542,15 @@ def settings_email_validate(request: HttpRequest) -> HttpResponse:
         messages.warning(request, "The token is invalid, please request a validation email.")
         return redirect(_settings_url("emails"))
 
-    fu = _get_full_user(username)
+    try:
+        fu = _get_full_user(username)
+    except requests.exceptions.ConnectionError:
+        messages.error(
+            request,
+            "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
+            "Please try again later.",
+        )
+        return redirect(_settings_url("emails"))
     if not fu:
         messages.error(request, "Unable to load your FreeIPA profile.")
         return redirect("home")
@@ -1506,6 +1569,13 @@ def settings_email_validate(request: HttpRequest) -> HttpResponse:
 
         try:
             _update_user_attrs(username, direct_updates=direct_updates, setattrs=setattrs, delattrs=delattrs)
+        except requests.exceptions.ConnectionError:
+            messages.error(
+                request,
+                "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
+                "Please try again later.",
+            )
+            return redirect(_settings_url("emails"))
         except Exception as e:
             logger.exception("Email validation apply failed username=%s attr=%s", username, attr)
             if settings.DEBUG:

@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import socket
 import threading
 from collections.abc import Callable
 from functools import lru_cache
+from typing import override
 
+import requests
 from django.conf import settings
 from django.contrib.auth.backends import BaseBackend
 from django.core.cache import cache
@@ -16,6 +19,26 @@ logger = logging.getLogger(__name__)
 
 _service_client_local = threading.local()
 _viewer_username_local = threading.local()
+
+_FREEIPA_REQUEST_TIMEOUT_SECONDS = 10
+
+
+class _FreeIPATimeoutSession(requests.Session):
+    def __init__(self, default_timeout: float) -> None:
+        super().__init__()
+        self.default_timeout = default_timeout
+
+    @override
+    def request(self, method: str, url: str, **kwargs: object) -> requests.Response:
+        if "timeout" not in kwargs or kwargs.get("timeout") is None:
+            kwargs["timeout"] = self.default_timeout
+        return super().request(method, url, **kwargs)
+
+
+def _build_freeipa_client() -> ClientMeta:
+    client = ClientMeta(host=settings.FREEIPA_HOST, verify_ssl=settings.FREEIPA_VERIFY_SSL)
+    client._session = _FreeIPATimeoutSession(_FREEIPA_REQUEST_TIMEOUT_SECONDS)
+    return client
 
 
 def _clean_str_list(values: object) -> list[str]:
@@ -247,7 +270,7 @@ def _get_freeipa_client(username: str, password: str) -> ClientMeta:
     wiring across user/group helpers and the auth backend.
     """
 
-    client = ClientMeta(host=settings.FREEIPA_HOST, verify_ssl=settings.FREEIPA_VERIFY_SSL)
+    client = _build_freeipa_client()
     client.login(username, password)
     return client
 
@@ -321,9 +344,12 @@ def _with_freeipa_service_client_retry[T](get_client: Callable[[], ClientMeta], 
     the FreeIPA session cookie expires or a connection is reset.
     """
 
+    if _freeipa_circuit_open():
+        raise FreeIPAUnavailableError("FreeIPA circuit breaker is open")
+
     try:
         client = get_client()
-        return fn(client)
+        result = fn(client)
     except exceptions.PasswordExpired as e:
         # Service account password expiration is not recoverable by retrying.
         # Make it loud in logs and let the request fail as a 500.
@@ -333,10 +359,21 @@ def _with_freeipa_service_client_retry[T](get_client: Callable[[], ClientMeta], 
     except exceptions.Unauthorized:
         clear_freeipa_service_client_cache()
         client = get_client()
-        return fn(client)
+        try:
+            result = fn(client)
+        except Exception as exc:
+            if _is_freeipa_availability_error(exc):
+                _record_freeipa_availability_failure()
+            logger.exception(f"FreeIPA service account operation failed: {exc}")
+            raise
     except Exception as e:
+        if _is_freeipa_availability_error(e):
+            _record_freeipa_availability_failure()
         logger.exception(f"FreeIPA service account operation failed: {e}")
         raise
+
+    _reset_freeipa_circuit_failures()
+    return result
 
 
 def _user_cache_key(username: str) -> str:
@@ -378,6 +415,65 @@ def _invalidate_user_cache(username: str) -> None:
 
 def _invalidate_group_cache(cn: str) -> None:
     cache.delete(_group_cache_key(cn))
+
+
+_FREEIPA_CIRCUIT_OPEN_CACHE_KEY = "freeipa_circuit_open"
+_FREEIPA_CIRCUIT_FAILURES_CACHE_KEY = "freeipa_circuit_consecutive_failures"
+
+
+def _freeipa_circuit_open() -> bool:
+    try:
+        return bool(cache.get(_FREEIPA_CIRCUIT_OPEN_CACHE_KEY))
+    except Exception:
+        return False
+
+
+def _open_freeipa_circuit() -> None:
+    try:
+        cache.add(
+            _FREEIPA_CIRCUIT_OPEN_CACHE_KEY,
+            True,
+            timeout=settings.FREEIPA_CIRCUIT_BREAKER_COOLDOWN_SECONDS,
+        )
+    except Exception:
+        return
+
+
+def _reset_freeipa_circuit_failures() -> None:
+    try:
+        cache.delete(_FREEIPA_CIRCUIT_FAILURES_CACHE_KEY)
+        cache.delete(_FREEIPA_CIRCUIT_OPEN_CACHE_KEY)
+    except Exception:
+        return
+
+
+def _record_freeipa_availability_failure() -> None:
+    try:
+        cache.add(
+            _FREEIPA_CIRCUIT_FAILURES_CACHE_KEY,
+            0,
+            timeout=settings.FREEIPA_CIRCUIT_BREAKER_COOLDOWN_SECONDS,
+        )
+        failures = cache.incr(_FREEIPA_CIRCUIT_FAILURES_CACHE_KEY)
+    except Exception:
+        return
+
+    if failures >= settings.FREEIPA_CIRCUIT_BREAKER_CONSECUTIVE_FAILURES:
+        _open_freeipa_circuit()
+
+
+def _is_freeipa_availability_error(exc: Exception) -> bool:
+    if isinstance(
+        exc,
+        (
+            requests.exceptions.Timeout,
+            requests.exceptions.ConnectionError,
+            requests.exceptions.SSLError,
+            socket.timeout,
+        ),
+    ):
+        return True
+    return False
 
 
 _ELECTIONS_FREEIPA_CIRCUIT_CACHE_KEY = "freeipa_elections_circuit_open"
@@ -478,6 +574,48 @@ class _FreeIPAPK:
 
 class _FreeIPAMeta:
     pk = _FreeIPAPK()
+
+
+class DegradedFreeIPAUser:
+    def __init__(self, username: str) -> None:
+        self.username = str(username).strip() if username else ""
+        self.backend = "core.backends.FreeIPAAuthBackend"
+        self._meta = _FreeIPAMeta()
+        self.is_authenticated = True
+        self.is_anonymous = False
+        self.is_staff = False
+        self.is_superuser = False
+        self.email = ""
+        self.first_name = ""
+        self.last_name = ""
+        self.displayname = ""
+        self.commonname = ""
+        self.gecos = ""
+        self.fasstatusnote = ""
+        self.groups_list: list[str] = []
+        self.timezone = ""
+        self.last_login = None
+
+    def get_username(self) -> str:
+        return self.username
+
+    def get_full_name(self) -> str:
+        return self.displayname or self.username
+
+    def get_short_name(self) -> str:
+        return self.first_name or self.username
+
+    def get_session_auth_hash(self) -> str:
+        return salted_hmac('freeipa-user', self.username, secret=settings.SECRET_KEY).hexdigest()
+
+    def get_all_permissions(self, obj: object | None = None) -> set[str]:
+        return set()
+
+    def has_perm(self, perm: str, obj: object | None = None) -> bool:
+        return False
+
+    def has_perms(self, perm_list: list[str], obj: object | None = None) -> bool:
+        return False
 
 class FreeIPAManager:
     """
@@ -1979,6 +2117,16 @@ class FreeIPAAuthBackend(BaseBackend):
             logger.warning("authenticate: bad request username=%s error=%s", username, e)
             if request is not None:
                 setattr(request, "_freeipa_auth_error", "Login failed due to a FreeIPA error.")
+            return None
+        except requests.exceptions.ConnectionError:
+            logger.warning("authenticate: connection error username=%s", username)
+            if request is not None:
+                setattr(
+                    request,
+                    "_freeipa_auth_error",
+                    "We cannot sign you in right now because AlmaLinux Accounts is temporarily unavailable. "
+                    "Please try again in a few minutes.",
+                )
             return None
         except Exception:
             logger.exception("FreeIPA authentication error username=%s", username)

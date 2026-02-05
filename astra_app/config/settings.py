@@ -217,6 +217,7 @@ if os.environ.get('DISABLE_AUTH_MIGRATIONS') == '1':
     }
 
 MIDDLEWARE = [
+    'core.middleware.FreeIPAUnavailableMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -332,6 +333,16 @@ ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS = _env_int(
 ELECTION_FREEIPA_CIRCUIT_BREAKER_SECONDS = _env_int(
     "ELECTION_FREEIPA_CIRCUIT_BREAKER_SECONDS",
     default=30,
+)
+
+FREEIPA_CIRCUIT_BREAKER_CONSECUTIVE_FAILURES = _env_int(
+    "FREEIPA_CIRCUIT_BREAKER_CONSECUTIVE_FAILURES",
+    default=3,
+)
+
+FREEIPA_CIRCUIT_BREAKER_COOLDOWN_SECONDS = _env_int(
+    "FREEIPA_CIRCUIT_BREAKER_COOLDOWN_SECONDS",
+    default=60,
 )
 
 ELECTION_RATE_LIMIT_BALLOT_VERIFY_LIMIT = _env_int(

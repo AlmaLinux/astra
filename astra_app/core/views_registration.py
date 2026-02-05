@@ -13,11 +13,11 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from python_freeipa import ClientMeta, exceptions
+from python_freeipa import exceptions
 
 from core.views_utils import _normalize_str
 
-from .backends import FreeIPAUser
+from .backends import FreeIPAUser, _build_freeipa_client
 from .forms_registration import PasswordSetForm, RegistrationForm, ResendRegistrationEmailForm
 from .models import AccountInvitation
 from .tokens import make_signed_token, read_signed_token
@@ -306,7 +306,7 @@ def activate(request: HttpRequest) -> HttpResponse:
 
             # Try to un-expire it by changing it "as the user".
             try:
-                c = ClientMeta(host=settings.FREEIPA_HOST, verify_ssl=settings.FREEIPA_VERIFY_SSL)
+                c = _build_freeipa_client()
                 # python-freeipa signature: change_password(username, new_password, old_password, otp=None)
                 c.change_password(username, password, password, otp=None)
             except exceptions.PWChangePolicyError as e:

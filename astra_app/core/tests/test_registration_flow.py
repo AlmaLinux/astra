@@ -7,8 +7,8 @@ from unittest.mock import patch
 from django.contrib.messages import get_messages
 from django.test import Client, TestCase, override_settings
 
-from core.models import AccountInvitation
 from core.backends import FreeIPAUser
+from core.models import AccountInvitation
 
 
 class RegistrationFlowTests(TestCase):
@@ -149,8 +149,8 @@ class RegistrationFlowTests(TestCase):
         ipa_client2.user_mod = lambda *args, **kwargs: {"result": {"uid": ["alice"]}}
 
         with patch("core.views_registration.FreeIPAUser.get_client", autospec=True, return_value=ipa_client2):
-            with patch("core.views_registration.ClientMeta", autospec=True) as client_meta_cls:
-                client_meta = client_meta_cls.return_value
+            with patch("core.views_registration._build_freeipa_client", autospec=True) as mocked_build:
+                client_meta = mocked_build.return_value
                 client_meta.change_password.return_value = None
 
                 activation_post = client.post(
@@ -213,8 +213,8 @@ class RegistrationFlowTests(TestCase):
         # Activation POST activates stage user and sets password.
 
         with patch("core.views_registration.FreeIPAUser.get_client", autospec=True, return_value=ipa_client2):
-            with patch("core.views_registration.ClientMeta", autospec=True) as client_meta_cls:
-                client_meta = client_meta_cls.return_value
+            with patch("core.views_registration._build_freeipa_client", autospec=True) as mocked_build:
+                client_meta = mocked_build.return_value
                 client_meta.change_password.return_value = None
 
                 activation_post = client.post(

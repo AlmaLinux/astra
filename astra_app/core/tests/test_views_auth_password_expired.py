@@ -37,8 +37,8 @@ class PasswordExpiredViewTests(TestCase):
         request.session["_freeipa_pwexp_username"] = "alice"
         request.session.save()
 
-        with patch("core.views_auth.ClientMeta", autospec=True) as mocked_client_cls:
-            mocked_client = mocked_client_cls.return_value
+        with patch("core.views_auth._build_freeipa_client", autospec=True) as mocked_build:
+            mocked_client = mocked_build.return_value
             mocked_client.change_password.return_value = None
 
             response = password_expired(request)
@@ -74,8 +74,8 @@ class PasswordExpiredViewTests(TestCase):
             return HttpResponse("ok")
 
         with patch("core.views_auth.render", side_effect=fake_render, autospec=True):
-            with patch("core.views_auth.ClientMeta", autospec=True) as mocked_client_cls:
-                mocked_client = mocked_client_cls.return_value
+            with patch("core.views_auth._build_freeipa_client", autospec=True) as mocked_build:
+                mocked_client = mocked_build.return_value
                 mocked_client.change_password.side_effect = exceptions.PWChangePolicyError("policy")
 
                 response = password_expired(request)
@@ -108,8 +108,8 @@ class PasswordExpiredViewTests(TestCase):
             return HttpResponse("ok")
 
         with patch("core.views_auth.render", side_effect=fake_render, autospec=True):
-            with patch("core.views_auth.ClientMeta", autospec=True) as mocked_client_cls:
-                mocked_client = mocked_client_cls.return_value
+            with patch("core.views_auth._build_freeipa_client", autospec=True) as mocked_build:
+                mocked_client = mocked_build.return_value
                 mocked_client.change_password.side_effect = exceptions.PWChangeInvalidPassword("bad")
 
                 response = password_expired(request)

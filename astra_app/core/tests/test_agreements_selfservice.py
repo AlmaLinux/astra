@@ -301,9 +301,11 @@ class AgreementsSelfServiceTests(TestCase):
         )
 
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
-            with patch("core.backends.FreeIPAFASAgreement.get", autospec=True, return_value=agreement):
-                with patch.object(agreement, "add_user", autospec=True) as mocked_add:
-                    resp = views_settings.settings_root(request)
+            with patch("core.views_settings.has_enabled_agreements", autospec=True, return_value=True):
+                with patch("core.views_settings.list_agreements_for_user", autospec=True, return_value=[]):
+                    with patch("core.backends.FreeIPAFASAgreement.get", autospec=True, return_value=agreement):
+                        with patch.object(agreement, "add_user", autospec=True) as mocked_add:
+                            resp = views_settings.settings_root(request)
 
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(resp["Location"], reverse("settings") + "#agreements")

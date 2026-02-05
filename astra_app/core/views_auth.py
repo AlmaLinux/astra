@@ -9,13 +9,14 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import views as auth_views
 from django.core import signing
+from django.forms.forms import NON_FIELD_ERRORS
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from python_freeipa import ClientMeta, exceptions
+from python_freeipa import exceptions
 
-from core.backends import FreeIPAUser
+from core.backends import FreeIPAUser, _build_freeipa_client
 from core.models import AccountInvitation
 from core.tokens import make_signed_token
 from core.views_utils import _normalize_str
@@ -72,6 +73,7 @@ class FreeIPALoginView(auth_views.LoginView):
 
         msg = getattr(request, "_freeipa_auth_error", None)
         if msg:
+            form.errors.pop(NON_FIELD_ERRORS, None)
             form.add_error(None, msg)
 
         return super().form_invalid(form)
@@ -248,7 +250,7 @@ def password_reset_confirm(request: HttpRequest) -> HttpResponse:
             except TypeError:
                 svc.user_mod(a_uid=username, o_userpassword=temp_password)
 
-            client = ClientMeta(host=settings.FREEIPA_HOST, verify_ssl=settings.FREEIPA_VERIFY_SSL)
+            client = _build_freeipa_client()
             # python-freeipa signature: change_password(username, new_password, old_password, otp=None)
             client.change_password(username, new_password, temp_password, otp=otp)
         except exceptions.PWChangePolicyError:
@@ -321,7 +323,7 @@ def password_expired(request: HttpRequest) -> HttpResponse:
         new_password = form.cleaned_data["new_password"]
 
         try:
-            client = ClientMeta(host=settings.FREEIPA_HOST, verify_ssl=settings.FREEIPA_VERIFY_SSL)
+            client = _build_freeipa_client()
             # python-freeipa signature: change_password(username, new_password, old_password, otp=None)
             client.change_password(username, new_password, current_password, otp=otp)
 

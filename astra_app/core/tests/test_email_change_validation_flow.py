@@ -6,6 +6,7 @@ from unittest.mock import patch
 from django.contrib.messages import get_messages
 from django.contrib.messages.storage.fallback import FallbackStorage
 from django.contrib.sessions.middleware import SessionMiddleware
+from django.core.cache import cache
 from django.test import RequestFactory, TestCase, override_settings
 
 from core.backends import FreeIPAUser
@@ -13,7 +14,16 @@ from core.backends import FreeIPAUser
 
 class EmailChangeValidationFlowTests(TestCase):
     def setUp(self):
+        super().setUp()
+        cache.clear()
         self.factory = RequestFactory()
+        self._agreements_enabled_patcher = patch(
+            "core.views_settings.has_enabled_agreements",
+            autospec=True,
+            return_value=False,
+        )
+        self._agreements_enabled_patcher.start()
+        self.addCleanup(self._agreements_enabled_patcher.stop)
 
     def _add_session_and_messages(self, request):
         SessionMiddleware(lambda r: None).process_request(request)
@@ -55,9 +65,16 @@ class EmailChangeValidationFlowTests(TestCase):
 
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
             with patch("core.views_settings._update_user_attrs", autospec=True) as update_mock:
-                with patch("post_office.mail.send", autospec=True) as send_mock:
-                    update_mock.return_value = ([], True)
-                    resp = views_settings.settings_root(request)
+                with patch("core.views_settings.user_email_context", autospec=True, return_value={
+                    "username": "alice",
+                    "first_name": "Alice",
+                    "last_name": "User",
+                    "full_name": "Alice User",
+                    "email": "old@example.org",
+                }):
+                    with patch("post_office.mail.send", autospec=True) as send_mock:
+                        update_mock.return_value = ([], True)
+                        resp = views_settings.settings_root(request)
 
         self.assertEqual(resp.status_code, 302)
         update_mock.assert_not_called()
@@ -99,9 +116,16 @@ class EmailChangeValidationFlowTests(TestCase):
 
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
             with patch("core.views_settings._update_user_attrs", autospec=True) as update_mock:
-                with patch("post_office.mail.send", autospec=True) as send_mock:
-                    update_mock.return_value = ([], True)
-                    resp = views_settings.settings_root(request)
+                with patch("core.views_settings.user_email_context", autospec=True, return_value={
+                    "username": "alice",
+                    "first_name": "Alice",
+                    "last_name": "User",
+                    "full_name": "Alice User",
+                    "email": "verified@example.org",
+                }):
+                    with patch("post_office.mail.send", autospec=True) as send_mock:
+                        update_mock.return_value = ([], True)
+                        resp = views_settings.settings_root(request)
 
         self.assertEqual(resp.status_code, 302)
         update_mock.assert_called_once()
@@ -137,9 +161,16 @@ class EmailChangeValidationFlowTests(TestCase):
 
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
             with patch("core.views_settings._update_user_attrs", autospec=True) as update_mock:
-                with patch("post_office.mail.send", autospec=True) as send_mock:
-                    update_mock.return_value = ([], True)
-                    resp = views_settings.settings_root(request)
+                with patch("core.views_settings.user_email_context", autospec=True, return_value={
+                    "username": "alice",
+                    "first_name": "Alice",
+                    "last_name": "User",
+                    "full_name": "Alice User",
+                    "email": "verified@example.org",
+                }):
+                    with patch("post_office.mail.send", autospec=True) as send_mock:
+                        update_mock.return_value = ([], True)
+                        resp = views_settings.settings_root(request)
 
         self.assertEqual(resp.status_code, 302)
         update_mock.assert_called_once()

@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import requests
 from django.contrib.messages import get_messages
 from django.contrib.messages.storage.fallback import FallbackStorage
 from django.contrib.sessions.middleware import SessionMiddleware
@@ -11,7 +12,7 @@ from django.test import RequestFactory, TestCase
 from django.urls import reverse
 
 from core import views_groups, views_settings, views_users
-from core.backends import FreeIPAOperationFailed
+from core.backends import DegradedFreeIPAUser, FreeIPAOperationFailed
 
 
 class GroupsSponsorsAndAgreementsTests(TestCase):
@@ -206,6 +207,31 @@ class GroupsSponsorsAndAgreementsTests(TestCase):
                     with self.assertRaises(Http404):
                         views_settings.settings_root(request)
 
+    def test_group_detail_blocks_mutations_for_degraded_user(self):
+        factory = RequestFactory()
+        request = factory.post("/groups/testgroup/", data={"action": "leave"})
+        self._add_session_and_messages(request)
+        request.user = DegradedFreeIPAUser("alice")
+
+        group = SimpleNamespace(
+            cn="testgroup",
+            fas_group=True,
+            description="",
+            members=["alice"],
+            sponsors=[],
+        )
+
+        with patch("core.views_groups.FreeIPAGroup.get", autospec=True, return_value=group):
+            response = views_groups.group_detail(request, "testgroup")
+
+        self.assertEqual(response.status_code, 302)
+        msgs = [m.message for m in get_messages(request)]
+        self.assertIn(
+            "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
+            "Please try again later.",
+            msgs,
+        )
+
     def test_group_detail_leave_group_removes_self(self):
         factory = RequestFactory()
         request = factory.post("/groups/testgroup/", data={"action": "leave"})
@@ -222,6 +248,126 @@ class GroupsSponsorsAndAgreementsTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         user.remove_from_group.assert_called_once_with("testgroup")
+
+    def test_group_detail_leave_group_connection_error_shows_unavailable_message(self):
+        factory = RequestFactory()
+        request = factory.post("/groups/testgroup/", data={"action": "leave"})
+        self._add_session_and_messages(request)
+
+        user = self._auth_user("alice")
+        user.remove_from_group = MagicMock(side_effect=requests.exceptions.ConnectionError())
+        request.user = user
+
+        group = SimpleNamespace(cn="testgroup", fas_group=True, members=["alice"], sponsors=[])
+
+        with patch("core.views_groups.FreeIPAGroup.get", autospec=True, return_value=group):
+            response = views_groups.group_detail(request, "testgroup")
+
+        self.assertEqual(response.status_code, 302)
+        msgs = [m.message for m in get_messages(request)]
+        self.assertIn(
+            "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
+            "Please try again later.",
+            msgs,
+        )
+
+    def test_group_detail_stop_sponsoring_connection_error_shows_unavailable_message(self):
+        factory = RequestFactory()
+        request = factory.post(
+            "/groups/testgroup/",
+            data={"action": "stop_sponsoring"},
+        )
+        self._add_session_and_messages(request)
+
+        request.user = self._auth_user("sponsor")
+
+        group = SimpleNamespace(
+            cn="testgroup",
+            fas_group=True,
+            members=[],
+            sponsors=["sponsor"],
+            sponsor_groups=[],
+            remove_sponsor=MagicMock(side_effect=requests.exceptions.ConnectionError()),
+        )
+
+        with patch("core.views_groups.FreeIPAGroup.get", autospec=True, return_value=group):
+            with patch("core.views_groups.required_agreements_for_group", autospec=True, return_value=[]):
+                response = views_groups.group_detail(request, "testgroup")
+
+        self.assertEqual(response.status_code, 302)
+        msgs = [m.message for m in get_messages(request)]
+        self.assertIn(
+            "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
+            "Please try again later.",
+            msgs,
+        )
+
+    def test_group_detail_add_member_connection_error_shows_unavailable_message(self):
+        factory = RequestFactory()
+        request = factory.post(
+            "/groups/testgroup/",
+            data={"action": "add_member", "username": "bob"},
+        )
+        self._add_session_and_messages(request)
+
+        request.user = self._auth_user("sponsor")
+
+        group = SimpleNamespace(
+            cn="testgroup",
+            fas_group=True,
+            members=[],
+            sponsors=["sponsor"],
+            sponsor_groups=[],
+            add_member=MagicMock(side_effect=requests.exceptions.ConnectionError()),
+        )
+
+        with patch("core.views_groups.FreeIPAGroup.get", autospec=True, return_value=group):
+            with patch("core.views_groups.required_agreements_for_group", autospec=True, return_value=[]):
+                with patch(
+                    "core.views_groups.missing_required_agreements_for_user_in_group",
+                    autospec=True,
+                    return_value=[],
+                ):
+                    response = views_groups.group_detail(request, "testgroup")
+
+        self.assertEqual(response.status_code, 302)
+        msgs = [m.message for m in get_messages(request)]
+        self.assertIn(
+            "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
+            "Please try again later.",
+            msgs,
+        )
+
+    def test_group_detail_remove_member_connection_error_shows_unavailable_message(self):
+        factory = RequestFactory()
+        request = factory.post(
+            "/groups/testgroup/",
+            data={"action": "remove_member", "username": "bob"},
+        )
+        self._add_session_and_messages(request)
+
+        request.user = self._auth_user("sponsor")
+
+        group = SimpleNamespace(
+            cn="testgroup",
+            fas_group=True,
+            members=["bob"],
+            sponsors=["sponsor"],
+            sponsor_groups=[],
+            remove_member=MagicMock(side_effect=requests.exceptions.ConnectionError()),
+        )
+
+        with patch("core.views_groups.FreeIPAGroup.get", autospec=True, return_value=group):
+            with patch("core.views_groups.required_agreements_for_group", autospec=True, return_value=[]):
+                response = views_groups.group_detail(request, "testgroup")
+
+        self.assertEqual(response.status_code, 302)
+        msgs = [m.message for m in get_messages(request)]
+        self.assertIn(
+            "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
+            "Please try again later.",
+            msgs,
+        )
 
     def test_group_detail_sponsor_cannot_add_member_without_signed_agreement(self):
         factory = RequestFactory()

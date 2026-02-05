@@ -11,9 +11,9 @@ from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
 from core import views_membership, views_settings
+from core.country_codes import country_code_status_from_user_data
 from core.membership_notes import CUSTOS
 from core.models import MembershipRequest, MembershipType, Note
-from core.country_codes import country_code_status_from_user_data
 
 
 class MembershipCountryRequirementsTests(TestCase):

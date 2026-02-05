@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import requests
 from django.contrib.sessions.middleware import SessionMiddleware
-from django.test import RequestFactory, TestCase
+from django.test import Client, RequestFactory, TestCase
 
+from core import backends
 from core.backends import FreeIPAAuthBackend, FreeIPAUser
 
 
@@ -61,6 +63,54 @@ class FreeIPABackendBehaviorTests(TestCase):
         self.assertIsNone(backend.get_user(123))
         self.assertIsNone(backend.get_user("123"))
 
+    def test_authenticate_connection_error_sets_unavailable_message(self):
+        factory = RequestFactory()
+        request = factory.post("/login/")
+        self._add_session(request)
+
+        backend = FreeIPAAuthBackend()
+
+        with patch(
+            "core.backends._get_freeipa_client",
+            autospec=True,
+            side_effect=requests.exceptions.ConnectionError(),
+        ):
+            user = backend.authenticate(request, username="alice", password="pw")
+
+        self.assertIsNone(user)
+        self.assertEqual(
+            getattr(request, "_freeipa_auth_error", None),
+            "We cannot sign you in right now because AlmaLinux Accounts is temporarily unavailable. "
+            "Please try again in a few minutes.",
+        )
+
+    def test_login_connection_error_shows_only_freeipa_unavailable_message(self) -> None:
+        client = Client()
+
+        with patch(
+            "core.backends._get_freeipa_client",
+            autospec=True,
+            side_effect=requests.exceptions.ConnectionError(),
+        ):
+            response = client.post(
+                "/login/",
+                data={"username": "alice", "password": "pw"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        form = response.context["form"]
+        errors = form.non_field_errors()
+        self.assertEqual(len(errors), 1)
+        self.assertIn(
+            "We cannot sign you in right now because AlmaLinux Accounts is temporarily unavailable. "
+            "Please try again in a few minutes.",
+            errors,
+        )
+        self.assertNotIn(
+            "Please enter a correct username and password. Note that both fields may be case-sensitive.",
+            errors,
+        )
+
     def test_add_to_group_is_idempotent_when_already_member(self) -> None:
         alice = FreeIPAUser(
             "alice",
@@ -96,3 +146,16 @@ class FreeIPABackendBehaviorTests(TestCase):
             patch("core.backends.FreeIPAUser.get", autospec=True, return_value=alice),
         ):
             alice.add_to_group("almalinux-individual")
+
+    def test_freeipa_client_injects_timeout_session(self) -> None:
+        class FakeClient:
+            def __init__(self, host: str | None = None, verify_ssl: bool = True) -> None:
+                self.host = host
+                self.verify_ssl = verify_ssl
+                self._session = None
+
+        with patch("core.backends.ClientMeta", new=FakeClient):
+            client = backends._build_freeipa_client()
+
+        self.assertIsInstance(client._session, backends._FreeIPATimeoutSession)
+        self.assertEqual(client._session.default_timeout, 10)

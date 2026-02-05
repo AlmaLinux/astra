@@ -3,6 +3,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import requests
+from django.contrib.messages import get_messages
 from django.test import TestCase
 
 from core.backends import FreeIPAUser
@@ -130,6 +132,49 @@ class GroupSponsorCanEditGroupInfoTests(TestCase):
         self.assertEqual(sorted(group.fas_irc_channels), ["irc:/#new", "irc:/#new-dev"])
         self.assertEqual(group.fas_discussion_url, "https://discussion.example.org/c/new")
         group.save.assert_called_once()
+
+    def test_sponsor_save_connection_error_shows_unavailable_message(self) -> None:
+        self._login_as_freeipa("bob")
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+
+        group = SimpleNamespace(
+            cn="fas1",
+            description="FAS Group 1",
+            fas_group=True,
+            fas_url="https://example.org/group/fas1",
+            fas_mailing_list="fas1@example.org",
+            fas_irc_channels=["#fas1"],
+            fas_discussion_url="https://discussion.example.org/c/fas1",
+            members=[],
+            sponsors=["bob"],
+            sponsor_groups=[],
+            save=MagicMock(side_effect=requests.exceptions.ConnectionError()),
+        )
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.backends.FreeIPAGroup.get", return_value=group),
+        ):
+            resp = self.client.post(
+                "/group/fas1/edit/",
+                {
+                    "description": "Updated desc",
+                    "fas_url": "https://example.org/new",
+                    "fas_mailing_list": "new@example.org",
+                    "fas_irc_channels": "#new\n#new-dev",
+                    "fas_discussion_url": "https://discussion.example.org/c/new",
+                },
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        msgs = [m.message for m in get_messages(resp.wsgi_request)]
+        self.assertIn(
+            "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
+            "Please try again later.",
+            msgs,
+        )
 
     def test_non_sponsor_forbidden(self) -> None:
         self._login_as_freeipa("alice")

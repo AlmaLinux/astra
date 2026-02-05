@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import cast
 from urllib.parse import quote
 
+import requests
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
@@ -12,7 +13,14 @@ from django.urls import reverse
 from django.views.decorators.http import require_GET
 
 from core.agreements import missing_required_agreements_for_user_in_group, required_agreements_for_group
-from core.backends import FreeIPAFASAgreement, FreeIPAGroup, FreeIPAOperationFailed, FreeIPAUser
+from core.backends import (
+    DegradedFreeIPAUser,
+    FreeIPAFASAgreement,
+    FreeIPAGroup,
+    FreeIPAOperationFailed,
+    FreeIPAUser,
+    _freeipa_circuit_open,
+)
 from core.forms_groups import GroupEditForm
 from core.permissions import ASTRA_ADD_ELECTION, json_permission_required
 from core.views_utils import _normalize_str
@@ -178,6 +186,14 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
                     break
 
     if request.method == "POST":
+        if isinstance(request.user, DegradedFreeIPAUser) or _freeipa_circuit_open():
+            messages.error(
+                request,
+                "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
+                "Please try again later.",
+            )
+            return redirect("group-detail", name)
+
         action = _normalize_str(request.POST.get("action")).lower()
 
         if action == "leave":
@@ -187,6 +203,12 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
             try:
                 cast(FreeIPAUser, request.user).remove_from_group(cn)
                 messages.success(request, "You have left the group.")
+            except requests.exceptions.ConnectionError:
+                messages.error(
+                    request,
+                    "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
+                    "Please try again later.",
+                )
             except Exception:
                 messages.error(request, "Failed to leave group due to an internal error.")
             return redirect("group-detail", name)
@@ -198,6 +220,12 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
             try:
                 group.remove_sponsor(username)
                 messages.success(request, "You are no longer a sponsor of this group.")
+            except requests.exceptions.ConnectionError:
+                messages.error(
+                    request,
+                    "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
+                    "Please try again later.",
+                )
             except Exception:
                 messages.error(request, "Failed to update sponsor status due to an internal error.")
             return redirect("group-detail", name)
@@ -229,6 +257,12 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
                     messages.success(request, f"Added {target} to the group.")
                 except FreeIPAOperationFailed as e:
                     messages.error(request, str(e))
+                except requests.exceptions.ConnectionError:
+                    messages.error(
+                        request,
+                        "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
+                        "Please try again later.",
+                    )
                 except Exception:
                     messages.error(request, "Failed to add member due to an internal error.")
                 return redirect("group-detail", name)
@@ -239,6 +273,12 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
                     messages.success(request, f"Removed {target} from the group.")
                 except FreeIPAOperationFailed as e:
                     messages.error(request, str(e))
+                except requests.exceptions.ConnectionError:
+                    messages.error(
+                        request,
+                        "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
+                        "Please try again later.",
+                    )
                 except Exception:
                     messages.error(request, "Failed to remove member due to an internal error.")
                 return redirect("group-detail", name)
@@ -295,6 +335,12 @@ def group_edit(request: HttpRequest, name: str) -> HttpResponse:
                 group.save()
                 messages.success(request, "Saved group info.")
                 return redirect("group-detail", cn)
+            except requests.exceptions.ConnectionError:
+                messages.error(
+                    request,
+                    "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
+                    "Please try again later.",
+                )
             except Exception:
                 messages.error(request, "Failed to save group info due to an internal error.")
     else:

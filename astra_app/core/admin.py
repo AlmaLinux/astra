@@ -16,7 +16,6 @@ from django.contrib.auth.models import Group as DjangoGroup
 from django.contrib.auth.models import User as DjangoUser
 from django.contrib.contenttypes.models import ContentType
 from django.core.cache import cache
-from urllib.parse import urlparse
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.http import Http404, HttpRequest, HttpResponse, HttpResponseRedirect, JsonResponse

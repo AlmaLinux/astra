@@ -2,11 +2,11 @@ from django.contrib.staticfiles.storage import staticfiles_storage
 from django.urls import path
 from django.views.generic import RedirectView
 
-from django.views.generic import RedirectView
 from core import (
     views_account_invitations,
     views_elections,
     views_groups,
+    views_health,
     views_mail_images,
     views_membership,
     views_organizations,
@@ -16,7 +16,6 @@ from core import (
     views_static,
     views_templated_email,
     views_users,
-    views_health,
 )
 
 urlpatterns = [

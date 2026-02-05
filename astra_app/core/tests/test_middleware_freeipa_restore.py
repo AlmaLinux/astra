@@ -5,10 +5,13 @@ from unittest.mock import patch
 
 from django.contrib.auth.models import AnonymousUser
 from django.contrib.sessions.middleware import SessionMiddleware
+from django.http import HttpResponse
 from django.test import RequestFactory, TestCase
 from django.utils import timezone
+from django.utils.functional import SimpleLazyObject
 
-from core.middleware import FreeIPAAuthenticationMiddleware
+from core import backends
+from core.middleware import FreeIPAAuthenticationMiddleware, FreeIPAUnavailableMiddleware
 
 
 class FreeIPAMiddlewareRestoreTests(TestCase):
@@ -150,3 +153,55 @@ class FreeIPAMiddlewareRestoreTests(TestCase):
         self.assertEqual(getattr(user, "username", None), "already")
         self.assertEqual(observed.get("in_request_tz"), "Europe/Paris")
         mocked_get.assert_not_called()
+
+    def test_uses_degraded_user_when_circuit_open(self):
+        factory = RequestFactory()
+        request = factory.get("/")
+        self._add_session(request)
+        request.session["_freeipa_username"] = "alice"
+        request.session.save()
+
+        backends._open_freeipa_circuit()
+
+        def get_response(req):
+            return req.user
+
+        with patch("core.middleware.FreeIPAUser.get", autospec=True) as mocked_get:
+            with patch("core.middleware.timezone.activate", side_effect=AssertionError("timezone activated")):
+                middleware = FreeIPAAuthenticationMiddleware(get_response)
+                user = middleware(request)
+
+        self.assertIsInstance(user, backends.DegradedFreeIPAUser)
+        mocked_get.assert_not_called()
+        backends._reset_freeipa_circuit_failures()
+
+    def test_freeipa_unavailable_middleware_returns_503(self):
+        factory = RequestFactory()
+        request = factory.get("/user/alice/")
+
+        middleware = FreeIPAUnavailableMiddleware(lambda _req: HttpResponse("ok"))
+        response = middleware.process_exception(request, backends.FreeIPAUnavailableError("open"))
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn(
+            b"AlmaLinux Accounts is temporarily unavailable",
+            response.content,
+        )
+
+    def test_avoids_evaluating_lazy_user_when_circuit_open(self):
+        factory = RequestFactory()
+        request = factory.get("/")
+        self._add_session(request)
+        request.session["_freeipa_username"] = "alice"
+        request.session.save()
+
+        request.user = SimpleLazyObject(
+            lambda: (_ for _ in ()).throw(backends.FreeIPAUnavailableError("open"))
+        )
+        backends._open_freeipa_circuit()
+
+        middleware = FreeIPAAuthenticationMiddleware(lambda req: req.user)
+        user = middleware(request)
+
+        self.assertIsInstance(user, backends.DegradedFreeIPAUser)
+        backends._reset_freeipa_circuit_failures()

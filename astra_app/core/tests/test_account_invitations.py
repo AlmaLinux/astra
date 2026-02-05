@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from urllib.parse import quote
 from unittest.mock import patch
+from urllib.parse import quote
 
 from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile

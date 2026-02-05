@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 from django.conf import settings
 from django.contrib.messages.storage.fallback import FallbackStorage
 from django.contrib.sessions.middleware import SessionMiddleware
+from django.core.cache import cache
 from django.http import HttpResponse
 from django.test import RequestFactory, TestCase, override_settings
 
@@ -31,7 +32,16 @@ class _DummyFreeIPAUser:
 
 class FASAttributesTests(TestCase):
     def setUp(self):
+        super().setUp()
+        cache.clear()
         self.factory = RequestFactory()
+        self._agreements_enabled_patcher = patch(
+            "core.views_settings.has_enabled_agreements",
+            autospec=True,
+            return_value=False,
+        )
+        self._agreements_enabled_patcher.start()
+        self.addCleanup(self._agreements_enabled_patcher.stop)
 
     def _seed_valid_country_code(self, fu: _DummyFreeIPAUser, *, code: str = "US") -> None:
         data = fu._user_data or {}
@@ -61,12 +71,13 @@ class FASAttributesTests(TestCase):
             return HttpResponse("ok")
 
         with patch("core.views_users._get_full_user", autospec=True, return_value=fu):
-            with patch("core.views_users.render", autospec=True, side_effect=fake_render):
-                resp = user_profile(req, fu.username)
+            with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
+                with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
+                    with patch("core.views_users.render", autospec=True, side_effect=fake_render):
+                        resp = user_profile(req, fu.username)
 
         self.assertEqual(resp.status_code, 200)
         self.assertIn("context", captured)
-        return captured["context"]
 
     @staticmethod
     def _apply_user_mod_to_dummy(fu: _DummyFreeIPAUser, call_kwargs: dict):
@@ -522,8 +533,15 @@ class FASAttributesTests(TestCase):
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
             with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
                 with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
-                    with patch("post_office.mail.send", autospec=True) as send_mock:
-                        resp = settings_root(req)
+                    with patch("core.views_settings.user_email_context", autospec=True, return_value={
+                        "username": "alice",
+                        "first_name": "Alice",
+                        "last_name": "User",
+                        "full_name": "Alice User",
+                        "email": "alice@example.com",
+                    }):
+                        with patch("post_office.mail.send", autospec=True) as send_mock:
+                            resp = settings_root(req)
 
         self.assertEqual(resp.status_code, 302)
         # Email changes are deferred until validated; no direct FreeIPA updates here.
@@ -556,8 +574,15 @@ class FASAttributesTests(TestCase):
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
             with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
                 with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
-                    with patch("post_office.mail.send", autospec=True) as send_mock2:
-                        resp2 = settings_root(req2)
+                    with patch("core.views_settings.user_email_context", autospec=True, return_value={
+                        "username": "alice",
+                        "first_name": "Alice",
+                        "last_name": "User",
+                        "full_name": "Alice User",
+                        "email": "alice@example.com",
+                    }):
+                        with patch("post_office.mail.send", autospec=True) as send_mock2:
+                            resp2 = settings_root(req2)
 
         self.assertEqual(resp2.status_code, 302)
         client.user_mod.assert_not_called()

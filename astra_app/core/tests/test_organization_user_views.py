@@ -18,7 +18,12 @@ from django.utils import timezone
 
 from core.backends import FreeIPAUser
 from core.models import FreeIPAPermissionGrant
-from core.permissions import ASTRA_ADD_MEMBERSHIP, ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP
+from core.permissions import (
+    ASTRA_ADD_MEMBERSHIP,
+    ASTRA_CHANGE_MEMBERSHIP,
+    ASTRA_DELETE_MEMBERSHIP,
+    ASTRA_VIEW_MEMBERSHIP,
+)
 
 
 class OrganizationUserViewsTests(TestCase):
@@ -638,7 +643,7 @@ class OrganizationUserViewsTests(TestCase):
             },
         )
 
-        gold = MembershipType.objects.get(code="gold")
+        MembershipType.objects.get(code="gold")
 
         org = Organization.objects.create(
             name="AlmaLinux",
@@ -1454,7 +1459,7 @@ class OrganizationUserViewsTests(TestCase):
             Organization,
             OrganizationSponsorship,
         )
-        from core.permissions import ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP
+        from core.permissions import ASTRA_CHANGE_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP
 
         MembershipType.objects.update_or_create(
             code="gold",

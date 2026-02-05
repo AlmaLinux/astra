@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from core.tokens import make_signed_token
-
 import datetime
 import hashlib
 import json
@@ -19,6 +17,8 @@ from django.db import models
 from django.db.models import Q
 from django.utils import timezone
 from PIL import Image
+
+from core.tokens import make_signed_token
 
 
 def organization_logo_upload_to(instance: Organization, filename: str) -> str:
@@ -453,7 +453,6 @@ class AccountInvitation(models.Model):
 
     @override
     def save(self, *args, **kwargs) -> None:
-        is_new = self.pk is None
         self.email = str(self.email or "").strip().lower()
         self.full_name = str(self.full_name or "").strip()
         self.note = str(self.note or "").strip()

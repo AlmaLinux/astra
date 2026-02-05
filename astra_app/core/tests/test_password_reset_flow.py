@@ -126,7 +126,7 @@ class PasswordResetFlowTests(TestCase):
         with (
             patch("core.password_reset.FreeIPAUser.get", autospec=True, return_value=user),
             patch("core.views_auth.FreeIPAUser.get_client", autospec=True, return_value=svc_client),
-            patch("core.views_auth.ClientMeta", autospec=True, return_value=pw_client),
+            patch("core.views_auth._build_freeipa_client", autospec=True, return_value=pw_client),
             patch("core.password_reset.queue_templated_email", autospec=True) as queue_email_mock,
         ):
             post_resp = client.post(

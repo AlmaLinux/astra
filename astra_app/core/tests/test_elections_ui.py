@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import datetime
-from urllib.parse import quote
 from unittest.mock import patch
+from urllib.parse import quote
+
+from django.conf import settings
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
 from core.backends import FreeIPAUser
 from core.models import Candidate, Election
-from django.conf import settings
 
 
 class ElectionsSidebarLinkTests(TestCase):
