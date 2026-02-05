@@ -10,6 +10,7 @@ from django.http import HttpRequest
 from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils.safestring import SafeString, mark_safe
+from post_office.models import Email
 
 from core.backends import FreeIPAUser
 from core.membership_notes import CUSTOS, note_action_icon, note_action_label, tally_last_votes
@@ -84,6 +85,109 @@ def _timeline_dom_id(key: str) -> str:
     return f"timeline-{digest}"
 
 
+def _email_id_from_action(action: dict[str, Any] | None) -> int | None:
+    if not isinstance(action, dict):
+        return None
+    raw = action.get("email_id")
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, str) and raw.isdigit():
+        return int(raw)
+    return None
+
+
+def _email_modal_id(email_id: int) -> str:
+    return f"membership-email-modal-{email_id}"
+
+
+def _split_emails(value: object) -> list[str]:
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if str(v).strip()]
+    if isinstance(value, str):
+        return [v.strip() for v in value.split(",") if v.strip()]
+    return []
+
+
+def _render_email_contents(email: Email) -> tuple[str, str, str]:
+    return (
+        str(email.subject or ""),
+        str(email.html_message or ""),
+        str(email.message or ""),
+    )
+
+
+def _email_modals_for_notes(notes: list[Note]) -> list[dict[str, Any]]:
+    email_ids = []
+    seen: set[int] = set()
+    for note in notes:
+        email_id = _email_id_from_action(note.action)
+        if email_id is None or email_id in seen:
+            continue
+        seen.add(email_id)
+        email_ids.append(email_id)
+
+    if not email_ids:
+        return []
+
+    emails = list(
+        Email.objects.filter(pk__in=email_ids).select_related("template").prefetch_related("logs")
+    )
+    emails_by_id = {email.id: email for email in emails}
+
+    modals: list[dict[str, Any]] = []
+    for email_id in email_ids:
+        email = emails_by_id.get(email_id)
+        if email is None:
+            continue
+
+        subject, html, text = _render_email_contents(email)
+
+        headers = email.headers if isinstance(email.headers, dict) else {}
+        reply_to = str(headers.get("Reply-To") or "").strip()
+        other_headers = [
+            (str(k), str(v))
+            for k, v in headers.items()
+            if str(k).strip().lower() != "reply-to" and str(v).strip()
+        ]
+
+        logs_raw = list(email.logs.all())
+        logs_sorted = sorted(
+            logs_raw,
+            key=lambda log: (
+                log.date,
+                0 if log.pk is None else int(log.pk),
+            ),
+        )
+        logs = [
+            {
+                "date": log.date,
+                "status": log.get_status_display(),
+                "message": str(log.message or ""),
+                "exception_type": str(log.exception_type or ""),
+            }
+            for log in logs_sorted
+        ]
+
+        modals.append(
+            {
+                "email_id": email.id,
+                "modal_id": _email_modal_id(email.id),
+                "from_email": str(email.from_email or ""),
+                "to": _split_emails(email.to),
+                "cc": _split_emails(email.cc),
+                "bcc": _split_emails(email.bcc),
+                "reply_to": reply_to,
+                "headers": other_headers,
+                "subject": subject,
+                "html": html,
+                "text": text,
+                "logs": logs,
+            }
+        )
+
+    return modals
+
+
 def _current_username_from_request(http_request: HttpRequest | None) -> str:
     if http_request is None or getattr(http_request, "user", None) is None:
         return ""
@@ -113,7 +217,12 @@ def _custos_bubble_style() -> str:
     return "--bubble-bg: #e9ecef; --bubble-fg: #212529;"
 
 
-def _timeline_entries_for_notes(notes: list[Note], *, current_username: str) -> list[dict[str, Any]]:
+def _timeline_entries_for_notes(
+    notes: list[Note],
+    *,
+    current_username: str,
+    email_modal_ids: dict[int, str] | None = None,
+) -> list[dict[str, Any]]:
     avatar_users_by_username = _avatar_users_by_username(notes)
     entries: list[dict[str, Any]] = []
     for n in notes:
@@ -128,20 +237,28 @@ def _timeline_entries_for_notes(notes: list[Note], *, current_username: str) -> 
         if isinstance(n.action, dict) and n.action:
             label = note_action_label(n.action)
             icon = note_action_icon(n.action)
+            entry: dict[str, Any] = {
+                "kind": "action",
+                "note": n,
+                "label": label,
+                "icon": icon,
+                "is_self": is_self,
+                "avatar_user": avatar_user,
+                "bubble_style": "--bubble-bg: #f8f9fa; --bubble-fg: #212529;",
+                "is_custos": is_custos,
+                "display_username": display_username,
+                "membership_request_id": membership_request_id,
+                "membership_request_url": membership_request_url,
+            }
+
+            email_id = _email_id_from_action(n.action)
+            if email_id is not None and email_modal_ids is not None:
+                modal_id = email_modal_ids.get(email_id)
+                if modal_id:
+                    entry["email_modal_id"] = modal_id
+
             entries.append(
-                {
-                    "kind": "action",
-                    "note": n,
-                    "label": label,
-                    "icon": icon,
-                    "is_self": is_self,
-                    "avatar_user": avatar_user,
-                    "bubble_style": "--bubble-bg: #f8f9fa; --bubble-fg: #212529;",
-                    "is_custos": is_custos,
-                    "display_username": display_username,
-                    "membership_request_id": membership_request_id,
-                    "membership_request_url": membership_request_url,
-                }
+                entry
             )
 
         if n.content is not None and str(n.content).strip() != "":
@@ -265,6 +382,9 @@ def membership_notes_aggregate_for_user(
 
     post_url = reverse("membership-notes-aggregate-note-add")
 
+    email_modals = _email_modals_for_notes(notes)
+    email_modal_ids = {m["email_id"]: m["modal_id"] for m in email_modals}
+
     html = render_to_string(
         "core/_membership_notes.html",
         {
@@ -274,6 +394,7 @@ def membership_notes_aggregate_for_user(
                 _timeline_entries_for_notes(
                     notes,
                     current_username=_current_username_from_request(http_request),
+                    email_modal_ids=email_modal_ids,
                 )
             ),
             "note_count": len(notes),
@@ -284,6 +405,7 @@ def membership_notes_aggregate_for_user(
             "aggregate_target_type": "user",
             "aggregate_target": normalized_username,
             "next_url": resolved_next_url,
+            "email_modals": email_modals,
         },
         request=http_request,
     )
@@ -324,6 +446,9 @@ def membership_notes_aggregate_for_organization(
 
     post_url = reverse("membership-notes-aggregate-note-add")
 
+    email_modals = _email_modals_for_notes(notes)
+    email_modal_ids = {m["email_id"]: m["modal_id"] for m in email_modals}
+
     html = render_to_string(
         "core/_membership_notes.html",
         {
@@ -333,6 +458,7 @@ def membership_notes_aggregate_for_organization(
                 _timeline_entries_for_notes(
                     notes,
                     current_username=_current_username_from_request(http_request),
+                    email_modal_ids=email_modal_ids,
                 )
             ),
             "note_count": len(notes),
@@ -343,6 +469,7 @@ def membership_notes_aggregate_for_organization(
             "aggregate_target_type": "org",
             "aggregate_target": str(organization_id),
             "next_url": resolved_next_url,
+            "email_modals": email_modals,
         },
         request=http_request,
     )
@@ -376,7 +503,6 @@ def membership_notes(
     if resolved_next_url is None:
         resolved_next_url = http_request.get_full_path() if http_request is not None else ""
 
-    avatar_users_by_username = _avatar_users_by_username(notes)
     current_username = _current_username_from_request(http_request)
 
     membership_can_add = bool(context.get("membership_can_add", False))
@@ -386,49 +512,14 @@ def membership_notes(
 
     post_url = reverse("membership-request-note-add", args=[mr.pk])
 
-    entries: list[dict[str, Any]] = []
-    for n in notes:
-        is_self = current_username and n.username.lower() == current_username.lower()
-        avatar_user = avatar_users_by_username.get(n.username)
-        is_custos = n.username == CUSTOS
-        display_username = _note_display_username(n)
+    email_modals = _email_modals_for_notes(notes)
+    email_modal_ids = {m["email_id"]: m["modal_id"] for m in email_modals}
 
-        if isinstance(n.action, dict) and n.action:
-            label = note_action_label(n.action)
-            icon = note_action_icon(n.action)
-            entries.append(
-                {
-                    "kind": "action",
-                    "note": n,
-                    "label": label,
-                    "icon": icon,
-                    "is_self": is_self,
-                    "avatar_user": avatar_user,
-                    "bubble_style": "--bubble-bg: #f8f9fa; --bubble-fg: #212529;",
-                    "is_custos": is_custos,
-                    "display_username": display_username,
-                }
-            )
-
-        if n.content is not None and str(n.content).strip() != "":
-            bubble_style: str | None = None
-            if not is_self and n.username:
-                if is_custos:
-                    bubble_style = _custos_bubble_style()
-                else:
-                    bubble_style = _bubble_style_for_username(n.username.strip().lower())
-
-            entries.append(
-                {
-                    "kind": "message",
-                    "note": n,
-                    "is_self": is_self,
-                    "avatar_user": avatar_user,
-                    "bubble_style": bubble_style,
-                    "is_custos": is_custos,
-                    "display_username": display_username,
-                }
-            )
+    entries = _timeline_entries_for_notes(
+        notes,
+        current_username=current_username,
+        email_modal_ids=email_modal_ids,
+    )
 
     html = render_to_string(
         "core/_membership_notes.html",
@@ -442,6 +533,7 @@ def membership_notes(
             "can_vote": can_vote,
             "post_url": post_url,
             "next_url": resolved_next_url,
+            "email_modals": email_modals,
         },
         request=http_request,
     )

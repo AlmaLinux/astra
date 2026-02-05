@@ -196,6 +196,15 @@
                         style="{{ entry.bubble_style }} border: 1px dashed rgba(0,0,0,0.15);"
                       >
                         <i class="fas {{ entry.icon|default:"fa-bolt" }} mr-1"></i> {{ entry.label }}
+                        {% if entry.email_modal_id %}
+                          <button
+                            type="button"
+                            class="btn btn-link btn-sm p-0 ml-2"
+                            data-toggle="modal"
+                            data-target="#{{ entry.email_modal_id }}"
+                            aria-label="View email"
+                          >View email</button>
+                        {% endif %}
                       </div>
                     {% else %}
                       {% if not entry.is_self and entry.bubble_style %}
@@ -331,6 +340,12 @@
         </form>
       </div>
     </div>
+
+    {% if email_modals %}
+      {% for modal in email_modals %}
+        {% include "core/_membership_email_modal.html" with modal=modal %}
+      {% endfor %}
+    {% endif %}
 
     <script>
       (function () {

@@ -71,6 +71,7 @@ class SendMailMembershipContactedNoteTests(TestCase):
             Note.objects.filter(
                 membership_request=req,
                 username="reviewer",
-                action={"type": "contacted"},
+                action__type="contacted",
+                action__kind="custom",
             ).exists()
         )

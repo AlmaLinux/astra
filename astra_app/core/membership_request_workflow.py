@@ -42,6 +42,19 @@ def _ensure_configured_email_template_exists(*, template_name: str) -> None:
         )
 
 
+def _email_id_from_sent_email(sent_email: object | None) -> int | None:
+    if sent_email is None:
+        return None
+    if not hasattr(sent_email, "id"):
+        return None
+    raw_id = sent_email.id
+    if isinstance(raw_id, int):
+        return raw_id
+    if isinstance(raw_id, str) and raw_id.isdigit():
+        return int(raw_id)
+    return None
+
+
 def _organization_notification_email(organization: Organization) -> str:
     """Preferred recipient for org notifications.
 
@@ -389,6 +402,7 @@ def approve_membership_request(
                 )
 
         org_email = _organization_notification_email(org)
+        sent_email = None
         if send_approved_email and org_email:
             template_name = settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME
             if membership_type.acceptance_template_id is not None:
@@ -486,7 +500,7 @@ def approve_membership_request(
                 membership_type.code,
             )
             try:
-                post_office.mail.send(
+                sent_email = post_office.mail.send(
                     recipients=[org_email],
                     sender=settings.DEFAULT_FROM_EMAIL,
                     template=template_name,
@@ -558,6 +572,24 @@ def approve_membership_request(
                 "approve_membership_request: failed to record action note (org) request_id=%s",
                 membership_request.pk,
             )
+
+        email_id = _email_id_from_sent_email(sent_email)
+        if email_id is not None:
+            try:
+                add_note(
+                    membership_request=membership_request,
+                    username=actor_username,
+                    action={
+                        "type": "contacted",
+                        "kind": "approved",
+                        "email_id": email_id,
+                    },
+                )
+            except Exception:
+                logger.exception(
+                    "approve_membership_request: failed to record email note (org) request_id=%s",
+                    membership_request.pk,
+                )
         return log
 
     if not membership_type.group_cn:
@@ -610,6 +642,7 @@ def approve_membership_request(
         )
         raise ValidationError("Unable to load the requested user from FreeIPA")
 
+    sent_email = None
     if send_approved_email and target.email:
         template_name = settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME
         if membership_type.acceptance_template_id is not None:
@@ -675,7 +708,7 @@ def approve_membership_request(
             membership_type.code,
         )
         try:
-            post_office.mail.send(
+            sent_email = post_office.mail.send(
                 recipients=[target.email],
                 sender=settings.DEFAULT_FROM_EMAIL,
                 template=template_name,
@@ -748,6 +781,24 @@ def approve_membership_request(
             membership_request.pk,
         )
 
+    email_id = _email_id_from_sent_email(sent_email)
+    if email_id is not None:
+        try:
+            add_note(
+                membership_request=membership_request,
+                username=actor_username,
+                action={
+                    "type": "contacted",
+                    "kind": "approved",
+                    "email_id": email_id,
+                },
+            )
+        except Exception:
+            logger.exception(
+                "approve_membership_request: failed to record email note (user) request_id=%s",
+                membership_request.pk,
+            )
+
     return log
 
 
@@ -789,9 +840,10 @@ def reject_membership_request(
         membership_request.save(update_fields=["responses", "status", "decided_at", "decided_by_username"])
 
         org_email = _organization_notification_email(org) if org is not None else ""
+        sent_email = None
         if send_rejected_email and org_email:
             try:
-                post_office.mail.send(
+                sent_email = post_office.mail.send(
                     recipients=[org_email],
                     sender=settings.DEFAULT_FROM_EMAIL,
                     template=settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME,
@@ -848,6 +900,24 @@ def reject_membership_request(
                 membership_request.pk,
             )
 
+        email_id = _email_id_from_sent_email(sent_email)
+        if email_id is not None:
+            try:
+                add_note(
+                    membership_request=membership_request,
+                    username=actor_username,
+                    action={
+                        "type": "contacted",
+                        "kind": "rejected",
+                        "email_id": email_id,
+                    },
+                )
+            except Exception:
+                logger.exception(
+                    "reject_membership_request: failed to record email note (org) request_id=%s",
+                    membership_request.pk,
+                )
+
         return log, email_error
 
     target = FreeIPAUser.get(membership_request.requested_username)
@@ -857,9 +927,10 @@ def reject_membership_request(
     membership_request.decided_by_username = actor_username
     membership_request.save(update_fields=["responses", "status", "decided_at", "decided_by_username"])
 
+    sent_email = None
     if send_rejected_email and target is not None and target.email:
         try:
-            post_office.mail.send(
+            sent_email = post_office.mail.send(
                 recipients=[target.email],
                 sender=settings.DEFAULT_FROM_EMAIL,
                 template=settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME,
@@ -899,6 +970,24 @@ def reject_membership_request(
             "reject_membership_request: failed to record action note (user) request_id=%s",
             membership_request.pk,
         )
+
+    email_id = _email_id_from_sent_email(sent_email)
+    if email_id is not None:
+        try:
+            add_note(
+                membership_request=membership_request,
+                username=actor_username,
+                action={
+                    "type": "contacted",
+                    "kind": "rejected",
+                    "email_id": email_id,
+                },
+            )
+        except Exception:
+            logger.exception(
+                "reject_membership_request: failed to record email note (user) request_id=%s",
+                membership_request.pk,
+            )
     return log, email_error
 
 
@@ -1034,9 +1123,10 @@ def put_membership_request_on_hold(
         elif org is not None:
             recipient_email = org.primary_contact_email()
 
+        sent_email = None
         if send_rfi_email and recipient_email:
             try:
-                post_office.mail.send(
+                sent_email = post_office.mail.send(
                     recipients=[recipient_email],
                     sender=settings.DEFAULT_FROM_EMAIL,
                     template=settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME,
@@ -1075,9 +1165,10 @@ def put_membership_request_on_hold(
         )
     else:
         target = FreeIPAUser.get(membership_request.requested_username)
+        sent_email = None
         if send_rfi_email and target is not None and target.email:
             try:
-                post_office.mail.send(
+                sent_email = post_office.mail.send(
                     recipients=[target.email],
                     sender=settings.DEFAULT_FROM_EMAIL,
                     template=settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME,
@@ -1115,7 +1206,6 @@ def put_membership_request_on_hold(
         add_note(
             membership_request=membership_request,
             username=actor_username,
-            content=message,
             action={"type": "request_on_hold"},
         )
     except Exception:
@@ -1123,6 +1213,24 @@ def put_membership_request_on_hold(
             "put_membership_request_on_hold: failed to record action note request_id=%s",
             membership_request.pk,
         )
+
+    email_id = _email_id_from_sent_email(sent_email)
+    if email_id is not None:
+        try:
+            add_note(
+                membership_request=membership_request,
+                username=actor_username,
+                action={
+                    "type": "contacted",
+                    "kind": "rfi",
+                    "email_id": email_id,
+                },
+            )
+        except Exception:
+            logger.exception(
+                "put_membership_request_on_hold: failed to record email note request_id=%s",
+                membership_request.pk,
+            )
 
     return log, email_error
 

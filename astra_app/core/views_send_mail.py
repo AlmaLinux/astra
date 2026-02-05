@@ -20,7 +20,7 @@ from django.shortcuts import render
 from django.template import engines
 from django.urls import reverse_lazy
 from django.views.decorators.http import require_POST
-from post_office.models import EmailTemplate
+from post_office.models import STATUS, Email, EmailTemplate, Log
 
 from core.backends import FreeIPAGroup, FreeIPAUser
 from core.email_context import system_email_context, user_email_context_from_user
@@ -715,6 +715,21 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                         staged_html_content = ""
                         staged_files = []
 
+                    raw_request_id = str(posted_extra_context.get("membership_request_id") or "").strip()
+                    membership_request = None
+                    if raw_request_id.isdigit():
+                        membership_request = MembershipRequest.objects.filter(pk=int(raw_request_id)).first()
+
+                    email_kind = ""
+                    if action_status in {"approved", "accepted"}:
+                        email_kind = "approved"
+                    elif action_status == "rejected":
+                        email_kind = "rejected"
+                    elif action_status in {"rfi", "on_hold"}:
+                        email_kind = "rfi"
+                    elif membership_request is not None:
+                        email_kind = "custom"
+
                     template_engine = engines["post_office"]
                     subject_template = template_engine.from_string(subject)
                     # inline_image tags are HTML-only; avoid rendering them in text.
@@ -749,6 +764,44 @@ def send_mail(request: HttpRequest) -> HttpResponse:
 
                                 email_message.send()
                                 sent += 1
+
+                                if membership_request is not None:
+                                    try:
+                                        headers = None
+                                        if reply_to:
+                                            headers = {"Reply-To": ", ".join(reply_to)}
+
+                                        email = Email.objects.create(
+                                            from_email=settings.DEFAULT_FROM_EMAIL,
+                                            to=to_email,
+                                            cc=", ".join(cc),
+                                            bcc=", ".join(bcc),
+                                            subject=rendered_subject,
+                                            message=rendered_text,
+                                            html_message=rendered_html,
+                                            headers=headers,
+                                            status=STATUS.sent,
+                                        )
+                                        Log.objects.create(
+                                            email=email,
+                                            status=STATUS.sent,
+                                            message="Sent via mail tool",
+                                            exception_type="",
+                                        )
+                                        add_note(
+                                            membership_request=membership_request,
+                                            username=str(request.user.get_username() or "").strip(),
+                                            action={
+                                                "type": "contacted",
+                                                "kind": email_kind,
+                                                "email_id": email.id,
+                                            },
+                                        )
+                                    except Exception:
+                                        logger.exception(
+                                            "Send mail email-note failed membership_request_id=%s",
+                                            raw_request_id,
+                                        )
                             except Exception:
                                 failures += 1
                                 logger.exception("Send mail failed email=%s", to_email)
@@ -760,23 +813,6 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                                 pass
                             except Exception:
                                 logger.exception("Send mail failed to delete temp inline image path=%s", path)
-
-                    if sent:
-                        raw_request_id = str(posted_extra_context.get("membership_request_id") or "").strip()
-                        if raw_request_id.isdigit():
-                            mr = MembershipRequest.objects.filter(pk=int(raw_request_id)).first()
-                            if mr is not None:
-                                try:
-                                    add_note(
-                                        membership_request=mr,
-                                        username=str(request.user.get_username() or "").strip(),
-                                        action={"type": "contacted"},
-                                    )
-                                except Exception:
-                                    logger.exception(
-                                        "Send mail contacted-note failed membership_request_id=%s",
-                                        raw_request_id,
-                                    )
 
                     if sent:
                         messages.success(request, f"Queued {sent} email{'s' if sent != 1 else ''}.")

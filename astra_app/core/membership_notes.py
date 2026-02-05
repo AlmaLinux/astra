@@ -106,6 +106,13 @@ def note_action_label(action: dict[str, Any]) -> str:
     if action_type == "request_rescinded":
         return "Request rescinded"
     if action_type == "contacted":
+        kind = str(action.get("kind") or "").strip().lower()
+        if kind in {"approved", "accepted"}:
+            return "Approval email sent"
+        if kind == "rejected":
+            return "Rejection email sent"
+        if kind in {"rfi", "on_hold"}:
+            return "RFI email sent"
         return "User contacted"
 
     if action_type == "representative_changed":

@@ -7,6 +7,7 @@ from django.conf import settings
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
+from post_office.models import Email
 
 from core.backends import FreeIPAUser
 from core.models import FreeIPAPermissionGrant, MembershipRequest
@@ -105,7 +106,17 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("post_office.mail.send", autospec=True) as send_mock:
+        email = Email.objects.create(
+            from_email="noreply@example.com",
+            to="alice@example.com",
+            cc="",
+            bcc="",
+            subject="RFI",
+            message="RFI text",
+            html_message="",
+        )
+
+        with patch("post_office.mail.send", autospec=True, return_value=email) as send_mock:
             resp = self.client.post(
                 reverse("membership-request-rfi", args=[req.pk]),
                 data={"rfi_message": "Please clarify your contributions."},
@@ -129,6 +140,25 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
                 membership_request=req,
                 username="reviewer",
                 action__type="request_on_hold",
+            ).exists()
+        )
+        self.assertFalse(
+            Note.objects.filter(
+                membership_request=req,
+                username="reviewer",
+                action__type="request_on_hold",
+                content__isnull=False,
+            )
+            .exclude(content="")
+            .exists()
+        )
+        self.assertTrue(
+            Note.objects.filter(
+                membership_request=req,
+                username="reviewer",
+                action__type="contacted",
+                action__kind="rfi",
+                action__email_id=email.id,
             ).exists()
         )
 
