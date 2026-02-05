@@ -84,6 +84,59 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
         self.assertContains(resp, f"Request #{pending.pk}")
         self.assertContains(resp, f"Request #{on_hold.pk}")
 
+    def test_reject_modal_includes_reason_presets(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.pending,
+        )
+
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+            },
+        )
+        alice = FreeIPAUser("alice", {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []})
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "alice":
+                return alice
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+            resp = self.client.get(reverse("membership-requests"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(
+            resp,
+            "This decision is due to legal requirements that currently prevent the AlmaLinux OS Foundation from "
+            "approving applications from certain countries.",
+        )
+        self.assertContains(
+            resp,
+            "We were unable to complete the approval process because we did not receive the additional information "
+            "requested during our review.",
+        )
+
     def test_on_hold_section_has_bulk_and_row_actions_and_waiting_inline(self) -> None:
         from django.utils import formats
 
