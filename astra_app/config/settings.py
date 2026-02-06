@@ -125,12 +125,6 @@ if _sentry_dsn:
             DjangoIntegration(),
             LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
         ],
-        # Bugsink is Sentry-compatible but does not implement all envelope item
-        # types. Disabling these avoids noisy "skipping non-supported envelope
-        # item: sessions" logs without affecting exception reporting.
-        traces_sample_rate=0,
-        send_client_reports=False,
-        auto_session_tracking=False,
         environment=_env_str(
             "SENTRY_ENVIRONMENT",
             default="development" if DEBUG else "production",
