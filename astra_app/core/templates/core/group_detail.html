@@ -105,7 +105,7 @@
       <div class="col-lg-4">
         <div class="card">
           <div class="card-header">
-            <h3 class="card-title">Sponsor tools</h3>
+            <h3 class="card-title">Team membership</h3>
           </div>
           <div class="card-body">
             <form method="post" class="mb-2">
@@ -132,11 +132,13 @@
               class="btn btn-outline-secondary btn-sm w-100"
               data-toggle="modal"
               data-target="#stop-sponsoring-modal"
-            >Stop being a sponsor</button>
+            >Stop being a Team Lead</button>
 
-            <small class="text-muted d-block mt-2">
-              Users must have signed required agreements before being added.
-            </small>
+            {% if required_agreements %}
+              <small class="text-muted d-block mt-2">
+                Users must have signed required agreements before being added.
+              </small>
+            {% endif %}
           </div>
         </div>
       </div>
@@ -145,9 +147,13 @@
 
   {% if sponsor_groups_list or sponsors_list %}
     <div class="card">
-      <div class="card-header">
-        <h3 class="card-title">Sponsors</h3>
-      </div>
+      {% with sponsor_group_count=sponsor_groups_list|length sponsor_user_count=sponsors_list|length %}
+        {% with sponsor_total=sponsor_group_count|add:sponsor_user_count %}
+          <div class="card-header">
+            <h3 class="card-title">Team Lead{{ sponsor_total|pluralize }}</h3>
+          </div>
+        {% endwith %}
+      {% endwith %}
       <div class="card-body">
         <div class="row">
           {% for cn in sponsor_groups_list %}
@@ -172,7 +178,7 @@
 
   <div class="card">
     <div class="card-header">
-      <h3 class="card-title">Members</h3>
+      <h3 class="card-title">Member{{ member_count|pluralize }}</h3>
       <div class="card-tools">
         <form method="get" class="input-group input-group-sm" style="width: 220px;">
           <input
