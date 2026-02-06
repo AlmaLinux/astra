@@ -83,7 +83,7 @@ Expected context:
             <tbody>
               {% for log in modal.logs %}
                 <tr>
-                  <td>{{ log.date }}</td>
+                  <td>{{ log.date|date:"Y-m-d H:i:s T" }}</td>
                   <td>{{ log.status }}</td>
                   <td>
                     {{ log.message }}
