@@ -129,9 +129,13 @@ if _sentry_dsn:
             "SENTRY_ENVIRONMENT",
             default="development" if DEBUG else "production",
         ),
-        release=_env_str("SENTRY_RELEASE", default=None),
+        release=_env_str("ASTRA_BUILD_SHA", default=None),
         send_default_pii=_env_bool("SENTRY_SEND_DEFAULT_PII", default=True),
         max_request_body_size="always",
+        enable_logs=True,
+        traces_sample_rate=1.0,
+        profile_session_sample_rate=1.0,
+        profile_lifecycle="trace",
     )
 
 # Self-service country settings: where to store the ISO 3166-1 country code.
