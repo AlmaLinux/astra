@@ -134,7 +134,8 @@
     const raw = String(value || '').trim();
     if (!raw) return '';
 
-    const normalizedScheme = (scheme === 'mattermost') ? 'mattermost' : (scheme === 'matrix') ? 'matrix' : 'irc';
+    const forceMattermost = raw.startsWith('~');
+    const normalizedScheme = forceMattermost ? 'mattermost' : (scheme === 'mattermost') ? 'mattermost' : (scheme === 'matrix') ? 'matrix' : 'irc';
 
     const lower = raw.toLowerCase();
     if (lower.startsWith('mattermost:') || lower.startsWith('irc:') || lower.startsWith('ircs:') || lower.startsWith('matrix:')) {

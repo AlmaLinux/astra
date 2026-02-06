@@ -268,6 +268,44 @@ class AdminIPAGroupCRUDTests(TestCase):
             )
         )
 
+    def test_create_group_sets_fas_attrs_on_create(self) -> None:
+        self._login_as_freeipa_admin("alice")
+
+        admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})
+        created_group = FreeIPAGroup("testgroup", {"cn": ["testgroup"], "fasgroup": [True]})
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=admin_user),
+            patch("core.admin.FreeIPAUser.all", return_value=[admin_user]),
+            patch("core.backends.FreeIPAGroup.create", return_value=created_group),
+            patch("core.backends.FreeIPAGroup.get", return_value=created_group),
+            patch.object(created_group, "save") as save_mock,
+            patch("core.backends.FreeIPAGroup.add_member"),
+        ):
+            url = reverse("admin:auth_ipagroup_add")
+            resp = self.client.post(
+                url,
+                data={
+                    "cn": "testgroup",
+                    "description": "A test group",
+                    "members": ["alice"],
+                    "fas_url": "https://example.com/group",
+                    "fas_mailing_list": "testgroup@example.com",
+                    "fas_irc_channels": "#testgroup",
+                    "fas_discussion_url": "https://discussion.example.com/group",
+                    "fas_group": "on",
+                    "_save": "Save",
+                },
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(created_group.fas_url, "https://example.com/group")
+        self.assertEqual(created_group.fas_mailing_list, "testgroup@example.com")
+        self.assertEqual(created_group.fas_discussion_url, "https://discussion.example.com/group")
+        self.assertEqual(created_group.fas_irc_channels, ["irc:/#testgroup"])
+        save_mock.assert_called_once()
+
     def test_edit_group_toggle_fasgroup(self):
         self._login_as_freeipa_admin("alice")
         admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})

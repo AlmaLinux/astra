@@ -1000,7 +1000,7 @@ class FreeIPAUser:
 
             # Keep cn/displayname/gecos in sync. Intentionally do not allow
             # per-field overrides (admin UX treats display name as derived).
-            cn = f"{givenname or ''} {sn or ''}"
+            cn = f"{givenname or ''} {sn or ''}".strip() or username
 
             initials = f"{(str(givenname).strip()[:1] or '').upper()}{(str(sn).strip()[:1] or '').upper()}"
 
@@ -1064,7 +1064,7 @@ class FreeIPAUser:
             updates['o_nsaccountlock'] = (not bool(self.is_active))
 
         # Always keep cn/displayname/gecos in sync.
-        desired_name = f"{self.first_name or ''} {self.last_name or ''}"
+        desired_name = f"{self.first_name or ''} {self.last_name or ''}".strip() or self.username
         updates["o_cn"] = desired_name
         updates["o_gecos"] = desired_name
         updates["o_displayname"] = desired_name

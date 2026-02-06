@@ -133,6 +133,43 @@ class GroupSponsorCanEditGroupInfoTests(TestCase):
         self.assertEqual(group.fas_discussion_url, "https://discussion.example.org/c/new")
         group.save.assert_called_once()
 
+    def test_sponsor_can_post_mattermost_channel_with_tilde(self) -> None:
+        self._login_as_freeipa("bob")
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+
+        group = SimpleNamespace(
+            cn="fas1",
+            description="FAS Group 1",
+            fas_group=True,
+            fas_url=None,
+            fas_mailing_list=None,
+            fas_irc_channels=[],
+            fas_discussion_url=None,
+            members=[],
+            sponsors=["bob"],
+            sponsor_groups=[],
+            save=MagicMock(),
+        )
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.backends.FreeIPAGroup.get", return_value=group),
+        ):
+            resp = self.client.post(
+                "/group/fas1/edit/",
+                {
+                    "description": "FAS Group 1",
+                    "fas_irc_channels": "~atomicsig",
+                },
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "/group/fas1/")
+        self.assertEqual(group.fas_irc_channels, ["mattermost:/channels/atomicsig"])
+        group.save.assert_called_once()
+
     def test_sponsor_save_connection_error_shows_unavailable_message(self) -> None:
         self._login_as_freeipa("bob")
 

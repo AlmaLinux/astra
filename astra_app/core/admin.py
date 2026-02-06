@@ -1186,6 +1186,22 @@ class IPAGroupAdmin(FreeIPAModelAdmin):
                     raise RuntimeError(
                         "FreeIPA server did not create a fasGroup at creation time; toggling is not supported"
                     )
+            if freeipa is not None and bool(getattr(freeipa, "fas_group", False)):
+                changed = False
+                if (freeipa.fas_url or "") != (fas_url or ""):
+                    freeipa.fas_url = fas_url or None
+                    changed = True
+                if (freeipa.fas_mailing_list or "") != (fas_mailing_list or ""):
+                    freeipa.fas_mailing_list = fas_mailing_list or None
+                    changed = True
+                if sorted(freeipa.fas_irc_channels or []) != sorted(list(fas_irc_channels) if fas_irc_channels else []):
+                    freeipa.fas_irc_channels = list(fas_irc_channels) if fas_irc_channels else []
+                    changed = True
+                if (freeipa.fas_discussion_url or "") != (fas_discussion_url or ""):
+                    freeipa.fas_discussion_url = fas_discussion_url or None
+                    changed = True
+                if changed:
+                    freeipa.save()
         else:
             freeipa = FreeIPAGroup.get(cn)
             if not freeipa:
