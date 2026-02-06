@@ -129,23 +129,27 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
 
     q = _normalize_str(request.GET.get("q"))
 
-    member_count = 0
-    if hasattr(group, "member_count_recursive"):
-        try:
-            fn = getattr(group, "member_count_recursive")
-            member_count = int(fn() if callable(fn) else fn)
-        except Exception:
-            member_count = 0
-    else:
-        try:
-            member_count = len(getattr(group, "members", []) or [])
-        except Exception:
-            member_count = 0
+    def _is_fas_group(cn: str) -> bool:
+        group_obj = FreeIPAGroup.get(cn)
+        return bool(group_obj and group_obj.fas_group)
+
+    member_count = group.member_count_recursive(fas_only=True)
 
     username = _normalize_str(request.user.get_username())
-    sponsors = set(group.sponsors)
-    sponsor_groups = set(getattr(group, "sponsor_groups", []) or [])
-    members = set(group.members)
+    try:
+        sponsors = set(group.sponsors)
+    except AttributeError:
+        sponsors = set()
+
+    try:
+        sponsor_groups = set(group.sponsor_groups)
+    except AttributeError:
+        sponsor_groups = set()
+
+    try:
+        members = set(group.members)
+    except AttributeError:
+        members = set()
     user_groups: set[str] = set()
     if isinstance(request.user, FreeIPAUser):
         user_groups = set(request.user.groups_list)
@@ -155,7 +159,7 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
     is_sponsor = (username in sponsors) or bool(sponsor_groups_lower & user_groups_lower)
     is_member = username in members
 
-    sponsor_groups_list = sorted(sponsor_groups, key=lambda s: s.lower())
+    sponsor_groups_list = sorted((g for g in sponsor_groups if _is_fas_group(g)), key=lambda s: s.lower())
     sponsors_list = sorted(sponsors, key=lambda s: s.lower())
     promotable_members = sorted((members - sponsors), key=lambda s: s.lower())
 

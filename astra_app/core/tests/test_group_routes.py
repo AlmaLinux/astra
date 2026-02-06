@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from django.test import TestCase
 
-from core.backends import FreeIPAUser
+from core.backends import FreeIPAGroup, FreeIPAUser
 
 
 class GroupRoutesTests(TestCase):
@@ -93,16 +93,21 @@ class GroupDetailRouteTests(TestCase):
     def test_group_detail_route_renders_info_and_members(self) -> None:
         self._login_as_freeipa("admin")
 
-        group = SimpleNamespace(
-            cn="fas1",
-            description="FAS Group 1",
-            fas_group=True,
-            fas_url="https://example.org/group/fas1",
-            fas_mailing_list="fas1@example.org",
-            fas_irc_channels=["#fas1"],
-            fas_discussion_url="https://discussion.example.org/c/fas1",
-            members=["alice", "bob"],
-            sponsors=[],
+        group = FreeIPAGroup(
+            "fas1",
+            {
+                "cn": ["fas1"],
+                "description": ["FAS Group 1"],
+                "member_user": ["alice", "bob"],
+                "member_group": [],
+                "membermanager_user": [],
+                "membermanager_group": [],
+                "fasurl": ["https://example.org/group/fas1"],
+                "fasmailinglist": ["fas1@example.org"],
+                "fasircchannel": ["#fas1"],
+                "fasdiscussionurl": ["https://discussion.example.org/c/fas1"],
+                "objectclass": ["fasgroup"],
+            },
         )
 
         def _fake_user_get(username: str) -> FreeIPAUser:
@@ -135,7 +140,16 @@ class GroupDetailRouteTests(TestCase):
     def test_group_detail_route_404_for_non_fas_group(self) -> None:
         self._login_as_freeipa("admin")
 
-        group = SimpleNamespace(cn="ipa_only", description="", fas_group=False, members=["alice"])
+        group = FreeIPAGroup(
+            "ipa_only",
+            {
+                "cn": ["ipa_only"],
+                "description": [""],
+                "member_user": ["alice"],
+                "member_group": [],
+                "objectclass": [],
+            },
+        )
 
         with patch("core.backends.FreeIPAGroup.get", return_value=group):
             resp = self.client.get("/group/ipa_only/")
@@ -146,7 +160,18 @@ class GroupDetailRouteTests(TestCase):
         self._login_as_freeipa("admin")
 
         members = [f"user{i:03d}" for i in range(65)]
-        group = SimpleNamespace(cn="fas1", description="", fas_group=True, members=members, sponsors=[])
+        group = FreeIPAGroup(
+            "fas1",
+            {
+                "cn": ["fas1"],
+                "description": [""],
+                "member_user": members,
+                "member_group": [],
+                "membermanager_user": [],
+                "membermanager_group": [],
+                "objectclass": ["fasgroup"],
+            },
+        )
 
         def _fake_user_get(username: str) -> FreeIPAUser:
             return FreeIPAUser(username, {"uid": [username], "givenname": [""], "sn": [""], "mail": [""]})
@@ -169,7 +194,18 @@ class GroupDetailRouteTests(TestCase):
     def test_group_detail_members_search_filters(self) -> None:
         self._login_as_freeipa("admin")
 
-        group = SimpleNamespace(cn="fas1", description="", fas_group=True, members=["alice", "bob"], sponsors=[])
+        group = FreeIPAGroup(
+            "fas1",
+            {
+                "cn": ["fas1"],
+                "description": [""],
+                "member_user": ["alice", "bob"],
+                "member_group": [],
+                "membermanager_user": [],
+                "membermanager_group": [],
+                "objectclass": ["fasgroup"],
+            },
+        )
 
         def _fake_user_get(username: str) -> FreeIPAUser:
             return FreeIPAUser(username, {"uid": [username], "givenname": [""], "sn": [""], "mail": [""]})

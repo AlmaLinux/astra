@@ -142,6 +142,12 @@ def user_grid(context: Context, **kwargs: Any) -> str:
             member_groups = [g for g in member_groups if q_lower in g.lower()]
             members = [m for m in members if q_lower in m.lower()]
 
+        def _is_fas_group(cn: str) -> bool:
+            obj = FreeIPAGroup.get(cn)
+            return bool(obj and obj.fas_group)
+
+        member_groups = [cn for cn in member_groups if _is_fas_group(cn)]
+
         groups_sorted = sorted(member_groups, key=lambda s: s.lower())
         users_sorted = sorted(members, key=lambda s: s.lower())
 

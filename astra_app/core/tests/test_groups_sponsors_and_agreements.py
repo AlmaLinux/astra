@@ -12,7 +12,7 @@ from django.test import RequestFactory, TestCase
 from django.urls import reverse
 
 from core import views_groups, views_settings, views_users
-from core.backends import DegradedFreeIPAUser, FreeIPAOperationFailed
+from core.backends import DegradedFreeIPAUser, FreeIPAGroup, FreeIPAOperationFailed
 
 
 class GroupsSponsorsAndAgreementsTests(TestCase):
@@ -108,12 +108,17 @@ class GroupsSponsorsAndAgreementsTests(TestCase):
         request = factory.get("/group/testgroup/")
         request.user = self._auth_user("alice")
 
-        group = SimpleNamespace(
-            cn="testgroup",
-            fas_group=True,
-            description="",
-            members=["alice"],
-            sponsors=[],
+        group = FreeIPAGroup(
+            "testgroup",
+            {
+                "cn": ["testgroup"],
+                "description": [""],
+                "member_user": ["alice"],
+                "membermanager_user": [],
+                "membermanager_group": [],
+                "member_group": [],
+                "objectclass": ["fasgroup"],
+            },
         )
 
         agreement_summary = SimpleNamespace(cn="cla", enabled=True, groups=["testgroup"], users=[])
@@ -142,12 +147,17 @@ class GroupsSponsorsAndAgreementsTests(TestCase):
         request = factory.get("/group/testgroup/")
         request.user = self._auth_user("alice")
 
-        group = SimpleNamespace(
-            cn="testgroup",
-            fas_group=True,
-            description="",
-            members=["bob"],
-            sponsors=["carol"],
+        group = FreeIPAGroup(
+            "testgroup",
+            {
+                "cn": ["testgroup"],
+                "description": [""],
+                "member_user": ["bob"],
+                "membermanager_user": ["carol"],
+                "membermanager_group": [],
+                "member_group": [],
+                "objectclass": ["fasgroup"],
+            },
         )
 
         # Agreement required for testgroup. Bob has signed; Carol has not.
@@ -213,12 +223,17 @@ class GroupsSponsorsAndAgreementsTests(TestCase):
         self._add_session_and_messages(request)
         request.user = DegradedFreeIPAUser("alice")
 
-        group = SimpleNamespace(
-            cn="testgroup",
-            fas_group=True,
-            description="",
-            members=["alice"],
-            sponsors=[],
+        group = FreeIPAGroup(
+            "testgroup",
+            {
+                "cn": ["testgroup"],
+                "description": [""],
+                "member_user": ["alice"],
+                "membermanager_user": [],
+                "membermanager_group": [],
+                "member_group": [],
+                "objectclass": ["fasgroup"],
+            },
         )
 
         with patch("core.views_groups.FreeIPAGroup.get", autospec=True, return_value=group):
@@ -241,7 +256,17 @@ class GroupsSponsorsAndAgreementsTests(TestCase):
         user.remove_from_group = MagicMock()
         request.user = user
 
-        group = SimpleNamespace(cn="testgroup", fas_group=True, members=["alice"], sponsors=[])
+        group = FreeIPAGroup(
+            "testgroup",
+            {
+                "cn": ["testgroup"],
+                "member_user": ["alice"],
+                "membermanager_user": [],
+                "membermanager_group": [],
+                "member_group": [],
+                "objectclass": ["fasgroup"],
+            },
+        )
 
         with patch("core.views_groups.FreeIPAGroup.get", autospec=True, return_value=group):
             response = views_groups.group_detail(request, "testgroup")
@@ -258,7 +283,17 @@ class GroupsSponsorsAndAgreementsTests(TestCase):
         user.remove_from_group = MagicMock(side_effect=requests.exceptions.ConnectionError())
         request.user = user
 
-        group = SimpleNamespace(cn="testgroup", fas_group=True, members=["alice"], sponsors=[])
+        group = FreeIPAGroup(
+            "testgroup",
+            {
+                "cn": ["testgroup"],
+                "member_user": ["alice"],
+                "membermanager_user": [],
+                "membermanager_group": [],
+                "member_group": [],
+                "objectclass": ["fasgroup"],
+            },
+        )
 
         with patch("core.views_groups.FreeIPAGroup.get", autospec=True, return_value=group):
             response = views_groups.group_detail(request, "testgroup")
@@ -281,14 +316,18 @@ class GroupsSponsorsAndAgreementsTests(TestCase):
 
         request.user = self._auth_user("sponsor")
 
-        group = SimpleNamespace(
-            cn="testgroup",
-            fas_group=True,
-            members=[],
-            sponsors=["sponsor"],
-            sponsor_groups=[],
-            remove_sponsor=MagicMock(side_effect=requests.exceptions.ConnectionError()),
+        group = FreeIPAGroup(
+            "testgroup",
+            {
+                "cn": ["testgroup"],
+                "member_user": [],
+                "membermanager_user": ["sponsor"],
+                "membermanager_group": [],
+                "member_group": [],
+                "objectclass": ["fasgroup"],
+            },
         )
+        group.remove_sponsor = MagicMock(side_effect=requests.exceptions.ConnectionError())
 
         with patch("core.views_groups.FreeIPAGroup.get", autospec=True, return_value=group):
             with patch("core.views_groups.required_agreements_for_group", autospec=True, return_value=[]):
@@ -312,14 +351,18 @@ class GroupsSponsorsAndAgreementsTests(TestCase):
 
         request.user = self._auth_user("sponsor")
 
-        group = SimpleNamespace(
-            cn="testgroup",
-            fas_group=True,
-            members=[],
-            sponsors=["sponsor"],
-            sponsor_groups=[],
-            add_member=MagicMock(side_effect=requests.exceptions.ConnectionError()),
+        group = FreeIPAGroup(
+            "testgroup",
+            {
+                "cn": ["testgroup"],
+                "member_user": [],
+                "membermanager_user": ["sponsor"],
+                "membermanager_group": [],
+                "member_group": [],
+                "objectclass": ["fasgroup"],
+            },
         )
+        group.add_member = MagicMock(side_effect=requests.exceptions.ConnectionError())
 
         with patch("core.views_groups.FreeIPAGroup.get", autospec=True, return_value=group):
             with patch("core.views_groups.required_agreements_for_group", autospec=True, return_value=[]):
@@ -348,14 +391,18 @@ class GroupsSponsorsAndAgreementsTests(TestCase):
 
         request.user = self._auth_user("sponsor")
 
-        group = SimpleNamespace(
-            cn="testgroup",
-            fas_group=True,
-            members=["bob"],
-            sponsors=["sponsor"],
-            sponsor_groups=[],
-            remove_member=MagicMock(side_effect=requests.exceptions.ConnectionError()),
+        group = FreeIPAGroup(
+            "testgroup",
+            {
+                "cn": ["testgroup"],
+                "member_user": ["bob"],
+                "membermanager_user": ["sponsor"],
+                "membermanager_group": [],
+                "member_group": [],
+                "objectclass": ["fasgroup"],
+            },
         )
+        group.remove_member = MagicMock(side_effect=requests.exceptions.ConnectionError())
 
         with patch("core.views_groups.FreeIPAGroup.get", autospec=True, return_value=group):
             with patch("core.views_groups.required_agreements_for_group", autospec=True, return_value=[]):
@@ -380,13 +427,18 @@ class GroupsSponsorsAndAgreementsTests(TestCase):
         sponsor_user = self._auth_user("sponsor")
         request.user = sponsor_user
 
-        group_backend = SimpleNamespace(
-            cn="testgroup",
-            fas_group=True,
-            members=[],
-            sponsors=["sponsor"],
-            add_member=MagicMock(),
+        group_backend = FreeIPAGroup(
+            "testgroup",
+            {
+                "cn": ["testgroup"],
+                "member_user": [],
+                "membermanager_user": ["sponsor"],
+                "membermanager_group": [],
+                "member_group": [],
+                "objectclass": ["fasgroup"],
+            },
         )
+        group_backend.add_member = MagicMock()
 
         with patch("core.views_groups.FreeIPAGroup.get", autospec=True, return_value=group_backend):
             with patch("core.agreements.FreeIPAFASAgreement.all", autospec=True) as mocked_all:
@@ -410,11 +462,16 @@ class GroupsSponsorsAndAgreementsTests(TestCase):
         self._add_session_and_messages(request)
         request.user = self._auth_user("sponsor")
 
-        group_backend = SimpleNamespace(
-            cn="testgroup",
-            fas_group=True,
-            members=[],
-            sponsors=["sponsor"],
+        group_backend = FreeIPAGroup(
+            "testgroup",
+            {
+                "cn": ["testgroup"],
+                "member_user": [],
+                "membermanager_user": ["sponsor"],
+                "membermanager_group": [],
+                "member_group": [],
+                "objectclass": ["fasgroup"],
+            },
         )
 
         err = FreeIPAOperationFailed(
@@ -441,13 +498,18 @@ class GroupsSponsorsAndAgreementsTests(TestCase):
         sponsor_user = self._auth_user("sponsor")
         request.user = sponsor_user
 
-        group_backend = SimpleNamespace(
-            cn="testgroup",
-            fas_group=True,
-            members=[],
-            sponsors=["sponsor"],
-            remove_sponsor=MagicMock(),
+        group_backend = FreeIPAGroup(
+            "testgroup",
+            {
+                "cn": ["testgroup"],
+                "member_user": [],
+                "membermanager_user": ["sponsor"],
+                "membermanager_group": [],
+                "member_group": [],
+                "objectclass": ["fasgroup"],
+            },
         )
+        group_backend.remove_sponsor = MagicMock()
 
         with patch("core.views_groups.FreeIPAGroup.get", autospec=True, return_value=group_backend):
             response = views_groups.group_detail(request, "testgroup")
@@ -463,16 +525,21 @@ class GroupsSponsorsAndAgreementsTests(TestCase):
         self._add_session_and_messages(request)
         request.user = self._auth_user("alice")
 
-        group = SimpleNamespace(
-            cn="testgroup",
-            fas_group=True,
-            description="Test Group",
-            members=["member1"],
-            sponsors=["sponsor1"],
-            fas_url=None,
-            fas_mailing_list=None,
-            fas_irc_channels=None,
-            fas_discussion_url=None,
+        group = FreeIPAGroup(
+            "testgroup",
+            {
+                "cn": ["testgroup"],
+                "description": ["Test Group"],
+                "member_user": ["member1"],
+                "membermanager_user": ["sponsor1"],
+                "membermanager_group": [],
+                "member_group": [],
+                "fasurl": [""],
+                "fasmailinglist": [""],
+                "fasircchannel": [],
+                "fasdiscussionurl": [""],
+                "objectclass": ["fasgroup"],
+            },
         )
 
         with patch("core.views_groups.FreeIPAGroup.get", autospec=True, return_value=group):

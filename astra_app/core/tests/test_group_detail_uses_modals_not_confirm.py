@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from django.test import TestCase
 
-from core.backends import FreeIPAUser
+from core.backends import FreeIPAGroup, FreeIPAUser
 
 
 class GroupDetailModalConfirmTests(TestCase):
@@ -17,18 +17,17 @@ class GroupDetailModalConfirmTests(TestCase):
     def test_group_detail_uses_modals_instead_of_confirm(self) -> None:
         self._login_as_freeipa("admin")
 
-        group = SimpleNamespace(
-            cn="parent",
-            description="Some group",
-            fas_group=True,
-            members=["admin", "alice"],
-            sponsors=["admin"],
-            sponsor_groups=[],
-            member_groups=[],
-            fas_url=None,
-            fas_mailing_list=None,
-            fas_irc_channels=[],
-            fas_discussion_url=None,
+        group = FreeIPAGroup(
+            "parent",
+            {
+                "cn": ["parent"],
+                "description": ["Some group"],
+                "member_user": ["admin", "alice"],
+                "member_group": [],
+                "membermanager_user": ["admin"],
+                "membermanager_group": [],
+                "objectclass": ["fasgroup"],
+            },
         )
 
         admin_user = FreeIPAUser(

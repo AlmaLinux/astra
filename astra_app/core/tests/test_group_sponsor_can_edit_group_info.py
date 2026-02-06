@@ -7,7 +7,7 @@ import requests
 from django.contrib.messages import get_messages
 from django.test import TestCase
 
-from core.backends import FreeIPAUser
+from core.backends import FreeIPAGroup, FreeIPAUser
 
 
 class GroupSponsorCanEditGroupInfoTests(TestCase):
@@ -21,17 +21,21 @@ class GroupSponsorCanEditGroupInfoTests(TestCase):
 
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
 
-        group = SimpleNamespace(
-            cn="fas1",
-            description="FAS Group 1",
-            fas_group=True,
-            fas_url="https://example.org/group/fas1",
-            fas_mailing_list="fas1@example.org",
-            fas_irc_channels=["#fas1"],
-            fas_discussion_url="https://discussion.example.org/c/fas1",
-            members=[],
-            sponsors=["bob"],
-            sponsor_groups=[],
+        group = FreeIPAGroup(
+            "fas1",
+            {
+                "cn": ["fas1"],
+                "description": ["FAS Group 1"],
+                "member_user": [],
+                "member_group": [],
+                "membermanager_user": ["bob"],
+                "membermanager_group": [],
+                "fasurl": ["https://example.org/group/fas1"],
+                "fasmailinglist": ["fas1@example.org"],
+                "fasircchannel": ["#fas1"],
+                "fasdiscussionurl": ["https://discussion.example.org/c/fas1"],
+                "objectclass": ["fasgroup"],
+            },
         )
 
         with (

@@ -107,6 +107,13 @@ When you notice duplicated logic across files:
 Guardrails:
 - Avoid “double defaults” (a default in settings + another default in code) because it silently diverges.
 - Prefer deleting code over adding code during refactors.
+- If a fix starts ballooning into lots of new production code, pause and reassess. Prefer the smallest change that satisfies the requirement, and avoid adding new layers/abstractions unless the product behavior truly needs it.
+
+When tests/mocks constrain refactors:
+- Prefer the smallest change that satisfies the failing test (or new requirement). Why: tests encode current behavior and constraints; working with them reduces risk and review overhead.
+- Do not introduce new abstractions, layers, or reshaped APIs just to make a refactor feel “cleaner”. Why: this is a common source of scope creep and makes future changes harder to reason about.
+- If a larger redesign is genuinely needed, stop and surface it explicitly (what breaks, what needs to change, what the migration plan is). Why: it should be a deliberate decision, not an incidental byproduct of a bugfix.
+- Do not expand mocks/stubs to accommodate a new architecture unless the product behavior changed. Why: tests should validate behavior, not be rewritten to follow an unrequested design.
 
 Pre-change checklist (must answer mentally before finishing):
 - Did I add a fallback that’s already configured elsewhere?

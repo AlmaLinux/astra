@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
 
-from core.backends import FreeIPAUser
+from core.backends import FreeIPAGroup, FreeIPAUser
 
 
 class GroupDetailPromoteMemberToSponsorTests(TestCase):
@@ -18,18 +18,17 @@ class GroupDetailPromoteMemberToSponsorTests(TestCase):
         self._login_as_freeipa("sponsor1")
 
         sponsor = FreeIPAUser("sponsor1", {"uid": ["sponsor1"], "memberof_group": []})
-        group = SimpleNamespace(
-            cn="testgroup",
-            fas_group=True,
-            description="",
-            members=["member1"],
-            sponsors=["sponsor1"],
-            sponsor_groups=[],
-            member_groups=[],
-            fas_url=None,
-            fas_mailing_list=None,
-            fas_irc_channels=[],
-            fas_discussion_url=None,
+        group = FreeIPAGroup(
+            "testgroup",
+            {
+                "cn": ["testgroup"],
+                "description": [""],
+                "member_user": ["member1"],
+                "member_group": [],
+                "membermanager_user": ["sponsor1"],
+                "membermanager_group": [],
+                "objectclass": ["fasgroup"],
+            },
         )
 
         with (
@@ -47,18 +46,17 @@ class GroupDetailPromoteMemberToSponsorTests(TestCase):
         self._login_as_freeipa("sponsor1")
 
         sponsor = FreeIPAUser("sponsor1", {"uid": ["sponsor1"], "memberof_group": []})
-        group = SimpleNamespace(
-            cn="testgroup",
-            fas_group=True,
-            description="",
-            members=["member1"],
-            sponsors=["sponsor1", "sponsor2"],
-            sponsor_groups=[],
-            member_groups=[],
-            fas_url=None,
-            fas_mailing_list=None,
-            fas_irc_channels=[],
-            fas_discussion_url=None,
+        group = FreeIPAGroup(
+            "testgroup",
+            {
+                "cn": ["testgroup"],
+                "description": [""],
+                "member_user": ["member1"],
+                "member_group": [],
+                "membermanager_user": ["sponsor1", "sponsor2"],
+                "membermanager_group": [],
+                "objectclass": ["fasgroup"],
+            },
         )
 
         with (
@@ -76,20 +74,19 @@ class GroupDetailPromoteMemberToSponsorTests(TestCase):
         self._login_as_freeipa("sponsor1")
 
         sponsor = FreeIPAUser("sponsor1", {"uid": ["sponsor1"], "memberof_group": []})
-        group = SimpleNamespace(
-            cn="testgroup",
-            fas_group=True,
-            description="",
-            members=["member1"],
-            sponsors=["sponsor1"],
-            sponsor_groups=[],
-            member_groups=[],
-            fas_url=None,
-            fas_mailing_list=None,
-            fas_irc_channels=[],
-            fas_discussion_url=None,
-            add_sponsor=MagicMock(),
+        group = FreeIPAGroup(
+            "testgroup",
+            {
+                "cn": ["testgroup"],
+                "description": [""],
+                "member_user": ["member1"],
+                "member_group": [],
+                "membermanager_user": ["sponsor1"],
+                "membermanager_group": [],
+                "objectclass": ["fasgroup"],
+            },
         )
+        group.add_sponsor = MagicMock()
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=sponsor),
@@ -108,20 +105,19 @@ class GroupDetailPromoteMemberToSponsorTests(TestCase):
         self._login_as_freeipa("sponsor1")
 
         sponsor = FreeIPAUser("sponsor1", {"uid": ["sponsor1"], "memberof_group": []})
-        group = SimpleNamespace(
-            cn="testgroup",
-            fas_group=True,
-            description="",
-            members=["member1"],
-            sponsors=["sponsor1", "sponsor2"],
-            sponsor_groups=[],
-            member_groups=[],
-            fas_url=None,
-            fas_mailing_list=None,
-            fas_irc_channels=[],
-            fas_discussion_url=None,
-            remove_sponsor=MagicMock(),
+        group = FreeIPAGroup(
+            "testgroup",
+            {
+                "cn": ["testgroup"],
+                "description": [""],
+                "member_user": ["member1"],
+                "member_group": [],
+                "membermanager_user": ["sponsor1", "sponsor2"],
+                "membermanager_group": [],
+                "objectclass": ["fasgroup"],
+            },
         )
+        group.remove_sponsor = MagicMock()
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=sponsor),

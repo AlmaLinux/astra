@@ -5,6 +5,8 @@ from unittest.mock import patch
 
 from django.test import TestCase
 
+from core.backends import FreeIPAGroup
+
 
 class GroupDetailInfoRowsHiddenTests(TestCase):
     def _login_as_freeipa(self, username: str) -> None:
@@ -15,18 +17,17 @@ class GroupDetailInfoRowsHiddenTests(TestCase):
     def test_group_detail_hides_empty_info_rows(self) -> None:
         self._login_as_freeipa("admin")
 
-        group = SimpleNamespace(
-            cn="parent",
-            description="",
-            fas_group=True,
-            members=[],
-            sponsors=[],
-            sponsor_groups=[],
-            member_groups=[],
-            fas_url=None,
-            fas_mailing_list=None,
-            fas_irc_channels=[],
-            fas_discussion_url=None,
+        group = FreeIPAGroup(
+            "parent",
+            {
+                "cn": ["parent"],
+                "description": [""],
+                "member_user": [],
+                "member_group": [],
+                "membermanager_user": [],
+                "membermanager_group": [],
+                "objectclass": ["fasgroup"],
+            },
         )
 
         with patch("core.backends.FreeIPAGroup.get", return_value=group):

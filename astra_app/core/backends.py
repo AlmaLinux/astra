@@ -1691,15 +1691,17 @@ class FreeIPAGroup:
             logger.exception("Failed to remove member group parent=%s child=%s", self.cn, group_cn)
             raise
 
-    def member_usernames_recursive(self) -> set[str]:
-        cached = getattr(self, "_recursive_member_usernames_cache", None)
-        if isinstance(cached, set):
-            return set(cached)
-        users = self._member_usernames_recursive(visited=set())
-        self._recursive_member_usernames_cache = set(users)
+    def member_usernames_recursive(self, *, fas_only: bool = False) -> set[str]:
+        if not fas_only:
+            cached = getattr(self, "_recursive_member_usernames_cache", None)
+            if isinstance(cached, set):
+                return set(cached)
+        users = self._member_usernames_recursive(visited=set(), fas_only=fas_only)
+        if not fas_only:
+            self._recursive_member_usernames_cache = set(users)
         return users
 
-    def _member_usernames_recursive(self, *, visited: set[str]) -> set[str]:
+    def _member_usernames_recursive(self, *, visited: set[str], fas_only: bool) -> set[str]:
         cn = str(self.cn or "").strip()
         key = cn.lower()
         if key and key in visited:
@@ -1707,24 +1709,30 @@ class FreeIPAGroup:
         if key:
             visited.add(key)
 
+        if fas_only and not self.fas_group:
+            return set()
+
         users: set[str] = set(self.members)
         for child_cn in sorted(set(self.member_groups), key=str.lower):
             child = FreeIPAGroup.get(child_cn)
             if child is None:
                 continue
+            if fas_only and not child.fas_group:
+                continue
             try:
-                users |= child._member_usernames_recursive(visited=visited)
+                users |= child._member_usernames_recursive(visited=visited, fas_only=fas_only)
             except Exception:
                 # Best-effort: ignore broken nested groups.
                 logger.exception("Failed to expand nested group members parent=%s child=%s", self.cn, child_cn)
                 continue
         return users
 
-    def member_count_recursive(self) -> int:
-        cached = getattr(self, "_recursive_member_usernames_cache", None)
-        if isinstance(cached, set):
-            return len(cached)
-        return len(self.member_usernames_recursive())
+    def member_count_recursive(self, *, fas_only: bool = False) -> int:
+        if not fas_only:
+            cached = getattr(self, "_recursive_member_usernames_cache", None)
+            if isinstance(cached, set):
+                return len(cached)
+        return len(self.member_usernames_recursive(fas_only=fas_only))
 
 
 class FreeIPAFASAgreement:

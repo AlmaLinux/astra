@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.test import TestCase
 
-from core.backends import FreeIPAUser
+from core.backends import FreeIPAGroup, FreeIPAUser
 
 
 class GroupNestedGroupsDisplayTests(TestCase):
@@ -17,37 +16,45 @@ class GroupNestedGroupsDisplayTests(TestCase):
     def test_group_detail_shows_nested_groups_first_sorted_then_users(self) -> None:
         self._login_as_freeipa("admin")
 
-        parent = SimpleNamespace(
-            cn="parent",
-            description="",
-            fas_group=True,
-            members=["bob"],
-            sponsors=[],
-            member_groups=["child", "alpha"],
+        parent = FreeIPAGroup(
+            "parent",
+            {
+                "cn": ["parent"],
+                "description": [""],
+                "member_user": ["bob"],
+                "member_group": ["child", "alpha"],
+                "objectclass": ["fasgroup"],
+            },
         )
-        alpha = SimpleNamespace(
-            cn="alpha",
-            description="",
-            fas_group=True,
-            members=["zara"],
-            sponsors=[],
-            member_groups=[],
+        alpha = FreeIPAGroup(
+            "alpha",
+            {
+                "cn": ["alpha"],
+                "description": [""],
+                "member_user": ["zara"],
+                "member_group": [],
+                "objectclass": ["fasgroup"],
+            },
         )
-        grand = SimpleNamespace(
-            cn="grand",
-            description="",
-            fas_group=True,
-            members=["carol"],
-            sponsors=[],
-            member_groups=[],
+        grand = FreeIPAGroup(
+            "grand",
+            {
+                "cn": ["grand"],
+                "description": [""],
+                "member_user": ["carol"],
+                "member_group": [],
+                "objectclass": ["fasgroup"],
+            },
         )
-        child = SimpleNamespace(
-            cn="child",
-            description="",
-            fas_group=True,
-            members=["alice", "bob"],
-            sponsors=[],
-            member_groups=["grand"],
+        child = FreeIPAGroup(
+            "child",
+            {
+                "cn": ["child"],
+                "description": [""],
+                "member_user": ["alice", "bob"],
+                "member_group": ["grand"],
+                "objectclass": ["fasgroup"],
+            },
         )
 
         def _fake_group_get(cn: str):
@@ -97,3 +104,69 @@ class GroupNestedGroupsDisplayTests(TestCase):
         # Child includes nested group 'grand' (carol), so the nested-aware count is 3 unique users.
         self.assertIn("child", html)
         self.assertIn(">3<", html)
+
+    def test_group_detail_skips_non_fasgroup_member_groups_and_members(self) -> None:
+        self._login_as_freeipa("admin")
+
+        parent = FreeIPAGroup(
+            "parent",
+            {
+                "cn": ["parent"],
+                "description": [""],
+                "member_user": ["bob"],
+                "member_group": ["child", "legacy"],
+                "objectclass": ["fasgroup"],
+            },
+        )
+        child = FreeIPAGroup(
+            "child",
+            {
+                "cn": ["child"],
+                "description": [""],
+                "member_user": ["alice"],
+                "member_group": [],
+                "objectclass": ["fasgroup"],
+            },
+        )
+        legacy = FreeIPAGroup(
+            "legacy",
+            {
+                "cn": ["legacy"],
+                "description": [""],
+                "member_user": ["zara"],
+                "member_group": [],
+                "objectclass": [],
+            },
+        )
+
+        def _fake_group_get(cn: str):
+            return {
+                "parent": parent,
+                "child": child,
+                "legacy": legacy,
+            }.get(cn)
+
+        def _fake_user_get(username: str) -> FreeIPAUser:
+            return FreeIPAUser(
+                username,
+                {
+                    "uid": [username],
+                    "givenname": [username.title()],
+                    "sn": ["User"],
+                    "mail": [f"{username}@example.com"],
+                    "memberof_group": [],
+                },
+            )
+
+        with (
+            patch("core.backends.FreeIPAGroup.get", side_effect=_fake_group_get),
+            patch("core.templatetags.core_user_widget.FreeIPAUser.get", side_effect=_fake_user_get),
+        ):
+            resp = self.client.get("/group/parent/")
+
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+
+        self.assertNotIn('href="/group/legacy/"', html)
+        self.assertIn('href="/group/child/"', html)
+        self.assertIn("(2 members)", html)

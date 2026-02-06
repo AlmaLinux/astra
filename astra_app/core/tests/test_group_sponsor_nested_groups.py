@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.test import TestCase
 
-from core.backends import FreeIPAUser
+from core.backends import FreeIPAGroup, FreeIPAUser
 
 
 class GroupSponsorNestedGroupsDisplayTests(TestCase):
@@ -17,36 +16,41 @@ class GroupSponsorNestedGroupsDisplayTests(TestCase):
     def test_group_detail_shows_sponsor_groups_first_sorted_then_users(self) -> None:
         self._login_as_freeipa("admin")
 
-        group = SimpleNamespace(
-            cn="parent",
-            description="",
-            fas_group=True,
-            members=[],
-            sponsors=["bob"],
-            sponsor_groups=["child", "alpha"],
-            member_groups=[],
-            fas_url=None,
-            fas_mailing_list=None,
-            fas_irc_channels=[],
-            fas_discussion_url=None,
+        group = FreeIPAGroup(
+            "parent",
+            {
+                "cn": ["parent"],
+                "description": [""],
+                "member_user": [],
+                "member_group": [],
+                "membermanager_user": ["bob"],
+                "membermanager_group": ["child", "alpha"],
+                "objectclass": ["fasgroup"],
+            },
         )
-        alpha = SimpleNamespace(
-            cn="alpha",
-            description="Alpha sponsor group description",
-            fas_group=True,
-            members=["alice"],
-            sponsors=[],
-            sponsor_groups=[],
-            member_groups=[],
+        alpha = FreeIPAGroup(
+            "alpha",
+            {
+                "cn": ["alpha"],
+                "description": ["Alpha sponsor group description"],
+                "member_user": ["alice"],
+                "member_group": [],
+                "membermanager_user": [],
+                "membermanager_group": [],
+                "objectclass": ["fasgroup"],
+            },
         )
-        child = SimpleNamespace(
-            cn="child",
-            description="Child sponsor group",
-            fas_group=True,
-            members=["carol"],
-            sponsors=[],
-            sponsor_groups=[],
-            member_groups=[],
+        child = FreeIPAGroup(
+            "child",
+            {
+                "cn": ["child"],
+                "description": ["Child sponsor group"],
+                "member_user": ["carol"],
+                "member_group": [],
+                "membermanager_user": [],
+                "membermanager_group": [],
+                "objectclass": ["fasgroup"],
+            },
         )
 
         def _fake_group_get(cn: str):
@@ -84,21 +88,87 @@ class GroupSponsorNestedGroupsDisplayTests(TestCase):
         self.assertLess(idx_alpha, idx_child)
         self.assertLess(idx_child, idx_bob)
 
+    def test_group_detail_skips_non_fasgroup_sponsor_groups(self) -> None:
+        self._login_as_freeipa("admin")
+
+        group = FreeIPAGroup(
+            "parent",
+            {
+                "cn": ["parent"],
+                "description": [""],
+                "member_user": [],
+                "member_group": [],
+                "membermanager_user": ["bob"],
+                "membermanager_group": ["alpha", "legacy"],
+                "objectclass": ["fasgroup"],
+            },
+        )
+        alpha = FreeIPAGroup(
+            "alpha",
+            {
+                "cn": ["alpha"],
+                "description": ["Alpha sponsor group description"],
+                "member_user": ["alice"],
+                "member_group": [],
+                "membermanager_user": [],
+                "membermanager_group": [],
+                "objectclass": ["fasgroup"],
+            },
+        )
+        legacy = FreeIPAGroup(
+            "legacy",
+            {
+                "cn": ["legacy"],
+                "description": ["Legacy sponsor group"],
+                "member_user": ["carol"],
+                "member_group": [],
+                "membermanager_user": [],
+                "membermanager_group": [],
+                "objectclass": [],
+            },
+        )
+
+        def _fake_group_get(cn: str):
+            return {"parent": group, "alpha": alpha, "legacy": legacy}.get(cn)
+
+        def _fake_user_get(username: str) -> FreeIPAUser:
+            return FreeIPAUser(
+                username,
+                {
+                    "uid": [username],
+                    "givenname": [username.title()],
+                    "sn": ["User"],
+                    "mail": [f"{username}@example.com"],
+                    "memberof_group": [],
+                },
+            )
+
+        with (
+            patch("core.backends.FreeIPAGroup.get", side_effect=_fake_group_get),
+            patch("core.templatetags.core_user_widget.FreeIPAUser.get", side_effect=_fake_user_get),
+        ):
+            resp = self.client.get("/group/parent/")
+
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+
+        self.assertIn('href="/group/alpha/"', html)
+        self.assertNotIn('href="/group/legacy/"', html)
+
     def test_group_detail_hides_sponsors_section_when_empty(self) -> None:
         self._login_as_freeipa("admin")
 
-        group = SimpleNamespace(
-            cn="parent",
-            description="",
-            fas_group=True,
-            members=[],
-            sponsors=[],
-            sponsor_groups=[],
-            member_groups=[],
-            fas_url=None,
-            fas_mailing_list=None,
-            fas_irc_channels=[],
-            fas_discussion_url=None,
+        group = FreeIPAGroup(
+            "parent",
+            {
+                "cn": ["parent"],
+                "description": [""],
+                "member_user": [],
+                "member_group": [],
+                "membermanager_user": [],
+                "membermanager_group": [],
+                "objectclass": ["fasgroup"],
+            },
         )
 
         with patch("core.backends.FreeIPAGroup.get", return_value=group):

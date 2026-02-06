@@ -5,6 +5,8 @@ from unittest.mock import patch
 
 from django.test import TestCase
 
+from core.backends import FreeIPAGroup
+
 
 class GroupDetailRendersChatChannelsTests(TestCase):
     def _login_as_freeipa(self, username: str) -> None:
@@ -15,22 +17,22 @@ class GroupDetailRendersChatChannelsTests(TestCase):
     def test_group_detail_renders_chat_channels_links(self) -> None:
         self._login_as_freeipa("admin")
 
-        group = SimpleNamespace(
-            cn="fas1",
-            description="FAS Group 1",
-            fas_group=True,
-            members=[],
-            sponsors=[],
-            sponsor_groups=[],
-            member_groups=[],
-            fas_url=None,
-            fas_mailing_list=None,
-            fas_discussion_url=None,
-            fas_irc_channels=[
-                "irc:/#dev",
-                "matrix://matrix.org/#almalinux",
-                "mattermost://chat.almalinux.org/almalinux/channels/general",
-            ],
+        group = FreeIPAGroup(
+            "fas1",
+            {
+                "cn": ["fas1"],
+                "description": ["FAS Group 1"],
+                "member_user": [],
+                "member_group": [],
+                "membermanager_user": [],
+                "membermanager_group": [],
+                "fasircchannel": [
+                    "irc:/#dev",
+                    "matrix://matrix.org/#almalinux",
+                    "mattermost://chat.almalinux.org/almalinux/channels/general",
+                ],
+                "objectclass": ["fasgroup"],
+            },
         )
 
         with patch("core.backends.FreeIPAGroup.get", return_value=group):
