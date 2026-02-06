@@ -481,11 +481,11 @@ class GroupsSponsorsAndAgreementsTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         html = response.content.decode("utf-8")
-        self.assertIn("Sponsors", html)
+        self.assertIn("Team Lead", html)
         self.assertIn(">sponsor1</a>", html)
 
-        sponsors_pos = html.find("Sponsors")
-        members_pos = html.find("Members")
+        sponsors_pos = html.find("Team Lead")
+        members_pos = html.find("Member")
         self.assertNotEqual(sponsors_pos, -1)
         self.assertNotEqual(members_pos, -1)
         self.assertLess(sponsors_pos, members_pos)

@@ -96,7 +96,7 @@ class RegistrationFormValidationTests(SimpleTestCase):
         self.assertIn("email", form.errors)
 
     def test_username_rejects_hate_speech(self):
-        with patch("core.profanity.detect_hate_speech", autospec=True, return_value=["Offensive Speech"]):
+        with patch("core.profanity._detects_hate_speech", autospec=True, return_value=True):
             form = RegistrationForm(
                 data={
                     "username": "alice",

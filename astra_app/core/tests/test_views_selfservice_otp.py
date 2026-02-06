@@ -65,21 +65,20 @@ class SettingsOTPViewTests(TestCase):
 
         with patch("core.views_settings.render", side_effect=fake_render, autospec=True):
             with patch("core.views_settings.settings_context", return_value={}, autospec=True):
-                with patch("core.views_settings.has_enabled_agreements", return_value=False, autospec=True):
-                    with patch("core.views_settings._get_full_user", return_value=fake_fu, autospec=True):
-                        with patch("core.views_settings.FreeIPAUser.get_client", autospec=True) as mocked_get_client:
-                            mocked_get_client.return_value.otptoken_find.return_value = {"result": []}
+                with patch("core.views_settings._get_full_user", return_value=fake_fu, autospec=True):
+                    with patch("core.views_settings.FreeIPAUser.get_client", autospec=True) as mocked_get_client:
+                        mocked_get_client.return_value.otptoken_find.return_value = {"result": []}
 
-                            with patch("core.views_settings._get_freeipa_client", autospec=True) as mocked_get_client:
-                                mocked_client = mocked_get_client.return_value
-                                mocked_client.otptoken_find.return_value = {
-                                    "result": [
-                                        {"ipatokenuniqueid": ["t2"], "description": "b"},
-                                        {"ipatokenuniqueid": ["t1"], "description": "a"},
-                                    ]
-                                }
+                        with patch("core.views_settings._get_freeipa_client", autospec=True) as mocked_get_client:
+                            mocked_client = mocked_get_client.return_value
+                            mocked_client.otptoken_find.return_value = {
+                                "result": [
+                                    {"ipatokenuniqueid": ["t2"], "description": "b"},
+                                    {"ipatokenuniqueid": ["t1"], "description": "a"},
+                                ]
+                            }
 
-                                response = settings_root(request)
+                            response = settings_root(request)
 
         self.assertEqual(response.status_code, 200)
         tokens = captured["context"]["otp_tokens"]
@@ -115,20 +114,19 @@ class SettingsOTPViewTests(TestCase):
 
         with patch("core.views_settings.settings_context", return_value={}, autospec=True):
             with patch("core.views_settings.render", side_effect=fake_render, autospec=True):
-                with patch("core.views_settings.has_enabled_agreements", return_value=False, autospec=True):
-                    with patch("core.views_settings._get_full_user", return_value=fake_fu, autospec=True):
-                        with patch("core.views_settings.FreeIPAUser.get_client", autospec=True) as mocked_get_client:
-                            mocked_get_client.return_value.otptoken_find.return_value = {"result": []}
+                with patch("core.views_settings._get_full_user", return_value=fake_fu, autospec=True):
+                    with patch("core.views_settings.FreeIPAUser.get_client", autospec=True) as mocked_get_client:
+                        mocked_get_client.return_value.otptoken_find.return_value = {"result": []}
 
-                            with patch("core.views_settings._get_freeipa_client", autospec=True) as mocked_get_client:
-                                mocked_client = mocked_get_client.return_value
-                                mocked_client.otptoken_find.return_value = {
-                                    "result": [
-                                        {"ipatokenuniqueid": ["t1"], "description": ["bitwarden alma members test"]},
-                                    ]
-                                }
+                        with patch("core.views_settings._get_freeipa_client", autospec=True) as mocked_get_client:
+                            mocked_client = mocked_get_client.return_value
+                            mocked_client.otptoken_find.return_value = {
+                                "result": [
+                                    {"ipatokenuniqueid": ["t1"], "description": ["bitwarden alma members test"]},
+                                ]
+                            }
 
-                                response = settings_root(request)
+                            response = settings_root(request)
 
         self.assertEqual(response.status_code, 200)
         tokens = captured["context"]["otp_tokens"]
@@ -179,18 +177,17 @@ class SettingsOTPViewTests(TestCase):
 
         with patch("core.views_settings.render", side_effect=fake_render, autospec=True):
             with patch("core.views_settings.settings_context", return_value={}, autospec=True):
-                with patch("core.views_settings.has_enabled_agreements", return_value=False, autospec=True):
-                    with patch("core.views_settings._get_full_user", return_value=fake_fu, autospec=True):
-                        with patch("core.views_settings.FreeIPAUser.get_client", autospec=True) as mocked_get_client:
-                            mocked_get_client.return_value.otptoken_find.return_value = {"result": []}
+                with patch("core.views_settings._get_full_user", return_value=fake_fu, autospec=True):
+                    with patch("core.views_settings.FreeIPAUser.get_client", autospec=True) as mocked_get_client:
+                        mocked_get_client.return_value.otptoken_find.return_value = {"result": []}
 
-                            with patch(
-                                "core.views_settings._get_freeipa_client",
-                                autospec=True,
-                                side_effect=[svc_client, user_client],
-                            ):
-                                with patch("core.views_settings.os.urandom", return_value=b"A" * OTP_KEY_LENGTH):
-                                    response = settings_root(request)
+                        with patch(
+                            "core.views_settings._get_freeipa_client",
+                            autospec=True,
+                            side_effect=[svc_client, user_client],
+                        ):
+                            with patch("core.views_settings.os.urandom", return_value=b"A" * OTP_KEY_LENGTH):
+                                response = settings_root(request)
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(captured["context"]["otp_uri"].startswith("otpauth://"))
@@ -235,16 +232,15 @@ class SettingsOTPViewTests(TestCase):
         )
 
         with patch("core.views_settings.settings_context", return_value={}, autospec=True):
-            with patch("core.views_settings.has_enabled_agreements", return_value=False, autospec=True):
-                with patch("core.views_settings._get_full_user", return_value=fake_fu, autospec=True):
-                    with patch("core.views_settings.FreeIPAUser.get_client", autospec=True) as mocked_get_client:
-                        mocked_get_client.return_value.otptoken_find.return_value = {"result": []}
-                        with patch(
-                            "core.views_settings._get_freeipa_client",
-                            autospec=True,
-                            side_effect=[svc_client, svc_client],
-                        ):
-                            response = settings_root(request)
+            with patch("core.views_settings._get_full_user", return_value=fake_fu, autospec=True):
+                with patch("core.views_settings.FreeIPAUser.get_client", autospec=True) as mocked_get_client:
+                    mocked_get_client.return_value.otptoken_find.return_value = {"result": []}
+                    with patch(
+                        "core.views_settings._get_freeipa_client",
+                        autospec=True,
+                        side_effect=[svc_client, svc_client],
+                    ):
+                        response = settings_root(request)
 
         self.assertEqual(response.status_code, 302)
         msgs = [m.message for m in get_messages(request)]
@@ -301,17 +297,16 @@ class SettingsOTPViewTests(TestCase):
 
         with patch("core.views_settings.render", side_effect=fake_render, autospec=True):
             with patch("core.views_settings.settings_context", return_value={}, autospec=True):
-                with patch("core.views_settings.has_enabled_agreements", return_value=False, autospec=True):
-                    with patch("core.views_settings._get_full_user", return_value=fake_fu, autospec=True):
-                        with patch("core.views_settings.FreeIPAUser.get_client", autospec=True) as mocked_get_client:
-                            mocked_get_client.return_value.otptoken_find.return_value = {"result": []}
+                with patch("core.views_settings._get_full_user", return_value=fake_fu, autospec=True):
+                    with patch("core.views_settings.FreeIPAUser.get_client", autospec=True) as mocked_get_client:
+                        mocked_get_client.return_value.otptoken_find.return_value = {"result": []}
 
-                            with patch(
-                                "core.views_settings._get_freeipa_client",
-                                autospec=True,
-                                side_effect=[svc_client, svc_client],
-                            ):
-                                response = settings_root(request)
+                        with patch(
+                            "core.views_settings._get_freeipa_client",
+                            autospec=True,
+                            side_effect=[svc_client, svc_client],
+                        ):
+                            response = settings_root(request)
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(captured["context"]["otp_uri"].startswith("otpauth://"))

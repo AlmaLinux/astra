@@ -78,7 +78,8 @@ class MembershipRequestsFlowTests(TestCase):
                     follow=False,
                 )
 
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], reverse("user-profile", args=["alice"]))
         req = MembershipRequest.objects.get(requested_username="alice", membership_type_id="individual")
         self.assertEqual(req.status, MembershipRequest.Status.pending)
         self.assertEqual(req.responses, [{"Contributions": "I contributed docs and CI improvements."}])
@@ -150,7 +151,7 @@ class MembershipRequestsFlowTests(TestCase):
                     follow=False,
                 )
 
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 302)
         expected = (
             f"{reverse('settings')}?agreement={quote(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN)}#agreements"
         )
@@ -261,7 +262,7 @@ class MembershipRequestsFlowTests(TestCase):
                         follow=False,
                     )
 
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 302)
         req.refresh_from_db()
         self.assertEqual(req.status, MembershipRequest.Status.approved)
         add_mock.assert_called_once()
@@ -411,7 +412,7 @@ class MembershipRequestsFlowTests(TestCase):
                         follow=False,
                     )
 
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 302)
         send_mock.assert_not_called()
 
         req.refresh_from_db()
@@ -508,7 +509,7 @@ class MembershipRequestsFlowTests(TestCase):
                         follow=False,
                     )
 
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 302)
         add_mock.assert_called_once()
         _, add_kwargs = add_mock.call_args
         self.assertEqual(add_kwargs["group_name"], "almalinux-sponsor-silver")
@@ -594,7 +595,7 @@ class MembershipRequestsFlowTests(TestCase):
                         follow=False,
                     )
 
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 302)
         send_mock.assert_not_called()
 
         redirect_url = str(resp["Location"])
@@ -673,7 +674,7 @@ class MembershipRequestsFlowTests(TestCase):
                         follow=False,
                     )
 
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 302)
         send_mock.assert_called_once()
         _, kwargs = send_mock.call_args
         ctx = kwargs["context"]
@@ -845,7 +846,7 @@ class MembershipRequestsFlowTests(TestCase):
                     follow=False,
                 )
 
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 302)
         req.refresh_from_db()
         self.assertEqual(req.status, MembershipRequest.Status.rejected)
 
@@ -928,7 +929,7 @@ class MembershipRequestsFlowTests(TestCase):
                     follow=False,
                 )
 
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 302)
         send_mock.assert_not_called()
 
         req.refresh_from_db()

@@ -278,6 +278,9 @@ class MembershipGroupSyncLifecycleTests(TestCase):
             },
         )
 
+        EmailTemplate.objects.filter(
+            name=settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME
+        ).delete()
         EmailTemplate.objects.create(
             name=settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
             subject="Your AlmaLinux sponsorship has expired",

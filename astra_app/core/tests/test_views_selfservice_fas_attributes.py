@@ -78,6 +78,7 @@ class FASAttributesTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertIn("context", captured)
+        return captured["context"]
 
     @staticmethod
     def _apply_user_mod_to_dummy(fu: _DummyFreeIPAUser, call_kwargs: dict):

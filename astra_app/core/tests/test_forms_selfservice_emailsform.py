@@ -20,7 +20,7 @@ class EmailsFormValidationTests(SimpleTestCase):
         self.assertIn("mail", form.errors)
 
     def test_bugzilla_email_rejects_hate_speech(self):
-        with patch("core.profanity.detect_hate_speech", autospec=True, return_value=["Hate Speech"]):
+        with patch("core.profanity._detects_hate_speech", autospec=True, return_value=True):
             form = EmailsForm(
                 data={
                     "mail": "alice@example.com",
