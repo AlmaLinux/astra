@@ -70,7 +70,7 @@ class GroupDetailPromoteMemberToSponsorTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'data-target="#demote-sponsor-modal"')
         self.assertContains(resp, 'data-username="sponsor2"')
-        self.assertContains(resp, "fa-person-arrow-down-from-line")
+        self.assertContains(resp, "fa-person-arrow-down-to-line")
 
     def test_sponsor_can_promote_member_to_sponsor(self) -> None:
         self._login_as_freeipa("sponsor1")

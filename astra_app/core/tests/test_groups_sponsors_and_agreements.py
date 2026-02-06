@@ -455,7 +455,7 @@ class GroupsSponsorsAndAgreementsTests(TestCase):
         self.assertEqual(response.status_code, 302)
         group_backend.remove_sponsor.assert_called_once_with("sponsor")
         msgs = [m.message for m in get_messages(request)]
-        self.assertTrue(any("sponsor" in m.lower() for m in msgs), msgs)
+        self.assertTrue(any("team lead" in m.lower() for m in msgs), msgs)
 
     def test_group_detail_renders_sponsors_section_before_members(self):
         factory = RequestFactory()
