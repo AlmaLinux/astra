@@ -200,6 +200,7 @@ INSTALLED_APPS = [
     'import_export',
     'storages',
     'logentry_admin',
+    'core_commands',
     'post_office',
     'django_ses',
     'avatar',

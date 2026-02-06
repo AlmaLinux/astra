@@ -5,6 +5,7 @@ from typing import Any, override
 
 from django.core.management.base import BaseCommand
 from django.db import connection
+from post_office.mail import get_queued
 from post_office.management.commands.send_queued_mail import Command as PostOfficeCommand
 
 logger = logging.getLogger(__name__)
@@ -24,7 +25,10 @@ class Command(BaseCommand):
 
     @override
     def handle(self, *args: Any, **options: Any) -> Any:
+        options.setdefault("log_level", 2)
         if connection.vendor != "postgresql":
+            if not get_queued().exists():
+                return 0
             return PostOfficeCommand().handle(*args, **options)
 
         with connection.cursor() as cursor:
@@ -40,6 +44,8 @@ class Command(BaseCommand):
             return 0
 
         try:
+            if not get_queued().exists():
+                return 0
             return PostOfficeCommand().handle(*args, **options)
         finally:
             with connection.cursor() as cursor:
