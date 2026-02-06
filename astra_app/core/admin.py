@@ -863,6 +863,16 @@ class IPAUserAdmin(FreeIPAModelAdmin):
     change_list_template = "admin/core/ipauser/change_list.html"
 
     @override
+    def get_queryset(self, request):
+        clear_current_viewer_username()
+        return super().get_queryset(request)
+
+    @override
+    def get_object(self, request, object_id, from_field=None):
+        clear_current_viewer_username()
+        return super().get_object(request, object_id, from_field=from_field)
+
+    @override
     def changeform_view(self, request, object_id=None, form_url="", extra_context=None) -> Any:
         extra_context = dict(extra_context or {})
 
@@ -1024,6 +1034,7 @@ class IPAUserAdmin(FreeIPAModelAdmin):
 
     @override
     def save_model(self, request, obj, form, change):
+        clear_current_viewer_username()
         username = form.cleaned_data.get("username") or getattr(obj, "username", None)
         if not username:
             return
