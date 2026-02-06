@@ -4,7 +4,7 @@
 
 {% block header %}
   <h1 class="m-0">Voting closed: {{ election.name }}</h1>
-  <a class="btn btn-link px-0" href="{% url 'election-detail' election.id %}">Back to election detail</a>
+  <a class="btn btn-link px-0" href="{% url 'election-detail' election.id %}" title="Return to election details">Back to election detail</a>
 {% endblock %}
 
 {% block content %}

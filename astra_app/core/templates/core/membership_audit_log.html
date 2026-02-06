@@ -34,12 +34,13 @@
                 type="button"
                 class="btn btn-default"
                 aria-label="Clear search"
+                title="Clear search filter"
                 onclick="var i=this.form.querySelector('input[name=\'q\']'); if(i){i.value='';} this.form.submit();"
               >
                 <i class="fas fa-times"></i>
               </button>
             {% endif %}
-            <button type="submit" class="btn btn-default" aria-label="Search">
+            <button type="submit" class="btn btn-default" aria-label="Search" title="Search audit log">
               <i class="fas fa-search"></i>
             </button>
           </div>

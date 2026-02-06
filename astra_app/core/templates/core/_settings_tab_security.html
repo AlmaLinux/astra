@@ -36,7 +36,7 @@
 		{% if password_form.confirm_new_password.errors %}<div class="text-danger">{{ password_form.confirm_new_password.errors }}</div>{% endif %}
 	</div>
 
-	<button type="submit" class="btn btn-danger">Change password</button>
+	<button type="submit" class="btn btn-danger" title="Update your password">Change password</button>
 </form>
 
 <hr class="my-4" />
@@ -49,14 +49,14 @@
 			<div class="modal-content">
 				<div class="modal-header">
 					<h5 class="modal-title">Scan your new token</h5>
-					<button type="button" class="close" data-dismiss="modal" aria-label="Close">
+					<button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog">
 						<span aria-hidden="true">&times;</span>
 					</button>
 				</div>
 				<div class="modal-body">
 					<p>Your new token is ready. Click the button below to reveal the QR code and scan it.</p>
 					<div class="text-center">
-						<button id="otp-toggle" class="btn btn-primary" type="button">Reveal</button>
+						<button id="otp-toggle" class="btn btn-primary" type="button" title="Reveal the QR code">Reveal</button>
 					</div>
 					<div id="otp-qrcode" class="text-center mt-3" style="display:none;">
 						{% if otp_qr_png_b64 %}
@@ -84,8 +84,8 @@
 							<div class="alert alert-danger">{{ otp_confirm_form.non_field_errors }}</div>
 						{% endif %}
 						<div class="d-flex justify-content-between">
-							<button type="submit" class="btn btn-primary" name="confirm-submit" value="1">Verify and Enable OTP Token</button>
-							<button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel">Cancel</button>
+							<button type="submit" class="btn btn-primary" name="confirm-submit" value="1" title="Verify and enable this token">Verify and Enable OTP Token</button>
+							<button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel" title="Close dialog without enabling">Cancel</button>
 						</div>
 					</form>
 				</div>
@@ -99,7 +99,7 @@
 		<div class="modal-content">
 			<div class="modal-header">
 				<h5 class="modal-title">Add OTP Token</h5>
-				<button type="button" class="close" data-dismiss="modal" aria-label="Close">
+				<button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog">
 					<span aria-hidden="true">&times;</span>
 				</button>
 			</div>
@@ -139,7 +139,7 @@
 					{% if otp_add_form.non_field_errors %}
 						<div class="alert alert-danger">{{ otp_add_form.non_field_errors }}</div>
 					{% endif %}
-					<button type="submit" class="btn btn-primary" name="add-submit" value="1">Generate OTP Token</button>
+					<button type="submit" class="btn btn-primary" name="add-submit" value="1" title="Generate a new OTP token">Generate OTP Token</button>
 				</form>
 			</div>
 		</div>
@@ -147,7 +147,7 @@
 </div>
 
 <div class="d-flex">
-	<button class="btn btn-primary btn-sm ml-auto" data-toggle="modal" data-target="#add-token-modal" type="button">Add OTP Token</button>
+	<button class="btn btn-primary btn-sm ml-auto" data-toggle="modal" data-target="#add-token-modal" type="button" title="Add a new OTP token">Add OTP Token</button>
 </div>
 
 <div class="list-group list-group-flush mt-3">
@@ -157,14 +157,14 @@
 				<div class="col">
 					<div class="font-weight-bold otp-description">
 						<span data-role="token-description">{{ t.description|default:"(no name)" }}</span>
-						<button class="btn btn-sm btn-outline-secondary ml-1 otp-rename-toggle" type="button" title="Rename"><i class="fa fa-edit"></i></button>
+						<button class="btn btn-sm btn-outline-secondary ml-1 otp-rename-toggle" type="button" title="Rename this token"><i class="fa fa-edit"></i></button>
 					</div>
 					<div class="otp-rename-form d-none">
 						<form action="{% url 'security-otp-rename' %}" method="post" class="form-inline">
 							{% csrf_token %}
 							<input type="hidden" name="token" value="{{ t.ipatokenuniqueid.0|default:'' }}" />
 							<input type="text" class="form-control form-control-sm mr-2" name="description" value="{{ t.description|default:'' }}" />
-							<button type="submit" class="btn btn-sm btn-primary">Rename</button>
+							<button type="submit" class="btn btn-sm btn-primary" title="Rename this token">Rename</button>
 						</form>
 					</div>
 					<div class="text-monospace">{{ t.ipatokenuniqueid.0|default:'' }}</div>
@@ -174,19 +174,19 @@
 						<form action="{% url 'security-otp-disable' %}" method="post" class="d-inline">
 							{% csrf_token %}
 							<input type="hidden" name="token" value="{{ t.ipatokenuniqueid.0|default:'' }}" />
-							<button type="submit" class="btn btn-sm btn-outline-secondary">Disable</button>
+							<button type="submit" class="btn btn-sm btn-outline-secondary" title="Disable this token">Disable</button>
 						</form>
 					{% else %}
 						<form action="{% url 'security-otp-enable' %}" method="post" class="d-inline">
 							{% csrf_token %}
 							<input type="hidden" name="token" value="{{ t.ipatokenuniqueid.0|default:'' }}" />
-							<button type="submit" class="btn btn-sm btn-outline-secondary">Enable</button>
+							<button type="submit" class="btn btn-sm btn-outline-secondary" title="Enable this token">Enable</button>
 						</form>
 					{% endif %}
 					<form action="{% url 'security-otp-delete' %}" method="post" class="d-inline">
 						{% csrf_token %}
 						<input type="hidden" name="token" value="{{ t.ipatokenuniqueid.0|default:'' }}" />
-						<button type="submit" class="btn btn-sm btn-outline-danger" title="Delete"><i class="fa fa-trash"></i></button>
+						<button type="submit" class="btn btn-sm btn-outline-danger" title="Delete this token"><i class="fa fa-trash"></i></button>
 					</form>
 				</div>
 			</div>

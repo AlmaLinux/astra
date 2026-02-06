@@ -128,7 +128,7 @@
       <div class="col-lg-3">
         <div class="card card-outline card-secondary">
           <div class="card-body">
-            <button type="submit" class="btn btn-primary btn-block" onclick="document.getElementById('election-edit-action').value='save_draft'">
+            <button type="submit" class="btn btn-primary btn-block" onclick="document.getElementById('election-edit-action').value='save_draft'" title="Save changes as a draft">
               Save Draft
             </button>
 
@@ -143,6 +143,7 @@
                   class="btn btn-outline-danger btn-block"
                   data-toggle="modal"
                   data-target="#delete-draft-election-modal"
+                  title="Delete this draft election"
                 >
                   Delete Draft
                 </button>
@@ -153,6 +154,7 @@
                 class="btn btn-success btn-block"
                 {% if election.status != 'draft' %}disabled{% endif %}
                 {% if election.status == 'draft' %}data-toggle="modal" data-target="#start-election-modal"{% endif %}
+                title="Open the election and send credentials"
               >
                 Start Election
               </button>
@@ -160,7 +162,7 @@
               <div class="text-muted small mt-2">
                 Starting an election sends credential emails to all eligible voters and locks settings.
               </div>
-            {% endif %}           
+            {% endif %}
           </div>
         </div>
       </div>
@@ -172,7 +174,7 @@
           <div class="modal-content">
             <div class="modal-header">
               <h5 class="modal-title" id="start-election-modal-label">Start election?</h5>
-              <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+              <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog">
                 <span aria-hidden="true">&times;</span>
               </button>
             </div>
@@ -181,8 +183,8 @@
               <p class="small mb-0">Eligible voters: <strong class="js-eligible-voters-count">{{ eligible_voters_count }}</strong></p>
             </div>
             <div class="modal-footer">
-              <button type="button" class="btn btn-outline-secondary" data-dismiss="modal">Cancel</button>
-              <button type="submit" class="btn btn-success" onclick="document.getElementById('election-edit-action').value='start_election'">Start election &amp; send credentials</button>
+              <button type="button" class="btn btn-outline-secondary" data-dismiss="modal" title="Close dialog without starting">Cancel</button>
+              <button type="submit" class="btn btn-success" onclick="document.getElementById('election-edit-action').value='start_election'" title="Start the election and send credentials">Start election &amp; send credentials</button>
             </div>
           </div>
         </div>
@@ -233,7 +235,7 @@
                       </td>
                       <td class="text-center">
                         <div class="d-none">{{ f.DELETE }}</div>
-                        <button type="button" class="btn btn-sm btn-outline-danger election-edit-remove-row">Remove</button>
+                        <button type="button" class="btn btn-sm btn-outline-danger election-edit-remove-row" title="Remove this candidate">Remove</button>
                       </td>
                     </tr>
                   {% endfor %}
@@ -241,7 +243,7 @@
               </table>
             </div>
 
-            <button type="button" class="btn btn-outline-primary btn-sm" id="candidates-add-row">Add candidate</button>
+            <button type="button" class="btn btn-outline-primary btn-sm" id="candidates-add-row" title="Add another candidate">Add candidate</button>
 
             <template id="candidates-empty-form">
               <tr class="candidate-form-row">
@@ -254,7 +256,7 @@
                 <td>{{ candidate_formset.empty_form.url }}</td>
                 <td class="text-center">
                   <div class="d-none">{{ candidate_formset.empty_form.DELETE }}</div>
-                  <button type="button" class="btn btn-sm btn-outline-danger election-edit-remove-row">Remove</button>
+                  <button type="button" class="btn btn-sm btn-outline-danger election-edit-remove-row" title="Remove this candidate">Remove</button>
                 </td>
               </tr>
             </template>
@@ -272,7 +274,7 @@
                   The AlmaLinux Bylaws state that "Only one Member which is part of a group of Related Companies
                   shall be entitled to have a representative on the Board of Directors at one time."
                 </p>
-                
+
                 {{ group_formset.management_form }}
                 <div class="table-responsive">
                   <table class="table table-sm mb-2">
@@ -303,7 +305,7 @@
                           </td>
                           <td class="text-center">
                             <div class="d-none">{{ g.DELETE }}</div>
-                            <button type="button" class="btn btn-sm btn-outline-danger election-edit-remove-row">Remove</button>
+                            <button type="button" class="btn btn-sm btn-outline-danger election-edit-remove-row" title="Remove this exclusion group">Remove</button>
                           </td>
                         </tr>
                       {% endfor %}
@@ -311,7 +313,7 @@
                   </table>
                 </div>
 
-                <button type="button" class="btn btn-outline-primary btn-sm" id="groups-add-row">Add exclusion group</button>
+                <button type="button" class="btn btn-outline-primary btn-sm" id="groups-add-row" title="Add another exclusion group">Add exclusion group</button>
 
                 <template id="groups-empty-form">
                   <tr class="group-form-row">
@@ -323,7 +325,7 @@
                     <td>{{ group_empty_form.candidate_usernames }}</td>
                     <td class="text-center">
                       <div class="d-none">{{ group_empty_form.DELETE }}</div>
-                      <button type="button" class="btn btn-sm btn-outline-danger election-edit-remove-row">Remove</button>
+                      <button type="button" class="btn btn-sm btn-outline-danger election-edit-remove-row" title="Remove this exclusion group">Remove</button>
                     </td>
                   </tr>
                 </template>
@@ -346,7 +348,7 @@
         <div class="modal-content">
           <div class="modal-header">
             <h5 class="modal-title" id="edit-template-changed-modal-label">Email template changed</h5>
-            <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+            <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog">
               <span aria-hidden="true">&times;</span>
             </button>
           </div>
@@ -354,9 +356,9 @@
             <p class="mb-0">You changed the email template selection. Do you want to save the new template + contents to this election, or keep the previously saved email configuration?</p>
           </div>
           <div class="modal-footer">
-            <button type="button" class="btn btn-outline-secondary" data-dismiss="modal">Cancel</button>
-            <button type="button" class="btn btn-outline-primary" id="edit-keep-existing-email-btn">Keep previously saved email</button>
-            <button type="button" class="btn btn-primary" id="edit-save-email-btn">Save template + contents</button>
+            <button type="button" class="btn btn-outline-secondary" data-dismiss="modal" title="Close dialog without saving">Cancel</button>
+            <button type="button" class="btn btn-outline-primary" id="edit-keep-existing-email-btn" title="Keep the existing email content">Keep previously saved email</button>
+            <button type="button" class="btn btn-primary" id="edit-save-email-btn" title="Save the new template and contents">Save template + contents</button>
           </div>
         </div>
       </div>

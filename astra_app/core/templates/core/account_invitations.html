@@ -6,7 +6,7 @@
   <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
     <h1 class="m-0">Account Invitations</h1>
     <div class="d-flex gap-2">
-      <a href="{% url 'account-invitations-upload' %}" class="btn btn-primary">Upload CSV</a>
+      <a href="{% url 'account-invitations-upload' %}" class="btn btn-primary" title="Upload invitations from CSV">Upload CSV</a>
     </div>
   </div>
 {% endblock %}
@@ -24,7 +24,7 @@
               <option value="dismiss">Dismiss</option>
             </select>
             <div class="input-group-append">
-              <button type="submit" class="btn btn-default" id="bulk-apply-accepted" disabled>Apply</button>
+              <button type="submit" class="btn btn-default" id="bulk-apply-accepted" title="Apply selected action to checked invitations" disabled>Apply</button>
             </div>
           </div>
         </form>
@@ -79,7 +79,7 @@
               <td class="text-right">
                 <form method="post" action="{% url 'account-invitation-dismiss' invitation.pk %}" class="d-inline">
                   {% csrf_token %}
-                  <button type="submit" class="btn btn-sm btn-outline-secondary">Dismiss</button>
+                  <button type="submit" class="btn btn-sm btn-outline-secondary" title="Dismiss this invitation">Dismiss</button>
                 </form>
               </td>
             </tr>
@@ -107,7 +107,7 @@
               <option value="dismiss">Dismiss</option>
             </select>
             <div class="input-group-append">
-              <button type="submit" class="btn btn-default" id="bulk-apply-pending" disabled>Apply</button>
+              <button type="submit" class="btn btn-default" id="bulk-apply-pending" title="Apply selected action to checked invitations" disabled>Apply</button>
             </div>
           </div>
         </form>
@@ -155,11 +155,11 @@
               <td class="text-right">
                 <form method="post" action="{% url 'account-invitation-resend' invitation.pk %}" class="d-inline">
                   {% csrf_token %}
-                  <button type="submit" class="btn btn-sm btn-outline-primary">Resend</button>
+                  <button type="submit" class="btn btn-sm btn-outline-primary" title="Resend invitation email">Resend</button>
                 </form>
                 <form method="post" action="{% url 'account-invitation-dismiss' invitation.pk %}" class="d-inline">
                   {% csrf_token %}
-                  <button type="submit" class="btn btn-sm btn-outline-secondary">Dismiss</button>
+                  <button type="submit" class="btn btn-sm btn-outline-secondary" title="Dismiss this invitation">Dismiss</button>
                 </form>
               </td>
             </tr>

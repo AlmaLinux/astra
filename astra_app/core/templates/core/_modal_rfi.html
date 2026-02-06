@@ -18,7 +18,7 @@ Optional:
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title">{{ title }}</h5>
-        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog">
           <span aria-hidden="true">&times;</span>
         </button>
       </div>
@@ -53,9 +53,9 @@ Optional:
           {% endif %}
 
           <div class="d-flex justify-content-between">
-            <button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel">Cancel</button>
-            <button type="submit" class="btn btn-outline-primary" name="custom_email" value="1">Send with Custom Email</button>
-            <button type="submit" class="btn btn-primary">Send RFI</button>
+            <button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel" title="Close dialog without sending">Cancel</button>
+            <button type="submit" class="btn btn-outline-primary" name="custom_email" value="1" title="Send request with a custom email">Send with Custom Email</button>
+            <button type="submit" class="btn btn-primary" title="Send request for information">Send RFI</button>
           </div>
         </form>
       </div>

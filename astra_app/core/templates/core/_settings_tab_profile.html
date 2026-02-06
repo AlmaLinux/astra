@@ -15,7 +15,7 @@
 					<img src="{{ avatar_url }}" class="img-fluid img-circle" style="width:96px;height:96px;object-fit:cover;" alt="Avatar" />
 				</div>
 				<div class="ml-3">
-					<button type="button" class="btn btn-outline-secondary" data-toggle="modal" data-target="#avatar-modal">Change avatar</button>
+					<button type="button" class="btn btn-outline-secondary" data-toggle="modal" data-target="#avatar-modal" title="Update your avatar">Change avatar</button>
 					<div class="mt-1">
 						<small class="text-muted">Upload a local avatar, or keep using your current avatar provider.</small>
 					</div>
@@ -83,7 +83,7 @@
 						<tbody></tbody>
 					</table>
 				</div>
-				<button type="button" class="btn btn-sm btn-outline-secondary" id="website-urls-add">Add website URL</button>
+				<button type="button" class="btn btn-sm btn-outline-secondary" id="website-urls-add" title="Add another website URL">Add website URL</button>
 			</div>
 
 			<div id="website-urls-fallback">
@@ -102,7 +102,7 @@
 						<tbody></tbody>
 					</table>
 				</div>
-				<button type="button" class="btn btn-sm btn-outline-secondary" id="rss-urls-add">Add RSS URL</button>
+				<button type="button" class="btn btn-sm btn-outline-secondary" id="rss-urls-add" title="Add another RSS URL">Add RSS URL</button>
 			</div>
 
 			<div id="rss-urls-fallback">
@@ -139,7 +139,7 @@
 						<tbody></tbody>
 					</table>
 				</div>
-				<button type="button" class="btn btn-sm btn-outline-secondary js-chat-nicks-add" id="chat-nicks-add">Add nickname</button>
+				<button type="button" class="btn btn-sm btn-outline-secondary js-chat-nicks-add" id="chat-nicks-add" title="Add another chat nickname">Add nickname</button>
 			</div>
 
 			<div id="chat-nicks-fallback">
@@ -180,7 +180,7 @@
 	</div>
 
 	<div class="d-flex justify-content-end">
-		<button type="submit" class="btn btn-primary">Save</button>
+		<button type="submit" class="btn btn-primary" title="Save profile changes">Save</button>
 	</div>
 </form>
 
@@ -228,7 +228,7 @@
 						<input type="url" class="form-control form-control-sm text-monospace ${opts.inputClass}" placeholder="${opts.placeholder}" />
 					</td>
 					<td style="width: 44px;" class="text-center">
-						<button type="button" class="btn btn-sm btn-outline-secondary" aria-label="Remove">×</button>
+						<button type="button" class="btn btn-sm btn-outline-secondary" aria-label="Remove" title="Remove this entry">×</button>
 					</td>
 				`;
 

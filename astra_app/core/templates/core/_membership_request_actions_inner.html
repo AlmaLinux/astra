@@ -16,6 +16,7 @@ Expected context:
     class="btn btn-sm btn-success"
     data-toggle="modal"
     data-target="#approve-modal-{{ pk_str }}"
+    title="Approve this request"
   >Approve</button>
 
   {% with approve_modal_id="approve-modal-"|add:pk_str approve_title="Approve "|add:membership_type_name|add:" request" %}
@@ -31,6 +32,7 @@ Expected context:
     class="btn btn-sm btn-danger"
     data-toggle="modal"
     data-target="#reject-modal-{{ pk_str }}"
+    title="Reject this request"
   >Reject</button>
 
   {% url 'membership-request-reject' membership_request.pk as reject_url %}
@@ -47,7 +49,7 @@ Expected context:
   <button
     type="button"
     class="btn btn-sm btn-outline-primary"
-    title="Request for Information"
+    title="Request information and put on hold"
     aria-label="Request for Information"
     data-toggle="modal"
     data-target="#rfi-modal-{{ pk_str }}"
@@ -65,6 +67,7 @@ Expected context:
     class="btn btn-sm btn-outline-secondary"
     data-toggle="modal"
     data-target="#ignore-modal-{{ pk_str }}"
+    title="Ignore this request"
   >Ignore</button>
 
   {% url 'membership-request-ignore' membership_request.pk as ignore_url %}

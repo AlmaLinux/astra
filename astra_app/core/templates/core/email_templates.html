@@ -12,7 +12,7 @@
       <div class="card card-outline card-primary">
         <div class="card-header d-flex align-items-center">
           <h3 class="card-title mb-0">Email Templates</h3>
-          <a class="btn btn-primary btn-sm ml-auto" href="{% url 'email-template-create' %}">New template</a>
+          <a class="btn btn-primary btn-sm ml-auto" href="{% url 'email-template-create' %}" title="Create a new email template">New template</a>
         </div>
         <div class="card-body p-0">
           <div class="table-responsive">
@@ -35,7 +35,7 @@
                     </td>
                     <td class="text-muted">{{ t.description }}</td>
                     <td>
-                      <a class="btn btn-outline-primary btn-sm" href="{% url 'email-template-edit' t.pk %}">Edit</a>
+                      <a class="btn btn-outline-primary btn-sm" href="{% url 'email-template-edit' t.pk %}" title="Edit this template">Edit</a>
                       {% if t.name in locked_names %}
                         <button
                           type="button"
@@ -56,6 +56,7 @@
                           data-bs-target="#email-template-delete-modal"
                           data-delete-url="{% url 'email-template-delete' t.pk %}"
                           data-template-name="{{ t.name }}"
+                          title="Delete this template"
                         >
                           Delete
                         </button>

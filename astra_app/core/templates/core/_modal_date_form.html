@@ -22,7 +22,7 @@ Optional:
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title">{{ title }}</h5>
-        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog">
           <span aria-hidden="true">&times;</span>
         </button>
       </div>
@@ -52,8 +52,8 @@ Optional:
           {% endif %}
 
           <div class="d-flex justify-content-between">
-            <button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel">Cancel</button>
-            <button type="submit" class="btn {{ submit_class|default:'btn-primary' }}">{{ submit_label|default:"Save" }}</button>
+            <button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel" title="Close dialog without saving">Cancel</button>
+            <button type="submit" class="btn {{ submit_class|default:'btn-primary' }}" title="Save expiration date">{{ submit_label|default:"Save" }}</button>
           </div>
         </form>
       </div>

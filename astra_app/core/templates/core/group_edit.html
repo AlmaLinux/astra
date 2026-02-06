@@ -7,7 +7,7 @@
 {% block header %}
   <div class="d-flex align-items-center justify-content-between flex-wrap" style="gap: .5rem;">
     <h1 class="m-0">Edit group: {{ group.cn }}</h1>
-    <a class="btn btn-sm btn-outline-secondary" href="{% url 'group-detail' group.cn %}">
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'group-detail' group.cn %}" title="Return to group details">
       <i class="fas fa-arrow-left mr-1"></i> Back
     </a>
   </div>
@@ -71,7 +71,7 @@
                     <tbody></tbody>
                   </table>
                 </div>
-                <button type="button" class="btn btn-sm btn-outline-secondary js-chat-channels-add" id="group-chat-channels-add">Add channel</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary js-chat-channels-add" id="group-chat-channels-add" title="Add chat channel">Add channel</button>
               </div>
 
               <div id="group-chat-channels-fallback">
@@ -95,10 +95,10 @@
           </div>
 
           <div class="card-footer d-flex justify-content-end" style="gap: .5rem;">
-            <a class="btn btn-outline-secondary" href="{% url 'group-detail' group.cn %}">
+            <a class="btn btn-outline-secondary" href="{% url 'group-detail' group.cn %}" title="Discard changes and return to group">
               Cancel
             </a>
-            <button type="submit" class="btn btn-primary">
+            <button type="submit" class="btn btn-primary" title="Save group info">
               <i class="fas fa-save mr-1"></i> Save
             </button>
           </div>

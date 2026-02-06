@@ -34,7 +34,7 @@
       role="alert"
       data-dismiss-key="account_setup_recommended_v1"
     >
-      <button type="button" class="close" data-dismiss="alert" aria-label="Dismiss">
+      <button type="button" class="close" data-dismiss="alert" aria-label="Dismiss" title="Dismiss this message">
         <span aria-hidden="true">&times;</span>
       </button>
       <strong>Recommended:</strong>
@@ -76,7 +76,7 @@
 
           {% if is_self %}
             <div class="mt-3">
-              <a class="btn btn-primary btn-block" href="{% url 'settings' %}#profile">Edit Profile</a>
+              <a class="btn btn-primary btn-block" href="{% url 'settings' %}#profile" title="Edit your profile">Edit Profile</a>
             </div>
           {% endif %}
         </div>
@@ -198,10 +198,10 @@
           <strong>Membership</strong>
           <div class="d-flex align-items-center" style="gap: .5rem;">
             {% if membership_can_view %}
-              <a href="{% url 'membership-audit-log-user' fu.username %}" class="btn btn-sm btn-outline-secondary">History</a>
+              <a href="{% url 'membership-audit-log-user' fu.username %}" class="btn btn-sm btn-outline-secondary" title="View membership history">History</a>
             {% endif %}
             {% if is_self and membership_can_request_any %}
-              <a href="{{ membership_request_url }}" class="btn btn-sm btn-outline-primary">Request</a>
+              <a href="{{ membership_request_url }}" class="btn btn-sm btn-outline-primary" title="Request membership">Request</a>
             {% endif %}
           </div>
         </li>
@@ -240,7 +240,7 @@
             </div>
             <div class="d-flex align-items-center justify-content-end flex-wrap" style="gap: .5rem;">
               {% if is_self and m.is_expiring_soon %}
-                <a href="{{ m.extend_url }}" class="btn btn-sm btn-primary">Request renewal</a>
+                <a href="{{ m.extend_url }}" class="btn btn-sm btn-primary" title="Request renewal for this membership">Request renewal</a>
               {% else %}
                 {% if membership_can_view and m.request_id %}
                   <a class="badge badge-success" href="{% url 'membership-request-detail' m.request_id %}">Active</a>

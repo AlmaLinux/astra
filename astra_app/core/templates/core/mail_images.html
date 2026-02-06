@@ -75,7 +75,7 @@
                 <input type="checkbox" class="custom-control-input" id="mail-images-overwrite" name="overwrite" value="1" />
                 <label class="custom-control-label" for="mail-images-overwrite">Overwrite</label>
               </div>
-              <button type="submit" class="btn btn-primary btn-block">Upload</button>
+              <button type="submit" class="btn btn-primary btn-block" title="Upload selected images">Upload</button>
             </div>
           </div>
         </div>
@@ -119,13 +119,14 @@
                 <input type="text" class="form-control form-control-sm" value="{{ img.url }}" readonly />
               </td>
               <td class="text-right">
-                <a class="btn btn-sm btn-outline-secondary" href="{{ img.url }}" target="_blank" rel="noopener">Download</a>
+                <a class="btn btn-sm btn-outline-secondary" href="{{ img.url }}" target="_blank" rel="noopener" title="Download this image">Download</a>
 
                 <button
                   type="button"
                   class="btn btn-sm btn-outline-danger"
                   data-toggle="modal"
                   data-target="#delete-mail-image-{{ forloop.counter }}"
+                  title="Delete this image"
                 >Delete</button>
 
                 <div class="modal fade" id="delete-mail-image-{{ forloop.counter }}" tabindex="-1" role="dialog" aria-hidden="true">
@@ -133,7 +134,7 @@
                     <div class="modal-content">
                       <div class="modal-header">
                         <h5 class="modal-title">Delete image</h5>
-                        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog">
                           <span aria-hidden="true">&times;</span>
                         </button>
                       </div>
@@ -148,8 +149,8 @@
                           <input type="hidden" name="key" value="{{ img.key }}" />
 
                           <div class="d-flex justify-content-between">
-                            <button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel">Cancel</button>
-                            <button type="submit" class="btn btn-danger">Delete</button>
+                            <button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel" title="Close dialog without deleting">Cancel</button>
+                            <button type="submit" class="btn btn-danger" title="Delete this image">Delete</button>
                           </div>
                         </form>
                       </div>

@@ -29,7 +29,7 @@
       {% if not registration_open %}
         <div class="card-body">
           <div class="alert alert-info">Registration is closed at the moment.</div>
-          <a class="btn btn-outline-primary" href="{% url 'login' %}">Back to login</a>
+          <a class="btn btn-outline-primary" href="{% url 'login' %}" title="Return to login">Back to login</a>
         </div>
       {% else %}
         <form method="post" novalidate>
@@ -74,7 +74,7 @@
           </div>
 
           <div class="card-footer d-flex justify-content-end">
-            <button type="submit" class="btn btn-primary">Register</button>
+            <button type="submit" class="btn btn-primary" title="Create your account">Register</button>
           </div>
         </form>
       {% endif %}

@@ -5,7 +5,7 @@
 		<div class="modal-content">
 			<div class="modal-header">
 				<h5 class="modal-title">Avatar</h5>
-				<button type="button" class="close" data-dismiss="modal" aria-label="Close">
+				<button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close avatar settings">
 					<span aria-hidden="true">&times;</span>
 				</button>
 			</div>
@@ -37,13 +37,13 @@
 						<input id="id_avatar_upload" name="avatar" type="file" accept="image/*" class="form-control-file" required />
 						<small class="form-text text-muted">Uploading a new avatar replaces the previous one.</small>
 					</div>
-					<button type="submit" class="btn btn-primary">Upload</button>
+					<button type="submit" class="btn btn-primary" title="Upload a new avatar">Upload</button>
 				</form>
 
 				{% if avatar_is_local %}
 					<form method="post" action="{% url 'settings-avatar-delete' %}">
 						{% csrf_token %}
-						<button type="submit" class="btn btn-outline-danger">Delete local avatar</button>
+						<button type="submit" class="btn btn-outline-danger" title="Remove uploaded avatar">Delete local avatar</button>
 					</form>
 				{% endif %}
 			</div>

@@ -5,7 +5,7 @@
 {% block header %}
   <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
     <h1 class="m-0">Upload Account Invitations</h1>
-    <a href="{% url 'account-invitations' %}" class="btn btn-outline-secondary">Back to invitations</a>
+    <a href="{% url 'account-invitations' %}" class="btn btn-outline-secondary" title="Return to invitations list">Back to invitations</a>
   </div>
 {% endblock %}
 
@@ -24,7 +24,7 @@
           <div class="text-muted small mt-1">Columns: email, full_name, note.</div>
         </div>
 
-        <button type="submit" class="btn btn-primary">Preview invitations</button>
+        <button type="submit" class="btn btn-primary" title="Preview invitations before sending">Preview invitations</button>
       </form>
     </div>
   </div>

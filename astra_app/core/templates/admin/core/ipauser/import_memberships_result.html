@@ -27,7 +27,7 @@
 
     {% if download_url %}
       <p>
-        <a class="button" href="{{ download_url }}">Download unmatched users CSV</a>
+        <a class="button" href="{{ download_url }}" title="Download unmatched users as CSV">Download unmatched users CSV</a>
       </p>
     {% endif %}
 
@@ -41,8 +41,8 @@
     {% endif %}
 
     <div class="submit-row">
-      <a class="button" href="{% url 'admin:core_membershipcsvimportlink_import' %}">Run again</a>
-      <a class="button cancel-link" href="{% url 'admin:auth_ipauser_changelist' %}">Back to users</a>
+      <a class="button" href="{% url 'admin:core_membershipcsvimportlink_import' %}" title="Run the import again with a new file">Run again</a>
+      <a class="button cancel-link" href="{% url 'admin:auth_ipauser_changelist' %}" title="Return to user list">Back to users</a>
     </div>
   </div>
 {% endblock %}

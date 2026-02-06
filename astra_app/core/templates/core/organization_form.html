@@ -131,13 +131,13 @@
         <div class="card-footer d-flex justify-content-between align-items-center flex-wrap" style="gap: .75rem;">
           <div>
             {% if is_create %}
-              <a class="btn btn-secondary" href="{{ cancel_url }}">Cancel</a>
+              <a class="btn btn-secondary" href="{{ cancel_url }}" title="Cancel and discard changes">Cancel</a>
             {% else %}
-              <a class="btn btn-secondary" href="{% url 'organization-detail' organization.pk %}">Cancel</a>
+              <a class="btn btn-secondary" href="{% url 'organization-detail' organization.pk %}" title="Cancel and discard changes">Cancel</a>
             {% endif %}
           </div>
           <div>
-            <button type="submit" class="btn btn-success">{% if is_create %}Create{% else %}Save{% endif %}</button>
+            <button type="submit" class="btn btn-success" title="{% if is_create %}Create organization{% else %}Save organization changes{% endif %}">{% if is_create %}Create{% else %}Save{% endif %}</button>
           </div>
         </div>
       </div>

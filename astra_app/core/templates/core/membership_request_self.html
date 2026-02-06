@@ -5,7 +5,7 @@
 {% block header %}
   <div class="d-flex align-items-center justify-content-between flex-wrap" style="gap: .5rem;">
     <h1 class="m-0">{% if req.requested_organization_name or req.requested_organization %}Your Sponsorship Request #{{ req.pk }}{% else %}Your Membership Request #{{ req.pk }}{% endif %}</h1>
-    <a href="{% url 'user-profile' request.user.get_username %}" class="btn btn-sm btn-outline-secondary">Back to profile</a>
+    <a href="{% url 'user-profile' request.user.get_username %}" class="btn btn-sm btn-outline-secondary" title="Back to profile">Back to profile</a>
   </div>
 {% endblock %}
 
@@ -60,7 +60,7 @@
           {% endfor %}
 
           <div class="d-flex justify-content-between">
-            <a href="{% url 'user-profile' request.user.get_username %}" class="btn btn-secondary">Cancel</a>
+            <a href="{% url 'user-profile' request.user.get_username %}" class="btn btn-secondary" title="Return to profile without changes">Cancel</a>
             <button
               type="submit"
               class="btn btn-outline-danger"
@@ -68,7 +68,7 @@
               formnovalidate
               title="{% if req.requested_organization_name or req.requested_organization %}Cancel your sponsorship request{% else %}Cancel your membership request{% endif %}"
             >Rescind request</button>
-            <button type="submit" class="btn btn-primary">Submit request</button>
+            <button type="submit" class="btn btn-primary" title="Submit updated request">Submit request</button>
           </div>
         </form>
       {% else %}

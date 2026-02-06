@@ -47,11 +47,11 @@
       <div class="col-lg-12">
         <div class="card card-outline card-primary">
           <div class="card-body d-flex align-items-center flex-wrap" style="gap: .75rem;">
-            <a class="btn btn-outline-secondary" href="{% url 'email-templates' %}">Back</a>
+            <a class="btn btn-outline-secondary" href="{% url 'email-templates' %}" title="Back to the template list">Back</a>
 
             <div class="flex-grow-1 text-center">
               {% if template and not is_locked %}
-                <button type="button" class="btn btn-outline-danger" data-toggle="modal" data-target="#email-template-delete-modal">
+                <button type="button" class="btn btn-outline-danger" data-toggle="modal" data-target="#email-template-delete-modal" title="Delete this template">
                   Delete
                 </button>
               {% elif template and is_locked %}
@@ -61,7 +61,7 @@
               {% endif %}
             </div>
 
-            <button type="submit" class="btn btn-success ml-auto">Save</button>
+            <button type="submit" class="btn btn-success ml-auto" title="Save template changes">Save</button>
           </div>
         </div>
       </div>

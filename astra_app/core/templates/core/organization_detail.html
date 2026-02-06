@@ -11,7 +11,7 @@
     {% if can_edit_organization or is_representative %}
       <div class="d-flex align-items-center" style="gap: .5rem;">
         {% if can_edit_organization %}
-          <a class="btn btn-sm btn-outline-primary" href="{% url 'organization-edit' organization.pk %}">
+          <a class="btn btn-sm btn-outline-primary" href="{% url 'organization-edit' organization.pk %}" title="Edit organization details">
             <i class="fas fa-edit mr-1"></i> Edit details
           </a>
         {% endif %}
@@ -21,6 +21,7 @@
             class="btn btn-sm btn-outline-danger"
             data-toggle="modal"
             data-target="#organization-delete-modal"
+            title="Delete organization"
           >
             <i class="fas fa-trash mr-1"></i> Delete organization
           </button>
@@ -252,10 +253,10 @@
             <h3 class="card-title mb-0">Sponsorship Level</h3>
             <div class="d-flex align-items-center" style="gap: .5rem;">
               {% if membership_can_view %}
-                <a href="{% url 'membership-audit-log-organization' organization.pk %}" class="btn btn-sm btn-outline-secondary">History</a>
+                <a href="{% url 'membership-audit-log-organization' organization.pk %}" class="btn btn-sm btn-outline-secondary" title="View sponsorship history">History</a>
               {% endif %}
               {% if is_representative %}
-                <a href="{% url 'organization-sponsorship-manage' organization.pk %}" class="btn btn-sm btn-outline-primary">
+                <a href="{% url 'organization-sponsorship-manage' organization.pk %}" class="btn btn-sm btn-outline-primary" title="{% if organization.membership_level %}Change sponsorship tier{% else %}Request sponsorship{% endif %}">
                   {% if organization.membership_level %}Change sponsorship tier{% else %}Request sponsorship{% endif %}
                 </a>
               {% endif %}
@@ -294,7 +295,7 @@
                     {% if is_representative and sponsorship_is_expiring_soon and not pending_membership_level_request %}
                       <form method="post" action="{% url 'organization-sponsorship-extend' organization.pk %}" class="m-0 d-inline">
                         {% csrf_token %}
-                        <button type="submit" class="btn btn-sm btn-primary">Request renewal</button>
+                        <button type="submit" class="btn btn-sm btn-primary" title="Request sponsorship renewal">Request renewal</button>
                       </form>
                       <div class="text-muted small">Submits a renewal request for Membership Committee review.</div>
                     {% else %}

@@ -9,6 +9,7 @@
       {% if not has_email %}disabled{% endif %}
       data-toggle="modal"
       data-target="#admin-password-reset-modal"
+      title="Queue a password reset email for this user"
     >
       Reset user's password
     </button>
@@ -19,6 +20,7 @@
         class="btn btn-block btn-danger btn-sm"
         data-toggle="modal"
         data-target="#admin-disable-otp-modal"
+        title="Disable all OTP tokens for this user"
       >
         Disable user's OTP tokens
       </button>

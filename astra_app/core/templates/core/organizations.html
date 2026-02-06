@@ -12,7 +12,7 @@
   <div class="card">
     <div class="card-header">
       <div class="d-flex align-items-center justify-content-between" style="gap: .75rem;">
-        <a href="{{ create_url|default:'' }}" class="btn btn-primary">Create organization</a>
+        <a href="{{ create_url|default:'' }}" class="btn btn-primary" title="Create a new organization">Create organization</a>
 
         <form method="get" class="input-group input-group-sm" style="width: 220px;">
           <input
@@ -29,12 +29,13 @@
                 type="button"
                 class="btn btn-default"
                 aria-label="Clear search"
+                title="Clear search filter"
                 onclick="var i=this.form.querySelector('input[name=\'q\']'); if(i){i.value='';} this.form.submit();"
               >
                 <i class="fas fa-times"></i>
               </button>
             {% endif %}
-            <button type="submit" class="btn btn-default" aria-label="Search">
+            <button type="submit" class="btn btn-default" aria-label="Search" title="Search organizations">
               <i class="fas fa-search"></i>
             </button>
           </div>

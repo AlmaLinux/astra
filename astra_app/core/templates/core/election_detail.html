@@ -82,7 +82,7 @@
         <div class="card-body">
           {% if election.status == 'open' %}
             {% if can_vote %}
-              <a class="btn btn-primary btn-block" href="{% url 'election-vote' election.id %}">Vote</a>
+              <a class="btn btn-primary btn-block" href="{% url 'election-vote' election.id %}" title="Cast your ballot in this election">Vote</a>
               {% if request.user.email %}
                 <p class="text-muted small mb-0">You'll need your voting credential, which was sent to <b>{{ request.user.email }}</b>.</p>
               {% else %}
@@ -96,19 +96,19 @@
                 <li>Or be a representative of a sponsoring organization</li>
                 <li>And it must have started at least {{ eligibility_min_membership_age_days }} day{{ eligibility_min_membership_age_days|pluralize }} before the election start</li>
               </ul>
-              <a class="btn btn-outline-primary btn-block" href="/membership/request/">Request membership</a>
+              <a class="btn btn-outline-primary btn-block" href="/membership/request/" title="Start a membership request">Request membership</a>
             {% endif %}
           {% elif election.status == 'closed' or election.status == 'tallied' %}
-            <a class="btn btn-outline-primary btn-block" href="{% url 'election-audit-log' election.id %}">View audit log</a>
+            <a class="btn btn-outline-primary btn-block" href="{% url 'election-audit-log' election.id %}" title="Review the election audit log">View audit log</a>
             {% if election.public_ballots_file %}
-              <a class="btn btn-outline-secondary btn-block" href="{{ election.public_ballots_file.url }}">Download ballots (JSON)</a>
+              <a class="btn btn-outline-secondary btn-block" href="{{ election.public_ballots_file.url }}" title="Download the ballots ledger (JSON)">Download ballots (JSON)</a>
             {% else %}
-              <a class="btn btn-outline-secondary btn-block" href="{% url 'election-public-ballots' election.id %}">Download ballots (JSON)</a>
+              <a class="btn btn-outline-secondary btn-block" href="{% url 'election-public-ballots' election.id %}" title="Download the ballots ledger (JSON)">Download ballots (JSON)</a>
             {% endif %}
             {% if election.public_audit_file %}
-              <a class="btn btn-outline-secondary btn-block" href="{{ election.public_audit_file.url }}">Download audit log (JSON)</a>
+              <a class="btn btn-outline-secondary btn-block" href="{{ election.public_audit_file.url }}" title="Download the audit log (JSON)">Download audit log (JSON)</a>
             {% else %}
-              <a class="btn btn-outline-secondary btn-block" href="{% url 'election-public-audit' election.id %}">Download audit log (JSON)</a>
+              <a class="btn btn-outline-secondary btn-block" href="{% url 'election-public-audit' election.id %}" title="Download the audit log (JSON)">Download audit log (JSON)</a>
             {% endif %}
           {% endif %}
 
@@ -120,6 +120,7 @@
               class="btn btn-warning btn-block mb-2"
               data-toggle="modal"
               data-target="#extend-election-modal"
+              title="Extend the election end date if needed"
             >
               Extend Election
             </button>
@@ -138,7 +139,7 @@
                     {% csrf_token %}
                     <div class="modal-header">
                       <h5 class="modal-title" id="extend-election-modal-label">Extend election?</h5>
-                      <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                      <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog">
                         <span aria-hidden="true">&times;</span>
                       </button>
                     </div>
@@ -180,8 +181,8 @@
                       </div>
                     </div>
                     <div class="modal-footer">
-                      <button type="button" class="btn btn-outline-secondary" data-dismiss="modal">Cancel</button>
-                      <button id="extend-submit" disabled type="submit" class="btn btn-warning" aria-disabled="true">Extend Election</button>
+                      <button type="button" class="btn btn-outline-secondary" data-dismiss="modal" title="Close dialog without extending">Cancel</button>
+                      <button id="extend-submit" disabled type="submit" class="btn btn-warning" aria-disabled="true" title="Extend the election end date">Extend Election</button>
                     </div>
                   </form>
                 </div>
@@ -193,6 +194,7 @@
               class="btn btn-danger btn-block"
               data-toggle="modal"
               data-target="#conclude-election-modal"
+              title="Conclude the election and stop voting"
             >
               Conclude Election
             </button>
@@ -211,7 +213,7 @@
                     {% csrf_token %}
                     <div class="modal-header">
                       <h5 class="modal-title" id="conclude-election-modal-label">Conclude election?</h5>
-                      <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                      <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog">
                         <span aria-hidden="true">&times;</span>
                       </button>
                     </div>
@@ -254,8 +256,8 @@
                       </div>
                     </div>
                     <div class="modal-footer">
-                      <button type="button" class="btn btn-outline-secondary" data-dismiss="modal">Cancel</button>
-                      <button id="conclude-submit" disabled type="submit" class="btn btn-danger" aria-disabled="true">Conclude Election</button>
+                      <button type="button" class="btn btn-outline-secondary" data-dismiss="modal" title="Close dialog without concluding">Cancel</button>
+                      <button id="conclude-submit" disabled type="submit" class="btn btn-danger" aria-disabled="true" title="Conclude the election and stop voting">Conclude Election</button>
                     </div>
                   </form>
                 </div>
@@ -498,7 +500,7 @@
           <h3 class="card-title">How votes are counted</h3>
 
           <div class="card-tools">
-            <button type="button" class="btn btn-tool" data-card-widget="collapse">
+            <button type="button" class="btn btn-tool" data-card-widget="collapse" title="Expand or collapse this section">
               <i class="fas fa-plus"></i>
             </button>
           </div>
@@ -546,19 +548,20 @@
                         type="button"
                         class="btn btn-default"
                         aria-label="Clear search"
+                        title="Clear search filter"
                         onclick="var i=this.form.querySelector('input[name=\'eligible_q\']'); if(i){i.value='';} this.form.submit();"
                       >
                         <i class="fas fa-times"></i>
                       </button>
                     {% endif %}
-                    <button type="submit" class="btn btn-default" aria-label="Search">
+                    <button type="submit" class="btn btn-default" aria-label="Search" title="Search eligible voters">
                       <i class="fas fa-search"></i>
                     </button>
                   </div>
                 </form>
               </div>
 
-              <button type="button" class="btn btn-tool" data-card-widget="collapse">
+              <button type="button" class="btn btn-tool" data-card-widget="collapse" title="Expand or collapse this section">
                 <i class="fas fa-plus"></i>
               </button>
             </div>
@@ -570,7 +573,7 @@
                 <div class="mb-3">
                   <form method="post" action="{% url 'election-send-mail-credentials' election.id %}" class="mb-0">
                     {% csrf_token %}
-                    <button type="submit" class="btn btn-outline-primary btn-sm">Resend all credentials</button>
+                    <button type="submit" class="btn btn-outline-primary btn-sm" title="Resend credentials to all eligible voters">Resend all credentials</button>
                   </form>
                 </div>
 
@@ -588,7 +591,7 @@
                       autocomplete="off"
                     >
                     <div class="input-group-append">
-                      <button type="submit" class="btn btn-outline-primary">Resend voting credential</button>
+                      <button type="submit" class="btn btn-outline-primary" title="Resend credential to the selected user">Resend voting credential</button>
                     </div>
                   </div>
                   {% if eligible_voter_usernames %}
@@ -632,19 +635,20 @@
                         type="button"
                         class="btn btn-default"
                         aria-label="Clear search"
+                        title="Clear search filter"
                         onclick="var i=this.form.querySelector('input[name=\'ineligible_q\']'); if(i){i.value='';} this.form.submit();"
                       >
                         <i class="fas fa-times"></i>
                       </button>
                     {% endif %}
-                    <button type="submit" class="btn btn-default" aria-label="Search">
+                    <button type="submit" class="btn btn-default" aria-label="Search" title="Search ineligible voters">
                       <i class="fas fa-search"></i>
                     </button>
                   </div>
                 </form>
               </div>
 
-              <button type="button" class="btn btn-tool" data-card-widget="collapse">
+              <button type="button" class="btn btn-tool" data-card-widget="collapse" title="Expand or collapse this section">
                 <i class="fas fa-plus"></i>
               </button>
             </div>
@@ -673,7 +677,7 @@
         <div class="modal-content">
           <div class="modal-header">
             <h5 class="modal-title" id="ineligible-voter-modal-label">Ineligible voter details</h5>
-            <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+            <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close voter details">
               <span aria-hidden="true">&times;</span>
             </button>
           </div>
@@ -697,7 +701,7 @@
             </dl>
           </div>
           <div class="modal-footer">
-            <button type="button" class="btn btn-outline-secondary" data-dismiss="modal">Close</button>
+            <button type="button" class="btn btn-outline-secondary" data-dismiss="modal" title="Close voter details">Close</button>
           </div>
         </div>
       </div>

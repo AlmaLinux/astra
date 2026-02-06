@@ -19,7 +19,7 @@ Optional:
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title">{{ title }}</h5>
-        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog">
           <span aria-hidden="true">&times;</span>
         </button>
       </div>
@@ -61,11 +61,11 @@ Optional:
           {% endif %}
 
           <div class="d-flex justify-content-between">
-            <button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel">Cancel</button>
+            <button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel" title="Close dialog without rejecting">Cancel</button>
             {% if show_custom_email_button %}
-              <button type="submit" class="btn btn-outline-danger" name="custom_email" value="1">Reject with Custom Email</button>
+              <button type="submit" class="btn btn-outline-danger" name="custom_email" value="1" title="Reject and send a custom email">Reject with Custom Email</button>
             {% endif %}
-            <button type="submit" class="btn btn-danger">Reject</button>
+            <button type="submit" class="btn btn-danger" title="Reject this request">Reject</button>
           </div>
         </form>
       </div>

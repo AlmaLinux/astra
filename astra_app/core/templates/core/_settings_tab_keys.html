@@ -15,7 +15,7 @@
 					<tbody></tbody>
 				</table>
 			</div>
-			<button type="button" class="btn btn-sm btn-outline-secondary" id="gpg-keys-add">Add GPG key ID</button>
+			<button type="button" class="btn btn-sm btn-outline-secondary" id="gpg-keys-add" title="Add another GPG key ID">Add GPG key ID</button>
 		</div>
 
 		<div id="gpg-keys-fallback">
@@ -34,7 +34,7 @@
 					<tbody></tbody>
 				</table>
 			</div>
-			<button type="button" class="btn btn-sm btn-outline-secondary" id="ssh-keys-add">Add SSH key</button>
+			<button type="button" class="btn btn-sm btn-outline-secondary" id="ssh-keys-add" title="Add another SSH key">Add SSH key</button>
 		</div>
 
 		<div id="ssh-keys-fallback">
@@ -44,7 +44,7 @@
 		</div>
 	</div>
 
-	<button type="submit" class="btn btn-primary">Save</button>
+	<button type="submit" class="btn btn-primary" title="Save key settings">Save</button>
 </form>
 
 <script>
@@ -78,7 +78,7 @@
 						}
 					</td>
 					<td style="width: 44px;" class="text-center">
-						<button type="button" class="btn btn-sm btn-outline-secondary" aria-label="Remove">×</button>
+						<button type="button" class="btn btn-sm btn-outline-secondary" aria-label="Remove" title="Remove this entry">×</button>
 					</td>
 				`;
 

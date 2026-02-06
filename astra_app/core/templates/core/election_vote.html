@@ -9,7 +9,7 @@
 
 {% block header %}
   <h1 class="m-0">Vote: {{ election.name }}</h1>
-  <a class="btn btn-link px-0" href="{% url 'election-detail' election.id %}">Back to election detail</a>
+  <a class="btn btn-link px-0" href="{% url 'election-detail' election.id %}" title="Return to election details">Back to election detail</a>
 {% endblock %}
 
 {% block content %}
@@ -64,7 +64,7 @@
               <div class="input-group">
                 <input id="election-receipt" class="form-control" type="text" readonly />
                 <div class="input-group-append">
-                  <button type="button" class="btn btn-outline-secondary" id="election-receipt-copy">Copy</button>
+                  <button type="button" class="btn btn-outline-secondary" id="election-receipt-copy" title="Copy receipt to clipboard">Copy</button>
                 </div>
               </div>
 
@@ -89,7 +89,7 @@
               </div>
             </div>
 
-            <button id="election-submit-button" type="submit" class="btn btn-primary btn-block mt-2" {% if not can_submit_vote %}disabled aria-disabled="true"{% endif %}>Submit vote</button>
+            <button id="election-submit-button" type="submit" class="btn btn-primary btn-block mt-2" title="Submit your ballot" {% if not can_submit_vote %}disabled aria-disabled="true"{% endif %}>Submit vote</button>
 
             <div class="mt-3">
               <details>
@@ -120,6 +120,7 @@
                 data-action="election-add"
                 data-candidate-id="{{ item.candidate.id }}"
                 data-candidate-label="{{ item.label }}"
+                title="Add this candidate to your ranking"
               >
                 Add to ranking
               </button>

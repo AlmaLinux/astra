@@ -9,9 +9,9 @@
     <h1 class="m-0">Membership Request #{{ req.pk }}</h1>
     <div class="d-flex align-items-center" style="gap: .5rem;">
       {% if contact_url %}
-        <a href="{{ contact_url }}" class="btn btn-sm btn-outline-primary">Contact</a>
+        <a href="{{ contact_url }}" class="btn btn-sm btn-outline-primary" title="Contact the requester">Contact</a>
       {% endif %}
-      <a href="{% url 'membership-requests' %}" class="btn btn-sm btn-outline-secondary">Back to requests</a>
+      <a href="{% url 'membership-requests' %}" class="btn btn-sm btn-outline-secondary" title="Return to request list">Back to requests</a>
     </div>
   </div>
 {% endblock %}

@@ -136,6 +136,7 @@
             class="btn btn-tool"
             data-card-widget="collapse"
             aria-label="Collapse"
+            title="Expand or collapse notes"
             data-membership-notes-collapse="{{ membership_request.pk }}"
           >
             <i class="fas {% if compact %}fa-plus{% else %}fa-minus{% endif %}"></i>
@@ -243,6 +244,7 @@
               type="button"
               class="close"
               aria-label="Dismiss"
+              title="Dismiss error message"
               data-membership-notes-error-close="{{ membership_request.pk }}"
             >
               <span aria-hidden="true">&times;</span>
@@ -295,7 +297,7 @@
                       type="button"
                       class="btn btn-light border"
                       data-note-action="vote_approve"
-                      title="Vote approve"
+                      title="Vote to approve"
                       aria-label="Vote approve"
                     >
                       <i class="fas fa-thumbs-up text-success"></i>
@@ -304,7 +306,7 @@
                       type="button"
                       class="btn btn-light border"
                       data-note-action="vote_disapprove"
-                      title="Vote disapprove"
+                      title="Vote to disapprove"
                       aria-label="Vote disapprove"
                     >
                       <i class="fas fa-thumbs-down text-danger"></i>
@@ -321,7 +323,7 @@
                   type="button"
                   class="btn btn-light border btn-sm flex-fill py-1"
                   data-note-action="vote_approve"
-                  title="Vote approve"
+                  title="Vote to approve"
                   aria-label="Vote approve"
                 >
                   <i class="fas fa-thumbs-up text-success"></i>
@@ -330,7 +332,7 @@
                   type="button"
                   class="btn btn-light border btn-sm flex-fill py-1"
                   data-note-action="vote_disapprove"
-                  title="Vote disapprove"
+                  title="Vote to disapprove"
                   aria-label="Vote disapprove"
                 >
                   <i class="fas fa-thumbs-down text-danger"></i>

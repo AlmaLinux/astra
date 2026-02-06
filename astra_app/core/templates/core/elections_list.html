@@ -6,7 +6,7 @@
   <div class="d-flex align-items-center justify-content-between">
     <h1 class="m-0">Elections</h1>
     {% if can_manage_elections %}
-      <a class="btn btn-primary" href="{% url 'election-edit' 0 %}">New election</a>
+      <a class="btn btn-primary" href="{% url 'election-edit' 0 %}" title="Create a new election">New election</a>
     {% endif %}
   </div>
 {% endblock %}
@@ -47,7 +47,7 @@
           <h3 class="card-title">Past elections</h3>
 
           <div class="card-tools">
-            <button type="button" class="btn btn-tool" data-card-widget="collapse">
+            <button type="button" class="btn btn-tool" data-card-widget="collapse" title="Show or hide past elections">
               <i class="fas fa-plus"></i>
             </button>
           </div>

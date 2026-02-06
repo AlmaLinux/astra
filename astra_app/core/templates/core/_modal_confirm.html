@@ -26,7 +26,7 @@ Alternative body rendering (use instead of `body` when you need one emphasized v
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title">{{ title }}</h5>
-        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog">
           <span aria-hidden="true">&times;</span>
         </button>
       </div>
@@ -48,16 +48,17 @@ Alternative body rendering (use instead of `body` when you need one emphasized v
           {% endif %}
 
           <div class="d-flex justify-content-between">
-            <button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel">{{ cancel_label|default:"Cancel" }}</button>
+            <button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel" title="Close dialog without applying changes">{{ cancel_label|default:"Cancel" }}</button>
             {% if show_custom_email_button %}
               <button
                 type="submit"
                 class="btn {{ custom_submit_class|default:'btn-primary' }}"
                 name="{{ custom_submit_name|default:'custom_email' }}"
                 value="{{ custom_submit_value|default:'1' }}"
+                title="Submit and send a custom email"
               >{{ custom_submit_label|default:"Custom" }}</button>
             {% endif %}
-            <button type="submit" class="btn {{ submit_button_class|default:submit_class|default:'btn-primary' }}">{{ submit_label }}</button>
+            <button type="submit" class="btn {{ submit_button_class|default:submit_class|default:'btn-primary' }}" title="Confirm and apply this action">{{ submit_label }}</button>
           </div>
         </form>
       </div>

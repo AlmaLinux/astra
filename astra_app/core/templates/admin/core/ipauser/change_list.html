@@ -2,7 +2,7 @@
 
 {% block object-tools-items %}
   <li>
-    <a href="{% url 'admin:core_membershipcsvimportlink_import' %}" class="addlink">Import memberships (CSV)</a>
+    <a href="{% url 'admin:core_membershipcsvimportlink_import' %}" class="addlink" title="Import memberships from a CSV file">Import memberships (CSV)</a>
   </li>
   {{ block.super }}
 {% endblock %}

@@ -58,16 +58,16 @@
 
           <hr class="my-3" />
 
-          <a class="btn btn-outline-primary btn-block" href="{% url 'election-detail' election.id %}">Back to election page</a>
+          <a class="btn btn-outline-primary btn-block" href="{% url 'election-detail' election.id %}" title="Return to election details">Back to election page</a>
           {% if election.public_ballots_file %}
-            <a class="btn btn-outline-secondary btn-block" href="{{ election.public_ballots_file.url }}">Download ballots (JSON)</a>
+            <a class="btn btn-outline-secondary btn-block" href="{{ election.public_ballots_file.url }}" title="Download ballots (JSON)">Download ballots (JSON)</a>
           {% else %}
-            <a class="btn btn-outline-secondary btn-block" href="{% url 'election-public-ballots' election.id %}">Download ballots (JSON)</a>
+            <a class="btn btn-outline-secondary btn-block" href="{% url 'election-public-ballots' election.id %}" title="Download ballots (JSON)">Download ballots (JSON)</a>
           {% endif %}
           {% if election.public_audit_file %}
-            <a class="btn btn-outline-secondary btn-block" href="{{ election.public_audit_file.url }}">Download audit log (JSON)</a>
+            <a class="btn btn-outline-secondary btn-block" href="{{ election.public_audit_file.url }}" title="Download audit log (JSON)">Download audit log (JSON)</a>
           {% else %}
-            <a class="btn btn-outline-secondary btn-block" href="{% url 'election-public-audit' election.id %}">Download audit log (JSON)</a>
+            <a class="btn btn-outline-secondary btn-block" href="{% url 'election-public-audit' election.id %}" title="Download audit log (JSON)">Download audit log (JSON)</a>
           {% endif %}
         </div>
       </div>
@@ -105,16 +105,16 @@
           <div id="timeline-top" class="d-flex flex-wrap align-items-center justify-content-between mb-2">
             <div class="btn-group btn-group-sm mb-2" role="group" aria-label="Jump to">
               {% for j in jump_links %}
-                <a class="btn btn-outline-secondary" href="#{{ j.anchor }}">{{ j.label }}</a>
+                <a class="btn btn-outline-secondary" href="#{{ j.anchor }}" title="Jump to {{ j.label|striptags }}">{{ j.label }}</a>
               {% endfor %}
             </div>
 
             <div class="btn-group btn-group-sm mb-2" role="group" aria-label="Timeline navigation">
               {% if newer_url %}
-                <a class="btn btn-outline-secondary" href="{{ newer_url }}">Newer</a>
+                <a class="btn btn-outline-secondary" href="{{ newer_url }}" title="Show newer timeline events">Newer</a>
               {% endif %}
               {% if older_url %}
-                <a class="btn btn-outline-secondary" href="{{ older_url }}">Load older</a>
+                <a class="btn btn-outline-secondary" href="{{ older_url }}" title="Load older timeline events">Load older</a>
               {% endif %}
             </div>
           </div>
@@ -398,14 +398,14 @@
           </div>
 
           <div class="d-flex flex-wrap align-items-center justify-content-between mt-3">
-            <a class="btn btn-link px-0" href="#timeline-top">Back to top</a>
+            <a class="btn btn-link px-0" href="#timeline-top" title="Jump to the top of the timeline">Back to top</a>
 
             <div class="btn-group btn-group-sm" role="group" aria-label="Timeline navigation">
               {% if newer_url %}
-                <a class="btn btn-outline-secondary" href="{{ newer_url }}">Newer</a>
+                <a class="btn btn-outline-secondary" href="{{ newer_url }}" title="Show newer timeline events">Newer</a>
               {% endif %}
               {% if older_url %}
-                <a class="btn btn-outline-secondary" href="{{ older_url }}">Load older</a>
+                <a class="btn btn-outline-secondary" href="{{ older_url }}" title="Load older timeline events">Load older</a>
               {% endif %}
             </div>
           </div>
