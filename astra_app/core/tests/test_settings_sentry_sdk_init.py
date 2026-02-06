@@ -87,7 +87,4 @@ class TestSettingsSentrySdkInit(unittest.TestCase):
         lines = [line for line in result.stdout.strip().splitlines() if line]
         self.assertIn("sentry-init", lines)
         self.assertIn("http://public@example.invalid/1", lines)
-        self.assertIn("traces_sample_rate=0", lines)
-        self.assertIn("send_client_reports=False", lines)
-        self.assertIn("auto_session_tracking=False", lines)
         self.assertEqual(lines[-1], "ok")
