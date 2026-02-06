@@ -15,7 +15,7 @@
     </h1>
 
     {% if is_member %}
-      <button type="button" class="btn btn-outline-danger" data-toggle="modal" data-target="#leave-group-modal">
+      <button type="button" class="btn btn-outline-danger" data-toggle="modal" data-target="#leave-group-modal" title="Leave this group">
         Leave group
       </button>
     {% endif %}
@@ -30,7 +30,7 @@
           <div class="d-flex justify-content-between align-items-center" style="gap: .5rem;">
             <h3 class="card-title mb-0">Group info</h3>
             {% if is_sponsor %}
-              <a class="btn btn-sm btn-outline-primary" href="{% url 'group-edit' group.cn %}">
+              <a class="btn btn-sm btn-outline-primary" href="{% url 'group-edit' group.cn %}" title="Edit group details">
                 <i class="fas fa-edit mr-1"></i> Edit group
               </a>
             {% endif %}
@@ -121,7 +121,7 @@
                   list="sponsor-user-suggestions"
                   autocomplete="off"
                 />
-                <button class="btn btn-primary" type="submit">Add</button>
+                <button class="btn btn-primary" type="submit" title="Add this user to the group">Add</button>
               </div>
             </form>
 
@@ -132,6 +132,7 @@
               class="btn btn-outline-secondary btn-sm w-100"
               data-toggle="modal"
               data-target="#stop-sponsoring-modal"
+              title="Remove your Team Lead role in this group"
             >Stop being a Team Lead</button>
 
             {% if required_agreements %}
