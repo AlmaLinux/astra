@@ -15,6 +15,34 @@
     </button>
   {% endif %}
 
+  {% if promote_to_sponsor %}
+    <button
+      type="button"
+      class="btn btn-outline-primary btn-sm position-absolute"
+      style="top: .35rem; right: 2.6rem; z-index: 10;"
+      aria-label="Promote to Team Lead"
+      data-toggle="modal"
+      data-target="#promote-member-modal"
+      data-username="{{ username }}"
+    >
+      <i class="fas fa-person-arrow-up-from-line"></i>
+    </button>
+  {% endif %}
+
+  {% if demote_from_sponsor %}
+    <button
+      type="button"
+      class="btn btn-outline-danger btn-sm position-absolute"
+      style="top: .35rem; right: .35rem; z-index: 10;"
+      aria-label="Remove Team Lead"
+      data-toggle="modal"
+      data-target="#demote-sponsor-modal"
+      data-username="{{ username }}"
+    >
+      <i class="fas fa-person-arrow-down-to-line"></i>
+    </button>
+  {% endif %}
+
   <div class="d-flex align-items-center {{ extra_class }}"{% if extra_style %} style="{{ extra_style }}"{% endif %}>
     <div class="flex-shrink-0 ml-1 mr-3">
       {% if avatar_user %}

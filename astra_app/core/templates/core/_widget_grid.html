@@ -18,13 +18,21 @@
     {% else %}
       {% if muted_usernames and item.username in muted_usernames %}
         {% if member_manage_enabled %}
-          {% user item.username remove_from_group_cn=member_manage_group_cn class="text-muted" style="opacity:0.55;" %}
+          {% if promote_member_usernames and item.username in promote_member_usernames %}
+            {% user item.username remove_from_group_cn=member_manage_group_cn promote_to_sponsor=True class="text-muted" style="opacity:0.55;" %}
+          {% else %}
+            {% user item.username remove_from_group_cn=member_manage_group_cn class="text-muted" style="opacity:0.55;" %}
+          {% endif %}
         {% else %}
           {% user item.username class="text-muted" style="opacity:0.55;" %}
         {% endif %}
       {% else %}
         {% if member_manage_enabled %}
-          {% user item.username remove_from_group_cn=member_manage_group_cn %}
+          {% if promote_member_usernames and item.username in promote_member_usernames %}
+            {% user item.username remove_from_group_cn=member_manage_group_cn promote_to_sponsor=True %}
+          {% else %}
+            {% user item.username remove_from_group_cn=member_manage_group_cn %}
+          {% endif %}
         {% else %}
           {% user item.username %}
         {% endif %}

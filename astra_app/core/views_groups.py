@@ -157,6 +157,7 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
 
     sponsor_groups_list = sorted(sponsor_groups, key=lambda s: s.lower())
     sponsors_list = sorted(sponsors, key=lambda s: s.lower())
+    promotable_members = sorted((members - sponsors), key=lambda s: s.lower())
 
     required_agreement_cns = required_agreements_for_group(cn)
     required_agreements: list[dict[str, object]] = []
@@ -215,11 +216,11 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
 
         if action == "stop_sponsoring":
             if not is_sponsor:
-                messages.info(request, "You are not a sponsor of this group.")
+                messages.info(request, "You are not a Team Lead of this group.")
                 return redirect("group-detail", name)
             try:
                 group.remove_sponsor(username)
-                messages.success(request, "You are no longer a sponsor of this group.")
+                messages.success(request, "You are no longer a Team Lead of this group.")
             except requests.exceptions.ConnectionError:
                 messages.error(
                     request,
@@ -232,7 +233,7 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
 
         if action in {"add_member", "remove_member"}:
             if not is_sponsor:
-                messages.error(request, "Only sponsors can manage group members.")
+                messages.error(request, "Only Team Leads can manage group members.")
                 return redirect("group-detail", name)
 
             target = _normalize_str(request.POST.get("username"))
@@ -283,6 +284,72 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
                     messages.error(request, "Failed to remove member due to an internal error.")
                 return redirect("group-detail", name)
 
+        if action == "promote_member":
+            if not is_sponsor:
+                messages.error(request, "Only Team Leads can manage group members.")
+                return redirect("group-detail", name)
+
+            target = _normalize_str(request.POST.get("username"))
+            if not target:
+                messages.error(request, "Please provide a username.")
+                return redirect("group-detail", name)
+
+            if target in sponsors:
+                messages.info(request, f"{target} is already a Team Lead of this group.")
+                return redirect("group-detail", name)
+
+            if target not in members:
+                messages.error(request, "User must be a member before being promoted to Team Lead.")
+                return redirect("group-detail", name)
+
+            try:
+                group.add_sponsor(target)
+                messages.success(request, f"Promoted {target} to Team Lead.")
+            except FreeIPAOperationFailed as e:
+                messages.error(request, str(e))
+            except requests.exceptions.ConnectionError:
+                messages.error(
+                    request,
+                    "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
+                    "Please try again later.",
+                )
+            except Exception:
+                messages.error(request, "Failed to update sponsor status due to an internal error.")
+            return redirect("group-detail", name)
+
+        if action == "demote_sponsor":
+            if not is_sponsor:
+                messages.error(request, "Only Team Leads can manage group members.")
+                return redirect("group-detail", name)
+
+            target = _normalize_str(request.POST.get("username"))
+            if not target:
+                messages.error(request, "Please provide a username.")
+                return redirect("group-detail", name)
+
+            if target == username:
+                messages.info(request, "Use the Team membership box to stop being a Team Lead.")
+                return redirect("group-detail", name)
+
+            if target not in sponsors:
+                messages.error(request, "User is not a Team Lead of this group.")
+                return redirect("group-detail", name)
+
+            try:
+                group.remove_sponsor(target)
+                messages.success(request, f"Removed {target} as a Team Lead.")
+            except FreeIPAOperationFailed as e:
+                messages.error(request, str(e))
+            except requests.exceptions.ConnectionError:
+                messages.error(
+                    request,
+                    "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
+                    "Please try again later.",
+                )
+            except Exception:
+                messages.error(request, "Failed to update sponsor status due to an internal error.")
+            return redirect("group-detail", name)
+
     return render(
         request,
         "core/group_detail.html",
@@ -292,8 +359,10 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
             "q": q,
             "is_member": is_member,
             "is_sponsor": is_sponsor,
+            "current_username": username,
             "sponsors_list": sponsors_list,
             "sponsor_groups_list": sponsor_groups_list,
+            "promotable_members": promotable_members,
             "required_agreements": required_agreements,
             "unsigned_usernames": sorted(unsigned_usernames, key=lambda s: s.lower()),
         },

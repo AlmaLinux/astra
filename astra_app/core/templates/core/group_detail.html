@@ -165,9 +165,17 @@
           {% for username in sponsors_list %}
             <div class="col-12 col-md-6 col-lg-4 col-xl-3">
               {% if unsigned_usernames and username in unsigned_usernames %}
-                {% user username class="text-muted" style="opacity:0.55;" %}
+                {% if is_sponsor and current_username and username != current_username %}
+                  {% user username demote_from_sponsor=True class="text-muted" style="opacity:0.55;" %}
+                {% else %}
+                  {% user username class="text-muted" style="opacity:0.55;" %}
+                {% endif %}
               {% else %}
-                {% user username %}
+                {% if is_sponsor and current_username and username != current_username %}
+                  {% user username demote_from_sponsor=True %}
+                {% else %}
+                  {% user username %}
+                {% endif %}
               {% endif %}
             </div>
           {% endfor %}
@@ -209,7 +217,7 @@
     </div>
 
     <div class="card-body">
-      {% user_grid group=group member_manage_enabled=is_sponsor member_manage_group_cn=group.cn muted_usernames=unsigned_usernames %}
+      {% user_grid group=group member_manage_enabled=is_sponsor member_manage_group_cn=group.cn muted_usernames=unsigned_usernames promote_member_usernames=promotable_members %}
     </div>
   </div>
 
@@ -280,27 +288,63 @@
   {% endif %}
 
   {% if is_sponsor %}
-    {% include "core/_modal_confirm.html" with modal_id="stop-sponsoring-modal" title="Stop being a sponsor?" body="Stop being a sponsor of this group?" action_url="" submit_label="Stop sponsoring" submit_class="btn-warning" form_fields_template="core/_modal_confirm_fields.html" confirm_action="stop_sponsoring" %}
+    {% include "core/_modal_confirm.html" with modal_id="stop-sponsoring-modal" title="Stop being a Team Lead?" body="Stop being a Team Lead of this group?" action_url="" submit_label="Stop being a Team Lead" submit_class="btn-warning" form_fields_template="core/_modal_confirm_fields.html" confirm_action="stop_sponsoring" %}
 
     {% url "group-detail" group.cn as group_detail_url %}
     {% include "core/_modal_confirm.html" with modal_id="remove-member-modal" title="Remove member?" body_prefix="Remove " body_emphasis="" body_suffix=" from this group?" action_url=group_detail_url submit_label="Remove" submit_class="btn-danger" form_fields_template="core/_modal_confirm_fields.html" confirm_action="remove_member" confirm_username_field=True %}
 
+    {% include "core/_modal_confirm.html" with modal_id="promote-member-modal" title="Promote member?" body_prefix="Promote " body_emphasis="" body_suffix=" to Team Lead?" action_url=group_detail_url submit_label="Promote to Team Lead" submit_class="btn-primary" form_fields_template="core/_modal_confirm_fields.html" confirm_action="promote_member" confirm_username_field=True %}
+
+    {% include "core/_modal_confirm.html" with modal_id="demote-sponsor-modal" title="Remove Team Lead?" body_prefix="Remove " body_emphasis="" body_suffix=" as Team Lead?" action_url=group_detail_url submit_label="Remove Team Lead" submit_class="btn-warning" form_fields_template="core/_modal_confirm_fields.html" confirm_action="demote_sponsor" confirm_username_field=True %}
+
     <script>
       (function () {
-        var jq = window.jQuery;
-        if (!jq || !jq.fn) return;
-
-        jq('#remove-member-modal').on('show.bs.modal', function (evt) {
-          var btn = evt && evt.relatedTarget ? evt.relatedTarget : null;
-          var username = btn ? String(btn.getAttribute('data-username') || '') : '';
-
-          var modalEl = this;
+        function fillModal(modalEl, username) {
+          if (!modalEl) return;
           var userEl = modalEl.querySelector('.js-confirm-username');
           if (userEl) userEl.value = username;
 
           var strongEl = modalEl.querySelector('.modal-body strong');
           if (strongEl) strongEl.textContent = username;
-        });
+        }
+
+        function wireClickHandler(modalId) {
+          document.addEventListener('click', function (evt) {
+            var target = evt && evt.target ? evt.target : null;
+            if (!target || !target.closest) return;
+
+            var btn = target.closest('[data-target="#' + modalId + '"]');
+            if (!btn) return;
+
+            var username = String(btn.getAttribute('data-username') || '');
+            fillModal(document.getElementById(modalId), username);
+          });
+        }
+
+        var jq = window.jQuery;
+        if (jq && jq.fn) {
+          jq('#remove-member-modal').on('show.bs.modal', function (evt) {
+            var btn = evt && evt.relatedTarget ? evt.relatedTarget : null;
+            var username = btn ? String(btn.getAttribute('data-username') || '') : '';
+            fillModal(this, username);
+          });
+
+          jq('#promote-member-modal').on('show.bs.modal', function (evt) {
+            var btn = evt && evt.relatedTarget ? evt.relatedTarget : null;
+            var username = btn ? String(btn.getAttribute('data-username') || '') : '';
+            fillModal(this, username);
+          });
+
+          jq('#demote-sponsor-modal').on('show.bs.modal', function (evt) {
+            var btn = evt && evt.relatedTarget ? evt.relatedTarget : null;
+            var username = btn ? String(btn.getAttribute('data-username') || '') : '';
+            fillModal(this, username);
+          });
+        }
+
+        wireClickHandler('remove-member-modal');
+        wireClickHandler('promote-member-modal');
+        wireClickHandler('demote-sponsor-modal');
       })();
     </script>
   {% endif %}

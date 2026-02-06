@@ -103,6 +103,15 @@ def user_grid(context: Context, **kwargs: Any) -> str:
     member_manage_group_cn_raw = kwargs.get("member_manage_group_cn", None)
     member_manage_group_cn = _normalize_str(member_manage_group_cn_raw) or None
 
+    promote_member_usernames_raw = kwargs.get("promote_member_usernames", None)
+    promote_member_usernames: set[str] = set()
+    if isinstance(promote_member_usernames_raw, (list, set, tuple)):
+        promote_member_usernames = {
+            str(u).strip()
+            for u in promote_member_usernames_raw
+            if str(u).strip()
+        }
+
     muted_usernames_raw = kwargs.get("muted_usernames", None)
     muted_usernames: set[str] = set()
     if isinstance(muted_usernames_raw, (list, set, tuple)):
@@ -200,6 +209,7 @@ def user_grid(context: Context, **kwargs: Any) -> str:
         "grid_items": grid_items,
         "member_manage_enabled": member_manage_enabled and bool(member_manage_group_cn),
         "member_manage_group_cn": member_manage_group_cn,
+        "promote_member_usernames": promote_member_usernames,
         "muted_usernames": muted_usernames,
     }
 
