@@ -6,10 +6,6 @@ astra.almalinux.org {
     }
     respond @blocked_health 404
 
-    handle_path /_bugs/* {
-        reverse_proxy 127.0.0.1:8080
-    }
-
     reverse_proxy 127.0.0.1:8001 127.0.0.1:8002 {
         lb_policy least_conn
         lb_retries 2
