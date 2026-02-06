@@ -184,6 +184,7 @@ def record_membership_request_created(
 
     if membership_request.requested_username:
         email_error: Exception | None = None
+        sent_email = None
 
         if send_submitted_email:
             logger.debug(
@@ -204,7 +205,7 @@ def record_membership_request_created(
             else:
                 if target is not None and target.email:
                     try:
-                        post_office.mail.send(
+                        sent_email = post_office.mail.send(
                             recipients=[target.email],
                             sender=settings.DEFAULT_FROM_EMAIL,
                             template=settings.MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME,
@@ -229,6 +230,24 @@ def record_membership_request_created(
                         membership_request.pk,
                         membership_request.requested_username,
                     )
+
+        email_id = _email_id_from_sent_email(sent_email)
+        if email_id is not None:
+            try:
+                add_note(
+                    membership_request=membership_request,
+                    username=actor_username,
+                    action={
+                        "type": "contacted",
+                        "kind": "submitted",
+                        "email_id": email_id,
+                    },
+                )
+            except Exception:
+                logger.exception(
+                    "record_membership_request_created: failed to record email note request_id=%s",
+                    membership_request.pk,
+                )
 
         try:
             log = MembershipLog.create_for_request(

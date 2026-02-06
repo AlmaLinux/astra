@@ -46,6 +46,45 @@ class MembershipNotesActionTests(TestCase):
             ).exists()
         )
 
+    def test_request_created_records_email_note_when_sent(self) -> None:
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+        email = Email.objects.create(
+            from_email="noreply@example.com",
+            to="alice@example.com",
+            cc="",
+            bcc="",
+            subject="Submitted",
+            message="Submitted text",
+            html_message="",
+        )
+
+        class _Target:
+            username = "alice"
+            email = "alice@example.com"
+            first_name = "Alice"
+            last_name = "User"
+            full_name = "Alice User"
+
+        with (
+            patch("core.membership_request_workflow.FreeIPAUser.get", return_value=_Target()),
+            patch("core.membership_request_workflow.post_office.mail.send", return_value=email),
+        ):
+            record_membership_request_created(
+                membership_request=req,
+                actor_username="alice",
+                send_submitted_email=True,
+            )
+
+        self.assertTrue(
+            Note.objects.filter(
+                membership_request=req,
+                username="alice",
+                action__type="contacted",
+                action__kind="submitted",
+                action__email_id=email.id,
+            ).exists()
+        )
+
     def test_request_created_action_label_includes_creator(self) -> None:
         from core.membership_notes import note_action_label
 
