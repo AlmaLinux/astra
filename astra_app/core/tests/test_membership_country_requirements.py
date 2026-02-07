@@ -174,7 +174,7 @@ class MembershipCountryRequirementsTests(TestCase):
         assert system_note is not None
         self.assertEqual(
             system_note.content,
-            f"alice is from {country_name_from_code('RU')} (RU), which is on the embargoed list.",
+            f"This user's declared country, {country_name_from_code('RU')} (RU), is on the list of embargoed countries.",
         )
 
     @override_settings(MEMBERSHIP_EMBARGOED_COUNTRY_CODES=["RU", "IR"])

@@ -22,7 +22,7 @@
       {% if embargoed_country_code %}
         <div class="alert alert-warning" role="alert">
           <strong>Compliance warning:</strong>
-          Target user country ({{ embargoed_country_label|default:embargoed_country_code }}) is in the embargoed list.
+          This user's declared country, {{ embargoed_country_label|default:embargoed_country_code }}, is on the list of embargoed countries.
         </div>
       {% endif %}
 

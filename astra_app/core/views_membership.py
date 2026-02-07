@@ -253,7 +253,7 @@ def membership_request(request: HttpRequest) -> HttpResponse:
                         add_note(
                             membership_request=mr,
                             username=CUSTOS,
-                            content=f"{username} is from {country_label_from_code(status.code)}, which is on the embargoed list.",
+                            content=f"This user's declared country, {country_label_from_code(status.code)}, is on the list of embargoed countries.",
                         )
                 except Exception:
                     logger.exception(
