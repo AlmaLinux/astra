@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 
 from django import forms
 from django.core.exceptions import ValidationError
+from django.core.validators import URLValidator
 from django.db.models import Q
 
 from core.membership import (
@@ -13,15 +15,45 @@ from core.membership import (
 from core.models import MembershipRequest, MembershipType
 
 
+class _AnswerKind(StrEnum):
+    text = "text"
+    url = "url"
+
+
 @dataclass(frozen=True, slots=True)
 class _QuestionSpec:
     name: str
     title: str
     required: bool
+    answer_kind: _AnswerKind = _AnswerKind.text
+    url_assume_scheme: str | None = None
 
     @property
     def field_name(self) -> str:
         return f"q_{self.name.lower().replace(' ', '_')}"
+
+
+class _AssumedSchemeURLField(forms.URLField):
+    default_validators = [URLValidator(schemes=["http", "https"])]
+
+    def __init__(
+        self,
+        *,
+        assume_scheme: str,
+        **kwargs,
+    ) -> None:
+        self._assume_scheme = assume_scheme
+        super().__init__(**kwargs)
+
+    def to_python(self, value) -> str | None:
+        normalized = super().to_python(value)
+        if normalized and "://" not in normalized:
+            return f"{self._assume_scheme}://{normalized}"
+        return normalized
+
+
+class _HttpURLField(forms.URLField):
+    default_validators = [URLValidator(schemes=["http", "https"])]
 
 
 class MembershipRequestForm(forms.Form):
@@ -29,22 +61,30 @@ class MembershipRequestForm(forms.Form):
         _QuestionSpec(
             name="Contributions",
             title=(
-                "Please provide summary of contributions to the AlmaLinux Community, including links if appropriate."
+                "Please provide a summary of your contributions to the AlmaLinux Community, including links if appropriate."
             ),
             required=True,
         ),
     )
 
     _MIRROR_QUESTIONS: tuple[_QuestionSpec, ...] = (
-        _QuestionSpec(name="Domain", title="Domain name of the mirror", required=True),
+        _QuestionSpec(
+            name="Domain",
+            title="Domain name of the mirror",
+            required=True,
+            answer_kind=_AnswerKind.url,
+            url_assume_scheme="https",
+        ),
         _QuestionSpec(
             name="Pull request",
             title="Please provide a link to your pull request on https://github.com/AlmaLinux/mirrors/",
             required=True,
+            answer_kind=_AnswerKind.url,
+            url_assume_scheme="https",
         ),
         _QuestionSpec(
             name="Additional info",
-            title="Please, provide any additional information membership committee should know",
+            title="Please provide any additional information the Membership Committee should know",
             required=False,
         ),
     )
@@ -61,6 +101,24 @@ class MembershipRequestForm(forms.Form):
     q_additional_info = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 4, "spellcheck": "true"}))
 
     @classmethod
+    def _question_spec_by_name(cls) -> dict[str, _QuestionSpec]:
+        return {spec.name: spec for spec in cls.all_question_specs()}
+
+    @classmethod
+    def _field_for_spec(cls, spec: _QuestionSpec) -> forms.Field:
+        if spec.answer_kind != _AnswerKind.url:
+            raise ValueError(f"Spec {spec.name!r} is not a URL question")
+        if spec.url_assume_scheme:
+            # Use a plain text input so browsers don't reject bare domains.
+            # We still validate on submit via Django, and add client-side JS validation.
+            return _AssumedSchemeURLField(
+                required=False,
+                assume_scheme=spec.url_assume_scheme,
+                widget=forms.TextInput(attrs={"inputmode": "url", "autocomplete": "url"}),
+            )
+        return _HttpURLField(required=False)
+
+    @classmethod
     def question_specs_for_membership_type(cls, membership_type: MembershipType) -> tuple[_QuestionSpec, ...]:
         if membership_type.code == "mirror":
             return cls._MIRROR_QUESTIONS
@@ -72,6 +130,10 @@ class MembershipRequestForm(forms.Form):
 
     def __init__(self, *args, username: str, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+
+        for spec in self.all_question_specs():
+            if spec.answer_kind == _AnswerKind.url:
+                self.fields[spec.field_name] = self._field_for_spec(spec)
 
         self.fields["membership_type"].widget.attrs.update({"class": "form-control w-100"})
         self.fields["q_contributions"].widget.attrs.update({"class": "form-control w-100"})
@@ -98,7 +160,10 @@ class MembershipRequestForm(forms.Form):
                 status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
             ).values_list("membership_type_id", flat=True)
         )
-        self.fields["membership_type"].queryset = (
+
+        membership_type_field = self.fields["membership_type"]
+        assert isinstance(membership_type_field, forms.ModelChoiceField)
+        membership_type_field.queryset = (
             MembershipType.objects.filter(enabled=True).filter(Q(isIndividual=True) | Q(code="mirror"))
             .exclude(code__in=self._blocked_membership_type_codes)
             .exclude(code__in=self._pending_membership_type_codes)
@@ -157,6 +222,15 @@ class MembershipRequestUpdateResponsesForm(forms.Form):
             for question, answer in item.items():
                 spec = _QuestionSpec(name=str(question), title=str(question), required=False)
                 if spec.field_name in self.fields:
+                    continue
+
+                known = MembershipRequestForm._question_spec_by_name().get(spec.name)
+                if known is not None and known.answer_kind == _AnswerKind.url:
+                    self.fields[spec.field_name] = MembershipRequestForm._field_for_spec(known)
+                    self.fields[spec.field_name].label = spec.title
+                    self.fields[spec.field_name].initial = str(answer or "")
+                    self.fields[spec.field_name].widget.attrs.update({"class": "form-control w-100"})
+                    self._question_specs.append(spec)
                     continue
 
                 self.fields[spec.field_name] = forms.CharField(

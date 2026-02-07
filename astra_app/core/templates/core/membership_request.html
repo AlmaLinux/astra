@@ -1,76 +1,151 @@
 {% extends 'core/base.html' %}
 
-{% block title %}Request Membership{% endblock %}
+{% load core_membership_responses %}
+
+{% block title %}
+  {% if req %}
+    {% if req.requested_organization_name or req.requested_organization %}Your Sponsorship Request #{{ req.pk }}{% else %}Your Membership Request #{{ req.pk }}{% endif %}
+  {% else %}
+    Request Membership
+  {% endif %}
+{% endblock %}
 
 {% block header %}
-  <h1 class="m-0">Request Membership</h1>
+  {% if req %}
+    <div class="d-flex align-items-center justify-content-between flex-wrap" style="gap: .5rem;">
+      <h1 class="m-0">{% if req.requested_organization_name or req.requested_organization %}Your Sponsorship Request #{{ req.pk }}{% else %}Your Membership Request #{{ req.pk }}{% endif %}</h1>
+    </div>
+  {% else %}
+    <h1 class="m-0">Request Membership</h1>
+  {% endif %}
 {% endblock %}
 
 {% block content %}
   <div class="card">
     <div class="card-body">
-      <form method="post">
-        {% csrf_token %}
+      {% if req %}
+        <dl class="row mb-0">
+          <dt class="col-sm-3">Status</dt>
+          <dd class="col-sm-9">{{ req.get_status_display }}</dd>
 
-        <div class="mb-3 text-muted">
-          Membership is subject to confirmation of eligibility.
-          Your request will be reviewed by the Membership Committee.
-        </div>
+          <dt class="col-sm-3">Requested at</dt>
+          <dd class="col-sm-9">{{ req.requested_at }}</dd>
 
-        <div class="mb-3">
-          {{ form.membership_type.label_tag }}
-          <div class="mt-1">{{ form.membership_type }}</div>
-          {% if form.membership_type.errors %}
-            <div class="text-danger small">{{ form.membership_type.errors }}</div>
+          <dt class="col-sm-3">Type</dt>
+          <dd class="col-sm-9">{{ req.membership_type.name }}</dd>
+
+          {% if req.requested_organization_name %}
+            <dt class="col-sm-3">Organization</dt>
+            <dd class="col-sm-9">{{ req.requested_organization_name }}</dd>
+          {% endif %}
+
+          {% if req.on_hold_at %}
+            <dt class="col-sm-3">On hold since</dt>
+            <dd class="col-sm-9">{{ req.on_hold_at }}</dd>
+          {% endif %}
+        </dl>
+        <hr>
+
+        {% if req.status == 'on_hold' %}
+          <div class="callout callout-danger">
+            We sent you an email{% if user_email %} to <strong>{{ user_email }}</strong>{% endif %} asking for clarifications.
+            Please update your request below and submit it to resume review.
+          </div>
+        {% endif %}
+      {% endif %}
+
+      <div class="mb-3 text-muted">
+        Membership is subject to confirmation of eligibility.
+        Your request will be reviewed by the Membership Committee.
+      </div>
+
+      {% if req %}
+        {% if req.status == 'pending' or req.status == 'on_hold' %}
+          <form id="membership-rescind-form" method="post" action="{% url 'membership-request-rescind' req.pk %}">
+            {% csrf_token %}
+          </form>
+        {% endif %}
+      {% endif %}
+
+      <form
+        id="membership-request-form"
+        method="{% if not req or req.status == 'on_hold' %}post{% else %}get{% endif %}"
+        {% if req %}novalidate data-membership-type="{{ req.membership_type.code }}"{% endif %}
+      >
+        {% if not req or req.status == 'on_hold' %}
+          {% csrf_token %}
+        {% endif %}
+
+        {% if form.non_field_errors %}
+          <div class="alert alert-danger" role="alert">
+            {{ form.non_field_errors }}
+          </div>
+        {% endif %}
+
+        {% if req %}
+          {% for field in form %}
+            {% include 'core/_form_field.html' %}
+          {% endfor %}
+
+        {% else %}
+          {% with field=form.membership_type %}
+            {% include 'core/_form_field.html' %}
+          {% endwith %}
+
+          <div id="questions-individual" class="mt-3">
+            <h5>Individual Membership</h5>
+            {% for field in form %}
+              {% if field.name == 'q_contributions' %}
+                {% include 'core/_form_field.html' %}
+              {% endif %}
+            {% endfor %}
+          </div>
+
+          <div id="questions-mirror" class="mt-3">
+            <h5>Mirror Membership</h5>
+            {% for field in form %}
+              {% if field.name|slice:':2' == 'q_' and field.name != 'q_contributions' %}
+                {% include 'core/_form_field.html' %}
+              {% endif %}
+            {% endfor %}
+          </div>
+        {% endif %}
+
+        {% if not req or req.status == 'on_hold' %}
+          <div class="mt-4 mb-3 text-muted">
+            By clicking the "Submit request" button below, you acknowledge and agree that, when accepted by
+            AlmaLinux OS Foundation, this application represents a binding contract between the parties
+            and commits the applicant to comply with all the terms and conditions of AlmaLinux OS
+            Foundation's Bylaws and such rules and policies as the Board of Directors and/or committees
+            may from time to time adopt. Additionally, the applicant hereby acknowledges and consents to
+            the terms set forth in the <a href="{% url 'privacy-policy' %}">AlmaLinux OS Foundation Privacy Policy</a>.
+          </div>
+        {% endif %}
+
+        <div class="d-flex justify-content-between flex-wrap mt-3" style="gap: .5rem;">
+          <a href="{% url 'user-profile' request.user.get_username %}" class="btn btn-secondary" title="Return to profile without changes">Cancel</a>
+
+          {% if not req or req.status == 'on_hold' %}
+            <button
+              type="submit"
+              class="btn btn-success"
+              title="{% if req %}Submit updated request{% else %}Submit membership request{% endif %}"
+            >Submit request</button>
+          {% endif %}
+
+          {% if req %}
+            {% if req.status == 'pending' or req.status == 'on_hold' %}
+              <button
+                type="submit"
+                form="membership-rescind-form"
+                formnovalidate
+                class="btn btn-outline-danger"
+                title="Cancel your {% if req.requested_organization_name or req.requested_organization %}sponsorship{% else %}membership{% endif %} request"
+              >Rescind request</button>
+            {% endif %}
           {% endif %}
         </div>
 
-        <div id="questions-individual" class="mt-3">
-          <h5>Individual</h5>
-          <div class="mb-3">
-            {{ form.q_contributions.label_tag }}
-            <div class="mt-1">{{ form.q_contributions }}</div>
-            {% if form.q_contributions.errors %}
-              <div class="text-danger small">{{ form.q_contributions.errors }}</div>
-            {% endif %}
-          </div>
-        </div>
-
-        <div id="questions-mirror" class="mt-3">
-          <h5>Mirror</h5>
-          <div class="mb-3">
-            {{ form.q_domain.label_tag }}
-            <div class="mt-1">{{ form.q_domain }}</div>
-            {% if form.q_domain.errors %}
-              <div class="text-danger small">{{ form.q_domain.errors }}</div>
-            {% endif %}
-          </div>
-          <div class="mb-3">
-            {{ form.q_pull_request.label_tag }}
-            <div class="mt-1">{{ form.q_pull_request }}</div>
-            {% if form.q_pull_request.errors %}
-              <div class="text-danger small">{{ form.q_pull_request.errors }}</div>
-            {% endif %}
-          </div>
-          <div class="mb-3">
-            {{ form.q_additional_info.label_tag }}
-            <div class="mt-1">{{ form.q_additional_info }}</div>
-            {% if form.q_additional_info.errors %}
-              <div class="text-danger small">{{ form.q_additional_info.errors }}</div>
-            {% endif %}
-          </div>
-        </div>
-
-        <div class="mt-4 mb-3 text-muted">
-          By clicking the "Submit request" button below, you acknowledge and agree that, when accepted by
-          AlmaLinux OS Foundation, this application represents a binding contract between the parties
-          and commits the applicant to comply with all the terms and conditions of AlmaLinux OS
-          Foundation's Bylaws and such rules and policies as the Board of Directors and/or committees
-          may from time to time adopt. Additionally, the applicant hereby acknowledges and consents to
-          the terms set forth in the <a href="{% url 'privacy-policy' %}">AlmaLinux OS Foundation Privacy Policy</a>.
-        </div>
-
-        <button type="submit" class="btn btn-primary" title="Submit membership request">Submit request</button>
       </form>
     </div>
   </div>
@@ -78,22 +153,148 @@
   <script>
     (function () {
       const select = document.getElementById('id_membership_type');
+      const selectForm = (select && select.form) ? select.form : null;
       const individual = document.getElementById('questions-individual');
       const mirror = document.getElementById('questions-mirror');
-      if (!select || !individual || !mirror) return;
 
-      function update() {
-        const code = select.value || '';
-        if (code === 'mirror') {
-          individual.style.display = 'none';
-          mirror.style.display = '';
-        } else {
-          individual.style.display = '';
-          mirror.style.display = 'none';
+      const contributions = document.getElementById('id_q_contributions');
+      const domain = document.getElementById('id_q_domain');
+      const pullRequest = document.getElementById('id_q_pull_request');
+
+      function membershipTypeCode() {
+        if (select) return select.value || '';
+        const candidateForm = (domain && domain.form) ? domain.form : ((pullRequest && pullRequest.form) ? pullRequest.form : null);
+        if (candidateForm && candidateForm.dataset && candidateForm.dataset.membershipType) return candidateForm.dataset.membershipType;
+        return '';
+      }
+
+      function isHttpUrl(s) {
+        try {
+          const u = new URL(s);
+          return (u.protocol === 'http:' || u.protocol === 'https:') && !!u.hostname;
+        } catch (e) {
+          return false;
         }
       }
 
-      select.addEventListener('change', update);
+      function isBareDomain(s) {
+        // Minimal sanity check: no spaces, has at least one dot, and uses common hostname chars.
+        if (!s) return false;
+        if (/\s/.test(s)) return false;
+        if (!s.includes('.')) return false;
+        return /^[A-Za-z0-9.-]+$/.test(s);
+      }
+
+      function validateMirrorFields() {
+        const code = membershipTypeCode();
+        if (code !== 'mirror') {
+          if (domain) domain.setCustomValidity('');
+          if (pullRequest) pullRequest.setCustomValidity('');
+          if (domain) domain.classList.remove('is-invalid');
+          if (pullRequest) pullRequest.classList.remove('is-invalid');
+          if (domain) domain.removeAttribute('title');
+          if (pullRequest) pullRequest.removeAttribute('title');
+          return true;
+        }
+
+        let ok = true;
+
+        if (domain) {
+          const v = (domain.value || '').trim();
+          if (!v) {
+            domain.setCustomValidity('');
+          } else if (v.includes('://')) {
+            if (isHttpUrl(v)) {
+              domain.setCustomValidity('');
+            } else {
+              domain.setCustomValidity('Enter a valid http(s) URL.');
+              ok = false;
+            }
+          } else {
+            if (isBareDomain(v)) {
+              domain.setCustomValidity('');
+            } else {
+              domain.setCustomValidity('Enter a valid domain name.');
+              ok = false;
+            }
+          }
+
+          domain.classList.toggle('is-invalid', !domain.validity.valid);
+          if (!domain.validity.valid) domain.title = domain.validationMessage || '';
+          else domain.removeAttribute('title');
+        }
+
+        if (pullRequest) {
+          const v = (pullRequest.value || '').trim();
+          if (!v) {
+            pullRequest.setCustomValidity('');
+          } else if (isHttpUrl(v)) {
+            pullRequest.setCustomValidity('');
+          } else {
+            pullRequest.setCustomValidity('Enter a valid http(s) URL.');
+            ok = false;
+          }
+
+          pullRequest.classList.toggle('is-invalid', !pullRequest.validity.valid);
+          if (!pullRequest.validity.valid) pullRequest.title = pullRequest.validationMessage || '';
+          else pullRequest.removeAttribute('title');
+        }
+
+        return ok;
+      }
+
+      function update() {
+        if (select && individual && mirror) {
+          const code = select.value || '';
+          if (code === 'mirror') {
+            individual.style.display = 'none';
+            mirror.style.display = '';
+
+            if (contributions) contributions.required = false;
+            if (domain) domain.required = true;
+            if (pullRequest) pullRequest.required = true;
+          } else {
+            individual.style.display = '';
+            mirror.style.display = 'none';
+
+            if (contributions) contributions.required = true;
+            if (domain) domain.required = false;
+            if (pullRequest) pullRequest.required = false;
+          }
+        }
+
+        validateMirrorFields();
+      }
+
+      if (select) select.addEventListener('change', update);
+
+      if (domain) {
+        domain.addEventListener('input', validateMirrorFields);
+        domain.addEventListener('blur', validateMirrorFields);
+      }
+      if (pullRequest) {
+        pullRequest.addEventListener('input', validateMirrorFields);
+        pullRequest.addEventListener('blur', validateMirrorFields);
+      }
+
+      const submitForm = selectForm || ((domain && domain.form) ? domain.form : ((pullRequest && pullRequest.form) ? pullRequest.form : null));
+      if (submitForm) {
+        submitForm.addEventListener('submit', function (evt) {
+          if (!validateMirrorFields()) {
+            evt.preventDefault();
+            if (domain && domain.validationMessage) domain.reportValidity();
+            else if (pullRequest && pullRequest.validationMessage) pullRequest.reportValidity();
+          }
+        });
+      }
+
+      // If the server rendered errors, ensure the fields get the Bootstrap invalid styling.
+      if (domain && domain.closest('.mb-3') && domain.closest('.mb-3').querySelector('.errorlist')) {
+        domain.classList.add('is-invalid');
+      }
+      if (pullRequest && pullRequest.closest('.mb-3') && pullRequest.closest('.mb-3').querySelector('.errorlist')) {
+        pullRequest.classList.add('is-invalid');
+      }
       update();
     })();
   </script>

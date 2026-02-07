@@ -316,7 +316,7 @@ def membership_request_self(request: HttpRequest, pk: int) -> HttpResponse:
             messages.error(request, "Invalid request update.")
             return render(
                 request,
-                "core/membership_request_self.html",
+                "core/membership_request.html",
                 {
                     "req": req,
                     "form": form,
@@ -335,7 +335,7 @@ def membership_request_self(request: HttpRequest, pk: int) -> HttpResponse:
             form.add_error(None, msg)
             return render(
                 request,
-                "core/membership_request_self.html",
+                "core/membership_request.html",
                 {
                     "req": req,
                     "form": form,
@@ -346,13 +346,23 @@ def membership_request_self(request: HttpRequest, pk: int) -> HttpResponse:
         messages.success(request, "Your request has been resubmitted for review.")
         return redirect("membership-request-self", pk=req.pk)
 
-    form: MembershipRequestUpdateResponsesForm | None = None
-    if req.status == MembershipRequest.Status.on_hold:
-        form = MembershipRequestUpdateResponsesForm(membership_request=req)
+    form = MembershipRequestUpdateResponsesForm(membership_request=req)
+    if req.status != MembershipRequest.Status.on_hold:
+        # For non-editable requests (pending/accepted/etc), render a read-only version of the
+        # responses using the same form visualization as the on-hold update screen.
+        has_additional_info = any(
+            isinstance(item, dict) and "Additional information" in item for item in (req.responses or [])
+        )
+        if not has_additional_info and "q_additional_information" in form.fields:
+            del form.fields["q_additional_information"]
+
+        for field in form.fields.values():
+            field.disabled = True
+            field.required = False
 
     return render(
         request,
-        "core/membership_request_self.html",
+        "core/membership_request.html",
         {
             "req": req,
             "form": form,

@@ -1290,11 +1290,83 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertEqual(
             req.responses,
             [
-                {"Domain": "example.com"},
+                {"Domain": "https://example.com"},
                 {"Pull request": "https://github.com/example/repo/pull/123"},
                 {"Additional info": "Extra details"},
             ],
         )
+
+    def test_membership_request_mirror_url_fields_are_validated(self) -> None:
+        from core.models import MembershipRequest, MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror",
+                "group_cn": "almalinux-mirror",
+                "isIndividual": False,
+                "isOrganization": True,
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        alice = self._make_user("alice", full_name="Alice User")
+        self._login_as_freeipa_user("alice")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+            resp_post_invalid = self.client.post(
+                reverse("membership-request"),
+                data={
+                    "membership_type": "mirror",
+                    "q_domain": "not a domain",
+                    "q_pull_request": "not a url",
+                },
+            )
+
+        self.assertEqual(resp_post_invalid.status_code, 200)
+        self.assertContains(resp_post_invalid, "Enter a valid URL")
+        self.assertFalse(
+            MembershipRequest.objects.filter(
+                requested_username="alice",
+                status=MembershipRequest.Status.pending,
+            ).exists()
+        )
+
+    def test_membership_request_detail_linkifies_mirror_url_responses(self) -> None:
+        from core.models import MembershipRequest, MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror",
+                "group_cn": "almalinux-mirror",
+                "isIndividual": False,
+                "isOrganization": True,
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="mirror",
+            responses=[
+                {"Domain": "mirror.example.org"},
+                {"Pull request": "https://github.com/AlmaLinux/mirrors/pull/1"},
+            ],
+        )
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.get(reverse("membership-request-detail", args=[req.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'href="https://mirror.example.org"')
+        self.assertContains(resp, 'href="https://github.com/AlmaLinux/mirrors/pull/1"')
 
     def test_membership_audit_log_is_paginated_50_per_page(self) -> None:
         import datetime
@@ -1418,11 +1490,8 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             resp = self.client.get(reverse("membership-audit-log"))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(
-            resp,
-            f'<td class="text-muted text-nowrap" style="width: 1%; white-space: nowrap;"><a href="{reverse("membership-request-detail", args=[req.pk])}">Request #{req.pk}</a><br/>',
-            html=False,
-        )
+        self.assertContains(resp, f'href="{reverse("membership-request-detail", args=[req.pk])}"')
+        self.assertContains(resp, f"Request #{req.pk}")
         self.assertContains(resp, "Request responses")
         self.assertContains(resp, "Contributions")
         self.assertContains(resp, "Patch submissions")

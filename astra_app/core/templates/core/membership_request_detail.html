@@ -1,6 +1,7 @@
 {% extends 'core/base.html' %}
 
 {% load core_membership_notes %}
+{% load core_membership_responses %}
 
 {% block title %}Membership Request #{{ req.pk }}{% endblock %}
 
@@ -94,7 +95,7 @@
         {% for item in req.responses %}
           {% for k,v in item.items %}
             <div class="small text-muted font-weight-bold">{{ k }}</div>
-            <div class="small" style="white-space: pre-wrap;">{{ v }}</div>
+            <div class="small" style="white-space: pre-wrap;">{{ v|membership_response_value:k }}</div>
           {% endfor %}
         {% endfor %}
       {% endif %}

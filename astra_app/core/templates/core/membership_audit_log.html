@@ -1,5 +1,7 @@
 {% extends 'core/base.html' %}
 
+{% load core_membership_responses %}
+
 {% block title %}Membership Audit Log{% endblock %}
 
 {% block header %}
@@ -90,7 +92,7 @@
                       {% for item in l.membership_request.responses %}
                         {% for k,v in item.items %}
                             <div class="small text-muted font-weight-bold">{{ k }}</div>
-                            <div class="small" style="white-space: pre-wrap;">{{ v }}</div>
+                            <div class="small" style="white-space: pre-wrap;">{{ v|membership_response_value:k }}</div>
                         {% endfor %}
                       {% endfor %}
                     </div>
