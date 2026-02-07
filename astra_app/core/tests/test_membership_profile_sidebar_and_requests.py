@@ -1418,6 +1418,11 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             resp = self.client.get(reverse("membership-audit-log"))
 
         self.assertEqual(resp.status_code, 200)
+        self.assertContains(
+            resp,
+            f'<td class="text-muted text-nowrap" style="width: 1%; white-space: nowrap;"><a href="{reverse("membership-request-detail", args=[req.pk])}">Request #{req.pk}</a><br/>',
+            html=False,
+        )
         self.assertContains(resp, "Request responses")
         self.assertContains(resp, "Contributions")
         self.assertContains(resp, "Patch submissions")

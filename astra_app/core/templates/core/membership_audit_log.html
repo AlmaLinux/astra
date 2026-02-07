@@ -63,7 +63,10 @@
         <tbody>
           {% for l in logs %}
             <tr>
-              <td class="text-muted text-nowrap" style="width: 1%; white-space: nowrap;">{{ l.created_at|date:"r" }}</td>
+              <td class="text-muted text-nowrap" style="width: 1%; white-space: nowrap;">
+                {% if l.membership_request %}<a href="{% url 'membership-request-detail' l.membership_request.pk %}">Request #{{ l.membership_request.pk }}</a><br/>{% endif %}
+                {{ l.created_at|date:"r" }}
+              </td>
               <td>{{ l.actor_username }}</td>
               <td>
                 {% if l.target_username == '' %}
@@ -84,18 +87,12 @@
                   <details class="mt-1">
                     <summary class="small text-muted">Request responses</summary>
                     <div class="mt-2">
-                      <div class="small text-muted">
-                        <a href="{% url 'membership-request-detail' l.membership_request.pk %}">Request #{{ l.membership_request.pk }}</a>
-                        &middot; {{ l.membership_request.requested_at|date:"r" }}
-                      </div>
-                      <div class="mt-2">
-                        {% for item in l.membership_request.responses %}
-                          {% for k,v in item.items %}
-                              <div class="small text-muted font-weight-bold">{{ k }}</div>
-                              <div class="small" style="white-space: pre-wrap;">{{ v }}</div>
-                          {% endfor %}
+                      {% for item in l.membership_request.responses %}
+                        {% for k,v in item.items %}
+                            <div class="small text-muted font-weight-bold">{{ k }}</div>
+                            <div class="small" style="white-space: pre-wrap;">{{ v }}</div>
                         {% endfor %}
-                      </div>
+                      {% endfor %}
                     </div>
                   </details>
                 {% endif %}
