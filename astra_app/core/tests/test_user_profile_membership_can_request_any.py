@@ -76,3 +76,53 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
         self.assertFalse(bool(resp.context["membership_can_request_any"]))
         self.assertNotContains(resp, 'title="No additional membership types available"')
         self.assertNotContains(resp, "btn btn-sm btn-outline-primary disabled")
+
+    def test_user_profile_does_not_recommend_request_after_rejection(self) -> None:
+        # Ensure the test is deterministic: only one membership type is requestable.
+        MembershipType.objects.update(enabled=False)
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        # The user previously opened a request and it was rejected.
+        MembershipRequest.objects.create(
+            requested_username="alex",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.rejected,
+        )
+
+        alex = FreeIPAUser(
+            "alex",
+            {
+                "uid": ["alex"],
+                "mail": ["alex@example.com"],
+                "memberof_group": [],
+                "givenname": ["Alex"],
+                "sn": ["User"],
+                "c": ["US"],
+            },
+        )
+
+        self._login_as_freeipa_user("alex")
+        with (
+            patch("core.views_users.has_enabled_agreements", return_value=False),
+            patch("core.views_users.FreeIPAGroup.all", return_value=[]),
+            patch("core.backends.FreeIPAUser.get", return_value=alex),
+        ):
+            resp = self.client.get(reverse("user-profile", kwargs={"username": "alex"}))
+
+        self.assertEqual(resp.status_code, 200)
+        recommended = list(resp.context.get("account_setup_recommended_actions") or [])
+        self.assertFalse(
+            any(a.get("id") == "membership-request-recommended-alert" for a in recommended),
+            "Did not expect a membership request recommendation after a rejected request.",
+        )

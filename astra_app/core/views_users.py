@@ -278,6 +278,10 @@ def _profile_context_for_user(
     account_setup_recommended_actions: list[dict[str, str]] = []
 
     has_open_membership_request = bool(personal_pending_requests)
+    has_rejected_membership_request = MembershipRequest.objects.filter(
+        requested_username=fu.username,
+        status=MembershipRequest.Status.rejected,
+    ).exists()
 
     if is_self:
         if not coc_signed and coc_settings_url:
@@ -338,7 +342,12 @@ def _profile_context_for_user(
                 }
             )
 
-        if (not has_individual_membership) and membership_can_request_any and (not has_open_membership_request):
+        if (
+            (not has_individual_membership)
+            and membership_can_request_any
+            and (not has_open_membership_request)
+            and (not has_rejected_membership_request)
+        ):
             account_setup_recommended_actions.append(
                 {
                     "id": "membership-request-recommended-alert",
