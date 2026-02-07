@@ -36,6 +36,7 @@ from core.backends import (
     _get_freeipa_client,
 )
 from core.email_context import user_email_context
+from core.country_codes import country_label_from_code
 from core.forms_selfservice import (
     EmailsForm,
     KeysForm,
@@ -942,7 +943,10 @@ def settings_root(request: HttpRequest) -> HttpResponse:
                                     add_note(
                                         membership_request=mr,
                                         username=CUSTOS,
-                                        content=f"{username} updated their country from {old_country} to {new_country}.",
+                                        content=(
+                                            f"{username} updated their country from {country_label_from_code(old_country)} "
+                                            f"to {country_label_from_code(new_country)}."
+                                        ),
                                     )
                                 except Exception:
                                     logger.exception(
@@ -1207,7 +1211,10 @@ def settings_root(request: HttpRequest) -> HttpResponse:
                             add_note(
                                 membership_request=mr,
                                 username=CUSTOS,
-                                content=f"{username} updated their country from {old_country} to {new_country}.",
+                                content=(
+                                    f"{username} updated their country from {country_label_from_code(old_country)} "
+                                    f"to {country_label_from_code(new_country)}."
+                                ),
                             )
                         except Exception:
                             logger.exception(

@@ -11,7 +11,7 @@ from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
 from core import views_membership, views_settings
-from core.country_codes import country_code_status_from_user_data
+from core.country_codes import country_code_status_from_user_data, country_name_from_code
 from core.membership_notes import CUSTOS
 from core.models import MembershipRequest, MembershipType, Note
 
@@ -172,7 +172,10 @@ class MembershipCountryRequirementsTests(TestCase):
         system_note = mr.notes.filter(username=CUSTOS).first()
         self.assertIsNotNone(system_note)
         assert system_note is not None
-        self.assertEqual(system_note.content, "alice is from RU, which is on the embargoed list.")
+        self.assertEqual(
+            system_note.content,
+            f"alice is from {country_name_from_code('RU')} (RU), which is on the embargoed list.",
+        )
 
     @override_settings(MEMBERSHIP_EMBARGOED_COUNTRY_CODES=["RU", "IR"])
     def test_membership_committee_sees_embargoed_country_warning(self) -> None:
@@ -210,6 +213,7 @@ class MembershipCountryRequirementsTests(TestCase):
         self.assertEqual(captured.get("template"), "core/membership_request_detail.html")
         ctx = captured.get("context") or {}
         self.assertEqual(ctx.get("embargoed_country_code"), "RU")
+        self.assertEqual(ctx.get("embargoed_country_label"), f"{country_name_from_code('RU')} (RU)")
 
     def test_country_change_with_pending_request_creates_system_note(self) -> None:
         self._ensure_membership_type()
@@ -261,6 +265,10 @@ class MembershipCountryRequirementsTests(TestCase):
 
         notes = list(Note.objects.filter(membership_request=mr, username=CUSTOS).order_by("timestamp", "pk"))
         self.assertTrue(
-            any(n.content == "alice updated their country from RU to US." for n in notes),
+            any(
+                n.content
+                == f"alice updated their country from {country_name_from_code('RU')} (RU) to {country_name_from_code('US')} (US)."
+                for n in notes
+            ),
             "Expected a system note about the country change.",
         )

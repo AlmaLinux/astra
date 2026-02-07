@@ -63,7 +63,21 @@ def embargoed_country_codes_from_settings() -> set[str]:
 
 
 def country_name_from_code(code: str) -> str:
-    record = pycountry.countries.get(alpha_2=str(code or "").strip().upper())
+    normalized = str(code or "").strip().upper()
+    record = pycountry.countries.get(alpha_2=normalized)
     if record is None:
-        return code
-    return str(record.name or code)
+        return normalized
+
+    # Prefer common names when available (e.g. "Iran" vs "Iran, Islamic Republic of").
+    common_name = getattr(record, "common_name", None)
+    if common_name:
+        return str(common_name)
+
+    return str(record.name or normalized)
+
+
+def country_label_from_code(code: str) -> str:
+    normalized = str(code or "").strip().upper()
+    if not normalized:
+        return ""
+    return f"{country_name_from_code(normalized)} ({normalized})"

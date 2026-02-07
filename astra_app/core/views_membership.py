@@ -19,7 +19,7 @@ from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 
 from core.backends import FreeIPAUser
-from core.country_codes import country_code_status_from_user_data, embargoed_country_codes_from_settings
+from core.country_codes import country_code_status_from_user_data, country_label_from_code, embargoed_country_codes_from_settings
 from core.email_context import (
     freeform_message_email_context,
     membership_committee_email_context,
@@ -253,7 +253,7 @@ def membership_request(request: HttpRequest) -> HttpResponse:
                         add_note(
                             membership_request=mr,
                             username=CUSTOS,
-                            content=f"{username} is from {status.code}, which is on the embargoed list.",
+                            content=f"{username} is from {country_label_from_code(status.code)}, which is on the embargoed list.",
                         )
                 except Exception:
                     logger.exception(
@@ -630,6 +630,7 @@ def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
     target_full_name = ""
     target_deleted = False
     embargoed_country_code: str | None = None
+    embargoed_country_label: str | None = None
     if req.requested_username:
         target_user = FreeIPAUser.get(req.requested_username)
         target_deleted = target_user is None
@@ -639,6 +640,7 @@ def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
             embargoed_country_codes = embargoed_country_codes_from_settings()
             if status.is_valid and status.code in embargoed_country_codes:
                 embargoed_country_code = status.code
+                embargoed_country_label = country_label_from_code(status.code)
 
     requested_log = (
         req.logs.filter(action=MembershipLog.Action.requested)
@@ -664,6 +666,7 @@ def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "target_full_name": target_full_name,
             "target_deleted": target_deleted,
             "embargoed_country_code": embargoed_country_code,
+            "embargoed_country_label": embargoed_country_label,
             "requested_by_username": requested_by_username,
             "requested_by_full_name": requested_by_full_name,
             "requested_by_deleted": requested_by_deleted,
