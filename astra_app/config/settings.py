@@ -115,17 +115,79 @@ if _sentry_dsn:
         import sentry_sdk
         from sentry_sdk.integrations.django import DjangoIntegration
         from sentry_sdk.integrations.logging import LoggingIntegration
+        from sentry_sdk.scrubber import DEFAULT_DENYLIST, EventScrubber
     except ImportError as e:
         raise ImproperlyConfigured(
             "SENTRY_DSN is set but sentry-sdk is not installed. "
             "Add sentry-sdk[django] to requirements."
         ) from e
 
-    # Capture Django exceptions + log-based errors. Default PII is disabled.
+    # Extend Sentry's default scrubbing lists with election/voting field names
+    # so they are never sent to Sentry. Grouped by risk category per security audit.
+    _sentry_denylist = DEFAULT_DENYLIST + [
+        # --- HIGH-RISK: Voting credential & identity fields ---
+        # Voter credential identifiers (can deanonymize votes)
+        "credential_public_id",
+        "public_id",  # synonym for credential_public_id
+        "ranking",
+        "ranking_usernames",
+        # Ballot receipt data (can be correlated to deanonymize voters or forge receipts)
+        "nonce",
+        "ballot_hash",
+        # Vote metadata (reveals voter privilege level = PII in small elections)
+        "weight",
+        # Voter identity linkage (directly identifies who voted)
+        "freeipa_username",
+        # --- MEDIUM-RISK: Ballot chaining & aggregate structures ---
+        # Ballot chaining/blockchain-like commitments
+        "chain_hash",
+        "previous_chain_hash",
+        # Nested ballot/tally objects in error contexts or audit logs
+        "ballot",
+        "ballots",
+        "tally_result",
+        "payload",  # AuditLogEntry payload may contain any of the above
+        # --- OPTIONAL: Defense-in-depth ---
+        "eligible_voters",
+        "eligible",
+        "superseded_by",
+        "is_counted",
+        "candidates",
+    ]
+
+    # Keyword fragments that indicate election-sensitive data in breadcrumbs.
+    _ELECTION_KEYWORDS = {"credential", "ballot", "vote", "nonce", "tally", "ranking"}
+
+    def _sentry_before_send(event: dict, hint: dict) -> dict | None:
+        """Scrub election-sensitive data from breadcrumbs and stack-frame locals."""
+        # Scrub breadcrumbs whose message or category mentions election keywords.
+        for crumb in event.get("breadcrumbs", {}).get("values", []):
+            msg = (crumb.get("message") or "").lower()
+            cat = (crumb.get("category") or "").lower()
+            if any(kw in msg or kw in cat for kw in _ELECTION_KEYWORDS):
+                crumb["message"] = "[scrubbed]"
+                crumb["data"] = {}
+
+        # Scrub stack-frame locals that match denylisted field names.
+        _deny_set = set(_sentry_denylist)
+        for exc_entry in event.get("exception", {}).get("values", []):
+            for frame in (exc_entry.get("stacktrace") or {}).get("frames", []):
+                frame_vars = frame.get("vars")
+                if isinstance(frame_vars, dict):
+                    for key in list(frame_vars):
+                        if key in _deny_set:
+                            frame_vars[key] = "[Filtered]"
+
+        return event
+
     sentry_sdk.init(
         dsn=_sentry_dsn,
         integrations=[
-            DjangoIntegration(),
+            DjangoIntegration(
+                middleware_spans=True,
+                signals_spans=True,
+                cache_spans=True,
+            ),
             LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
         ],
         environment=_env_str(
@@ -134,6 +196,11 @@ if _sentry_dsn:
         ),
         release=_env_str("ASTRA_BUILD_SHA", default=None),
         send_default_pii=_env_bool("SENTRY_SEND_DEFAULT_PII", default=True),
+        before_send=_sentry_before_send,
+        event_scrubber=EventScrubber(
+            denylist=_sentry_denylist,
+            recursive=True,
+        ),
         max_request_body_size="always",
         enable_logs=True,
         traces_sample_rate=1.0,
