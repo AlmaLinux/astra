@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -18,9 +17,9 @@ class GroupRoutesTests(TestCase):
         self._login_as_freeipa("admin")
 
         groups = [
-            SimpleNamespace(cn="fas1", description="FAS Group 1", fas_group=True),
-            SimpleNamespace(cn="ipa_only", description="Not a FAS group", fas_group=False),
-            SimpleNamespace(cn="fas2", description="FAS Group 2", fas_group=True),
+            SimpleNamespace(cn="fas1", description="FAS Group 1", fas_group=True, member_count_recursive=lambda: 0),
+            SimpleNamespace(cn="ipa_only", description="Not a FAS group", fas_group=False, member_count_recursive=lambda: 0),
+            SimpleNamespace(cn="fas2", description="FAS Group 2", fas_group=True, member_count_recursive=lambda: 0),
         ]
 
         with patch("core.backends.FreeIPAGroup.all", return_value=groups):
@@ -35,7 +34,7 @@ class GroupRoutesTests(TestCase):
         self._login_as_freeipa("admin")
 
         groups = [
-            SimpleNamespace(cn=f"group{i:03d}", description="", fas_group=True)
+            SimpleNamespace(cn=f"group{i:03d}", description="", fas_group=True, member_count_recursive=lambda: 0)
             for i in range(65)
         ]
 
@@ -55,8 +54,8 @@ class GroupRoutesTests(TestCase):
         self._login_as_freeipa("admin")
 
         groups = [
-            SimpleNamespace(cn="infra", description="Infrastructure", fas_group=True),
-            SimpleNamespace(cn="docs", description="Documentation", fas_group=True),
+            SimpleNamespace(cn="infra", description="Infrastructure", fas_group=True, member_count_recursive=lambda: 0),
+            SimpleNamespace(cn="docs", description="Documentation", fas_group=True, member_count_recursive=lambda: 0),
         ]
 
         with patch("core.backends.FreeIPAGroup.all", return_value=groups):
@@ -70,8 +69,8 @@ class GroupRoutesTests(TestCase):
         self._login_as_freeipa("admin")
 
         groups = [
-            SimpleNamespace(cn="fas1", description="", fas_group=True, members=["alice", "bob"]),
-            SimpleNamespace(cn="fas2", description="", fas_group=True, members=[]),
+            SimpleNamespace(cn="fas1", description="", fas_group=True, member_count_recursive=lambda: 2),
+            SimpleNamespace(cn="fas2", description="", fas_group=True, member_count_recursive=lambda: 0),
         ]
 
         with patch("core.backends.FreeIPAGroup.all", return_value=groups):

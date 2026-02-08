@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from collections.abc import Mapping
 from typing import Any
 
@@ -20,3 +18,21 @@ def dict_get(mapping: Mapping[str, Any] | None, key: str) -> Any:  # noqa: ANN40
     if mapping is None:
         return ""
     return mapping.get(key, "")
+
+
+@register.simple_tag
+def make_presets(*args: str) -> list[dict[str, str]]:
+    """Build a list of ``{label, value}`` dicts from alternating arguments.
+
+    Usage in templates::
+
+        {% load core_dict %}
+        {% make_presets "Label A" "value-a" "Label B" "value-b" as my_presets %}
+
+    The resulting list can be passed to included partials that accept a
+    ``presets`` context variable (e.g. ``_modal_preset_textarea.html``).
+    """
+    return [
+        {"label": args[i], "value": args[i + 1]}
+        for i in range(0, len(args) - 1, 2)
+    ]

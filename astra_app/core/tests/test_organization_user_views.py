@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 import datetime
 from io import BytesIO
@@ -921,6 +920,40 @@ class OrganizationUserViewsTests(TestCase):
             self.assertContains(resp, "Under review")
             self.assertContains(resp, "Annual dues: $20,000 USD")
 
+    def test_sponsorship_manage_prefills_current_membership_level(self) -> None:
+        """When a representative visits the sponsorship manage page, the current level should be pre-selected."""
+        from core.models import MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={"name": "Silver", "isOrganization": True, "isIndividual": False, "sort_order": 1, "enabled": True},
+        )
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={"name": "Gold", "isOrganization": True, "isIndividual": False, "sort_order": 2, "enabled": True},
+        )
+
+        org = Organization.objects.create(
+            name="Prefill Org",
+            membership_level_id="gold",
+            website_logo="https://example.com/logo",
+            website="https://example.com/",
+            representative="bob",
+        )
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        self._login_as_freeipa_user("bob")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.views_organizations.block_action_without_coc", return_value=None),
+        ):
+            resp = self.client.get(reverse("organization-sponsorship-manage", args=[org.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'value="gold" selected')
+        self.assertNotContains(resp, 'value="silver" selected')
+
     def test_sponsorship_manage_requires_signed_coc(self) -> None:
         from core.backends import FreeIPAFASAgreement
         from core.models import MembershipRequest, MembershipType, Organization
@@ -1692,7 +1725,7 @@ class OrganizationUserViewsTests(TestCase):
         extend_at = datetime.datetime(2025, 2, 1, 12, 0, 0, tzinfo=datetime.UTC)
 
         with patch("django.utils.timezone.now", autospec=True, return_value=start_at):
-            first_log = MembershipLog.create_for_org_approval(
+            first_log = MembershipLog.create_for_approval(
                 actor_username="reviewer",
                 target_organization=org,
                 membership_type=membership_type,
@@ -1710,7 +1743,7 @@ class OrganizationUserViewsTests(TestCase):
         OrganizationSponsorship.objects.filter(organization=org).delete()
 
         with patch("django.utils.timezone.now", autospec=True, return_value=extend_at):
-            MembershipLog.create_for_org_approval(
+            MembershipLog.create_for_approval(
                 actor_username="reviewer",
                 target_organization=org,
                 membership_type=membership_type,
@@ -1749,7 +1782,7 @@ class OrganizationUserViewsTests(TestCase):
         after_expiry_at = datetime.datetime(2025, 7, 1, 12, 0, 0, tzinfo=datetime.UTC)
 
         with patch("django.utils.timezone.now", autospec=True, return_value=start_at):
-            MembershipLog.create_for_org_approval(
+            MembershipLog.create_for_approval(
                 actor_username="reviewer",
                 target_organization=org,
                 membership_type=membership_type,
@@ -1761,7 +1794,7 @@ class OrganizationUserViewsTests(TestCase):
         OrganizationSponsorship.objects.filter(organization=org).update(expires_at=start_at)
 
         with patch("django.utils.timezone.now", autospec=True, return_value=after_expiry_at):
-            MembershipLog.create_for_org_approval(
+            MembershipLog.create_for_approval(
                 actor_username="reviewer",
                 target_organization=org,
                 membership_type=membership_type,
@@ -1987,7 +2020,7 @@ class OrganizationUserViewsTests(TestCase):
             status=MembershipRequest.Status.pending,
             responses=[{"Additional Information": "Please consider our updated sponsorship level."}],
         )
-        MembershipLog.create_for_org_request(
+        MembershipLog.create_for_request(
             actor_username="bob",
             target_organization=org,
             membership_type=membership_type,

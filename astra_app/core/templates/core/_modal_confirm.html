@@ -1,4 +1,5 @@
-<!--
+{% extends 'core/_modal_base.html' %}
+{% comment %}
 Reusable Bootstrap modal-confirm.
 
 Required context:
@@ -19,18 +20,9 @@ Alternative body rendering (use instead of `body` when you need one emphasized v
 - body_prefix: str
 - body_emphasis: str
 - body_suffix: str
--->
+{% endcomment %}
 
-<div class="modal fade"{% if modal_id %} id="{{ modal_id }}"{% endif %} tabindex="-1" role="dialog" aria-hidden="true">
-  <div class="modal-dialog" role="document"{% if dialog_style %} style="{{ dialog_style }}"{% endif %}>
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title">{{ title }}</h5>
-        <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog">
-          <span aria-hidden="true">&times;</span>
-        </button>
-      </div>
-      <div class="modal-body">
+{% block modal_body %}
         <div class="mb-3">
           {% if body_prefix or body_suffix %}
             {{ body_prefix }} <strong>{{ body_emphasis }}</strong>{{ body_suffix }}
@@ -61,7 +53,4 @@ Alternative body rendering (use instead of `body` when you need one emphasized v
             <button type="submit" class="btn {{ submit_button_class|default:submit_class|default:'btn-primary' }}" title="Confirm and apply this action">{{ submit_label }}</button>
           </div>
         </form>
-      </div>
-    </div>
-  </div>
-</div>
+{% endblock %}

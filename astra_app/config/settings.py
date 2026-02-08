@@ -15,6 +15,9 @@ def _env_str(name: str, *, default: str | None = None) -> str | None:
     value = os.environ.get(name)
     if value is None:
         return default
+    # Treat empty env vars as unset when a non-empty default is available.
+    if not value and default:
+        return default
     return value
 
 
@@ -141,16 +144,11 @@ if _sentry_dsn:
 # Self-service country settings: where to store the ISO 3166-1 country code.
 # Some FreeIPA dev schemas don't allow writing to the LDAP "c" attribute.
 # Configure in devel via SELF_SERVICE_ADDRESS_COUNTRY_ATTR=fasstatusnote
-SELF_SERVICE_ADDRESS_COUNTRY_ATTR = (
-    _env_str("SELF_SERVICE_ADDRESS_COUNTRY_ATTR", default="c")
-    or "c"
-)
+SELF_SERVICE_ADDRESS_COUNTRY_ATTR = _env_str("SELF_SERVICE_ADDRESS_COUNTRY_ATTR", default="c")
 
-_valx_words_file = _env_str(
-    "VALX_PROFANITY_WORDS_FILE",
-    default=str(BASE_DIR / "core" / "data" / "custom_profanity.txt"),
+VALX_PROFANITY_WORDS_FILE = Path(
+    _env_str("VALX_PROFANITY_WORDS_FILE", default=str(BASE_DIR / "core" / "data" / "custom_profanity.txt"))
 )
-VALX_PROFANITY_WORDS_FILE = Path(_valx_words_file or str(BASE_DIR / "core" / "data" / "custom_profanity.txt"))
 
 # FreeIPA FAS agreement CN used for the Community Code of Conduct.
 COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN = "AlmaLinux Community Code of Conduct"
@@ -248,6 +246,7 @@ TEMPLATES = [
                 'core.context_processors.organization_nav',
                 'core.context_processors.chat_networks',
                 'core.context_processors.build_info',
+                'core.context_processors.sidebar_active_flags',
             ],
         },
     },
@@ -285,10 +284,10 @@ if not _database_url:
     if db_host:
         from urllib.parse import quote
 
-        db_port = _env_str("DATABASE_PORT", default="5432") or "5432"
-        db_name = _env_str("DATABASE_NAME", default="") or ""
-        db_user = _env_str("DATABASE_USER", default="") or ""
-        db_password = _env_str("DATABASE_PASSWORD", default="") or ""
+        db_port = _env_str("DATABASE_PORT", default="5432")
+        db_name = _env_str("DATABASE_NAME", default="")
+        db_user = _env_str("DATABASE_USER", default="")
+        db_password = _env_str("DATABASE_PASSWORD", default="")
         if not db_name or not db_user:
             raise ImproperlyConfigured(
                 "DATABASE_NAME and DATABASE_USER must be set when using DATABASE_HOST/DATABASE_PASSWORD."
@@ -321,7 +320,7 @@ DEFAULT_FROM_EMAIL = _env_str("DEFAULT_FROM_EMAIL", default="AlmaLinux Accounts 
 
 # Public base URL used for absolute links in email (cron jobs don't have a request
 # context). Example: https://accounts.almalinux.org
-PUBLIC_BASE_URL = _env_str("PUBLIC_BASE_URL", default="http://localhost:8000") or "http://localhost:8000"
+PUBLIC_BASE_URL = _env_str("PUBLIC_BASE_URL", default="http://localhost:8000")
 
 # Elections
 ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS = _env_int(
@@ -343,6 +342,8 @@ FREEIPA_CIRCUIT_BREAKER_COOLDOWN_SECONDS = _env_int(
     "FREEIPA_CIRCUIT_BREAKER_COOLDOWN_SECONDS",
     default=60,
 )
+
+FREEIPA_REQUEST_TIMEOUT_SECONDS = _env_int("FREEIPA_REQUEST_TIMEOUT_SECONDS", default=10)
 
 ELECTION_RATE_LIMIT_BALLOT_VERIFY_LIMIT = _env_int(
     "ELECTION_RATE_LIMIT_BALLOT_VERIFY_LIMIT",
@@ -381,36 +382,36 @@ MEMBERSHIP_EMBARGOED_COUNTRY_CODES = _env_list(
 MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME = _env_str(
     "MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME",
     default="membership-expiring-soon",
-) or "membership-expiring-soon"
+)
 ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME = _env_str(
     "ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME",
     default="organization-sponsorship-expiring-soon",
-) or "organization-sponsorship-expiring-soon"
+)
 ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME = _env_str(
     "ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME",
     default="organization-sponsorship-expired",
-) or "organization-sponsorship-expired"
+)
 MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME = _env_str(
     "MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME",
     default="membership-expired",
-) or "membership-expired"
+)
 MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME = _env_str(
     "MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME",
     default="membership-request-submitted",
-) or "membership-request-submitted"
+)
 MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME = _env_str(
     "MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME",
     default="membership-request-approved-individual",
-) or "membership-request-approved-individual"
+)
 MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME = _env_str(
     "MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME",
     default="membership-request-rejected",
-) or "membership-request-rejected"
+)
 
 MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME = _env_str(
     "MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME",
     default="membership-request-rfi",
-) or "membership-request-rfi"
+)
 
 
 ACCOUNT_INVITATION_MAX_CSV_ROWS = _env_int("ACCOUNT_INVITATION_MAX_CSV_ROWS", default=500)
@@ -435,45 +436,45 @@ ACCOUNT_INVITATION_REFRESH_WINDOW_SECONDS = _env_int(
 )
 
 MEMBERSHIP_COMMITTEE_EMAIL = _env_str("MEMBERSHIP_COMMITTEE_EMAIL",
-    default="membership@almalinux.org") or "membership@almalinux.org"
+    default="membership@almalinux.org")
 
 MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME = _env_str(
     "MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME",
     default="membership-committee-pending-requests",
-) or "membership-committee-pending-requests"
+)
 
 MEMBERSHIP_COMMITTEE_EMBARGOED_MEMBERS_EMAIL_TEMPLATE_NAME = _env_str(
     "MEMBERSHIP_COMMITTEE_EMBARGOED_MEMBERS_EMAIL_TEMPLATE_NAME",
     default="membership-committee-embargoed-members",
-) or "membership-committee-embargoed-members"
+)
 
 FREEIPA_MEMBERSHIP_RECONCILE_ALERT_EMAIL_TEMPLATE_NAME = _env_str(
     "FREEIPA_MEMBERSHIP_RECONCILE_ALERT_EMAIL_TEMPLATE_NAME",
     default="freeipa-membership-reconcile-alert",
-) or "freeipa-membership-reconcile-alert"
+)
 
 PASSWORD_RESET_TOKEN_TTL_SECONDS = _env_int("PASSWORD_RESET_TOKEN_TTL_SECONDS", default=60 * 60)
 PASSWORD_RESET_EMAIL_TEMPLATE_NAME = _env_str(
     "PASSWORD_RESET_EMAIL_TEMPLATE_NAME",
     default="password-reset",
-) or "password-reset"
+)
 PASSWORD_RESET_SUCCESS_EMAIL_TEMPLATE_NAME = _env_str(
     "PASSWORD_RESET_SUCCESS_EMAIL_TEMPLATE_NAME",
     default="password-reset-success",
-) or "password-reset-success"
+)
 
 ELECTION_COMMITTEE_EMAIL = _env_str("ELECTION_COMMITTEE_EMAIL",
-    default="elections@almalinux.org") or "elections@almalinux.org"
+    default="elections@almalinux.org")
 
 ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME = _env_str(
     "ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME",
     default="election-voting-credential",
-) or "election-voting-credential"
+)
 
 ELECTION_VOTE_RECEIPT_EMAIL_TEMPLATE_NAME = _env_str(
     "ELECTION_VOTE_RECEIPT_EMAIL_TEMPLATE_NAME",
     default="election-vote-receipt",
-) or "election-vote-receipt"
+)
 
 # Queue all Django mail through django-post_office.
 EMAIL_BACKEND = 'post_office.EmailBackend'
@@ -499,9 +500,9 @@ POST_OFFICE = {
 # Used as the production delivery backend (see POST_OFFICE['BACKENDS']).
 # Also provides a stats dashboard and an SNS event webhook (bounces, complaints,
 # deliveries, opens, clicks).
-AWS_SES_ACCESS_KEY_ID=_env_str("AWS_SES_ACCESS_KEY_ID", default="") or ""
-AWS_SES_SECRET_ACCESS_KEY=_env_str("AWS_SES_SECRET_ACCESS_KEY", default="") or ""
-AWS_SES_REGION_NAME = _env_str("AWS_SES_REGION_NAME", default="us-east-1") or "us-east-1"
+AWS_SES_ACCESS_KEY_ID=_env_str("AWS_SES_ACCESS_KEY_ID", default="")
+AWS_SES_SECRET_ACCESS_KEY=_env_str("AWS_SES_SECRET_ACCESS_KEY", default="")
+AWS_SES_REGION_NAME = _env_str("AWS_SES_REGION_NAME", default="us-east-1")
 AWS_SES_REGION_ENDPOINT = os.environ.get("AWS_SES_REGION_ENDPOINT", f"email.{AWS_SES_REGION_NAME}.amazonaws.com")
 
 # Signature verification is recommended for production SNS webhooks. For local
@@ -524,7 +525,7 @@ AWS_SES_ADD_BOUNCE_TO_BLACKLIST = _env_bool("AWS_SES_ADD_BOUNCE_TO_BLACKLIST", d
 AWS_SES_ADD_COMPLAINT_TO_BLACKLIST = _env_bool("AWS_SES_ADD_COMPLAINT_TO_BLACKLIST", default=not DEBUG)
 
 # Optional: tag outgoing mail with a configuration set for event publishing.
-AWS_SES_CONFIGURATION_SET = (_env_str("AWS_SES_CONFIGURATION_SET", default="") or "").strip() or None
+AWS_SES_CONFIGURATION_SET = (_env_str("AWS_SES_CONFIGURATION_SET", default="")).strip() or None
 
 # Password validation
 # https://docs.djangoproject.com/en/5.0/ref/settings/#auth-password-validators
@@ -562,7 +563,7 @@ if not DEBUG:
     SESSION_COOKIE_SECURE = _env_bool("SESSION_COOKIE_SECURE", default=True)
     CSRF_COOKIE_SECURE = _env_bool("CSRF_COOKIE_SECURE", default=True)
     SECURE_CONTENT_TYPE_NOSNIFF = True
-    SECURE_REFERRER_POLICY = _env_str("SECURE_REFERRER_POLICY", default="same-origin") or "same-origin"
+    SECURE_REFERRER_POLICY = _env_str("SECURE_REFERRER_POLICY", default="same-origin")
 
     # HSTS is opt-in by default because it can brick HTTP-only deployments.
     SECURE_HSTS_SECONDS = _env_int("SECURE_HSTS_SECONDS", default=0)
@@ -593,8 +594,8 @@ STORAGES = {
     },
 }
 
-AWS_STORAGE_BUCKET_NAME = _env_str("AWS_STORAGE_BUCKET_NAME", default="") or ""
-AWS_S3_REGION_NAME = _env_str("AWS_S3_REGION_NAME", default="us-east-1") or "us-east-1"
+AWS_STORAGE_BUCKET_NAME = _env_str("AWS_STORAGE_BUCKET_NAME", default="")
+AWS_S3_REGION_NAME = _env_str("AWS_S3_REGION_NAME", default="us-east-1")
 AWS_S3_ENDPOINT_URL = (_env_str("AWS_S3_ENDPOINT_URL", default="") or "").strip() or None
 
 # Optional: separate the URL used in rendered pages from the internal API endpoint.
@@ -607,7 +608,7 @@ _public_base_url_raw = str(PUBLIC_BASE_URL or "").strip()
 if "://" not in _public_base_url_raw:
     _public_base_url_raw = f"https://{_public_base_url_raw}"
 
-_aws_s3_domain_raw = _env_str("AWS_S3_DOMAIN", default="") or ""
+_aws_s3_domain_raw = _env_str("AWS_S3_DOMAIN", default="")
 if not _ALLOW_MISSING_RUNTIME_SECRETS:
     if not AWS_STORAGE_BUCKET_NAME:
         raise ImproperlyConfigured("AWS_STORAGE_BUCKET_NAME must be set.")
@@ -623,7 +624,7 @@ _aws_s3_domain = urlsplit(_aws_s3_domain_raw)
 AWS_S3_URL_PROTOCOL = f"{_aws_s3_domain.scheme}:"
 _aws_s3_base_domain = (_aws_s3_domain.netloc + _aws_s3_domain.path.rstrip("/")).strip("/")
 # MinIO compatibility and predictable URLs.
-AWS_S3_ADDRESSING_STYLE = _env_str("AWS_S3_ADDRESSING_STYLE", default="path") or "path"
+AWS_S3_ADDRESSING_STYLE = _env_str("AWS_S3_ADDRESSING_STYLE", default="path")
 if AWS_S3_ADDRESSING_STYLE == "virtual":
     AWS_S3_CUSTOM_DOMAIN = _aws_s3_base_domain
 else:
@@ -634,19 +635,18 @@ AWS_DEFAULT_ACL = None
 # Profile chat link formatting (Noggin-style).
 CHAT_NETWORKS = {
     "mattermost": {
-        "default_server": _env_str("CHAT_MATTERMOST_DEFAULT_SERVER", default="chat.almalinux.org")
-        or "chat.almalinux.org",
-        "default_team": _env_str("CHAT_MATTERMOST_DEFAULT_TEAM", default="almalinux") or "almalinux",
+        "default_server": _env_str("CHAT_MATTERMOST_DEFAULT_SERVER", default="chat.almalinux.org"),
+        "default_team": _env_str("CHAT_MATTERMOST_DEFAULT_TEAM", default="almalinux"),
     },
-    "irc": {"default_server": _env_str("CHAT_IRC_DEFAULT_SERVER", default="irc.libera.chat") or "irc.libera.chat"},
-    "matrix": {"default_server": _env_str("CHAT_MATRIX_DEFAULT_SERVER", default="matrix.org") or "matrix.org"},
+    "irc": {"default_server": _env_str("CHAT_IRC_DEFAULT_SERVER", default="irc.libera.chat")},
+    "matrix": {"default_server": _env_str("CHAT_MATRIX_DEFAULT_SERVER", default="matrix.org")},
 }
 
 # Optional query string appended to matrix.to links (Element web instance).
 CHAT_MATRIX_TO_ARGS = _env_str(
     "CHAT_MATRIX_TO_ARGS",
     default="web-instance[element.io]=app.element.io",
-) or "web-instance[element.io]=app.element.io"
+)
 
 LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/'
@@ -662,7 +662,7 @@ AVATAR_PROVIDERS = (
     "avatar.providers.LibRAvatarProvider",
     "avatar.providers.DefaultAvatarProvider",
 )
-AVATAR_GRAVATAR_DEFAULT = _env_str("AVATAR_GRAVATAR_DEFAULT", default="identicon") or "identicon"
+AVATAR_GRAVATAR_DEFAULT = _env_str("AVATAR_GRAVATAR_DEFAULT", default="identicon")
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field
@@ -673,24 +673,20 @@ AUTHENTICATION_BACKENDS = [
     'core.backends.FreeIPAAuthBackend',
 ]
 
-# If behind a proxy that sets X-Forwarded-Proto, ensure Django knows to
-# treat those requests as secure.
-SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-
 # FreeIPA Configuration
-FREEIPA_HOST = _env_str("FREEIPA_HOST", default="ipa.demo1.freeipa.org") or "ipa.demo1.freeipa.org"
+FREEIPA_HOST = _env_str("FREEIPA_HOST", default="ipa.demo1.freeipa.org")
 FREEIPA_VERIFY_SSL = _env_bool("FREEIPA_VERIFY_SSL", default=True)
-FREEIPA_SERVICE_USER = _env_str("FREEIPA_SERVICE_USER", default="admin") or "admin"
-FREEIPA_SERVICE_PASSWORD = _env_str("FREEIPA_SERVICE_PASSWORD", default="") or ""
+FREEIPA_SERVICE_USER = _env_str("FREEIPA_SERVICE_USER", default="admin")
+FREEIPA_SERVICE_PASSWORD = _env_str("FREEIPA_SERVICE_PASSWORD", default="")
 if not _ALLOW_MISSING_RUNTIME_SECRETS and not FREEIPA_SERVICE_PASSWORD:
     raise ImproperlyConfigured("FREEIPA_SERVICE_PASSWORD must be set.")
-FREEIPA_ADMIN_GROUP = _env_str("FREEIPA_ADMIN_GROUP", default="admins") or "admins"
-FREEIPA_MEMBERSHIP_COMMITTEE_GROUP = _env_str("FREEIPA_MEMBERSHIP_COMMITTEE_GROUP", default="membership-committee") or "membership-committee"
-FREEIPA_ELECTION_COMMITTEE_GROUP = _env_str("FREEIPA_ELECTION_COMMITTEE_GROUP", default="election-committee") or "election-committee"
+FREEIPA_ADMIN_GROUP = _env_str("FREEIPA_ADMIN_GROUP", default="admins")
+FREEIPA_MEMBERSHIP_COMMITTEE_GROUP = _env_str("FREEIPA_MEMBERSHIP_COMMITTEE_GROUP", default="membership-committee")
+FREEIPA_ELECTION_COMMITTEE_GROUP = _env_str("FREEIPA_ELECTION_COMMITTEE_GROUP", default="election-committee")
 
 # Users to exclude from directory listings/searches (these accounts can still log in).
 # This prevents service/admin accounts from appearing in user pickers, search results, etc.
-_freeipa_filtered_usernames_raw = _env_str("FREEIPA_FILTERED_USERNAMES", default="") or ""
+_freeipa_filtered_usernames_raw = _env_str("FREEIPA_FILTERED_USERNAMES", default="")
 _freeipa_filtered_usernames_extra = {
     u.strip().lower() for u in _freeipa_filtered_usernames_raw.split(",") if u.strip()
 }
@@ -735,18 +731,15 @@ EMAIL_VALIDATION_EMAIL_TEMPLATE_NAME = "settings-email-validation"
 ACCOUNT_INVITE_EMAIL_TEMPLATE_NAME = _env_str(
     "ACCOUNT_INVITE_EMAIL_TEMPLATE_NAME",
     default="account-invite",
-) or "account-invite"
+)
 ACCOUNT_INVITATION_EMAIL_TEMPLATE_NAMES = _env_list(
     "ACCOUNT_INVITATION_EMAIL_TEMPLATE_NAMES",
     default=[ACCOUNT_INVITE_EMAIL_TEMPLATE_NAME],
 )
 
-# Map FreeIPA groups to Django permissions
-# Format: {'freeipa_group_name': {'app_label.permission_codename', ...}}
-FREEIPA_GROUP_PERMISSIONS = {
-    'content_editors': {'core.add_article', 'core.change_article'},
-    'moderators': {'core.delete_article'},
-}
+# Map FreeIPA groups to Django permissions.
+# Populated by FreeIPAPermissionGrant model; kept for legacy compatibility.
+FREEIPA_GROUP_PERMISSIONS: dict[str, set[str]] = {}
 
 # Caching
 CACHES = {

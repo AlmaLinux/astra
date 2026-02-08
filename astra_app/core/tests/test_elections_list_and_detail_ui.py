@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 import datetime
 import json
@@ -329,7 +328,7 @@ class ElectionDetailManagerUIStatsTests(TestCase):
 
         with (
             patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.views_elections.FreeIPAUser.all", return_value=[]),
+            patch("core.elections_eligibility.FreeIPAUser.all", return_value=[]),
         ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
         self.assertEqual(resp.status_code, 200)
@@ -426,8 +425,8 @@ class ElectionDetailManagerUIStatsTests(TestCase):
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=admin),
-            patch("core.views_elections.FreeIPAUser.all", return_value=[]),
-            patch("core.views_elections.timezone.localdate", side_effect=_localdate_side_effect),
+            patch("core.elections_eligibility.FreeIPAUser.all", return_value=[]),
+            patch("core.views_elections.detail.timezone.localdate", side_effect=_localdate_side_effect),
         ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
 
@@ -496,8 +495,8 @@ class ElectionDetailManagerUIStatsTests(TestCase):
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=admin),
-            patch("core.views_elections.FreeIPAUser.all", return_value=[]),
-            patch("core.views_elections.timezone.localdate", side_effect=_localdate_side_effect),
+            patch("core.elections_eligibility.FreeIPAUser.all", return_value=[]),
+            patch("core.views_elections.detail.timezone.localdate", side_effect=_localdate_side_effect),
         ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
 
@@ -548,7 +547,7 @@ class ElectionDetailManagerUIStatsTests(TestCase):
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=admin),
-            patch("core.views_elections.FreeIPAUser.all", return_value=[]),
+            patch("core.elections_eligibility.FreeIPAUser.all", return_value=[]),
         ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
 
@@ -600,7 +599,7 @@ class ElectionDetailManagerUIStatsTests(TestCase):
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=admin),
-            patch("core.views_elections.FreeIPAUser.all", return_value=freeipa_users),
+            patch("core.elections_eligibility.FreeIPAUser.all", return_value=freeipa_users),
         ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
 
@@ -659,7 +658,7 @@ class ElectionDetailManagerUIStatsTests(TestCase):
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=admin),
-            patch("core.views_elections.FreeIPAUser.all", return_value=freeipa_users),
+            patch("core.elections_eligibility.FreeIPAUser.all", return_value=freeipa_users),
         ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
 
@@ -708,7 +707,7 @@ class ElectionDetailManagerUIStatsTests(TestCase):
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=admin),
-            patch("core.views_elections.FreeIPAUser.all", return_value=freeipa_users),
+            patch("core.elections_eligibility.FreeIPAUser.all", return_value=freeipa_users),
         ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
 
@@ -769,7 +768,7 @@ class ElectionDetailManagerUIStatsTests(TestCase):
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=admin),
-            patch("core.views_elections.FreeIPAUser.all", return_value=freeipa_users),
+            patch("core.elections_eligibility.FreeIPAUser.all", return_value=freeipa_users),
         ):
             resp = self.client.get(
                 reverse("election-detail", args=[election.id]),
@@ -825,7 +824,7 @@ class ElectionDetailManagerUIStatsTests(TestCase):
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=admin),
-            patch("core.views_elections.FreeIPAUser.all", return_value=freeipa_users),
+            patch("core.elections_eligibility.FreeIPAUser.all", return_value=freeipa_users),
         ):
             resp = self.client.get(
                 reverse("election-detail", args=[election.id]),
@@ -868,11 +867,11 @@ class ElectionDetailManagerUIStatsTests(TestCase):
         with (
             patch("core.backends.FreeIPAUser.get", return_value=admin),
             patch(
-                "core.views_elections.elections_eligibility._freeipa_group_recursive_member_usernames",
+                "core.elections_eligibility._freeipa_group_recursive_member_usernames",
                 return_value={"nomember"},
             ),
-            patch("core.views_elections.FreeIPAUser.all", return_value=[]),
-            patch("core.views_elections.timezone.now", return_value=now),
+            patch("core.elections_eligibility.FreeIPAUser.all", return_value=[]),
+            patch("core.views_elections.detail.timezone.now", return_value=now),
         ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
 
@@ -913,8 +912,8 @@ class ElectionDetailManagerUIStatsTests(TestCase):
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=admin),
-            patch("core.views_elections.FreeIPAUser.all", return_value=freeipa_users),
-            patch("core.views_elections.timezone.now", return_value=now),
+            patch("core.elections_eligibility.FreeIPAUser.all", return_value=freeipa_users),
+            patch("core.views_elections.detail.timezone.now", return_value=now),
         ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
 
@@ -959,7 +958,7 @@ class ElectionDetailManagerUIStatsTests(TestCase):
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=admin),
-            patch("core.views_elections.FreeIPAUser.all", return_value=freeipa_users),
+            patch("core.elections_eligibility.FreeIPAUser.all", return_value=freeipa_users),
         ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
 
@@ -1012,7 +1011,7 @@ class ElectionDetailManagerUIStatsTests(TestCase):
 
         with (
             patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.views_elections.FreeIPAUser.all", return_value=[]),
+            patch("core.elections_eligibility.FreeIPAUser.all", return_value=[]),
         ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
 
@@ -1076,7 +1075,7 @@ class ElectionDetailConcludeElectionTests(TestCase):
 
         with (
             patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.views_elections.FreeIPAUser.all", return_value=[]),
+            patch("core.elections_eligibility.FreeIPAUser.all", return_value=[]),
         ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
         self.assertEqual(resp.status_code, 200)
@@ -1223,7 +1222,7 @@ class ElectionDetailExtendElectionTests(TestCase):
         admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
         with (
             patch("core.backends.FreeIPAUser.get", return_value=admin),
-            patch("core.views_elections.FreeIPAUser.all", return_value=[]),
+            patch("core.elections_eligibility.FreeIPAUser.all", return_value=[]),
         ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
         self.assertEqual(resp.status_code, 200)

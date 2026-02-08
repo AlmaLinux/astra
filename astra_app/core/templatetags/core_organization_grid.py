@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Any, cast
 
 from django.core.paginator import Paginator
@@ -8,22 +6,9 @@ from django.template import Context, Library
 from django.template.loader import render_to_string
 from django.utils.safestring import mark_safe
 
-from core.views_utils import _normalize_str
+from core.views_utils import _normalize_str, pagination_window
 
 register = Library()
-
-
-def _pagination_window(paginator: Paginator, page_number: int) -> tuple[list[int], bool, bool]:
-    total_pages = paginator.num_pages
-    if total_pages <= 10:
-        return list(range(1, total_pages + 1)), False, False
-
-    start = max(1, page_number - 2)
-    end = min(total_pages, page_number + 2)
-    page_numbers = list(range(start, end + 1))
-    show_first = 1 not in page_numbers
-    show_last = total_pages not in page_numbers
-    return page_numbers, show_first, show_last
 
 
 @register.simple_tag(takes_context=True, name="organization_grid")
@@ -83,7 +68,7 @@ def organization_grid(context: Context, **kwargs: Any) -> str:
     page_obj = paginator.get_page(page_number)
     orgs_page = cast(list[object], page_obj.object_list)
 
-    page_numbers, show_first, show_last = _pagination_window(paginator, page_obj.number)
+    page_numbers, show_first, show_last = pagination_window(paginator, page_obj.number)
 
     grid_items = [{"kind": "organization", "organization": org} for org in orgs_page]
 

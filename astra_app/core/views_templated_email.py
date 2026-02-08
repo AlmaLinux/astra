@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from django import forms
 from django.contrib import messages
 from django.contrib.auth.decorators import permission_required
@@ -23,6 +21,31 @@ from core.templated_email import (
     update_email_template,
     validate_email_subject_no_folding,
 )
+
+
+def _preview_and_variables(
+    *, subject: str, html_content: str, text_content: str
+) -> tuple[dict[str, str], list[tuple[str, str]]]:
+    """Compute rendered preview + available variable list from raw template sources.
+
+    Returns (rendered_preview dict, available_variables list). Used by both the
+    create and edit views to avoid repeating the same placeholder→render logic.
+    """
+    ctx = placeholder_context_from_sources(subject, html_content, text_content)
+    available_variables = list(ctx.items())
+    rendered_preview = {"html": "", "text": "", "subject": ""}
+    try:
+        rendered_preview.update(
+            render_templated_email_preview(
+                subject=subject,
+                html_content=html_content,
+                text_content=text_content,
+                context=ctx,
+            )
+        )
+    except ValueError:
+        pass
+    return rendered_preview, available_variables
 
 _MANAGE_TEMPLATE_PERMISSIONS: frozenset[str] = frozenset({ASTRA_ADD_ELECTION, ASTRA_ADD_SEND_MAIL})
 
@@ -88,23 +111,11 @@ def email_template_create(request: HttpRequest):
                 )
                 messages.success(request, f"Created template: {tpl.name}.")
                 return redirect("email-template-edit", template_id=tpl.pk)
-        ctx = placeholder_context_from_sources(
-            str(form.data.get("subject") or ""),
-            str(form.data.get("html_content") or ""),
-            str(form.data.get("text_content") or ""),
+        rendered_preview, available_variables = _preview_and_variables(
+            subject=str(form.data.get("subject") or ""),
+            html_content=str(form.data.get("html_content") or ""),
+            text_content=str(form.data.get("text_content") or ""),
         )
-        available_variables = list(ctx.items())
-        try:
-            rendered_preview.update(
-                render_templated_email_preview(
-                    subject=str(form.data.get("subject") or ""),
-                    html_content=str(form.data.get("html_content") or ""),
-                    text_content=str(form.data.get("text_content") or ""),
-                    context=ctx,
-                )
-            )
-        except ValueError:
-            pass
     else:
         form = EmailTemplateManageForm()
 
@@ -134,9 +145,6 @@ def email_template_edit(request: HttpRequest, template_id: int):
     locked_names = locked_email_template_names()
     is_locked = tpl.name in locked_names
 
-    rendered_preview = {"html": "", "text": "", "subject": ""}
-    available_variables: list[tuple[str, str]] = []
-
     if request.method == "POST":
         form = EmailTemplateManageForm(request.POST)
         if is_locked:
@@ -164,23 +172,11 @@ def email_template_edit(request: HttpRequest, template_id: int):
                 messages.success(request, f"Saved template: {tpl.name}.")
                 return redirect("email-template-edit", template_id=tpl.pk)
 
-        ctx = placeholder_context_from_sources(
-            str(form.data.get("subject") or ""),
-            str(form.data.get("html_content") or ""),
-            str(form.data.get("text_content") or ""),
+        rendered_preview, available_variables = _preview_and_variables(
+            subject=str(form.data.get("subject") or ""),
+            html_content=str(form.data.get("html_content") or ""),
+            text_content=str(form.data.get("text_content") or ""),
         )
-        available_variables = list(ctx.items())
-        try:
-            rendered_preview.update(
-                render_templated_email_preview(
-                    subject=str(form.data.get("subject") or ""),
-                    html_content=str(form.data.get("html_content") or ""),
-                    text_content=str(form.data.get("text_content") or ""),
-                    context=ctx,
-                )
-            )
-        except ValueError:
-            pass
     else:
         form = EmailTemplateManageForm(
             initial={
@@ -193,19 +189,11 @@ def email_template_edit(request: HttpRequest, template_id: int):
         )
         if is_locked:
             form.fields["name"].disabled = True
-        ctx = placeholder_context_from_sources(tpl.subject, tpl.html_content, tpl.content)
-        available_variables = list(ctx.items())
-        try:
-            rendered_preview.update(
-                render_templated_email_preview(
-                    subject=str(tpl.subject or ""),
-                    html_content=str(tpl.html_content or ""),
-                    text_content=str(tpl.content or ""),
-                    context=ctx,
-                )
-            )
-        except ValueError:
-            pass
+        rendered_preview, available_variables = _preview_and_variables(
+            subject=str(tpl.subject or ""),
+            html_content=str(tpl.html_content or ""),
+            text_content=str(tpl.content or ""),
+        )
 
     return render(
         request,

@@ -6,30 +6,7 @@
 {% block extra_head %}
   {{ block.super }}
   <link rel="stylesheet" href="{% static 'admin/css/vendor/select2/select2.css' %}">
-  <style>
-    /* Select2 default theme needs small tweaks to match AdminLTE/Bootstrap form-control sizing. */
-    .select2-container {
-      width: 100% !important;
-    }
-
-    .select2-container--default .select2-selection--multiple {
-      min-height: calc(1.5em + 0.75rem + 2px);
-      border: 1px solid #ced4da;
-      border-radius: 0.25rem;
-    }
-
-    .select2-container--default.select2-container--focus .select2-selection--multiple {
-      border-color: #80bdff;
-      box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
-    }
-
-    /* Select2 multiple "pill" text should be readable on light theme. */
-    .select2-container--default .select2-selection--multiple .select2-selection__choice,
-    .select2-container--default .select2-selection--multiple .select2-selection__choice__display,
-    .select2-container--default .select2-selection--multiple .select2-selection__choice__remove {
-      color: #000;
-    }
-  </style>
+  <link rel="stylesheet" href="{% static 'core/css/select2_overrides.css' %}">
 {% endblock %}
 
 {% block header %}

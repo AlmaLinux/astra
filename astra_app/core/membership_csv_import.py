@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import csv
 import datetime
 import io
@@ -25,6 +23,18 @@ from core.models import Membership, MembershipLog, MembershipRequest, Membership
 from core.views_utils import _normalize_str
 
 logger = logging.getLogger(__name__)
+
+# Column-mapping field names shared between MembershipCSVImportForm,
+# MembershipCSVConfirmImportForm, and the admin's get_confirm_form_initial /
+# get_import_resource_kwargs.  Adding a new column requires a single edit here.
+_COLUMN_FIELDS = (
+    "email_column",
+    "name_column",
+    "active_member_column",
+    "membership_start_date_column",
+    "committee_notes_column",
+    "membership_type_column",
+)
 
 
 def _norm_header(value: str) -> str:
@@ -198,14 +208,7 @@ class MembershipCSVImportForm(ImportForm):
             return
 
         choices: list[tuple[str, str]] = [("", "Auto-detect")] + [(h, h) for h in headers]
-        for field_name in (
-            "email_column",
-            "name_column",
-            "active_member_column",
-            "membership_start_date_column",
-            "committee_notes_column",
-            "membership_type_column",
-        ):
+        for field_name in _COLUMN_FIELDS:
             self.fields[field_name].choices = choices
 
         for spec in MembershipRequestForm.all_question_specs():

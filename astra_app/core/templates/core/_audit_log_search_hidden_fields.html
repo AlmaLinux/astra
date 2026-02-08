@@ -1,0 +1,7 @@
+{# Hidden filter fields for the membership audit log search form. #}
+{% if filter_username_param %}
+  <input type="hidden" name="username" value="{{ filter_username_param }}">
+{% endif %}
+{% if filter_organization_param %}
+  <input type="hidden" name="organization" value="{{ filter_organization_param }}">
+{% endif %}

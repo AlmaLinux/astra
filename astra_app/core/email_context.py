@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import html
 from typing import TYPE_CHECKING
 
@@ -40,13 +38,7 @@ def user_email_context(*, username: str) -> dict[str, str]:
             "email": "",
         }
 
-    return {
-        "username": str(user.username or ""),
-        "first_name": str(user.first_name or ""),
-        "last_name": str(user.last_name or ""),
-        "full_name": str(user.full_name or ""),
-        "email": str(user.email or ""),
-    }
+    return user_email_context_from_user(user=user)
 
 
 def user_email_context_from_user(*, user: FreeIPAUser) -> dict[str, str]:

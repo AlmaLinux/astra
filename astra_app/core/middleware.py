@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import logging
 from zoneinfo import ZoneInfo
 
@@ -22,33 +20,29 @@ from core.backends import (
     clear_freeipa_service_client_cache,
     set_current_viewer_username,
 )
+from core.ipa_user_attrs import _first
 
 logger = logging.getLogger(__name__)
 
 
-def _first_ci(data: object, attr: str):
+def _get_user_timezone_name(user) -> str | None:
+    # _user_data is optional: only FreeIPA-backed users have it.
+    data = getattr(user, "_user_data", None)
     if not isinstance(data, dict):
         return None
-    if attr in data:
-        value = data.get(attr)
-    else:
-        value = data.get(attr.lower())
-        if value is None:
-            for k, v in data.items():
-                if str(k).lower() == attr.lower():
-                    value = v
-                    break
-
-    if isinstance(value, list):
-        return value[0] if value else None
-    return value
+    tz = _first(data, "fasTimezone")
+    return str(tz).strip() or None if tz else None
 
 
-def _get_user_timezone_name(user) -> str | None:
-    data = getattr(user, "_user_data", None)
-    tz_name = _first_ci(data, "fasTimezone")
-    tz_name = str(tz_name).strip() if tz_name else ""
-    return tz_name or None
+def _wants_json_response(request) -> bool:
+    """True when the client expects a JSON response (API call, .json endpoint)."""
+    accept = str(request.headers.get("Accept") or "")
+    content_type = str(request.content_type or "")
+    return (
+        request.path.endswith(".json")
+        or "application/json" in accept
+        or content_type.startswith("application/json")
+    )
 
 
 def _get_freeipa_or_default_user(request):
@@ -92,7 +86,6 @@ class FreeIPAAuthenticationMiddleware:
         # user from session-stored username even if Django resolves to
         # AnonymousUser (e.g. when no DB row exists).
         upstream_user = getattr(request, "user", None)
-        session_username: str | None = None
         upstream_is_authenticated = False
         if upstream_user is not None and not isinstance(upstream_user, SimpleLazyObject):
             try:
@@ -100,21 +93,17 @@ class FreeIPAAuthenticationMiddleware:
             except Exception:
                 upstream_is_authenticated = False
 
-        if not upstream_is_authenticated:
-            try:
-                session_username = request.session.get("_freeipa_username")
-            except Exception:
-                session_username = None
+        # Read session username once; used for both user restoration and viewer context.
+        try:
+            session_username: str | None = request.session.get("_freeipa_username")
+        except Exception:
+            session_username = None
 
+        if not upstream_is_authenticated:
             if session_username and _freeipa_circuit_open():
                 request.user = DegradedFreeIPAUser(session_username)
             else:
                 request.user = SimpleLazyObject(lambda: _get_freeipa_or_default_user(request))
-        else:
-            try:
-                session_username = request.session.get("_freeipa_username")
-            except Exception:
-                session_username = None
 
         # Expose the viewer username to the FreeIPAUser ingestion boundary so
         # privacy redaction (fasIsPrivate) can happen at initialization time.
@@ -129,14 +118,8 @@ class FreeIPAAuthenticationMiddleware:
         except Exception:
             viewer_username = None
 
-        if not viewer_username:
-            if session_username:
-                viewer_username = session_username
-            else:
-                try:
-                    viewer_username = str(request.session.get("_freeipa_username") or "").strip() or None
-                except Exception:
-                    viewer_username = None
+        if not viewer_username and session_username:
+            viewer_username = session_username
         set_current_viewer_username(viewer_username)
 
         # Activate the user's timezone for this request so template tags/filters
@@ -249,9 +232,7 @@ class LoginRequiredMiddleware:
             return self.get_response(request)
 
         # For JSON endpoints, avoid redirecting (clients expect JSON).
-        accept = str(request.headers.get("Accept") or "")
-        content_type = str(request.content_type or "")
-        if path.endswith(".json") or "application/json" in accept or content_type.startswith("application/json"):
+        if _wants_json_response(request):
             return JsonResponse({"ok": False, "error": "Authentication required."}, status=403)
 
         return redirect(f"{settings.LOGIN_URL}?next={request.get_full_path()}")
@@ -268,11 +249,7 @@ class FreeIPAUnavailableMiddleware(MiddlewareMixin):
             return None
 
         logger.warning("FreeIPA unavailable during request path=%s", request.path, exc_info=False)
-        accept = str(request.headers.get("Accept") or "")
-        content_type = str(request.content_type or "")
-        if request.path.endswith(".json") or "application/json" in accept or content_type.startswith(
-            "application/json"
-        ):
+        if _wants_json_response(request):
             return JsonResponse(
                 {
                     "ok": False,

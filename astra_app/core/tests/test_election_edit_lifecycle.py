@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 import datetime
 from unittest.mock import patch
@@ -87,7 +86,7 @@ class ElectionEditLifecycleTests(TestCase):
 
         with (
             patch("core.backends.FreeIPAUser.get", side_effect=get_user),
-            patch("core.views_elections.timezone.now", return_value=started_at),
+            patch("core.views_elections.edit.timezone.now", return_value=started_at),
             patch("post_office.mail.send", autospec=True) as post_office_send_mock,
         ):
             resp = self.client.post(

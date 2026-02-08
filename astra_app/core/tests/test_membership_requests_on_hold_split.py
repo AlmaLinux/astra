@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 import datetime
 import re
@@ -201,10 +200,13 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
         self.assertContains(resp, 'name="bulk_scope" value="on_hold"')
         self.assertContains(resp, 'id="select-all-requests-on-hold"')
 
-        # On-hold table should include a row actions column, but only the actions valid for on_hold.
-        self.assertContains(resp, f'reject-modal-{on_hold.pk}')
-        self.assertContains(resp, f'ignore-modal-{on_hold.pk}')
-        self.assertNotContains(resp, f'approve-modal-{on_hold.pk}')
+        # On-hold table should include reject/ignore buttons, but not approve (on_hold status).
+        reject_url = reverse('membership-request-reject', args=[on_hold.pk])
+        ignore_url = reverse('membership-request-ignore', args=[on_hold.pk])
+        approve_url = reverse('membership-request-approve', args=[on_hold.pk])
+        self.assertContains(resp, f'data-action-url="{reject_url}"')
+        self.assertContains(resp, f'data-action-url="{ignore_url}"')
+        self.assertNotContains(resp, f'data-action-url="{approve_url}"')
 
         # Waiting time should be rendered inline under "On hold since" (no separate "Waiting" column).
         self.assertNotContains(resp, ">Waiting</th>")

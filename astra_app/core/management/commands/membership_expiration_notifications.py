@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import datetime
 import math
 from collections.abc import Iterable
@@ -12,12 +10,12 @@ from django.utils import timezone
 
 from core.backends import FreeIPAUser
 from core.email_context import organization_sponsor_email_context, user_email_context_from_user
+from core.ipa_user_attrs import _first
 from core.membership_notifications import (
     send_membership_notification,
     send_organization_sponsorship_notification,
 )
 from core.models import Membership, OrganizationSponsorship
-from core.views_utils import _first
 
 
 class Command(BaseCommand):

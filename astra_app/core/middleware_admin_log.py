@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import logging
 
 from django.contrib.auth import get_user_model
@@ -85,8 +83,7 @@ class AdminShadowUserLogEntryMiddleware:
 
     def __call__(self, request):
         try:
-            path = getattr(request, "path", "") or ""
-            if not path.startswith("/admin/"):
+            if not request.path.startswith("/admin/"):
                 return self.get_response(request)
 
             user = getattr(request, "user", None)

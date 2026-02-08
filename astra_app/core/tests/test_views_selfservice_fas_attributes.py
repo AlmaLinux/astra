@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 from dataclasses import dataclass, field
 from types import SimpleNamespace
@@ -208,8 +207,8 @@ class FASAttributesTests(TestCase):
         req.user = self._auth_user()
 
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
-            with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
-                with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
+            with patch("core.ipa_user_attrs.FreeIPAUser.get", autospec=True, return_value=fu):
+                with patch("core.ipa_user_attrs.FreeIPAUser.get_client", autospec=True, return_value=client):
                     resp = settings_root(req)
 
         self.assertEqual(resp.status_code, 302)
@@ -280,8 +279,8 @@ class FASAttributesTests(TestCase):
         req.user = self._auth_user("alice")
 
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
-            with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
-                with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
+            with patch("core.ipa_user_attrs.FreeIPAUser.get", autospec=True, return_value=fu):
+                with patch("core.ipa_user_attrs.FreeIPAUser.get_client", autospec=True, return_value=client):
                     resp = settings_root(req)
 
         self.assertEqual(resp.status_code, 302)
@@ -389,8 +388,8 @@ class FASAttributesTests(TestCase):
         req.user = self._auth_user()
 
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
-            with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
-                with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
+            with patch("core.ipa_user_attrs.FreeIPAUser.get", autospec=True, return_value=fu):
+                with patch("core.ipa_user_attrs.FreeIPAUser.get_client", autospec=True, return_value=client):
                     resp = settings_root(req)
 
         self.assertEqual(resp.status_code, 302)
@@ -479,8 +478,8 @@ class FASAttributesTests(TestCase):
         req.user = self._auth_user()
 
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
-            with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
-                with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
+            with patch("core.ipa_user_attrs.FreeIPAUser.get", autospec=True, return_value=fu):
+                with patch("core.ipa_user_attrs.FreeIPAUser.get_client", autospec=True, return_value=client):
                     resp = settings_root(req)
 
         self.assertEqual(resp.status_code, 302)
@@ -532,8 +531,8 @@ class FASAttributesTests(TestCase):
         req.user = self._auth_user()
 
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
-            with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
-                with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
+            with patch("core.ipa_user_attrs.FreeIPAUser.get", autospec=True, return_value=fu):
+                with patch("core.ipa_user_attrs.FreeIPAUser.get_client", autospec=True, return_value=client):
                     with patch("core.views_settings.user_email_context", autospec=True, return_value={
                         "username": "alice",
                         "first_name": "Alice",
@@ -573,8 +572,8 @@ class FASAttributesTests(TestCase):
         req2.user = self._auth_user()
 
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
-            with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
-                with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
+            with patch("core.ipa_user_attrs.FreeIPAUser.get", autospec=True, return_value=fu):
+                with patch("core.ipa_user_attrs.FreeIPAUser.get_client", autospec=True, return_value=client):
                     with patch("core.views_settings.user_email_context", autospec=True, return_value={
                         "username": "alice",
                         "first_name": "Alice",
@@ -614,8 +613,8 @@ class FASAttributesTests(TestCase):
         req3.user = self._auth_user()
 
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
-            with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
-                with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
+            with patch("core.ipa_user_attrs.FreeIPAUser.get", autospec=True, return_value=fu):
+                with patch("core.ipa_user_attrs.FreeIPAUser.get_client", autospec=True, return_value=client):
                     resp3 = settings_root(req3)
 
         self.assertEqual(resp3.status_code, 302)
@@ -655,8 +654,8 @@ class FASAttributesTests(TestCase):
         req.user = self._auth_user()
 
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
-            with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
-                with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
+            with patch("core.ipa_user_attrs.FreeIPAUser.get", autospec=True, return_value=fu):
+                with patch("core.ipa_user_attrs.FreeIPAUser.get_client", autospec=True, return_value=client):
                     resp = settings_root(req)
 
         self.assertEqual(resp.status_code, 302)
@@ -692,8 +691,8 @@ class FASAttributesTests(TestCase):
         req2.user = self._auth_user()
 
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
-            with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
-                with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
+            with patch("core.ipa_user_attrs.FreeIPAUser.get", autospec=True, return_value=fu):
+                with patch("core.ipa_user_attrs.FreeIPAUser.get_client", autospec=True, return_value=client):
                     resp2 = settings_root(req2)
 
         self.assertEqual(resp2.status_code, 302)
@@ -727,8 +726,8 @@ class FASAttributesTests(TestCase):
         req3.user = self._auth_user()
 
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
-            with patch("core.views_utils.FreeIPAUser.get", autospec=True, return_value=fu):
-                with patch("core.views_utils.FreeIPAUser.get_client", autospec=True, return_value=client):
+            with patch("core.ipa_user_attrs.FreeIPAUser.get", autospec=True, return_value=fu):
+                with patch("core.ipa_user_attrs.FreeIPAUser.get_client", autospec=True, return_value=client):
                     resp3 = settings_root(req3)
 
         self.assertEqual(resp3.status_code, 302)

@@ -1,10 +1,6 @@
-from __future__ import annotations
-
 import datetime
 import logging
-from typing import override
 
-from django import forms
 from django.conf import settings
 from django.contrib import messages
 from django.db import IntegrityError
@@ -15,6 +11,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_GET
 
 from core.backends import FreeIPAUser
+from core.forms_organizations import OrganizationEditForm, OrganizationSponsorshipRequestForm
 from core.membership_notes import add_note
 from core.membership_request_workflow import record_membership_request_created
 from core.models import MembershipLog, MembershipRequest, MembershipType, Organization, OrganizationSponsorship
@@ -25,41 +22,18 @@ from core.permissions import (
     ASTRA_VIEW_MEMBERSHIP,
     json_permission_required_any,
 )
-from core.user_labels import user_choice_from_freeipa
-from core.views_utils import _normalize_str, block_action_without_coc
+from core.views_utils import _normalize_str, block_action_without_coc, get_username
 
 logger = logging.getLogger(__name__)
 
 
-def _can_access_organization(request: HttpRequest, organization: Organization) -> bool:
-    username = str(request.user.get_username() or "").strip()
-    if not username:
-        return False
-
-    if any(
-        request.user.has_perm(p)
-        for p in (
-            ASTRA_VIEW_MEMBERSHIP,
-            ASTRA_ADD_MEMBERSHIP,
-            ASTRA_CHANGE_MEMBERSHIP,
-            ASTRA_DELETE_MEMBERSHIP,
-        )
-    ):
-        return True
-
-    return username == organization.representative
+def _is_representative(request: HttpRequest, organization: Organization) -> bool:
+    username = get_username(request)
+    return bool(username and username == organization.representative)
 
 
-def _require_organization_access(request: HttpRequest, organization: Organization) -> None:
-    if not _can_access_organization(request, organization):
-        # Hide existence of organizations from unauthorized users.
-        raise Http404
-
-
-def _require_representative(request: HttpRequest, organization: Organization) -> None:
-    username = str(request.user.get_username() or "").strip()
-    if not username or username != organization.representative:
-        raise Http404
+def _can_delete_organization(request: HttpRequest, organization: Organization) -> bool:
+    return request.user.has_perm(ASTRA_DELETE_MEMBERSHIP) or _is_representative(request, organization)
 
 
 def _can_edit_organization(request: HttpRequest, organization: Organization) -> bool:
@@ -68,23 +42,21 @@ def _can_edit_organization(request: HttpRequest, organization: Organization) -> 
         for p in (ASTRA_ADD_MEMBERSHIP, ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP)
     ):
         return True
-
-    username = str(request.user.get_username() or "").strip()
-    if not username:
-        return False
-
-    return username == organization.representative
+    return _is_representative(request, organization)
 
 
-def _can_delete_organization(request: HttpRequest, organization: Organization) -> bool:
-    if request.user.has_perm(ASTRA_DELETE_MEMBERSHIP):
-        return True
+def _can_access_organization(request: HttpRequest, organization: Organization) -> bool:
+    return request.user.has_perm(ASTRA_VIEW_MEMBERSHIP) or _can_edit_organization(request, organization)
 
-    username = str(request.user.get_username() or "").strip()
-    if not username:
-        return False
 
-    return username == organization.representative
+def _require_organization_access(request: HttpRequest, organization: Organization) -> None:
+    if not _can_access_organization(request, organization):
+        raise Http404
+
+
+def _require_representative(request: HttpRequest, organization: Organization) -> None:
+    if not _is_representative(request, organization):
+        raise Http404
 
 
 def _require_organization_edit_access(request: HttpRequest, organization: Organization) -> None:
@@ -92,132 +64,57 @@ def _require_organization_edit_access(request: HttpRequest, organization: Organi
         raise Http404
 
 
-class OrganizationEditForm(forms.ModelForm):
-    representative = forms.ChoiceField(
-        required=False,
-        widget=forms.Select(
-            attrs={
-                "class": "form-control alx-select2",
-                "data-placeholder": "Search users…",
-            }
-        ),
-        help_text="Select the user who will be the organization's representative.",
+def _render_org_form(
+    request: HttpRequest,
+    form: OrganizationEditForm,
+    *,
+    organization: Organization | None,
+    is_create: bool,
+) -> HttpResponse:
+    # Build contact-group descriptors so the template can loop instead of
+    # repeating the same markup three times.
+    contact_groups = [
+        {
+            "key": "business",
+            "label": "Business",
+            "description": "We will send legal and billing notices to this email address, unless you tell us otherwise.",
+            "name_field": form["business_contact_name"],
+            "email_field": form["business_contact_email"],
+            "phone_field": form["business_contact_phone"],
+        },
+        {
+            "key": "marketing",
+            "label": "PR and marketing",
+            "description": "We will contact this person about press releases and sponsor marketing benefits.",
+            "name_field": form["pr_marketing_contact_name"],
+            "email_field": form["pr_marketing_contact_email"],
+            "phone_field": form["pr_marketing_contact_phone"],
+        },
+        {
+            "key": "technical",
+            "label": "Technical",
+            "description": "We will send technical notices to this email address, unless you tell us otherwise.",
+            "name_field": form["technical_contact_name"],
+            "email_field": form["technical_contact_email"],
+            "phone_field": form["technical_contact_phone"],
+        },
+    ]
+    return render(
+        request,
+        "core/organization_form.html",
+        {
+            "form": form,
+            "cancel_url": reverse("organizations") if is_create else "",
+            "is_create": is_create,
+            "organization": organization,
+            "show_representatives": "representative" in form.fields,
+            "contact_groups": contact_groups,
+        },
     )
-
-    class Meta:
-        model = Organization
-        fields = (
-            "business_contact_name",
-            "business_contact_email",
-            "business_contact_phone",
-            "pr_marketing_contact_name",
-            "pr_marketing_contact_email",
-            "pr_marketing_contact_phone",
-            "technical_contact_name",
-            "technical_contact_email",
-            "technical_contact_phone",
-            "name",
-            "website_logo",
-            "website",
-            "logo",
-        )
-
-        labels = {
-            "business_contact_name": "Name",
-            "business_contact_email": "Email",
-            "business_contact_phone": "Phone",
-            "pr_marketing_contact_name": "Name",
-            "pr_marketing_contact_email": "Email",
-            "pr_marketing_contact_phone": "Phone",
-            "technical_contact_name": "Name",
-            "technical_contact_email": "Email",
-            "technical_contact_phone": "Phone",
-            "name": "Organization name",
-            "website_logo": "Website logo (URL)",
-            "website": "Website URL",
-            "logo": "Accounts logo (upload)",
-        }
-
-        help_texts = {
-            "name": "This is the name we will display publicly for sponsor recognition.",
-            "website_logo": "Share a direct link to your logo file, or a link to your brand assets.",
-            "website": "Enter the URL you want your logo to link to (homepage or a dedicated landing page).",
-        }
-
-    @override
-    def __init__(self, *args, **kwargs):
-        self.can_select_representatives: bool = bool(kwargs.pop("can_select_representatives", False))
-        super().__init__(*args, **kwargs)
-
-        self.fields["business_contact_name"].required = True
-        self.fields["business_contact_email"].required = True
-        self.fields["pr_marketing_contact_name"].required = True
-        self.fields["pr_marketing_contact_email"].required = True
-        self.fields["technical_contact_name"].required = True
-        self.fields["technical_contact_email"].required = True
-        self.fields["name"].required = True
-        self.fields["website_logo"].required = True
-        self.fields["website"].required = True
-
-        for field in self.fields.values():
-            if isinstance(field.widget, forms.ClearableFileInput):
-                field.widget.attrs.setdefault("class", "form-control-file")
-            else:
-                field.widget.attrs.setdefault("class", "form-control")
-
-        self.fields["website"].widget = forms.URLInput(attrs={"class": "form-control", "placeholder": "https://…"})
-        self.fields["website_logo"].widget = forms.URLInput(attrs={"class": "form-control", "placeholder": "https://…"})
-        self.fields["business_contact_email"].widget = forms.EmailInput(attrs={"class": "form-control"})
-        self.fields["pr_marketing_contact_email"].widget = forms.EmailInput(attrs={"class": "form-control"})
-        self.fields["technical_contact_email"].widget = forms.EmailInput(attrs={"class": "form-control"})
-
-        if not self.can_select_representatives:
-            # Representative is defaulted to the creator; only membership admins can change.
-            del self.fields["representative"]
-        else:
-            # Select2 uses AJAX, so only include currently-selected value as a choice.
-            current = ""
-            if self.is_bound:
-                current = str(self.data.get("representative") or "").strip()
-            else:
-                initial = self.initial.get("representative")
-                current = str(initial or "").strip()
-            self.fields["representative"].choices = [user_choice_from_freeipa(current)] if current else []
-
-    def clean_representative(self) -> str:
-        if "representative" not in self.fields:
-            return ""
-
-        username = str(self.cleaned_data.get("representative") or "").strip()
-
-        if not username:
-            return ""
-
-        if FreeIPAUser.get(username) is None:
-            raise forms.ValidationError(
-                f"Unknown user: {username}",
-                code="unknown_representative",
-            )
-
-        # Avoid leaking which org they represent; just state the rule.
-        conflict_exists = (
-            Organization.objects.filter(representative=username)
-            .exclude(pk=self.instance.pk)
-            .exists()
-        )
-        if conflict_exists:
-            raise forms.ValidationError(
-                "That user is already the representative of another organization.",
-                code="representative_not_unique",
-            )
-
-        return username
-
-
 
 
 def organizations(request: HttpRequest) -> HttpResponse:
-    username = str(request.user.get_username() or "").strip()
+    username = get_username(request)
     if not username:
         raise Http404
 
@@ -257,7 +154,7 @@ def organizations(request: HttpRequest) -> HttpResponse:
 
 
 def organization_create(request: HttpRequest) -> HttpResponse:
-    username = str(request.user.get_username() or "").strip()
+    username = get_username(request)
     if not username:
         raise Http404
 
@@ -298,17 +195,7 @@ def organization_create(request: HttpRequest) -> HttpResponse:
                         "representative",
                         "You already represent an organization. Select a different representative.",
                     )
-                    return render(
-                        request,
-                        "core/organization_form.html",
-                        {
-                            "form": form,
-                            "cancel_url": reverse("organizations"),
-                            "is_create": True,
-                            "organization": None,
-                            "show_representatives": "representative" in form.fields,
-                        },
-                    )
+                    return _render_org_form(request, form, organization=None, is_create=True)
 
                 organization.representative = selected or username
             else:
@@ -327,17 +214,7 @@ def organization_create(request: HttpRequest) -> HttpResponse:
                         None,
                         "You already represent an organization and cannot create another. Contact the membership committee if you need to create an additional organization.",
                     )
-                return render(
-                    request,
-                    "core/organization_form.html",
-                    {
-                        "form": form,
-                        "cancel_url": reverse("organizations"),
-                        "is_create": True,
-                        "organization": None,
-                        "show_representatives": "representative" in form.fields,
-                    },
-                )
+                return _render_org_form(request, form, organization=None, is_create=True)
             messages.success(request, "Organization created.")
             if organization.representative == username:
                 return redirect("organization-sponsorship-manage", organization_id=organization.pk)
@@ -353,17 +230,7 @@ def organization_create(request: HttpRequest) -> HttpResponse:
                 "organization-representatives-search"
             )
 
-    return render(
-        request,
-        "core/organization_form.html",
-        {
-            "form": form,
-            "cancel_url": reverse("organizations"),
-            "is_create": True,
-            "organization": None,
-            "show_representatives": "representative" in form.fields,
-        },
-    )
+    return _render_org_form(request, form, organization=None, is_create=True)
 
 
 @require_GET
@@ -415,8 +282,7 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
     organization = get_object_or_404(Organization, pk=organization_id)
     _require_organization_access(request, organization)
 
-    username = str(request.user.get_username() or "").strip()
-    is_representative = bool(username and username == organization.representative)
+    is_representative = _is_representative(request, organization)
 
     representative_username = _normalize_str(organization.representative)
     representative_full_name = ""
@@ -477,6 +343,33 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
     if organization.membership_level_id:
         membership_level_badge_text = str(organization.membership_level_id).replace("_", " ").title()
 
+    # Build contact-group descriptors for looped rendering. Same pattern
+    # as `contact_groups` in the edit form (see _render_org_form), but
+    # with plain values instead of form fields.
+    contact_display_groups = [
+        {
+            "key": "business",
+            "label": "Business",
+            "name": organization.business_contact_name,
+            "email": organization.business_contact_email,
+            "phone": organization.business_contact_phone,
+        },
+        {
+            "key": "marketing",
+            "label": "PR and marketing",
+            "name": organization.pr_marketing_contact_name,
+            "email": organization.pr_marketing_contact_email,
+            "phone": organization.pr_marketing_contact_phone,
+        },
+        {
+            "key": "technical",
+            "label": "Technical",
+            "name": organization.technical_contact_name,
+            "email": organization.technical_contact_email,
+            "phone": organization.technical_contact_phone,
+        },
+    ]
+
     return render(
         request,
         "core/organization_detail.html",
@@ -492,6 +385,7 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
             "can_edit_organization": can_edit_organization,
             "membership_level_badge_text": membership_level_badge_text,
             "can_delete_organization": can_delete_organization,
+            "contact_display_groups": contact_display_groups,
         },
     )
 
@@ -523,8 +417,8 @@ def organization_delete(request: HttpRequest, organization_id: int) -> HttpRespo
                     messages.error(request, "Failed to remove the representative from the FreeIPA group.")
                     return redirect("organization-detail", organization_id=organization.pk)
 
-        MembershipLog.create_for_org_termination(
-            actor_username=str(request.user.get_username() or "").strip(),
+        MembershipLog.create_for_termination(
+            actor_username=get_username(request),
             target_organization=organization,
             membership_type=membership_type,
         )
@@ -543,7 +437,7 @@ def organization_sponsorship_extend(request: HttpRequest, organization_id: int) 
 
     blocked = block_action_without_coc(
         request,
-        username=str(request.user.get_username() or "").strip(),
+        username=get_username(request),
         action_label="request sponsorships",
     )
     if blocked is not None:
@@ -598,34 +492,11 @@ def organization_sponsorship_extend(request: HttpRequest, organization_id: int) 
     )
     record_membership_request_created(
         membership_request=mr,
-        actor_username=str(request.user.get_username() or "").strip(),
+        actor_username=get_username(request),
         send_submitted_email=False,
     )
     messages.success(request, "Sponsorship renewal request submitted for review.")
     return redirect("organization-detail", organization_id=organization.pk)
-
-
-class OrganizationSponsorshipRequestForm(forms.Form):
-    membership_level = forms.ModelChoiceField(
-        queryset=MembershipType.objects.none(),
-        required=True,
-        label="Sponsorship level",
-        empty_label="Select a sponsorship level…",
-        widget=forms.Select(attrs={"class": "form-control"}),
-    )
-    additional_information = forms.CharField(
-        required=False,
-        label="Additional information",
-        widget=forms.Textarea(attrs={"class": "form-control", "rows": 4}),
-    )
-
-    @override
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.fields["membership_level"].queryset = MembershipType.objects.filter(isOrganization=True).order_by(
-            "sort_order",
-            "code",
-        )
 
 
 def organization_sponsorship_manage(request: HttpRequest, organization_id: int) -> HttpResponse:
@@ -634,7 +505,7 @@ def organization_sponsorship_manage(request: HttpRequest, organization_id: int) 
 
     blocked = block_action_without_coc(
         request,
-        username=str(request.user.get_username() or "").strip(),
+        username=get_username(request),
         action_label="request sponsorships",
     )
     if blocked is not None:
@@ -677,7 +548,7 @@ def organization_sponsorship_manage(request: HttpRequest, organization_id: int) 
 
             record_membership_request_created(
                 membership_request=mr,
-                actor_username=str(request.user.get_username() or "").strip(),
+                actor_username=get_username(request),
                 send_submitted_email=False,
             )
 
@@ -740,17 +611,7 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
             representative = form.cleaned_data.get("representative") or ""
             if not representative:
                 form.add_error("representative", "A representative is required.")
-                return render(
-                    request,
-                    "core/organization_form.html",
-                    {
-                        "organization": organization,
-                        "form": form,
-                        "is_create": False,
-                        "cancel_url": "",
-                        "show_representatives": True,
-                    },
-                )
+                return _render_org_form(request, form, organization=organization, is_create=False)
 
             old_representative = organization.representative
             new_representative = representative
@@ -777,17 +638,7 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
                         # This should already be prevented by OrganizationEditForm.clean_representative,
                         # but keep the view defensive.
                         form.add_error("representative", f"Unknown user: {representative}")
-                        return render(
-                            request,
-                            "core/organization_form.html",
-                            {
-                                "organization": organization,
-                                "form": form,
-                                "is_create": False,
-                                "cancel_url": "",
-                                "show_representatives": True,
-                            },
-                        )
+                        return _render_org_form(request, form, organization=organization, is_create=False)
 
                     try:
                         if old_rep is not None:
@@ -817,17 +668,7 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
                             )
 
                         form.add_error(None, "Failed to update FreeIPA group membership for the representative.")
-                        return render(
-                            request,
-                            "core/organization_form.html",
-                            {
-                                "organization": organization,
-                                "form": form,
-                                "is_create": False,
-                                "cancel_url": "",
-                                "show_representatives": True,
-                            },
-                        )
+                        return _render_org_form(request, form, organization=organization, is_create=False)
 
         try:
             updated_org.save()
@@ -855,17 +696,7 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
                 "representative",
                 "That user is already the representative of another organization.",
             )
-            return render(
-                request,
-                "core/organization_form.html",
-                {
-                    "organization": organization,
-                    "form": form,
-                    "is_create": False,
-                    "cancel_url": "",
-                    "show_representatives": True,
-                },
-            )
+            return _render_org_form(request, form, organization=organization, is_create=False)
 
         if old_representative and new_representative and old_representative != new_representative:
             pending_requests = list(
@@ -875,7 +706,7 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
                 )
             )
             if pending_requests:
-                actor_username = str(request.user.get_username() or "").strip()
+                actor_username = get_username(request)
                 MembershipLog.objects.bulk_create(
                     [
                         MembershipLog(
@@ -922,14 +753,4 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
 
         return redirect("organization-detail", organization_id=organization.pk)
 
-    return render(
-        request,
-        "core/organization_form.html",
-        {
-            "organization": organization,
-            "form": form,
-            "is_create": False,
-            "cancel_url": "",
-            "show_representatives": "representative" in form.fields,
-        },
-    )
+    return _render_org_form(request, form, organization=organization, is_create=False)

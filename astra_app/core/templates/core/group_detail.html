@@ -189,32 +189,7 @@
     <div class="card-header">
       <h3 class="card-title">Member{{ member_count|pluralize }}</h3>
       <div class="card-tools">
-        <form method="get" class="input-group input-group-sm" style="width: 220px;">
-          <input
-            type="text"
-            name="q"
-            class="form-control float-right"
-            placeholder="Search members..."
-            value="{{ q }}"
-            aria-label="Search members"
-          >
-          <div class="input-group-append">
-            {% if q %}
-              <button
-                type="button"
-                class="btn btn-default"
-                aria-label="Clear search"
-                title="Clear search filter"
-                onclick="var i=this.form.querySelector('input[name=\'q\']'); if(i){i.value='';} this.form.submit();"
-              >
-                <i class="fas fa-times"></i>
-              </button>
-            {% endif %}
-            <button type="submit" class="btn btn-default" aria-label="Search" title="Search group members">
-              <i class="fas fa-search"></i>
-            </button>
-          </div>
-        </form>
+        {% include "core/_search_form.html" with search_value=q search_placeholder="Search members..." search_aria_label="Search members" search_submit_title="Search group members" %}
       </div>
     </div>
 
@@ -300,7 +275,9 @@
     {% include "core/_modal_confirm.html" with modal_id="demote-sponsor-modal" title="Remove Team Lead?" body_prefix="Remove " body_emphasis="" body_suffix=" as Team Lead?" action_url=group_detail_url submit_label="Remove Team Lead" submit_class="btn-warning" form_fields_template="core/_modal_confirm_fields.html" confirm_action="demote_sponsor" confirm_username_field=True %}
 
     <script>
-      (function () {
+      // Deferred until DOMContentLoaded so jQuery is available for
+      // Bootstrap 4 show.bs.modal (fired via jQuery only).
+      document.addEventListener('DOMContentLoaded', function () {
         function fillModal(modalEl, username) {
           if (!modalEl) return;
           var userEl = modalEl.querySelector('.js-confirm-username');
@@ -310,44 +287,16 @@
           if (strongEl) strongEl.textContent = username;
         }
 
-        function wireClickHandler(modalId) {
-          document.addEventListener('click', function (evt) {
-            var target = evt && evt.target ? evt.target : null;
-            if (!target || !target.closest) return;
-
-            var btn = target.closest('[data-target="#' + modalId + '"]');
-            if (!btn) return;
-
-            var username = String(btn.getAttribute('data-username') || '');
-            fillModal(document.getElementById(modalId), username);
-          });
-        }
-
-        var jq = window.jQuery;
-        if (jq && jq.fn) {
-          jq('#remove-member-modal').on('show.bs.modal', function (evt) {
+        var modalIds = ['remove-member-modal', 'promote-member-modal', 'demote-sponsor-modal'];
+        modalIds.forEach(function (id) {
+          // jQuery is guaranteed loaded by now (DOMContentLoaded).
+          window.jQuery('#' + id).on('show.bs.modal', function (evt) {
             var btn = evt && evt.relatedTarget ? evt.relatedTarget : null;
             var username = btn ? String(btn.getAttribute('data-username') || '') : '';
             fillModal(this, username);
           });
-
-          jq('#promote-member-modal').on('show.bs.modal', function (evt) {
-            var btn = evt && evt.relatedTarget ? evt.relatedTarget : null;
-            var username = btn ? String(btn.getAttribute('data-username') || '') : '';
-            fillModal(this, username);
-          });
-
-          jq('#demote-sponsor-modal').on('show.bs.modal', function (evt) {
-            var btn = evt && evt.relatedTarget ? evt.relatedTarget : null;
-            var username = btn ? String(btn.getAttribute('data-username') || '') : '';
-            fillModal(this, username);
-          });
-        }
-
-        wireClickHandler('remove-member-modal');
-        wireClickHandler('promote-member-modal');
-        wireClickHandler('demote-sponsor-modal');
-      })();
+        });
+      });
     </script>
   {% endif %}
 {% endblock %}

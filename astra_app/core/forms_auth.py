@@ -1,12 +1,13 @@
-from __future__ import annotations
 
 from django import forms
 from django.contrib.auth.forms import AuthenticationForm
 
+from core.form_validators import clean_password_confirm
+from core.forms_base import StyledForm, _StyledFormMixin
 from core.views_utils import _normalize_str
 
 
-class FreeIPAAuthenticationForm(AuthenticationForm):
+class FreeIPAAuthenticationForm(_StyledFormMixin, AuthenticationForm):
     """AuthenticationForm with a separate OTP field.
 
     Noggin-style behavior: if OTP is provided, append it to the password before
@@ -17,8 +18,7 @@ class FreeIPAAuthenticationForm(AuthenticationForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        for field in self.fields.values():
-            field.widget.attrs.setdefault("class", "form-control")
+        self._apply_css_classes()
 
     def clean(self):
         # Ensure the OTP is applied before AuthenticationForm runs authenticate().
@@ -29,28 +29,20 @@ class FreeIPAAuthenticationForm(AuthenticationForm):
         return super().clean()
 
 
-class ExpiredPasswordChangeForm(forms.Form):
+class ExpiredPasswordChangeForm(StyledForm):
     username = forms.CharField(label="Username", required=True)
     current_password = forms.CharField(label="Current Password", widget=forms.PasswordInput, required=True)
     otp = forms.CharField(label="One-Time Password", required=False)
     new_password = forms.CharField(label="New Password", widget=forms.PasswordInput, required=True)
     confirm_new_password = forms.CharField(label="Confirm New Password", widget=forms.PasswordInput, required=True)
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        for field in self.fields.values():
-            field.widget.attrs.setdefault("class", "form-control")
-
     def clean(self):
         cleaned = super().clean()
-        new = cleaned.get("new_password")
-        confirm = cleaned.get("confirm_new_password")
-        if new and confirm and new != confirm:
-            raise forms.ValidationError("New password fields do not match.")
+        clean_password_confirm(cleaned)
         return cleaned
 
 
-class SyncTokenForm(forms.Form):
+class SyncTokenForm(StyledForm):
     """Noggin-style OTP token sync form.
 
     Used when a user's token has drifted and they can no longer log in.
@@ -65,30 +57,23 @@ class SyncTokenForm(forms.Form):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        for field in self.fields.values():
-            field.widget.attrs.setdefault("class", "form-control")
         self.fields["first_code"].widget.attrs.setdefault("autocomplete", "off")
         self.fields["second_code"].widget.attrs.setdefault("autocomplete", "off")
-        self.fields["token"].help_text = "Optional. Leave empty to sync the default token." 
+        self.fields["token"].help_text = "Optional. Leave empty to sync the default token."
 
 
-class PasswordResetRequestForm(forms.Form):
+class PasswordResetRequestForm(StyledForm):
     username_or_email = forms.CharField(
         label="Username or email",
         required=True,
         max_length=255,
     )
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        for field in self.fields.values():
-            field.widget.attrs.setdefault("class", "form-control")
-
     def clean_username_or_email(self) -> str:
         return _normalize_str(self.cleaned_data.get("username_or_email"))
 
 
-class PasswordResetSetForm(forms.Form):
+class PasswordResetSetForm(StyledForm):
     password = forms.CharField(
         label="New password",
         widget=forms.PasswordInput,
@@ -110,9 +95,6 @@ class PasswordResetSetForm(forms.Form):
 
     def __init__(self, *args, require_otp: bool = False, **kwargs):
         super().__init__(*args, **kwargs)
-        for field in self.fields.values():
-            field.widget.attrs.setdefault("class", "form-control")
-
         self.fields["otp"].widget.attrs.setdefault("autocomplete", "off")
         if require_otp:
             self.fields["otp"].required = True
@@ -122,9 +104,6 @@ class PasswordResetSetForm(forms.Form):
 
     def clean(self):
         cleaned = super().clean()
-        pw = cleaned.get("password")
-        pw2 = cleaned.get("password_confirm")
-        if pw and pw2 and pw != pw2:
-            raise forms.ValidationError("Passwords must match")
+        clean_password_confirm(cleaned, password_field="password", confirm_field="password_confirm")
         return cleaned
 

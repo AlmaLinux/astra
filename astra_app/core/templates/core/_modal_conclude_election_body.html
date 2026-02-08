@@ -1,0 +1,22 @@
+{% comment %}
+Body content for the "Conclude Election" name-confirm modal.
+Included by _modal_name_confirm.html.
+{% endcomment %}
+<p class="mb-3">You are about to close this election and end voting.</p>
+
+<ul class="mb-3">
+  <li>Voting ends and no further ballots can be submitted.</li>
+  <li><strong>Irreversible:</strong> Voting credentials are anonymized and election-related emails are scrubbed.</li>
+  <li>If you tally now, results and public audit artifacts will be published.</li>
+</ul>
+<div class="custom-control custom-checkbox">
+  <input
+    type="checkbox"
+    class="custom-control-input"
+    id="conclude-skip-tally"
+    name="skip_tally"
+  >
+  <label class="custom-control-label" for="conclude-skip-tally">
+    Close election, but do not tally votes
+  </label>
+</div>

@@ -16,7 +16,6 @@ Source-of-truth (stable permalinks):
 - election_chain_next_hash:   https://github.com/AlmaLinux/astra/blob/8806e7916ec58df46a7d9f333a2e50baac31bdb7/astra_app/core/tokens.py
 """
 
-from __future__ import annotations
 
 import hashlib
 import json

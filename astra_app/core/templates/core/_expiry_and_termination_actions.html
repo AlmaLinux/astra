@@ -20,27 +20,21 @@ Optional:
 {% endcomment %}
 
 {% with prefix=id_prefix|default:"" suffix=id_suffix|default:"" %}
-  {% if prefix %}
-    {% with base=prefix|add:"-" %}
-      {% if suffix %}
-        {% with expiry_modal_id=base|add:"expiry-modal-"|add:suffix terminate_modal_id=base|add:"terminate-modal-"|add:suffix expires_input_id=base|add:"expires-on-"|add:suffix %}
-          {% include 'core/_expiry_and_termination_actions_render.html' %}
-        {% endwith %}
-      {% else %}
-        {% with expiry_modal_id=base|add:"expiry-modal" terminate_modal_id=base|add:"terminate-modal" expires_input_id=base|add:"expires-on" %}
-          {% include 'core/_expiry_and_termination_actions_render.html' %}
-        {% endwith %}
-      {% endif %}
+  {% if prefix and suffix %}
+    {% with expiry_modal_id=prefix|add:"-expiry-modal-"|add:suffix terminate_modal_id=prefix|add:"-terminate-modal-"|add:suffix expires_input_id=prefix|add:"-expires-on-"|add:suffix %}
+      {% include 'core/_expiry_and_termination_actions_render.html' %}
+    {% endwith %}
+  {% elif prefix %}
+    {% with expiry_modal_id=prefix|add:"-expiry-modal" terminate_modal_id=prefix|add:"-terminate-modal" expires_input_id=prefix|add:"-expires-on" %}
+      {% include 'core/_expiry_and_termination_actions_render.html' %}
+    {% endwith %}
+  {% elif suffix %}
+    {% with expiry_modal_id="expiry-modal-"|add:suffix terminate_modal_id="terminate-modal-"|add:suffix expires_input_id="expires-on-"|add:suffix %}
+      {% include 'core/_expiry_and_termination_actions_render.html' %}
     {% endwith %}
   {% else %}
-    {% if suffix %}
-      {% with expiry_modal_id="expiry-modal-"|add:suffix terminate_modal_id="terminate-modal-"|add:suffix expires_input_id="expires-on-"|add:suffix %}
-        {% include 'core/_expiry_and_termination_actions_render.html' %}
-      {% endwith %}
-    {% else %}
-      {% with expiry_modal_id="expiry-modal" terminate_modal_id="terminate-modal" expires_input_id="expires-on" %}
-        {% include 'core/_expiry_and_termination_actions_render.html' %}
-      {% endwith %}
-    {% endif %}
+    {% with expiry_modal_id="expiry-modal" terminate_modal_id="terminate-modal" expires_input_id="expires-on" %}
+      {% include 'core/_expiry_and_termination_actions_render.html' %}
+    {% endwith %}
   {% endif %}
 {% endwith %}

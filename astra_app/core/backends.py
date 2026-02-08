@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import hashlib
 import logging
 import socket
@@ -15,12 +13,14 @@ from django.core.cache import cache
 from django.utils.crypto import salted_hmac
 from python_freeipa import ClientMeta, exceptions
 
+from core.ipa_utils import bool_from_ipa
+
 logger = logging.getLogger(__name__)
 
 _service_client_local = threading.local()
 _viewer_username_local = threading.local()
 
-_FREEIPA_REQUEST_TIMEOUT_SECONDS = 10
+_FREEIPA_REQUEST_TIMEOUT_SECONDS: int = getattr(settings, "FREEIPA_REQUEST_TIMEOUT_SECONDS", 10)  # env-tunable
 
 
 class _FreeIPATimeoutSession(requests.Session):
@@ -129,6 +129,21 @@ def _has_truthy_failure(value: object) -> bool:
     return bool(value)
 
 
+def _is_benign_membership_message(value: object, *, is_add: bool) -> bool:
+    """Treat idempotent add/remove outcomes as non-errors.
+
+    FreeIPA returns human-readable strings like "This entry is already a member"
+    or "This entry is not a member" when the state already matches the request.
+    Both group and agreement membership operations share this pattern.
+    """
+    text = str(value or "").strip().lower()
+    if not text:
+        return True
+    if is_add:
+        return "already" in text and "member" in text
+    return "not" in text and "member" in text
+
+
 def _raise_if_freeipa_failed(result: object, *, action: str, subject: str) -> None:
     if not isinstance(result, dict):
         return
@@ -152,26 +167,13 @@ def _raise_if_freeipa_failed(result: object, *, action: str, subject: str) -> No
         if isinstance(member, dict):
             user_bucket = member.get("user")
 
-            def _is_benign_group_member_message(value: object, *, is_add: bool) -> bool:
-                # FreeIPA can return human strings here such as:
-                # - add: "This entry is already a member"
-                # - remove: "This entry is not a member"
-                # Treat these as idempotent outcomes so membership sync/extension
-                # logic doesn't fail when state already matches the request.
-                text = str(value or "").strip().lower()
-                if not text:
-                    return True
-                if is_add:
-                    return "already" in text and "member" in text
-                return "not" in text and "member" in text
-
             if isinstance(user_bucket, list) and user_bucket:
                 if action == "group_add_member" and all(
-                    _is_benign_group_member_message(v, is_add=True) for v in user_bucket
+                    _is_benign_membership_message(v, is_add=True) for v in user_bucket
                 ):
                     user_bucket = []
                 if action == "group_remove_member" and all(
-                    _is_benign_group_member_message(v, is_add=False) for v in user_bucket
+                    _is_benign_membership_message(v, is_add=False) for v in user_bucket
                 ):
                     user_bucket = []
 
@@ -198,20 +200,9 @@ def _raise_if_freeipa_failed(result: object, *, action: str, subject: str) -> No
         "fasagreement_add_user",
         "fasagreement_remove_user",
     } and isinstance(failed, dict):
-        def _is_benign_agreement_member_message(value: object, *, is_add: bool) -> bool:
-            # Treat idempotent membership operations as success:
-            # - add: "This entry is already a member"
-            # - remove: "This entry is not a member"
-            text = str(value or "").strip().lower()
-            if not text:
-                return True
-            if is_add:
-                return "already" in text and "member" in text
-            return "not" in text and "member" in text
-
         def _clean_member_bucket(value: object, *, is_add: bool) -> object:
             if isinstance(value, list) and value:
-                if all(_is_benign_agreement_member_message(v, is_add=is_add) for v in value):
+                if all(_is_benign_membership_message(v, is_add=is_add) for v in value):
                     return []
             return value
 
@@ -633,7 +624,30 @@ class FreeIPAManager:
     def __iter__(self):
         return iter(self._iterable)
 
-class FreeIPAUser:
+
+class _FreeIPAClientMixin:
+    """Shared service-client helpers for FreeIPA-backed model classes."""
+
+    @classmethod
+    def get_client(cls) -> ClientMeta:
+        """Return a FreeIPA client authenticated as the service account."""
+        return _get_freeipa_service_client_cached()
+
+    @classmethod
+    def _rpc(cls, client: ClientMeta, method: str, args: list[object] | None, params: dict[str, object] | None):
+        """Call a FreeIPA JSON-RPC method.
+
+        python-freeipa's ClientMeta doesn't generate methods for custom plugin
+        commands (e.g. fasagreement_*). All clients expose a raw `_request()`
+        method which can call any command the server supports.
+        """
+        # hasattr needed: duck-typing check against third-party ClientMeta
+        if not hasattr(client, "_request"):
+            raise FreeIPAOperationFailed("FreeIPA client does not support raw JSON-RPC requests")
+        return client._request(method, args or [], params or {})
+
+
+class FreeIPAUser(_FreeIPAClientMixin):
     """
     A non-persistent user object backed by FreeIPA.
     """
@@ -688,12 +702,7 @@ class FreeIPAUser:
         fas_is_private_raw = _first_attr_ci(self._user_data, "fasIsPrivate", None)
         if fas_is_private_raw is None:
             fas_is_private_raw = _first_attr_ci(self._user_data, "fasisprivate", None)
-        if fas_is_private_raw is None:
-            self.fas_is_private = False
-        elif isinstance(fas_is_private_raw, bool):
-            self.fas_is_private = bool(fas_is_private_raw)
-        else:
-            self.fas_is_private = str(fas_is_private_raw).strip().upper() in {"TRUE", "T", "YES", "Y", "1", "ON"}
+        self.fas_is_private = bool_from_ipa(fas_is_private_raw, default=False)
 
         # Determine status based on FreeIPA data
         # nsaccountlock: True means locked (inactive)
@@ -802,12 +811,6 @@ class FreeIPAUser:
     def get_session_auth_hash(self):
         # Used by Django to invalidate sessions on credential changes.
         return salted_hmac('freeipa-user', self.username, secret=settings.SECRET_KEY).hexdigest()
-
-    @classmethod
-    def get_client(cls) -> ClientMeta:
-        """Return a FreeIPA client authenticated as the service account."""
-
-        return _get_freeipa_service_client_cached()
 
     @classmethod
     def all(cls):
@@ -1245,7 +1248,7 @@ class FreeIPAUser:
             raise
 
 
-class FreeIPAGroup:
+class FreeIPAGroup(_FreeIPAClientMixin):
     """
     A non-persistent group object backed by FreeIPA.
     """
@@ -1311,18 +1314,6 @@ class FreeIPAGroup:
 
     def __str__(self):
         return self.cn
-
-    @classmethod
-    def get_client(cls) -> ClientMeta:
-        """Return a FreeIPA client authenticated as the service account."""
-
-        return _get_freeipa_service_client_cached()
-
-    @classmethod
-    def _rpc(cls, client: ClientMeta, method: str, args: list[object] | None, params: dict[str, object] | None):
-        if not hasattr(client, "_request"):
-            raise FreeIPAOperationFailed("FreeIPA client does not support raw JSON-RPC requests")
-        return client._request(method, args or [], params or {})
 
     @classmethod
     def all(cls):
@@ -1735,7 +1726,7 @@ class FreeIPAGroup:
         return len(self.member_usernames_recursive(fas_only=fas_only))
 
 
-class FreeIPAFASAgreement:
+class FreeIPAFASAgreement(_FreeIPAClientMixin):
     """A non-persistent User Agreement object backed by FreeIPA.
 
     This relies on the freeipa-fas plugin, which exposes the fasagreement
@@ -1755,12 +1746,8 @@ class FreeIPAFASAgreement:
         enabled_raw = self._agreement_data.get("ipaenabledflag", None)
         if isinstance(enabled_raw, list):
             enabled_raw = enabled_raw[0] if enabled_raw else None
-        if enabled_raw is None:
-            self.enabled = True
-        elif isinstance(enabled_raw, bool):
-            self.enabled = bool(enabled_raw)
-        else:
-            self.enabled = str(enabled_raw).strip().upper() in {"TRUE", "T", "YES", "Y", "1", "ON"}
+        # Default to enabled when FreeIPA omits the flag entirely.
+        self.enabled = bool_from_ipa(enabled_raw, default=True)
 
         self.groups = self._multi_value_first_present(
             self._agreement_data,
@@ -1784,25 +1771,6 @@ class FreeIPAFASAgreement:
 
     def __str__(self) -> str:
         return self.cn
-
-    @classmethod
-    def get_client(cls) -> ClientMeta:
-        return _get_freeipa_service_client_cached()
-
-    @classmethod
-    def _rpc(cls, client: ClientMeta, method: str, args: list[object] | None, params: dict[str, object] | None):
-        """Call a FreeIPA JSON-RPC method.
-
-        python-freeipa's ClientMeta doesn't necessarily generate methods for
-        custom plugin commands like fasagreement_*. However, all clients expose
-        a raw `_request()` method which can call any command supported by the
-        server.
-        """
-
-        if not hasattr(client, "_request"):
-            raise FreeIPAOperationFailed("FreeIPA client does not support raw JSON-RPC requests")
-
-        return client._request(method, args or [], params or {})
 
     @classmethod
     def all(cls) -> list[FreeIPAFASAgreement]:

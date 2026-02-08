@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from django.http import HttpRequest, JsonResponse
 
 from core.backends import FreeIPAGroup, FreeIPAUser

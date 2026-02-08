@@ -1,0 +1,21 @@
+{% comment %}
+Body content for the "Extend Election" name-confirm modal.
+Included by _modal_name_confirm.html.
+{% endcomment %}
+<p class="mb-3">Set a new end datetime. It must be later than the current end.</p>
+
+<div class="form-group mb-0">
+  <label for="extend-end-datetime">New end datetime</label>
+  <input
+    id="extend-end-datetime"
+    name="end_datetime"
+    type="datetime-local"
+    class="form-control js-datetime-picker"
+    value="{{ election.end_datetime|date:'Y-m-d\\TH:i' }}"
+    min="{{ election.end_datetime|date:'Y-m-d\\TH:i' }}"
+    required
+  >
+  <div class="text-muted small mt-1">
+    Current end: {{ election.end_datetime|date:"Y-m-d H:i T" }}
+  </div>
+</div>

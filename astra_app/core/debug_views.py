@@ -111,13 +111,13 @@ def _wikipedia_example() -> tuple[int, list[dict[str, object]], list[dict[str, o
     candidate_name_by_id = {int(c["id"]): str(c.get("name") or "").strip() for c in candidates}
     return 3, candidates, ballots, votes_cast, candidate_name_by_id, []
 
-def _exclusion_example() -> tuple[int, list[dict[str, object]], list[dict[str, object]], int, dict[int, str], list[dict[str, object]]]:
-    # This is a modified version of the Wikipedia example with an exclusion group added.
-    seats, candidates, ballots, votes_cast, candidate_name_by_id, exclusions = _wikipedia_example()
-    exclusions = [
-        {"public_id": 1, "name": "Healthy food", "max_elected": 1, "candidate_ids": [10, 11, 12]},
-    ]
-    return seats, candidates, ballots, votes_cast, candidate_name_by_id, exclusions
+# def _exclusion_example() -> tuple[int, list[dict[str, object]], list[dict[str, object]], int, dict[int, str], list[dict[str, object]]]:
+#     # This is a modified version of the Wikipedia example with an exclusion group added.
+#     seats, candidates, ballots, votes_cast, candidate_name_by_id, exclusions = _wikipedia_example()
+#     exclusions = [
+#         {"public_id": 1, "name": "Healthy food", "max_elected": 1, "candidate_ids": [10, 11, 12]},
+#     ]
+#     return seats, candidates, ballots, votes_cast, candidate_name_by_id, exclusions
 
 @require_GET
 @user_passes_test(lambda u: bool(u.is_superuser), login_url="/admin/login/")

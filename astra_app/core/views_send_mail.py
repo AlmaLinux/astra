@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import csv
 import io
 import json
@@ -32,19 +30,17 @@ from core.templated_email import (
     preview_drop_inline_image_tags,
     preview_rewrite_inline_image_tags_to_urls,
     render_templated_email_preview,
+    render_templated_email_preview_response,
     stage_inline_images_for_sending,
     update_email_template,
 )
+from core.views_utils import get_username
 
 logger = logging.getLogger(__name__)
 
 
 _CSV_SESSION_KEY = "send_mail_csv_payload_v1"
 _PREVIEW_CONTEXT_SESSION_KEY = "send_mail_preview_first_context_v1"
-
-
-def _variable_placeholder(var_name: str) -> str:
-    return f"-{var_name}-"
 
 
 @dataclass(frozen=True)
@@ -56,7 +52,7 @@ class RecipientPreview:
 
 def _best_example_context(*, recipients: list[dict[str, str]], var_names: list[str]) -> dict[str, str]:
     if not recipients:
-        return {var: _variable_placeholder(var) for var in var_names}
+        return {var: f"-{var}-" for var in var_names}
 
     best: dict[str, str] = recipients[0]
     best_score = -1
@@ -76,7 +72,7 @@ def _best_example_context(*, recipients: list[dict[str, str]], var_names: list[s
     for var in var_names:
         value = str(filled.get(var, "") or "").strip()
         if not value:
-            filled[var] = _variable_placeholder(var)
+            filled[var] = f"-{var}-"
     return filled
 
 
@@ -185,7 +181,7 @@ def _apply_extra_context(
         return preview, merged_recipients
 
     if not merged_recipients:
-        example_context = {v: str(extra_context.get(v) or _variable_placeholder(v)) for v in var_names}
+        example_context = {v: str(extra_context.get(v) or f"-{v}-") for v in var_names}
         variables = [(v, str(example_context.get(v, ""))) for v in var_names]
         return (
             RecipientPreview(variables=variables, recipient_count=0, first_context=example_context),
@@ -790,7 +786,7 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                                         )
                                         add_note(
                                             membership_request=membership_request,
-                                            username=str(request.user.get_username() or "").strip(),
+                                            username=get_username(request),
                                             action={
                                                 "type": "contacted",
                                                 "kind": email_kind,
@@ -961,18 +957,7 @@ def send_mail_render_preview(request: HttpRequest) -> JsonResponse:
     if not isinstance(context, dict):
         return JsonResponse({"error": "Preview context is invalid."}, status=400)
 
-    subject = str(request.POST.get("subject") or "")
-    html_content = preview_rewrite_inline_image_tags_to_urls(str(request.POST.get("html_content") or ""))
-    text_content = preview_drop_inline_image_tags(str(request.POST.get("text_content") or ""))
-
-    try:
-        return JsonResponse(
-            render_templated_email_preview(
-                subject=subject,
-                html_content=html_content,
-                text_content=text_content,
-                context={str(k): str(v) for k, v in context.items()},
-            )
-        )
-    except ValueError as exc:
-        return JsonResponse({"error": f"Template error: {exc}"}, status=400)
+    return render_templated_email_preview_response(
+        request=request,
+        context={str(k): str(v) for k, v in context.items()},
+    )

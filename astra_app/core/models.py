@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import datetime
 import hashlib
 import json
@@ -351,83 +349,6 @@ class MembershipRequest(models.Model):
         return f"{self.requested_username} → {self.membership_type_id}"
 
 
-class MembershipInvitation(models.Model):
-    email = models.EmailField(unique=True)
-    full_name = models.CharField(max_length=255, blank=True, default="")
-    note = models.TextField(blank=True, default="")
-    invited_by_username = models.CharField(max_length=255)
-    invited_at = models.DateTimeField(auto_now_add=True)
-    email_template_name = models.CharField(max_length=255, blank=True, default="")
-    last_sent_at = models.DateTimeField(blank=True, null=True)
-    send_count = models.PositiveIntegerField(default=0)
-    dismissed_at = models.DateTimeField(blank=True, null=True)
-    dismissed_by_username = models.CharField(max_length=255, blank=True, default="")
-    accepted_at = models.DateTimeField(blank=True, null=True)
-    freeipa_matched_usernames = models.JSONField(blank=True, default=list)
-    freeipa_last_checked_at = models.DateTimeField(blank=True, null=True)
-
-    class Meta:
-        ordering = ("-invited_at", "email")
-        indexes = [
-            models.Index(fields=["accepted_at"], name="inv_accept_at"),
-            models.Index(fields=["dismissed_at"], name="inv_dismiss_at"),
-        ]
-
-    @override
-    def save(self, *args, **kwargs) -> None:
-        self.email = str(self.email or "").strip().lower()
-        self.full_name = str(self.full_name or "").strip()
-        self.note = str(self.note or "").strip()
-        self.invited_by_username = str(self.invited_by_username or "").strip()
-        self.email_template_name = str(self.email_template_name or "").strip()
-        self.dismissed_by_username = str(self.dismissed_by_username or "").strip()
-        if not isinstance(self.freeipa_matched_usernames, list):
-            self.freeipa_matched_usernames = []
-        else:
-            self.freeipa_matched_usernames = [
-                str(item or "").strip().lower()
-                for item in self.freeipa_matched_usernames
-                if str(item or "").strip()
-            ]
-        super().save(*args, **kwargs)
-
-    def __str__(self) -> str:
-        return f"invite:{self.email}"
-
-
-class MembershipInvitationSend(models.Model):
-    class Result(models.TextChoices):
-        queued = "queued", "Queued"
-        failed = "failed", "Failed"
-
-    invitation = models.ForeignKey(
-        MembershipInvitation,
-        on_delete=models.CASCADE,
-        related_name="sends",
-    )
-    sent_by_username = models.CharField(max_length=255)
-    sent_at = models.DateTimeField(default=timezone.now)
-    template_name = models.CharField(max_length=255)
-    post_office_email_id = models.BigIntegerField(blank=True, null=True)
-    result = models.CharField(max_length=16, choices=Result.choices)
-    error_category = models.CharField(max_length=64, blank=True, default="")
-
-    class Meta:
-        indexes = [
-            models.Index(fields=["sent_at"], name="inv_send_at"),
-        ]
-
-    @override
-    def save(self, *args, **kwargs) -> None:
-        self.sent_by_username = str(self.sent_by_username or "").strip()
-        self.template_name = str(self.template_name or "").strip()
-        self.error_category = str(self.error_category or "").strip()
-        super().save(*args, **kwargs)
-
-    def __str__(self) -> str:
-        return f"invite-send:{self.invitation_id}:{self.sent_at.isoformat()}"
-
-
 class AccountInvitation(models.Model):
     email = models.EmailField(unique=True)
     full_name = models.CharField(max_length=255, blank=True, default="")
@@ -657,167 +578,127 @@ class MembershipLog(models.Model):
         super().save(*args, **kwargs)
 
         if self.target_organization_id is not None:
-            if self.action not in {
-                self.Action.approved,
-                self.Action.expiry_changed,
-                self.Action.terminated,
-            }:
-                return
-
-            # OrganizationSponsorship is the current-state table for an org's sponsorship.
-            # We use created_at as the start time of the *current uninterrupted term*.
-            if self.action == self.Action.terminated:
-                OrganizationSponsorship.objects.filter(organization_id=self.target_organization_id).delete()
-                return
-
-            start_at = self.created_at
-
-            existing = (
-                OrganizationSponsorship.objects.filter(organization_id=self.target_organization_id)
-                .only("created_at", "expires_at")
-                .first()
-            )
-            if existing is not None and existing.expires_at is not None and existing.expires_at > self.created_at:
-                start_at = existing.created_at
-            else:
-                last_approved = (
-                    MembershipLog.objects.filter(
-                        target_organization_id=self.target_organization_id,
-                        membership_type=self.membership_type,
-                        action=self.Action.approved,
-                        created_at__lt=self.created_at,
-                    )
-                    .only("created_at", "expires_at")
-                    .order_by("-created_at")
-                    .first()
-                )
-
-                if last_approved is not None and last_approved.expires_at is not None and last_approved.expires_at > self.created_at:
-                    last_terminated = (
-                        MembershipLog.objects.filter(
-                            target_organization_id=self.target_organization_id,
-                            membership_type=self.membership_type,
-                            action=self.Action.terminated,
-                            created_at__lt=self.created_at,
-                        )
-                        .only("created_at")
-                        .order_by("-created_at")
-                        .first()
-                    )
-
-                    approved_qs = MembershipLog.objects.filter(
-                        target_organization_id=self.target_organization_id,
-                        membership_type=self.membership_type,
-                        action=self.Action.approved,
-                    )
-                    if last_terminated is not None:
-                        approved_qs = approved_qs.filter(created_at__gt=last_terminated.created_at)
-
-                    first_term_approved = approved_qs.only("created_at").order_by("created_at").first()
-                    if first_term_approved is not None:
-                        start_at = first_term_approved.created_at
-
-            sponsorship, _created = OrganizationSponsorship.objects.update_or_create(
-                organization_id=self.target_organization_id,
-                defaults={
-                    "membership_type": self.membership_type,
-                    "expires_at": self.expires_at,
-                },
-            )
-
-            # `created_at` is auto_now_add; ensure it reflects the uninterrupted term start.
-            if sponsorship.created_at != start_at:
-                OrganizationSponsorship.objects.filter(pk=sponsorship.pk).update(created_at=start_at)
+            self._apply_org_side_effects()
             return
 
         if self.target_organization_code:
             # Organization-target logs without a live FK should never affect current-state tables.
             return
 
-        if self.action not in {
-            self.Action.approved,
-            self.Action.expiry_changed,
-            self.Action.terminated,
-        }:
-            return
+        self._apply_user_side_effects()
 
-        # Membership is the current-state table for a user+membership_type.
-        # We use created_at as the start time of the *current uninterrupted term*:
-        # - preserve it across extensions/expiry tweaks while the membership is active
-        # - reset it when the previous term has already expired at approval time
-        # - reset it across explicit termination by deleting the current-state row
-        if self.action == self.Action.terminated:
-            Membership.objects.filter(
-                target_username=self.target_username,
-                membership_type=self.membership_type,
-            ).delete()
-            return
+    def _resolve_term_start_at(self, *, log_filter: dict[str, object]) -> datetime.datetime:
+        """Compute the start of the current uninterrupted term from membership logs.
 
+        Both user-membership and org-sponsorship branches use identical logic:
+        check the existing current-state row, then fall back to log history.
+        This is extracted to avoid duplicating ~30 lines of query logic.
+        """
         start_at = self.created_at
 
-        existing = (
-            Membership.objects.filter(
-                target_username=self.target_username,
-                membership_type=self.membership_type,
+        last_approved = (
+            MembershipLog.objects.filter(
+                **log_filter,
+                action=self.Action.approved,
+                created_at__lt=self.created_at,
             )
+            .only("created_at", "expires_at")
+            .order_by("-created_at")
+            .first()
+        )
+
+        if last_approved is not None and last_approved.expires_at is not None and last_approved.expires_at > self.created_at:
+            last_terminated = (
+                MembershipLog.objects.filter(
+                    **log_filter,
+                    action=self.Action.terminated,
+                    created_at__lt=self.created_at,
+                )
+                .only("created_at")
+                .order_by("-created_at")
+                .first()
+            )
+
+            approved_qs = MembershipLog.objects.filter(**log_filter, action=self.Action.approved)
+            if last_terminated is not None:
+                approved_qs = approved_qs.filter(created_at__gt=last_terminated.created_at)
+
+            first_term_approved = approved_qs.only("created_at").order_by("created_at").first()
+            if first_term_approved is not None:
+                start_at = first_term_approved.created_at
+
+        return start_at
+
+    def _apply_side_effects(
+        self,
+        *,
+        model_class: type[models.Model],
+        delete_filter: dict[str, object],
+        lookup_filter: dict[str, object],
+        log_filter: dict[str, object],
+        create_defaults: dict[str, object],
+    ) -> None:
+        """Shared 4-step side-effect algorithm for both user membership and org sponsorship.
+
+        1. Skip actions that don't affect current-state rows
+        2. On termination: delete the current-state row
+        3. Determine the start of the current uninterrupted term
+        4. Upsert the current-state row with new expiry and correct start date
+        """
+        if self.action not in {self.Action.approved, self.Action.expiry_changed, self.Action.terminated}:
+            return
+
+        if self.action == self.Action.terminated:
+            model_class.objects.filter(**delete_filter).delete()
+            return
+
+        existing = (
+            model_class.objects.filter(**lookup_filter)
             .only("created_at", "expires_at")
             .first()
         )
 
         if existing is not None and existing.expires_at is not None and existing.expires_at > self.created_at:
-            # Active membership: extending or changing expiry keeps the original start.
             start_at = existing.created_at
         else:
-            # Missing/expired row: consult logs to decide whether this approval is an
-            # uninterrupted extension or the start of a new term.
-            last_approved = (
-                MembershipLog.objects.filter(
-                    target_username=self.target_username,
-                    membership_type=self.membership_type,
-                    action=self.Action.approved,
-                    created_at__lt=self.created_at,
-                )
-                .only("created_at", "expires_at")
-                .order_by("-created_at")
-                .first()
-            )
-            if last_approved is not None and last_approved.expires_at is not None and last_approved.expires_at > self.created_at:
-                last_terminated = (
-                    MembershipLog.objects.filter(
-                        target_username=self.target_username,
-                        membership_type=self.membership_type,
-                        action=self.Action.terminated,
-                        created_at__lt=self.created_at,
-                    )
-                    .only("created_at")
-                    .order_by("-created_at")
-                    .first()
-                )
+            start_at = self._resolve_term_start_at(log_filter=log_filter)
 
-                approved_qs = MembershipLog.objects.filter(
-                    target_username=self.target_username,
-                    membership_type=self.membership_type,
-                    action=self.Action.approved,
-                )
-                if last_terminated is not None:
-                    approved_qs = approved_qs.filter(created_at__gt=last_terminated.created_at)
-
-                first_term_approved = approved_qs.only("created_at").order_by("created_at").first()
-                if first_term_approved is not None:
-                    start_at = first_term_approved.created_at
-
-        membership, _created = Membership.objects.update_or_create(
-            target_username=self.target_username,
-            membership_type=self.membership_type,
+        row, _created = model_class.objects.update_or_create(
+            **lookup_filter,
             defaults={
+                **create_defaults,
                 "expires_at": self.expires_at,
             },
         )
 
-        # `created_at` is auto_now_add, so Django will overwrite it on create.
-        # Update it explicitly to reflect the start of the uninterrupted term.
-        if membership.created_at != start_at:
-            Membership.objects.filter(pk=membership.pk).update(created_at=start_at)
+        if row.created_at != start_at:
+            model_class.objects.filter(pk=row.pk).update(created_at=start_at)
+
+    def _apply_org_side_effects(self) -> None:
+        lookup = {"organization_id": self.target_organization_id}
+        self._apply_side_effects(
+            model_class=OrganizationSponsorship,
+            delete_filter=lookup,
+            lookup_filter=lookup,
+            log_filter={
+                "target_organization_id": self.target_organization_id,
+                "membership_type": self.membership_type,
+            },
+            create_defaults={"membership_type": self.membership_type},
+        )
+
+    def _apply_user_side_effects(self) -> None:
+        lookup = {
+            "target_username": self.target_username,
+            "membership_type": self.membership_type,
+        }
+        self._apply_side_effects(
+            model_class=Membership,
+            delete_filter=lookup,
+            lookup_filter=lookup,
+            log_filter=lookup,
+            create_defaults={},
+        )
 
     def __str__(self) -> str:
         if self.target_username == "":
@@ -850,41 +731,59 @@ class MembershipLog(models.Model):
         return base + datetime.timedelta(days=settings.MEMBERSHIP_VALIDITY_DAYS)
 
     @classmethod
+    def _create_log(
+        cls,
+        *,
+        actor_username: str,
+        action: str,
+        membership_type: MembershipType,
+        target_username: str = "",
+        target_organization: Organization | None = None,
+        target_organization_code: str = "",
+        target_organization_name: str = "",
+        membership_request: MembershipRequest | None = None,
+        expires_at: datetime.datetime | None = None,
+        rejection_reason: str = "",
+    ) -> MembershipLog:
+        """Internal factory: all public create_for_* methods delegate here."""
+        kwargs: dict[str, object] = {
+            "actor_username": actor_username,
+            "target_username": target_username,
+            "membership_type": membership_type,
+            "membership_request": membership_request,
+            "requested_group_cn": membership_type.group_cn,
+            "action": action,
+        }
+        if target_organization is not None:
+            kwargs["target_organization"] = target_organization
+            kwargs["target_organization_code"] = str(target_organization.pk)
+            kwargs["target_organization_name"] = target_organization.name
+        elif target_organization_code or target_organization_name:
+            # Org FK is gone but caller supplied identifiers (e.g. deleted org).
+            kwargs["target_organization_code"] = target_organization_code
+            kwargs["target_organization_name"] = target_organization_name
+        if expires_at is not None:
+            kwargs["expires_at"] = expires_at
+        if rejection_reason:
+            kwargs["rejection_reason"] = rejection_reason
+        return cls.objects.create(**kwargs)
+
+    # --- Factory methods (unified: pass target_username OR target_organization) ---
+
+    @classmethod
     def create_for_request(
         cls,
         *,
         actor_username: str,
-        target_username: str,
         membership_type: MembershipType,
+        target_username: str = "",
+        target_organization: Organization | None = None,
         membership_request: MembershipRequest | None = None,
     ) -> MembershipLog:
-        return cls.objects.create(
-            actor_username=actor_username,
-            target_username=target_username,
-            membership_type=membership_type,
-            membership_request=membership_request,
-            requested_group_cn=membership_type.group_cn,
-            action=cls.Action.requested,
-        )
-
-    @classmethod
-    def create_for_org_request(
-        cls,
-        *,
-        actor_username: str,
-        target_organization: Organization,
-        membership_type: MembershipType,
-        membership_request: MembershipRequest | None = None,
-    ) -> MembershipLog:
-        return cls.objects.create(
-            actor_username=actor_username,
-            target_username="",
+        return cls._create_log(
+            actor_username=actor_username, target_username=target_username,
             target_organization=target_organization,
-            target_organization_code=str(target_organization.pk),
-            target_organization_name=target_organization.name,
-            membership_type=membership_type,
-            membership_request=membership_request,
-            requested_group_cn=membership_type.group_cn,
+            membership_type=membership_type, membership_request=membership_request,
             action=cls.Action.requested,
         )
 
@@ -893,22 +792,20 @@ class MembershipLog(models.Model):
         cls,
         *,
         actor_username: str,
-        target_username: str,
         membership_type: MembershipType,
         approved_at: datetime.datetime,
+        target_username: str = "",
+        target_organization: Organization | None = None,
         previous_expires_at: datetime.datetime | None = None,
         membership_request: MembershipRequest | None = None,
     ) -> MembershipLog:
-        return cls.objects.create(
-            actor_username=actor_username,
-            target_username=target_username,
-            membership_type=membership_type,
-            membership_request=membership_request,
-            requested_group_cn=membership_type.group_cn,
+        return cls._create_log(
+            actor_username=actor_username, target_username=target_username,
+            target_organization=target_organization,
+            membership_type=membership_type, membership_request=membership_request,
             action=cls.Action.approved,
             expires_at=cls.expiry_for_approval_at(
-                approved_at=approved_at,
-                previous_expires_at=previous_expires_at,
+                approved_at=approved_at, previous_expires_at=previous_expires_at,
             ),
         )
 
@@ -917,64 +814,17 @@ class MembershipLog(models.Model):
         cls,
         *,
         actor_username: str,
-        target_username: str,
         membership_type: MembershipType,
+        target_username: str = "",
+        target_organization: Organization | None = None,
         previous_expires_at: datetime.datetime | None = None,
         membership_request: MembershipRequest | None = None,
     ) -> MembershipLog:
         return cls.create_for_approval_at(
-            actor_username=actor_username,
-            target_username=target_username,
-            membership_type=membership_type,
-            approved_at=timezone.now(),
-            previous_expires_at=previous_expires_at,
-            membership_request=membership_request,
-        )
-
-    @classmethod
-    def create_for_org_approval_at(
-        cls,
-        *,
-        actor_username: str,
-        target_organization: Organization,
-        membership_type: MembershipType,
-        approved_at: datetime.datetime,
-        previous_expires_at: datetime.datetime | None = None,
-        membership_request: MembershipRequest | None = None,
-    ) -> MembershipLog:
-        return cls.objects.create(
-            actor_username=actor_username,
-            target_username="",
+            actor_username=actor_username, target_username=target_username,
             target_organization=target_organization,
-            target_organization_code=str(target_organization.pk),
-            target_organization_name=target_organization.name,
-            membership_type=membership_type,
-            membership_request=membership_request,
-            requested_group_cn=membership_type.group_cn,
-            action=cls.Action.approved,
-            expires_at=cls.expiry_for_approval_at(
-                approved_at=approved_at,
-                previous_expires_at=previous_expires_at,
-            ),
-        )
-
-    @classmethod
-    def create_for_org_approval(
-        cls,
-        *,
-        actor_username: str,
-        target_organization: Organization,
-        membership_type: MembershipType,
-        previous_expires_at: datetime.datetime | None = None,
-        membership_request: MembershipRequest | None = None,
-    ) -> MembershipLog:
-        return cls.create_for_org_approval_at(
-            actor_username=actor_username,
-            target_organization=target_organization,
-            membership_type=membership_type,
-            approved_at=timezone.now(),
-            previous_expires_at=previous_expires_at,
-            membership_request=membership_request,
+            membership_type=membership_type, approved_at=timezone.now(),
+            previous_expires_at=previous_expires_at, membership_request=membership_request,
         )
 
     @classmethod
@@ -982,42 +832,17 @@ class MembershipLog(models.Model):
         cls,
         *,
         actor_username: str,
-        target_username: str,
         membership_type: MembershipType,
         expires_at: datetime.datetime,
+        target_username: str = "",
+        target_organization: Organization | None = None,
         membership_request: MembershipRequest | None = None,
     ) -> MembershipLog:
-        return cls.objects.create(
-            actor_username=actor_username,
-            target_username=target_username,
-            membership_type=membership_type,
-            membership_request=membership_request,
-            requested_group_cn=membership_type.group_cn,
-            action=cls.Action.expiry_changed,
-            expires_at=expires_at,
-        )
-
-    @classmethod
-    def create_for_org_expiry_change(
-        cls,
-        *,
-        actor_username: str,
-        target_organization: Organization,
-        membership_type: MembershipType,
-        expires_at: datetime.datetime,
-        membership_request: MembershipRequest | None = None,
-    ) -> MembershipLog:
-        return cls.objects.create(
-            actor_username=actor_username,
-            target_username="",
+        return cls._create_log(
+            actor_username=actor_username, target_username=target_username,
             target_organization=target_organization,
-            target_organization_code=str(target_organization.pk),
-            target_organization_name=target_organization.name,
-            membership_type=membership_type,
-            membership_request=membership_request,
-            requested_group_cn=membership_type.group_cn,
-            action=cls.Action.expiry_changed,
-            expires_at=expires_at,
+            membership_type=membership_type, membership_request=membership_request,
+            action=cls.Action.expiry_changed, expires_at=expires_at,
         )
 
     @classmethod
@@ -1025,42 +850,16 @@ class MembershipLog(models.Model):
         cls,
         *,
         actor_username: str,
-        target_username: str,
         membership_type: MembershipType,
+        target_username: str = "",
+        target_organization: Organization | None = None,
         membership_request: MembershipRequest | None = None,
     ) -> MembershipLog:
-        terminated_at = timezone.now()
-        return cls.objects.create(
-            actor_username=actor_username,
-            target_username=target_username,
-            membership_type=membership_type,
-            membership_request=membership_request,
-            requested_group_cn=membership_type.group_cn,
-            action=cls.Action.terminated,
-            expires_at=terminated_at,
-        )
-
-    @classmethod
-    def create_for_org_termination(
-        cls,
-        *,
-        actor_username: str,
-        target_organization: Organization,
-        membership_type: MembershipType,
-        membership_request: MembershipRequest | None = None,
-    ) -> MembershipLog:
-        terminated_at = timezone.now()
-        return cls.objects.create(
-            actor_username=actor_username,
-            target_username="",
+        return cls._create_log(
+            actor_username=actor_username, target_username=target_username,
             target_organization=target_organization,
-            target_organization_code=str(target_organization.pk),
-            target_organization_name=target_organization.name,
-            membership_type=membership_type,
-            membership_request=membership_request,
-            requested_group_cn=membership_type.group_cn,
-            action=cls.Action.terminated,
-            expires_at=terminated_at,
+            membership_type=membership_type, membership_request=membership_request,
+            action=cls.Action.terminated, expires_at=timezone.now(),
         )
 
     @classmethod
@@ -1068,43 +867,17 @@ class MembershipLog(models.Model):
         cls,
         *,
         actor_username: str,
-        target_username: str,
         membership_type: MembershipType,
         rejection_reason: str,
+        target_username: str = "",
+        target_organization: Organization | None = None,
         membership_request: MembershipRequest | None = None,
     ) -> MembershipLog:
-        return cls.objects.create(
-            actor_username=actor_username,
-            target_username=target_username,
-            membership_type=membership_type,
-            membership_request=membership_request,
-            requested_group_cn=membership_type.group_cn,
-            action=cls.Action.rejected,
-            rejection_reason=rejection_reason,
-        )
-
-    @classmethod
-    def create_for_org_rejection(
-        cls,
-        *,
-        actor_username: str,
-        target_organization: Organization,
-        membership_type: MembershipType,
-        rejection_reason: str,
-        membership_request: MembershipRequest | None = None,
-    ) -> MembershipLog:
-        return cls.objects.create(
-            actor_username=actor_username,
-            target_username="",
+        return cls._create_log(
+            actor_username=actor_username, target_username=target_username,
             target_organization=target_organization,
-            target_organization_code=str(target_organization.pk),
-            target_organization_name=target_organization.name,
-            membership_type=membership_type,
-            membership_request=membership_request,
-            requested_group_cn=membership_type.group_cn,
-            action=cls.Action.rejected,
-            rejection_reason=rejection_reason,
-            expires_at=None,
+            membership_type=membership_type, membership_request=membership_request,
+            action=cls.Action.rejected, rejection_reason=rejection_reason,
         )
 
     @classmethod
@@ -1112,46 +885,38 @@ class MembershipLog(models.Model):
         cls,
         *,
         actor_username: str,
-        target_username: str,
         membership_type: MembershipType,
+        target_username: str = "",
+        target_organization: Organization | None = None,
         membership_request: MembershipRequest | None = None,
     ) -> MembershipLog:
-        return cls.objects.create(
-            actor_username=actor_username,
-            target_username=target_username,
-            membership_type=membership_type,
-            membership_request=membership_request,
-            requested_group_cn=membership_type.group_cn,
+        return cls._create_log(
+            actor_username=actor_username, target_username=target_username,
+            target_organization=target_organization,
+            membership_type=membership_type, membership_request=membership_request,
             action=cls.Action.ignored,
         )
 
-    @classmethod
-    def create_for_org_ignore(
-        cls,
-        *,
-        actor_username: str,
-        target_organization: Organization,
-        membership_type: MembershipType,
-        membership_request: MembershipRequest | None = None,
-    ) -> MembershipLog:
-        return cls.objects.create(
-            actor_username=actor_username,
-            target_username="",
-            target_organization=target_organization,
-            target_organization_code=str(target_organization.pk),
-            target_organization_name=target_organization.name,
-            membership_type=membership_type,
-            membership_request=membership_request,
-            requested_group_cn=membership_type.group_cn,
-            action=cls.Action.ignored,
-            expires_at=None,
-        )
 
 
 def election_artifact_upload_to(election: Election, filename: str) -> str:
     if not election.pk:
         raise ValueError("Election must be saved before writing artifacts")
     return f"elections/{election.pk}/{filename}"
+
+
+class ElectionQuerySet(models.QuerySet):
+    """Custom queryset for Election with soft-delete awareness."""
+
+    def active(self) -> ElectionQuerySet:
+        """Exclude soft-deleted elections.
+
+        Uses the raw string "deleted" because ElectionQuerySet must be defined
+        before Election (Django's as_manager() requires it), so we cannot
+        reference Election.Status.deleted here. The value is guaranteed to
+        match by the Election.Status enum definition below.
+        """
+        return self.exclude(status="deleted")
 
 
 class Election(models.Model):
@@ -1214,6 +979,8 @@ class Election(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    objects = ElectionQuerySet.as_manager()
 
     class Meta:
         ordering = ("-start_datetime", "id")

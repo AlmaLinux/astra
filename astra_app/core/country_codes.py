@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 import pycountry
@@ -13,7 +11,7 @@ class CountryCodeStatus:
 
 
 def country_attr_name() -> str:
-    name = str(getattr(settings, "SELF_SERVICE_ADDRESS_COUNTRY_ATTR", "c") or "").strip()
+    name = str(settings.SELF_SERVICE_ADDRESS_COUNTRY_ATTR or "").strip()
     return name or "c"
 
 

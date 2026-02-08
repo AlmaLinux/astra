@@ -1,0 +1,27 @@
+{% comment %}
+Base scaffold for Bootstrap modals. Used via {% extends %} by modal partials.
+
+Required context:
+- title: str
+
+Optional:
+- modal_id: str
+- dialog_style: str (inline style for .modal-dialog)
+{% endcomment %}
+
+<div class="modal fade"{% if modal_id %} id="{{ modal_id }}"{% endif %} tabindex="-1" role="dialog" aria-hidden="true">
+  <div class="modal-dialog" role="document"{% if dialog_style %} style="{{ dialog_style }}"{% endif %}>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">{{ title }}</h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        {% block modal_body %}{% endblock %}
+      </div>
+    </div>
+  </div>
+</div>
+{% block after_modal %}{% endblock %}

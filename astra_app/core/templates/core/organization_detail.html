@@ -62,23 +62,7 @@
 
           <div class="d-flex align-items-center justify-content-end flex-wrap" style="gap: .5rem;">
             {% if pending_membership_level_request %}
-              {% if pending_membership_level_request.status == 'on_hold' %}
-                {% if is_representative %}
-                  <a class="badge badge-danger alx-status-badge alx-status-badge--action" href="{% url 'membership-request-self' pending_membership_level_request.pk %}">Action required</a>
-                {% elif membership_can_view %}
-                  <a class="badge badge-danger alx-status-badge alx-status-badge--action" href="{% url 'membership-request-detail' pending_membership_level_request.pk %}">On hold</a>
-                {% else %}
-                  <span class="badge badge-danger alx-status-badge alx-status-badge--action">On hold</span>
-                {% endif %}
-              {% else %}
-                {% if is_representative %}
-                  <a class="badge badge-secondary alx-status-badge alx-status-badge--review" href="{% url 'membership-request-self' pending_membership_level_request.pk %}">Under review</a>
-                {% elif membership_can_view %}
-                  <a class="badge badge-secondary alx-status-badge alx-status-badge--review" href="{% url 'membership-request-detail' pending_membership_level_request.pk %}">Under review</a>
-                {% else %}
-                  <span class="badge badge-secondary alx-status-badge alx-status-badge--review">Under review</span>
-                {% endif %}
-              {% endif %}
+              {% include 'core/_pending_request_badge.html' with request_obj=pending_membership_level_request is_owner=is_representative %}
             {% elif organization.membership_level %}
               <span class="badge badge-success alx-status-badge alx-status-badge--active">{{ membership_level_badge_text }}</span>
             {% else %}
@@ -108,41 +92,19 @@
               >Representative</a>
             </li>
 
-            <li class="nav-item">
-              <a
-                class="nav-link"
-                id="org-contacts-business-tab"
-                data-toggle="pill"
-                href="#org-contacts-business"
-                role="tab"
-                aria-controls="org-contacts-business"
-                aria-selected="false"
-              >Business</a>
-            </li>
-
-            <li class="nav-item">
-              <a
-                class="nav-link"
-                id="org-contacts-marketing-tab"
-                data-toggle="pill"
-                href="#org-contacts-marketing"
-                role="tab"
-                aria-controls="org-contacts-marketing"
-                aria-selected="false"
-              >PR and marketing</a>
-            </li>
-
-            <li class="nav-item">
-              <a
-                class="nav-link"
-                id="org-contacts-technical-tab"
-                data-toggle="pill"
-                href="#org-contacts-technical"
-                role="tab"
-                aria-controls="org-contacts-technical"
-                aria-selected="false"
-              >Technical</a>
-            </li>
+            {% for group in contact_display_groups %}
+              <li class="nav-item">
+                <a
+                  class="nav-link"
+                  id="org-contacts-{{ group.key }}-tab"
+                  data-toggle="pill"
+                  href="#org-contacts-{{ group.key }}"
+                  role="tab"
+                  aria-controls="org-contacts-{{ group.key }}"
+                  aria-selected="false"
+                >{{ group.label }}</a>
+              </li>
+            {% endfor %}
           </ul>
         </div>
 
@@ -178,71 +140,29 @@
               </dl>
             </div>
 
-            <div
-              class="tab-pane fade"
-              id="org-contacts-business"
-              role="tabpanel"
-              aria-labelledby="org-contacts-business-tab"
-            >
-              <dl class="row mb-0">
-                <dt class="col-sm-4">Name</dt>
-                <dd class="col-sm-8">{{ organization.business_contact_name|default:"—" }}</dd>
-                <dt class="col-sm-4">Email</dt>
-                <dd class="col-sm-8">
-                  {% if organization.business_contact_email %}
-                    <a href="{% url 'send-mail' %}?type=manual&to={{ organization.business_contact_email|urlencode }}">{{ organization.business_contact_email }}</a>
-                  {% else %}
-                    —
-                  {% endif %}
-                </dd>
-                <dt class="col-sm-4">Phone</dt>
-                <dd class="col-sm-8">{{ organization.business_contact_phone|default:"—" }}</dd>
-              </dl>
-            </div>
-
-            <div
-              class="tab-pane fade"
-              id="org-contacts-marketing"
-              role="tabpanel"
-              aria-labelledby="org-contacts-marketing-tab"
-            >
-              <dl class="row mb-0">
-                <dt class="col-sm-4">Name</dt>
-                <dd class="col-sm-8">{{ organization.pr_marketing_contact_name|default:"—" }}</dd>
-                <dt class="col-sm-4">Email</dt>
-                <dd class="col-sm-8">
-                  {% if organization.pr_marketing_contact_email %}
-                    <a href="{% url 'send-mail' %}?type=manual&to={{ organization.pr_marketing_contact_email|urlencode }}">{{ organization.pr_marketing_contact_email }}</a>
-                  {% else %}
-                    —
-                  {% endif %}
-                </dd>
-                <dt class="col-sm-4">Phone</dt>
-                <dd class="col-sm-8">{{ organization.pr_marketing_contact_phone|default:"—" }}</dd>
-              </dl>
-            </div>
-
-            <div
-              class="tab-pane fade"
-              id="org-contacts-technical"
-              role="tabpanel"
-              aria-labelledby="org-contacts-technical-tab"
-            >
-              <dl class="row mb-0">
-                <dt class="col-sm-4">Name</dt>
-                <dd class="col-sm-8">{{ organization.technical_contact_name|default:"—" }}</dd>
-                <dt class="col-sm-4">Email</dt>
-                <dd class="col-sm-8">
-                  {% if organization.technical_contact_email %}
-                    <a href="{% url 'send-mail' %}?type=manual&to={{ organization.technical_contact_email|urlencode }}">{{ organization.technical_contact_email }}</a>
-                  {% else %}
-                    —
-                  {% endif %}
-                </dd>
-                <dt class="col-sm-4">Phone</dt>
-                <dd class="col-sm-8">{{ organization.technical_contact_phone|default:"—" }}</dd>
-              </dl>
-            </div>
+            {% for group in contact_display_groups %}
+              <div
+                class="tab-pane fade"
+                id="org-contacts-{{ group.key }}"
+                role="tabpanel"
+                aria-labelledby="org-contacts-{{ group.key }}-tab"
+              >
+                <dl class="row mb-0">
+                  <dt class="col-sm-4">Name</dt>
+                  <dd class="col-sm-8">{{ group.name|default:"—" }}</dd>
+                  <dt class="col-sm-4">Email</dt>
+                  <dd class="col-sm-8">
+                    {% if group.email %}
+                      <a href="{% url 'send-mail' %}?type=manual&to={{ group.email|urlencode }}">{{ group.email }}</a>
+                    {% else %}
+                      —
+                    {% endif %}
+                  </dd>
+                  <dt class="col-sm-4">Phone</dt>
+                  <dd class="col-sm-8">{{ group.phone|default:"—" }}</dd>
+                </dl>
+              </div>
+            {% endfor %}
           </div>
         </div>
       </div>
@@ -327,23 +247,7 @@
                       <div class="text-muted small">{{ pending_membership_level_request.membership_type.description }}</div>
                     {% endif %}
                   </div>
-                  {% if pending_membership_level_request.status == 'on_hold' %}
-                    {% if is_representative %}
-                      <a class="badge badge-danger alx-status-badge alx-status-badge--action" href="{% url 'membership-request-self' pending_membership_level_request.pk %}">Action required</a>
-                    {% elif membership_can_view %}
-                      <a class="badge badge-danger alx-status-badge alx-status-badge--action" href="{% url 'membership-request-detail' pending_membership_level_request.pk %}">On hold</a>
-                    {% else %}
-                      <span class="badge badge-danger alx-status-badge alx-status-badge--action">On hold</span>
-                    {% endif %}
-                  {% else %}
-                    {% if is_representative %}
-                      <a class="badge badge-secondary alx-status-badge alx-status-badge--review" href="{% url 'membership-request-self' pending_membership_level_request.pk %}">Under review</a>
-                    {% elif membership_can_view %}
-                      <a class="badge badge-secondary alx-status-badge alx-status-badge--review" href="{% url 'membership-request-detail' pending_membership_level_request.pk %}">Under review</a>
-                    {% else %}
-                      <span class="badge badge-secondary alx-status-badge alx-status-badge--review">Under review</span>
-                    {% endif %}
-                  {% endif %}
+                  {% include 'core/_pending_request_badge.html' with request_obj=pending_membership_level_request is_owner=is_representative %}
                 </li>
               {% endif %}
             {% else %}

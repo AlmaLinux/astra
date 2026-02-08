@@ -8,32 +8,7 @@
 <div class="card">
   <div class="card-header">
     <div class="card-tools">
-      <form method="get" class="input-group input-group-sm" style="width: 220px;">
-        <input
-          type="text"
-          name="q"
-          class="form-control float-right"
-          placeholder="Search groups..."
-          value="{{ q }}"
-          aria-label="Search groups"
-        >
-        <div class="input-group-append">
-          {% if q %}
-            <button
-              type="button"
-              class="btn btn-default"
-              aria-label="Clear search"
-              title="Clear search filter"
-              onclick="var i=this.form.querySelector('input[name=\'q\']'); if(i){i.value='';} this.form.submit();"
-            >
-              <i class="fas fa-times"></i>
-            </button>
-          {% endif %}
-          <button type="submit" class="btn btn-default" aria-label="Search" title="Search groups">
-            <i class="fas fa-search"></i>
-          </button>
-        </div>
-      </form>
+      {% include "core/_search_form.html" with search_value=q search_placeholder="Search groups..." search_aria_label="Search groups" search_submit_title="Search groups" %}
     </div>
   </div>
 
@@ -65,55 +40,7 @@
   </div>
 
   <div class="card-footer clearfix">
-    <div class="float-left text-muted small">
-      {% if paginator.count %}
-        Showing {{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ paginator.count }}
-      {% endif %}
-    </div>
-
-    {% if is_paginated %}
-      <ul class="pagination pagination-sm m-0 float-right">
-        <li class="page-item {% if not page_obj.has_previous %}disabled{% endif %}">
-          <a
-            class="page-link"
-            href="{% if page_obj.has_previous %}?page={{ page_obj.previous_page_number }}{% if q %}&amp;q={{ q|urlencode }}{% endif %}{% else %}#{% endif %}"
-            aria-label="Previous"
-          >
-            &laquo;
-          </a>
-        </li>
-
-        {% if show_first %}
-          <li class="page-item">
-            <a class="page-link" href="?page=1{% if q %}&amp;q={{ q|urlencode }}{% endif %}">1</a>
-          </li>
-          <li class="page-item disabled"><span class="page-link">…</span></li>
-        {% endif %}
-
-        {% for page_number in page_numbers %}
-          <li class="page-item {% if page_number == page_obj.number %}active{% endif %}">
-            <a class="page-link" href="?page={{ page_number }}{% if q %}&amp;q={{ q|urlencode }}{% endif %}">{{ page_number }}</a>
-          </li>
-        {% endfor %}
-
-        {% if show_last %}
-          <li class="page-item disabled"><span class="page-link">…</span></li>
-          <li class="page-item">
-            <a class="page-link" href="?page={{ paginator.num_pages }}{% if q %}&amp;q={{ q|urlencode }}{% endif %}">{{ paginator.num_pages }}</a>
-          </li>
-        {% endif %}
-
-        <li class="page-item {% if not page_obj.has_next %}disabled{% endif %}">
-          <a
-            class="page-link"
-            href="{% if page_obj.has_next %}?page={{ page_obj.next_page_number }}{% if q %}&amp;q={{ q|urlencode }}{% endif %}{% else %}#{% endif %}"
-            aria-label="Next"
-          >
-            &raquo;
-          </a>
-        </li>
-      </ul>
-    {% endif %}
+    {% include "core/_pagination.html" %}
   </div>
 </div>
 {% endblock %}

@@ -57,93 +57,6 @@
 			}
 		}
 
-		function setupRowEditor(opts) {
-			const textarea = document.getElementById(opts.textareaId);
-			const widget = document.getElementById(opts.widgetId);
-			const fallback = document.getElementById(opts.fallbackId);
-			const tableBody = document.querySelector(opts.tableBodySelector);
-			const addBtn = document.getElementById(opts.addBtnId);
-
-			if (!textarea || !widget || !fallback || !tableBody || !addBtn || !textarea.form) return;
-
-			function buildRow(initialValue) {
-				const tr = document.createElement('tr');
-				tr.className = opts.rowClass;
-
-				tr.innerHTML = `
-					<td>
-						${opts.kind === 'textarea'
-							? '<textarea class="form-control form-control-sm text-monospace" rows="2" placeholder="Paste a key"></textarea>'
-							: '<input type="text" class="form-control form-control-sm text-monospace" placeholder="Key ID" />'
-						}
-					</td>
-					<td style="width: 44px;" class="text-center">
-						<button type="button" class="btn btn-sm btn-outline-secondary" aria-label="Remove" title="Remove this entry">×</button>
-					</td>
-				`;
-
-				const valueEl = tr.querySelector('input,textarea');
-				const removeBtn = tr.querySelector('button');
-
-				valueEl.value = initialValue || '';
-				valueEl.addEventListener('input', syncToTextarea);
-				removeBtn.addEventListener('click', function () {
-					tr.remove();
-					syncToTextarea();
-				});
-
-				return tr;
-			}
-
-			function syncToTextarea() {
-				const rows = Array.from(tableBody.querySelectorAll('tr.' + opts.rowClass));
-				const lines = [];
-				for (const row of rows) {
-					const valueEl = row.querySelector('input,textarea');
-					const raw = (valueEl && valueEl.value) ? String(valueEl.value) : '';
-					const v = raw.replaceAll('\r', '').trim();
-					if (v) lines.push(v);
-				}
-				textarea.value = lines.join('\n');
-			}
-
-			function addRow(value) {
-				const tr = buildRow(value);
-				tableBody.appendChild(tr);
-				syncToTextarea();
-				return tr;
-			}
-
-			const existing = String(textarea.value || '')
-				.replaceAll('\r', '')
-				.split('\n')
-				.map(function (l) { return String(l || '').trim(); })
-				.filter(Boolean);
-
-			if (existing.length === 0) {
-				addRow('');
-			} else {
-				for (const v of existing) addRow(v);
-			}
-
-			addBtn.addEventListener('click', function () {
-				const tr = addRow('');
-				const input = tr.querySelector('input,textarea');
-				if (input) input.focus();
-			});
-
-			textarea.form.addEventListener('submit', function () {
-				syncToTextarea();
-			});
-
-			// Keep the fallback visible if there are server-side validation errors.
-			const hasErrors = !!fallback.querySelector('.errorlist, .text-danger .errorlist');
-			if (!hasErrors) {
-				fallback.classList.add('d-none');
-			}
-			widget.classList.remove('d-none');
-		}
-
 		onReady(function () {
 			setupRowEditor({
 				textareaId: 'id_fasGPGKeyId',
@@ -152,7 +65,8 @@
 				tableBodySelector: '#gpg-keys-table tbody',
 				addBtnId: 'gpg-keys-add',
 				rowClass: 'gpg-keys-row',
-				kind: 'input'
+				kind: 'text',
+				placeholder: 'Key ID'
 			});
 
 			setupRowEditor({
@@ -162,7 +76,8 @@
 				tableBodySelector: '#ssh-keys-table tbody',
 				addBtnId: 'ssh-keys-add',
 				rowClass: 'ssh-keys-row',
-				kind: 'textarea'
+				kind: 'textarea',
+				placeholder: 'Paste a key'
 			});
 		});
 	})();

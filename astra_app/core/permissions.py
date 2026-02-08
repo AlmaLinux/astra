@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from collections.abc import Callable, Collection
 from functools import wraps
 from typing import ParamSpec, TypeVar
@@ -40,30 +38,7 @@ def json_permission_required(permission: str) -> Callable[[Callable[P, R]], Call
     This returns a JSON 403 response instead of redirecting or rendering HTML.
     Authentication is enforced by LoginRequiredMiddleware.
     """
-
-    def decorator(view_func: Callable[P, R]) -> Callable[P, HttpResponse]:
-        @wraps(view_func)
-        def wrapper(*args: P.args, **kwargs: P.kwargs) -> HttpResponse:
-            if not args:
-                return JsonResponse({"error": "Permission denied."}, status=403)
-
-            request = args[0]
-            if not isinstance(request, HttpRequest):
-                return JsonResponse({"error": "Permission denied."}, status=403)
-
-            try:
-                allowed = request.user.has_perm(permission)
-            except Exception:
-                allowed = False
-
-            if not allowed:
-                return JsonResponse({"error": "Permission denied."}, status=403)
-
-            return view_func(*args, **kwargs)
-
-        return wrapper
-
-    return decorator
+    return json_permission_required_any({permission})
 
 
 def json_permission_required_any(permissions: Collection[str]) -> Callable[[Callable[P, R]], Callable[P, HttpResponse]]:

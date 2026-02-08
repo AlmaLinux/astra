@@ -1,11 +1,9 @@
-from __future__ import annotations
 
 import locale
 import re
 import zoneinfo
 from functools import lru_cache
 from typing import override
-from urllib.parse import urlparse
 
 import pycountry
 import pyotp
@@ -13,6 +11,9 @@ from django import forms
 
 from core.chatnicknames import normalize_chat_nicknames_text
 from core.country_codes import is_valid_country_alpha2, normalize_country_alpha2
+from core.form_validators import clean_password_confirm, validate_http_urls
+from core.forms_base import StyledForm
+from core.ipa_user_attrs import _split_list_field
 from core.profanity import validate_no_profanity_or_hate_speech
 from core.views_utils import _normalize_str
 
@@ -140,38 +141,7 @@ def _get_country_choices() -> list[tuple[str, str]]:
     return choices + countries
 
 
-class _StyledForm(forms.Form):
-    """Apply AdminLTE-friendly CSS classes to widgets."""
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        for name, field in self.fields.items():
-            if isinstance(field.widget, forms.CheckboxInput):
-                field.widget.attrs.setdefault("class", "form-check-input")
-            elif isinstance(
-                field.widget,
-                (forms.Textarea, forms.TextInput, forms.PasswordInput, forms.EmailInput, forms.URLInput, forms.ClearableFileInput),
-            ):
-                field.widget.attrs.setdefault("class", "form-control")
-            else:
-                field.widget.attrs.setdefault("class", "form-control")
-
-            if isinstance(field.widget, forms.Textarea):
-                field.widget.attrs.setdefault("spellcheck", "true")
-
-    def full_clean(self):
-        super().full_clean()
-        # After validation, mark invalid widgets so AdminLTE/Bootstrap highlight them.
-        for name in self.errors.keys():
-            if name not in self.fields:
-                continue
-            widget = self.fields[name].widget
-            css = widget.attrs.get("class", "")
-            if "is-invalid" not in css:
-                widget.attrs["class"] = (css + " is-invalid").strip()
-
-
-class ProfileForm(_StyledForm):
+class ProfileForm(StyledForm):
     # Core identity fields
     givenname = forms.CharField(
         label="First Name",
@@ -300,46 +270,13 @@ class ProfileForm(_StyledForm):
         self.fields["fasLocale"].choices = _choices(get_locale_options(), current=locale_current)
         self.fields["fasTimezone"].choices = _choices(get_timezone_options(), current=timezone_current)
 
-    @staticmethod
-    def _split_list_field(value: str) -> list[str]:
-        out: list[str] = []
-        for raw_line in (value or "").splitlines():
-            line = raw_line.strip()
-            if not line:
-                continue
-            for part in line.split(","):
-                p = part.strip()
-                if p:
-                    out.append(p)
-        return out
-
     @classmethod
     def _rejoin_lines(cls, items: list[str]) -> str:
         return "\n".join(items)
 
     @classmethod
-    def _validate_http_urls(cls, value: str, *, field_label: str) -> str:
-        # Matches freeipa-fas `fasutils.URL`: scheme must be http/https, host must be non-empty.
-        # Also matches `baseruserfas.URL(... normalizer=value.strip(), maxlength=255)` per item.
-        urls = [u.strip() for u in cls._split_list_field(value)]
-        normalized: list[str] = []
-        for u in urls:
-            if not u:
-                continue
-            if len(u) > 255:
-                raise forms.ValidationError(f"Invalid {field_label}: each URL must be at most 255 characters")
-            parsed = urlparse(u)
-            scheme = (parsed.scheme or "").lower()
-            if scheme not in {"http", "https"}:
-                raise forms.ValidationError(f"Invalid {field_label}: URL must start with http:// or https://")
-            if not parsed.netloc:
-                raise forms.ValidationError(f"Invalid {field_label}: empty host name")
-            normalized.append(u)
-        return cls._rejoin_lines(normalized)
-
-    @classmethod
     def _validate_multivalued_maxlen(cls, value: str, *, field_label: str, maxlen: int) -> str:
-        items = [i.strip() for i in cls._split_list_field(value)]
+        items = [i.strip() for i in _split_list_field(value)]
         normalized: list[str] = []
         for i in items:
             if not i:
@@ -352,7 +289,7 @@ class ProfileForm(_StyledForm):
     @classmethod
     def _validate_gpg_key_ids(cls, value: str) -> str:
         # Matches baseruserfas: Str("fasgpgkeyid*", minlength=16, maxlength=40)
-        items = [i.strip() for i in cls._split_list_field(value)]
+        items = [i.strip() for i in _split_list_field(value)]
         normalized: list[str] = []
         for i in items:
             if not i:
@@ -363,10 +300,10 @@ class ProfileForm(_StyledForm):
         return cls._rejoin_lines(normalized)
 
     def clean_fasWebsiteUrl(self):
-        return self._validate_http_urls(self.cleaned_data.get("fasWebsiteUrl", ""), field_label="Website URL")
+        return validate_http_urls(self.cleaned_data.get("fasWebsiteUrl", ""), field_label="Website URL")
 
     def clean_fasRssUrl(self):
-        return self._validate_http_urls(self.cleaned_data.get("fasRssUrl", ""), field_label="RSS URL")
+        return validate_http_urls(self.cleaned_data.get("fasRssUrl", ""), field_label="RSS URL")
 
     def clean_fasIRCNick(self):
         # baseruserfas: Str("fasircnick*", maxlength=64)
@@ -433,7 +370,7 @@ class ProfileForm(_StyledForm):
         return value
 
 
-class EmailsForm(_StyledForm):
+class EmailsForm(StyledForm):
     mail = forms.EmailField(label="E-mail Address", required=True)
     fasRHBZEmail = forms.EmailField(label="Red Hat Bugzilla Email", required=False, max_length=255)
 
@@ -449,7 +386,7 @@ class EmailsForm(_StyledForm):
         return validate_no_profanity_or_hate_speech(value, field_label="Bugzilla email")
 
 
-class KeysForm(_StyledForm):
+class KeysForm(StyledForm):
     fasGPGKeyId = forms.CharField(
         label="GPG Key IDs",
         required=False,
@@ -468,7 +405,7 @@ class KeysForm(_StyledForm):
         return ProfileForm._validate_gpg_key_ids(self.cleaned_data.get("fasGPGKeyId", ""))
 
 
-class OTPAddForm(_StyledForm):
+class OTPAddForm(StyledForm):
     description = forms.CharField(
         label="Token name",
         required=False,
@@ -487,7 +424,7 @@ class OTPAddForm(_StyledForm):
     )
 
 
-class OTPConfirmForm(_StyledForm):
+class OTPConfirmForm(StyledForm):
     secret = forms.CharField(widget=forms.HiddenInput, required=True)
     description = forms.CharField(widget=forms.HiddenInput, required=False)
     code = forms.CharField(
@@ -508,16 +445,16 @@ class OTPConfirmForm(_StyledForm):
         return code
 
 
-class OTPTokenActionForm(_StyledForm):
+class OTPTokenActionForm(StyledForm):
     token = forms.CharField(widget=forms.HiddenInput, required=True)
 
 
-class OTPTokenRenameForm(_StyledForm):
+class OTPTokenRenameForm(StyledForm):
     token = forms.CharField(widget=forms.HiddenInput, required=True)
     description = forms.CharField(required=False)
 
 
-class PasswordChangeFreeIPAForm(_StyledForm):
+class PasswordChangeFreeIPAForm(StyledForm):
     current_password = forms.CharField(label="Current Password", widget=forms.PasswordInput)
     otp = forms.CharField(
         label="One-Time Password",
@@ -529,8 +466,5 @@ class PasswordChangeFreeIPAForm(_StyledForm):
 
     def clean(self):
         cleaned = super().clean()
-        new = cleaned.get("new_password")
-        confirm = cleaned.get("confirm_new_password")
-        if new and confirm and new != confirm:
-            raise forms.ValidationError("New password fields do not match.")
+        clean_password_confirm(cleaned)
         return cleaned

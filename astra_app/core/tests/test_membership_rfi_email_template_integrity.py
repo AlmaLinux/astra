@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 from django.core.mail import EmailMessage
 from django.test import TestCase

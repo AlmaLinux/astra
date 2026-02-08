@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Any, cast
 
 from django.core.paginator import Paginator
@@ -8,8 +6,9 @@ from django.template import Context, Library
 from django.template.loader import render_to_string
 from django.utils.safestring import mark_safe
 
-from core.backends import FreeIPAGroup, FreeIPAUser
-from core.views_utils import _normalize_str
+from core.backends import FreeIPAGroup, FreeIPAUser, _clean_str_list
+from core.templatetags._user_helpers import try_get_full_name
+from core.views_utils import _normalize_str, pagination_window
 
 register = Library()
 
@@ -29,50 +28,8 @@ def _get_username_for_sort(user: object) -> str:
     return ""
 
 
-def _get_full_name_for_filter(user: object) -> str:
-    full_name = getattr(user, "full_name", None)
-    if isinstance(full_name, str):
-        return full_name.strip()
-    if full_name is not None:
-        try:
-            return str(full_name).strip()
-        except Exception:
-            return ""
-
-    get_full_name = getattr(user, "get_full_name", None)
-    if callable(get_full_name):
-        try:
-            return str(get_full_name()).strip()
-        except Exception:
-            return ""
-    return ""
-
-
-def _pagination_window(paginator: Paginator, page_number: int) -> tuple[list[int], bool, bool]:
-    total_pages = paginator.num_pages
-    if total_pages <= 10:
-        return list(range(1, total_pages + 1)), False, False
-
-    start = max(1, page_number - 2)
-    end = min(total_pages, page_number + 2)
-    page_numbers = list(range(start, end + 1))
-    show_first = 1 not in page_numbers
-    show_last = total_pages not in page_numbers
-    return page_numbers, show_first, show_last
-
-
-def _normalize_members(members_raw: object) -> list[str]:
-    if not members_raw:
-        return []
-    if isinstance(members_raw, str):
-        return [members_raw.strip()] if members_raw.strip() else []
-    if isinstance(members_raw, list):
-        return [str(m).strip() for m in members_raw if str(m).strip()]
-    return [str(members_raw).strip()] if str(members_raw).strip() else []
-
-
 def _normalize_groups(groups_raw: object) -> list[str]:
-    return _normalize_members(groups_raw)
+    return _clean_str_list(groups_raw)
 
 
 @register.simple_tag(takes_context=True, name="user_grid")
@@ -128,14 +85,13 @@ def user_grid(context: Context, **kwargs: Any) -> str:
             if group_name:
                 group_obj = FreeIPAGroup.get(group_name)
 
-    usernames_page: list[str] | None = None
     users_page: list[object] | None = None
     items_page: list[dict[str, str]] | None = None
 
     if group_obj is not None:
         member_groups_raw = cast(Any, group_obj).member_groups if hasattr(group_obj, "member_groups") else []
         member_groups = _normalize_groups(member_groups_raw)
-        members = _normalize_members(cast(Any, group_obj).members)
+        members = _clean_str_list(cast(Any, group_obj).members)
 
         if q:
             q_lower = q.lower()
@@ -174,7 +130,7 @@ def user_grid(context: Context, **kwargs: Any) -> str:
                 username = _get_username_for_sort(user)
                 if q_lower in username:
                     return True
-                full_name = _get_full_name_for_filter(user).lower()
+                full_name = try_get_full_name(user).lower()
                 return q_lower in full_name
 
             users_list = [u for u in users_list if _matches(u)]
@@ -187,19 +143,39 @@ def user_grid(context: Context, **kwargs: Any) -> str:
 
         empty_label = "No users found."
 
-    page_numbers, show_first, show_last = _pagination_window(paginator, page_obj.number)
+    page_numbers, show_first, show_last = pagination_window(paginator, page_obj.number)
 
     template_name = "core/_widget_grid.html"
+
+    effective_manage = member_manage_enabled and bool(member_manage_group_cn)
 
     grid_items: list[dict[str, object]] = []
     if group_obj is not None:
         grid_items = cast(list[dict[str, object]], items_page or [])
+        for item in grid_items:
+            if item.get("kind") != "user":
+                continue
+            username = str(item.get("username", ""))
+            is_muted = username in muted_usernames
+            item["remove_from_group_cn"] = member_manage_group_cn if effective_manage else ""
+            item["promote_to_sponsor"] = effective_manage and username in promote_member_usernames
+            item["extra_class"] = "text-muted" if is_muted else ""
+            item["extra_style"] = "opacity:0.55;" if is_muted else ""
     elif users_page is not None:
-        grid_items = [
-            {"kind": "user", "username": getattr(u, "username", "")} for u in users_page if getattr(u, "username", "")
-        ]
-    elif usernames_page is not None:
-        grid_items = [{"kind": "user", "username": username} for username in usernames_page if username]
+        for u in users_page:
+            # user-like objects may be FreeIPAUser, SimpleNamespace, etc.
+            username = getattr(u, "username", "")
+            if not username:
+                continue
+            is_muted = username in muted_usernames
+            grid_items.append({
+                "kind": "user",
+                "username": username,
+                "remove_from_group_cn": member_manage_group_cn if effective_manage else "",
+                "promote_to_sponsor": effective_manage and username in promote_member_usernames,
+                "extra_class": "text-muted" if is_muted else "",
+                "extra_style": "opacity:0.55;" if is_muted else "",
+            })
 
     template_context: dict[str, object] = {
         "title": title,
@@ -213,10 +189,6 @@ def user_grid(context: Context, **kwargs: Any) -> str:
         "show_first": show_first,
         "show_last": show_last,
         "grid_items": grid_items,
-        "member_manage_enabled": member_manage_enabled and bool(member_manage_group_cn),
-        "member_manage_group_cn": member_manage_group_cn,
-        "promote_member_usernames": promote_member_usernames,
-        "muted_usernames": muted_usernames,
     }
 
     html = render_to_string(template_name, template_context, request=http_request)

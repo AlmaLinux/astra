@@ -6,30 +6,8 @@
 {% block extra_head %}
   {{ block.super }}
   <link rel="stylesheet" href="{% static 'admin/css/vendor/select2/select2.css' %}">
+  <link rel="stylesheet" href="{% static 'core/css/select2_overrides.css' %}">
   <style>
-    /* Select2 default theme needs small tweaks to match AdminLTE/Bootstrap form-control sizing. */
-    .select2-container {
-      width: 100% !important;
-    }
-
-    .select2-container--default .select2-selection--single {
-      height: calc(2.25rem + 2px);
-      padding: 0.375rem 0.75rem;
-      border: 1px solid #ced4da;
-      border-radius: 0.25rem;
-    }
-
-    .select2-container--default .select2-selection--single .select2-selection__rendered {
-      line-height: 1.5;
-      padding-left: 0;
-    }
-
-    .select2-container--default .select2-selection--single .select2-selection__arrow {
-      height: calc(2.25rem + 2px);
-      top: 0;
-      right: 0.5rem;
-    }
-
     #exclusion-groups-toggle .exclusion-groups-collapse-chevron {
       display: inline-block;
       transition: transform 150ms ease-in-out;
@@ -67,31 +45,31 @@
             <div class="form-group">
               <label for="{{ details_form.name.id_for_label }}">Name</label>
               {{ details_form.name }}
-              {% if details_form.name.errors %}<div class="text-danger small">{{ details_form.name.errors }}</div>{% endif %}
+              {% if details_form.name.errors %}<div class="text-danger">{{ details_form.name.errors }}</div>{% endif %}
             </div>
 
             <div class="form-group">
               <label for="{{ details_form.description.id_for_label }}">Description</label>
               {{ details_form.description }}
-              {% if details_form.description.errors %}<div class="text-danger small">{{ details_form.description.errors }}</div>{% endif %}
+              {% if details_form.description.errors %}<div class="text-danger">{{ details_form.description.errors }}</div>{% endif %}
             </div>
 
             <div class="form-group">
               <label for="{{ details_form.url.id_for_label }}">URL</label>
               {{ details_form.url }}
-              {% if details_form.url.errors %}<div class="text-danger small">{{ details_form.url.errors }}</div>{% endif %}
+              {% if details_form.url.errors %}<div class="text-danger">{{ details_form.url.errors }}</div>{% endif %}
             </div>
 
             <div class="form-row">
               <div class="form-group col-md-6">
                 <label for="{{ details_form.start_datetime.id_for_label }}">Start</label>
                 {{ details_form.start_datetime }}
-                {% if details_form.start_datetime.errors %}<div class="text-danger small">{{ details_form.start_datetime.errors }}</div>{% endif %}
+                {% if details_form.start_datetime.errors %}<div class="text-danger">{{ details_form.start_datetime.errors }}</div>{% endif %}
               </div>
               <div class="form-group col-md-6">
                 <label for="{{ details_form.end_datetime.id_for_label }}">End</label>
                 {{ details_form.end_datetime }}
-                {% if details_form.end_datetime.errors %}<div class="text-danger small">{{ details_form.end_datetime.errors }}</div>{% endif %}
+                {% if details_form.end_datetime.errors %}<div class="text-danger">{{ details_form.end_datetime.errors }}</div>{% endif %}
               </div>
             </div>
 
@@ -99,12 +77,12 @@
               <div class="form-group col-md-6">
                 <label for="{{ details_form.number_of_seats.id_for_label }}">Number of seats</label>
                 {{ details_form.number_of_seats }}
-                {% if details_form.number_of_seats.errors %}<div class="text-danger small">{{ details_form.number_of_seats.errors }}</div>{% endif %}
+                {% if details_form.number_of_seats.errors %}<div class="text-danger">{{ details_form.number_of_seats.errors }}</div>{% endif %}
               </div>
               <div class="form-group col-md-6">
                 <label for="{{ details_form.quorum.id_for_label }}">Quorum (%)</label>
                 {{ details_form.quorum }}
-                {% if details_form.quorum.errors %}<div class="text-danger small">{{ details_form.quorum.errors }}</div>{% endif %}
+                {% if details_form.quorum.errors %}<div class="text-danger">{{ details_form.quorum.errors }}</div>{% endif %}
                 <div class="text-muted small mt-1">
                   Minimum turnout percentage required by both voter count and vote weight; if not reached, the end date may be extended.
                 </div>
@@ -114,7 +92,7 @@
             <div class="form-group">
               <label for="{{ details_form.eligible_group_cn.id_for_label }}">Eligible group (optional)</label>
               {{ details_form.eligible_group_cn }}
-              {% if details_form.eligible_group_cn.errors %}<div class="text-danger small">{{ details_form.eligible_group_cn.errors }}</div>{% endif %}
+              {% if details_form.eligible_group_cn.errors %}<div class="text-danger">{{ details_form.eligible_group_cn.errors }}</div>{% endif %}
               <div class="text-muted small mt-1">
                 If set, only members of this group will receive voting credentials when the election starts, and only members of this group can be candidates.
               </div>
@@ -219,19 +197,19 @@
                       <td>
                         {{ f.id }}
                         {{ f.freeipa_username }}
-                        {% if f.freeipa_username.errors %}<div class="text-danger small">{{ f.freeipa_username.errors }}</div>{% endif %}
+                        {% if f.freeipa_username.errors %}<div class="text-danger">{{ f.freeipa_username.errors }}</div>{% endif %}
                       </td>
                       <td>
                         {{ f.nominated_by }}
-                        {% if f.nominated_by.errors %}<div class="text-danger small">{{ f.nominated_by.errors }}</div>{% endif %}
+                        {% if f.nominated_by.errors %}<div class="text-danger">{{ f.nominated_by.errors }}</div>{% endif %}
                       </td>
                       <td>
                         {{ f.description }}
-                        {% if f.description.errors %}<div class="text-danger small">{{ f.description.errors }}</div>{% endif %}
+                        {% if f.description.errors %}<div class="text-danger">{{ f.description.errors }}</div>{% endif %}
                       </td>
                       <td>
                         {{ f.url }}
-                        {% if f.url.errors %}<div class="text-danger small">{{ f.url.errors }}</div>{% endif %}
+                        {% if f.url.errors %}<div class="text-danger">{{ f.url.errors }}</div>{% endif %}
                       </td>
                       <td class="text-center">
                         <div class="d-none">{{ f.DELETE }}</div>
@@ -292,15 +270,15 @@
                           <td>
                             {{ g.id }}
                             {{ g.name }}
-                            {% if g.name.errors %}<div class="text-danger small">{{ g.name.errors }}</div>{% endif %}
+                            {% if g.name.errors %}<div class="text-danger">{{ g.name.errors }}</div>{% endif %}
                           </td>
                           <td>
                             {{ g.max_elected }}
-                            {% if g.max_elected.errors %}<div class="text-danger small">{{ g.max_elected.errors }}</div>{% endif %}
+                            {% if g.max_elected.errors %}<div class="text-danger">{{ g.max_elected.errors }}</div>{% endif %}
                           </td>
                           <td>
                             {{ g.candidate_usernames }}
-                            {% if g.candidate_usernames.errors %}<div class="text-danger small">{{ g.candidate_usernames.errors }}</div>{% endif %}
+                            {% if g.candidate_usernames.errors %}<div class="text-danger">{{ g.candidate_usernames.errors }}</div>{% endif %}
                             {% if g.candidate_usernames.help_text %}<div class="text-muted small">{{ g.candidate_usernames.help_text }}</div>{% endif %}
                           </td>
                           <td class="text-center">

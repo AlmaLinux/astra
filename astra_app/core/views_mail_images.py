@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import logging
 import posixpath
 from dataclasses import dataclass

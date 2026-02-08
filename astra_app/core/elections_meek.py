@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from decimal import ROUND_DOWN, Decimal, localcontext
@@ -138,6 +136,16 @@ def _format_candidate_list(
     return _format_list(items, joiner="and")
 
 
+def _plural_s(n: int) -> str:
+    """Return 's' for plural counts, empty string for singular."""
+    return "" if n == 1 else "s"
+
+
+def _was_were(n: int) -> str:
+    """Return 'was' or 'were' matching the count."""
+    return "was" if n == 1 else "were"
+
+
 def generate_meek_round_explanations(
     round_data: Mapping[str, object],
     *,
@@ -219,11 +227,38 @@ def generate_meek_round_explanations(
         max(seats - elected_total_before_iteration, 0) if seats > 0 else 0
     )
 
-    def _plural_s(n: int) -> str:
-        return "" if n == 1 else "s"
+    def _emit_elimination_paragraph(eliminated_cid: int) -> list[str]:
+        """Build the elimination paragraph for a candidate — single implementation point."""
+        elim_str = _format_candidate_list([eliminated_cid], candidate_name_by_id=names)
 
-    def _was_were(n: int) -> str:
-        return "was" if n == 1 else "were"
+        elim_tie_break = any(
+            str(tb.get("type") or "").strip() == "elimination" and tb.get("selected") == eliminated_cid
+            for tb in tie_breaks
+            if isinstance(tb, Mapping)
+        )
+
+        elim_clause = " (tied for the lowest vote total)" if elim_tie_break else ""
+        elim_reason = "had the lowest vote total and " if not elim_tie_break else ""
+
+        transfer_sentence = (
+            "Since the count is complete, no further redistribution is needed to determine the final outcome."
+            if count_complete
+            else "Their vote value will transfer to remaining eligible candidates according to voter preferences under the counting method."
+        )
+        return [
+            f"Candidate {elim_str} {elim_reason}was eliminated from the count{elim_clause}. {transfer_sentence}",
+            "",
+        ]
+
+    def _append_exclusion_transfer_tail(paragraph: list[str], *, affected_ids: list[int], excluded_str: str) -> None:
+        """Append the vote-transfer or count-complete tail to a forced-exclusion paragraph."""
+        if not count_complete and eligible_candidates:
+            who = "candidate" if len(affected_ids) == 1 else "candidates"
+            paragraph.append(
+                f"Any vote value currently assigned to {who} {excluded_str} will transfer to remaining eligible candidates according to voter preferences and current retention factors."
+            )
+        elif count_complete:
+            paragraph.append("Since the count is complete, this exclusion does not affect the final outcome.")
 
     elimination_emitted = False
 
@@ -292,26 +327,7 @@ def generate_meek_round_explanations(
         audit_parts.append("")
 
     if eliminated is not None and elected_by_rule:
-        eliminated_str = _format_candidate_list([eliminated], candidate_name_by_id=names)
-
-        elimination_tie_break = any(
-            str(tb.get("type") or "").strip() == "elimination" and tb.get("selected") == eliminated
-            for tb in tie_breaks
-            if isinstance(tb, Mapping)
-        )
-
-        elimination_clause = " (tied for the lowest vote total)" if elimination_tie_break else ""
-        eliminated_reason = "had the lowest vote total and " if not elimination_tie_break else ""
-
-        transfer_sentence = (
-            "Since the count is complete, no further redistribution is needed to determine the final outcome."
-            if count_complete
-            else "Their vote value will transfer to remaining eligible candidates according to voter preferences under the counting method."
-        )
-        audit_parts.append(
-            f"Candidate {eliminated_str} {eliminated_reason}was eliminated from the count{elimination_clause}. {transfer_sentence}"
-        )
-        audit_parts.append("")
+        audit_parts.extend(_emit_elimination_paragraph(eliminated))
         elimination_emitted = True
 
     if elected:
@@ -410,58 +426,25 @@ def generate_meek_round_explanations(
 
                 if excluded_reached_quota:
                     excluded_str = _format_candidate_list(excluded_reached_quota, candidate_name_by_id=names)
-                    verb = "was" if len(excluded_reached_quota) == 1 else "were"
+                    verb = _was_were(len(excluded_reached_quota))
                     paragraph.append(
                         f"As a result, candidate {excluded_str} could not be elected despite meeting the quota and {verb} removed from further consideration. "
                         "This is rule-based and not a vote comparison."
                     )
-
-                    if not count_complete and eligible_candidates:
-                        who = "candidate" if len(excluded_reached_quota) == 1 else "candidates"
-                        paragraph.append(
-                            f"Any vote value currently assigned to {who} {excluded_str} will transfer to remaining eligible candidates according to voter preferences and current retention factors."
-                        )
-                    elif count_complete:
-                        paragraph.append("Since the count is complete, this exclusion does not affect the final outcome.")
+                    _append_exclusion_transfer_tail(paragraph, affected_ids=excluded_reached_quota, excluded_str=excluded_str)
                 else:
                     excluded_str = _format_candidate_list(excluded_ids, candidate_name_by_id=names)
                     paragraph.append(
                         f"As a result, candidate {excluded_str} was removed from further consideration. "
                         "This is rule-based and not a vote comparison."
                     )
-
-                    if not count_complete and eligible_candidates:
-                        who = "candidate" if len(excluded_ids) == 1 else "candidates"
-                        paragraph.append(
-                            f"Any vote value currently assigned to {who} {excluded_str} will transfer to remaining eligible candidates according to voter preferences and current retention factors."
-                        )
-                    elif count_complete:
-                        paragraph.append("Since the count is complete, this exclusion does not affect the final outcome.")
+                    _append_exclusion_transfer_tail(paragraph, affected_ids=excluded_ids, excluded_str=excluded_str)
 
                 audit_parts.append(" ".join(paragraph))
                 audit_parts.append("")
 
     if eliminated is not None and not elimination_emitted:
-        eliminated_str = _format_candidate_list([eliminated], candidate_name_by_id=names)
-
-        elimination_tie_break = any(
-            str(tb.get("type") or "").strip() == "elimination" and tb.get("selected") == eliminated
-            for tb in tie_breaks
-            if isinstance(tb, Mapping)
-        )
-
-        elimination_clause = " (tied for the lowest vote total)" if elimination_tie_break else ""
-        eliminated_reason = "had the lowest vote total and " if not elimination_tie_break else ""
-
-        transfer_sentence = (
-            "Since the count is complete, no further redistribution is needed to determine the final outcome."
-            if count_complete
-            else "Their vote value will transfer to remaining eligible candidates according to voter preferences under the counting method."
-        )
-        audit_parts.append(
-            f"Candidate {eliminated_str} {eliminated_reason}was eliminated from the count{elimination_clause}. {transfer_sentence}"
-        )
-        audit_parts.append("")
+        audit_parts.extend(_emit_elimination_paragraph(eliminated))
 
     has_iteration_events = bool(elected or eliminated is not None or forced_exclusions)
 
@@ -821,6 +804,102 @@ def tally_meek(
 
             return forced_events
 
+        def _build_round(
+            *,
+            elected_this_round: list[int],
+            elected_to_fill_remaining_seats: list[int],
+            eliminated: int | None,
+            forced_exclusions: list[dict[str, object]],
+            tie_breaks: list[dict[str, object]],
+            eligible_candidates: list[int],
+            retained_totals_source: dict[int, Decimal],
+            numerically_converged: bool,
+            max_retention_delta: str,
+            quota_reached: list[int] | None = None,
+        ) -> bool:
+            """Construct a round_data dict, generate explanations, and append to rounds.
+
+            Returns count_complete so callers can use it for flow control.
+            """
+            elected_total = len(elected)
+            count_complete = is_count_complete(elected_total=elected_total, eligible_candidates=eligible_candidates)
+            round_data: dict[str, object] = {
+                "iteration": len(rounds) + 1,
+                "elected": list(elected_this_round),
+                "elected_to_fill_remaining_seats": list(elected_to_fill_remaining_seats),
+                "eliminated": eliminated,
+                "forced_exclusions": forced_exclusions,
+                "tie_breaks": tie_breaks,
+                "eligible_candidates": eligible_candidates,
+                "retention_factors": {str(cid): str(retention.get(cid, Decimal(0))) for cid in sorted(all_candidate_ids)},
+                "retained_totals": {str(cid): str(retained_totals_source.get(cid, Decimal(0))) for cid in sorted(all_candidate_ids)},
+                "numerically_converged": numerically_converged,
+                "max_retention_delta": max_retention_delta,
+                "seats": seats,
+                "elected_total": elected_total,
+                "count_complete": count_complete,
+            }
+            if quota_reached is not None:
+                round_data["quota_reached"] = list(quota_reached)
+            round_data.update(
+                generate_meek_round_explanations(
+                    round_data,
+                    quota=quota,
+                    candidate_name_by_id=candidate_name_by_id,
+                )
+            )
+            rounds.append(round_data)
+            return count_complete
+
+        def _reorder_with_tie_breaks(
+            candidates: list[int],
+            primary_totals: Mapping[int, Decimal],
+            *,
+            incoming_totals: Mapping[int, Decimal],
+        ) -> tuple[list[int], list[dict[str, object]]]:
+            """Deterministically reorder candidates, resolving tied groups via tie-break rules.
+
+            Candidates must already be sorted by primary_totals (descending).
+            Returns (reordered_candidates, tie_break_records).
+            """
+            tie_breaks_out: list[dict[str, object]] = []
+            if len(candidates) <= 1:
+                return list(candidates), tie_breaks_out
+
+            reordered: list[int] = []
+            idx = 0
+            while idx < len(candidates):
+                cid = candidates[idx]
+                key = primary_totals.get(cid, Decimal(0))
+                group: list[int] = [cid]
+                idx += 1
+                while idx < len(candidates) and primary_totals.get(candidates[idx], Decimal(0)) == key:
+                    group.append(candidates[idx])
+                    idx += 1
+
+                if len(group) == 1:
+                    reordered.extend(group)
+                    continue
+
+                ordered_group, rule_trace = _tie_break_rules_trace(
+                    candidate_ids=group,
+                    prefer_highest=True,
+                    prior_round_retained=previous_totals,
+                    cumulative_support=incoming_totals,
+                    first_preferences=first_pref,
+                )
+                reordered.extend(ordered_group)
+                tie_breaks_out.append(
+                    {
+                        "type": "election_order",
+                        "candidate_ids": sorted(group),
+                        "ordered": ordered_group,
+                        "rule_trace": rule_trace,
+                    }
+                )
+
+            return reordered, tie_breaks_out
+
         while len(elected) < seats and continuing_ids:
             # Fixed-point iteration for current continuing set.
             for iter_idx in range(1, max_iterations + 1):
@@ -842,41 +921,9 @@ def tally_meek(
                 # apply within groups tied on that retained total.
                 newly_elected.sort(key=lambda cid: retained_totals.get(cid, Decimal(0)), reverse=True)
 
-                tie_breaks: list[dict[str, object]] = []
-                if len(newly_elected) > 1:
-                    reordered: list[int] = []
-                    idx = 0
-                    while idx < len(newly_elected):
-                        cid = newly_elected[idx]
-                        retained_key = retained_totals.get(cid, Decimal(0))
-                        group: list[int] = [cid]
-                        idx += 1
-                        while idx < len(newly_elected) and retained_totals.get(newly_elected[idx], Decimal(0)) == retained_key:
-                            group.append(newly_elected[idx])
-                            idx += 1
-
-                        if len(group) == 1:
-                            reordered.extend(group)
-                            continue
-
-                        ordered_group, rule_trace = _tie_break_rules_trace(
-                            candidate_ids=group,
-                            prefer_highest=True,
-                            prior_round_retained=previous_totals,
-                            cumulative_support=incoming_totals,
-                            first_preferences=first_pref,
-                        )
-                        reordered.extend(ordered_group)
-                        tie_breaks.append(
-                            {
-                                "type": "election_order",
-                                "candidate_ids": sorted(group),
-                                "ordered": ordered_group,
-                                "rule_trace": rule_trace,
-                            }
-                        )
-
-                    newly_elected = reordered
+                newly_elected, tie_breaks = _reorder_with_tie_breaks(
+                    newly_elected, retained_totals, incoming_totals=incoming_totals,
+                )
 
                 remaining_seats = seats - len(elected)
                 if remaining_seats <= 0:
@@ -928,35 +975,18 @@ def tally_meek(
                     tie_breaks=tie_breaks,
                 )
 
-                elected_total = len(elected)
-                count_complete = is_count_complete(elected_total=elected_total, eligible_candidates=eligible_candidates)
-                round_data: dict[str, object] = {
-                        "iteration": len(rounds) + 1,
-                        "quota_reached": list(quota_reached),
-                        "elected": list(elected_this_iteration),
-                        "elected_to_fill_remaining_seats": list(elected_to_fill_remaining_seats),
-                        "eliminated": None,
-                        "forced_exclusions": forced_events,
-                        "tie_breaks": tie_breaks,
-                        "eligible_candidates": eligible_candidates,
-                        "retention_factors": {str(cid): str(retention.get(cid, Decimal(0))) for cid in sorted(all_candidate_ids)},
-                        "retained_totals": {
-                            str(cid): str(retained_totals.get(cid, Decimal(0))) for cid in sorted(all_candidate_ids)
-                        },
-                        "numerically_converged": numerically_converged,
-                        "max_retention_delta": str(max_delta),
-                        "seats": seats,
-                        "elected_total": elected_total,
-                        "count_complete": count_complete,
-                    }
-                round_data.update(
-                    generate_meek_round_explanations(
-                        round_data,
-                        quota=quota,
-                        candidate_name_by_id=candidate_name_by_id,
-                    )
+                count_complete = _build_round(
+                    elected_this_round=elected_this_iteration,
+                    elected_to_fill_remaining_seats=elected_to_fill_remaining_seats,
+                    eliminated=None,
+                    forced_exclusions=forced_events,
+                    tie_breaks=tie_breaks,
+                    eligible_candidates=eligible_candidates,
+                    retained_totals_source=retained_totals,
+                    numerically_converged=numerically_converged,
+                    max_retention_delta=str(max_delta),
+                    quota_reached=quota_reached,
                 )
-                rounds.append(round_data)
 
                 previous_totals = {cid: retained_totals.get(cid, Decimal(0)) for cid in continuing_ids}
 
@@ -996,70 +1026,23 @@ def tally_meek(
                     reverse=True,
                 )
 
-                tie_breaks: list[dict[str, object]] = []
-                if len(remaining_candidates) > 1:
-                    reordered: list[int] = []
-                    idx = 0
-                    while idx < len(remaining_candidates):
-                        cid = remaining_candidates[idx]
-                        key = previous_totals.get(cid, Decimal(0))
-                        group: list[int] = [cid]
-                        idx += 1
-                        while idx < len(remaining_candidates) and previous_totals.get(remaining_candidates[idx], Decimal(0)) == key:
-                            group.append(remaining_candidates[idx])
-                            idx += 1
-
-                        if len(group) == 1:
-                            reordered.extend(group)
-                            continue
-
-                        ordered_group, rule_trace = _tie_break_rules_trace(
-                            candidate_ids=group,
-                            prefer_highest=True,
-                            prior_round_retained=previous_totals,
-                            cumulative_support=incoming_totals,
-                            first_preferences=first_pref,
-                        )
-                        reordered.extend(ordered_group)
-                        tie_breaks.append(
-                            {
-                                "type": "election_order",
-                                "candidate_ids": sorted(group),
-                                "ordered": ordered_group,
-                                "rule_trace": rule_trace,
-                            }
-                        )
-
-                    remaining_candidates = reordered
+                remaining_candidates, tie_breaks = _reorder_with_tie_breaks(
+                    remaining_candidates, previous_totals, incoming_totals=incoming_totals,
+                )
 
                 elected.extend(remaining_candidates)
                 eligible_candidates = eligible_candidates_list()
-                elected_total = len(elected)
-                count_complete = is_count_complete(elected_total=elected_total, eligible_candidates=eligible_candidates)
-                round_data: dict[str, object] = {
-                        "iteration": len(rounds) + 1,
-                        "elected": list(remaining_candidates),
-                        "elected_to_fill_remaining_seats": list(remaining_candidates),
-                        "eliminated": None,
-                        "forced_exclusions": [],
-                        "tie_breaks": tie_breaks,
-                        "eligible_candidates": eligible_candidates,
-                        "retention_factors": {str(cid): str(retention.get(cid, Decimal(0))) for cid in sorted(all_candidate_ids)},
-                        "retained_totals": {str(cid): str(previous_totals.get(cid, Decimal(0))) for cid in sorted(all_candidate_ids)},
-                        "numerically_converged": True,
-                        "max_retention_delta": "0",
-                        "seats": seats,
-                        "elected_total": elected_total,
-                        "count_complete": count_complete,
-                    }
-                round_data.update(
-                    generate_meek_round_explanations(
-                        round_data,
-                        quota=quota,
-                        candidate_name_by_id=candidate_name_by_id,
-                    )
+                _build_round(
+                    elected_this_round=remaining_candidates,
+                    elected_to_fill_remaining_seats=remaining_candidates,
+                    eliminated=None,
+                    forced_exclusions=[],
+                    tie_breaks=tie_breaks,
+                    eligible_candidates=eligible_candidates,
+                    retained_totals_source=previous_totals,
+                    numerically_converged=True,
+                    max_retention_delta="0",
                 )
-                rounds.append(round_data)
                 break
 
             # After convergence, if we still have seats to fill, eliminate the lowest continuing non-elected candidate.
@@ -1111,35 +1094,18 @@ def tally_meek(
                 elected_this_iteration=[],
                 tie_breaks=tie_breaks,
             )
-            elected_total = len(elected)
-            count_complete = is_count_complete(elected_total=elected_total, eligible_candidates=eligible_candidates)
 
-            round_data: dict[str, object] = {
-                    "iteration": len(rounds) + 1,
-                    "elected": list(elected_this_iteration),
-                    "elected_to_fill_remaining_seats": list(elected_to_fill_remaining_seats),
-                    "eliminated": to_eliminate,
-                    "forced_exclusions": [],
-                    "tie_breaks": tie_breaks,
-                    "eligible_candidates": eligible_candidates,
-                    "retention_factors": {str(cid): str(retention.get(cid, Decimal(0))) for cid in sorted(all_candidate_ids)},
-                    "retained_totals": {
-                        str(cid): str(retained_totals.get(cid, Decimal(0))) for cid in sorted(all_candidate_ids)
-                    },
-                    "numerically_converged": True,
-                    "max_retention_delta": "0",
-                    "seats": seats,
-                    "elected_total": elected_total,
-                    "count_complete": count_complete,
-                }
-            round_data.update(
-                generate_meek_round_explanations(
-                    round_data,
-                    quota=quota,
-                    candidate_name_by_id=candidate_name_by_id,
-                )
+            _build_round(
+                elected_this_round=elected_this_iteration,
+                elected_to_fill_remaining_seats=elected_to_fill_remaining_seats,
+                eliminated=to_eliminate,
+                forced_exclusions=[],
+                tie_breaks=tie_breaks,
+                eligible_candidates=eligible_candidates,
+                retained_totals_source=retained_totals,
+                numerically_converged=True,
+                max_retention_delta="0",
             )
-            rounds.append(round_data)
 
         return {
             "quota": quota,

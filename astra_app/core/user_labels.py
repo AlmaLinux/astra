@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from collections.abc import Mapping
 
 from core.backends import FreeIPAUser
@@ -42,8 +40,15 @@ def user_choice_from_freeipa(username: str) -> tuple[str, str]:
     return user_choice(u, user=user)
 
 
-def user_choices_from_freeipa(usernames: list[str] | set[str] | tuple[str, ...]) -> list[tuple[str, str]]:
-    return [user_choice_from_freeipa(u) for u in usernames if str(u or "").strip()]
+def user_choice_with_fallback(username: str, users_by_username: Mapping[str, FreeIPAUser]) -> tuple[str, str]:
+    """Build a user choice tuple, using a pre-fetched mapping with FreeIPA fallback.
+
+    Avoids repeated inline conditionals across admin forms.
+    """
+    user = users_by_username.get(username)
+    if user is not None:
+        return user_choice(username, user=user)
+    return user_choice_from_freeipa(username)
 
 
 def user_choices_from_users(usernames: list[str], *, users_by_username: Mapping[str, FreeIPAUser]) -> list[tuple[str, str]]:

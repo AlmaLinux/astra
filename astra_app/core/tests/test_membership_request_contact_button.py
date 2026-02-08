@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 from unittest.mock import patch
 from urllib.parse import urlencode
@@ -64,9 +63,11 @@ class MembershipRequestRfiButtonTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, ">RFI<")
         self.assertContains(resp, "Request for Information")
-        self.assertContains(resp, f'data-target="#rfi-modal-{req.pk}"')
-        self.assertContains(resp, f'id="rfi-modal-{req.pk}"')
-        self.assertContains(resp, f'action="{reverse("membership-request-rfi", args=[req.pk])}"')
+        # Shared modal: button carries action URL as data attribute, targets shared modal
+        rfi_url = reverse("membership-request-rfi", args=[req.pk])
+        self.assertContains(resp, f'data-action-url="{rfi_url}"')
+        self.assertContains(resp, 'data-target="#shared-rfi-modal"')
+        self.assertContains(resp, 'id="shared-rfi-modal"')
         self.assertContains(resp, 'name="rfi_message"')
 
     def test_rfi_modal_includes_message_preset(self) -> None:
@@ -176,9 +177,11 @@ class MembershipRequestRfiButtonTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, ">RFI<")
         self.assertContains(resp, "Request for Information")
-        self.assertContains(resp, f'data-target="#rfi-modal-{req.pk}"')
-        self.assertContains(resp, f'id="rfi-modal-{req.pk}"')
-        self.assertContains(resp, f'action="{reverse("membership-request-rfi", args=[req.pk])}"')
+        # Shared modal: button carries action URL as data attribute, targets shared modal
+        rfi_url = reverse("membership-request-rfi", args=[req.pk])
+        self.assertContains(resp, f'data-action-url="{rfi_url}"')
+        self.assertContains(resp, 'data-target="#shared-rfi-modal"')
+        self.assertContains(resp, 'id="shared-rfi-modal"')
         self.assertContains(resp, 'name="rfi_message"')
 
     def test_contact_button_links_to_send_mail_for_org_representative(self) -> None:

@@ -125,38 +125,11 @@
                   type="button"
                   class="btn btn-sm btn-outline-danger"
                   data-toggle="modal"
-                  data-target="#delete-mail-image-{{ forloop.counter }}"
+                  data-target="#delete-mail-image-modal"
+                  data-img-key="{{ img.key }}"
+                  data-img-name="{{ img.relative_key }}"
                   title="Delete this image"
                 >Delete</button>
-
-                <div class="modal fade" id="delete-mail-image-{{ forloop.counter }}" tabindex="-1" role="dialog" aria-hidden="true">
-                  <div class="modal-dialog" role="document">
-                    <div class="modal-content">
-                      <div class="modal-header">
-                        <h5 class="modal-title">Delete image</h5>
-                        <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog">
-                          <span aria-hidden="true">&times;</span>
-                        </button>
-                      </div>
-                      <div class="modal-body">
-                        <div class="mb-3 text-left">
-                          Delete <strong>{{ img.relative_key }}</strong>?
-                        </div>
-
-                        <form method="post" action="{{ request.path }}" class="m-0">
-                          {% csrf_token %}
-                          <input type="hidden" name="action" value="delete" />
-                          <input type="hidden" name="key" value="{{ img.key }}" />
-
-                          <div class="d-flex justify-content-between">
-                            <button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel" title="Close dialog without deleting">Cancel</button>
-                            <button type="submit" class="btn btn-danger" title="Delete this image">Delete</button>
-                          </div>
-                        </form>
-                      </div>
-                    </div>
-                  </div>
-                </div>
               </td>
             </tr>
           {% empty %}
@@ -168,4 +141,46 @@
       </table>
     </div>
   </div>
+
+  {# Shared delete confirmation modal — populated by JS from the triggering button's data attrs #}
+  <div class="modal fade" id="delete-mail-image-modal" tabindex="-1" role="dialog" aria-hidden="true">
+    <div class="modal-dialog" role="document">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Delete image</h5>
+          <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog">
+            <span aria-hidden="true">&times;</span>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3 text-left">
+            Delete <strong id="delete-mail-image-name"></strong>?
+          </div>
+          <form method="post" action="{{ request.path }}" class="m-0">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="delete" />
+            <input type="hidden" name="key" id="delete-mail-image-key" value="" />
+            <div class="d-flex justify-content-between">
+              <button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel" title="Close dialog without deleting">Cancel</button>
+              <button type="submit" class="btn btn-danger" title="Delete this image">Delete</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      'use strict';
+      document.addEventListener('click', function (e) {
+        var btn = e.target.closest && e.target.closest('button[data-img-key][data-target="#delete-mail-image-modal"]');
+        if (!btn) return;
+        var nameEl = document.getElementById('delete-mail-image-name');
+        var keyEl = document.getElementById('delete-mail-image-key');
+        if (nameEl) nameEl.textContent = btn.getAttribute('data-img-name') || '';
+        if (keyEl) keyEl.value = btn.getAttribute('data-img-key') || '';
+      });
+    })();
+  </script>
 {% endblock %}

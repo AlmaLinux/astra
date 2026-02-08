@@ -1,10 +1,12 @@
-from __future__ import annotations
-
-from urllib.parse import urlparse
 
 from django import forms
 
-from core.chatnicknames import normalize_chat_channels_text
+from core.form_validators import (
+    clean_fas_discussion_url_value,
+    clean_fas_irc_channels_value,
+    clean_fas_mailing_list_value,
+    clean_fas_url_value,
+)
 
 
 class GroupEditForm(forms.Form):
@@ -45,46 +47,17 @@ class GroupEditForm(forms.Form):
         ),
     )
 
-    @staticmethod
-    def _validate_http_url(value: str, *, field_label: str) -> str:
-        v = (value or "").strip()
-        if not v:
-            return ""
-        if len(v) > 255:
-            raise forms.ValidationError(f"Invalid {field_label}: must be at most 255 characters")
-
-        parsed = urlparse(v)
-        scheme = (parsed.scheme or "").lower()
-        if scheme not in {"http", "https"}:
-            raise forms.ValidationError(f"Invalid {field_label}: URL must start with http:// or https://")
-        if not parsed.netloc:
-            raise forms.ValidationError(f"Invalid {field_label}: empty host name")
-        return v
-
     def clean_description(self) -> str:
         return str(self.cleaned_data.get("description") or "").strip()
 
     def clean_fas_url(self) -> str:
-        return self._validate_http_url(str(self.cleaned_data.get("fas_url") or ""), field_label="URL")
+        return clean_fas_url_value(self.cleaned_data.get("fas_url"), field_label="URL")
 
     def clean_fas_discussion_url(self) -> str:
-        return self._validate_http_url(
-            str(self.cleaned_data.get("fas_discussion_url") or ""),
-            field_label="Discussion URL",
-        )
+        return clean_fas_discussion_url_value(self.cleaned_data.get("fas_discussion_url"), field_label="Discussion URL")
 
     def clean_fas_mailing_list(self) -> str:
-        v = str(self.cleaned_data.get("fas_mailing_list") or "").strip()
-        if not v:
-            return ""
-        return forms.EmailField(required=False).clean(v)
+        return clean_fas_mailing_list_value(self.cleaned_data.get("fas_mailing_list"))
 
     def clean_fas_irc_channels(self) -> list[str]:
-        raw = str(self.cleaned_data.get("fas_irc_channels") or "")
-        try:
-            normalized = normalize_chat_channels_text(raw, max_item_len=64)
-        except ValueError as exc:
-            raise forms.ValidationError(str(exc)) from exc
-
-        # Store as FreeIPA list attribute (multi-valued)
-        return [line for line in normalized.splitlines() if line.strip()]
+        return clean_fas_irc_channels_value(self.cleaned_data.get("fas_irc_channels"))

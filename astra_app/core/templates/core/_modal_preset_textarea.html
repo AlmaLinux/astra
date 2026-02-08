@@ -1,0 +1,93 @@
+{% extends 'core/_modal_base.html' %}
+{% comment %}
+Reusable Bootstrap modal with a dropdown of presets and a textarea.
+Used for rejection and request-for-information flows.
+
+Required context:
+- modal_id: str           — HTML id for the modal
+- title: str              — modal title
+- action_url: str         — form POST target
+- field_id: str           — HTML id for the textarea
+- field_name: str         — form field name (e.g. "reason", "rfi_message")
+
+Optional:
+- next_url: str
+- field_label: str        — label text (default: "Message:")
+- field_required: bool    — whether to add the `required` attribute
+- presets: list of {label, value} dicts — preset dropdown options.
+            Build with the make_presets tag from core_dict and pass via
+            the include's `with` clause. Omit for no dropdown.
+- preset_label: str       — label for the preset dropdown (default: "Quick responses")
+- help_text: str          — shown below the textarea
+- dialog_style: str       — inline style for .modal-dialog
+- submit_label: str       — submit button text (default: "Submit")
+- submit_class: str       — submit button class (default: "btn-primary")
+- show_custom_email_button: bool
+- custom_submit_label: str
+- custom_submit_class: str
+{% endcomment %}
+
+{% block modal_body %}
+        <form method="post" action="{{ action_url }}" novalidate>
+          {% csrf_token %}
+          {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}" />{% endif %}
+
+          {% if presets %}
+            <div class="form-group">
+              <label for="{{ field_id }}-preset">{{ preset_label|default:"Quick responses" }}</label>
+              <select
+                id="{{ field_id }}-preset"
+                class="form-control"
+                data-preset-textarea-target="{{ field_id }}"
+              >
+                <option value="">Choose a preset (optional)</option>
+                {% for preset in presets %}
+                  <option value="{{ preset.value }}">{{ preset.label }}</option>
+                {% endfor %}
+              </select>
+              <div class="text-muted small mt-1">Selecting a preset will copy it into the box below. You can still edit it.</div>
+            </div>
+          {% endif %}
+
+          <div class="form-group">
+            <label for="{{ field_id }}">{{ field_label|default:"Message:" }}</label>
+            <textarea id="{{ field_id }}" name="{{ field_name }}" class="form-control" rows="4"{% if field_required %} required{% endif %}></textarea>
+          </div>
+
+          {% if help_text %}
+          <div class="text-muted small mb-3">{{ help_text }}</div>
+          {% endif %}
+
+          {% if form_fields_template %}
+            {% include form_fields_template %}
+          {% endif %}
+
+          <div class="d-flex justify-content-between">
+            <button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel" title="Close dialog">Cancel</button>
+            {% if show_custom_email_button %}
+              <button type="submit" class="btn {{ custom_submit_class|default:'btn-outline-primary' }}" name="custom_email" value="1" title="{{ custom_submit_label|default:'Submit with Custom Email' }}">{{ custom_submit_label|default:"Submit with Custom Email" }}</button>
+            {% endif %}
+            <button type="submit" class="btn {{ submit_class|default:'btn-primary' }}" title="{{ submit_label|default:'Submit' }}">{{ submit_label|default:"Submit" }}</button>
+          </div>
+        </form>
+{% endblock %}
+
+{% block after_modal %}
+<script>
+  (function () {
+    if (window.AstraPresetTextareaInitialized) return;
+    window.AstraPresetTextareaInitialized = true;
+
+    document.addEventListener("change", function (event) {
+      var target = event.target;
+      if (!target || !target.matches || !target.matches('[data-preset-textarea-target]')) return;
+      var textareaId = target.getAttribute("data-preset-textarea-target");
+      if (!textareaId) return;
+      var textarea = document.getElementById(textareaId);
+      if (!textarea) return;
+      textarea.value = target.value || "";
+      textarea.focus();
+    });
+  })();
+</script>
+{% endblock %}

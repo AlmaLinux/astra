@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import re
 from dataclasses import dataclass
 from enum import StrEnum
@@ -7,7 +5,8 @@ from urllib.parse import urlparse
 
 from django.conf import settings
 
-from core.views_utils import _normalize_str, _split_list_field
+from core.ipa_user_attrs import _split_list_field
+from core.views_utils import _normalize_str
 
 
 class ChatScheme(StrEnum):
@@ -26,9 +25,6 @@ _SERVER_RE = re.compile(r"^[a-z0-9][a-z0-9.-]*(:[0-9]+)?$", re.IGNORECASE)
 
 
 def _get_default_server(scheme: ChatScheme) -> str | None:
-    if not hasattr(settings, "CHAT_NETWORKS"):
-        return None
-
     networks = settings.CHAT_NETWORKS
     if not isinstance(networks, dict):
         return None
@@ -42,9 +38,6 @@ def _get_default_server(scheme: ChatScheme) -> str | None:
 
 
 def _get_default_team() -> str | None:
-    if not hasattr(settings, "CHAT_NETWORKS"):
-        return None
-
     networks = settings.CHAT_NETWORKS
     if not isinstance(networks, dict):
         return None
@@ -206,7 +199,7 @@ def build_chat_nickname_link(value: str, *, scheme_override: str | None = None) 
         return ChatNicknameLink(href=href, title=title, display=display)
 
     if scheme == ChatScheme.matrix:
-        args = settings.CHAT_MATRIX_TO_ARGS if hasattr(settings, "CHAT_MATRIX_TO_ARGS") else ""
+        args = settings.CHAT_MATRIX_TO_ARGS
         args = args if isinstance(args, str) and args else ""
 
         href = f"https://matrix.to/#/@{nick}:{server}"
@@ -428,7 +421,7 @@ def build_chat_channel_link(value: str, *, scheme_override: str | None = None) -
         return ChatChannelLink(href=href, title=title, display=display)
 
     if scheme == ChatScheme.matrix:
-        args = settings.CHAT_MATRIX_TO_ARGS if hasattr(settings, "CHAT_MATRIX_TO_ARGS") else ""
+        args = settings.CHAT_MATRIX_TO_ARGS
         args = args if isinstance(args, str) and args else ""
 
         href = f"https://matrix.to/#/{channel}:{server}"

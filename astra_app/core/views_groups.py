@@ -1,12 +1,9 @@
-from __future__ import annotations
-
 from typing import cast
 from urllib.parse import quote
 
 import requests
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied
-from django.core.paginator import Paginator
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -23,7 +20,7 @@ from core.backends import (
 )
 from core.forms_groups import GroupEditForm
 from core.permissions import ASTRA_ADD_ELECTION, json_permission_required
-from core.views_utils import _normalize_str
+from core.views_utils import MSG_SERVICE_UNAVAILABLE, _normalize_str, get_username, paginate_and_build_context
 
 
 @require_GET
@@ -72,48 +69,20 @@ def groups(request: HttpRequest) -> HttpResponse:
     groups_sorted = sorted(groups_filtered, key=_sort_key)
 
     for g in groups_sorted:
-        member_count = 0
-        if hasattr(g, "member_count_recursive"):
-            try:
-                fn = getattr(g, "member_count_recursive")
-                member_count = int(fn() if callable(fn) else fn)
-            except Exception:
-                member_count = 0
-        else:
-            try:
-                member_count = len(getattr(g, "members", []) or [])
-            except Exception:
-                member_count = 0
-        setattr(g, "member_count", member_count)
+        g.member_count = g.member_count_recursive()
 
-    paginator = Paginator(groups_sorted, 30)
-    page_obj = paginator.get_page(page_number)
-
-    total_pages = paginator.num_pages
-    current_page = page_obj.number
-    if total_pages <= 10:
-        page_numbers = list(range(1, total_pages + 1))
-        show_first = False
-        show_last = False
-    else:
-        start = max(1, current_page - 2)
-        end = min(total_pages, current_page + 2)
-        page_numbers = list(range(start, end + 1))
-        show_first = 1 not in page_numbers
-        show_last = total_pages not in page_numbers
+    page_ctx = paginate_and_build_context(
+        groups_sorted, page_number, 30,
+        page_url_prefix=f"?q={q}&page=" if q else "?page=",
+    )
 
     return render(
         request,
         "core/groups.html",
         {
             "q": q,
-            "paginator": paginator,
-            "page_obj": page_obj,
-            "is_paginated": paginator.num_pages > 1,
-            "page_numbers": page_numbers,
-            "show_first": show_first,
-            "show_last": show_last,
-            "groups": page_obj.object_list,
+            **page_ctx,
+            "groups": page_ctx["page_obj"].object_list,
         },
     )
 
@@ -135,7 +104,7 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
 
     member_count = group.member_count_recursive(fas_only=True)
 
-    username = _normalize_str(request.user.get_username())
+    username = get_username(request)
     try:
         sponsors = set(group.sponsors)
     except AttributeError:
@@ -194,8 +163,7 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
         if isinstance(request.user, DegradedFreeIPAUser) or _freeipa_circuit_open():
             messages.error(
                 request,
-                "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
-                "Please try again later.",
+                MSG_SERVICE_UNAVAILABLE,
             )
             return redirect("group-detail", name)
 
@@ -211,8 +179,7 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
             except requests.exceptions.ConnectionError:
                 messages.error(
                     request,
-                    "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
-                    "Please try again later.",
+                    MSG_SERVICE_UNAVAILABLE,
                 )
             except Exception:
                 messages.error(request, "Failed to leave group due to an internal error.")
@@ -228,8 +195,7 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
             except requests.exceptions.ConnectionError:
                 messages.error(
                     request,
-                    "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
-                    "Please try again later.",
+                    MSG_SERVICE_UNAVAILABLE,
                 )
             except Exception:
                 messages.error(request, "Failed to update sponsor status due to an internal error.")
@@ -265,8 +231,7 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
                 except requests.exceptions.ConnectionError:
                     messages.error(
                         request,
-                        "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
-                        "Please try again later.",
+                        MSG_SERVICE_UNAVAILABLE,
                     )
                 except Exception:
                     messages.error(request, "Failed to add member due to an internal error.")
@@ -281,8 +246,7 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
                 except requests.exceptions.ConnectionError:
                     messages.error(
                         request,
-                        "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
-                        "Please try again later.",
+                        MSG_SERVICE_UNAVAILABLE,
                     )
                 except Exception:
                     messages.error(request, "Failed to remove member due to an internal error.")
@@ -314,8 +278,7 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
             except requests.exceptions.ConnectionError:
                 messages.error(
                     request,
-                    "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
-                    "Please try again later.",
+                    MSG_SERVICE_UNAVAILABLE,
                 )
             except Exception:
                 messages.error(request, "Failed to update sponsor status due to an internal error.")
@@ -347,8 +310,7 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
             except requests.exceptions.ConnectionError:
                 messages.error(
                     request,
-                    "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
-                    "Please try again later.",
+                    MSG_SERVICE_UNAVAILABLE,
                 )
             except Exception:
                 messages.error(request, "Failed to update sponsor status due to an internal error.")
@@ -382,7 +344,7 @@ def group_edit(request: HttpRequest, name: str) -> HttpResponse:
     if not group or not group.fas_group:
         raise Http404("Group not found")
 
-    username = _normalize_str(request.user.get_username())
+    username = get_username(request)
     sponsors = set(group.sponsors)
     sponsor_groups = set(group.sponsor_groups)
     user_groups: set[str] = set()
@@ -411,8 +373,7 @@ def group_edit(request: HttpRequest, name: str) -> HttpResponse:
             except requests.exceptions.ConnectionError:
                 messages.error(
                     request,
-                    "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
-                    "Please try again later.",
+                    MSG_SERVICE_UNAVAILABLE,
                 )
             except Exception:
                 messages.error(request, "Failed to save group info due to an internal error.")

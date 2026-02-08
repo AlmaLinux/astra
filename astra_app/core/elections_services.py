@@ -1,8 +1,7 @@
-from __future__ import annotations
-
 import datetime
 import json
 import secrets
+from collections.abc import Iterable
 from dataclasses import dataclass
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
@@ -149,13 +148,31 @@ def _jsonify_tally_result(result: object) -> dict[str, object]:
     raise ElectionError("Tally result serialization failed")
 
 
-def build_public_ballots_export(*, election: Election) -> dict[str, object]:
-    candidates = Candidate.objects.filter(election=election).only("id", "freeipa_username")
-    candidate_name_by_id: dict[int, str] = {
+def _election_email_context(*, election: Election, tz_name: str | None = None) -> dict[str, object]:
+    """Shared election fields for email template contexts."""
+    return {
+        "election_id": election.id,
+        "election_name": election.name,
+        "election_description": election.description,
+        "election_url": election.url,
+        "election_start_datetime": _format_datetime_in_timezone(dt=election.start_datetime, tz_name=tz_name),
+        "election_end_datetime": _format_datetime_in_timezone(dt=election.end_datetime, tz_name=tz_name),
+        "election_number_of_seats": election.number_of_seats,
+    }
+
+
+def candidate_username_by_id_map(candidates: Iterable[Candidate]) -> dict[int, str]:
+    """Build {candidate_id: username} from a candidate queryset, skipping blanks."""
+    return {
         int(c.id): str(c.freeipa_username or "").strip()
         for c in candidates
         if str(c.freeipa_username or "").strip()
     }
+
+
+def build_public_ballots_export(*, election: Election) -> dict[str, object]:
+    candidates = Candidate.objects.filter(election=election).only("id", "freeipa_username")
+    candidate_name_by_id = candidate_username_by_id_map(candidates)
 
     ballots_qs = (
         Ballot.objects.filter(election=election)
@@ -327,13 +344,7 @@ def send_vote_receipt_email(
     context: dict[str, object] = {
         **user_email_context(username=username),
         **election_committee_email_context(),
-        "election_id": election.id,
-        "election_name": election.name,
-        "election_description": election.description,
-        "election_url": election.url,
-        "election_start_datetime": _format_datetime_in_timezone(dt=election.start_datetime, tz_name=tz_name),
-        "election_end_datetime": _format_datetime_in_timezone(dt=election.end_datetime, tz_name=tz_name),
-        "election_number_of_seats": election.number_of_seats,
+        **_election_email_context(election=election, tz_name=tz_name),
         "ballot_hash": receipt.ballot.ballot_hash,
         "nonce": receipt.nonce,
         "weight": receipt.ballot.weight,
@@ -418,13 +429,7 @@ def build_voting_credential_email_context(
     return {
         **user_context,
         **election_committee_email_context(),
-        "election_id": election.id,
-        "election_name": election.name,
-        "election_description": election.description,
-        "election_url": election.url,
-        "election_start_datetime": _format_datetime_in_timezone(dt=election.start_datetime, tz_name=tz_name),
-        "election_end_datetime": _format_datetime_in_timezone(dt=election.end_datetime, tz_name=tz_name),
-        "election_number_of_seats": election.number_of_seats,
+        **_election_email_context(election=election, tz_name=tz_name),
         "credential_public_id": credential_public_id,
         "vote_url": election_vote_url(
             request=request,
@@ -697,17 +702,7 @@ def anonymize_election(*, election: Election) -> dict[str, int]:
 
 
 @transaction.atomic
-def issue_voting_credentials_from_memberships(*, election: Election) -> int:
-    if election.status in {Election.Status.closed, Election.Status.tallied}:
-        raise ElectionError("cannot issue credentials for a closed election")
-    eligible = eligible_voters_from_memberships(election=election)
-    for voter in eligible:
-        issue_voting_credential(election=election, freeipa_username=voter.username, weight=voter.weight)
-    return len(eligible)
-
-
-@transaction.atomic
-def issue_voting_credentials_from_memberships_detailed(*, election: Election) -> list[VotingCredential]:
+def issue_voting_credentials_from_memberships(*, election: Election) -> list[VotingCredential]:
     if election.status in {Election.Status.closed, Election.Status.tallied}:
         raise ElectionError("cannot issue credentials for a closed election")
 
@@ -726,6 +721,40 @@ def scrub_election_emails(*, election: Election) -> int:
     # post_office stores context as a JSON field.
     count, _ = Email.objects.filter(context__contains={"election_id": election.id}).delete()
     return count
+
+
+def _audit_and_raise(
+    *,
+    election: Election,
+    event_type: str,
+    exc: Exception,
+    recovery_message: str,
+    actor: str | None = None,
+) -> None:
+    """Log a failure audit entry in an autonomous transaction and raise ElectionError.
+
+    Used by close_election and tally_election to ensure the audit trail persists
+    even when the outer transaction rolls back.
+    """
+    failure_payload: dict[str, object] = {
+        "error": str(exc),
+        "error_type": type(exc).__name__,
+    }
+    if actor:
+        failure_payload["actor"] = actor
+
+    try:
+        with transaction.atomic():
+            AuditLogEntry.objects.create(
+                election=election,
+                event_type=event_type,
+                payload=failure_payload,
+                is_public=False,
+            )
+    except Exception:
+        pass  # Don't let audit log failure mask original error
+
+    raise ElectionError(f"{recovery_message}: {exc}") from exc
 
 
 @transaction.atomic
@@ -763,30 +792,17 @@ def close_election(*, election: Election, actor: str | None = None) -> None:
             is_public=True,
         )
     except Exception as exc:
-        failure_payload = {
-            "error": str(exc),
-            "error_type": type(exc).__name__,
-        }
-        if actor:
-            failure_payload["actor"] = actor
-
-        # Use autonomous transaction to persist audit log even if outer transaction rolls back
-        try:
-            with transaction.atomic():
-                AuditLogEntry.objects.create(
-                    election=election,
-                    event_type="election_close_failed",
-                    payload=failure_payload,
-                    is_public=False,
-                )
-        except Exception:
-            pass  # Don't let audit log failure mask original error
-
-        raise ElectionError(
-            f"Failed to close election: {exc}. "
-            "Recovery: Verify database connectivity and election state, then retry. "
-            "Contact an administrator if the issue persists."
-        ) from exc
+        _audit_and_raise(
+            election=election,
+            event_type="election_close_failed",
+            exc=exc,
+            recovery_message=(
+                "Failed to close election. "
+                "Recovery: Verify database connectivity and election state, then retry. "
+                "Contact an administrator if the issue persists"
+            ),
+            actor=actor,
+        )
 
 
 @transaction.atomic
@@ -891,28 +907,15 @@ def tally_election(*, election: Election, actor: str | None = None) -> dict[str,
 
         return result
     except Exception as exc:
-        failure_payload = {
-            "error": str(exc),
-            "error_type": type(exc).__name__,
-        }
-        if actor:
-            failure_payload["actor"] = actor
-
-        # Use autonomous transaction to persist audit log even if outer transaction rolls back
-        try:
-            with transaction.atomic():
-                AuditLogEntry.objects.create(
-                    election=election,
-                    event_type="tally_failed",
-                    payload=failure_payload,
-                    is_public=False,
-                )
-        except Exception:
-            pass  # Don't let audit log failure mask original error
-
-        raise ElectionError(
-            f"Failed to tally election: {exc}. "
-            "Recovery: Verify ballot data integrity and candidate configuration, then retry from the election detail page. "
-            "The election remains in 'closed' state and can be tallied again. "
-            "Contact an administrator if the issue persists."
-        ) from exc
+        _audit_and_raise(
+            election=election,
+            event_type="tally_failed",
+            exc=exc,
+            recovery_message=(
+                "Failed to tally election. "
+                "Recovery: Verify ballot data integrity and candidate configuration, then retry from the election detail page. "
+                "The election remains in 'closed' state and can be tallied again. "
+                "Contact an administrator if the issue persists"
+            ),
+            actor=actor,
+        )

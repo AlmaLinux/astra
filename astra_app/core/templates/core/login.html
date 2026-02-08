@@ -6,12 +6,7 @@
 
 {% block content %}
 <div class="row align-items-start public-auth-layout">
-  <div class="col-lg-7 d-none d-lg-block">
-    <h1 class="public-auth-title">AlmaLinux Accounts</h1>
-    <p class="public-auth-lead">
-      AlmaLinux Accounts provides the ability to create and manage your account across AlmaLinux's entire infrastructure.
-    </p>
-  </div>
+  {% include 'core/_public_auth_hero.html' %}
 
   <div class="col-12 col-lg-5">
     <div class="card card-primary card-tabs public-auth-card">

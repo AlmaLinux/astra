@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import hashlib
 from collections.abc import Mapping
 from typing import Any

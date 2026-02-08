@@ -66,58 +66,7 @@
                 {{ r.requested_at }}
               </td>
               <td>
-                {% if row.organization %}
-                  <div>
-                    <a href="{% url 'organization-detail' row.organization.pk %}">{{ row.organization.name }}</a>
-                  </div>
-                {% elif r.requested_username %}
-                  <a href="{% url 'user-profile' r.requested_username %}">
-                    {% if row.full_name %}
-                      <div>{{ row.full_name }} <span class="text-muted small">({{ r.requested_username }})</span></div>
-                    {% else %}
-                      <div>{{ r.requested_username }}</div>
-                    {% endif %}
-                  </a>
-                {% endif %}
-
-                {% if row.requested_by_username %}
-                  {% if r.requested_username %}
-                    {% if row.requested_by_username != r.requested_username %}
-                      <div class="text-muted small">
-                        Requested by:
-                        <a href="{% url 'user-profile' row.requested_by_username %}">
-                          {% if row.requested_by_full_name %}
-                            {{ row.requested_by_full_name }} <span class="text-muted">({{ row.requested_by_username }})</span>
-                          {% else %}
-                            {{ row.requested_by_username }}
-                          {% endif %}
-                        </a>
-                        {% if row.requested_by_deleted %}
-                          <span class="text-muted">(deleted)</span>
-                        {% endif %}
-                      </div>
-                    {% endif %}
-                  {% elif row.organization %}
-                    <div class="text-muted small">
-                      Requested by:
-                      <a href="{% url 'user-profile' row.requested_by_username %}">
-                        {% if row.requested_by_full_name %}
-                          {{ row.requested_by_full_name }} <span class="text-muted">({{ row.requested_by_username }})</span>
-                        {% else %}
-                          {{ row.requested_by_username }}
-                        {% endif %}
-                      </a>
-                      {% if row.requested_by_deleted %}
-                        <span class="text-muted">(deleted)</span>
-                      {% endif %}
-                    </div>
-                  {% endif %}
-                {% endif %}
-
-                <div class="mt-2">
-                  {% membership_notes r compact=True %}
-                </div>
-
+                {% include 'core/_membership_request_requester_cell.html' %}
               </td>
               <td>
                 {{ r.membership_type.name }}
@@ -221,58 +170,7 @@
                   {{ r.requested_at }}
                 </td>
                 <td>
-                  {% if row.organization %}
-                    <div>
-                      <a href="{% url 'organization-detail' row.organization.pk %}">{{ row.organization.name }}</a>
-                    </div>
-                  {% elif r.requested_username %}
-                    <a href="{% url 'user-profile' r.requested_username %}">
-                      {% if row.full_name %}
-                        <div>{{ row.full_name }} <span class="text-muted small">({{ r.requested_username }})</span></div>
-                      {% else %}
-                        <div>{{ r.requested_username }}</div>
-                      {% endif %}
-                    </a>
-                  {% endif %}
-
-                  {% if row.requested_by_username %}
-                    {% if r.requested_username %}
-                      {% if row.requested_by_username != r.requested_username %}
-                        <div class="text-muted small">
-                          Requested by:
-                          <a href="{% url 'user-profile' row.requested_by_username %}">
-                            {% if row.requested_by_full_name %}
-                              {{ row.requested_by_full_name }} <span class="text-muted">({{ row.requested_by_username }})</span>
-                            {% else %}
-                              {{ row.requested_by_username }}
-                            {% endif %}
-                          </a>
-                          {% if row.requested_by_deleted %}
-                            <span class="text-muted">(deleted)</span>
-                          {% endif %}
-                        </div>
-                      {% endif %}
-                    {% elif row.organization %}
-                      <div class="text-muted small">
-                        Requested by:
-                        <a href="{% url 'user-profile' row.requested_by_username %}">
-                          {% if row.requested_by_full_name %}
-                            {{ row.requested_by_full_name }} <span class="text-muted">({{ row.requested_by_username }})</span>
-                          {% else %}
-                            {{ row.requested_by_username }}
-                          {% endif %}
-                        </a>
-                        {% if row.requested_by_deleted %}
-                          <span class="text-muted">(deleted)</span>
-                        {% endif %}
-                      </div>
-                    {% endif %}
-                  {% endif %}
-
-                  <div class="mt-2">
-                    {% membership_notes r compact=True %}
-                  </div>
-
+                  {% include 'core/_membership_request_requester_cell.html' %}
                 </td>
 
                 <td>{{ r.membership_type.name }}</td>
@@ -347,4 +245,6 @@
       setupBulk('bulk-action-form-on-hold', 'select-all-requests-on-hold', '.request-checkbox--on-hold', 'bulk-apply-on-hold');
     })();
   </script>
+
+  {% include 'core/_membership_request_shared_modals.html' %}
 {% endblock %}

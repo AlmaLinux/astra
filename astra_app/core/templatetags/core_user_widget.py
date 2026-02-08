@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Any, cast
 
 from django.template import Context, Library
@@ -7,6 +5,7 @@ from django.template.loader import render_to_string
 from django.utils.safestring import mark_safe
 
 from core.backends import FreeIPAUser
+from core.templatetags._user_helpers import try_get_full_name
 from core.views_utils import _normalize_str
 
 register = Library()
@@ -21,27 +20,6 @@ def _is_avatar_compatible_user(user: object) -> bool:
         and hasattr(user, "pk")
         and hasattr(user, "_meta")
     )
-
-
-def _try_get_full_name(user: object) -> str:
-    # This is a template tag and may receive different "user-like" objects
-    # (FreeIPAUser, Django User, stubs in tests), so use feature detection.
-    full_name = getattr(user, "full_name", None)
-    if isinstance(full_name, str):
-        return full_name.strip()
-    if full_name is not None:
-        try:
-            return str(full_name).strip()
-        except Exception:
-            return ""
-
-    get_full_name = getattr(user, "get_full_name", None)
-    if callable(get_full_name):
-        try:
-            return str(get_full_name()).strip()
-        except Exception:
-            return ""
-    return ""
 
 
 @register.simple_tag(takes_context=True, name="user")
@@ -92,7 +70,7 @@ def user_widget(context: Context, username: object, **kwargs: Any) -> str:
             cache[raw] = user_obj
 
     avatar_user = user_obj if user_obj and _is_avatar_compatible_user(user_obj) else None
-    full_name = _try_get_full_name(user_obj) if user_obj else ""
+    full_name = try_get_full_name(user_obj) if user_obj else ""
 
     html = render_to_string(
         "core/_user_widget.html",

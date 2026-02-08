@@ -1,0 +1,48 @@
+{% comment %}
+Requester info for membership request list rows.
+
+Renders the "Requested for" cell content: the target user/organization link,
+the "Requested by" attribution when it differs, and the compact membership notes.
+
+Expected context (inherited from parent via {% include %}):
+- row: dict with r, organization, full_name, requested_by_username, etc.
+- r: row.r (MembershipRequest)
+{% endcomment %}
+
+{% load core_membership_notes %}
+
+{% if row.organization %}
+  <div>
+    <a href="{% url 'organization-detail' row.organization.pk %}">{{ row.organization.name }}</a>
+  </div>
+{% elif r.requested_username %}
+  <a href="{% url 'user-profile' r.requested_username %}">
+    {% if row.full_name %}
+      <div>{{ row.full_name }} <span class="text-muted small">({{ r.requested_username }})</span></div>
+    {% else %}
+      <div>{{ r.requested_username }}</div>
+    {% endif %}
+  </a>
+{% endif %}
+
+{% if row.requested_by_username %}
+  {% if r.requested_username and row.requested_by_username != r.requested_username or not r.requested_username and row.organization %}
+    <div class="text-muted small">
+      Requested by:
+      <a href="{% url 'user-profile' row.requested_by_username %}">
+        {% if row.requested_by_full_name %}
+          {{ row.requested_by_full_name }} <span class="text-muted">({{ row.requested_by_username }})</span>
+        {% else %}
+          {{ row.requested_by_username }}
+        {% endif %}
+      </a>
+      {% if row.requested_by_deleted %}
+        <span class="text-muted">(deleted)</span>
+      {% endif %}
+    </div>
+  {% endif %}
+{% endif %}
+
+<div class="mt-2">
+  {% membership_notes r compact=True %}
+</div>

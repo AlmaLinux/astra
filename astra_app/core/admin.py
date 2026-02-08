@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import csv
 import io
 import logging
@@ -30,22 +28,29 @@ from python_freeipa import exceptions
 from tablib import Dataset
 
 from core.agreements import missing_required_agreements_for_user_in_group
-from core.chatnicknames import normalize_chat_channels_text
 from core.elections_services import (
     ElectionError,
     close_election,
     issue_voting_credentials_from_memberships,
-    issue_voting_credentials_from_memberships_detailed,
     send_voting_credential_email,
     tally_election,
 )
+from core.form_validators import (
+    clean_fas_discussion_url_value,
+    clean_fas_irc_channels_value,
+    clean_fas_mailing_list_value,
+    clean_fas_url_value,
+)
+from core.ipa_user_attrs import _split_lines
+from core.ipa_utils import sync_set_membership
 from core.membership_csv_import import (
+    _COLUMN_FIELDS,
     MembershipCSVConfirmImportForm,
     MembershipCSVImportForm,
     MembershipCSVImportResource,
 )
 from core.protected_resources import protected_freeipa_group_cns
-from core.user_labels import user_choice, user_choice_from_freeipa, user_choices_from_users
+from core.user_labels import user_choice, user_choice_with_fallback, user_choices_from_users
 from core.views_utils import _normalize_str
 
 from .backends import (
@@ -187,21 +192,13 @@ class FreeIPAModelAdmin(admin.ModelAdmin):
 
         return _ListBackedQuerySet(self.model, [o for o in queryset if matches(o)]), False
 
-    def _freeipa_object_id(self, obj: object) -> str:
-        # Prefer model pk; fall back to common FreeIPA identifiers.
-        for attr in ("pk", "username", "cn"):
-            value = getattr(obj, attr, None)
-            if value:
-                return str(value)
-        return str(obj)
-
     @override
     def delete_model(self, request, obj) -> None:
         backend = getattr(self, "freeipa_backend", None)
         if backend is None:
             return super().delete_model(request, obj)
 
-        object_id = self._freeipa_object_id(obj)
+        object_id = self._object_key(obj)
         freeipa_obj = backend.get(object_id)
         if freeipa_obj:
             freeipa_obj.delete()
@@ -395,6 +392,29 @@ class FreeIPAModelAdmin(admin.ModelAdmin):
         )
 
 
+def _safe_reregister(model: type, admin_cls: type[admin.ModelAdmin]) -> None:
+    """Unregister a model from admin (if registered) and re-register with a new admin class."""
+    from django.contrib.admin.sites import NotRegistered
+    try:
+        admin.site.unregister(model)
+    except NotRegistered:
+        pass
+    admin.site.register(model, admin_cls)
+
+
+class ReadOnlyModelAdmin(admin.ModelAdmin):
+    """Mixin that disables add/change/delete permissions."""
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
 def _override_post_office_log_admin():
     """Disable manual creation of django-post-office Log rows in admin.
 
@@ -402,26 +422,15 @@ def _override_post_office_log_admin():
     """
 
     try:
-        from django.contrib.admin.sites import NotRegistered
         from post_office.admin import LogAdmin as PostOfficeLogAdmin
         from post_office.models import Log
     except Exception:
         return
 
-    class ReadOnlyAddLogAdmin(PostOfficeLogAdmin):
-        def has_add_permission(self, request):
-            return False
-        def has_change_permission(self, request, obj=None):
-            return False
-        def has_delete_permission(self, request, obj=None):
-            return False
-
-    try:
-        admin.site.unregister(Log)
-    except NotRegistered:
+    class ReadOnlyAddLogAdmin(ReadOnlyModelAdmin, PostOfficeLogAdmin):
         pass
 
-    admin.site.register(Log, ReadOnlyAddLogAdmin)
+    _safe_reregister(Log, ReadOnlyAddLogAdmin)
 
 
 _override_post_office_log_admin()
@@ -437,7 +446,6 @@ def _override_post_office_email_admin() -> None:
     """
 
     try:
-        from django.contrib.admin.sites import NotRegistered
         from post_office.admin import EmailAdmin as PostOfficeEmailAdmin
         from post_office.models import Email
     except Exception:
@@ -463,19 +471,10 @@ def _override_post_office_email_admin() -> None:
                     fields.insert(0, "message_id")
                 return [(None, {"fields": fields})]
 
-    try:
-        admin.site.unregister(Email)
-    except NotRegistered:
-        pass
-
-    admin.site.register(Email, SafeEmailAdmin)
+    _safe_reregister(Email, SafeEmailAdmin)
 
 
 _override_post_office_email_admin()
-
-
-def _split_lines(value: str) -> list[str]:
-    return [line.strip() for line in (value or "").splitlines() if line.strip()]
 
 
 def _override_django_ses_admin():
@@ -488,49 +487,96 @@ def _override_django_ses_admin():
     """
 
     try:
-        from django.contrib.admin.sites import NotRegistered
         from django_ses.models import BlacklistedEmail, SESStat
     except Exception:
         return
 
-    class SESStatAdmin(admin.ModelAdmin):
+    class SESStatAdmin(ReadOnlyModelAdmin):
         list_display = ("date", "delivery_attempts", "bounces", "complaints", "rejects")
         ordering = ("-date",)
-
-        def has_add_permission(self, request):
-            return False
-
-        def has_change_permission(self, request, obj=None):
-            return False
-
-        def has_delete_permission(self, request, obj=None):
-            return False
 
     class BlacklistedEmailAdmin(admin.ModelAdmin):
         list_display = ("email",)
         search_fields = ("email",)
         ordering = ("email",)
 
-    try:
-        admin.site.unregister(SESStat)
-    except NotRegistered:
-        pass
-    try:
-        admin.site.unregister(BlacklistedEmail)
-    except NotRegistered:
-        pass
-
-    admin.site.register(SESStat, SESStatAdmin)
-    admin.site.register(BlacklistedEmail, BlacklistedEmailAdmin)
+    _safe_reregister(SESStat, SESStatAdmin)
+    _safe_reregister(BlacklistedEmail, BlacklistedEmailAdmin)
 
 
 _override_django_ses_admin()
 
 
-class IPAUserBaseForm(forms.ModelForm):
+def _duallistbox_widget(*, size: int = 14) -> forms.SelectMultiple:
+    """Reusable dual-list-box widget used across FreeIPA admin forms."""
+    return forms.SelectMultiple(attrs={"class": "form-control alx-duallistbox", "size": size})
+
+
+class FreeIPAFormMixin:
+    """Mixin for FreeIPA-backed ModelForms that have no DB table.
+
+    Suppresses Django's DB-backed uniqueness checks — FreeIPA enforces
+    uniqueness on its own.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._validate_unique = False
+
+    def validate_unique(self):
+        return
+
+
+def _merge_group_choices(
+    field: forms.Field,
+    current_values: list[str],
+    base_names: list[str],
+) -> None:
+    """Ensure *current_values* are selectable in a simple (name, name) choice field."""
+    existing = dict(field.choices)
+    missing = [v for v in current_values if v not in existing]
+    if missing:
+        field.choices = [(g, g) for g in (base_names + missing)]
+
+
+def _merge_user_choices(
+    field: forms.Field,
+    current_values: list[str],
+    base_usernames: list[str],
+    users_by_username: dict[str, FreeIPAUser],
+) -> None:
+    """Ensure *current_values* are selectable in a user choice field with display labels."""
+    existing = dict(field.choices)
+    missing = [u for u in current_values if u not in existing]
+    if missing:
+        merged = sorted(set([*base_usernames, *missing]), key=str.lower)
+        field.choices = [
+            user_choice_with_fallback(u, users_by_username)
+            for u in merged
+        ]
+
+
+def _freeipa_user_data() -> tuple[list[str], dict[str, FreeIPAUser]]:
+    """Return sorted usernames and username→FreeIPAUser mapping from FreeIPA."""
+    users = FreeIPAUser.all()
+    by_username: dict[str, FreeIPAUser] = {u.username: u for u in users if u.username}
+    return sorted(by_username, key=str.lower), by_username
+
+
+def _freeipa_group_names(*, fas_only: bool = False) -> list[str]:
+    """Return sorted FreeIPA group CN list, optionally restricted to FAS groups."""
+    groups = FreeIPAGroup.all()
+    if fas_only:
+        return sorted(
+            {getattr(g, "cn", "") for g in groups if getattr(g, "cn", "") and bool(getattr(g, "fas_group", False))}
+        )
+    return sorted({getattr(g, "cn", "") for g in groups if getattr(g, "cn", "")})
+
+
+class IPAUserBaseForm(FreeIPAFormMixin, forms.ModelForm):
     groups = forms.MultipleChoiceField(
         required=False,
-        widget=forms.SelectMultiple(attrs={"class": "form-control alx-duallistbox", "size": 12}),
+        widget=_duallistbox_widget(),
         help_text="Select the FreeIPA groups this user should be a member of.",
     )
 
@@ -541,11 +587,8 @@ class IPAUserBaseForm(forms.ModelForm):
     @override
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # These models are unmanaged and have no DB tables; skip DB-backed uniqueness checks.
-        self._validate_unique = False
 
-        groups = FreeIPAGroup.all()
-        group_names = sorted({getattr(g, "cn", "") for g in groups if getattr(g, "cn", "")})
+        group_names = _freeipa_group_names()
         self.fields["groups"].choices = [(name, name) for name in group_names]
 
         # Username is immutable in FreeIPA.
@@ -563,15 +606,8 @@ class IPAUserBaseForm(forms.ModelForm):
                 current = sorted(freeipa.direct_groups_list)
                 # If the server returns groups outside our enumerated list,
                 # keep them selectable so we don't drop memberships on save.
-                missing = [g for g in current if g not in dict(self.fields["groups"].choices)]
-                if missing:
-                    self.fields["groups"].choices = [(g, g) for g in (group_names + missing)]
+                _merge_group_choices(self.fields["groups"], current, group_names)
                 self.initial.setdefault("groups", current)
-
-    @override
-    def validate_unique(self):
-        # No DB; uniqueness is enforced by FreeIPA.
-        return
 
 
 class IPAUserAddForm(IPAUserBaseForm):
@@ -586,26 +622,26 @@ class IPAUserChangeForm(IPAUserBaseForm):
     pass
 
 
-class IPAGroupForm(forms.ModelForm):
+class IPAGroupForm(FreeIPAFormMixin, forms.ModelForm):
     members = forms.MultipleChoiceField(
         required=False,
-        widget=forms.SelectMultiple(attrs={"class": "form-control alx-duallistbox", "size": 14}),
+        widget=_duallistbox_widget(),
         help_text="Select the users that should be members of this group.",
     )
     sponsors = forms.MultipleChoiceField(
         required=False,
-        widget=forms.SelectMultiple(attrs={"class": "form-control alx-duallistbox", "size": 14}),
+        widget=_duallistbox_widget(),
         help_text="Select the users that should be sponsors (memberManager) of this group.",
     )
     member_groups = forms.MultipleChoiceField(
         required=False,
-        widget=forms.SelectMultiple(attrs={"class": "form-control alx-duallistbox", "size": 14}),
+        widget=_duallistbox_widget(),
         help_text="Select the groups that should be nested members of this group.",
         label="Member groups",
     )
     sponsor_groups = forms.MultipleChoiceField(
         required=False,
-        widget=forms.SelectMultiple(attrs={"class": "form-control alx-duallistbox", "size": 14}),
+        widget=_duallistbox_widget(),
         help_text="Select the groups that should be sponsors (memberManager) of this group.",
         label="Sponsor groups",
     )
@@ -647,17 +683,12 @@ class IPAGroupForm(forms.ModelForm):
     @override
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # These models are unmanaged and have no DB tables; skip DB-backed uniqueness checks.
-        self._validate_unique = False
 
-        users = FreeIPAUser.all()
-        users_by_username: dict[str, FreeIPAUser] = {u.username: u for u in users if u.username}
-        usernames = sorted(users_by_username, key=str.lower)
+        usernames, users_by_username = _freeipa_user_data()
         self.fields["members"].choices = user_choices_from_users(usernames, users_by_username=users_by_username)
         self.fields["sponsors"].choices = user_choices_from_users(usernames, users_by_username=users_by_username)
 
-        groups = FreeIPAGroup.all()
-        group_names = sorted({getattr(g, "cn", "") for g in groups if getattr(g, "cn", "")})
+        group_names = _freeipa_group_names()
         self.fields["member_groups"].choices = [(g, g) for g in group_names]
         self.fields["sponsor_groups"].choices = [(g, g) for g in group_names]
 
@@ -672,35 +703,19 @@ class IPAGroupForm(forms.ModelForm):
                 self.initial.setdefault("description", freeipa.description or "")
                 current = sorted(freeipa.members)
                 # Groups can contain entries that aren't part of the standard user listing.
-                missing = [u for u in current if u not in dict(self.fields["members"].choices)]
-                if missing:
-                    merged = sorted(set([*usernames, *missing]), key=str.lower)
-                    self.fields["members"].choices = [
-                        user_choice(u, user=users_by_username.get(u)) if u in users_by_username else user_choice_from_freeipa(u)
-                        for u in merged
-                    ]
+                _merge_user_choices(self.fields["members"], current, usernames, users_by_username)
                 self.initial.setdefault("members", current)
 
                 current_sponsors = sorted(freeipa.sponsors)
-                missing_sponsors = [u for u in current_sponsors if u not in dict(self.fields["sponsors"].choices)]
-                if missing_sponsors:
-                    merged = sorted(set([*usernames, *missing_sponsors]), key=str.lower)
-                    self.fields["sponsors"].choices = [
-                        user_choice(u, user=users_by_username.get(u)) if u in users_by_username else user_choice_from_freeipa(u)
-                        for u in merged
-                    ]
+                _merge_user_choices(self.fields["sponsors"], current_sponsors, usernames, users_by_username)
                 self.initial.setdefault("sponsors", current_sponsors)
 
                 current_member_groups = sorted(getattr(freeipa, "member_groups", []) or [])
-                missing_groups = [g for g in current_member_groups if g not in dict(self.fields["member_groups"].choices)]
-                if missing_groups:
-                    self.fields["member_groups"].choices = [(g, g) for g in (group_names + missing_groups)]
+                _merge_group_choices(self.fields["member_groups"], current_member_groups, group_names)
                 self.initial.setdefault("member_groups", current_member_groups)
 
                 current_sponsor_groups = sorted(getattr(freeipa, "sponsor_groups", []) or [])
-                missing_sponsor_groups = [g for g in current_sponsor_groups if g not in dict(self.fields["sponsor_groups"].choices)]
-                if missing_sponsor_groups:
-                    self.fields["sponsor_groups"].choices = [(g, g) for g in (group_names + missing_sponsor_groups)]
+                _merge_group_choices(self.fields["sponsor_groups"], current_sponsor_groups, group_names)
                 self.initial.setdefault("sponsor_groups", current_sponsor_groups)
                 self.initial.setdefault("fas_url", freeipa.fas_url or "")
                 self.initial.setdefault("fas_mailing_list", freeipa.fas_mailing_list or "")
@@ -710,78 +725,31 @@ class IPAGroupForm(forms.ModelForm):
             # `fas_group` is a creation-time property; disallow toggling on edit.
             self.fields["fas_group"].disabled = True
 
-    @override
-    def validate_unique(self):
-        # No DB; uniqueness is enforced by FreeIPA.
-        return
-
-    @staticmethod
-    def _split_list_field(value: str) -> list[str]:
-        out: list[str] = []
-        for raw_line in (value or "").splitlines():
-            line = raw_line.strip()
-            if not line:
-                continue
-            for part in line.split(","):
-                p = part.strip()
-                if p:
-                    out.append(p)
-        return out
-
-    @staticmethod
-    def _validate_http_url(value: str, *, field_label: str) -> str:
-        v = (value or "").strip()
-        if not v:
-            return ""
-        if len(v) > 255:
-            raise forms.ValidationError(f"Invalid {field_label}: must be at most 255 characters")
-
-        parsed = urlparse(v)
-        scheme = (parsed.scheme or "").lower()
-        if scheme not in {"http", "https"}:
-            raise forms.ValidationError(f"Invalid {field_label}: URL must start with http:// or https://")
-        if not parsed.netloc:
-            raise forms.ValidationError(f"Invalid {field_label}: empty host name")
-        return v
-
     def clean_fas_url(self) -> str:
-        return self._validate_http_url(self.cleaned_data.get("fas_url", ""), field_label="FAS URL")
+        return clean_fas_url_value(self.cleaned_data.get("fas_url", ""))
 
     def clean_fas_discussion_url(self) -> str:
-        return self._validate_http_url(
-            self.cleaned_data.get("fas_discussion_url", ""),
-            field_label="FAS Discussion URL",
-        )
+        return clean_fas_discussion_url_value(self.cleaned_data.get("fas_discussion_url", ""))
 
     def clean_fas_mailing_list(self) -> str:
-        v = (self.cleaned_data.get("fas_mailing_list") or "").strip()
-        if not v:
-            return ""
-
-        return forms.EmailField(required=False).clean(v)
+        return clean_fas_mailing_list_value(self.cleaned_data.get("fas_mailing_list"))
 
     def clean_fas_irc_channels(self) -> str:
-        raw = self.cleaned_data.get("fas_irc_channels") or ""
-        try:
-            normalized = normalize_chat_channels_text(raw, max_item_len=64)
-        except ValueError as exc:
-            raise forms.ValidationError(f"Invalid FAS IRC Channels: {exc}") from exc
-
-        lines = [line for line in normalized.splitlines() if line.strip()]
-        # Keep stable ordering for diffs.
-        deduped = sorted(set(lines), key=str.lower)
+        channels = clean_fas_irc_channels_value(self.cleaned_data.get("fas_irc_channels"))
+        # Admin stores as newline-joined string; keep stable ordering for diffs.
+        deduped = sorted(set(channels), key=str.lower)
         return "\n".join(deduped)
 
 
-class IPAFASAgreementForm(forms.ModelForm):
+class IPAFASAgreementForm(FreeIPAFormMixin, forms.ModelForm):
     groups = forms.MultipleChoiceField(
         required=False,
-        widget=forms.SelectMultiple(attrs={"class": "form-control alx-duallistbox", "size": 14}),
+        widget=_duallistbox_widget(),
         help_text="Select the FreeIPA groups this agreement applies to.",
     )
     users = forms.MultipleChoiceField(
         required=False,
-        widget=forms.SelectMultiple(attrs={"class": "form-control alx-duallistbox", "size": 14}),
+        widget=_duallistbox_widget(),
         help_text="Select the users who have consented to this agreement.",
     )
     enabled = forms.BooleanField(
@@ -797,25 +765,14 @@ class IPAFASAgreementForm(forms.ModelForm):
     @override
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # These models are unmanaged and have no DB tables; skip DB-backed uniqueness checks.
-        self._validate_unique = False
 
         if "description" in self.fields:
             self.fields["description"].label = "Text"
 
-        groups = FreeIPAGroup.all()
-        group_names = sorted(
-            {
-                getattr(g, "cn", "")
-                for g in groups
-                if getattr(g, "cn", "") and bool(getattr(g, "fas_group", False))
-            }
-        )
+        group_names = _freeipa_group_names(fas_only=True)
         self.fields["groups"].choices = [(name, name) for name in group_names]
 
-        users = FreeIPAUser.all()
-        users_by_username = {u.username: u for u in users if u.username}
-        usernames = sorted(users_by_username, key=str.lower)
+        usernames, users_by_username = _freeipa_user_data()
         self.fields["users"].choices = user_choices_from_users(usernames, users_by_username=users_by_username)
 
         # Agreement name is immutable in FreeIPA.
@@ -830,25 +787,12 @@ class IPAFASAgreementForm(forms.ModelForm):
                 self.initial.setdefault("enabled", freeipa.enabled)
 
                 current_groups = sorted(freeipa.groups)
-                missing_groups = [g for g in current_groups if g not in dict(self.fields["groups"].choices)]
-                if missing_groups:
-                    self.fields["groups"].choices = [(g, g) for g in (group_names + missing_groups)]
+                _merge_group_choices(self.fields["groups"], current_groups, group_names)
                 self.initial.setdefault("groups", current_groups)
 
                 current_users = sorted(freeipa.users)
-                missing_users = [u for u in current_users if u not in dict(self.fields["users"].choices)]
-                if missing_users:
-                    merged = sorted(set([*usernames, *missing_users]), key=str.lower)
-                    self.fields["users"].choices = [
-                        user_choice(u, user=users_by_username.get(u)) if u in users_by_username else user_choice_from_freeipa(u)
-                        for u in merged
-                    ]
+                _merge_user_choices(self.fields["users"], current_users, usernames, users_by_username)
                 self.initial.setdefault("users", current_users)
-
-    @override
-    def validate_unique(self):
-        # No DB; uniqueness is enforced by FreeIPA.
-        return
 
 
 @admin.register(IPAUser)
@@ -1060,16 +1004,20 @@ class IPAUserAdmin(FreeIPAModelAdmin):
             freeipa.is_active = bool(form.cleaned_data.get("is_active"))
             freeipa.save()
 
-        current_groups = set(freeipa.direct_groups_list)
-        for g in sorted(desired_groups - current_groups):
+        def _check_agreements(g: str) -> None:
             missing = missing_required_agreements_for_user_in_group(username, g)
             if missing:
                 raise FreeIPAOperationFailed(
                     f"Cannot add user '{username}' to group '{g}' until they have signed: {', '.join(missing)}"
                 )
-            freeipa.add_to_group(g)
-        for g in sorted(current_groups - desired_groups):
-            freeipa.remove_from_group(g)
+
+        sync_set_membership(
+            desired_groups,
+            set(freeipa.direct_groups_list),
+            freeipa.add_to_group,
+            freeipa.remove_from_group,
+            pre_add_check=_check_agreements,
+        )
 
 @admin.register(IPAGroup)
 class IPAGroupAdmin(FreeIPAModelAdmin):
@@ -1167,6 +1115,39 @@ class IPAGroupAdmin(FreeIPAModelAdmin):
         resp["Content-Disposition"] = f'attachment; filename="{group_cn}_emails.csv"'
         return resp
 
+    @staticmethod
+    def _sync_fas_group_attributes(
+        freeipa: FreeIPAGroup,
+        *,
+        description: str = "",
+        fas_url: str = "",
+        fas_mailing_list: str = "",
+        fas_irc_channels: set[str] | None = None,
+        fas_discussion_url: str = "",
+        sync_description: bool = False,
+    ) -> None:
+        """Dirty-check and persist FAS attributes (+ optionally description) on a FreeIPA group."""
+        changed = False
+        if sync_description and freeipa.description != description:
+            freeipa.description = description
+            changed = True
+        if bool(getattr(freeipa, "fas_group", False)):
+            irc_list = sorted(fas_irc_channels) if fas_irc_channels else []
+            if (freeipa.fas_url or "") != (fas_url or ""):
+                freeipa.fas_url = fas_url or None
+                changed = True
+            if (freeipa.fas_mailing_list or "") != (fas_mailing_list or ""):
+                freeipa.fas_mailing_list = fas_mailing_list or None
+                changed = True
+            if sorted(freeipa.fas_irc_channels or []) != irc_list:
+                freeipa.fas_irc_channels = irc_list
+                changed = True
+            if (freeipa.fas_discussion_url or "") != (fas_discussion_url or ""):
+                freeipa.fas_discussion_url = fas_discussion_url or None
+                changed = True
+        if changed:
+            freeipa.save()
+
     @override
     def save_model(self, request, obj, form, change):
         cn = form.cleaned_data.get("cn") or getattr(obj, "cn", None)
@@ -1197,44 +1178,27 @@ class IPAGroupAdmin(FreeIPAModelAdmin):
                     raise RuntimeError(
                         "FreeIPA server did not create a fasGroup at creation time; toggling is not supported"
                     )
-            if freeipa is not None and bool(getattr(freeipa, "fas_group", False)):
-                changed = False
-                if (freeipa.fas_url or "") != (fas_url or ""):
-                    freeipa.fas_url = fas_url or None
-                    changed = True
-                if (freeipa.fas_mailing_list or "") != (fas_mailing_list or ""):
-                    freeipa.fas_mailing_list = fas_mailing_list or None
-                    changed = True
-                if sorted(freeipa.fas_irc_channels or []) != sorted(list(fas_irc_channels) if fas_irc_channels else []):
-                    freeipa.fas_irc_channels = list(fas_irc_channels) if fas_irc_channels else []
-                    changed = True
-                if (freeipa.fas_discussion_url or "") != (fas_discussion_url or ""):
-                    freeipa.fas_discussion_url = fas_discussion_url or None
-                    changed = True
-                if changed:
-                    freeipa.save()
+            if freeipa is not None:
+                self._sync_fas_group_attributes(
+                    freeipa,
+                    fas_url=fas_url,
+                    fas_mailing_list=fas_mailing_list,
+                    fas_irc_channels=fas_irc_channels,
+                    fas_discussion_url=fas_discussion_url,
+                )
         else:
             freeipa = FreeIPAGroup.get(cn)
             if not freeipa:
                 return
-            changed = False
-            if freeipa.description != description:
-                freeipa.description = description
-                changed = True
-            if (freeipa.fas_url or "") != (fas_url or ""):
-                freeipa.fas_url = fas_url or None
-                changed = True
-            if (freeipa.fas_mailing_list or "") != (fas_mailing_list or ""):
-                freeipa.fas_mailing_list = fas_mailing_list or None
-                changed = True
-            if sorted(freeipa.fas_irc_channels or []) != sorted(list(fas_irc_channels) if fas_irc_channels else []):
-                freeipa.fas_irc_channels = list(fas_irc_channels) if fas_irc_channels else []
-                changed = True
-            if (freeipa.fas_discussion_url or "") != (fas_discussion_url or ""):
-                freeipa.fas_discussion_url = fas_discussion_url or None
-                changed = True
-            if changed:
-                freeipa.save()
+            self._sync_fas_group_attributes(
+                freeipa,
+                description=description,
+                fas_url=fas_url,
+                fas_mailing_list=fas_mailing_list,
+                fas_irc_channels=fas_irc_channels,
+                fas_discussion_url=fas_discussion_url,
+                sync_description=True,
+            )
 
         # `fas_group` is a creation-time-only property. Do not attempt to
         # toggle it for existing groups via `group_mod` as many FreeIPA
@@ -1253,34 +1217,30 @@ class IPAGroupAdmin(FreeIPAModelAdmin):
             except Exception:
                 pass
 
-        current_members = set(freeipa.members)
-        for u in sorted(desired_members - current_members):
+        def _check_group_agreements(u: str) -> None:
             missing = missing_required_agreements_for_user_in_group(u, cn)
             if missing:
                 raise FreeIPAOperationFailed(
                     f"Cannot add user '{u}' to group '{cn}' until they have signed: {', '.join(missing)}"
                 )
-            freeipa.add_member(u)
-        for u in sorted(current_members - desired_members):
-            freeipa.remove_member(u)
 
-        current_sponsors = set(freeipa.sponsors)
-        for u in sorted(desired_sponsors - current_sponsors):
-            freeipa.add_sponsor(u)
-        for u in sorted(current_sponsors - desired_sponsors):
-            freeipa.remove_sponsor(u)
-
-        current_sponsor_groups = set(getattr(freeipa, "sponsor_groups", []) or [])
-        for group_cn in sorted(desired_sponsor_groups - current_sponsor_groups):
-            freeipa.add_sponsor_group(group_cn)
-        for group_cn in sorted(current_sponsor_groups - desired_sponsor_groups):
-            freeipa.remove_sponsor_group(group_cn)
-
-        current_member_groups = set(getattr(freeipa, "member_groups", []) or [])
-        for group_cn in sorted(desired_member_groups - current_member_groups):
-            freeipa.add_member_group(group_cn)
-        for group_cn in sorted(current_member_groups - desired_member_groups):
-            freeipa.remove_member_group(group_cn)
+        sync_set_membership(
+            desired_members, set(freeipa.members),
+            freeipa.add_member, freeipa.remove_member,
+            pre_add_check=_check_group_agreements,
+        )
+        sync_set_membership(
+            desired_sponsors, set(freeipa.sponsors),
+            freeipa.add_sponsor, freeipa.remove_sponsor,
+        )
+        sync_set_membership(
+            desired_sponsor_groups, set(getattr(freeipa, "sponsor_groups", []) or []),
+            freeipa.add_sponsor_group, freeipa.remove_sponsor_group,
+        )
+        sync_set_membership(
+            desired_member_groups, set(getattr(freeipa, "member_groups", []) or []),
+            freeipa.add_member_group, freeipa.remove_member_group,
+        )
 
     @override
     def delete_model(self, request, obj) -> None:
@@ -1321,17 +1281,14 @@ class IPAFASAgreementAdmin(FreeIPAModelAdmin):
                 if freeipa.description != description:
                     freeipa.set_description(description or None)
 
-            current_groups = set(freeipa.groups)
-            for group_cn in sorted(selected_groups - current_groups):
-                freeipa.add_group(group_cn)
-            for group_cn in sorted(current_groups - selected_groups):
-                freeipa.remove_group(group_cn)
-
-            current_users = set(freeipa.users)
-            for username in sorted(selected_users - current_users):
-                freeipa.add_user(username)
-            for username in sorted(current_users - selected_users):
-                freeipa.remove_user(username)
+            sync_set_membership(
+                selected_groups, set(freeipa.groups),
+                freeipa.add_group, freeipa.remove_group,
+            )
+            sync_set_membership(
+                selected_users, set(freeipa.users),
+                freeipa.add_user, freeipa.remove_user,
+            )
 
             if freeipa.enabled != enabled:
                 freeipa.set_enabled(enabled)
@@ -1362,8 +1319,7 @@ class MembershipTypeAdmin(admin.ModelAdmin):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
 
-            groups = FreeIPAGroup.all()
-            group_names = sorted({g.cn for g in groups if g.cn})
+            group_names = _freeipa_group_names()
 
             current = (self.initial.get("group_cn") or "").strip()
             if not current and self.instance and self.instance.group_cn:
@@ -1426,7 +1382,7 @@ class ElectionAdmin(admin.ModelAdmin):
     def issue_credentials_from_memberships_action(self, request: HttpRequest, queryset) -> None:
         for election in queryset:
             try:
-                affected = issue_voting_credentials_from_memberships(election=election)
+                affected = len(issue_voting_credentials_from_memberships(election=election))
             except ElectionError as exc:
                 self.message_user(request, f"{election}: {exc}", level=messages.ERROR)
                 continue
@@ -1441,7 +1397,7 @@ class ElectionAdmin(admin.ModelAdmin):
     def issue_and_email_credentials_from_memberships_action(self, request: HttpRequest, queryset) -> None:
         for election in queryset:
             try:
-                credentials = issue_voting_credentials_from_memberships_detailed(election=election)
+                credentials = issue_voting_credentials_from_memberships(election=election)
             except ElectionError as exc:
                 self.message_user(request, f"{election}: {exc}", level=messages.ERROR)
                 continue
@@ -1501,25 +1457,23 @@ class ElectionAdmin(admin.ModelAdmin):
         "Issue credentials from memberships and email voters"
     )  # type: ignore[attr-defined]
 
-    def close_elections_action(self, request: HttpRequest, queryset) -> None:
+    def _run_election_action(self, request: HttpRequest, queryset, *, action_fn: Callable, success_verb: str) -> None:
+        """Shared boilerplate for election admin actions that apply a function per election."""
         for election in queryset:
             try:
-                close_election(election=election)
+                action_fn(election=election)
             except ElectionError as exc:
                 self.message_user(request, f"{election}: {exc}", level=messages.ERROR)
                 continue
-            self.message_user(request, f"{election}: closed.", level=messages.SUCCESS)
+            self.message_user(request, f"{election}: {success_verb}.", level=messages.SUCCESS)
+
+    def close_elections_action(self, request: HttpRequest, queryset) -> None:
+        self._run_election_action(request, queryset, action_fn=close_election, success_verb="closed")
 
     close_elections_action.short_description = "Close election(s)"  # type: ignore[attr-defined]
 
     def tally_elections_action(self, request: HttpRequest, queryset) -> None:
-        for election in queryset:
-            try:
-                tally_election(election=election)
-            except ElectionError as exc:
-                self.message_user(request, f"{election}: {exc}", level=messages.ERROR)
-                continue
-            self.message_user(request, f"{election}: tallied.", level=messages.SUCCESS)
+        self._run_election_action(request, queryset, action_fn=tally_election, success_verb="tallied")
 
     tally_elections_action.short_description = "Tally election(s)"  # type: ignore[attr-defined]
 
@@ -1556,45 +1510,21 @@ class VotingCredentialAdmin(admin.ModelAdmin):
 
 
 @admin.register(Ballot)
-class BallotAdmin(admin.ModelAdmin):
+class BallotAdmin(ReadOnlyModelAdmin):
     list_display = ("election", "credential_public_id", "weight", "ballot_hash", "created_at")
     list_filter = ("election",)
     search_fields = ("credential_public_id", "ballot_hash")
     ordering = ("-created_at", "id")
     readonly_fields = ("election", "credential_public_id", "ranking", "weight", "ballot_hash", "created_at", "chain_hash", "previous_chain_hash")
 
-    @override
-    def has_add_permission(self, request: HttpRequest) -> bool:
-        return False
-
-    @override
-    def has_change_permission(self, request: HttpRequest, obj: object | None = None) -> bool:
-        return False
-
-    @override
-    def has_delete_permission(self, request: HttpRequest, obj: Any | None = ...) -> bool:
-        return False
-
 
 @admin.register(AuditLogEntry)
-class AuditLogEntryAdmin(admin.ModelAdmin):
+class AuditLogEntryAdmin(ReadOnlyModelAdmin):
     list_display = ("election", "timestamp", "event_type", "is_public")
     list_filter = ("election", "is_public", "event_type")
     search_fields = ("event_type",)
     ordering = ("-timestamp", "id")
     readonly_fields = ("election", "timestamp", "event_type", "payload", "is_public")
-
-    @override
-    def has_add_permission(self, request: HttpRequest) -> bool:
-        return False
-
-    @override
-    def has_change_permission(self, request: HttpRequest, obj: object | None = None) -> bool:
-        return False
-
-    @override
-    def has_delete_permission(self, request: HttpRequest, obj: Any | None = ...) -> bool:
-        return False
 
 
 @admin.register(MembershipCSVImportLink)
@@ -1649,14 +1579,7 @@ class MembershipCSVImportLinkAdmin(ImportMixin, admin.ModelAdmin):
         if membership_type is not None:
             initial["membership_type"] = membership_type.pk
 
-        for key in (
-            "email_column",
-            "name_column",
-            "active_member_column",
-            "membership_start_date_column",
-            "committee_notes_column",
-            "membership_type_column",
-        ):
+        for key in _COLUMN_FIELDS:
             value = import_form.cleaned_data.get(key, "")
             if value:
                 initial[key] = value
@@ -1695,14 +1618,7 @@ class MembershipCSVImportLinkAdmin(ImportMixin, admin.ModelAdmin):
 
         extra: dict[str, Any] = {}
         if isinstance(cleaned_data, dict):
-            for key in (
-                "email_column",
-                "name_column",
-                "active_member_column",
-                "membership_start_date_column",
-                "committee_notes_column",
-                "membership_type_column",
-            ):
+            for key in _COLUMN_FIELDS:
                 value = cleaned_data.get(key, "")
                 if value:
                     extra[key] = value
@@ -1933,26 +1849,19 @@ class OrganizationAdmin(admin.ModelAdmin):
                     lambda membership_type: membership_type.description or membership_type.name
                 )
 
-            self.fields["business_contact_name"].label = "Name"
-            self.fields["business_contact_email"].label = "Email"
-            self.fields["business_contact_phone"].label = "Phone"
-            self.fields["business_contact_email"].help_text = (
-                "All legal and financial notices from AlmaLinux OS Foundation to the member will be sent to this e-mail address unless the member directs otherwise"
-            )
-
-            self.fields["pr_marketing_contact_name"].label = "Name"
-            self.fields["pr_marketing_contact_email"].label = "Email"
-            self.fields["pr_marketing_contact_phone"].label = "Phone"
-            self.fields["pr_marketing_contact_email"].help_text = (
-                "This person will be contacted for press release and marketing benefit reasons"
-            )
-
-            self.fields["technical_contact_name"].label = "Name"
-            self.fields["technical_contact_email"].label = "Email"
-            self.fields["technical_contact_phone"].label = "Phone"
-            self.fields["technical_contact_email"].help_text = (
-                "All technical notices from AlmaLinux OS Foundation to the member will be sent to this e-mail address unless the member directs otherwise"
-            )
+            # Set short labels for each contact group's Name/Email/Phone fields
+            # and assign per-group email help text. The fieldset descriptions
+            # already provide the full context, so this just keeps the form clean.
+            _CONTACT_GROUPS = [
+                ("business_contact", "All legal and financial notices from AlmaLinux OS Foundation to the member will be sent to this e-mail address unless the member directs otherwise"),
+                ("pr_marketing_contact", "This person will be contacted for press release and marketing benefit reasons"),
+                ("technical_contact", "All technical notices from AlmaLinux OS Foundation to the member will be sent to this e-mail address unless the member directs otherwise"),
+            ]
+            for prefix, email_help in _CONTACT_GROUPS:
+                self.fields[f"{prefix}_name"].label = "Name"
+                self.fields[f"{prefix}_email"].label = "Email"
+                self.fields[f"{prefix}_phone"].label = "Phone"
+                self.fields[f"{prefix}_email"].help_text = email_help
 
             self.fields["membership_level"].help_text = (
                 "The full details of what each sponsorship level includes can be found here: almalinux.org/members"
@@ -1968,9 +1877,7 @@ class OrganizationAdmin(admin.ModelAdmin):
             self.fields["logo"].label = "Logo upload for AlmaLinux Accounts"
             self.fields["additional_information"].label = "Please provide any additional information the Membership Committee should take into account"
 
-            users = FreeIPAUser.all()
-            users_by_username = {u.username: u for u in users if u.username}
-            usernames = sorted(users_by_username, key=str.lower)
+            usernames, users_by_username = _freeipa_user_data()
 
             taken_representatives = set(
                 Organization.objects.exclude(representative="")
@@ -1990,7 +1897,7 @@ class OrganizationAdmin(admin.ModelAdmin):
             self.fields["representative"].choices = [
                 ("", "—"),
                 *[
-                    user_choice(u, user=users_by_username.get(u)) if u in users_by_username else user_choice_from_freeipa(u)
+                    user_choice_with_fallback(u, users_by_username)
                     for u in merged
                 ],
             ]
@@ -2129,31 +2036,20 @@ class FreeIPAPermissionGrantAdmin(admin.ModelAdmin):
                 current = str(self.instance.principal_name or "").strip()
 
             if selected_type == FreeIPAPermissionGrant.PrincipalType.group:
-                principals = [g.cn for g in FreeIPAGroup.all() if g.cn]
-                principal_names = sorted(set(principals), key=str.lower)
+                principal_names = _freeipa_group_names()
                 if current and current not in principal_names:
-                    principal_names.append(current)
-                    principal_names = sorted(set(principal_names), key=str.lower)
-
+                    principal_names = sorted(set([*principal_names, current]), key=str.lower)
                 self.fields["principal_name"].choices = [("", "---------"), *[(n, n) for n in principal_names]]
                 return
 
-            users = [u for u in FreeIPAUser.all() if u.username]
-            users_by_username = {u.username: u for u in users if u.username}
-            principal_names = sorted(set(users_by_username.keys()), key=str.lower)
-            if current and current not in principal_names:
-                principal_names.append(current)
-                principal_names = sorted(set(principal_names), key=str.lower)
-
+            usernames, users_by_username = _freeipa_user_data()
+            if current and current not in users_by_username:
+                usernames = sorted(set([*usernames, current]), key=str.lower)
             self.fields["principal_name"].choices = [
                 ("", "---------"),
                 *[
-                    (
-                        user_choice(u, user=users_by_username.get(u))
-                        if u in users_by_username
-                        else user_choice_from_freeipa(u)
-                    )
-                    for u in principal_names
+                    user_choice_with_fallback(u, users_by_username)
+                    for u in usernames
                 ],
             ]
 
@@ -2195,17 +2091,14 @@ class FreeIPAPermissionGrantAdmin(admin.ModelAdmin):
             principal_type = FreeIPAPermissionGrant.PrincipalType.user
 
         if principal_type == FreeIPAPermissionGrant.PrincipalType.group:
-            principal_names = [g.cn for g in FreeIPAGroup.all() if g.cn]
-            principal_names = sorted(set(principal_names), key=str.lower)
-            principals = [{"id": n, "text": n} for n in principal_names]
+            names = _freeipa_group_names()
+            principals = [{"id": n, "text": n} for n in names]
             return JsonResponse({"principal_type": principal_type, "principals": principals})
 
-        users = [u for u in FreeIPAUser.all() if u.username]
-        users_by_username = {u.username: u for u in users if u.username}
-        principal_names = sorted(set(users_by_username.keys()), key=str.lower)
+        usernames, users_by_username = _freeipa_user_data()
         principals = [
             {"id": u, "text": user_choice(u, user=users_by_username.get(u))[1]}
-            for u in principal_names
+            for u in usernames
         ]
         return JsonResponse({"principal_type": principal_type, "principals": principals})
 

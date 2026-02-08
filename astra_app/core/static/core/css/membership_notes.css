@@ -1,0 +1,96 @@
+/*
+ * Membership Committee Notes — visual styles.
+ *
+ * Uses [data-membership-notes-container] as the scope selector so styles
+ * apply identically to all note widgets without per-PK CSS emission.
+ */
+
+[data-membership-notes-container] .direct-chat-text {
+  display: inline-block;
+  width: auto;
+  max-width: 80%;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * Compact header: title on the left (ellipsis if needed), tools on the right.
+ * Keep everything on a single row.
+ */
+[data-membership-notes-container] .membership-notes-header-compact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+}
+
+[data-membership-notes-container] .membership-notes-title {
+  min-width: 0;
+}
+
+[data-membership-notes-container] .membership-notes-header-compact .membership-notes-title {
+  margin: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-membership-notes-container] .membership-notes-header-compact .card-tools {
+  float: none;
+  flex: 0 0 auto;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  gap: .25rem;
+}
+
+[data-membership-notes-container] .membership-notes-bubble {
+  background-color: var(--bubble-bg) !important;
+  color: var(--bubble-fg, #212529) !important;
+}
+
+/* Make the little arrow/triangle match the border color. */
+[data-membership-notes-container] .direct-chat-msg.right .membership-notes-bubble::before,
+[data-membership-notes-container] .direct-chat-msg.right .membership-notes-bubble::after {
+  border-left-color: #d2d6de !important;
+  border-right-color: transparent !important;
+}
+
+[data-membership-notes-container] .direct-chat-msg.right {
+  text-align: right;
+}
+
+/*
+ * When a single note row contains multiple bubbles (grouped events),
+ * stack them neatly and keep their edges aligned.
+ */
+[data-membership-notes-container] .membership-notes-bubbles {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+}
+
+/* Ensure self-authored message bubbles keep a distinct background. */
+[data-membership-notes-container] .membership-notes-self-bubble {
+  background-color: #007bff;
+  border-color: #007bff;
+  color: #ffffff;
+}
+
+[data-membership-notes-container] .membership-notes-bubbles .direct-chat-text {
+  margin: 0;
+}
+
+[data-membership-notes-container] .direct-chat-msg.right .membership-notes-bubbles {
+  align-items: flex-end;
+  padding-right: 10px;
+  text-align: right;
+}
+
+[data-membership-notes-container] .direct-chat-msg:not(.right) .membership-notes-bubbles {
+  align-items: flex-start;
+  padding-left: 10px;
+  text-align: left;
+}

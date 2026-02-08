@@ -1,4 +1,5 @@
-<!--
+{% extends 'core/_modal_base.html' %}
+{% comment %}
 Reusable Bootstrap modal for editing an end-of-day UTC expiration date.
 
 Required context:
@@ -15,18 +16,9 @@ Optional:
 - help_text: str
 - submit_label: str (default: Save)
 - submit_class: str (default: btn-primary)
--->
+{% endcomment %}
 
-<div class="modal fade" id="{{ modal_id }}" tabindex="-1" role="dialog" aria-hidden="true">
-  <div class="modal-dialog" role="document">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title">{{ title }}</h5>
-        <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog">
-          <span aria-hidden="true">&times;</span>
-        </button>
-      </div>
-      <div class="modal-body">
+{% block modal_body %}
         {% if current_text %}
           <div class="mb-3">{{ current_text }}</div>
         {% endif %}
@@ -56,7 +48,4 @@ Optional:
             <button type="submit" class="btn {{ submit_class|default:'btn-primary' }}" title="Save expiration date">{{ submit_label|default:"Save" }}</button>
           </div>
         </form>
-      </div>
-    </div>
-  </div>
-</div>
+{% endblock %}

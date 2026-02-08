@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 import datetime
 from unittest.mock import patch
@@ -363,10 +362,52 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertContains(resp, "Request renewal")
         self.assertContains(resp, reverse("membership-request") + "?membership_type=individual")
 
+        # Verify prefill: visiting with ?membership_type=individual should select that option.
         with patch("core.backends.FreeIPAUser.get", return_value=alice):
-            resp_request = self.client.get(reverse("membership-request"))
+            resp_request = self.client.get(
+                reverse("membership-request") + "?membership_type=individual"
+            )
         self.assertEqual(resp_request.status_code, 200)
-        self.assertContains(resp_request, 'value="individual"')
+        self.assertContains(resp_request, 'value="individual" selected')
+
+    def test_membership_request_prefills_mirror_type(self) -> None:
+        """When ?membership_type=mirror is passed, the mirror option should be selected."""
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "isIndividual": True,
+                "isOrganization": False,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror",
+                "group_cn": "almalinux-mirror",
+                "isIndividual": False,
+                "isOrganization": False,
+                "sort_order": 10,
+                "enabled": True,
+            },
+        )
+
+        alice = self._make_user("alice", full_name="Alice User")
+        self._login_as_freeipa_user("alice")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+            resp = self.client.get(
+                reverse("membership-request") + "?membership_type=mirror"
+            )
+        self.assertEqual(resp.status_code, 200)
+        # Mirror should be selected, individual should NOT be selected.
+        self.assertContains(resp, 'value="mirror" selected')
+        self.assertNotContains(resp, 'value="individual" selected')
 
     def test_terminated_membership_does_not_count_as_active(self) -> None:
         import datetime

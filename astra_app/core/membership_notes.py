@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from collections.abc import Iterable
 from typing import Any
 
@@ -76,44 +74,44 @@ def tally_last_votes(notes: Iterable[Note]) -> tuple[int, int]:
     return approvals, disapprovals
 
 
+# Maps action_type -> (label, icon).  Vote sub-logic is handled inline.
+_ACTION_DISPLAY: dict[str, tuple[str, str]] = {
+    "request_created": ("Request created", "fa-hand"),
+    "request_approved": ("Request approved", "fa-circle-check"),
+    "request_rejected": ("Request rejected", "fa-circle-xmark"),
+    "request_ignored": ("Request ignored", "fa-ghost"),
+    "request_on_hold": ("Request on hold", "fa-circle-pause"),
+    "request_resubmitted": ("Request resubmitted", "fa-rotate-right"),
+    "request_rescinded": ("Request rescinded", "fa-ban"),
+    "contacted": ("User contacted", "fa-envelope"),
+}
+
+_VOTE_LABELS: dict[str, str] = {"approve": "Voted approve", "disapprove": "Voted disapprove"}
+_VOTE_ICONS: dict[str, str] = {"approve": "fa-thumbs-up", "disapprove": "fa-thumbs-down"}
+
+_CONTACTED_LABELS: dict[str, str] = {
+    "approved": "Approval email sent",
+    "accepted": "Approval email sent",
+    "rejected": "Rejection email sent",
+    "rfi": "RFI email sent",
+    "on_hold": "RFI email sent",
+}
+
+
 def note_action_label(action: dict[str, Any]) -> str:
     """Human label for a Note.action payload.
 
     This is used by templates; keep it conservative for unknown action payloads.
     """
-
     action_type = action.get("type")
+
     if action_type == "vote":
         value = str(action.get("value") or "").strip().lower()
-        if value == "approve":
-            return "Voted approve"
-        if value == "disapprove":
-            return "Voted disapprove"
-        return "Voted"
+        return _VOTE_LABELS.get(value, "Voted")
 
-    if action_type == "request_created":
-        return "Request created"
-    if action_type == "request_approved":
-        return "Request approved"
-    if action_type == "request_rejected":
-        return "Request rejected"
-    if action_type == "request_ignored":
-        return "Request ignored"
-    if action_type == "request_on_hold":
-        return "Request on hold"
-    if action_type == "request_resubmitted":
-        return "Request resubmitted"
-    if action_type == "request_rescinded":
-        return "Request rescinded"
     if action_type == "contacted":
         kind = str(action.get("kind") or "").strip().lower()
-        if kind in {"approved", "accepted"}:
-            return "Approval email sent"
-        if kind == "rejected":
-            return "Rejection email sent"
-        if kind in {"rfi", "on_hold"}:
-            return "RFI email sent"
-        return "User contacted"
+        return _CONTACTED_LABELS.get(kind, "User contacted")
 
     if action_type == "representative_changed":
         old = str(action.get("old") or "").strip()
@@ -122,40 +120,20 @@ def note_action_label(action: dict[str, Any]) -> str:
             return f"Representative changed from {old} to {new}"
         return "Representative changed"
 
-    return str(action_type or "Action")
+    label, _ = _ACTION_DISPLAY.get(action_type, (None, None))
+    return label or str(action_type or "Action")
 
 
 def note_action_icon(action: dict[str, Any]) -> str:
     """Font Awesome icon class (without style prefix) for a Note.action payload."""
-
     action_type = action.get("type")
+
     if action_type == "vote":
         value = str(action.get("value") or "").strip().lower()
-        if value == "approve":
-            return "fa-thumbs-up"
-        if value == "disapprove":
-            return "fa-thumbs-down"
-        return "fa-thumbs-up"
-
-    if action_type == "contacted":
-        return "fa-envelope"
-
-    if action_type == "request_approved":
-        return "fa-circle-check"
-    if action_type == "request_rejected":
-        return "fa-circle-xmark"
-    if action_type == "request_ignored":
-        return "fa-ghost"
-    if action_type == "request_created":
-        return "fa-hand"
-    if action_type == "request_on_hold":
-        return "fa-circle-pause"
-    if action_type == "request_resubmitted":
-        return "fa-rotate-right"
-    if action_type == "request_rescinded":
-        return "fa-ban"
+        return _VOTE_ICONS.get(value, "fa-thumbs-up")
 
     if action_type == "representative_changed":
         return "fa-user-check"
 
-    return "fa-bolt"
+    _, icon = _ACTION_DISPLAY.get(action_type, (None, None))
+    return icon or "fa-bolt"

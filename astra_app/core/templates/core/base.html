@@ -211,8 +211,8 @@
             </li>
 
             {% if membership_can_add or membership_can_view %}
-              <li class="nav-item {% if current_url_name == 'membership-requests' or current_url_name == 'account-invitations' or current_url_name == 'account-invitations-upload' or current_url_name == 'account-invitations-send' or current_url_name == 'membership-audit-log' or current_url_name == 'membership-audit-log-user' or current_url_name == 'membership-stats' %}menu-open{% endif %}">
-                <a href="#" class="nav-link d-flex align-items-start {% if current_url_name == 'membership-requests' or current_url_name == 'account-invitations' or current_url_name == 'account-invitations-upload' or current_url_name == 'account-invitations-send' or current_url_name == 'membership-audit-log' or current_url_name == 'membership-audit-log-user' or current_url_name == 'membership-stats' %}active{% endif %}">
+              <li class="nav-item {% if membership_nav_active %}menu-open{% endif %}">
+                <a href="#" class="nav-link d-flex align-items-start {% if membership_nav_active %}active{% endif %}">
                   <i class="nav-icon fas fa-users-gear mt-1"></i>
                   <p class="mb-0 ml-2 flex-grow-1">
                     Membership Management
@@ -220,7 +220,7 @@
                   </p>
                 </a>
 
-                <ul class="nav nav-treeview" {% if current_url_name == 'membership-requests' or current_url_name == 'account-invitations' or current_url_name == 'account-invitations-upload' or current_url_name == 'account-invitations-send' or current_url_name == 'membership-audit-log' or current_url_name == 'membership-audit-log-user' or current_url_name == 'membership-stats' %}style="display: block;"{% endif %}>
+                <ul class="nav nav-treeview" {% if membership_nav_active %}style="display: block;"{% endif %}>
                   {% if membership_can_add %}
                     <li class="nav-item">
                       <a href="{% url 'membership-requests' %}" class="nav-link d-flex align-items-start {% if current_url_name == 'membership-requests' %}active{% endif %}">
@@ -272,8 +272,8 @@
             {% endif %}
 
             {% if send_mail_can_add %}
-              <li class="nav-item {% if current_url_name == 'email-templates' or current_url_name == 'email-template-create' or current_url_name == 'email-template-edit' or current_url_name == 'send-mail' or current_url_name == 'email-images' %}menu-open{% endif %}">
-                <a href="#" class="nav-link d-flex align-items-start {% if current_url_name == 'email-templates' or current_url_name == 'email-template-create' or current_url_name == 'email-template-edit' or current_url_name == 'send-mail' or current_url_name == 'email-images' %}active{% endif %}">
+              <li class="nav-item {% if mail_nav_active %}menu-open{% endif %}">
+                <a href="#" class="nav-link d-flex align-items-start {% if mail_nav_active %}active{% endif %}">
                   <i class="nav-icon fas fa-envelope-open-text mt-1"></i>
                   <p class="mb-0 ml-2 flex-grow-1">
                     Mail Tools
@@ -281,7 +281,7 @@
                   </p>
                 </a>
 
-                <ul class="nav nav-treeview" {% if current_url_name == 'email-templates' or current_url_name == 'email-template-create' or current_url_name == 'email-template-edit' or current_url_name == 'send-mail' or current_url_name == 'email-images' %}style="display: block;"{% endif %}>
+                <ul class="nav nav-treeview" {% if mail_nav_active %}style="display: block;"{% endif %}>
                   <li class="nav-item">
                     <a href="{% url 'send-mail' %}" class="nav-link {% if current_url_name == 'send-mail' %}active{% endif %}">
                       <i class="nav-icon fas fa-envelope"></i>
@@ -375,151 +375,8 @@
 <script src="{% static 'vendor/bootstrap/js/bootstrap.min.js' %}"></script>
 <script src="{% static 'vendor/adminlte/js/adminlte.min.js' %}"></script>
 <script src="{% static 'core/js/character_count.js' %}"></script>
-<script>
-  (function () {
-    const input = document.getElementById('global-search-input');
-    const menu = document.getElementById('global-search-menu');
-    if (!input || !menu) return;
-
-    const hasDirectoryAccess = {% if perms.astra.view_user_directory %}true{% else %}false{% endif %};
-
-    let debounceTimer = null;
-    let lastQuery = '';
-    let inflight = null;
-
-    function hideMenu() {
-      menu.classList.remove('show');
-      menu.innerHTML = '';
-    }
-
-    function showMenu() {
-      menu.classList.add('show');
-    }
-
-    function escapeHtml(s) {
-      return String(s)
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#39;');
-    }
-
-    function renderLoading(q) {
-      let html = '';
-      if (hasDirectoryAccess) {
-        html += '<h6 class="dropdown-header">Users</h6>' +
-                '<div class="dropdown-item text-muted"><i class="fas fa-circle-notch fa-spin mr-2"></i>Searching…</div>' +
-                '<div class="dropdown-divider"></div>';
-      }
-      html += '<h6 class="dropdown-header">Groups</h6>' +
-              '<div class="dropdown-item text-muted"><i class="fas fa-circle-notch fa-spin mr-2"></i>Searching…</div>';
-      menu.innerHTML = html;
-      showMenu();
-    }
-
-    function renderResults(q, data) {
-      const users = Array.isArray(data.users) ? data.users : [];
-      const groups = Array.isArray(data.groups) ? data.groups : [];
-
-      let html = '';
-      if (hasDirectoryAccess) {
-        html += '<h6 class="dropdown-header">Users</h6>';
-        if (users.length === 0) {
-          html += '<div class="dropdown-item text-muted">No users found</div>';
-        } else {
-          for (const u of users) {
-            const username = escapeHtml(u.username || '');
-            const fullName = escapeHtml(u.full_name || '');
-            html += '<a class="dropdown-item" href="/user/' + encodeURIComponent(u.username) + '/">' +
-                    '<div class="font-weight-bold">' + username + '</div>' +
-                    (fullName ? '<div class="text-muted text-sm">' + fullName + '</div>' : '') +
-                    '</a>';
-          }
-        }
-
-        html += '<div class="dropdown-divider"></div>';
-      }
-      html += '<h6 class="dropdown-header">Groups</h6>';
-      if (groups.length === 0) {
-        html += '<div class="dropdown-item text-muted">No groups found</div>';
-      } else {
-        for (const g of groups) {
-          const cn = escapeHtml(g.cn || '');
-          const desc = escapeHtml(g.description || '');
-          html += '<a class="dropdown-item" href="/group/' + encodeURIComponent(g.cn) + '/">' +
-                  '<div class="font-weight-bold">' + cn + '</div>' +
-                  (desc ? '<div class="text-muted text-sm">' + desc + '</div>' : '') +
-                  '</a>';
-        }
-      }
-
-      menu.innerHTML = html;
-      showMenu();
-    }
-
-    async function doSearch(q) {
-      if (!q) {
-        hideMenu();
-        return;
-      }
-      lastQuery = q;
-      renderLoading(q);
-
-      if (inflight && typeof inflight.abort === 'function') {
-        inflight.abort();
-      }
-      inflight = new AbortController();
-
-      try {
-        const resp = await fetch('/search/?q=' + encodeURIComponent(q), {
-          headers: { 'Accept': 'application/json' },
-          signal: inflight.signal,
-        });
-        if (!resp.ok) {
-          hideMenu();
-          return;
-        }
-        const data = await resp.json();
-        if (q !== lastQuery) return;
-        renderResults(q, data);
-      } catch (e) {
-        // AbortError is expected on rapid typing.
-        if (e && e.name === 'AbortError') return;
-        hideMenu();
-      }
-    }
-
-    input.addEventListener('input', function () {
-      const q = (input.value || '').trim();
-      if (!q) {
-        hideMenu();
-        return;
-      }
-      if (debounceTimer) window.clearTimeout(debounceTimer);
-      debounceTimer = window.setTimeout(function () { doSearch(q); }, 180);
-    });
-
-    input.addEventListener('focus', function () {
-      const q = (input.value || '').trim();
-      if (q) doSearch(q);
-    });
-
-    document.addEventListener('click', function (evt) {
-      if (!menu.classList.contains('show')) return;
-      const target = evt.target;
-      if (target === input || menu.contains(target)) return;
-      hideMenu();
-    });
-
-    document.addEventListener('keydown', function (evt) {
-      if (evt.key === 'Escape') {
-        hideMenu();
-        input.blur();
-      }
-    });
-  })();
-</script>
+<script type="application/json" id="global-search-config">{"hasDirectoryAccess": {% if perms.astra.view_user_directory %}true{% else %}false{% endif %}}</script>
+<script src="{% static 'core/js/global_search.js' %}"></script>
 {% endblock %}
 </body>
 </html>

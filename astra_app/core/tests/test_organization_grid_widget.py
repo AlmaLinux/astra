@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 from django.template import Context, Template
 from django.test import RequestFactory, TestCase

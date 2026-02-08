@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import datetime
 import logging
 from urllib.parse import quote

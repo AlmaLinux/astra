@@ -1,0 +1,39 @@
+{% comment %}
+Shared pagination controls.
+Required context: paginator, page_obj, is_paginated, page_numbers, show_first, show_last, page_url_prefix.
+page_url_prefix should end with the page param name= (e.g. "?page=" or "?q=foo&page=").
+{% endcomment %}
+
+<div class="float-left text-muted small">
+  {% if paginator.count %}
+    Showing {{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ paginator.count }}
+  {% endif %}
+</div>
+
+{% if is_paginated %}
+  <ul class="pagination pagination-sm m-0 float-right">
+    <li class="page-item {% if not page_obj.has_previous %}disabled{% endif %}">
+      <a class="page-link" href="{% if page_obj.has_previous %}{{ page_url_prefix }}{{ page_obj.previous_page_number }}{% else %}#{% endif %}" aria-label="Previous">&laquo;</a>
+    </li>
+
+    {% if show_first %}
+      <li class="page-item"><a class="page-link" href="{{ page_url_prefix }}1">1</a></li>
+      <li class="page-item disabled"><span class="page-link">…</span></li>
+    {% endif %}
+
+    {% for page_number in page_numbers %}
+      <li class="page-item {% if page_number == page_obj.number %}active{% endif %}">
+        <a class="page-link" href="{{ page_url_prefix }}{{ page_number }}">{{ page_number }}</a>
+      </li>
+    {% endfor %}
+
+    {% if show_last %}
+      <li class="page-item disabled"><span class="page-link">…</span></li>
+      <li class="page-item"><a class="page-link" href="{{ page_url_prefix }}{{ paginator.num_pages }}">{{ paginator.num_pages }}</a></li>
+    {% endif %}
+
+    <li class="page-item {% if not page_obj.has_next %}disabled{% endif %}">
+      <a class="page-link" href="{% if page_obj.has_next %}{{ page_url_prefix }}{{ page_obj.next_page_number }}{% else %}#{% endif %}" aria-label="Next">&raquo;</a>
+    </li>
+  </ul>
+{% endif %}

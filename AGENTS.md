@@ -10,6 +10,8 @@
 - Add clean code with sensible comments. Consider what you're implementing and the context, as well
   as how you can generalize functions to reduce code duplication and sources of bugs.
 - If you can reuse something already implemented elsewhere, do it. Add the least amount of code possible (but make sure all error conditions are covered!)
+- NEVER try to commit your changes. The user will deal with commits, you are not to touch `git commit` ever.
+  - Be very careful when trying to run `git checkout` to undo some changes, there may be staged changes and you shouldn't overrite them.
 
 ## Python Coding Guidelines
 
@@ -133,5 +135,7 @@ Pre-change checklist (must answer mentally before finishing):
 - This is python, you don't need to compile the code.
 - You can smoke-test Django with: `podman-compose exec -T web python manage.py check`
 - You can run more tests with: `podman-compose exec -T web python manage.py test`
+  - IMPORTANT: There are a lot of tests and they take a while to run, plus it's hard to miss the relevant output.
+    Run the full test suite like this: `podman-compose exec -T web python manage.py test --keepdb 2>&1 | grep -E "^(FAIL|ERROR|OK|FAILED|Ran )"`. This will show you *which* tests fail and then you can run just those to see the details.
 - Add ruff after you're done making changes: `podman-compose exec -T web ruff check --fix /app/astra_app`
 - Stop and restart everything: `podman-compose down && podman-compose up -d --build`. NEVER RUN `podman-compose down -v` as that will delete your database!

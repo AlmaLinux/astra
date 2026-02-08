@@ -1,15 +1,31 @@
-from __future__ import annotations
-
 from typing import Any, cast
 
 from django.template import Context, Library
 from django.template.loader import render_to_string
 from django.utils.safestring import mark_safe
 
-from core.backends import FreeIPAGroup
+from core.backends import FreeIPAGroup, _clean_str_list
 from core.views_utils import _normalize_str
 
 register = Library()
+
+
+def _get_render_cache(render_context: object, key: str) -> dict:
+    """Get or create a dict in the template render context."""
+    existing = render_context.get(key)
+    if not isinstance(existing, dict):
+        existing = {}
+        render_context[key] = existing
+    return existing
+
+
+def _get_list_attr(obj: object, name: str) -> list[str]:
+    """Extract a list-of-strings attribute from a duck-typed group object.
+
+    Uses getattr: template tag accepts duck-typed objects
+    (e.g. tests pass SimpleNamespace).
+    """
+    return _clean_str_list(getattr(obj, name, None))
 
 
 @register.simple_tag(takes_context=True, name="group")
@@ -22,34 +38,13 @@ def group_widget(context: Context, group: object, **kwargs: Any) -> str:
     extra_style = kwargs.get("style", "") or ""
 
     render_cache = context.render_context
-
-    existing_obj_cache = render_cache.get("_core_group_widget_cache")
-    if not isinstance(existing_obj_cache, dict):
-        existing_obj_cache = {}
-        render_cache["_core_group_widget_cache"] = existing_obj_cache
-    obj_cache = cast(dict[str, object | None], existing_obj_cache)
-
-    existing_count_cache = render_cache.get("_core_group_widget_count_cache")
-    if not isinstance(existing_count_cache, dict):
-        existing_count_cache = {}
-        render_cache["_core_group_widget_count_cache"] = existing_count_cache
-    count_cache = cast(dict[str, int], existing_count_cache)
+    obj_cache = cast(dict[str, object | None], _get_render_cache(render_cache, "_core_group_widget_cache"))
+    count_cache = cast(dict[str, int], _get_render_cache(render_cache, "_core_group_widget_count_cache"))
 
     group_obj = obj_cache.get(raw)
     if group_obj is None:
         group_obj = FreeIPAGroup.get(raw)
         obj_cache[raw] = group_obj
-
-    def _get_list_attr(obj: object, name: str) -> list[str]:
-        # Template tag accepts duck-typed objects (e.g. tests pass SimpleNamespace).
-        value = getattr(obj, name, None)
-        if not value:
-            return []
-        if isinstance(value, str):
-            return [value.strip()] if value.strip() else []
-        if isinstance(value, list):
-            return [str(v).strip() for v in value if str(v).strip()]
-        return [str(value).strip()] if str(value).strip() else []
 
     def _recursive_usernames(cn: str, *, visited: set[str]) -> set[str]:
         key = cn.strip().lower()
@@ -78,6 +73,7 @@ def group_widget(context: Context, group: object, **kwargs: Any) -> str:
 
     description = ""
     if group_obj is not None:
+        # Uses getattr: duck-typed interface (tests pass SimpleNamespace)
         desc = getattr(group_obj, "description", "")
         if isinstance(desc, str):
             description = desc.strip()

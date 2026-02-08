@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 from core.tokens import election_chain_next_hash
 

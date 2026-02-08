@@ -27,19 +27,19 @@
 			<div class="form-group col-md-6">
 				{{ profile_form.givenname.label_tag }}
 				{{ profile_form.givenname }}
-				{% if profile_form.givenname.errors %}<div class="invalid-feedback d-block">{{ profile_form.givenname.errors }}</div>{% endif %}
+				{% if profile_form.givenname.errors %}<div class="text-danger">{{ profile_form.givenname.errors }}</div>{% endif %}
 			</div>
 			<div class="form-group col-md-6">
 				{{ profile_form.sn.label_tag }}
 				{{ profile_form.sn }}
-				{% if profile_form.sn.errors %}<div class="invalid-feedback d-block">{{ profile_form.sn.errors }}</div>{% endif %}
+				{% if profile_form.sn.errors %}<div class="text-danger">{{ profile_form.sn.errors }}</div>{% endif %}
 			</div>
 		</div>
 
 		<div class="form-group">
 			{{ profile_form.fasPronoun.label_tag }}
 			{{ profile_form.fasPronoun }}
-			{% if profile_form.fasPronoun.errors %}<div class="invalid-feedback d-block">{{ profile_form.fasPronoun.errors }}</div>{% endif %}
+			{% if profile_form.fasPronoun.errors %}<div class="text-danger">{{ profile_form.fasPronoun.errors }}</div>{% endif %}
 			{% if profile_form.fasPronoun.help_text %}<small class="form-text text-muted">{{ profile_form.fasPronoun.help_text }}</small>{% endif %}
 			<datalist id="pronoun-options">
 				<option value="she / her / hers"></option>
@@ -48,19 +48,9 @@
 			</datalist>
 		</div>
 
-		<div class="form-group">
-			{{ profile_form.country_code.label_tag }}
-			{{ profile_form.country_code }}
-			{% if profile_form.country_code.errors %}<div class="invalid-feedback d-block">{{ profile_form.country_code.errors }}</div>{% endif %}
-			{% if profile_form.country_code.help_text %}<small class="form-text text-muted">{{ profile_form.country_code.help_text }}</small>{% endif %}
-		</div>
+		{% include "core/_form_field.html" with field=profile_form.country_code %}
 
-		<div class="form-group">
-			{{ profile_form.fasLocale.label_tag }}
-			{{ profile_form.fasLocale }}
-			{% if profile_form.fasLocale.errors %}<div class="invalid-feedback d-block">{{ profile_form.fasLocale.errors }}</div>{% endif %}
-			{% if profile_form.fasLocale.help_text %}<small class="form-text text-muted">{{ profile_form.fasLocale.help_text }}</small>{% endif %}
-		</div>
+		{% include "core/_form_field.html" with field=profile_form.fasLocale %}
 
 		<div class="form-group">
 			{{ profile_form.fasTimezone.label_tag }}
@@ -70,7 +60,7 @@
 					{% if value %}<option value="{{ value }}"></option>{% endif %}
 				{% endfor %}
 			</datalist>
-			{% if profile_form.fasTimezone.errors %}<div class="invalid-feedback d-block">{{ profile_form.fasTimezone.errors }}</div>{% endif %}
+			{% if profile_form.fasTimezone.errors %}<div class="text-danger">{{ profile_form.fasTimezone.errors }}</div>{% endif %}
 			{% if profile_form.fasTimezone.help_text %}<small class="form-text text-muted">{{ profile_form.fasTimezone.help_text }}</small>{% endif %}
 		</div>
 
@@ -88,7 +78,7 @@
 
 			<div id="website-urls-fallback">
 				{{ profile_form.fasWebsiteUrl }}
-				{% if profile_form.fasWebsiteUrl.errors %}<div class="invalid-feedback d-block">{{ profile_form.fasWebsiteUrl.errors }}</div>{% endif %}
+				{% if profile_form.fasWebsiteUrl.errors %}<div class="text-danger">{{ profile_form.fasWebsiteUrl.errors }}</div>{% endif %}
 			</div>
 			{% if profile_form.fasWebsiteUrl.help_text %}<small class="form-text text-muted">{{ profile_form.fasWebsiteUrl.help_text }}</small>{% endif %}
 		</div>
@@ -107,7 +97,7 @@
 
 			<div id="rss-urls-fallback">
 				{{ profile_form.fasRssUrl }}
-				{% if profile_form.fasRssUrl.errors %}<div class="invalid-feedback d-block">{{ profile_form.fasRssUrl.errors }}</div>{% endif %}
+				{% if profile_form.fasRssUrl.errors %}<div class="text-danger">{{ profile_form.fasRssUrl.errors }}</div>{% endif %}
 			</div>
 			{% if profile_form.fasRssUrl.help_text %}<small class="form-text text-muted">{{ profile_form.fasRssUrl.help_text }}</small>{% endif %}
 		</div>
@@ -145,7 +135,7 @@
 			<div id="chat-nicks-fallback">
 				{{ profile_form.fasIRCNick.label_tag }}
 				{{ profile_form.fasIRCNick }}
-				{% if profile_form.fasIRCNick.errors %}<div class="invalid-feedback d-block">{{ profile_form.fasIRCNick.errors }}</div>{% endif %}
+				{% if profile_form.fasIRCNick.errors %}<div class="text-danger">{{ profile_form.fasIRCNick.errors }}</div>{% endif %}
 				{% if profile_form.fasIRCNick.help_text %}<small class="form-text text-muted">{{ profile_form.fasIRCNick.help_text }}</small>{% endif %}
 			</div>
 		</div>
@@ -158,7 +148,7 @@
 				</div>
 				{{ profile_form.fasGitHubUsername }}
 			</div>
-			{% if profile_form.fasGitHubUsername.errors %}<div class="invalid-feedback d-block">{{ profile_form.fasGitHubUsername.errors }}</div>{% endif %}
+			{% if profile_form.fasGitHubUsername.errors %}<div class="text-danger">{{ profile_form.fasGitHubUsername.errors }}</div>{% endif %}
 		</div>
 
 		<div class="form-group">
@@ -169,13 +159,13 @@
 				</div>
 				{{ profile_form.fasGitLabUsername }}
 			</div>
-			{% if profile_form.fasGitLabUsername.errors %}<div class="invalid-feedback d-block">{{ profile_form.fasGitLabUsername.errors }}</div>{% endif %}
+			{% if profile_form.fasGitLabUsername.errors %}<div class="text-danger">{{ profile_form.fasGitLabUsername.errors }}</div>{% endif %}
 		</div>
 
 		<div class="form-group form-check">
 			{{ profile_form.fasIsPrivate }}
 			<label class="form-check-label" for="{{ profile_form.fasIsPrivate.id_for_label }}">{{ profile_form.fasIsPrivate.label }} <small class="text-muted">Hide personal details (including your name and email) from other signed-in users. Your profile stays visible, as do your groups and memberships.</small></label>
-			{% if profile_form.fasIsPrivate.errors %}<div class="invalid-feedback d-block">{{ profile_form.fasIsPrivate.errors }}</div>{% endif %}
+			{% if profile_form.fasIsPrivate.errors %}<div class="text-danger">{{ profile_form.fasIsPrivate.errors }}</div>{% endif %}
 		</div>
 	</div>
 
@@ -198,118 +188,31 @@
 			}
 		}
 
-		function setupUrlListEditor(opts) {
-			const textarea = document.getElementById(opts.textareaId);
-			const widget = document.getElementById(opts.widgetId);
-			const fallback = document.getElementById(opts.fallbackId);
-			const tableBody = document.querySelector(opts.tableBodySelector);
-			const addBtn = document.getElementById(opts.addBtnId);
-
-			if (!textarea || !widget || !fallback || !tableBody || !addBtn || !textarea.form) return;
-
-			function parseExisting(value) {
-				return String(value || '')
-					.replaceAll('\r', '')
-					.split('\n')
-					.flatMap(function (line) {
-						return String(line || '')
-							.split(',')
-							.map(function (p) { return String(p || '').trim(); })
-							.filter(Boolean);
-					});
-			}
-
-			function buildRow(initialValue) {
-				const tr = document.createElement('tr');
-				tr.className = opts.rowClass;
-
-				tr.innerHTML = `
-					<td>
-						<input type="url" class="form-control form-control-sm text-monospace ${opts.inputClass}" placeholder="${opts.placeholder}" />
-					</td>
-					<td style="width: 44px;" class="text-center">
-						<button type="button" class="btn btn-sm btn-outline-secondary" aria-label="Remove" title="Remove this entry">×</button>
-					</td>
-				`;
-
-				const valueEl = tr.querySelector('input');
-				const removeBtn = tr.querySelector('button');
-
-				valueEl.value = initialValue || '';
-				valueEl.addEventListener('input', syncToTextarea);
-				removeBtn.addEventListener('click', function () {
-					tr.remove();
-					syncToTextarea();
-				});
-
-				return tr;
-			}
-
-			function syncToTextarea() {
-				const rows = Array.from(tableBody.querySelectorAll('tr.' + opts.rowClass));
-				const lines = [];
-				for (const row of rows) {
-					const valueEl = row.querySelector('input');
-					const raw = (valueEl && valueEl.value) ? String(valueEl.value) : '';
-					const v = raw.replaceAll('\r', '').trim();
-					if (v) lines.push(v);
-				}
-				textarea.value = lines.join('\n');
-			}
-
-			function addRow(value) {
-				const tr = buildRow(value);
-				tableBody.appendChild(tr);
-				syncToTextarea();
-				return tr;
-			}
-
-			const existing = parseExisting(textarea.value);
-			if (existing.length === 0) {
-				addRow('');
-			} else {
-				for (const v of existing) addRow(v);
-			}
-
-			addBtn.addEventListener('click', function () {
-				const tr = addRow('');
-				const input = tr.querySelector('input');
-				if (input) input.focus();
-			});
-
-			textarea.form.addEventListener('submit', function () {
-				syncToTextarea();
-			});
-
-			// Do not hide fallback if validation errors are present.
-			const hasErrors = !!fallback.querySelector('.errorlist');
-			if (!hasErrors) {
-				fallback.classList.add('d-none');
-			}
-			widget.classList.remove('d-none');
-		}
-
 		onReady(function () {
-			setupUrlListEditor({
+			setupRowEditor({
 				textareaId: 'id_fasWebsiteUrl',
 				widgetId: 'website-urls-widget',
 				fallbackId: 'website-urls-fallback',
 				tableBodySelector: '#website-urls-table tbody',
 				addBtnId: 'website-urls-add',
 				rowClass: 'website-urls-row',
+				kind: 'url',
 				inputClass: 'website-urls-value',
-				placeholder: 'https://example.com'
+				placeholder: 'https://example.com',
+				splitComma: true
 			});
 
-			setupUrlListEditor({
+			setupRowEditor({
 				textareaId: 'id_fasRssUrl',
 				widgetId: 'rss-urls-widget',
 				fallbackId: 'rss-urls-fallback',
 				tableBodySelector: '#rss-urls-table tbody',
 				addBtnId: 'rss-urls-add',
 				rowClass: 'rss-urls-row',
+				kind: 'url',
 				inputClass: 'rss-urls-value',
-				placeholder: 'https://example.com/rss.xml'
+				placeholder: 'https://example.com/rss.xml',
+				splitComma: true
 			});
 		});
 	})();

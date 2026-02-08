@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 from django.contrib.staticfiles.storage import staticfiles_storage
 from django.test import TestCase

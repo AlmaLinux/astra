@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -134,21 +132,13 @@ class MembershipRequestForm(forms.Form):
         for spec in self.all_question_specs():
             if spec.answer_kind == _AnswerKind.url:
                 self.fields[spec.field_name] = self._field_for_spec(spec)
-
-        self.fields["membership_type"].widget.attrs.update({"class": "form-control w-100"})
-        self.fields["q_contributions"].widget.attrs.update({"class": "form-control w-100"})
-        self.fields["q_domain"].widget.attrs.update({"class": "form-control w-100"})
-        self.fields["q_pull_request"].widget.attrs.update({"class": "form-control w-100"})
-        self.fields["q_additional_info"].widget.attrs.update({"class": "form-control w-100"})
-
-        for field in self.fields.values():
-            if isinstance(field.widget, forms.Textarea):
-                field.widget.attrs.setdefault("spellcheck", "true")
-
-        # Use titles as user-facing labels.
-        for spec in self.all_question_specs():
             self.fields[spec.field_name].label = spec.title
             self.fields[spec.field_name].required = False
+
+        for field in self.fields.values():
+            field.widget.attrs.setdefault("class", "form-control w-100")
+            if isinstance(field.widget, forms.Textarea):
+                field.widget.attrs.setdefault("spellcheck", "true")
 
         valid_codes = get_valid_membership_type_codes_for_username(username)
         extendable_codes = get_extendable_membership_type_codes_for_username(username)
@@ -226,34 +216,30 @@ class MembershipRequestUpdateResponsesForm(forms.Form):
 
                 known = MembershipRequestForm._question_spec_by_name().get(spec.name)
                 if known is not None and known.answer_kind == _AnswerKind.url:
-                    self.fields[spec.field_name] = MembershipRequestForm._field_for_spec(known)
-                    self.fields[spec.field_name].label = spec.title
-                    self.fields[spec.field_name].initial = str(answer or "")
-                    self.fields[spec.field_name].widget.attrs.update({"class": "form-control w-100"})
-                    self._question_specs.append(spec)
-                    continue
-
-                self.fields[spec.field_name] = forms.CharField(
-                    required=False,
-                    label=spec.title,
-                    widget=forms.Textarea(attrs={"rows": 4, "class": "form-control w-100", "spellcheck": "true"}),
-                    initial=str(answer or ""),
-                )
+                    field = MembershipRequestForm._field_for_spec(known)
+                else:
+                    field = forms.CharField(
+                        required=False,
+                        widget=forms.Textarea(attrs={"rows": 4}),
+                    )
+                field.label = spec.title
+                field.initial = str(answer or "")
+                self.fields[spec.field_name] = field
                 self._question_specs.append(spec)
 
-        # Always provide a place for the user to add clarifications.
-        # If the existing request already has an "Additional Information" response,
-        # reuse it (same field name) instead of creating a second question.
+        # Always provide a place for clarifications; reuses the same field name
+        # so an existing response isn't duplicated.
         extra_spec = _QuestionSpec(name="Additional information", title="Additional information", required=False)
         if extra_spec.field_name not in self.fields:
             self.fields[extra_spec.field_name] = forms.CharField(
                 required=False,
                 label=extra_spec.title,
-                widget=forms.Textarea(attrs={"rows": 4, "class": "form-control w-100", "spellcheck": "true"}),
+                widget=forms.Textarea(attrs={"rows": 4}),
             )
             self._question_specs.append(extra_spec)
 
         for field in self.fields.values():
+            field.widget.attrs.setdefault("class", "form-control w-100")
             if isinstance(field.widget, forms.Textarea):
                 field.widget.attrs.setdefault("spellcheck", "true")
 

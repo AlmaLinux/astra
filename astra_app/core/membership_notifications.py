@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import datetime
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo

@@ -15,7 +15,6 @@ Source-of-truth (stable permalink):
 - Ballot.compute_hash: https://github.com/AlmaLinux/astra/blob/8806e7916ec58df46a7d9f333a2e50baac31bdb7/astra_app/core/models.py
 """
 
-from __future__ import annotations
 
 import hashlib
 import json

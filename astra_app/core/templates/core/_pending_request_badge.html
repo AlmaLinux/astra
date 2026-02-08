@@ -1,0 +1,31 @@
+{% comment %}
+Pending request status badge with role-based link rendering.
+
+Displays an on_hold or pending/review badge with appropriate styling and links
+depending on whether the viewer owns the request or has membership-view permission.
+
+Required context:
+- request_obj: object with .status (str) and .pk (int) attributes
+- is_owner: bool (True for the request's owner — representative for orgs, is_self for users)
+
+From context processors (auto-available):
+- membership_can_view: bool
+{% endcomment %}
+
+{% if request_obj.status == 'on_hold' %}
+  {% if is_owner %}
+    <a class="badge badge-danger alx-status-badge alx-status-badge--action" href="{% url 'membership-request-self' request_obj.pk %}">Action required</a>
+  {% elif membership_can_view %}
+    <a class="badge badge-danger alx-status-badge alx-status-badge--action" href="{% url 'membership-request-detail' request_obj.pk %}">On hold</a>
+  {% else %}
+    <span class="badge badge-danger alx-status-badge alx-status-badge--action">On hold</span>
+  {% endif %}
+{% else %}
+  {% if is_owner %}
+    <a class="badge badge-secondary alx-status-badge alx-status-badge--review" href="{% url 'membership-request-self' request_obj.pk %}">Under review</a>
+  {% elif membership_can_view %}
+    <a class="badge badge-secondary alx-status-badge alx-status-badge--review" href="{% url 'membership-request-detail' request_obj.pk %}">Under review</a>
+  {% else %}
+    <span class="badge badge-secondary alx-status-badge alx-status-badge--review">Under review</span>
+  {% endif %}
+{% endif %}

@@ -6,12 +6,7 @@
 
 {% block content %}
 <div class="row align-items-start public-auth-layout">
-  <div class="col-lg-7 d-none d-lg-block">
-    <h1 class="public-auth-title">AlmaLinux Accounts</h1>
-    <p class="public-auth-lead">
-      AlmaLinux Accounts provides the ability to create and manage your account across AlmaLinux's entire infrastructure.
-    </p>
-  </div>
+  {% include 'core/_public_auth_hero.html' %}
 
   <div class="col-12 col-lg-5">
     <div class="card card-primary card-tabs public-auth-card">
@@ -40,31 +35,22 @@
               <div class="alert alert-danger">{{ form.non_field_errors }}</div>
             {% endif %}
 
-            <div class="form-group">
-              <label for="id_username">Username</label>
-              {{ form.username }}
-              {% if form.username.errors %}<div class="text-danger">{{ form.username.errors }}</div>{% endif %}
-              {% if form.username.help_text %}<small class="form-text text-muted">{{ form.username.help_text }}</small>{% endif %}
-            </div>
+            {% include "core/_form_field.html" with field=form.username %}
 
             <div class="form-row">
               <div class="form-group col-md-6">
-                <label for="id_first_name">First Name</label>
+                {{ form.first_name.label_tag }}
                 {{ form.first_name }}
                 {% if form.first_name.errors %}<div class="text-danger">{{ form.first_name.errors }}</div>{% endif %}
               </div>
               <div class="form-group col-md-6">
-                <label for="id_last_name">Last Name</label>
+                {{ form.last_name.label_tag }}
                 {{ form.last_name }}
                 {% if form.last_name.errors %}<div class="text-danger">{{ form.last_name.errors }}</div>{% endif %}
               </div>
             </div>
 
-            <div class="form-group">
-              <label for="id_email">E-mail Address</label>
-              {{ form.email }}
-              {% if form.email.errors %}<div class="text-danger">{{ form.email.errors }}</div>{% endif %}
-            </div>
+            {% include "core/_form_field.html" with field=form.email %}
 
             <div class="form-group form-check">
               {{ form.over_16 }}

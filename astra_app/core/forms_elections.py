@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import datetime
 from typing import override
 
@@ -143,12 +141,9 @@ class ElectionEndDateForm(forms.ModelForm):
     class Meta:
         model = Election
         fields = ["end_datetime"]
-        widgets = {
-            "end_datetime": forms.DateTimeInput(
-                attrs={"class": "form-control js-datetime-picker", "type": "datetime-local"}
-            ),
-        }
 
+    # Class-level field overrides Meta.widgets; the explicit definition here
+    # ensures input_formats are applied.
     end_datetime = forms.DateTimeField(
         input_formats=_DATETIME_LOCAL_INPUT_FORMATS,
         widget=forms.DateTimeInput(attrs={"class": "form-control js-datetime-picker", "type": "datetime-local"}),

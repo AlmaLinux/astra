@@ -17,41 +17,19 @@
         </li>
       {% endif %}
 
-      <li class="nav-item">
-        <a
-          class="nav-link {% if active_contact == 'business' %}active{% endif %}{% if form.business_contact_name.errors or form.business_contact_email.errors or form.business_contact_phone.errors %} alx-tab-error{% endif %}"
-          id="contacts-business-tab"
-          data-toggle="pill"
-          href="#contacts-business"
-          role="tab"
-          aria-controls="contacts-business"
-          aria-selected="{% if active_contact == 'business' %}true{% else %}false{% endif %}"
-        >Business</a>
-      </li>
-
-      <li class="nav-item">
-        <a
-          class="nav-link {% if active_contact == 'marketing' %}active{% endif %}{% if form.pr_marketing_contact_name.errors or form.pr_marketing_contact_email.errors or form.pr_marketing_contact_phone.errors %} alx-tab-error{% endif %}"
-          id="contacts-marketing-tab"
-          data-toggle="pill"
-          href="#contacts-marketing"
-          role="tab"
-          aria-controls="contacts-marketing"
-          aria-selected="{% if active_contact == 'marketing' %}true{% else %}false{% endif %}"
-        >PR and marketing</a>
-      </li>
-
-      <li class="nav-item">
-        <a
-          class="nav-link {% if active_contact == 'technical' %}active{% endif %}{% if form.technical_contact_name.errors or form.technical_contact_email.errors or form.technical_contact_phone.errors %} alx-tab-error{% endif %}"
-          id="contacts-technical-tab"
-          data-toggle="pill"
-          href="#contacts-technical"
-          role="tab"
-          aria-controls="contacts-technical"
-          aria-selected="{% if active_contact == 'technical' %}true{% else %}false{% endif %}"
-        >Technical</a>
-      </li>
+      {% for group in contact_groups %}
+        <li class="nav-item">
+          <a
+            class="nav-link {% if active_contact == group.key %}active{% endif %}{% if group.name_field.errors or group.email_field.errors or group.phone_field.errors %} alx-tab-error{% endif %}"
+            id="contacts-{{ group.key }}-tab"
+            data-toggle="pill"
+            href="#contacts-{{ group.key }}"
+            role="tab"
+            aria-controls="contacts-{{ group.key }}"
+            aria-selected="{% if active_contact == group.key %}true{% else %}false{% endif %}"
+          >{{ group.label }}</a>
+        </li>
+      {% endfor %}
     </ul>
   </div>
 
@@ -79,84 +57,32 @@
         </div>
       {% endif %}
 
-      <div
-        class="tab-pane fade {% if active_contact == 'business' %}active show{% endif %}"
-        id="contacts-business"
-        role="tabpanel"
-        aria-labelledby="contacts-business-tab"
-      >
-        <p class="text-muted mb-3">
-          We will send legal and billing notices to this email address, unless you tell us otherwise.
-        </p>
+      {% for group in contact_groups %}
+        <div
+          class="tab-pane fade {% if active_contact == group.key %}active show{% endif %}"
+          id="contacts-{{ group.key }}"
+          role="tabpanel"
+          aria-labelledby="contacts-{{ group.key }}-tab"
+        >
+          <p class="text-muted mb-3">{{ group.description }}</p>
 
-        <div class="form-group">
-          <label for="{{ form.business_contact_name.id_for_label }}">{{ form.business_contact_name.label }} <span class="text-danger">(required)</span></label>
-          {{ form.business_contact_name }}
-          {% if form.business_contact_name.errors %}<div class="text-danger">{{ form.business_contact_name.errors }}</div>{% endif %}
+          <div class="form-group">
+            <label for="{{ group.name_field.id_for_label }}">{{ group.name_field.label }} <span class="text-danger">(required)</span></label>
+            {{ group.name_field }}
+            {% if group.name_field.errors %}<div class="text-danger">{{ group.name_field.errors }}</div>{% endif %}
+          </div>
+          <div class="form-group">
+            <label for="{{ group.email_field.id_for_label }}">{{ group.email_field.label }} <span class="text-danger">(required)</span></label>
+            {{ group.email_field }}
+            {% if group.email_field.errors %}<div class="text-danger">{{ group.email_field.errors }}</div>{% endif %}
+          </div>
+          <div class="form-group mb-0">
+            <label for="{{ group.phone_field.id_for_label }}">{{ group.phone_field.label }}</label>
+            {{ group.phone_field }}
+            {% if group.phone_field.errors %}<div class="text-danger">{{ group.phone_field.errors }}</div>{% endif %}
+          </div>
         </div>
-        <div class="form-group">
-          <label for="{{ form.business_contact_email.id_for_label }}">{{ form.business_contact_email.label }} <span class="text-danger">(required)</span></label>
-          {{ form.business_contact_email }}
-          {% if form.business_contact_email.errors %}<div class="text-danger">{{ form.business_contact_email.errors }}</div>{% endif %}
-        </div>
-        <div class="form-group mb-0">
-          <label for="{{ form.business_contact_phone.id_for_label }}">{{ form.business_contact_phone.label }}</label>
-          {{ form.business_contact_phone }}
-          {% if form.business_contact_phone.errors %}<div class="text-danger">{{ form.business_contact_phone.errors }}</div>{% endif %}
-        </div>
-      </div>
-
-      <div
-        class="tab-pane fade {% if active_contact == 'marketing' %}active show{% endif %}"
-        id="contacts-marketing"
-        role="tabpanel"
-        aria-labelledby="contacts-marketing-tab"
-      >
-        <p class="text-muted mb-3">We will contact this person about press releases and sponsor marketing benefits.</p>
-
-        <div class="form-group">
-          <label for="{{ form.pr_marketing_contact_name.id_for_label }}">{{ form.pr_marketing_contact_name.label }} <span class="text-danger">(required)</span></label>
-          {{ form.pr_marketing_contact_name }}
-          {% if form.pr_marketing_contact_name.errors %}<div class="text-danger">{{ form.pr_marketing_contact_name.errors }}</div>{% endif %}
-        </div>
-        <div class="form-group">
-          <label for="{{ form.pr_marketing_contact_email.id_for_label }}">{{ form.pr_marketing_contact_email.label }} <span class="text-danger">(required)</span></label>
-          {{ form.pr_marketing_contact_email }}
-          {% if form.pr_marketing_contact_email.errors %}<div class="text-danger">{{ form.pr_marketing_contact_email.errors }}</div>{% endif %}
-        </div>
-        <div class="form-group mb-0">
-          <label for="{{ form.pr_marketing_contact_phone.id_for_label }}">{{ form.pr_marketing_contact_phone.label }}</label>
-          {{ form.pr_marketing_contact_phone }}
-          {% if form.pr_marketing_contact_phone.errors %}<div class="text-danger">{{ form.pr_marketing_contact_phone.errors }}</div>{% endif %}
-        </div>
-      </div>
-
-      <div
-        class="tab-pane fade {% if active_contact == 'technical' %}active show{% endif %}"
-        id="contacts-technical"
-        role="tabpanel"
-        aria-labelledby="contacts-technical-tab"
-      >
-        <p class="text-muted mb-3">
-          We will send technical notices to this email address, unless you tell us otherwise.
-        </p>
-
-        <div class="form-group">
-          <label for="{{ form.technical_contact_name.id_for_label }}">{{ form.technical_contact_name.label }} <span class="text-danger">(required)</span></label>
-          {{ form.technical_contact_name }}
-          {% if form.technical_contact_name.errors %}<div class="text-danger">{{ form.technical_contact_name.errors }}</div>{% endif %}
-        </div>
-        <div class="form-group">
-          <label for="{{ form.technical_contact_email.id_for_label }}">{{ form.technical_contact_email.label }} <span class="text-danger">(required)</span></label>
-          {{ form.technical_contact_email }}
-          {% if form.technical_contact_email.errors %}<div class="text-danger">{{ form.technical_contact_email.errors }}</div>{% endif %}
-        </div>
-        <div class="form-group mb-0">
-          <label for="{{ form.technical_contact_phone.id_for_label }}">{{ form.technical_contact_phone.label }}</label>
-          {{ form.technical_contact_phone }}
-          {% if form.technical_contact_phone.errors %}<div class="text-danger">{{ form.technical_contact_phone.errors }}</div>{% endif %}
-        </div>
-      </div>
+      {% endfor %}
     </div>
   </div>
 </div>

@@ -98,7 +98,7 @@
               </ul>
               <a class="btn btn-outline-primary btn-block" href="/membership/request/" title="Start a membership request">Request membership</a>
             {% endif %}
-          {% elif election.status == 'closed' or election.status == 'tallied' %}
+          {% elif election_is_finished %}
             <a class="btn btn-outline-primary btn-block" href="{% url 'election-audit-log' election.id %}" title="Review the election audit log">View audit log</a>
             {% if election.public_ballots_file %}
               <a class="btn btn-outline-secondary btn-block" href="{{ election.public_ballots_file.url }}" title="Download the ballots ledger (JSON)">Download ballots (JSON)</a>
@@ -125,69 +125,8 @@
               Extend Election
             </button>
 
-            <div
-              class="modal fade"
-              id="extend-election-modal"
-              tabindex="-1"
-              role="dialog"
-              aria-labelledby="extend-election-modal-label"
-              aria-hidden="true"
-            >
-              <div class="modal-dialog" role="document">
-                <div class="modal-content">
-                  <form method="post" action="{% url 'election-extend-end' election.id %}">
-                    {% csrf_token %}
-                    <div class="modal-header">
-                      <h5 class="modal-title" id="extend-election-modal-label">Extend election?</h5>
-                      <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog">
-                        <span aria-hidden="true">&times;</span>
-                      </button>
-                    </div>
-                    <div class="modal-body">
-                      <p class="mb-3">Set a new end datetime. It must be later than the current end.</p>
-
-                      <div class="form-group mb-0">
-                        <label for="extend-end-datetime">New end datetime</label>
-                        <input
-                          id="extend-end-datetime"
-                          name="end_datetime"
-                          type="datetime-local"
-                          class="form-control js-datetime-picker"
-                          value="{{ election.end_datetime|date:'Y-m-d\\TH:i' }}"
-                          min="{{ election.end_datetime|date:'Y-m-d\\TH:i' }}"
-                          required
-                        >
-                        <div class="text-muted small mt-1">
-                          Current end: {{ election.end_datetime|date:"Y-m-d H:i T" }}
-                        </div>
-                      </div>
-
-                      <hr />
-
-                      <div class="form-group mb-0">
-                        <label for="extend-confirm">Type the election name to confirm</label>
-                        <div class="text-muted small mb-2">
-                          <strong>Election name:</strong> {{ election.name }}
-                        </div>
-                        <input
-                          id="extend-confirm"
-                          name="confirm"
-                          type="text"
-                          class="form-control"
-                          placeholder="{{ election.name }}"
-                          data-confirm-name="{{ election.name|escapejs }}"
-                          required
-                        >
-                      </div>
-                    </div>
-                    <div class="modal-footer">
-                      <button type="button" class="btn btn-outline-secondary" data-dismiss="modal" title="Close dialog without extending">Cancel</button>
-                      <button id="extend-submit" disabled type="submit" class="btn btn-warning" aria-disabled="true" title="Extend the election end date">Extend Election</button>
-                    </div>
-                  </form>
-                </div>
-              </div>
-            </div>
+            {% url 'election-extend-end' election.id as extend_url %}
+            {% include 'core/_modal_name_confirm.html' with modal_id="extend-election-modal" action_url=extend_url modal_title="Extend election?" button_text="Extend Election" button_class="btn btn-warning" confirm_input_id="extend-confirm" confirm_submit_id="extend-submit" confirm_name=election.name cancel_title="Close dialog without extending" submit_title="Extend the election end date" modal_body_template="core/_modal_extend_election_body.html" %}
 
             <button
               type="button"
@@ -199,70 +138,8 @@
               Conclude Election
             </button>
 
-            <div
-              class="modal fade"
-              id="conclude-election-modal"
-              tabindex="-1"
-              role="dialog"
-              aria-labelledby="conclude-election-modal-label"
-              aria-hidden="true"
-            >
-              <div class="modal-dialog" role="document">
-                <div class="modal-content">
-                  <form method="post" action="{% url 'election-conclude' election.id %}">
-                    {% csrf_token %}
-                    <div class="modal-header">
-                      <h5 class="modal-title" id="conclude-election-modal-label">Conclude election?</h5>
-                      <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog">
-                        <span aria-hidden="true">&times;</span>
-                      </button>
-                    </div>
-                    <div class="modal-body">
-                      <p class="mb-3">You are about to close this election and end voting.</p>
-
-                      <ul class="mb-3">
-                        <li>Voting ends and no further ballots can be submitted.</li>
-                        <li><strong>Irreversible:</strong> Voting credentials are anonymized and election-related emails are scrubbed.</li>
-                        <li>If you tally now, results and public audit artifacts will be published.</li>
-                      </ul>
-                      <div class="custom-control custom-checkbox">
-                        <input
-                          type="checkbox"
-                          class="custom-control-input"
-                          id="conclude-skip-tally"
-                          name="skip_tally"
-                        >
-                        <label class="custom-control-label" for="conclude-skip-tally">
-                          Close election, but do not tally votes
-                        </label>
-                      </div>
-
-                      <hr />
-
-                      <div class="form-group mb-0">
-                        <label for="conclude-confirm">Type the election name to confirm</label>
-                        <div class="text-muted small mb-2">
-                          <strong>Election name:</strong> {{ election.name }}
-                        </div>
-                        <input
-                          id="conclude-confirm"
-                          name="confirm"
-                          type="text"
-                          class="form-control"
-                          placeholder="{{ election.name }}"
-                          data-confirm-name="{{ election.name|escapejs }}"
-                          required
-                        >
-                      </div>
-                    </div>
-                    <div class="modal-footer">
-                      <button type="button" class="btn btn-outline-secondary" data-dismiss="modal" title="Close dialog without concluding">Cancel</button>
-                      <button id="conclude-submit" disabled type="submit" class="btn btn-danger" aria-disabled="true" title="Conclude the election and stop voting">Conclude Election</button>
-                    </div>
-                  </form>
-                </div>
-              </div>
-            </div>
+            {% url 'election-conclude' election.id as conclude_url %}
+            {% include 'core/_modal_name_confirm.html' with modal_id="conclude-election-modal" action_url=conclude_url modal_title="Conclude election?" button_text="Conclude Election" button_class="btn btn-danger" confirm_input_id="conclude-confirm" confirm_submit_id="conclude-submit" confirm_name=election.name cancel_title="Close dialog without concluding" submit_title="Conclude the election and stop voting" modal_body_template="core/_modal_conclude_election_body.html" %}
           {% endif %}
         </div>
       </div>
@@ -295,58 +172,7 @@
             {% if turnout_stats %}
               <h5 class="mb-2"><strong>Participation</strong></h5>
 
-              <div class="mb-3 text-muted">
-                Quorum:
-                {% if turnout_stats.quorum_required %}
-                  {{ turnout_stats.required_participating_voter_count }} voters and
-                  {{ turnout_stats.required_participating_vote_weight_total }} vote weight
-                  ({{ turnout_stats.quorum_percent }}%)
-                  {% if turnout_stats.quorum_met %}
-                    <span class="ml-1 badge badge-success">met</span>
-                  {% else %}
-                    <span class="ml-1 badge badge-danger">not met</span>
-                  {% endif %}
-                {% else %}
-                  not required
-                {% endif %}
-              </div>
-
-              <div class="mb-2">
-                <strong>Number of unique voters</strong>
-                —
-                {{ turnout_stats.participating_voter_count }} / {{ turnout_stats.eligible_voter_count }} ({{ turnout_stats.participating_voter_percent }}%)
-              </div>
-
-              <div class="progress mb-2">
-                <div
-                  class="progress-bar bg-success"
-                  role="progressbar"
-                  aria-valuenow="{{ turnout_stats.participating_voter_count }}"
-                  aria-valuemin="0"
-                  aria-valuemax="{{ turnout_stats.eligible_voter_count }}"
-                  style="width: {{ turnout_stats.participating_voter_percent }}%"
-                >
-                  <span class="sr-only">{{ turnout_stats.participating_voter_percent }}% Complete</span>
-                </div>
-              </div>
-
-              <div class="mb-2">
-                <strong>Votes cast</strong>
-                —
-                {{ turnout_stats.participating_vote_weight_total }} / {{ turnout_stats.eligible_vote_weight_total }} ({{ turnout_stats.participating_vote_weight_percent }}%)
-              </div>
-              <div class="progress mb-0">
-                <div
-                  class="progress-bar bg-info"
-                  role="progressbar"
-                  aria-valuenow="{{ turnout_stats.participating_vote_weight_total }}"
-                  aria-valuemin="0"
-                  aria-valuemax="{{ turnout_stats.eligible_vote_weight_total }}"
-                  style="width: {{ turnout_stats.participating_vote_weight_percent }}%"
-                >
-                  <span class="sr-only">{{ turnout_stats.participating_vote_weight_percent }}% Complete</span>
-                </div>
-              </div>
+              {% include 'core/_election_participation_stats.html' %}
             {% endif %}
           </div>
         </div>
@@ -365,58 +191,7 @@
             <div class="row">
               {% if election.status == 'open' %}
                 <div class="col-12 col-lg-4">
-                <div class="mb-3 text-muted">
-                    Quorum:
-                    {% if turnout_stats.quorum_required %}
-                      {{ turnout_stats.required_participating_voter_count }} voters and
-                      {{ turnout_stats.required_participating_vote_weight_total }} vote weight
-                      ({{ turnout_stats.quorum_percent }}%)
-                      {% if turnout_stats.quorum_met %}
-                        <span class="ml-1 badge badge-success">met</span>
-                      {% else %}
-                        <span class="ml-1 badge badge-danger">not met</span>
-                      {% endif %}
-                    {% else %}
-                      not required
-                    {% endif %}
-                  </div>
-
-                  <div class="mb-2">
-                    <strong>Number of unique voters</strong>
-                    —
-                    {{ turnout_stats.participating_voter_count }} / {{ turnout_stats.eligible_voter_count }} ({{ turnout_stats.participating_voter_percent }}%)
-                  </div>
-
-                  <div class="progress mb-2">
-                    <div
-                      class="progress-bar bg-success"
-                      role="progressbar"
-                      aria-valuenow="{{ turnout_stats.participating_voter_count }}"
-                      aria-valuemin="0"
-                      aria-valuemax="{{ turnout_stats.eligible_voter_count }}"
-                      style="width: {{ turnout_stats.participating_voter_percent }}%"
-                    >
-                      <span class="sr-only">{{ turnout_stats.participating_voter_percent }}% Complete</span>
-                    </div>
-                  </div>
-
-                  <div class="mb-2">
-                    <strong>Votes cast</strong>
-                    —
-                    {{ turnout_stats.participating_vote_weight_total }} / {{ turnout_stats.eligible_vote_weight_total }} ({{ turnout_stats.participating_vote_weight_percent }}%)
-                  </div>
-                  <div class="progress mb-0">
-                    <div
-                      class="progress-bar bg-info"
-                      role="progressbar"
-                      aria-valuenow="{{ turnout_stats.participating_vote_weight_total }}"
-                      aria-valuemin="0"
-                      aria-valuemax="{{ turnout_stats.eligible_vote_weight_total }}"
-                      style="width: {{ turnout_stats.participating_vote_weight_percent }}%"
-                    >
-                      <span class="sr-only">{{ turnout_stats.participating_vote_weight_percent }}% Complete</span>
-                    </div>
-                  </div>
+                  {% include 'core/_election_participation_stats.html' %}
                 </div>
               {% endif %}
 
@@ -514,7 +289,7 @@
             <li><strong>Why you can trust it:</strong> the tally is <strong>deterministic</strong> and produces a public audit trail. Independent observers can verify the final result using the published ballots ledger and audit log.</li>
           </ul>
 
-          {% if election.status == 'closed' or election.status == 'tallied' %}
+          {% if election_is_finished %}
             <p class="mb-2">For full details and verification artifacts, see the <a href="{% url 'election-audit-log' election.id %}"><strong>audit log</strong></a> and the downloadable <a href="{% url 'election-public-ballots' election.id %}"><strong>ballots ledger (JSON)</strong></a> and <a href="{% url 'election-public-audit' election.id %}"><strong>audit log (JSON)</strong></a>.</p>
           {% else %}
             <p class="mb-2">For full details and verification artifacts, the audit log and downloadable ballots ledger will be published when the election ends.</p>
@@ -533,32 +308,7 @@
 
             <div class="card-tools">
               <div class="js-card-search">
-                <form method="get" class="input-group input-group-sm" style="width: 220px;">
-                  <input
-                    type="text"
-                    name="eligible_q"
-                    class="form-control float-right"
-                    placeholder="Search users..."
-                    value="{{ eligible_q }}"
-                    aria-label="Search users"
-                  >
-                  <div class="input-group-append">
-                    {% if eligible_q %}
-                      <button
-                        type="button"
-                        class="btn btn-default"
-                        aria-label="Clear search"
-                        title="Clear search filter"
-                        onclick="var i=this.form.querySelector('input[name=\'eligible_q\']'); if(i){i.value='';} this.form.submit();"
-                      >
-                        <i class="fas fa-times"></i>
-                      </button>
-                    {% endif %}
-                    <button type="submit" class="btn btn-default" aria-label="Search" title="Search eligible voters">
-                      <i class="fas fa-search"></i>
-                    </button>
-                  </div>
-                </form>
+                {% include 'core/_search_form.html' with search_field_name="eligible_q" search_value=eligible_q search_placeholder="Search users..." search_aria_label="Search users" search_submit_title="Search eligible voters" %}
               </div>
 
               <button type="button" class="btn btn-tool" data-card-widget="collapse" title="Expand or collapse this section">
@@ -620,32 +370,7 @@
 
             <div class="card-tools">
               <div class="js-card-search">
-                <form method="get" class="input-group input-group-sm" style="width: 220px;">
-                  <input
-                    type="text"
-                    name="ineligible_q"
-                    class="form-control float-right"
-                    placeholder="Search users..."
-                    value="{{ ineligible_q }}"
-                    aria-label="Search users"
-                  >
-                  <div class="input-group-append">
-                    {% if ineligible_q %}
-                      <button
-                        type="button"
-                        class="btn btn-default"
-                        aria-label="Clear search"
-                        title="Clear search filter"
-                        onclick="var i=this.form.querySelector('input[name=\'ineligible_q\']'); if(i){i.value='';} this.form.submit();"
-                      >
-                        <i class="fas fa-times"></i>
-                      </button>
-                    {% endif %}
-                    <button type="submit" class="btn btn-default" aria-label="Search" title="Search ineligible voters">
-                      <i class="fas fa-search"></i>
-                    </button>
-                  </div>
-                </form>
+                {% include 'core/_search_form.html' with search_field_name="ineligible_q" search_value=ineligible_q search_placeholder="Search users..." search_aria_label="Search users" search_submit_title="Search ineligible voters" %}
               </div>
 
               <button type="button" class="btn btn-tool" data-card-widget="collapse" title="Expand or collapse this section">

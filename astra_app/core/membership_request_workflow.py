@@ -1,11 +1,12 @@
-from __future__ import annotations
-
+import dataclasses
 import datetime
 import logging
+from typing import Any
 
 import post_office.mail
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.db.models import QuerySet
 from django.utils import timezone
 from post_office.models import EmailTemplate
 
@@ -28,6 +29,79 @@ from core.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# MembershipTarget — encapsulates user-vs-org differences for workflow steps
+# ---------------------------------------------------------------------------
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class MembershipTarget:
+    """Resolved notification target for a membership request.
+
+    Encapsulates the user-vs-org differences so workflow functions can
+    operate on a single code path.
+    """
+
+    email: str
+    email_context: dict[str, object]
+    target_username: str
+    target_organization: Organization | None
+    target_organization_code: str
+    target_organization_name: str
+
+    @property
+    def log_kwargs(self) -> dict[str, object]:
+        """Keyword arguments for MembershipLog factory methods."""
+        kwargs: dict[str, object] = {"target_username": self.target_username}
+        if self.target_organization is not None:
+            kwargs["target_organization"] = self.target_organization
+        return kwargs
+
+
+def _build_membership_target(membership_request: MembershipRequest) -> MembershipTarget:
+    """Resolve the notification target from a membership request."""
+    if membership_request.requested_username:
+        user = FreeIPAUser.get(membership_request.requested_username)
+        return MembershipTarget(
+            email=user.email if user is not None else "",
+            email_context=user_email_context_from_user(user=user) if user is not None else {},
+            target_username=membership_request.requested_username,
+            target_organization=None,
+            target_organization_code="",
+            target_organization_name="",
+        )
+    org = membership_request.requested_organization
+    if org is not None:
+        org_email = _organization_notification_email(org)
+        return MembershipTarget(
+            email=org_email,
+            email_context={
+                **organization_sponsor_email_context(organization=org),
+                "organization_name": org.name,
+            },
+            target_username="",
+            target_organization=org,
+            target_organization_code=str(org.pk),
+            target_organization_name=org.name,
+        )
+    # Orphaned org request: org FK is None but code/name may exist on the request.
+    return MembershipTarget(
+        email="",
+        email_context={
+            "organization_name": membership_request.requested_organization_name or "",
+        },
+        target_username="",
+        target_organization=None,
+        target_organization_code=membership_request.requested_organization_code or "",
+        target_organization_name=membership_request.requested_organization_name or "",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 
 def _ensure_configured_email_template_exists(*, template_name: str) -> None:
@@ -72,80 +146,110 @@ def _organization_notification_email(organization: Organization) -> str:
     return organization.primary_contact_email()
 
 
+def _resolve_approval_template_name(
+    *, membership_type: MembershipType, override: str | None,
+) -> str:
+    """Resolve the email template for an approval notification."""
+    if override:
+        return override
+    if membership_type.acceptance_template_id is not None:
+        return membership_type.acceptance_template.name
+    return settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME
+
+
+def _try_add_note(
+    *,
+    membership_request: MembershipRequest,
+    username: str,
+    action: dict[str, Any],
+    log_prefix: str,
+) -> None:
+    """Persist an action note, logging and swallowing failures."""
+    try:
+        add_note(membership_request=membership_request, username=username, action=action)
+    except Exception:
+        logger.exception("%s: failed to record note request_id=%s", log_prefix, membership_request.pk)
+
+
+def _try_record_email_note(
+    *,
+    membership_request: MembershipRequest,
+    actor_username: str,
+    sent_email: object | None,
+    email_kind: str,
+    log_prefix: str,
+) -> None:
+    """Record a 'contacted' note if an email was successfully sent."""
+    email_id = _email_id_from_sent_email(sent_email)
+    if email_id is not None:
+        _try_add_note(
+            membership_request=membership_request,
+            username=actor_username,
+            action={"type": "contacted", "kind": email_kind, "email_id": email_id},
+            log_prefix=log_prefix,
+        )
+
+
+def _active_expires_at(queryset: QuerySet) -> datetime.datetime | None:
+    """Return expires_at if the first matching record is still valid, else None."""
+    current = queryset.first()
+    if current is None or current.expires_at is None:
+        return None
+    if current.expires_at <= timezone.now():
+        return None
+    return current.expires_at
+
+
+def _create_status_change_log(
+    *,
+    membership_request: MembershipRequest,
+    actor_username: str,
+    membership_type: MembershipType,
+    action: str,
+    rejection_reason: str = "",
+) -> MembershipLog:
+    """Create a MembershipLog for a status change, routing user vs org target."""
+    org = membership_request.requested_organization
+    # For requests with org code but no live FK, pass identifiers directly
+    # so _create_log records them in a single DB write.
+    org_code = ""
+    org_name = ""
+    if not membership_request.requested_username and org is None:
+        org_code = membership_request.requested_organization_code or ""
+        org_name = membership_request.requested_organization_name or ""
+    return MembershipLog._create_log(
+        actor_username=actor_username,
+        target_username=membership_request.requested_username,
+        target_organization=org,
+        target_organization_code=org_code,
+        target_organization_name=org_name,
+        membership_type=membership_type,
+        membership_request=membership_request,
+        action=action,
+        rejection_reason=rejection_reason,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+
 def previous_expires_at_for_extension(*, username: str, membership_type: MembershipType) -> datetime.datetime | None:
     """Return the expiry for an active membership if it can be extended.
 
     Only extend active memberships; if the current row is missing or already
     expired, return None so approval starts a new term.
     """
-
-    logger.debug(
-        "previous_expires_at_for_extension: start username=%r membership_type=%s",
-        username,
-        membership_type.code,
+    return _active_expires_at(
+        Membership.objects.filter(target_username=username, membership_type=membership_type)
     )
-
-    current = Membership.objects.filter(target_username=username, membership_type=membership_type).first()
-    if current is None or current.expires_at is None:
-        logger.debug(
-            "previous_expires_at_for_extension: no current membership (or expires_at missing) username=%r membership_type=%s",
-            username,
-            membership_type.code,
-        )
-        return None
-
-    now = timezone.now()
-    if current.expires_at <= now:
-        logger.debug(
-            "previous_expires_at_for_extension: expired username=%r membership_type=%s expires_at=%s now=%s",
-            username,
-            membership_type.code,
-            current.expires_at,
-            now,
-        )
-        return None
-
-    logger.debug(
-        "previous_expires_at_for_extension: extendable username=%r membership_type=%s expires_at=%s now=%s",
-        username,
-        membership_type.code,
-        current.expires_at,
-        now,
-    )
-    return current.expires_at
 
 
 def previous_expires_at_for_org_extension(*, organization_id: int) -> datetime.datetime | None:
-    logger.debug(
-        "previous_expires_at_for_org_extension: start organization_id=%s",
-        organization_id,
+    return _active_expires_at(
+        OrganizationSponsorship.objects.filter(organization_id=organization_id)
     )
-
-    current = OrganizationSponsorship.objects.filter(organization_id=organization_id).first()
-    if current is None or current.expires_at is None:
-        logger.debug(
-            "previous_expires_at_for_org_extension: no current sponsorship (or expires_at missing) organization_id=%s",
-            organization_id,
-        )
-        return None
-
-    now = timezone.now()
-    if current.expires_at <= now:
-        logger.debug(
-            "previous_expires_at_for_org_extension: expired organization_id=%s expires_at=%s now=%s",
-            organization_id,
-            current.expires_at,
-            now,
-        )
-        return None
-
-    logger.debug(
-        "previous_expires_at_for_org_extension: extendable organization_id=%s expires_at=%s now=%s",
-        organization_id,
-        current.expires_at,
-        now,
-    )
-    return current.expires_at
 
 
 def record_membership_request_created(
@@ -157,47 +261,26 @@ def record_membership_request_created(
     """Record the initial request audit log and optionally email the requester."""
 
     membership_type = membership_request.membership_type
+    log_prefix = "record_membership_request_created"
 
-    logger.debug(
-        "record_membership_request_created: start request_id=%s actor=%r membership_type=%s requested_username=%r requested_org_id=%s send_submitted_email=%s",
-        membership_request.pk,
-        actor_username,
-        membership_type.code,
-        membership_request.requested_username,
-        membership_request.requested_organization_id,
-        send_submitted_email,
+    _try_add_note(
+        membership_request=membership_request,
+        username=actor_username,
+        action={"type": "request_created"},
+        log_prefix=log_prefix,
     )
-
-    try:
-        add_note(
-            membership_request=membership_request,
-            username=actor_username,
-            action={"type": "request_created"},
-        )
-    except Exception:
-        # Notes are an additional durable timeline for committee review. Avoid
-        # failing the entire request flow if note persistence fails.
-        logger.exception(
-            "record_membership_request_created: failed to record action note request_id=%s",
-            membership_request.pk,
-        )
 
     if membership_request.requested_username:
         email_error: Exception | None = None
         sent_email = None
 
         if send_submitted_email:
-            logger.debug(
-                "record_membership_request_created: sending submitted email request_id=%s target=%r membership_type=%s",
-                membership_request.pk,
-                membership_request.requested_username,
-                membership_type.code,
-            )
             try:
                 target = FreeIPAUser.get(membership_request.requested_username)
             except Exception as e:
                 logger.exception(
-                    "record_membership_request_created: FreeIPAUser.get failed for submitted email request_id=%s target=%r",
+                    "%s: FreeIPAUser.get failed for submitted email request_id=%s target=%r",
+                    log_prefix,
                     membership_request.pk,
                     membership_request.requested_username,
                 )
@@ -219,46 +302,32 @@ def record_membership_request_created(
                         )
                     except Exception as e:
                         logger.exception(
-                            "record_membership_request_created: sending submitted email failed request_id=%s target=%r",
+                            "%s: sending submitted email failed request_id=%s target=%r",
+                            log_prefix,
                             membership_request.pk,
                             membership_request.requested_username,
                         )
                         email_error = e
-                else:
-                    logger.debug(
-                        "record_membership_request_created: submitted email skipped (missing email) request_id=%s target=%r",
-                        membership_request.pk,
-                        membership_request.requested_username,
-                    )
 
-        email_id = _email_id_from_sent_email(sent_email)
-        if email_id is not None:
-            try:
-                add_note(
-                    membership_request=membership_request,
-                    username=actor_username,
-                    action={
-                        "type": "contacted",
-                        "kind": "submitted",
-                        "email_id": email_id,
-                    },
-                )
-            except Exception:
-                logger.exception(
-                    "record_membership_request_created: failed to record email note request_id=%s",
-                    membership_request.pk,
-                )
+        _try_record_email_note(
+            membership_request=membership_request,
+            actor_username=actor_username,
+            sent_email=sent_email,
+            email_kind="submitted",
+            log_prefix=log_prefix,
+        )
 
         try:
-            log = MembershipLog.create_for_request(
-                actor_username=actor_username,
-                target_username=membership_request.requested_username,
-                membership_type=membership_type,
+            _create_status_change_log(
                 membership_request=membership_request,
+                actor_username=actor_username,
+                membership_type=membership_type,
+                action=MembershipLog.Action.requested,
             )
         except Exception:
             logger.exception(
-                "record_membership_request_created: failed to create requested log (user) request_id=%s actor=%r target=%r membership_type=%s",
+                "%s: failed to create requested log (user) request_id=%s actor=%r target=%r membership_type=%s",
+                log_prefix,
                 membership_request.pk,
                 actor_username,
                 membership_request.requested_username,
@@ -266,91 +335,27 @@ def record_membership_request_created(
             )
             raise
 
-        logger.debug(
-            "record_membership_request_created: created requested log log_id=%s request_id=%s target=%r membership_type=%s",
-            log.pk,
-            membership_request.pk,
-            membership_request.requested_username,
-            membership_type.code,
-        )
-
-        logger.debug(
-            "record_membership_request_created: done request_id=%s",
-            membership_request.pk,
-        )
-
         if email_error is not None:
             raise email_error
         return
 
-    # Organization request.
-    org = membership_request.requested_organization
-    if org is not None:
-        try:
-            log = MembershipLog.create_for_org_request(
-                actor_username=actor_username,
-                target_organization=org,
-                membership_type=membership_type,
-                membership_request=membership_request,
-            )
-        except Exception:
-            logger.exception(
-                "record_membership_request_created: failed to create requested log (org) request_id=%s actor=%r org_id=%s membership_type=%s",
-                membership_request.pk,
-                actor_username,
-                org.pk,
-                membership_type.code,
-            )
-            raise
-
-        logger.debug(
-            "record_membership_request_created: created requested log (org) log_id=%s request_id=%s org_id=%s membership_type=%s",
-            log.pk,
-            membership_request.pk,
-            org.pk,
-            membership_type.code,
-        )
-        logger.debug(
-            "record_membership_request_created: done request_id=%s",
-            membership_request.pk,
-        )
-        return
-
-    # A request can point to a non-existent org via requested_organization_code.
+    # Organization request (with or without live FK).
     try:
-        log = MembershipLog.objects.create(
-            actor_username=actor_username,
-            target_username="",
-            target_organization=None,
-            target_organization_code=membership_request.requested_organization_code,
-            target_organization_name=membership_request.requested_organization_name,
-            membership_type=membership_type,
+        _create_status_change_log(
             membership_request=membership_request,
-            requested_group_cn=membership_type.group_cn,
+            actor_username=actor_username,
+            membership_type=membership_type,
             action=MembershipLog.Action.requested,
-            expires_at=None,
         )
     except Exception:
         logger.exception(
-            "record_membership_request_created: failed to create requested log (org code) request_id=%s actor=%r org_code=%r membership_type=%s",
+            "%s: failed to create requested log (org) request_id=%s actor=%r membership_type=%s",
+            log_prefix,
             membership_request.pk,
             actor_username,
-            membership_request.requested_organization_code,
             membership_type.code,
         )
         raise
-
-    logger.debug(
-        "record_membership_request_created: created requested log (org code) log_id=%s request_id=%s org_code=%r membership_type=%s",
-        log.pk,
-        membership_request.pk,
-        membership_request.requested_organization_code,
-        membership_type.code,
-    )
-    logger.debug(
-        "record_membership_request_created: done request_id=%s",
-        membership_request.pk,
-    )
 
 
 def approve_membership_request(
@@ -369,37 +374,16 @@ def approve_membership_request(
 
     membership_type = membership_request.membership_type
     decided = decided_at or timezone.now()
-
-    logger.debug(
-        "approve_membership_request: start request_id=%s actor=%r membership_type=%s requested_username=%r requested_org_id=%s decided_at=%s send_approved_email=%s",
-        membership_request.pk,
-        actor_username,
-        membership_type.code,
-        membership_request.requested_username,
-        membership_request.requested_organization_id,
-        decided,
-        send_approved_email,
-    )
+    log_prefix = "approve_membership_request"
 
     if membership_request.status != MembershipRequest.Status.pending:
         raise ValidationError("Only pending requests can be approved")
 
-    if membership_request.requested_username == "":
+    if not membership_request.requested_username:
+        # --- Organization request path ---
         org = membership_request.requested_organization
         if org is None:
-            logger.debug(
-                "approve_membership_request: org not found request_id=%s org_code=%r",
-                membership_request.pk,
-                membership_request.requested_organization_code,
-            )
             raise ValidationError("Organization not found")
-
-        logger.debug(
-            "approve_membership_request: approving org request request_id=%s org_id=%s membership_type=%s",
-            membership_request.pk,
-            org.pk,
-            membership_type.code,
-        )
 
         if membership_type.group_cn and org.representative:
             missing_agreements = missing_required_agreements_for_user_in_group(
@@ -408,29 +392,22 @@ def approve_membership_request(
             )
             if missing_agreements:
                 missing_list = ", ".join(missing_agreements)
-                logger.warning(
-                    "approve_membership_request: missing required agreements (org) request_id=%s org_id=%s representative=%r missing=%s",
-                    membership_request.pk,
-                    org.pk,
-                    org.representative,
-                    missing_list,
-                )
                 raise ValidationError(
                     "Representative must sign required agreements before approval: "
                     f"{missing_list}"
                 )
 
-        org_email = _organization_notification_email(org)
-        sent_email = None
-        if send_approved_email and org_email:
-            template_name = settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME
-            if membership_type.acceptance_template_id is not None:
-                template_name = membership_type.acceptance_template.name
-            if approved_email_template_name:
-                template_name = approved_email_template_name
+        email_recipient = _organization_notification_email(org)
+
+        # Validate email template early (before FreeIPA side-effects).
+        template_name: str | None = None
+        if send_approved_email and email_recipient:
+            template_name = _resolve_approval_template_name(
+                membership_type=membership_type, override=approved_email_template_name,
+            )
             _ensure_configured_email_template_exists(template_name=template_name)
 
-        # This must be captured before any membership/sponsorship updates.
+        # Capture before any membership/sponsorship updates.
         previous_expires_at = previous_expires_at_for_org_extension(organization_id=org.pk)
 
         if membership_type.group_cn and org.representative:
@@ -438,34 +415,21 @@ def approve_membership_request(
                 representative = FreeIPAUser.get(org.representative)
             except Exception:
                 logger.exception(
-                    "approve_membership_request: FreeIPAUser.get failed (org representative) request_id=%s org_id=%s representative=%r",
+                    "%s: FreeIPAUser.get failed (org representative) request_id=%s org_id=%s representative=%r",
+                    log_prefix,
                     membership_request.pk,
                     org.pk,
                     org.representative,
                 )
                 raise
 
-            if representative is None:
-                logger.debug(
-                    "approve_membership_request: representative not found (org) request_id=%s org_id=%s representative=%r",
-                    membership_request.pk,
-                    org.pk,
-                    org.representative,
-                )
-            else:
-                logger.debug(
-                    "approve_membership_request: add_to_group start (org representative) request_id=%s org_id=%s representative=%r group_cn=%r",
-                    membership_request.pk,
-                    org.pk,
-                    representative.username,
-                    membership_type.group_cn,
-                )
-
+            if representative is not None:
                 try:
                     representative.add_to_group(group_name=membership_type.group_cn)
                 except Exception:
                     logger.exception(
-                        "approve_membership_request: add_to_group failed (org representative) request_id=%s org_id=%s representative=%r group_cn=%r",
+                        "%s: add_to_group failed (org representative) request_id=%s org_id=%s representative=%r group_cn=%r",
+                        log_prefix,
                         membership_request.pk,
                         org.pk,
                         representative.username,
@@ -473,350 +437,138 @@ def approve_membership_request(
                     )
                     raise
 
-                logger.debug(
-                    "approve_membership_request: add_to_group success (org representative) request_id=%s org_id=%s representative=%r group_cn=%r",
-                    membership_request.pk,
-                    org.pk,
-                    representative.username,
-                    membership_type.group_cn,
-                )
-
         org.membership_level = membership_type
-        try:
-            org.save(update_fields=["membership_level"])
-        except Exception:
-            logger.exception(
-                "approve_membership_request: failed to save org membership_level request_id=%s org_id=%s",
-                membership_request.pk,
-                org.pk,
-            )
-            raise
+        org.save(update_fields=["membership_level"])
 
-        membership_request.status = MembershipRequest.Status.approved
-        membership_request.decided_at = decided
-        membership_request.decided_by_username = actor_username
-        try:
-            membership_request.save(update_fields=["status", "decided_at", "decided_by_username"])
-        except Exception:
-            logger.exception(
-                "approve_membership_request: failed to update request status (org) request_id=%s org_id=%s",
-                membership_request.pk,
-                org.pk,
-            )
-            raise
-
-        if send_approved_email and org_email:
-            template_name = settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME
-            if membership_type.acceptance_template_id is not None:
-                template_name = membership_type.acceptance_template.name
-            if approved_email_template_name:
-                template_name = approved_email_template_name
-
-            logger.debug(
-                "approve_membership_request: sending approved email (org) request_id=%s org_id=%s membership_type=%s",
-                membership_request.pk,
-                org.pk,
-                membership_type.code,
-            )
-            try:
-                sent_email = post_office.mail.send(
-                    recipients=[org_email],
-                    sender=settings.DEFAULT_FROM_EMAIL,
-                    template=template_name,
-                    context={
-                        **organization_sponsor_email_context(organization=org),
-                        **membership_committee_email_context(),
-                        "organization_name": org.name,
-                        "membership_type": membership_type.name,
-                        "membership_type_code": membership_type.code,
-                    },
-                    headers={"Reply-To": settings.MEMBERSHIP_COMMITTEE_EMAIL},
-                )
-            except Exception:
-                logger.exception(
-                    "approve_membership_request: sending approved email failed (org) request_id=%s org_id=%s",
-                    membership_request.pk,
-                    org.pk,
-                )
-                raise
-        else:
-            logger.debug(
-                "approve_membership_request: approved email skipped (org) request_id=%s send_approved_email=%s has_email=%s",
-                membership_request.pk,
-                send_approved_email,
-                bool(org_email),
-            )
-
-        # Audit log must be the last step.
-        try:
-            log = MembershipLog.create_for_org_approval_at(
-                actor_username=actor_username,
-                target_organization=org,
-                membership_type=membership_type,
-                approved_at=decided,
-                previous_expires_at=previous_expires_at,
-                membership_request=membership_request,
-            )
-        except Exception:
-            logger.exception(
-                "approve_membership_request: failed to create org approval log request_id=%s org_id=%s membership_type=%s",
-                membership_request.pk,
-                org.pk,
-                membership_type.code,
-            )
-            raise
-
-        logger.debug(
-            "approve_membership_request: created org approval log log_id=%s request_id=%s org_id=%s membership_type=%s",
-            log.pk,
-            membership_request.pk,
-            org.pk,
-            membership_type.code,
+        email_context: dict[str, object] = (
+            {
+                **organization_sponsor_email_context(organization=org),
+                **membership_committee_email_context(),
+                "organization_name": org.name,
+                "membership_type": membership_type.name,
+                "membership_type_code": membership_type.code,
+            }
+            if template_name is not None
+            else {}
         )
+        log_kwargs: dict[str, object] = {"target_organization": org}
 
-        logger.debug(
-            "approve_membership_request: done (org) request_id=%s log_id=%s",
-            membership_request.pk,
-            log.pk,
-        )
+    else:
+        # --- User request path ---
+        if not membership_type.group_cn:
+            raise ValidationError("This membership type is not linked to a group")
 
-        try:
-            add_note(
-                membership_request=membership_request,
-                username=actor_username,
-                action={"type": "request_approved"},
-            )
-        except Exception:
-            logger.exception(
-                "approve_membership_request: failed to record action note (org) request_id=%s",
-                membership_request.pk,
-            )
-
-        email_id = _email_id_from_sent_email(sent_email)
-        if email_id is not None:
-            try:
-                add_note(
-                    membership_request=membership_request,
-                    username=actor_username,
-                    action={
-                        "type": "contacted",
-                        "kind": "approved",
-                        "email_id": email_id,
-                    },
-                )
-            except Exception:
-                logger.exception(
-                    "approve_membership_request: failed to record email note (org) request_id=%s",
-                    membership_request.pk,
-                )
-        return log
-
-    if not membership_type.group_cn:
-        logger.debug(
-            "approve_membership_request: missing group_cn request_id=%s membership_type=%s",
-            membership_request.pk,
-            membership_type.code,
-        )
-        raise ValidationError("This membership type is not linked to a group")
-
-    logger.debug(
-        "approve_membership_request: approving user request request_id=%s target=%r group_cn=%r membership_type=%s",
-        membership_request.pk,
-        membership_request.requested_username,
-        membership_type.group_cn,
-        membership_type.code,
-    )
-
-    missing_agreements = missing_required_agreements_for_user_in_group(
-        membership_request.requested_username,
-        membership_type.group_cn,
-    )
-    if missing_agreements:
-        missing_list = ", ".join(missing_agreements)
-        logger.warning(
-            "approve_membership_request: missing required agreements request_id=%s target=%r missing=%s",
-            membership_request.pk,
+        missing_agreements = missing_required_agreements_for_user_in_group(
             membership_request.requested_username,
-            missing_list,
-        )
-        raise ValidationError(
-            "User must sign required agreements before approval: "
-            f"{missing_list}"
-        )
-
-    try:
-        target = FreeIPAUser.get(membership_request.requested_username)
-    except Exception:
-        logger.exception(
-            "approve_membership_request: FreeIPAUser.get failed request_id=%s target=%r",
-            membership_request.pk,
-            membership_request.requested_username,
-        )
-        raise
-    if target is None:
-        logger.debug(
-            "approve_membership_request: requested user not found request_id=%s target=%r",
-            membership_request.pk,
-            membership_request.requested_username,
-        )
-        raise ValidationError("Unable to load the requested user from FreeIPA")
-
-    sent_email = None
-    if send_approved_email and target.email:
-        template_name = settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME
-        if membership_type.acceptance_template_id is not None:
-            template_name = membership_type.acceptance_template.name
-        if approved_email_template_name:
-            template_name = approved_email_template_name
-        _ensure_configured_email_template_exists(template_name=template_name)
-
-    logger.debug(
-        "approve_membership_request: add_to_group start request_id=%s target=%r group_cn=%r",
-        membership_request.pk,
-        target.username,
-        membership_type.group_cn,
-    )
-
-    # This must be captured before adding the user to the group.
-    previous_expires_at = previous_expires_at_for_extension(
-        username=membership_request.requested_username,
-        membership_type=membership_type,
-    )
-    try:
-        target.add_to_group(group_name=membership_type.group_cn)
-    except Exception:
-        logger.exception(
-            "approve_membership_request: add_to_group failed request_id=%s target=%r group_cn=%r",
-            membership_request.pk,
-            target.username,
             membership_type.group_cn,
         )
-        raise
+        if missing_agreements:
+            missing_list = ", ".join(missing_agreements)
+            raise ValidationError(
+                "User must sign required agreements before approval: "
+                f"{missing_list}"
+            )
 
-    logger.debug(
-        "approve_membership_request: add_to_group success request_id=%s target=%r group_cn=%r",
-        membership_request.pk,
-        target.username,
-        membership_type.group_cn,
-    )
+        try:
+            user = FreeIPAUser.get(membership_request.requested_username)
+        except Exception:
+            logger.exception(
+                "%s: FreeIPAUser.get failed request_id=%s target=%r",
+                log_prefix,
+                membership_request.pk,
+                membership_request.requested_username,
+            )
+            raise
+        if user is None:
+            raise ValidationError("Unable to load the requested user from FreeIPA")
+
+        email_recipient = user.email
+
+        # Validate email template early (before FreeIPA side-effects).
+        template_name = None
+        if send_approved_email and email_recipient:
+            template_name = _resolve_approval_template_name(
+                membership_type=membership_type, override=approved_email_template_name,
+            )
+            _ensure_configured_email_template_exists(template_name=template_name)
+
+        # Capture before adding the user to the group.
+        previous_expires_at = previous_expires_at_for_extension(
+            username=membership_request.requested_username,
+            membership_type=membership_type,
+        )
+        try:
+            user.add_to_group(group_name=membership_type.group_cn)
+        except Exception:
+            logger.exception(
+                "%s: add_to_group failed request_id=%s target=%r group_cn=%r",
+                log_prefix,
+                membership_request.pk,
+                user.username,
+                membership_type.group_cn,
+            )
+            raise
+
+        email_context = (
+            {
+                **user_email_context_from_user(user=user),
+                **membership_committee_email_context(),
+                "membership_type": membership_type.name,
+                "membership_type_code": membership_type.code,
+                "group_cn": membership_type.group_cn,
+            }
+            if template_name is not None
+            else {}
+        )
+        log_kwargs = {"target_username": membership_request.requested_username}
+
+    # --- Common approval tail: status update, email, log, notes ---
 
     membership_request.status = MembershipRequest.Status.approved
     membership_request.decided_at = decided
     membership_request.decided_by_username = actor_username
-    try:
-        membership_request.save(update_fields=["status", "decided_at", "decided_by_username"])
-    except Exception:
-        logger.exception(
-            "approve_membership_request: failed to update request status (user) request_id=%s target=%r",
-            membership_request.pk,
-            membership_request.requested_username,
-        )
-        raise
+    membership_request.save(update_fields=["status", "decided_at", "decided_by_username"])
 
-    if send_approved_email and target.email:
-        template_name = settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME
-        if membership_type.acceptance_template_id is not None:
-            template_name = membership_type.acceptance_template.name
-        if approved_email_template_name:
-            template_name = approved_email_template_name
-
-        logger.debug(
-            "approve_membership_request: sending approved email request_id=%s target=%r membership_type=%s",
-            membership_request.pk,
-            target.username,
-            membership_type.code,
-        )
+    sent_email = None
+    if template_name is not None:
         try:
             sent_email = post_office.mail.send(
-                recipients=[target.email],
+                recipients=[email_recipient],
                 sender=settings.DEFAULT_FROM_EMAIL,
                 template=template_name,
-                context={
-                    **user_email_context_from_user(user=target),
-                    **membership_committee_email_context(),
-                    "membership_type": membership_type.name,
-                    "membership_type_code": membership_type.code,
-                    "group_cn": membership_type.group_cn,
-                },
+                context=email_context,
                 headers={"Reply-To": settings.MEMBERSHIP_COMMITTEE_EMAIL},
             )
         except Exception:
             logger.exception(
-                "approve_membership_request: sending approved email failed request_id=%s target=%r",
+                "%s: sending approved email failed request_id=%s",
+                log_prefix,
                 membership_request.pk,
-                target.username,
             )
             raise
-    else:
-        logger.debug(
-            "approve_membership_request: approved email skipped request_id=%s send_approved_email=%s has_email=%s",
-            membership_request.pk,
-            send_approved_email,
-            bool(target.email),
-        )
 
-    # Audit log must be the last step.
-    try:
-        log = MembershipLog.create_for_approval_at(
-            actor_username=actor_username,
-            target_username=membership_request.requested_username,
-            membership_type=membership_type,
-            approved_at=decided,
-            previous_expires_at=previous_expires_at,
-            membership_request=membership_request,
-        )
-    except Exception:
-        logger.exception(
-            "approve_membership_request: failed to create approval log request_id=%s target=%r membership_type=%s",
-            membership_request.pk,
-            membership_request.requested_username,
-            membership_type.code,
-        )
-        raise
-
-    logger.debug(
-        "approve_membership_request: created approval log log_id=%s request_id=%s target=%r membership_type=%s",
-        log.pk,
-        membership_request.pk,
-        membership_request.requested_username,
-        membership_type.code,
+    log = MembershipLog.create_for_approval_at(
+        actor_username=actor_username,
+        membership_type=membership_type,
+        approved_at=decided,
+        previous_expires_at=previous_expires_at,
+        membership_request=membership_request,
+        **log_kwargs,
     )
 
-    logger.debug(
-        "approve_membership_request: done (user) request_id=%s log_id=%s",
-        membership_request.pk,
-        log.pk,
+    _try_add_note(
+        membership_request=membership_request,
+        username=actor_username,
+        action={"type": "request_approved"},
+        log_prefix=log_prefix,
     )
-
-    try:
-        add_note(
-            membership_request=membership_request,
-            username=actor_username,
-            action={"type": "request_approved"},
-        )
-    except Exception:
-        logger.exception(
-            "approve_membership_request: failed to record action note (user) request_id=%s",
-            membership_request.pk,
-        )
-
-    email_id = _email_id_from_sent_email(sent_email)
-    if email_id is not None:
-        try:
-            add_note(
-                membership_request=membership_request,
-                username=actor_username,
-                action={
-                    "type": "contacted",
-                    "kind": "approved",
-                    "email_id": email_id,
-                },
-            )
-        except Exception:
-            logger.exception(
-                "approve_membership_request: failed to record email note (user) request_id=%s",
-                membership_request.pk,
-            )
+    _try_record_email_note(
+        membership_request=membership_request,
+        actor_username=actor_username,
+        sent_email=sent_email,
+        email_kind="approved",
+        log_prefix=log_prefix,
+    )
 
     return log
 
@@ -831,6 +583,7 @@ def reject_membership_request(
 ) -> tuple[MembershipLog, Exception | None]:
     membership_type = membership_request.membership_type
     decided = decided_at or timezone.now()
+    log_prefix = "reject_membership_request"
 
     if membership_request.status not in {MembershipRequest.Status.pending, MembershipRequest.Status.on_hold}:
         raise ValidationError("Only pending or on-hold requests can be rejected")
@@ -848,115 +601,25 @@ def reject_membership_request(
         responses.append({"Rejection reason": reason})
         membership_request.responses = responses
 
-    email_error: Exception | None = None
-
-    if membership_request.requested_username == "":
-        org = membership_request.requested_organization
-
-        membership_request.status = MembershipRequest.Status.rejected
-        membership_request.decided_at = decided
-        membership_request.decided_by_username = actor_username
-        membership_request.save(update_fields=["responses", "status", "decided_at", "decided_by_username"])
-
-        org_email = _organization_notification_email(org) if org is not None else ""
-        sent_email = None
-        if send_rejected_email and org_email:
-            try:
-                sent_email = post_office.mail.send(
-                    recipients=[org_email],
-                    sender=settings.DEFAULT_FROM_EMAIL,
-                    template=settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME,
-                    context={
-                        **(organization_sponsor_email_context(organization=org) if org is not None else {}),
-                        **membership_committee_email_context(),
-                        **freeform_message_email_context(key="rejection_reason", value=reason),
-                        "organization_name": org.name if org is not None else (membership_request.requested_organization_name or ""),
-                        "membership_type": membership_type.name,
-                        "membership_type_code": membership_type.code,
-                    },
-                    headers={"Reply-To": settings.MEMBERSHIP_COMMITTEE_EMAIL},
-                )
-            except Exception as e:
-                logger.exception(
-                    "reject_membership_request: sending rejected email failed (org) request_id=%s org_id=%s",
-                    membership_request.pk,
-                    org.pk if org is not None else None,
-                )
-                email_error = e
-
-        if org is not None:
-            log = MembershipLog.create_for_org_rejection(
-                actor_username=actor_username,
-                target_organization=org,
-                membership_type=membership_type,
-                rejection_reason=reason,
-                membership_request=membership_request,
-            )
-        else:
-            log = MembershipLog.objects.create(
-                actor_username=actor_username,
-                target_username="",
-                target_organization=None,
-                target_organization_code=membership_request.requested_organization_code,
-                target_organization_name=membership_request.requested_organization_name,
-                membership_type=membership_type,
-                membership_request=membership_request,
-                requested_group_cn=membership_type.group_cn,
-                action=MembershipLog.Action.rejected,
-                rejection_reason=reason,
-                expires_at=None,
-            )
-
-        try:
-            add_note(
-                membership_request=membership_request,
-                username=actor_username,
-                action={"type": "request_rejected"},
-            )
-        except Exception:
-            logger.exception(
-                "reject_membership_request: failed to record action note (org) request_id=%s",
-                membership_request.pk,
-            )
-
-        email_id = _email_id_from_sent_email(sent_email)
-        if email_id is not None:
-            try:
-                add_note(
-                    membership_request=membership_request,
-                    username=actor_username,
-                    action={
-                        "type": "contacted",
-                        "kind": "rejected",
-                        "email_id": email_id,
-                    },
-                )
-            except Exception:
-                logger.exception(
-                    "reject_membership_request: failed to record email note (org) request_id=%s",
-                    membership_request.pk,
-                )
-
-        return log, email_error
-
-    target = FreeIPAUser.get(membership_request.requested_username)
+    target = _build_membership_target(membership_request)
 
     membership_request.status = MembershipRequest.Status.rejected
     membership_request.decided_at = decided
     membership_request.decided_by_username = actor_username
     membership_request.save(update_fields=["responses", "status", "decided_at", "decided_by_username"])
 
+    email_error: Exception | None = None
     sent_email = None
-    if send_rejected_email and target is not None and target.email:
+    if send_rejected_email and target.email:
         try:
             sent_email = post_office.mail.send(
                 recipients=[target.email],
                 sender=settings.DEFAULT_FROM_EMAIL,
                 template=settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME,
                 context={
-                    **user_email_context_from_user(user=target),
-                    **freeform_message_email_context(key="rejection_reason", value=reason),
+                    **target.email_context,
                     **membership_committee_email_context(),
+                    **freeform_message_email_context(key="rejection_reason", value=reason),
                     "membership_type": membership_type.name,
                     "membership_type_code": membership_type.code,
                 },
@@ -964,49 +627,33 @@ def reject_membership_request(
             )
         except Exception as e:
             logger.exception(
-                "reject_membership_request: sending rejected email failed (user) request_id=%s target=%r",
+                "%s: sending rejected email failed request_id=%s",
+                log_prefix,
                 membership_request.pk,
-                membership_request.requested_username,
             )
             email_error = e
 
-    log = MembershipLog.create_for_rejection(
-        actor_username=actor_username,
-        target_username=membership_request.requested_username,
-        membership_type=membership_type,
-        rejection_reason=reason,
+    log = _create_status_change_log(
         membership_request=membership_request,
+        actor_username=actor_username,
+        membership_type=membership_type,
+        action=MembershipLog.Action.rejected,
+        rejection_reason=reason,
     )
 
-    try:
-        add_note(
-            membership_request=membership_request,
-            username=actor_username,
-            action={"type": "request_rejected"},
-        )
-    except Exception:
-        logger.exception(
-            "reject_membership_request: failed to record action note (user) request_id=%s",
-            membership_request.pk,
-        )
-
-    email_id = _email_id_from_sent_email(sent_email)
-    if email_id is not None:
-        try:
-            add_note(
-                membership_request=membership_request,
-                username=actor_username,
-                action={
-                    "type": "contacted",
-                    "kind": "rejected",
-                    "email_id": email_id,
-                },
-            )
-        except Exception:
-            logger.exception(
-                "reject_membership_request: failed to record email note (user) request_id=%s",
-                membership_request.pk,
-            )
+    _try_add_note(
+        membership_request=membership_request,
+        username=actor_username,
+        action={"type": "request_rejected"},
+        log_prefix=log_prefix,
+    )
+    _try_record_email_note(
+        membership_request=membership_request,
+        actor_username=actor_username,
+        sent_email=sent_email,
+        email_kind="rejected",
+        log_prefix=log_prefix,
+    )
     return log, email_error
 
 
@@ -1018,6 +665,7 @@ def ignore_membership_request(
 ) -> MembershipLog:
     membership_type = membership_request.membership_type
     decided = decided_at or timezone.now()
+    log_prefix = "ignore_membership_request"
 
     if membership_request.status not in {MembershipRequest.Status.pending, MembershipRequest.Status.on_hold}:
         raise ValidationError("Only pending or on-hold requests can be ignored")
@@ -1027,75 +675,19 @@ def ignore_membership_request(
     membership_request.decided_by_username = actor_username
     membership_request.save(update_fields=["status", "decided_at", "decided_by_username"])
 
-    if membership_request.requested_username == "":
-        org = membership_request.requested_organization
-        if org is not None:
-            log = MembershipLog.create_for_org_ignore(
-                actor_username=actor_username,
-                target_organization=org,
-                membership_type=membership_type,
-                membership_request=membership_request,
-            )
-
-            try:
-                add_note(
-                    membership_request=membership_request,
-                    username=actor_username,
-                    action={"type": "request_ignored"},
-                )
-            except Exception:
-                logger.exception(
-                    "ignore_membership_request: failed to record action note (org) request_id=%s",
-                    membership_request.pk,
-                )
-
-            return log
-
-        log = MembershipLog.objects.create(
-            actor_username=actor_username,
-            target_username="",
-            target_organization=None,
-            target_organization_code=membership_request.requested_organization_code,
-            target_organization_name=membership_request.requested_organization_name,
-            membership_type=membership_type,
-            membership_request=membership_request,
-            requested_group_cn=membership_type.group_cn,
-            action=MembershipLog.Action.ignored,
-            expires_at=None,
-        )
-
-        try:
-            add_note(
-                membership_request=membership_request,
-                username=actor_username,
-                action={"type": "request_ignored"},
-            )
-        except Exception:
-            logger.exception(
-                "ignore_membership_request: failed to record action note (org code) request_id=%s",
-                membership_request.pk,
-            )
-
-        return log
-
-    log = MembershipLog.create_for_ignore(
-        actor_username=actor_username,
-        target_username=membership_request.requested_username,
-        membership_type=membership_type,
+    log = _create_status_change_log(
         membership_request=membership_request,
+        actor_username=actor_username,
+        membership_type=membership_type,
+        action=MembershipLog.Action.ignored,
     )
 
-    try:
-        add_note(
-            membership_request=membership_request,
-            username=actor_username,
-            action={"type": "request_ignored"},
-        )
-    except Exception:
-        logger.exception(
-            "ignore_membership_request: failed to record action note (user) request_id=%s",
-            membership_request.pk,
-        )
+    _try_add_note(
+        membership_request=membership_request,
+        username=actor_username,
+        action={"type": "request_ignored"},
+        log_prefix=log_prefix,
+    )
 
     return log
 
@@ -1117,6 +709,7 @@ def put_membership_request_on_hold(
 
     membership_type = membership_request.membership_type
     now = held_at or timezone.now()
+    log_prefix = "put_membership_request_on_hold"
 
     if membership_request.status != MembershipRequest.Status.pending:
         raise ValidationError("Only pending requests can be put on hold")
@@ -1127,129 +720,54 @@ def put_membership_request_on_hold(
     membership_request.on_hold_at = now
     membership_request.save(update_fields=["status", "on_hold_at"])
 
+    target = _build_membership_target(membership_request)
+
     email_error: Exception | None = None
-
-    if membership_request.requested_username == "":
-        org = membership_request.requested_organization
-        representative_username = org.representative if org is not None else ""
-        representative = FreeIPAUser.get(representative_username) if representative_username else None
-
-        recipient_email = ""
-        user_context: dict[str, str] = {}
-        if representative is not None and representative.email:
-            recipient_email = representative.email
-            user_context = user_email_context_from_user(user=representative)
-        elif org is not None:
-            recipient_email = org.primary_contact_email()
-
-        sent_email = None
-        if send_rfi_email and recipient_email:
-            try:
-                sent_email = post_office.mail.send(
-                    recipients=[recipient_email],
-                    sender=settings.DEFAULT_FROM_EMAIL,
-                    template=settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME,
-                    context={
-                        **user_context,
-                        **(organization_sponsor_email_context(organization=org) if org is not None else {}),
-                        **freeform_message_email_context(key="rfi_message", value=message),
-                        **membership_committee_email_context(),
-                        "organization_name": org.name if org is not None else (membership_request.requested_organization_name or ""),
-                        "membership_type": membership_type.name,
-                        "membership_type_code": membership_type.code,
-                        "application_url": application_url,
-                    },
-                    headers={"Reply-To": settings.MEMBERSHIP_COMMITTEE_EMAIL},
-                )
-            except Exception as e:
-                logger.exception(
-                    "put_membership_request_on_hold: sending RFI email failed (org) request_id=%s org_id=%s rep=%r",
-                    membership_request.pk,
-                    org.pk if org is not None else None,
-                    representative_username,
-                )
-                email_error = e
-
-        log = MembershipLog.objects.create(
-            actor_username=actor_username,
-            target_username="",
-            target_organization=org,
-            target_organization_code=str(org.pk) if org is not None else (membership_request.requested_organization_code or ""),
-            target_organization_name=org.name if org is not None else (membership_request.requested_organization_name or ""),
-            membership_type=membership_type,
-            membership_request=membership_request,
-            requested_group_cn=membership_type.group_cn,
-            action=MembershipLog.Action.on_hold,
-            expires_at=None,
-        )
-    else:
-        target = FreeIPAUser.get(membership_request.requested_username)
-        sent_email = None
-        if send_rfi_email and target is not None and target.email:
-            try:
-                sent_email = post_office.mail.send(
-                    recipients=[target.email],
-                    sender=settings.DEFAULT_FROM_EMAIL,
-                    template=settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME,
-                    context={
-                        **user_email_context_from_user(user=target),
-                        **freeform_message_email_context(key="rfi_message", value=message),
-                        **membership_committee_email_context(),
-                        "membership_type": membership_type.name,
-                        "membership_type_code": membership_type.code,
-                        "application_url": application_url,
-                    },
-                    headers={"Reply-To": settings.MEMBERSHIP_COMMITTEE_EMAIL},
-                )
-            except Exception as e:
-                logger.exception(
-                    "put_membership_request_on_hold: sending RFI email failed (user) request_id=%s target=%r",
-                    membership_request.pk,
-                    membership_request.requested_username,
-                )
-                email_error = e
-
-        log = MembershipLog.objects.create(
-            actor_username=actor_username,
-            target_username=membership_request.requested_username,
-            target_organization=None,
-            target_organization_code="",
-            target_organization_name="",
-            membership_type=membership_type,
-            membership_request=membership_request,
-            requested_group_cn=membership_type.group_cn,
-            action=MembershipLog.Action.on_hold,
-        )
-
-    try:
-        add_note(
-            membership_request=membership_request,
-            username=actor_username,
-            action={"type": "request_on_hold"},
-        )
-    except Exception:
-        logger.exception(
-            "put_membership_request_on_hold: failed to record action note request_id=%s",
-            membership_request.pk,
-        )
-
-    email_id = _email_id_from_sent_email(sent_email)
-    if email_id is not None:
+    sent_email = None
+    if send_rfi_email and target.email:
         try:
-            add_note(
-                membership_request=membership_request,
-                username=actor_username,
-                action={
-                    "type": "contacted",
-                    "kind": "rfi",
-                    "email_id": email_id,
+            sent_email = post_office.mail.send(
+                recipients=[target.email],
+                sender=settings.DEFAULT_FROM_EMAIL,
+                template=settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME,
+                context={
+                    **target.email_context,
+                    **freeform_message_email_context(key="rfi_message", value=message),
+                    **membership_committee_email_context(),
+                    "membership_type": membership_type.name,
+                    "membership_type_code": membership_type.code,
+                    "application_url": application_url,
                 },
+                headers={"Reply-To": settings.MEMBERSHIP_COMMITTEE_EMAIL},
             )
-        except Exception:
+        except Exception as e:
             logger.exception(
-                "put_membership_request_on_hold: failed to record email note request_id=%s",
+                "%s: sending RFI email failed request_id=%s",
+                log_prefix,
                 membership_request.pk,
             )
+            email_error = e
+
+    log = _create_status_change_log(
+        membership_request=membership_request,
+        actor_username=actor_username,
+        membership_type=membership_type,
+        action=MembershipLog.Action.on_hold,
+    )
+
+    _try_add_note(
+        membership_request=membership_request,
+        username=actor_username,
+        action={"type": "request_on_hold"},
+        log_prefix=log_prefix,
+    )
+    _try_record_email_note(
+        membership_request=membership_request,
+        actor_username=actor_username,
+        sent_email=sent_email,
+        email_kind="rfi",
+        log_prefix=log_prefix,
+    )
 
     return log, email_error
 
@@ -1286,45 +804,19 @@ def resubmit_membership_request(
     membership_request.on_hold_at = None
     membership_request.save(update_fields=["responses", "status", "on_hold_at"])
 
-    membership_type = membership_request.membership_type
-    if membership_request.requested_username == "":
-        org = membership_request.requested_organization
-        log = MembershipLog.objects.create(
-            actor_username=actor_username,
-            target_username="",
-            target_organization=org,
-            target_organization_code=str(org.pk) if org is not None else (membership_request.requested_organization_code or ""),
-            target_organization_name=org.name if org is not None else (membership_request.requested_organization_name or ""),
-            membership_type=membership_type,
-            membership_request=membership_request,
-            requested_group_cn=membership_type.group_cn,
-            action=MembershipLog.Action.resubmitted,
-            expires_at=None,
-        )
-    else:
-        log = MembershipLog.objects.create(
-            actor_username=actor_username,
-            target_username=membership_request.requested_username,
-            target_organization=None,
-            target_organization_code="",
-            target_organization_name="",
-            membership_type=membership_type,
-            membership_request=membership_request,
-            requested_group_cn=membership_type.group_cn,
-            action=MembershipLog.Action.resubmitted,
-        )
+    log = _create_status_change_log(
+        membership_request=membership_request,
+        actor_username=actor_username,
+        membership_type=membership_request.membership_type,
+        action=MembershipLog.Action.resubmitted,
+    )
 
-    try:
-        add_note(
-            membership_request=membership_request,
-            username=actor_username,
-            action={"type": "request_resubmitted"},
-        )
-    except Exception:
-        logger.exception(
-            "resubmit_membership_request: failed to record action note request_id=%s",
-            membership_request.pk,
-        )
+    _try_add_note(
+        membership_request=membership_request,
+        username=actor_username,
+        action={"type": "request_resubmitted"},
+        log_prefix="resubmit_membership_request",
+    )
 
     return log
 
@@ -1347,44 +839,18 @@ def rescind_membership_request(
     membership_request.decided_by_username = actor_username
     membership_request.save(update_fields=["status", "decided_at", "decided_by_username"])
 
-    membership_type = membership_request.membership_type
-    if membership_request.requested_username == "":
-        org = membership_request.requested_organization
-        log = MembershipLog.objects.create(
-            actor_username=actor_username,
-            target_username="",
-            target_organization=org,
-            target_organization_code=str(org.pk) if org is not None else (membership_request.requested_organization_code or ""),
-            target_organization_name=org.name if org is not None else (membership_request.requested_organization_name or ""),
-            membership_type=membership_type,
-            membership_request=membership_request,
-            requested_group_cn=membership_type.group_cn,
-            action=MembershipLog.Action.rescinded,
-            expires_at=None,
-        )
-    else:
-        log = MembershipLog.objects.create(
-            actor_username=actor_username,
-            target_username=membership_request.requested_username,
-            target_organization=None,
-            target_organization_code="",
-            target_organization_name="",
-            membership_type=membership_type,
-            membership_request=membership_request,
-            requested_group_cn=membership_type.group_cn,
-            action=MembershipLog.Action.rescinded,
-        )
+    log = _create_status_change_log(
+        membership_request=membership_request,
+        actor_username=actor_username,
+        membership_type=membership_request.membership_type,
+        action=MembershipLog.Action.rescinded,
+    )
 
-    try:
-        add_note(
-            membership_request=membership_request,
-            username=actor_username,
-            action={"type": "request_rescinded"},
-        )
-    except Exception:
-        logger.exception(
-            "rescind_membership_request: failed to record action note request_id=%s",
-            membership_request.pk,
-        )
+    _try_add_note(
+        membership_request=membership_request,
+        username=actor_username,
+        action={"type": "request_rescinded"},
+        log_prefix="rescind_membership_request",
+    )
 
     return log

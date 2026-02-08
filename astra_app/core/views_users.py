@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import datetime
 import logging
 from urllib.parse import quote
@@ -20,13 +18,14 @@ from core.agreements import (
 )
 from core.backends import FreeIPAGroup, FreeIPAUser
 from core.country_codes import country_code_status_from_user_data
+from core.ipa_user_attrs import _data_get, _first, _get_full_user, _value_to_text
 from core.membership import (
     get_extendable_membership_type_codes_for_username,
     get_valid_membership_type_codes_for_username,
     get_valid_memberships_for_username,
 )
 from core.models import MembershipLog, MembershipRequest, MembershipType
-from core.views_utils import _data_get, _first, _get_full_user, _normalize_str, _value_to_text
+from core.views_utils import _normalize_str, get_username
 
 logger = logging.getLogger(__name__)
 
@@ -396,7 +395,7 @@ def _profile_context_for_user(
 
 
 def home(request: HttpRequest) -> HttpResponse:
-    username = _normalize_str(request.user.get_username())
+    username = get_username(request)
     if not username:
         messages.error(request, "Unable to determine your username.")
         return redirect("login")
@@ -408,7 +407,7 @@ def user_profile(request: HttpRequest, username: str) -> HttpResponse:
     if not username:
         raise Http404("User not found")
 
-    viewer_username = _normalize_str(request.user.get_username())
+    viewer_username = get_username(request)
     logger.debug("User profile view: username=%s viewer=%s", username, viewer_username)
 
     fu = _get_full_user(username)

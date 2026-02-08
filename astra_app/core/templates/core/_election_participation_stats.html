@@ -1,0 +1,56 @@
+{# Reusable participation statistics block for elections. #}
+{# Expects: turnout_stats, stats_label (optional, default: "Participation") #}
+{% if turnout_stats %}
+  <div class="mb-3 text-muted">
+    Quorum:
+    {% if turnout_stats.quorum_required %}
+      {{ turnout_stats.required_participating_voter_count }} voters and
+      {{ turnout_stats.required_participating_vote_weight_total }} vote weight
+      ({{ turnout_stats.quorum_percent }}%)
+      {% if turnout_stats.quorum_met %}
+        <span class="ml-1 badge badge-success">met</span>
+      {% else %}
+        <span class="ml-1 badge badge-danger">not met</span>
+      {% endif %}
+    {% else %}
+      not required
+    {% endif %}
+  </div>
+
+  <div class="mb-2">
+    <strong>Number of unique voters</strong>
+    &mdash;
+    {{ turnout_stats.participating_voter_count }} / {{ turnout_stats.eligible_voter_count }} ({{ turnout_stats.participating_voter_percent }}%)
+  </div>
+
+  <div class="progress mb-2">
+    <div
+      class="progress-bar bg-success"
+      role="progressbar"
+      aria-valuenow="{{ turnout_stats.participating_voter_count }}"
+      aria-valuemin="0"
+      aria-valuemax="{{ turnout_stats.eligible_voter_count }}"
+      style="width: {{ turnout_stats.participating_voter_percent }}%"
+    >
+      <span class="sr-only">{{ turnout_stats.participating_voter_percent }}% Complete</span>
+    </div>
+  </div>
+
+  <div class="mb-2">
+    <strong>Votes cast</strong>
+    &mdash;
+    {{ turnout_stats.participating_vote_weight_total }} / {{ turnout_stats.eligible_vote_weight_total }} ({{ turnout_stats.participating_vote_weight_percent }}%)
+  </div>
+  <div class="progress mb-0">
+    <div
+      class="progress-bar bg-info"
+      role="progressbar"
+      aria-valuenow="{{ turnout_stats.participating_vote_weight_total }}"
+      aria-valuemin="0"
+      aria-valuemax="{{ turnout_stats.eligible_vote_weight_total }}"
+      style="width: {{ turnout_stats.participating_vote_weight_percent }}%"
+    >
+      <span class="sr-only">{{ turnout_stats.participating_vote_weight_percent }}% Complete</span>
+    </div>
+  </div>
+{% endif %}

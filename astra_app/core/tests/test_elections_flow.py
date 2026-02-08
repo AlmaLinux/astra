@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 import datetime
 import json
@@ -317,7 +316,7 @@ class ElectionBulkCredentialIssuanceTests(TestCase):
         m5 = Membership.objects.create(target_username="dave", membership_type=nonvoter, expires_at=None)
         Membership.objects.filter(pk=m5.pk).update(created_at=eligible_created_at)
 
-        affected = issue_voting_credentials_from_memberships(election=election)
+        affected = len(issue_voting_credentials_from_memberships(election=election))
         self.assertEqual(affected, 1)
         self.assertEqual(VotingCredential.objects.filter(election=election).count(), 1)
 
@@ -346,14 +345,14 @@ class ElectionBulkCredentialIssuanceTests(TestCase):
         membership = Membership.objects.create(target_username="alice", membership_type=voter, expires_at=None)
         Membership.objects.filter(pk=membership.pk).update(created_at=eligible_created_at)
 
-        affected1 = issue_voting_credentials_from_memberships(election=election)
+        affected1 = len(issue_voting_credentials_from_memberships(election=election))
         self.assertEqual(affected1, 1)
         cred1 = VotingCredential.objects.get(election=election, freeipa_username="alice")
 
         voter.votes = 5
         voter.save(update_fields=["votes"])
 
-        affected2 = issue_voting_credentials_from_memberships(election=election)
+        affected2 = len(issue_voting_credentials_from_memberships(election=election))
         self.assertEqual(affected2, 1)
         cred2 = VotingCredential.objects.get(election=election, freeipa_username="alice")
 
@@ -965,7 +964,7 @@ class ElectionVoteEndpointTests(TestCase):
 
     def setUp(self) -> None:
         super().setUp()
-        self._coc_patcher = patch("core.views_elections.has_signed_coc", return_value=True)
+        self._coc_patcher = patch("core.views_elections.vote.has_signed_coc", return_value=True)
         self._coc_patcher.start()
         self.addCleanup(self._coc_patcher.stop)
         now = timezone.now()
@@ -1257,7 +1256,7 @@ class ElectionPublicPagesTests(TestCase):
 
     def setUp(self) -> None:
         super().setUp()
-        self._coc_patcher = patch("core.views_elections.block_action_without_coc", return_value=None)
+        self._coc_patcher = patch("core.views_elections.vote.block_action_without_coc", return_value=None)
         self._coc_patcher.start()
         self.addCleanup(self._coc_patcher.stop)
 

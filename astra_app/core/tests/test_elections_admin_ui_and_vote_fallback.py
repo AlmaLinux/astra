@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 import datetime
 import json
@@ -448,7 +447,7 @@ class ElectionDetailAdminControlsTests(TestCase):
         with (
             patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
             patch(
-                "core.views_elections.issue_voting_credentials_from_memberships_detailed",
+                "core.views_elections.lifecycle.issue_voting_credentials_from_memberships",
                 side_effect=AssertionError("should not bulk issue"),
             ),
         ):
@@ -509,7 +508,7 @@ class ElectionVoteNoJsFallbackTests(TestCase):
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=voter1),
-            patch("core.views_elections.has_signed_coc", return_value=True),
+            patch("core.views_elections.vote.has_signed_coc", return_value=True),
         ):
             resp = self.client.post(
                 reverse("election-vote-submit", args=[election.id]),

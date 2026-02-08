@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import logging
 from urllib.parse import urlencode
 
@@ -29,6 +27,7 @@ from core.models import AccountInvitation, AccountInvitationSend
 from core.permissions import ASTRA_ADD_MEMBERSHIP
 from core.rate_limit import allow_request
 from core.templated_email import queue_templated_email
+from core.views_utils import get_username
 
 logger = logging.getLogger(__name__)
 
@@ -323,7 +322,7 @@ def account_invitations_send(request: HttpRequest) -> HttpResponse:
 
     if not allow_request(
         scope="account_invitation_bulk_send",
-        key_parts=[request.user.get_username()],
+        key_parts=[get_username(request)],
         limit=settings.ACCOUNT_INVITATION_BULK_SEND_LIMIT,
         window_seconds=settings.ACCOUNT_INVITATION_BULK_SEND_WINDOW_SECONDS,
     ):
@@ -362,7 +361,7 @@ def account_invitations_send(request: HttpRequest) -> HttpResponse:
         messages.error(request, "The selected email template is not available.")
         return redirect("account-invitations")
 
-    actor_username = request.user.get_username()
+    actor_username = get_username(request)
     now = timezone.now()
 
     sent = 0
@@ -544,7 +543,7 @@ def account_invitations_bulk(request: HttpRequest) -> HttpResponse:
         messages.error(request, "No invitations matched your selection.")
         return redirect("account-invitations")
 
-    actor_username = request.user.get_username()
+    actor_username = get_username(request)
     now = timezone.now()
 
     if action == "dismiss":
@@ -612,7 +611,7 @@ def account_invitation_resend(request: HttpRequest, invitation_id: int) -> HttpR
 
     if not allow_request(
         scope="account_invitation_resend",
-        key_parts=[request.user.get_username(), invitation_id],
+        key_parts=[get_username(request), invitation_id],
         limit=settings.ACCOUNT_INVITATION_RESEND_LIMIT,
         window_seconds=settings.ACCOUNT_INVITATION_RESEND_WINDOW_SECONDS,
     ):
@@ -629,7 +628,7 @@ def account_invitation_resend(request: HttpRequest, invitation_id: int) -> HttpR
         messages.error(request, "No invitation templates are configured.")
         return redirect("account-invitations")
 
-    actor_username = request.user.get_username()
+    actor_username = get_username(request)
     now = timezone.now()
     result = _resend_invitation(
         invitation=invitation,
@@ -656,7 +655,7 @@ def account_invitation_dismiss(request: HttpRequest, invitation_id: int) -> Http
     invitation = get_object_or_404(AccountInvitation, pk=invitation_id)
     now = timezone.now()
     invitation.dismissed_at = now
-    invitation.dismissed_by_username = request.user.get_username()
+    invitation.dismissed_by_username = get_username(request)
     invitation.save(update_fields=["dismissed_at", "dismissed_by_username"])
 
     messages.success(request, "Invitation dismissed.")

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from django.template import Library
 from django.utils.html import format_html
 

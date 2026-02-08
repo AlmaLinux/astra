@@ -1,0 +1,32 @@
+{# Reusable inline search form. #}
+{# Pass: search_placeholder, search_aria_label, search_submit_title #}
+{# Optional: search_field_name (default: "q"), search_value, search_width (default: "220px") #}
+{% with field_name=search_field_name|default:"q" value=search_value|default:"" width=search_width|default:"220px" %}
+<form method="get" class="input-group input-group-sm" style="width: {{ width }};">
+  {% if search_hidden_fields_template %}{% include search_hidden_fields_template %}{% endif %}
+  <input
+    type="text"
+    name="{{ field_name }}"
+    class="form-control float-right"
+    placeholder="{{ search_placeholder }}"
+    value="{{ value }}"
+    aria-label="{{ search_aria_label }}"
+  >
+  <div class="input-group-append">
+    {% if value %}
+      <button
+        type="button"
+        class="btn btn-default"
+        aria-label="Clear search"
+        title="Clear search filter"
+        onclick="var i=this.form.querySelector('input[name=\'{{ field_name }}\']'); if(i){i.value='';} this.form.submit();"
+      >
+        <i class="fas fa-times"></i>
+      </button>
+    {% endif %}
+    <button type="submit" class="btn btn-default" aria-label="Search" title="{{ search_submit_title }}">
+      <i class="fas fa-search"></i>
+    </button>
+  </div>
+</form>
+{% endwith %}

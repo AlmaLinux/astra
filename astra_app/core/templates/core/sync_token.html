@@ -25,36 +25,11 @@
             Enter two consecutive OTP codes from your authenticator app.
           </p>
 
-          <div class="form-group">
-            <label for="{{ form.username.id_for_label }}">{{ form.username.label }}</label>
-            {{ form.username }}
-            {% if form.username.errors %}<div class="text-danger">{{ form.username.errors }}</div>{% endif %}
-          </div>
-
-          <div class="form-group">
-            <label for="{{ form.password.id_for_label }}">{{ form.password.label }}</label>
-            {{ form.password }}
-            {% if form.password.errors %}<div class="text-danger">{{ form.password.errors }}</div>{% endif %}
-          </div>
-
-          <div class="form-group">
-            <label for="{{ form.first_code.id_for_label }}">{{ form.first_code.label }}</label>
-            {{ form.first_code }}
-            {% if form.first_code.errors %}<div class="text-danger">{{ form.first_code.errors }}</div>{% endif %}
-          </div>
-
-          <div class="form-group">
-            <label for="{{ form.second_code.id_for_label }}">{{ form.second_code.label }}</label>
-            {{ form.second_code }}
-            {% if form.second_code.errors %}<div class="text-danger">{{ form.second_code.errors }}</div>{% endif %}
-          </div>
-
-          <div class="form-group">
-            <label for="{{ form.token.id_for_label }}">{{ form.token.label }}</label>
-            {{ form.token }}
-            {% if form.token.errors %}<div class="text-danger">{{ form.token.errors }}</div>{% endif %}
-            {% if form.token.help_text %}<small class="form-text text-muted">{{ form.token.help_text }}</small>{% endif %}
-          </div>
+          {% include "core/_form_field.html" with field=form.username %}
+          {% include "core/_form_field.html" with field=form.password %}
+          {% include "core/_form_field.html" with field=form.first_code %}
+          {% include "core/_form_field.html" with field=form.second_code %}
+          {% include "core/_form_field.html" with field=form.token %}
         </div>
 
         <div class="card-footer d-flex justify-content-between">

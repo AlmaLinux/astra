@@ -1,0 +1,70 @@
+{% comment %}
+Reusable modal scaffold with a "type the name to confirm" input field.
+
+Wraps a form POST with a common header, confirm-input section, and footer.
+The unique body content above the confirm input is rendered from a separate
+template passed via modal_body_template.
+
+Required context variables:
+  modal_id:            DOM id for the modal element
+  action_url:          Form POST target URL
+  modal_title:         Header text (e.g. "Extend election?")
+  button_text:         Submit button label (e.g. "Extend Election")
+  button_class:        CSS class for submit button (e.g. "btn btn-warning")
+  confirm_input_id:    DOM id for the confirm text input (for bindNameConfirm)
+  confirm_submit_id:   DOM id for the submit button (for bindNameConfirm)
+  confirm_name:        The name the user must type to confirm
+  cancel_title:        Title attribute for cancel button
+  submit_title:        Title attribute for submit button
+  modal_body_template: Path to the template for unique body content above the
+                       confirm input (e.g. "core/_modal_extend_election_body.html")
+{% endcomment %}
+<div
+  class="modal fade"
+  id="{{ modal_id }}"
+  tabindex="-1"
+  role="dialog"
+  aria-labelledby="{{ modal_id }}-label"
+  aria-hidden="true"
+>
+  <div class="modal-dialog" role="document">
+    <div class="modal-content">
+      <form method="post" action="{{ action_url }}">
+        {% csrf_token %}
+        <div class="modal-header">
+          <h5 class="modal-title" id="{{ modal_id }}-label">{{ modal_title }}</h5>
+          <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog">
+            <span aria-hidden="true">&times;</span>
+          </button>
+        </div>
+        <div class="modal-body">
+          {% if modal_body_template %}
+            {% include modal_body_template %}
+          {% endif %}
+
+          <hr />
+
+          <div class="form-group mb-0">
+            <label for="{{ confirm_input_id }}">Type the election name to confirm</label>
+            <div class="text-muted small mb-2">
+              <strong>Election name:</strong> {{ confirm_name }}
+            </div>
+            <input
+              id="{{ confirm_input_id }}"
+              name="confirm"
+              type="text"
+              class="form-control"
+              placeholder="{{ confirm_name }}"
+              data-confirm-name="{{ confirm_name|escapejs }}"
+              required
+            >
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-dismiss="modal" title="{{ cancel_title }}">Cancel</button>
+          <button id="{{ confirm_submit_id }}" disabled type="submit" class="{{ button_class }}" aria-disabled="true" title="{{ submit_title }}">{{ button_text }}</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>

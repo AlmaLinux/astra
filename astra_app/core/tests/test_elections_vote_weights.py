@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 import datetime
 import json
@@ -13,7 +12,7 @@ from core.backends import FreeIPAUser
 from core.elections_eligibility import eligible_voters_from_memberships
 from core.elections_services import (
     close_election,
-    issue_voting_credentials_from_memberships_detailed,
+    issue_voting_credentials_from_memberships,
     submit_ballot,
     tally_election,
 )
@@ -33,10 +32,10 @@ from core.models import (
 class ElectionVoteWeightsTests(TestCase):
     def setUp(self) -> None:
         super().setUp()
-        self._coc_patcher = patch("core.views_elections.has_signed_coc", return_value=True)
+        self._coc_patcher = patch("core.views_elections.vote.has_signed_coc", return_value=True)
         self._coc_patcher.start()
         self.addCleanup(self._coc_patcher.stop)
-        self._coc_block_patcher = patch("core.views_elections.block_action_without_coc", return_value=None)
+        self._coc_block_patcher = patch("core.views_elections.vote.block_action_without_coc", return_value=None)
         self._coc_block_patcher.start()
         self.addCleanup(self._coc_block_patcher.stop)
 
@@ -131,7 +130,7 @@ class ElectionVoteWeightsTests(TestCase):
 
         expected = self._make_weighted_voter(election=election, username="voter1")
 
-        issued = issue_voting_credentials_from_memberships_detailed(election=election)
+        issued = issue_voting_credentials_from_memberships(election=election)
         cred = next(c for c in issued if c.freeipa_username == "voter1")
         self.assertEqual(int(cred.weight), expected)
 
@@ -167,7 +166,7 @@ class ElectionVoteWeightsTests(TestCase):
 
         expected = self._make_weighted_voter(election=election, username="voter1")
 
-        issued = issue_voting_credentials_from_memberships_detailed(election=election)
+        issued = issue_voting_credentials_from_memberships(election=election)
         cred = next(c for c in issued if c.freeipa_username == "voter1")
         self.assertEqual(int(cred.weight), expected)
 
@@ -222,7 +221,7 @@ class ElectionVoteWeightsTests(TestCase):
 
         self._make_weighted_voter(election=election, username="voter1")
 
-        issued = issue_voting_credentials_from_memberships_detailed(election=election)
+        issued = issue_voting_credentials_from_memberships(election=election)
         cred = next(c for c in issued if c.freeipa_username == "voter1")
 
         self._login_as_freeipa_user("voter1")
@@ -273,7 +272,7 @@ class ElectionVoteWeightsTests(TestCase):
         c2 = Candidate.objects.create(election=election, freeipa_username="bob", nominated_by="nominator")
 
         expected = self._make_weighted_voter(election=election, username="voter1")
-        issued = issue_voting_credentials_from_memberships_detailed(election=election)
+        issued = issue_voting_credentials_from_memberships(election=election)
         cred = next(c for c in issued if c.freeipa_username == "voter1")
 
         receipt = submit_ballot(
@@ -313,7 +312,7 @@ class ElectionVoteWeightsTests(TestCase):
 
         expected = self._make_weighted_voter(election=election, username="voter1")
 
-        issued = issue_voting_credentials_from_memberships_detailed(election=election)
+        issued = issue_voting_credentials_from_memberships(election=election)
         cred = next(c for c in issued if c.freeipa_username == "voter1")
         self.assertEqual(int(cred.weight), expected)
 

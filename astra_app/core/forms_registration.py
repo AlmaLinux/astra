@@ -1,14 +1,15 @@
-from __future__ import annotations
 
 from django import forms
 
+from core.form_validators import clean_password_confirm
+from core.forms_base import StyledForm
 from core.profanity import validate_no_profanity_or_hate_speech
 from core.views_utils import _normalize_str
 
 _USERNAME_RE = r"^[a-z0-9](?:[a-z0-9-]{3,30})[a-z0-9]$"  # length 5..32, no leading/trailing '-'
 
 
-class RegistrationForm(forms.Form):
+class RegistrationForm(StyledForm):
     username = forms.RegexField(
         regex=_USERNAME_RE,
         label="Username",
@@ -28,14 +29,6 @@ class RegistrationForm(forms.Form):
     )
 
     invitation_token = forms.CharField(required=False, widget=forms.HiddenInput())
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        for field in self.fields.values():
-            if isinstance(field.widget, forms.CheckboxInput):
-                field.widget.attrs.setdefault("class", "form-check-input")
-            else:
-                field.widget.attrs.setdefault("class", "form-control")
 
     def clean_username(self) -> str:
         username = _normalize_str(self.cleaned_data.get("username"))
@@ -77,7 +70,7 @@ class ResendRegistrationEmailForm(forms.Form):
     username = forms.CharField(widget=forms.HiddenInput, required=True)
 
 
-class PasswordSetForm(forms.Form):
+class PasswordSetForm(StyledForm):
     password = forms.CharField(
         label="Password",
         widget=forms.PasswordInput,
@@ -94,15 +87,7 @@ class PasswordSetForm(forms.Form):
         max_length=122,
     )
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        for field in self.fields.values():
-            field.widget.attrs.setdefault("class", "form-control")
-
     def clean(self):
         cleaned = super().clean()
-        pw = cleaned.get("password")
-        pw2 = cleaned.get("password_confirm")
-        if pw and pw2 and pw != pw2:
-            raise forms.ValidationError("Passwords must match")
+        clean_password_confirm(cleaned, password_field="password", confirm_field="password_confirm")
         return cleaned

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import base64
 import datetime
 import io
@@ -35,8 +33,8 @@ from core.backends import (
     _freeipa_circuit_open,
     _get_freeipa_client,
 )
-from core.email_context import user_email_context
 from core.country_codes import country_label_from_code
+from core.email_context import user_email_context
 from core.forms_selfservice import (
     EmailsForm,
     KeysForm,
@@ -48,26 +46,29 @@ from core.forms_selfservice import (
     ProfileForm,
     normalize_locale_tag,
 )
-from core.membership_notes import CUSTOS, add_note
-from core.models import MembershipRequest
-from core.tokens import make_signed_token, read_signed_token
-from core.views_utils import (
+from core.ipa_user_attrs import (
     _add_change,
     _add_change_list_setattr,
     _add_change_setattr,
-    _bool_from_ipa,
-    _bool_to_ipa,
     _data_get,
     _first,
     _form_label_for_attr,
     _get_full_user,
-    _normalize_str,
     _split_lines,
     _split_list_field,
     _update_user_attrs,
     _value_to_csv,
     _value_to_text,
+)
+from core.ipa_utils import bool_from_ipa, bool_to_ipa
+from core.membership_notes import CUSTOS, add_note
+from core.models import MembershipRequest
+from core.tokens import make_signed_token, read_signed_token
+from core.views_utils import (
+    MSG_SERVICE_UNAVAILABLE,
+    _normalize_str,
     block_action_without_country_code,
+    get_username,
     settings_context,
 )
 
@@ -284,6 +285,354 @@ def avatar_delete(request: HttpRequest) -> HttpResponse:
 type TokenDict = dict[str, Any]
 
 
+# ---------------------------------------------------------------------------
+# Per-tab change builders — shared between save-all and single-tab paths.
+# ---------------------------------------------------------------------------
+
+
+def _build_profile_changes(
+    *,
+    profile_form: ProfileForm,
+    profile_initial: dict[str, object],
+    data: dict[str, object],
+    username: str,
+    country_attr: str,
+    country_attr_lower: str,
+) -> tuple[dict[str, object], list[str], list[str], list[str], str, str]:
+    """Build FreeIPA update lists for the profile tab.
+
+    Returns (direct_updates, addattrs, setattrs, delattrs, old_country, new_country).
+    """
+    direct_updates: dict[str, object] = {}
+    addattrs: list[str] = []
+    setattrs: list[str] = []
+    delattrs: list[str] = []
+
+    old_country = str(profile_initial.get("country_code") or "").strip().upper()
+    new_country = str(profile_form.cleaned_data.get("country_code") or "").strip().upper()
+
+    _add_change(
+        updates=direct_updates, delattrs=delattrs,
+        attr="givenname",
+        current_value=profile_initial.get("givenname"),
+        new_value=profile_form.cleaned_data["givenname"],
+    )
+    _add_change(
+        updates=direct_updates, delattrs=delattrs,
+        attr="sn",
+        current_value=profile_initial.get("sn"),
+        new_value=profile_form.cleaned_data["sn"],
+    )
+    new_cn = f"{profile_form.cleaned_data['givenname']} {profile_form.cleaned_data['sn']}".strip() or username
+    current_cn = _first(data, "cn", "")
+    _add_change(
+        updates=direct_updates, delattrs=delattrs,
+        attr="cn", current_value=current_cn, new_value=new_cn,
+    )
+
+    _add_change_list_setattr(
+        addattrs=addattrs, setattrs=setattrs, delattrs=delattrs,
+        attr="fasPronoun",
+        current_values=_data_get(data, "fasPronoun", []),
+        new_values=_split_list_field(profile_form.cleaned_data["fasPronoun"]),
+    )
+    _add_change_setattr(
+        setattrs=setattrs, delattrs=delattrs,
+        attr="fasLocale",
+        current_value=normalize_locale_tag(profile_initial.get("fasLocale")),
+        new_value=normalize_locale_tag(profile_form.cleaned_data["fasLocale"]),
+    )
+    _add_change_setattr(
+        setattrs=setattrs, delattrs=delattrs,
+        attr="fasTimezone",
+        current_value=profile_initial.get("fasTimezone"),
+        new_value=profile_form.cleaned_data["fasTimezone"],
+    )
+    _add_change_list_setattr(
+        addattrs=addattrs, setattrs=setattrs, delattrs=delattrs,
+        attr="fasWebsiteUrl",
+        current_values=_data_get(data, "fasWebsiteUrl", []),
+        new_values=_split_list_field(profile_form.cleaned_data["fasWebsiteUrl"]),
+    )
+    _add_change_list_setattr(
+        addattrs=addattrs, setattrs=setattrs, delattrs=delattrs,
+        attr="fasRssUrl",
+        current_values=_data_get(data, "fasRssUrl", []),
+        new_values=_split_list_field(profile_form.cleaned_data["fasRssUrl"]),
+    )
+    _add_change_list_setattr(
+        addattrs=addattrs, setattrs=setattrs, delattrs=delattrs,
+        attr="fasIRCNick",
+        current_values=_data_get(data, "fasIRCNick", []),
+        new_values=_split_list_field(profile_form.cleaned_data["fasIRCNick"]),
+    )
+    _add_change_setattr(
+        setattrs=setattrs, delattrs=delattrs,
+        attr="fasGitHubUsername",
+        current_value=profile_initial.get("fasGitHubUsername"),
+        new_value=profile_form.cleaned_data["fasGitHubUsername"],
+    )
+    _add_change_setattr(
+        setattrs=setattrs, delattrs=delattrs,
+        attr="fasGitLabUsername",
+        current_value=profile_initial.get("fasGitLabUsername"),
+        new_value=profile_form.cleaned_data["fasGitLabUsername"],
+    )
+    if country_attr_lower in {"c", "st", "l", "postalcode"}:
+        _add_change(
+            updates=direct_updates, delattrs=delattrs,
+            attr=country_attr_lower,
+            current_value=profile_initial.get("country_code"),
+            new_value=profile_form.cleaned_data["country_code"],
+            transform=str.upper,
+        )
+    else:
+        _add_change_setattr(
+            setattrs=setattrs, delattrs=delattrs,
+            attr=country_attr,
+            current_value=profile_initial.get("country_code"),
+            new_value=profile_form.cleaned_data["country_code"],
+            transform=str.upper,
+        )
+
+    current_private = profile_initial["fasIsPrivate"]
+    new_private = profile_form.cleaned_data["fasIsPrivate"]
+    if current_private != new_private:
+        setattrs.append(f"fasIsPrivate={bool_to_ipa(new_private)}")
+
+    return direct_updates, addattrs, setattrs, delattrs, old_country, new_country
+
+
+def _build_emails_changes(
+    *,
+    emails_form: EmailsForm,
+    emails_initial: dict[str, object],
+) -> tuple[dict[str, object], list[str], list[str], list[tuple[str, str]]]:
+    """Build FreeIPA update lists for the emails tab.
+
+    Returns (direct_updates, setattrs, delattrs, pending_validations).
+    """
+    direct_updates: dict[str, object] = {}
+    setattrs: list[str] = []
+    delattrs: list[str] = []
+    pending_validations: list[tuple[str, str]] = []
+
+    current_mail = _normalize_str(emails_initial.get("mail")).lower()
+    new_mail = _normalize_str(emails_form.cleaned_data["mail"]).lower()
+    current_rhbz = _normalize_str(emails_initial.get("fasRHBZEmail")).lower()
+    new_rhbz = _normalize_str(emails_form.cleaned_data["fasRHBZEmail"]).lower()
+
+    if current_mail != new_mail and new_mail:
+        if current_rhbz == new_mail and current_rhbz:
+            direct_updates["o_mail"] = new_mail
+        else:
+            pending_validations.append(("mail", new_mail))
+
+    if current_rhbz != new_rhbz:
+        if new_rhbz:
+            if current_mail == new_rhbz and current_mail:
+                _add_change_setattr(
+                    setattrs=setattrs, delattrs=delattrs,
+                    attr="fasRHBZEmail",
+                    current_value=current_rhbz, new_value=new_rhbz,
+                )
+            else:
+                pending_validations.append(("fasRHBZEmail", new_rhbz))
+        else:
+            _add_change_setattr(
+                setattrs=setattrs, delattrs=delattrs,
+                attr="fasRHBZEmail",
+                current_value=current_rhbz, new_value=new_rhbz,
+            )
+
+    return direct_updates, setattrs, delattrs, pending_validations
+
+
+def _build_keys_changes(
+    *,
+    keys_form: KeysForm,
+    data: dict[str, object],
+) -> tuple[list[str], list[str], list[str]]:
+    """Build FreeIPA update lists for the keys tab.
+
+    Returns (addattrs, setattrs, delattrs).
+    """
+    addattrs: list[str] = []
+    setattrs: list[str] = []
+    delattrs: list[str] = []
+
+    _add_change_list_setattr(
+        addattrs=addattrs, setattrs=setattrs, delattrs=delattrs,
+        attr="fasGPGKeyId",
+        current_values=_data_get(data, "fasGPGKeyId", []),
+        new_values=_split_lines(keys_form.cleaned_data["fasGPGKeyId"]),
+    )
+    _add_change_list_setattr(
+        addattrs=addattrs, setattrs=setattrs, delattrs=delattrs,
+        attr="ipasshpubkey",
+        current_values=_data_get(data, "ipasshpubkey", []),
+        new_values=_split_lines(keys_form.cleaned_data["ipasshpubkey"]),
+    )
+
+    return addattrs, setattrs, delattrs
+
+
+def _settings_update_error_response(
+    request: HttpRequest,
+    context: dict,
+    tab: str,
+    error: Exception,
+    *,
+    tab_label: str,
+    username: str,
+) -> HttpResponse:
+    """Build error response for a settings update failure."""
+    if isinstance(error, requests.exceptions.ConnectionError):
+        messages.error(request, MSG_SERVICE_UNAVAILABLE)
+    else:
+        logger.exception("Failed to update %s username=%s", tab_label, username)
+        if settings.DEBUG:
+            messages.error(request, f"Failed to update {tab_label} (debug): {error}")
+        else:
+            messages.error(request, f"Failed to update {tab_label} due to an internal error.")
+    context["force_tab"] = tab
+    return render(request, "core/settings.html", context)
+
+
+def _apply_and_report_profile_update(
+    request: HttpRequest,
+    username: str,
+    *,
+    direct_updates: dict[str, object],
+    addattrs: list[str],
+    setattrs: list[str],
+    delattrs: list[str],
+    old_country: str,
+    new_country: str,
+    country_attr: str,
+    profile_form: ProfileForm,
+    no_changes_message: str = "No changes were applied.",
+) -> bool:
+    """Apply profile changes to FreeIPA, report via messages, record country-change notes.
+
+    Returns whether changes were applied.  Raises on IPA communication errors.
+    """
+    skipped, applied = _update_user_attrs(
+        username,
+        direct_updates=direct_updates,
+        addattrs=addattrs,
+        setattrs=setattrs,
+        delattrs=delattrs,
+    )
+    if skipped:
+        for attr in skipped:
+            label = (
+                profile_form.fields["country_code"].label
+                if attr == country_attr
+                else _form_label_for_attr(profile_form, attr)
+            )
+            messages.warning(request, f"Saved, but '{label or attr}' is not editable on this FreeIPA server.")
+    if applied:
+        messages.success(request, "Profile updated in FreeIPA.")
+        if old_country and new_country and old_country != new_country and country_attr not in (skipped or []):
+            pending = list(
+                MembershipRequest.objects.filter(
+                    requested_username=username,
+                    status=MembershipRequest.Status.pending,
+                ).only("pk")
+            )
+            for mr in pending:
+                try:
+                    add_note(
+                        membership_request=mr,
+                        username=CUSTOS,
+                        content=(
+                            f"{username} updated their country from {country_label_from_code(old_country)} "
+                            f"to {country_label_from_code(new_country)}."
+                        ),
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to record country-change system note request_id=%s username=%s",
+                        mr.pk,
+                        username,
+                    )
+    else:
+        messages.info(request, no_changes_message)
+    return applied
+
+
+def _apply_and_report_emails_update(
+    request: HttpRequest,
+    username: str,
+    *,
+    direct_updates: dict[str, object],
+    setattrs: list[str],
+    delattrs: list[str],
+    pending_validations: list[tuple[str, str]],
+    fu: FreeIPAUser,
+    emails_form: EmailsForm,
+    no_changes_message: str = "No changes were applied.",
+) -> bool:
+    """Apply email changes to FreeIPA, send validation emails, report via messages.
+
+    Returns whether any changes were applied or validations sent.  Raises on IPA errors.
+    """
+    applied = False
+    if direct_updates or setattrs or delattrs:
+        skipped, ipa_applied = _update_user_attrs(
+            username, direct_updates=direct_updates, setattrs=setattrs, delattrs=delattrs,
+        )
+        if skipped:
+            for attr in skipped:
+                label = _form_label_for_attr(emails_form, attr)
+                messages.warning(request, f"Saved, but '{label or attr}' is not editable on this FreeIPA server.")
+        if ipa_applied:
+            messages.success(request, "Email settings updated in FreeIPA.")
+            applied = True
+        else:
+            messages.info(request, no_changes_message)
+    if pending_validations:
+        name = fu.full_name
+        for attr, address in pending_validations:
+            _send_email_validation_email(
+                request, username=username, name=name, attr=attr, email_to_validate=address,
+            )
+        messages.success(
+            request, "We sent you an email to validate your new email address. Please check your inbox.",
+        )
+        applied = True
+    return applied
+
+
+def _apply_and_report_keys_update(
+    request: HttpRequest,
+    username: str,
+    *,
+    addattrs: list[str],
+    setattrs: list[str],
+    delattrs: list[str],
+    keys_form: KeysForm,
+    no_changes_message: str = "No changes were applied.",
+) -> bool:
+    """Apply key changes to FreeIPA and report via messages.
+
+    Returns whether changes were applied.  Raises on IPA communication errors.
+    """
+    skipped, applied = _update_user_attrs(
+        username, addattrs=addattrs, setattrs=setattrs, delattrs=delattrs,
+    )
+    if skipped:
+        for attr in skipped:
+            label = _form_label_for_attr(keys_form, attr)
+            messages.warning(request, f"Saved, but '{label or attr}' is not editable on this FreeIPA server.")
+    if applied:
+        messages.success(request, "Keys updated in FreeIPA.")
+    else:
+        messages.info(request, no_changes_message)
+    return applied
+
+
 def settings_root(request: HttpRequest) -> HttpResponse:
     """Unified settings page.
 
@@ -291,7 +640,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
     active tab is posted as a `tab` field.
     """
 
-    username = request.user.get_username()
+    username = get_username(request)
     requested_tab = _normalize_str(request.POST.get("tab") or request.GET.get("tab")) or "profile"
     if requested_tab not in _SETTINGS_TABS:
         requested_tab = "profile"
@@ -303,8 +652,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
     ):
         messages.error(
             request,
-            "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
-            "Please try again later.",
+            MSG_SERVICE_UNAVAILABLE,
         )
         return redirect(_settings_url(requested_tab))
 
@@ -313,8 +661,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
     except requests.exceptions.ConnectionError:
         messages.error(
             request,
-            "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
-            "Please try again later.",
+            MSG_SERVICE_UNAVAILABLE,
         )
         return redirect("home")
     if not fu:
@@ -341,7 +688,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
         "fasIRCNick": _value_to_text(_data_get(data, "fasIRCNick", "")),
         "fasGitHubUsername": _first(data, "fasGitHubUsername", "") or "",
         "fasGitLabUsername": _first(data, "fasGitLabUsername", "") or "",
-        "fasIsPrivate": _bool_from_ipa(_data_get(data, "fasIsPrivate", "FALSE"), default=False),
+        "fasIsPrivate": bool_from_ipa(_data_get(data, "fasIsPrivate", "FALSE"), default=False),
     }
     profile_form = ProfileForm(
         request.POST if request.method == "POST" and (is_save_all or requested_tab == "profile") else None,
@@ -708,7 +1055,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
             }.get(invalid_tab)
             return render(request, "core/settings.html", context)
 
-        # --- Build changes for each tab ---
+        # --- Build changes for each tab using shared helpers ---
         old_country = str(profile_initial.get("country_code") or "").strip().upper()
         new_country = ""
         profile_direct_updates: dict[str, object] = {}
@@ -716,174 +1063,29 @@ def settings_root(request: HttpRequest) -> HttpResponse:
         profile_setattrs: list[str] = []
         profile_delattrs: list[str] = []
         if profile_changed:
-            new_country = str(profile_form.cleaned_data.get("country_code") or "").strip().upper()
-            _add_change(
-                updates=profile_direct_updates,
-                delattrs=profile_delattrs,
-                attr="givenname",
-                current_value=profile_initial.get("givenname"),
-                new_value=profile_form.cleaned_data["givenname"],
-            )
-            _add_change(
-                updates=profile_direct_updates,
-                delattrs=profile_delattrs,
-                attr="sn",
-                current_value=profile_initial.get("sn"),
-                new_value=profile_form.cleaned_data["sn"],
-            )
-            new_cn = (
-                f"{profile_form.cleaned_data['givenname']} {profile_form.cleaned_data['sn']}".strip() or username
-            )
-            current_cn = _first(data, "cn", "")
-            _add_change(
-                updates=profile_direct_updates,
-                delattrs=profile_delattrs,
-                attr="cn",
-                current_value=current_cn,
-                new_value=new_cn,
-            )
-
-            _add_change_list_setattr(
-                addattrs=profile_addattrs,
-                setattrs=profile_setattrs,
-                delattrs=profile_delattrs,
-                attr="fasPronoun",
-                current_values=_data_get(data, "fasPronoun", []),
-                new_values=_split_list_field(profile_form.cleaned_data["fasPronoun"]),
-            )
-            _add_change_setattr(
-                setattrs=profile_setattrs,
-                delattrs=profile_delattrs,
-                attr="fasLocale",
-                current_value=normalize_locale_tag(profile_initial.get("fasLocale")),
-                new_value=normalize_locale_tag(profile_form.cleaned_data["fasLocale"]),
-            )
-            _add_change_setattr(
-                setattrs=profile_setattrs,
-                delattrs=profile_delattrs,
-                attr="fasTimezone",
-                current_value=profile_initial.get("fasTimezone"),
-                new_value=profile_form.cleaned_data["fasTimezone"],
-            )
-
-            _add_change_list_setattr(
-                addattrs=profile_addattrs,
-                setattrs=profile_setattrs,
-                delattrs=profile_delattrs,
-                attr="fasWebsiteUrl",
-                current_values=_data_get(data, "fasWebsiteUrl", []),
-                new_values=_split_list_field(profile_form.cleaned_data["fasWebsiteUrl"]),
-            )
-            _add_change_list_setattr(
-                addattrs=profile_addattrs,
-                setattrs=profile_setattrs,
-                delattrs=profile_delattrs,
-                attr="fasRssUrl",
-                current_values=_data_get(data, "fasRssUrl", []),
-                new_values=_split_list_field(profile_form.cleaned_data["fasRssUrl"]),
-            )
-            _add_change_list_setattr(
-                addattrs=profile_addattrs,
-                setattrs=profile_setattrs,
-                delattrs=profile_delattrs,
-                attr="fasIRCNick",
-                current_values=_data_get(data, "fasIRCNick", []),
-                new_values=_split_list_field(profile_form.cleaned_data["fasIRCNick"]),
-            )
-            _add_change_setattr(
-                setattrs=profile_setattrs,
-                delattrs=profile_delattrs,
-                attr="fasGitHubUsername",
-                current_value=profile_initial.get("fasGitHubUsername"),
-                new_value=profile_form.cleaned_data["fasGitHubUsername"],
-            )
-            _add_change_setattr(
-                setattrs=profile_setattrs,
-                delattrs=profile_delattrs,
-                attr="fasGitLabUsername",
-                current_value=profile_initial.get("fasGitLabUsername"),
-                new_value=profile_form.cleaned_data["fasGitLabUsername"],
-            )
-            if country_attr_lower in {"c", "st", "l", "postalcode"}:
-                _add_change(
-                    updates=profile_direct_updates,
-                    delattrs=profile_delattrs,
-                    attr=country_attr_lower,
-                    current_value=profile_initial.get("country_code"),
-                    new_value=profile_form.cleaned_data["country_code"],
-                    transform=str.upper,
+            profile_direct_updates, profile_addattrs, profile_setattrs, profile_delattrs, old_country, new_country = (
+                _build_profile_changes(
+                    profile_form=profile_form, profile_initial=profile_initial,
+                    data=data, username=username,
+                    country_attr=country_attr, country_attr_lower=country_attr_lower,
                 )
-            else:
-                _add_change_setattr(
-                    setattrs=profile_setattrs,
-                    delattrs=profile_delattrs,
-                    attr=country_attr,
-                    current_value=profile_initial.get("country_code"),
-                    new_value=profile_form.cleaned_data["country_code"],
-                    transform=str.upper,
-                )
-
-            current_private = profile_initial["fasIsPrivate"]
-            new_private = profile_form.cleaned_data["fasIsPrivate"]
-            if current_private != new_private:
-                profile_setattrs.append(f"fasIsPrivate={_bool_to_ipa(new_private)}")
+            )
 
         emails_direct_updates: dict[str, object] = {}
         emails_setattrs: list[str] = []
         emails_delattrs: list[str] = []
         pending_validations: list[tuple[str, str]] = []
         if emails_changed:
-            current_mail = _normalize_str(emails_initial.get("mail")).lower()
-            new_mail = _normalize_str(emails_form.cleaned_data["mail"]).lower()
-            current_rhbz = _normalize_str(emails_initial.get("fasRHBZEmail")).lower()
-            new_rhbz = _normalize_str(emails_form.cleaned_data["fasRHBZEmail"]).lower()
-
-            if current_mail != new_mail and new_mail:
-                if current_rhbz == new_mail and current_rhbz:
-                    emails_direct_updates["o_mail"] = new_mail
-                else:
-                    pending_validations.append(("mail", new_mail))
-
-            if current_rhbz != new_rhbz:
-                if new_rhbz:
-                    if current_mail == new_rhbz and current_mail:
-                        _add_change_setattr(
-                            setattrs=emails_setattrs,
-                            delattrs=emails_delattrs,
-                            attr="fasRHBZEmail",
-                            current_value=current_rhbz,
-                            new_value=new_rhbz,
-                        )
-                    else:
-                        pending_validations.append(("fasRHBZEmail", new_rhbz))
-                else:
-                    _add_change_setattr(
-                        setattrs=emails_setattrs,
-                        delattrs=emails_delattrs,
-                        attr="fasRHBZEmail",
-                        current_value=current_rhbz,
-                        new_value=new_rhbz,
-                    )
+            emails_direct_updates, emails_setattrs, emails_delattrs, pending_validations = (
+                _build_emails_changes(emails_form=emails_form, emails_initial=emails_initial)
+            )
 
         keys_addattrs: list[str] = []
         keys_setattrs: list[str] = []
         keys_delattrs: list[str] = []
         if keys_changed:
-            _add_change_list_setattr(
-                addattrs=keys_addattrs,
-                setattrs=keys_setattrs,
-                delattrs=keys_delattrs,
-                attr="fasGPGKeyId",
-                current_values=_data_get(data, "fasGPGKeyId", []),
-                new_values=_split_lines(keys_form.cleaned_data["fasGPGKeyId"]),
-            )
-            _add_change_list_setattr(
-                addattrs=keys_addattrs,
-                setattrs=keys_setattrs,
-                delattrs=keys_delattrs,
-                attr="ipasshpubkey",
-                current_values=_data_get(data, "ipasshpubkey", []),
-                new_values=_split_lines(keys_form.cleaned_data["ipasshpubkey"]),
+            keys_addattrs, keys_setattrs, keys_delattrs = (
+                _build_keys_changes(keys_form=keys_form, data=data)
             )
 
         profile_has_changes = bool(profile_direct_updates or profile_addattrs or profile_setattrs or profile_delattrs)
@@ -909,244 +1111,42 @@ def settings_root(request: HttpRequest) -> HttpResponse:
 
         try:
             if profile_has_changes:
-                skipped, applied = _update_user_attrs(
-                    username,
-                    direct_updates=profile_direct_updates,
-                    addattrs=profile_addattrs,
-                    setattrs=profile_setattrs,
-                    delattrs=profile_delattrs,
+                _apply_and_report_profile_update(
+                    request, username,
+                    direct_updates=profile_direct_updates, addattrs=profile_addattrs,
+                    setattrs=profile_setattrs, delattrs=profile_delattrs,
+                    old_country=old_country, new_country=new_country,
+                    country_attr=country_attr, profile_form=profile_form,
+                    no_changes_message="No profile changes were applied.",
                 )
-                if skipped:
-                    for attr in skipped:
-                        label = (
-                            profile_form.fields["country_code"].label
-                            if attr == country_attr
-                            else _form_label_for_attr(profile_form, attr)
-                        )
-                        messages.warning(
-                            request,
-                            f"Saved, but '{label or attr}' is not editable on this FreeIPA server.",
-                        )
-                if applied:
-                    messages.success(request, "Profile updated in FreeIPA.")
-
-                    if old_country and new_country and old_country != new_country and country_attr not in (skipped or []):
-                        pending = list(
-                            MembershipRequest.objects.filter(
-                                requested_username=username,
-                                status=MembershipRequest.Status.pending,
-                            ).only("pk")
-                        )
-                        if pending:
-                            for mr in pending:
-                                try:
-                                    add_note(
-                                        membership_request=mr,
-                                        username=CUSTOS,
-                                        content=(
-                                            f"{username} updated their country from {country_label_from_code(old_country)} "
-                                            f"to {country_label_from_code(new_country)}."
-                                        ),
-                                    )
-                                except Exception:
-                                    logger.exception(
-                                        "Failed to record country-change system note request_id=%s username=%s",
-                                        mr.pk,
-                                        username,
-                                    )
-                else:
-                    messages.info(request, "No profile changes were applied.")
-
             if emails_has_changes:
-                if emails_direct_updates or emails_setattrs or emails_delattrs:
-                    skipped, applied = _update_user_attrs(
-                        username,
-                        direct_updates=emails_direct_updates,
-                        setattrs=emails_setattrs,
-                        delattrs=emails_delattrs,
-                    )
-                    if skipped:
-                        for attr in skipped:
-                            label = _form_label_for_attr(emails_form, attr)
-                            messages.warning(
-                                request,
-                                f"Saved, but '{label or attr}' is not editable on this FreeIPA server.",
-                            )
-                    if applied:
-                        messages.success(request, "Email settings updated in FreeIPA.")
-                    else:
-                        messages.info(request, "No email settings changes were applied.")
-
-                if pending_validations:
-                    name = fu.full_name
-                    for attr, address in pending_validations:
-                        _send_email_validation_email(
-                            request,
-                            username=username,
-                            name=name,
-                            attr=attr,
-                            email_to_validate=address,
-                        )
-                    messages.success(
-                        request,
-                        "We sent you an email to validate your new email address. Please check your inbox.",
-                    )
-
-            if keys_has_changes:
-                skipped, applied = _update_user_attrs(
-                    username,
-                    addattrs=keys_addattrs,
-                    setattrs=keys_setattrs,
-                    delattrs=keys_delattrs,
+                _apply_and_report_emails_update(
+                    request, username,
+                    direct_updates=emails_direct_updates, setattrs=emails_setattrs,
+                    delattrs=emails_delattrs, pending_validations=pending_validations,
+                    fu=fu, emails_form=emails_form,
+                    no_changes_message="No email settings changes were applied.",
                 )
-                if skipped:
-                    for attr in skipped:
-                        label = _form_label_for_attr(keys_form, attr)
-                        messages.warning(
-                            request,
-                            f"Saved, but '{label or attr}' is not editable on this FreeIPA server.",
-                        )
-                if applied:
-                    messages.success(request, "Keys updated in FreeIPA.")
-                else:
-                    messages.info(request, "No key changes were applied.")
-
-        except requests.exceptions.ConnectionError:
-            messages.error(
-                request,
-                "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
-                "Please try again later.",
-            )
-            context["force_tab"] = requested_tab
-            return render(request, "core/settings.html", context)
+            if keys_has_changes:
+                _apply_and_report_keys_update(
+                    request, username,
+                    addattrs=keys_addattrs, setattrs=keys_setattrs, delattrs=keys_delattrs,
+                    keys_form=keys_form,
+                    no_changes_message="No key changes were applied.",
+                )
         except Exception as e:
-            logger.exception("Failed to update settings username=%s", username)
-            if settings.DEBUG:
-                messages.error(request, f"Failed to update settings (debug): {e}")
-            else:
-                messages.error(request, "Failed to update settings due to an internal error.")
-            context["force_tab"] = requested_tab
-            return render(request, "core/settings.html", context)
+            return _settings_update_error_response(
+                request, context, requested_tab, e, tab_label="settings", username=username,
+            )
 
         return redirect(_settings_url(requested_tab))
 
     if requested_tab == "profile" and profile_form.is_valid():
-        direct_updates: dict[str, object] = {}
-        addattrs: list[str] = []
-        setattrs: list[str] = []
-        delattrs: list[str] = []
-
-        old_country = str(profile_initial.get("country_code") or "").strip().upper()
-        new_country = str(profile_form.cleaned_data.get("country_code") or "").strip().upper()
-
-        _add_change(
-            updates=direct_updates,
-            delattrs=delattrs,
-            attr="givenname",
-            current_value=profile_initial.get("givenname"),
-            new_value=profile_form.cleaned_data["givenname"],
+        direct_updates, addattrs, setattrs, delattrs, old_country, new_country = _build_profile_changes(
+            profile_form=profile_form, profile_initial=profile_initial,
+            data=data, username=username,
+            country_attr=country_attr, country_attr_lower=country_attr_lower,
         )
-        _add_change(
-            updates=direct_updates,
-            delattrs=delattrs,
-            attr="sn",
-            current_value=profile_initial.get("sn"),
-            new_value=profile_form.cleaned_data["sn"],
-        )
-        new_cn = f"{profile_form.cleaned_data['givenname']} {profile_form.cleaned_data['sn']}".strip() or username
-        current_cn = _first(data, "cn", "")
-        _add_change(
-            updates=direct_updates,
-            delattrs=delattrs,
-            attr="cn",
-            current_value=current_cn,
-            new_value=new_cn,
-        )
-
-        _add_change_list_setattr(
-            addattrs=addattrs,
-            setattrs=setattrs,
-            delattrs=delattrs,
-            attr="fasPronoun",
-            current_values=_data_get(data, "fasPronoun", []),
-            new_values=_split_list_field(profile_form.cleaned_data["fasPronoun"]),
-        )
-        _add_change_setattr(
-            setattrs=setattrs,
-            delattrs=delattrs,
-            attr="fasLocale",
-            current_value=normalize_locale_tag(profile_initial.get("fasLocale")),
-            new_value=normalize_locale_tag(profile_form.cleaned_data["fasLocale"]),
-        )
-        _add_change_setattr(
-            setattrs=setattrs,
-            delattrs=delattrs,
-            attr="fasTimezone",
-            current_value=profile_initial.get("fasTimezone"),
-            new_value=profile_form.cleaned_data["fasTimezone"],
-        )
-
-        _add_change_list_setattr(
-            addattrs=addattrs,
-            setattrs=setattrs,
-            delattrs=delattrs,
-            attr="fasWebsiteUrl",
-            current_values=_data_get(data, "fasWebsiteUrl", []),
-            new_values=_split_list_field(profile_form.cleaned_data["fasWebsiteUrl"]),
-        )
-        _add_change_list_setattr(
-            addattrs=addattrs,
-            setattrs=setattrs,
-            delattrs=delattrs,
-            attr="fasRssUrl",
-            current_values=_data_get(data, "fasRssUrl", []),
-            new_values=_split_list_field(profile_form.cleaned_data["fasRssUrl"]),
-        )
-        _add_change_list_setattr(
-            addattrs=addattrs,
-            setattrs=setattrs,
-            delattrs=delattrs,
-            attr="fasIRCNick",
-            current_values=_data_get(data, "fasIRCNick", []),
-            new_values=_split_list_field(profile_form.cleaned_data["fasIRCNick"]),
-        )
-        _add_change_setattr(
-            setattrs=setattrs,
-            delattrs=delattrs,
-            attr="fasGitHubUsername",
-            current_value=profile_initial.get("fasGitHubUsername"),
-            new_value=profile_form.cleaned_data["fasGitHubUsername"],
-        )
-        _add_change_setattr(
-            setattrs=setattrs,
-            delattrs=delattrs,
-            attr="fasGitLabUsername",
-            current_value=profile_initial.get("fasGitLabUsername"),
-            new_value=profile_form.cleaned_data["fasGitLabUsername"],
-        )
-        if country_attr_lower in {"c", "st", "l", "postalcode"}:
-            _add_change(
-                updates=direct_updates,
-                delattrs=delattrs,
-                attr=country_attr_lower,
-                current_value=profile_initial.get("country_code"),
-                new_value=profile_form.cleaned_data["country_code"],
-                transform=str.upper,
-            )
-        else:
-            _add_change_setattr(
-                setattrs=setattrs,
-                delattrs=delattrs,
-                attr=country_attr,
-                current_value=profile_initial.get("country_code"),
-                new_value=profile_form.cleaned_data["country_code"],
-                transform=str.upper,
-            )
-
-        current_private = profile_initial["fasIsPrivate"]
-        new_private = profile_form.cleaned_data["fasIsPrivate"]
-        if current_private != new_private:
-            setattrs.append(f"fasIsPrivate={_bool_to_ipa(new_private)}")
 
         if not direct_updates and not addattrs and not setattrs and not delattrs:
             messages.info(request, "No changes to save.")
@@ -1163,106 +1163,23 @@ def settings_root(request: HttpRequest) -> HttpResponse:
             return blocked
 
         try:
-            skipped, applied = _update_user_attrs(
-                username,
-                direct_updates=direct_updates,
-                addattrs=addattrs,
-                setattrs=setattrs,
-                delattrs=delattrs,
+            _apply_and_report_profile_update(
+                request, username,
+                direct_updates=direct_updates, addattrs=addattrs,
+                setattrs=setattrs, delattrs=delattrs,
+                old_country=old_country, new_country=new_country,
+                country_attr=country_attr, profile_form=profile_form,
             )
-        except requests.exceptions.ConnectionError:
-            messages.error(
-                request,
-                "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
-                "Please try again later.",
-            )
-            context["force_tab"] = "profile"
-            return render(request, "core/settings.html", context)
         except Exception as e:
-            logger.exception("Failed to update profile username=%s", username)
-            if settings.DEBUG:
-                messages.error(request, f"Failed to update profile (debug): {e}")
-            else:
-                messages.error(request, "Failed to update profile due to an internal error.")
-            context["force_tab"] = "profile"
-            return render(request, "core/settings.html", context)
-
-        if skipped:
-            for attr in skipped:
-                label = (
-                    profile_form.fields["country_code"].label
-                    if attr == country_attr
-                    else _form_label_for_attr(profile_form, attr)
-                )
-                messages.warning(request, f"Saved, but '{label or attr}' is not editable on this FreeIPA server.")
-        if applied:
-            messages.success(request, "Profile updated in FreeIPA.")
-
-            if old_country and new_country and old_country != new_country and country_attr not in (skipped or []):
-                pending = list(
-                    MembershipRequest.objects.filter(
-                        requested_username=username,
-                        status=MembershipRequest.Status.pending,
-                    ).only("pk")
-                )
-                if pending:
-                    for mr in pending:
-                        try:
-                            add_note(
-                                membership_request=mr,
-                                username=CUSTOS,
-                                content=(
-                                    f"{username} updated their country from {country_label_from_code(old_country)} "
-                                    f"to {country_label_from_code(new_country)}."
-                                ),
-                            )
-                        except Exception:
-                            logger.exception(
-                                "Failed to record country-change system note request_id=%s username=%s",
-                                mr.pk,
-                                username,
-                            )
-        else:
-            messages.info(request, "No changes were applied.")
+            return _settings_update_error_response(
+                request, context, "profile", e, tab_label="profile", username=username,
+            )
         return redirect(_settings_url("profile"))
 
     if requested_tab == "emails" and emails_form.is_valid():
-        direct_updates: dict[str, object] = {}
-        setattrs: list[str] = []
-        delattrs: list[str] = []
-        pending_validations: list[tuple[str, str]] = []
-
-        current_mail = _normalize_str(emails_initial.get("mail")).lower()
-        new_mail = _normalize_str(emails_form.cleaned_data["mail"]).lower()
-        current_rhbz = _normalize_str(emails_initial.get("fasRHBZEmail")).lower()
-        new_rhbz = _normalize_str(emails_form.cleaned_data["fasRHBZEmail"]).lower()
-
-        if current_mail != new_mail and new_mail:
-            if _normalize_str(current_rhbz).lower() == new_mail and current_rhbz:
-                direct_updates["o_mail"] = new_mail
-            else:
-                pending_validations.append(("mail", new_mail))
-
-        if current_rhbz != new_rhbz:
-            if new_rhbz:
-                if _normalize_str(current_mail).lower() == new_rhbz and current_mail:
-                    _add_change_setattr(
-                        setattrs=setattrs,
-                        delattrs=delattrs,
-                        attr="fasRHBZEmail",
-                        current_value=current_rhbz,
-                        new_value=new_rhbz,
-                    )
-                else:
-                    pending_validations.append(("fasRHBZEmail", new_rhbz))
-            else:
-                _add_change_setattr(
-                    setattrs=setattrs,
-                    delattrs=delattrs,
-                    attr="fasRHBZEmail",
-                    current_value=current_rhbz,
-                    new_value=new_rhbz,
-                )
+        direct_updates, setattrs, delattrs, pending_validations = _build_emails_changes(
+            emails_form=emails_form, emails_initial=emails_initial,
+        )
 
         if not pending_validations and not direct_updates and not setattrs and not delattrs:
             messages.info(request, "No changes to save.")
@@ -1273,80 +1190,24 @@ def settings_root(request: HttpRequest) -> HttpResponse:
             return blocked
 
         try:
-            if direct_updates or setattrs or delattrs:
-                skipped, applied = _update_user_attrs(
-                    username,
-                    direct_updates=direct_updates,
-                    setattrs=setattrs,
-                    delattrs=delattrs,
-                )
-                if skipped:
-                    for attr in skipped:
-                        label = _form_label_for_attr(emails_form, attr)
-                        messages.warning(request, f"Saved, but '{label or attr}' is not editable on this FreeIPA server.")
-                if applied:
-                    messages.success(request, "Email settings updated in FreeIPA.")
-                else:
-                    messages.info(request, "No changes were applied.")
-
-            if pending_validations:
-                name = fu.full_name
-                for attr, address in pending_validations:
-                    _send_email_validation_email(
-                        request,
-                        username=username,
-                        name=name,
-                        attr=attr,
-                        email_to_validate=address,
-                    )
-                messages.success(
-                    request,
-                    "We sent you an email to validate your new email address. Please check your inbox.",
-                )
-
-        except requests.exceptions.ConnectionError:
-            messages.error(
-                request,
-                "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
-                "Please try again later.",
+            _apply_and_report_emails_update(
+                request, username,
+                direct_updates=direct_updates, setattrs=setattrs, delattrs=delattrs,
+                pending_validations=pending_validations, fu=fu, emails_form=emails_form,
             )
-            context["force_tab"] = "emails"
-            return render(request, "core/settings.html", context)
         except Exception as e:
-            logger.exception("Failed to update email settings username=%s", username)
-            if settings.DEBUG:
-                messages.error(request, f"Failed to update email settings (debug): {e}")
-            else:
-                messages.error(request, "Failed to update email settings due to an internal error.")
-            context["force_tab"] = "emails"
-            return render(request, "core/settings.html", context)
+            return _settings_update_error_response(
+                request, context, "emails", e, tab_label="email settings", username=username,
+            )
 
         return redirect(_settings_url("emails"))
 
     if requested_tab == "keys" and keys_form.is_valid():
-        direct_updates: dict[str, object] = {}
-        addattrs: list[str] = []
-        setattrs: list[str] = []
-        delattrs: list[str] = []
-
-        _add_change_list_setattr(
-            addattrs=addattrs,
-            setattrs=setattrs,
-            delattrs=delattrs,
-            attr="fasGPGKeyId",
-            current_values=_data_get(data, "fasGPGKeyId", []),
-            new_values=_split_lines(keys_form.cleaned_data["fasGPGKeyId"]),
-        )
-        _add_change_list_setattr(
-            addattrs=addattrs,
-            setattrs=setattrs,
-            delattrs=delattrs,
-            attr="ipasshpubkey",
-            current_values=_data_get(data, "ipasshpubkey", []),
-            new_values=_split_lines(keys_form.cleaned_data["ipasshpubkey"]),
+        addattrs, setattrs, delattrs = _build_keys_changes(
+            keys_form=keys_form, data=data,
         )
 
-        if not direct_updates and not addattrs and not setattrs and not delattrs:
+        if not addattrs and not setattrs and not delattrs:
             messages.info(request, "No changes to save.")
             return redirect(_settings_url("keys"))
 
@@ -1355,38 +1216,16 @@ def settings_root(request: HttpRequest) -> HttpResponse:
             return blocked
 
         try:
-            skipped, applied = _update_user_attrs(
-                username,
-                direct_updates=direct_updates,
-                addattrs=addattrs,
-                setattrs=setattrs,
-                delattrs=delattrs,
+            _apply_and_report_keys_update(
+                request, username,
+                addattrs=addattrs, setattrs=setattrs, delattrs=delattrs,
+                keys_form=keys_form,
             )
-        except requests.exceptions.ConnectionError:
-            messages.error(
-                request,
-                "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
-                "Please try again later.",
-            )
-            context["force_tab"] = "keys"
-            return render(request, "core/settings.html", context)
         except Exception as e:
-            logger.exception("Failed to update keys username=%s", username)
-            if settings.DEBUG:
-                messages.error(request, f"Failed to update keys (debug): {e}")
-            else:
-                messages.error(request, "Failed to update keys due to an internal error.")
-            context["force_tab"] = "keys"
-            return render(request, "core/settings.html", context)
+            return _settings_update_error_response(
+                request, context, "keys", e, tab_label="keys", username=username,
+            )
 
-        if skipped:
-            for attr in skipped:
-                label = _form_label_for_attr(keys_form, attr)
-                messages.warning(request, f"Saved, but '{label or attr}' is not editable on this FreeIPA server.")
-        if applied:
-            messages.success(request, "Keys updated in FreeIPA.")
-        else:
-            messages.info(request, "No changes were applied.")
         return redirect(_settings_url("keys"))
 
     if requested_tab == "security":
@@ -1427,49 +1266,43 @@ def settings_root(request: HttpRequest) -> HttpResponse:
     return render(request, "core/settings.html", context)
 
 
-def security_otp_enable(request: HttpRequest) -> HttpResponse:
-    fu = FreeIPAUser.get(request.user.get_username())
-    blocked = _block_settings_change_without_country_code(request, user_data=fu._user_data if fu else None)
+def _otp_preamble(request: HttpRequest) -> HttpResponse | None:
+    """Shared country-code gate for OTP actions. Returns a redirect if blocked, else None."""
+    fu = FreeIPAUser.get(get_username(request))
+    return _block_settings_change_without_country_code(request, user_data=fu._user_data if fu else None)
+
+
+def _security_otp_toggle(request: HttpRequest, *, disable: bool) -> HttpResponse:
+    """Enable or disable an OTP token."""
+    blocked = _otp_preamble(request)
     if blocked is not None:
         return blocked
     form = OTPTokenActionForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         token = form.cleaned_data["token"]
+        verb = "disable" if disable else "enable"
         try:
             client = FreeIPAUser.get_client()
-            client.otptoken_mod(a_ipatokenuniqueid=token, o_ipatokendisabled=False)
+            client.otptoken_mod(a_ipatokenuniqueid=token, o_ipatokendisabled=disable)
         except exceptions.FreeIPAError as e:
-            messages.error(request, f"Cannot enable the token. {e}")
+            messages.error(request, f"Cannot {verb} the token. {e}")
         else:
-            messages.success(request, "OTP token enabled.")
+            messages.success(request, f"OTP token {verb}d.")
     else:
         messages.error(request, "Token must not be empty")
     return redirect(_settings_url("security"))
+
+
+def security_otp_enable(request: HttpRequest) -> HttpResponse:
+    return _security_otp_toggle(request, disable=False)
 
 
 def security_otp_disable(request: HttpRequest) -> HttpResponse:
-    fu = FreeIPAUser.get(request.user.get_username())
-    blocked = _block_settings_change_without_country_code(request, user_data=fu._user_data if fu else None)
-    if blocked is not None:
-        return blocked
-    form = OTPTokenActionForm(request.POST or None)
-    if request.method == "POST" and form.is_valid():
-        token = form.cleaned_data["token"]
-        try:
-            client = FreeIPAUser.get_client()
-            client.otptoken_mod(a_ipatokenuniqueid=token, o_ipatokendisabled=True)
-        except exceptions.FreeIPAError as e:
-            messages.error(request, f"Cannot disable the token. {e}")
-        else:
-            messages.success(request, "OTP token disabled.")
-    else:
-        messages.error(request, "Token must not be empty")
-    return redirect(_settings_url("security"))
+    return _security_otp_toggle(request, disable=True)
 
 
 def security_otp_delete(request: HttpRequest) -> HttpResponse:
-    fu = FreeIPAUser.get(request.user.get_username())
-    blocked = _block_settings_change_without_country_code(request, user_data=fu._user_data if fu else None)
+    blocked = _otp_preamble(request)
     if blocked is not None:
         return blocked
     form = OTPTokenActionForm(request.POST or None)
@@ -1493,8 +1326,7 @@ def security_otp_delete(request: HttpRequest) -> HttpResponse:
 
 
 def security_otp_rename(request: HttpRequest) -> HttpResponse:
-    fu = FreeIPAUser.get(request.user.get_username())
-    blocked = _block_settings_change_without_country_code(request, user_data=fu._user_data if fu else None)
+    blocked = _otp_preamble(request)
     if blocked is not None:
         return blocked
     form = OTPTokenRenameForm(request.POST or None)
@@ -1522,7 +1354,7 @@ def security_otp_rename(request: HttpRequest) -> HttpResponse:
 
 
 def settings_email_validate(request: HttpRequest) -> HttpResponse:
-    username = request.user.get_username()
+    username = get_username(request)
     token_string = _normalize_str(request.GET.get("token"))
     if not token_string:
         messages.warning(request, "No token provided, please check your email validation link.")
@@ -1554,8 +1386,7 @@ def settings_email_validate(request: HttpRequest) -> HttpResponse:
     except requests.exceptions.ConnectionError:
         messages.error(
             request,
-            "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
-            "Please try again later.",
+            MSG_SERVICE_UNAVAILABLE,
         )
         return redirect(_settings_url("emails"))
     if not fu:
@@ -1579,8 +1410,7 @@ def settings_email_validate(request: HttpRequest) -> HttpResponse:
         except requests.exceptions.ConnectionError:
             messages.error(
                 request,
-                "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
-                "Please try again later.",
+                MSG_SERVICE_UNAVAILABLE,
             )
             return redirect(_settings_url("emails"))
         except Exception as e:
