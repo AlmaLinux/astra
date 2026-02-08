@@ -182,6 +182,19 @@ def _profile_context_for_user(
     now = timezone.now()
     expiring_soon_by = now + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS)
 
+    personal_pending_requests_qs = list(
+        MembershipRequest.objects.select_related("membership_type")
+        .filter(
+            requested_username=fu.username,
+            status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
+        )
+        .order_by("requested_at")
+    )
+
+    # Type IDs with an existing pending/on-hold renewal request — used to
+    # suppress the "Request renewal" button when one is already in progress.
+    pending_renewal_type_ids = {r.membership_type_id for r in personal_pending_requests_qs}
+
     memberships: list[dict[str, object]] = []
     for membership in valid_memberships:
         expires_at = membership.expires_at
@@ -192,19 +205,11 @@ def _profile_context_for_user(
                 "created_at": membership.created_at,
                 "expires_at": expires_at,
                 "is_expiring_soon": is_expiring_soon,
+                "has_pending_renewal_for_type": membership.membership_type_id in pending_renewal_type_ids,
                 "extend_url": f"{membership_request_url}?membership_type={membership.membership_type.code}",
                 "request_id": request_id_by_membership_type_id.get(membership.membership_type_id),
             }
         )
-
-    personal_pending_requests_qs = list(
-        MembershipRequest.objects.select_related("membership_type")
-        .filter(
-            requested_username=fu.username,
-            status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
-        )
-        .order_by("requested_at")
-    )
 
     org_pending_requests_qs = list(
         MembershipRequest.objects.select_related("membership_type", "requested_organization")
