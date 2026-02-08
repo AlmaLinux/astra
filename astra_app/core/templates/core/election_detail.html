@@ -1,5 +1,6 @@
 {% extends 'core/base.html' %}
 {% load static %}
+{% load avatar_tags %}
 
 {% block extra_head %}
   {{ block.super }}
@@ -229,6 +230,11 @@
                       </h3>
                     </div>
                     <div class="card-body">
+                      {% if item.candidate_user %}
+                        <div style="float:left; margin-right:1rem; margin-bottom:0.5rem;">
+                          {% avatar item.candidate_user 120 class="img-circle" style="width:120px;height:120px;object-fit:cover;" alt="Avatar" title=item.candidate_user.get_full_name %}
+                        </div>
+                      {% endif %}
                       {% if item.candidate.description %}
                         <p class="mb-2">{{ item.candidate.description|linebreaksbr }}</p>
                       {% endif %}
