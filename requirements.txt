@@ -1,5 +1,6 @@
 Django>=6.0,<7.0
-django-jazzmin
+# Lock to 3.0.1 until https://github.com/farridav/django-jazzmin/issues/651 is resolved
+django-jazzmin==3.0.1
 django-import-export
 psycopg2-binary
 django-storages[boto3]
