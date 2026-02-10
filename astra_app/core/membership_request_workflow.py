@@ -25,7 +25,6 @@ from core.models import (
     MembershipRequest,
     MembershipType,
     Organization,
-    OrganizationSponsorship,
 )
 
 logger = logging.getLogger(__name__)
@@ -246,9 +245,14 @@ def previous_expires_at_for_extension(*, username: str, membership_type: Members
     )
 
 
-def previous_expires_at_for_org_extension(*, organization_id: int) -> datetime.datetime | None:
+def previous_expires_at_for_org_extension(
+    *, organization_id: int, membership_type: MembershipType,
+) -> datetime.datetime | None:
     return _active_expires_at(
-        OrganizationSponsorship.objects.filter(organization_id=organization_id)
+        Membership.objects.filter(
+            target_organization_id=organization_id,
+            membership_type=membership_type,
+        )
     )
 
 
@@ -408,7 +412,20 @@ def approve_membership_request(
             _ensure_configured_email_template_exists(template_name=template_name)
 
         # Capture before any membership/sponsorship updates.
-        previous_expires_at = previous_expires_at_for_org_extension(organization_id=org.pk)
+        previous_expires_at = previous_expires_at_for_org_extension(
+            organization_id=org.pk, membership_type=membership_type,
+        )
+
+        # DD-03: Capture OLD membership in same category BEFORE creating
+        # MembershipLog, so we can remove rep from the old FreeIPA group.
+        old_membership = (
+            Membership.objects.select_related("membership_type")
+            .filter(
+                target_organization=org,
+                category=membership_type.category,
+            )
+            .first()
+        )
 
         if membership_type.group_cn and org.representative:
             try:
@@ -424,6 +441,29 @@ def approve_membership_request(
                 raise
 
             if representative is not None:
+                # Stale-group fix: remove rep from old group before adding to
+                # new one when switching types within the same category
+                # (e.g. gold -> platinum).
+                if (
+                    old_membership is not None
+                    and old_membership.membership_type != membership_type
+                    and old_membership.membership_type.group_cn
+                ):
+                    try:
+                        representative.remove_from_group(
+                            group_name=old_membership.membership_type.group_cn,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "%s: remove_from_group (old) failed request_id=%s org_id=%s representative=%r group_cn=%r",
+                            log_prefix,
+                            membership_request.pk,
+                            org.pk,
+                            representative.username,
+                            old_membership.membership_type.group_cn,
+                        )
+                        raise
+
                 try:
                     representative.add_to_group(group_name=membership_type.group_cn)
                 except Exception:
@@ -436,9 +476,6 @@ def approve_membership_request(
                         membership_type.group_cn,
                     )
                     raise
-
-        org.membership_level = membership_type
-        org.save(update_fields=["membership_level"])
 
         email_context: dict[str, object] = (
             {

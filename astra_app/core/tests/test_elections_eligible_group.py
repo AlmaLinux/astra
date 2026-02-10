@@ -29,7 +29,7 @@ class ElectionEligibleGroupTests(TestCase):
             code="voter",
             name="Voter",
             votes=1,
-            isIndividual=True,
+            category_id="individual",
             enabled=True,
         )
 
@@ -75,7 +75,7 @@ class ElectionEligibleGroupTests(TestCase):
             code="voter",
             name="Voter",
             votes=1,
-            isIndividual=True,
+            category_id="individual",
             enabled=True,
         )
 

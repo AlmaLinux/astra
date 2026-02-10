@@ -12,10 +12,10 @@ from post_office.models import EmailTemplate
 from core.backends import FreeIPAUser
 from core.models import (
     FreeIPAPermissionGrant,
+    Membership,
     MembershipLog,
     MembershipType,
     Organization,
-    OrganizationSponsorship,
 )
 from core.permissions import ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP
 
@@ -42,8 +42,7 @@ class MembershipGroupSyncLifecycleTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -105,16 +104,15 @@ class MembershipGroupSyncLifecycleTests(TestCase):
             defaults={
                 "name": "Gold Sponsor",
                 "group_cn": "almalinux-gold",
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "sponsorship",
                 "sort_order": 0,
                 "enabled": True,
             },
         )
 
-        org = Organization.objects.create(name="Acme", membership_level_id="gold", representative="bob")
-        OrganizationSponsorship.objects.create(
-            organization=org,
+        org = Organization.objects.create(name="Acme", representative="bob")
+        Membership.objects.create(
+            target_organization=org,
             membership_type_id="gold",
             expires_at=timezone.now() + datetime.timedelta(days=30),
         )
@@ -165,16 +163,15 @@ class MembershipGroupSyncLifecycleTests(TestCase):
             defaults={
                 "name": "Gold Sponsor",
                 "group_cn": "almalinux-gold",
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "sponsorship",
                 "sort_order": 0,
                 "enabled": True,
             },
         )
 
-        org = Organization.objects.create(name="Acme", membership_level_id="gold", representative="bob")
-        OrganizationSponsorship.objects.create(
-            organization=org,
+        org = Organization.objects.create(name="Acme", representative="bob")
+        Membership.objects.create(
+            target_organization=org,
             membership_type_id="gold",
             expires_at=timezone.now() + datetime.timedelta(days=30),
         )
@@ -233,7 +230,6 @@ class MembershipGroupSyncLifecycleTests(TestCase):
                         "technical_contact_email": "tech@example.com",
                         "website_logo": "https://example.com/logo.png",
                         "website": "https://example.com",
-                        "membership_level": "gold",
                         "representative": "alice",
                     },
                     follow=False,
@@ -253,17 +249,16 @@ class MembershipGroupSyncLifecycleTests(TestCase):
             defaults={
                 "name": "Gold Sponsor",
                 "group_cn": "almalinux-gold",
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "sponsorship",
                 "sort_order": 0,
                 "enabled": True,
             },
         )
 
         frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
-        org = Organization.objects.create(name="Acme", membership_level_id="gold", representative="bob")
-        OrganizationSponsorship.objects.create(
-            organization=org,
+        org = Organization.objects.create(name="Acme", representative="bob")
+        Membership.objects.create(
+            target_organization=org,
             membership_type_id="gold",
             expires_at=frozen_now - datetime.timedelta(days=1),
         )
@@ -294,8 +289,7 @@ class MembershipGroupSyncLifecycleTests(TestCase):
 
         remove_mock.assert_called_once()
         org.refresh_from_db()
-        self.assertIsNone(org.membership_level_id)
-        self.assertFalse(OrganizationSponsorship.objects.filter(organization=org).exists())
+        self.assertFalse(Membership.objects.filter(target_organization=org).exists())
 
     def test_org_sponsorship_expired_cleanup_does_not_clear_db_when_freeipa_removal_fails(self) -> None:
         MembershipType.objects.update_or_create(
@@ -303,17 +297,16 @@ class MembershipGroupSyncLifecycleTests(TestCase):
             defaults={
                 "name": "Gold Sponsor",
                 "group_cn": "almalinux-gold",
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "sponsorship",
                 "sort_order": 0,
                 "enabled": True,
             },
         )
 
         frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
-        org = Organization.objects.create(name="Acme", membership_level_id="gold", representative="bob")
-        OrganizationSponsorship.objects.create(
-            organization=org,
+        org = Organization.objects.create(name="Acme", representative="bob")
+        Membership.objects.create(
+            target_organization=org,
             membership_type_id="gold",
             expires_at=frozen_now - datetime.timedelta(days=1),
         )
@@ -323,5 +316,4 @@ class MembershipGroupSyncLifecycleTests(TestCase):
                 call_command("membership_expired_cleanup")
 
         org.refresh_from_db()
-        self.assertEqual(org.membership_level_id, "gold")
-        self.assertTrue(OrganizationSponsorship.objects.filter(organization=org).exists())
+        self.assertTrue(Membership.objects.filter(target_organization=org).exists())

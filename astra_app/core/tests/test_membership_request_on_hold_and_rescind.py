@@ -79,8 +79,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -177,8 +176,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -242,8 +240,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -265,8 +262,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -304,8 +300,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -362,8 +357,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -406,8 +400,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -450,8 +443,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -494,8 +486,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
             defaults={
                 "name": "Organization",
                 "group_cn": "almalinux-org",
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "sponsorship",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -555,8 +546,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
             defaults={
                 "name": "Organization",
                 "group_cn": "almalinux-org",
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "sponsorship",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -605,8 +595,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -659,8 +648,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -702,8 +690,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -734,8 +721,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -783,8 +769,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -832,8 +817,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -901,8 +885,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },

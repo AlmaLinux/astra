@@ -5,7 +5,6 @@ from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.contrib import messages
-from django.db.models import Q
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -144,7 +143,7 @@ def _profile_context_for_user(
     valid_memberships = get_valid_memberships_for_username(fu.username)
     valid_membership_type_codes = get_valid_membership_type_codes_for_username(fu.username)
 
-    has_individual_membership = any(m.membership_type.isIndividual for m in valid_memberships)
+    has_individual_membership = any(m.membership_type.category.is_individual for m in valid_memberships)
 
     membership_type_ids = {m.membership_type_id for m in valid_memberships}
 
@@ -191,9 +190,7 @@ def _profile_context_for_user(
         .order_by("requested_at")
     )
 
-    # Type IDs with an existing pending/on-hold renewal request — used to
-    # suppress the "Request renewal" button when one is already in progress.
-    pending_renewal_type_ids = {r.membership_type_id for r in personal_pending_requests_qs}
+    pending_request_category_ids = {r.membership_type.category_id for r in personal_pending_requests_qs}
 
     memberships: list[dict[str, object]] = []
     for membership in valid_memberships:
@@ -205,7 +202,7 @@ def _profile_context_for_user(
                 "created_at": membership.created_at,
                 "expires_at": expires_at,
                 "is_expiring_soon": is_expiring_soon,
-                "has_pending_renewal_for_type": membership.membership_type_id in pending_renewal_type_ids,
+                "has_pending_request_in_category": membership.category_id in pending_request_category_ids,
                 "extend_url": f"{membership_request_url}?membership_type={membership.membership_type.code}",
                 "request_id": request_id_by_membership_type_id.get(membership.membership_type_id),
             }
@@ -225,6 +222,7 @@ def _profile_context_for_user(
         {
             "membership_type": r.membership_type,
             "requested_at": r.requested_at,
+            "pk": r.pk,
             "request_id": r.pk,
             "status": r.status,
             "on_hold_at": r.on_hold_at,
@@ -238,6 +236,7 @@ def _profile_context_for_user(
         {
             "membership_type": r.membership_type,
             "requested_at": r.requested_at,
+            "pk": r.pk,
             "request_id": r.pk,
             "status": r.status,
             "on_hold_at": r.on_hold_at,
@@ -256,15 +255,13 @@ def _profile_context_for_user(
         r for r in pending_requests if r.get("status") == MembershipRequest.Status.on_hold
     ]
 
-    pending_membership_type_codes = {r.membership_type_id for r in personal_pending_requests_qs}
     extendable_membership_type_codes = get_extendable_membership_type_codes_for_username(fu.username)
     blocked_membership_type_codes = valid_membership_type_codes - extendable_membership_type_codes
 
     membership_can_request_any = (
-        MembershipType.objects.filter(enabled=True)
-        .filter(Q(isIndividual=True) | Q(code="mirror"))
+        MembershipType.objects.filter(enabled=True, category__is_individual=True)
         .exclude(code__in=blocked_membership_type_codes)
-        .exclude(code__in=pending_membership_type_codes)
+        .exclude(category_id__in=pending_request_category_ids)
         .exclude(group_cn="")
         .exists()
     )

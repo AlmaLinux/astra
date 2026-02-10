@@ -3,7 +3,7 @@ from typing import override
 from django import forms
 
 from core.backends import FreeIPAUser
-from core.models import MembershipType, Organization
+from core.models import Organization
 from core.user_labels import user_choice_from_freeipa
 
 
@@ -128,25 +128,3 @@ class OrganizationEditForm(forms.ModelForm):
 
         return username
 
-
-class OrganizationSponsorshipRequestForm(forms.Form):
-    membership_level = forms.ModelChoiceField(
-        queryset=MembershipType.objects.none(),
-        required=True,
-        label="Sponsorship level",
-        empty_label="Select a sponsorship level…",
-        widget=forms.Select(attrs={"class": "form-control"}),
-    )
-    additional_information = forms.CharField(
-        required=False,
-        label="Additional information",
-        widget=forms.Textarea(attrs={"class": "form-control", "rows": 4}),
-    )
-
-    @override
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.fields["membership_level"].queryset = MembershipType.objects.filter(isOrganization=True).order_by(
-            "sort_order",
-            "code",
-        )

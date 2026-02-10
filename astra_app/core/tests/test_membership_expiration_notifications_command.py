@@ -13,7 +13,6 @@ from core.models import (
     MembershipLog,
     MembershipType,
     Organization,
-    OrganizationSponsorship,
 )
 
 
@@ -24,8 +23,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -89,8 +87,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -144,8 +141,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -199,8 +195,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -249,8 +244,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -299,8 +293,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
             defaults={
                 "name": "Sponsor",
                 "group_cn": "almalinux-sponsor",
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "sponsorship",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -331,8 +324,8 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 expires_on_utc, datetime.time(23, 59, 59), tzinfo=datetime.UTC
             )
 
-            OrganizationSponsorship.objects.create(
-                organization=organization,
+            Membership.objects.create(
+                target_organization=organization,
                 membership_type=membership_type,
                 expires_at=expires_at_utc,
             )
@@ -359,8 +352,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
             defaults={
                 "name": "Sponsor",
                 "group_cn": "almalinux-sponsor",
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "sponsorship",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -391,8 +383,8 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 expires_on_utc, datetime.time(23, 59, 59), tzinfo=datetime.UTC
             )
 
-            OrganizationSponsorship.objects.create(
-                organization=organization,
+            Membership.objects.create(
+                target_organization=organization,
                 membership_type=membership_type,
                 expires_at=expires_at_utc,
             )
@@ -411,8 +403,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
             defaults={
                 "name": "Sponsor",
                 "group_cn": "almalinux-sponsor",
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "sponsorship",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -443,8 +434,8 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 expires_on_utc, datetime.time(23, 59, 59), tzinfo=datetime.UTC
             )
 
-            OrganizationSponsorship.objects.create(
-                organization=organization,
+            Membership.objects.create(
+                target_organization=organization,
                 membership_type=membership_type,
                 expires_at=expires_at_utc,
             )

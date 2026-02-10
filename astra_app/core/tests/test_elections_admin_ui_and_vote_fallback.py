@@ -42,7 +42,7 @@ class ElectionDetailAdminControlsTests(TestCase):
             code="voter",
             name="Voter",
             votes=1,
-            isIndividual=True,
+            category_id="individual",
             enabled=True,
         )
         membership = Membership.objects.create(target_username="viewer", membership_type=voter_type, expires_at=None)
@@ -98,7 +98,7 @@ class ElectionDetailAdminControlsTests(TestCase):
             code="voter",
             name="Voter",
             votes=1,
-            isIndividual=True,
+            category_id="individual",
         )
         membership = Membership.objects.create(target_username="alice", membership_type=voter_type, expires_at=None)
         Membership.objects.filter(pk=membership.pk).update(created_at=election.start_datetime - datetime.timedelta(days=200))
@@ -404,7 +404,7 @@ class ElectionDetailAdminControlsTests(TestCase):
             code="voter",
             name="Voter",
             votes=1,
-            isIndividual=True,
+            category_id="individual",
             enabled=True,
         )
         membership = Membership.objects.create(target_username="alice", membership_type=voter_type, expires_at=None)
@@ -494,7 +494,7 @@ class ElectionVoteNoJsFallbackTests(TestCase):
             code="voter",
             name="Voter",
             votes=1,
-            isIndividual=True,
+            category_id="individual",
             enabled=True,
         )
         membership = Membership.objects.create(target_username="voter1", membership_type=voter_type, expires_at=None)

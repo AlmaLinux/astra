@@ -483,7 +483,7 @@ class ElectionPrivacyFlowTests(TestCase):
             description="",
         )
 
-        mt = MembershipType.objects.create(code="voter", name="Voter", votes=1, isIndividual=True)
+        mt = MembershipType.objects.create(code="voter", name="Voter", votes=1, category_id="individual")
         Membership.objects.create(
             target_username="reviewer",
             membership_type=mt,

@@ -15,8 +15,7 @@ class MembershipRequestWorkflowAgreementTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -51,8 +50,7 @@ class MembershipRequestWorkflowAgreementTests(TestCase):
             defaults={
                 "name": "Gold Sponsor",
                 "group_cn": "almalinux-gold",
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "sponsorship",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -82,5 +80,3 @@ class MembershipRequestWorkflowAgreementTests(TestCase):
         get_mock.assert_not_called()
         membership_request.refresh_from_db()
         self.assertEqual(membership_request.status, MembershipRequest.Status.pending)
-        org.refresh_from_db()
-        self.assertIsNone(org.membership_level_id)

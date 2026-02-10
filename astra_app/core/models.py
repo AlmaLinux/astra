@@ -1,6 +1,7 @@
 import datetime
 import hashlib
 import json
+import logging
 import secrets
 import uuid
 from io import BytesIO
@@ -11,12 +12,14 @@ from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import UploadedFile
 from django.core.validators import MaxValueValidator, MinValueValidator
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Q
 from django.utils import timezone
 from PIL import Image
 
 from core.tokens import make_signed_token
+
+logger = logging.getLogger(__name__)
 
 
 def organization_logo_upload_to(instance: Organization, filename: str) -> str:
@@ -120,6 +123,51 @@ class IPAFASAgreement(models.Model):
         )
 
 
+class MembershipTypeCategory(models.Model):
+    """Broad category of membership types (individual, mirror, sponsorship).
+
+    Controls which target types (users and/or organizations) are valid for
+    membership types in this category, and enforces the one-per-category
+    invariant for organizations via a denormalized FK on Membership.
+    """
+
+    name = models.CharField(max_length=64, primary_key=True)
+    is_individual = models.BooleanField(
+        default=False,
+        help_text="Whether types in this category can be held by individual users.",
+    )
+    is_organization = models.BooleanField(
+        default=False,
+        help_text="Whether types in this category can be held by organizations.",
+    )
+    sort_order = models.IntegerField(
+        default=0,
+        help_text="Lower values appear first in membership type selections.",
+    )
+
+    class Meta:
+        ordering = ("sort_order", "name")
+        verbose_name = "Membership type category"
+        verbose_name_plural = "Membership type categories"
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class MembershipTypeQuerySet(models.QuerySet["MembershipType"]):
+    def enabled(self) -> MembershipTypeQuerySet:
+        return self.filter(enabled=True)
+
+    def ordered_for_display(self) -> MembershipTypeQuerySet:
+        return self.select_related("category").order_by(
+            "category__sort_order",
+            "category__name",
+            "sort_order",
+            "code",
+            "pk",
+        )
+
+
 class MembershipType(models.Model):
     code = models.CharField(max_length=64, primary_key=True)
     name = models.CharField(max_length=255)
@@ -134,10 +182,16 @@ class MembershipType(models.Model):
         related_name="+",
         help_text="Email template used when a membership request is approved.",
     )
-    isIndividual = models.BooleanField(default=False)
-    isOrganization = models.BooleanField(default=False)
+    category = models.ForeignKey(
+        MembershipTypeCategory,
+        on_delete=models.PROTECT,
+        related_name="membership_types",
+        help_text="Broad category: individual, mirror, or sponsorship.",
+    )
     sort_order = models.IntegerField(default=0)
     enabled = models.BooleanField(default=True)
+
+    objects = MembershipTypeQuerySet.as_manager()
 
     class Meta:
         ordering = ("sort_order", "code")
@@ -160,15 +214,6 @@ class Organization(models.Model):
     technical_contact_name = models.CharField(max_length=255, blank=True, default="")
     technical_contact_email = models.EmailField(blank=True, default="")
     technical_contact_phone = models.CharField(max_length=64, blank=True, default="")
-
-    membership_level = models.ForeignKey(
-        MembershipType,
-        on_delete=models.PROTECT,
-        blank=True,
-        null=True,
-        related_name="organizations",
-        limit_choices_to={"isOrganization": True},
-    )
 
     website_logo = models.URLField(blank=True, default="", max_length=2048)
 
@@ -251,26 +296,6 @@ class Organization(models.Model):
         self.logo.save(f"{self.pk}.png", content, save=False)
 
 
-class OrganizationSponsorship(models.Model):
-    organization = models.OneToOneField(
-        Organization,
-        on_delete=models.CASCADE,
-        related_name="sponsorship",
-    )
-    membership_type = models.ForeignKey(MembershipType, on_delete=models.PROTECT)
-    expires_at = models.DateTimeField(blank=True, null=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        indexes = [
-            models.Index(fields=["expires_at"], name="orgs_exp_at"),
-        ]
-
-    def __str__(self) -> str:
-        return f"{self.organization_id} ({self.membership_type_id})"
-
-
 class MembershipRequest(models.Model):
     class Status(models.TextChoices):
         pending = "pending", "Pending"
@@ -307,7 +332,7 @@ class MembershipRequest(models.Model):
                 name="uniq_membershiprequest_open_user_type",
             ),
             models.UniqueConstraint(
-                fields=["requested_organization"],
+                fields=["requested_organization", "membership_type"],
                 condition=Q(status__in=["pending", "on_hold"], requested_organization__isnull=False),
                 name="uniq_membershiprequest_open_org_type",
             ),
@@ -481,8 +506,31 @@ class Note(models.Model):
 
 
 class Membership(models.Model):
-    target_username = models.CharField(max_length=255)
+    """Active membership row for a user OR an organization.
+
+    Exactly one of (target_username, target_organization) must be set.
+    The ``category`` FK is denormalized from ``membership_type.category`` on
+    save, enabling the DB-level UniqueConstraint that enforces the
+    one-membership-per-category invariant for organizations.
+    """
+
+    target_username = models.CharField(max_length=255, blank=True, default="")
+    target_organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        blank=True,
+        null=True,
+        related_name="memberships",
+    )
+    target_organization_code = models.CharField(max_length=64, blank=True, default="")
+    target_organization_name = models.CharField(max_length=255, blank=True, default="")
     membership_type = models.ForeignKey(MembershipType, on_delete=models.PROTECT)
+    category = models.ForeignKey(
+        MembershipTypeCategory,
+        on_delete=models.PROTECT,
+        related_name="+",
+        help_text="Denormalized from membership_type.category for UniqueConstraint.",
+    )
     expires_at = models.DateTimeField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -491,17 +539,118 @@ class Membership(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["target_username", "membership_type"],
+                condition=~models.Q(target_username=""),
                 name="uniq_membership_target_username_type",
+            ),
+            models.UniqueConstraint(
+                fields=["target_organization", "membership_type"],
+                condition=models.Q(target_organization__isnull=False),
+                name="uniq_membership_org_type",
+            ),
+            # One-per-category for orgs: an org can hold at most one
+            # membership type from each category (DD-01).
+            models.UniqueConstraint(
+                fields=["target_organization", "category"],
+                condition=models.Q(target_organization__isnull=False),
+                name="uniq_membership_org_category",
+            ),
+            # Exactly one target must be set, never both, never neither.
+            models.CheckConstraint(
+                condition=(
+                    (
+                        ~models.Q(target_username="")
+                        & models.Q(target_organization__isnull=True)
+                        & models.Q(target_organization_code="")
+                    )
+                    | (
+                        models.Q(target_username="")
+                        & models.Q(target_organization__isnull=False)
+                    )
+                ),
+                name="chk_membership_exactly_one_target",
             ),
         ]
         indexes = [
             models.Index(fields=["target_username"], name="m_tgt"),
+            models.Index(fields=["target_organization"], name="m_org_tgt"),
             models.Index(fields=["expires_at"], name="m_exp_at"),
         ]
         ordering = ("target_username", "membership_type_id")
 
+    @override
+    def save(self, *args, **kwargs) -> None:
+        # Denormalize category from membership_type so the DB constraint works.
+        self.category_id = self.membership_type.category_id
+
+        # Denormalize org identifiers for display after FK deletion.
+        if self.target_organization_id is not None:
+            if not self.target_organization_code:
+                self.target_organization_code = str(self.target_organization_id)
+            if not self.target_organization_name and self.target_organization is not None:
+                self.target_organization_name = self.target_organization.name
+
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def replace_within_category(
+        cls,
+        *,
+        organization: Organization,
+        new_membership_type: MembershipType,
+        expires_at: datetime.datetime | None,
+        created_at: datetime.datetime | None = None,
+    ) -> tuple[Membership, Membership | None]:
+        """Atomically replace an org's membership within the same category (DD-02).
+
+        Returns (new_membership, old_membership_or_None).
+        The old membership is deleted first so the UniqueConstraint on
+        (target_organization, category) is satisfied.
+        """
+        with transaction.atomic():
+            category_id = new_membership_type.category_id
+            old = (
+                cls.objects.filter(
+                    target_organization=organization,
+                    category_id=category_id,
+                )
+                .select_for_update()
+                .first()
+            )
+            if old is not None:
+                old_copy = Membership(
+                    pk=old.pk,
+                    target_organization_id=old.target_organization_id,
+                    target_organization_code=old.target_organization_code,
+                    target_organization_name=old.target_organization_name,
+                    membership_type_id=old.membership_type_id,
+                    category_id=old.category_id,
+                    expires_at=old.expires_at,
+                )
+                # Manually copy created_at since auto_now_add would overwrite on
+                # a new unsaved instance.
+                old_copy.created_at = old.created_at
+                old.delete()
+            else:
+                old_copy = None
+
+            new = cls(
+                target_organization=organization,
+                membership_type=new_membership_type,
+                expires_at=expires_at,
+            )
+            new.save()
+
+            if created_at is not None and new.created_at != created_at:
+                cls.objects.filter(pk=new.pk).update(created_at=created_at)
+                new.created_at = created_at
+
+            return new, old_copy
+
     def __str__(self) -> str:
-        return f"{self.target_username} ({self.membership_type_id})"
+        if self.target_username:
+            return f"{self.target_username} ({self.membership_type_id})"
+        code = self.target_organization_code or (self.target_organization_id or "?")
+        return f"org:{code} ({self.membership_type_id})"
 
 
 class MembershipLog(models.Model):
@@ -675,17 +824,63 @@ class MembershipLog(models.Model):
             model_class.objects.filter(pk=row.pk).update(created_at=start_at)
 
     def _apply_org_side_effects(self) -> None:
-        lookup = {"organization_id": self.target_organization_id}
-        self._apply_side_effects(
-            model_class=OrganizationSponsorship,
-            delete_filter=lookup,
-            lookup_filter=lookup,
-            log_filter={
-                "target_organization_id": self.target_organization_id,
-                "membership_type": self.membership_type,
-            },
-            create_defaults={"membership_type": self.membership_type},
+        """Side-effects for organization membership changes.
+
+        Uses replace_within_category() for approval/expiry-change paths so
+        that within-category upgrades (e.g. gold -> platinum) correctly
+        replace the old membership row (DD-02).
+        """
+        if self.action not in {self.Action.approved, self.Action.expiry_changed, self.Action.terminated}:
+            return
+
+        if self.action == self.Action.terminated:
+            Membership.objects.filter(
+                target_organization_id=self.target_organization_id,
+                membership_type=self.membership_type,
+            ).delete()
+            return
+
+        # Check for an existing membership of the SAME type for term start.
+        existing = (
+            Membership.objects.filter(
+                target_organization_id=self.target_organization_id,
+                membership_type=self.membership_type,
+            )
+            .only("created_at", "expires_at")
+            .first()
         )
+
+        log_filter = {
+            "target_organization_id": self.target_organization_id,
+            "membership_type": self.membership_type,
+        }
+
+        if existing is not None and existing.expires_at is not None and existing.expires_at > self.created_at:
+            start_at = existing.created_at
+        else:
+            start_at = self._resolve_term_start_at(log_filter=log_filter)
+
+        org = Organization.objects.filter(pk=self.target_organization_id).first()
+        if org is None:
+            logger.warning(
+                "_apply_org_side_effects: organization not found org_id=%s",
+                self.target_organization_id,
+            )
+            return
+
+        new_membership, old = Membership.replace_within_category(
+            organization=org,
+            new_membership_type=self.membership_type,
+            expires_at=self.expires_at,
+            created_at=start_at,
+        )
+        if old is not None and old.membership_type_id != self.membership_type_id:
+            logger.info(
+                "_apply_org_side_effects: replaced %s with %s for org_id=%s",
+                old.membership_type_id,
+                self.membership_type_id,
+                self.target_organization_id,
+            )
 
     def _apply_user_side_effects(self) -> None:
         lookup = {
@@ -697,7 +892,9 @@ class MembershipLog(models.Model):
             delete_filter=lookup,
             lookup_filter=lookup,
             log_filter=lookup,
-            create_defaults={},
+            create_defaults={
+                "category": self.membership_type.category,
+            },
         )
 
     def __str__(self) -> str:

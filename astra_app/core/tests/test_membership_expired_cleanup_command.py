@@ -5,11 +5,12 @@ from unittest.mock import patch
 from django.conf import settings
 from django.core.management import call_command
 from django.test import TestCase
+from django.urls import reverse
 from django.utils import timezone
 from post_office.models import EmailTemplate
 
 from core.backends import FreeIPAUser
-from core.models import Membership, MembershipLog, MembershipType, Organization, OrganizationSponsorship
+from core.models import Membership, MembershipLog, MembershipType, Organization
 
 
 class MembershipExpiredCleanupCommandTests(TestCase):
@@ -19,8 +20,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -75,8 +75,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -131,8 +130,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
             defaults={
                 "name": "Gold Sponsor",
                 "group_cn": "almalinux-gold",
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "sponsorship",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -151,11 +149,10 @@ class MembershipExpiredCleanupCommandTests(TestCase):
         frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
         org = Organization.objects.create(
             name="Acme",
-            membership_level_id="gold",
             representative="rep1",
         )
-        OrganizationSponsorship.objects.create(
-            organization=org,
+        Membership.objects.create(
+            target_organization=org,
             membership_type=membership_type,
             expires_at=frozen_now - datetime.timedelta(days=1),
         )
@@ -175,12 +172,13 @@ class MembershipExpiredCleanupCommandTests(TestCase):
                     call_command("membership_expired_cleanup")
 
         remove_mock.assert_called_once()
-        self.assertFalse(OrganizationSponsorship.objects.filter(organization=org).exists())
-
-        org.refresh_from_db()
-        self.assertIsNone(org.membership_level_id)
+        self.assertFalse(Membership.objects.filter(target_organization=org).exists())
 
         from post_office.models import Email
+
+        request_path = reverse("organization-membership-request", kwargs={"organization_id": org.pk})
+        base = str(settings.PUBLIC_BASE_URL or "").strip().rstrip("/")
+        expected_extend_url = f"{base}{request_path}" if base else request_path
 
         self.assertTrue(
             Email.objects.filter(
@@ -188,6 +186,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
                 template__name=settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
                 context__organization_id=org.pk,
                 context__membership_type_code="gold",
+                context__extend_url=expected_extend_url,
             ).exists()
         )
 
@@ -197,8 +196,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
             defaults={
                 "name": "Gold Sponsor",
                 "group_cn": "almalinux-gold",
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "sponsorship",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -217,11 +215,10 @@ class MembershipExpiredCleanupCommandTests(TestCase):
         frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
         org = Organization.objects.create(
             name="Acme",
-            membership_level_id="gold",
             representative="rep1",
         )
-        OrganizationSponsorship.objects.create(
-            organization=org,
+        Membership.objects.create(
+            target_organization=org,
             membership_type=membership_type,
             expires_at=frozen_now - datetime.timedelta(days=1),
         )
@@ -241,10 +238,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
                     call_command("membership_expired_cleanup", "--dry-run")
 
         remove_mock.assert_not_called()
-        self.assertTrue(OrganizationSponsorship.objects.filter(organization=org).exists())
-
-        org.refresh_from_db()
-        self.assertEqual(org.membership_level_id, "gold")
+        self.assertTrue(Membership.objects.filter(target_organization=org).exists())
 
         from post_office.models import Email
 

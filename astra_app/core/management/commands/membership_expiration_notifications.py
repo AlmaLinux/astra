@@ -15,7 +15,7 @@ from core.membership_notifications import (
     send_membership_notification,
     send_organization_sponsorship_notification,
 )
-from core.models import Membership, OrganizationSponsorship
+from core.models import Membership
 
 
 class Command(BaseCommand):
@@ -51,12 +51,15 @@ class Command(BaseCommand):
 
         memberships: Iterable[Membership] = (
             Membership.objects.select_related("membership_type")
+            .exclude(target_username="")
             .order_by("target_username", "membership_type_id")
         )
-        sponsorships = OrganizationSponsorship.objects.select_related(
-            "organization",
+        sponsorships = Membership.objects.select_related(
+            "target_organization",
             "membership_type",
-        ).order_by("organization_id", "membership_type_id")
+        ).filter(
+            target_organization__isnull=False,
+        ).order_by("target_organization_id", "membership_type_id")
 
         queued = 0
         skipped = 0
@@ -137,7 +140,7 @@ class Command(BaseCommand):
             template = settings.ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME
 
             sponsor_context = organization_sponsor_email_context(
-                organization=sponsorship.organization,
+                organization=sponsorship.target_organization,
             )
             recipient_email = str(sponsor_context.get("email") or "").strip()
             if not recipient_email:
@@ -146,7 +149,7 @@ class Command(BaseCommand):
             base = str(settings.PUBLIC_BASE_URL or "").strip().rstrip("/")
             extend_path = reverse(
                 "organization-sponsorship-extend",
-                kwargs={"organization_id": sponsorship.organization_id},
+                kwargs={"organization_id": sponsorship.target_organization_id},
             )
             extend_url = f"{base}{extend_path}" if base else extend_path
 
@@ -159,7 +162,7 @@ class Command(BaseCommand):
                     already_sent = Email.objects.filter(
                         to=recipient_email,
                         template__name=template,
-                        context__organization_id=sponsorship.organization_id,
+                        context__organization_id=sponsorship.target_organization_id,
                         context__membership_type_code=sponsorship.membership_type.code,
                         created__date=today,
                     ).exists()
@@ -177,7 +180,7 @@ class Command(BaseCommand):
             else:
                 did_queue = send_organization_sponsorship_notification(
                     recipient_email=recipient_email,
-                    organization=sponsorship.organization,
+                    organization=sponsorship.target_organization,
                     membership_type=sponsorship.membership_type,
                     template_name=template,
                     expires_at=sponsorship.expires_at,

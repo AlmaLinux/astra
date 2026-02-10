@@ -32,7 +32,7 @@ class ElectionEditEligibleUsersSearchTests(TestCase):
             code="voter",
             name="Voter",
             votes=1,
-            isIndividual=True,
+            category_id="individual",
             enabled=True,
         )
         membership = Membership.objects.create(
@@ -71,7 +71,7 @@ class ElectionEditEligibleUsersSearchTests(TestCase):
             code="voter",
             name="Voter",
             votes=1,
-            isIndividual=True,
+            category_id="individual",
             enabled=True,
         )
         membership = Membership.objects.create(
@@ -108,7 +108,7 @@ class ElectionEditEligibleUsersSearchTests(TestCase):
             code="voter",
             name="Voter",
             votes=1,
-            isIndividual=True,
+            category_id="individual",
             enabled=True,
         )
         membership = Membership.objects.create(

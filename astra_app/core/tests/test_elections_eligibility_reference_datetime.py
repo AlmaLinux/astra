@@ -27,7 +27,7 @@ class ElectionEligibilityReferenceDatetimeTests(TestCase):
             code="voter",
             name="Voter",
             votes=1,
-            isIndividual=True,
+            category_id="individual",
             enabled=True,
         )
 
@@ -63,7 +63,7 @@ class ElectionEligibilityReferenceDatetimeTests(TestCase):
             code="voter",
             name="Voter",
             votes=1,
-            isIndividual=True,
+            category_id="individual",
             enabled=True,
         )
 
@@ -93,7 +93,7 @@ class ElectionEligibilityRenewalPreservesCreatedAtTests(TestCase):
             code="voter",
             name="Voter",
             votes=1,
-            isIndividual=True,
+            category_id="individual",
             enabled=True,
         )
 

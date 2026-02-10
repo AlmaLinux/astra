@@ -28,8 +28,7 @@ class AdminMembershipTypeCRUDTests(TestCase):
                 data={
                     "code": "partner",
                     "name": "Partner",
-                    "isIndividual": False,
-                    "isOrganization": True,
+                    "category": "sponsorship",
                     "sort_order": 70,
                     "enabled": True,
                     "_save": "Save",
@@ -58,8 +57,7 @@ class AdminMembershipTypeCRUDTests(TestCase):
         MembershipType.objects.create(
             code="partner",
             name="Partner",
-            isIndividual=False,
-            isOrganization=True,
+            category_id="sponsorship",
             sort_order=70,
             enabled=True,
         )
@@ -97,8 +95,7 @@ class AdminMembershipTypeCRUDTests(TestCase):
                     "code": "partner",
                     "name": "Partner",
                     "group_cn": "mirror-admins",
-                    "isIndividual": False,
-                    "isOrganization": True,
+                    "category": "sponsorship",
                     "sort_order": 70,
                     "enabled": True,
                     "_save": "Save",

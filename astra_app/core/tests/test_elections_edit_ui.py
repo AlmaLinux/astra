@@ -309,7 +309,7 @@ class ElectionDraftDeletionTests(TestCase):
             code="voter",
             name="Voter",
             votes=1,
-            isIndividual=True,
+            category_id="individual",
             enabled=True,
         )
         membership = Membership.objects.create(
@@ -738,7 +738,7 @@ class ElectionEditCreateModeGroupSelectionTests(TestCase):
             code="voter",
             name="Voter",
             votes=1,
-            isIndividual=True,
+            category_id="individual",
             enabled=True,
         )
         membership = Membership.objects.create(
@@ -830,7 +830,7 @@ class ElectionCommitteeDisqualificationDraftTests(TestCase):
             defaults={
                 "name": "Voter",
                 "votes": 1,
-                "isIndividual": True,
+                "category_id": "individual",
                 "enabled": True,
             },
         )

@@ -43,9 +43,9 @@ urlpatterns = [
         name="organization-sponsorship-extend",
     ),
     path(
-        "organization/<int:organization_id>/sponsorship/manage/",
-        views_organizations.organization_sponsorship_manage,
-        name="organization-sponsorship-manage",
+        "organization/<int:organization_id>/membership/request/",
+        views_membership.membership_request,
+        name="organization-membership-request",
     ),
     path(
         "organization/<int:organization_id>/sponsorship/<str:membership_type_code>/expiry/",

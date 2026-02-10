@@ -27,8 +27,7 @@ class StartupMembershipGroupSyncTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "individual-members-missing",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 1,
                 "enabled": True,
             },
@@ -52,8 +51,7 @@ class StartupMembershipGroupSyncTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "individual-members-fas",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 2,
                 "enabled": True,
             },
@@ -79,8 +77,7 @@ class StartupMembershipGroupSyncTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "individual-members-conn-error",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 3,
                 "enabled": True,
             },
@@ -112,8 +109,7 @@ class StartupMembershipGroupSyncTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "individual-members-unavailable",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 4,
                 "enabled": True,
             },

@@ -16,7 +16,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.backends import FreeIPAUser
-from core.models import FreeIPAPermissionGrant
+from core.models import FreeIPAPermissionGrant, Membership
 from core.permissions import (
     ASTRA_ADD_MEMBERSHIP,
     ASTRA_CHANGE_MEMBERSHIP,
@@ -263,8 +263,7 @@ class OrganizationUserViewsTests(TestCase):
             defaults={
                 "name": "Silver Sponsor Member",
                 "description": "Silver Sponsor Member",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
                 "sort_order": 1,
                 "enabled": True,
             },
@@ -354,8 +353,7 @@ class OrganizationUserViewsTests(TestCase):
             defaults={
                 "name": "Silver Sponsor Member",
                 "description": "Silver Sponsor Member",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
                 "sort_order": 1,
                 "enabled": True,
             },
@@ -406,8 +404,7 @@ class OrganizationUserViewsTests(TestCase):
             defaults={
                 "name": "Silver Sponsor Member",
                 "description": "Silver Sponsor Member (Annual dues: $2,500 USD)",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
                 "sort_order": 1,
                 "enabled": True,
             },
@@ -421,11 +418,12 @@ class OrganizationUserViewsTests(TestCase):
             pr_marketing_contact_email="pr@almalinux.org",
             technical_contact_name="Tech Person",
             technical_contact_email="tech@almalinux.org",
-            membership_level_id="silver",
             website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
             representative="bob",
         )
+
+        Membership.objects.create(target_organization=org, membership_type_id="silver")
 
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
         self._login_as_freeipa_user("bob")
@@ -445,15 +443,14 @@ class OrganizationUserViewsTests(TestCase):
 
     @override_settings(TIME_ZONE="Europe/Berlin")
     def test_org_detail_sponsorship_expiry_displays_utc_consistently(self) -> None:
-        from core.models import MembershipType, Organization, OrganizationSponsorship
+        from core.models import Membership, MembershipType, Organization
 
         MembershipType.objects.update_or_create(
             code="silver",
             defaults={
                 "name": "Silver Sponsor Member",
                 "description": "Silver Sponsor Member (Annual dues: $2,500 USD)",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
                 "sort_order": 1,
                 "enabled": True,
             },
@@ -462,14 +459,13 @@ class OrganizationUserViewsTests(TestCase):
 
         org = Organization.objects.create(
             name="AlmaLinux",
-            membership_level=membership_type,
             representative="bob",
         )
 
         frozen_now = datetime.datetime(2026, 1, 5, 12, 0, 0, tzinfo=datetime.UTC)
         expires_at = datetime.datetime(2027, 1, 21, 23, 59, 59, tzinfo=datetime.UTC)
-        OrganizationSponsorship.objects.create(
-            organization=org,
+        Membership.objects.create(
+            target_organization=org,
             membership_type=membership_type,
             expires_at=expires_at,
         )
@@ -495,15 +491,18 @@ class OrganizationUserViewsTests(TestCase):
             defaults={
                 "name": "Gold Sponsor Member",
                 "description": "Gold Sponsor Member (Annual dues: $20,000 USD)",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
                 "sort_order": 2,
                 "enabled": True,
             },
         )
         membership_type = MembershipType.objects.get(code="gold")
 
-        org = Organization.objects.create(name="Acme", membership_level=membership_type, representative="bob")
+        org = Organization.objects.create(name="Acme", representative="bob")
+        Membership.objects.create(
+            target_organization=org,
+            membership_type=membership_type,
+        )
         req = MembershipRequest.objects.create(
             requested_username="",
             requested_organization=org,
@@ -542,8 +541,7 @@ class OrganizationUserViewsTests(TestCase):
             code="silver",
             defaults={
                 "name": "Silver Sponsor Member",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
                 "sort_order": 1,
                 "enabled": True,
             },
@@ -557,7 +555,6 @@ class OrganizationUserViewsTests(TestCase):
             pr_marketing_contact_email="pr@almalinux.org",
             technical_contact_name="Tech Person",
             technical_contact_email="tech@almalinux.org",
-            membership_level_id="silver",
             website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
             representative="bob",
@@ -623,8 +620,7 @@ class OrganizationUserViewsTests(TestCase):
             defaults={
                 "name": "Silver Sponsor Member",
                 "description": "Silver Sponsor Member (Annual dues: $2,500 USD)",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
                 "sort_order": 1,
                 "enabled": True,
             },
@@ -635,8 +631,7 @@ class OrganizationUserViewsTests(TestCase):
             defaults={
                 "name": "Gold Sponsor Member",
                 "description": "Gold Sponsor Member (Annual dues: $20,000 USD)",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
                 "sort_order": 2,
                 "enabled": True,
             },
@@ -652,7 +647,6 @@ class OrganizationUserViewsTests(TestCase):
             pr_marketing_contact_email="pr@almalinux.org",
             technical_contact_name="Tech Person",
             technical_contact_email="tech@almalinux.org",
-            membership_level_id="silver",
             website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
             representative="bob",
@@ -668,8 +662,8 @@ class OrganizationUserViewsTests(TestCase):
             self.assertContains(resp, 'id="id_website_logo"')
             self.assertNotContains(resp, 'textarea name="website_logo"')
 
-            # Sponsorship requests are handled on the separate manage page.
-            self.assertNotContains(resp, 'id="id_membership_level"')
+            # Membership requests are handled on the separate request page.
+            self.assertNotContains(resp, 'id="id_membership_type"')
             self.assertNotContains(resp, 'id="id_additional_information"')
 
             resp = self.client.post(
@@ -706,8 +700,7 @@ class OrganizationUserViewsTests(TestCase):
             defaults={
                 "name": "Gold Sponsor Member",
                 "description": "Gold Sponsor Member (Annual dues: $20,000 USD)",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
                 "sort_order": 2,
                 "enabled": True,
             },
@@ -717,10 +710,11 @@ class OrganizationUserViewsTests(TestCase):
 
         org = Organization.objects.create(
             name="AlmaLinux",
-            membership_level=gold,
             website="https://almalinux.org/",
             representative="bob",
         )
+
+        Membership.objects.create(target_organization=org, membership_type=gold)
 
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
         self._login_as_freeipa_user("bob")
@@ -730,8 +724,8 @@ class OrganizationUserViewsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Edit details")
         self.assertContains(resp, reverse("organization-edit", args=[org.pk]))
-        self.assertContains(resp, "Change sponsorship tier")
-        self.assertContains(resp, reverse("organization-sponsorship-manage", args=[org.pk]))
+        self.assertContains(resp, "Change membership tier")
+        self.assertContains(resp, reverse("organization-membership-request", args=[org.pk]))
 
         self.assertNotContains(resp, "Active sponsor")
         self.assertContains(resp, 'alx-status-badge--active">Gold')
@@ -739,6 +733,81 @@ class OrganizationUserViewsTests(TestCase):
         body = resp.content.decode("utf-8")
         self.assertLess(body.find('class="col-md-7"'), body.find('id="org-contacts-tabs"'))
         self.assertLess(body.find('class="col-md-5"'), body.find("Branding"))
+
+    def test_org_detail_shows_dual_category_memberships(self) -> None:
+        """An org with both sponsorship-category and mirror-category memberships
+        displays both badges and both sponsorship entries on the detail page."""
+        from core.models import MembershipType, Organization
+
+        gold = MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "description": "Gold Sponsor Member (Annual dues: $20,000 USD)",
+                "category_id": "sponsorship",
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )[0]
+
+        mirror = MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror Member",
+                "description": "Mirror member",
+                "category_id": "mirror",
+                "sort_order": 10,
+                "enabled": True,
+            },
+        )[0]
+
+        org = Organization.objects.create(
+            name="DualCatOrg",
+            website="https://example.com/",
+            representative="bob",
+        )
+
+        # Create two memberships in different categories
+        Membership.objects.create(target_organization=org, membership_type=gold)
+        Membership.objects.create(target_organization=org, membership_type=mirror)
+
+        # Verify both rows exist simultaneously (DB-level enforcement)
+        self.assertEqual(
+            Membership.objects.filter(target_organization=org).count(),
+            2,
+        )
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        self._login_as_freeipa_user("bob")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+
+        # Both membership badges render
+        self.assertContains(resp, 'alx-status-badge--active">Gold')
+        self.assertContains(resp, 'alx-status-badge--active">Mirror')
+
+        # Both membership names appear in the sponsorship level card
+        self.assertContains(resp, "Gold Sponsor Member")
+        self.assertContains(resp, "Mirror Member")
+
+        # A same-category duplicate is rejected by the DB constraint
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Membership.objects.create(
+                    target_organization=org,
+                    membership_type=MembershipType.objects.update_or_create(
+                        code="platinum",
+                        defaults={
+                            "name": "Platinum Sponsor Member",
+                            "category_id": "sponsorship",
+                            "sort_order": 3,
+                            "enabled": True,
+                        },
+                    )[0],
+                )
 
     @override_settings(
         STORAGES={
@@ -757,8 +826,7 @@ class OrganizationUserViewsTests(TestCase):
             defaults={
                 "name": "Silver Sponsor Member",
                 "description": "Silver Sponsor Member (Annual dues: $2,500 USD)",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
                 "sort_order": 1,
                 "enabled": True,
             },
@@ -772,7 +840,6 @@ class OrganizationUserViewsTests(TestCase):
             pr_marketing_contact_email="pr@almalinux.org",
             technical_contact_name="Tech Person",
             technical_contact_email="tech@almalinux.org",
-            membership_level_id="silver",
             website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
             representative="bob",
@@ -802,7 +869,6 @@ class OrganizationUserViewsTests(TestCase):
                     "technical_contact_name": "Tech Person",
                     "technical_contact_email": "tech@almalinux.org",
                     "technical_contact_phone": "",
-                    "membership_level": "silver",
                     "name": "AlmaLinux",
                     "website_logo": "https://example.com/logo-options",
                     "website": "https://almalinux.org/",
@@ -836,7 +902,7 @@ class OrganizationUserViewsTests(TestCase):
         finally:
             org.logo.close()
 
-    def test_membership_level_change_creates_request_until_approved(self) -> None:
+    def test_membership_type_change_creates_request_until_approved(self) -> None:
         from core.models import MembershipLog, MembershipRequest, MembershipType, Note, Organization
 
         MembershipType.objects.update_or_create(
@@ -844,8 +910,7 @@ class OrganizationUserViewsTests(TestCase):
             defaults={
                 "name": "Silver Sponsor Member",
                 "description": "Silver Sponsor Member (Annual dues: $2,500 USD)",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
                 "sort_order": 1,
                 "enabled": True,
             },
@@ -856,8 +921,7 @@ class OrganizationUserViewsTests(TestCase):
             defaults={
                 "name": "Gold Sponsor Member",
                 "description": "Gold Sponsor Member (Annual dues: $20,000 USD)",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
                 "sort_order": 2,
                 "enabled": True,
             },
@@ -871,36 +935,44 @@ class OrganizationUserViewsTests(TestCase):
             pr_marketing_contact_email="pr@almalinux.org",
             technical_contact_name="Tech Person",
             technical_contact_email="tech@almalinux.org",
-            membership_level_id="silver",
             website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
             representative="bob",
         )
+
+        # Current sponsorship stored in Membership table
+        Membership.objects.create(target_organization=org, membership_type_id="silver")
 
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
         self._login_as_freeipa_user("bob")
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=bob),
-            patch("core.views_organizations.block_action_without_coc", return_value=None),
+            patch("core.views_membership.block_action_without_coc", return_value=None),
         ):
             resp = self.client.post(
-                reverse("organization-sponsorship-manage", args=[org.pk]),
+                reverse("organization-membership-request", args=[org.pk]),
                 data={
-                    "membership_level": "gold",
-                    "additional_information": "Please consider our updated sponsorship level.",
+                    "membership_type": "gold",
+                    "q_sponsorship_details": "Please consider our updated membership level.",
                 },
                 follow=False,
             )
         self.assertEqual(resp.status_code, 302)
 
-        org.refresh_from_db()
-        self.assertEqual(org.membership_level_id, "silver")
+        # The upgrade request is pending — the current-state Membership row is not changed yet
+        self.assertEqual(
+            Membership.objects.filter(target_organization=org).first().membership_type_id,
+            "silver",
+        )
 
         req = MembershipRequest.objects.get(status=MembershipRequest.Status.pending)
         self.assertEqual(req.membership_type_id, "gold")
         self.assertEqual(req.requested_organization_id, org.pk)
-        self.assertEqual(req.responses, [{"Additional Information": "Please consider our updated sponsorship level."}])
+        self.assertEqual(
+            req.responses,
+            [{"Sponsorship details": "Please consider our updated membership level."}],
+        )
 
         self.assertTrue(
             Note.objects.filter(
@@ -920,25 +992,187 @@ class OrganizationUserViewsTests(TestCase):
             self.assertContains(resp, "Under review")
             self.assertContains(resp, "Annual dues: $20,000 USD")
 
-    def test_sponsorship_manage_prefills_current_membership_level(self) -> None:
-        """When a representative visits the sponsorship manage page, the current level should be pre-selected."""
+    def test_org_membership_request_prefills_current_membership_type(self) -> None:
+        """When a representative visits the org request page, the current type should be pre-selected."""
         from core.models import MembershipType, Organization
 
         MembershipType.objects.update_or_create(
             code="silver",
-            defaults={"name": "Silver", "isOrganization": True, "isIndividual": False, "sort_order": 1, "enabled": True},
         )
         MembershipType.objects.update_or_create(
             code="gold",
-            defaults={"name": "Gold", "isOrganization": True, "isIndividual": False, "sort_order": 2, "enabled": True},
         )
 
         org = Organization.objects.create(
             name="Prefill Org",
-            membership_level_id="gold",
             website_logo="https://example.com/logo",
             website="https://example.com/",
             representative="bob",
+        )
+
+        # Prefill is based on Membership row, not org field
+        Membership.objects.create(target_organization=org, membership_type_id="gold")
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        self._login_as_freeipa_user("bob")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.views_membership.block_action_without_coc", return_value=None),
+        ):
+            resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, 'value="gold" selected')
+        self.assertNotContains(resp, 'value="gold"')
+        self.assertContains(resp, 'value="silver"')
+
+    def test_org_membership_request_requires_rep_or_committee(self) -> None:
+        from core.models import FreeIPAPermissionGrant, MembershipType, Organization
+        from core.permissions import ASTRA_VIEW_MEMBERSHIP
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="Access Org", representative="bob")
+
+        alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": []})
+        self._login_as_freeipa_user("alice")
+        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+            resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
+        self.assertEqual(resp.status_code, 404)
+
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": []})
+        self._login_as_freeipa_user("reviewer")
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.views_membership.block_action_without_coc", return_value=None),
+        ):
+            resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
+        self.assertEqual(resp.status_code, 200)
+
+    def test_org_membership_request_dropdown_labels_and_order(self) -> None:
+        from core.models import MembershipType, MembershipTypeCategory, Organization
+
+        MembershipTypeCategory.objects.filter(pk="sponsorship").update(is_organization=True, sort_order=2)
+        MembershipTypeCategory.objects.filter(pk="mirror").update(is_organization=True, sort_order=1)
+
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror Member",
+                "category_id": "mirror",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="Label Org", representative="bob")
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        self._login_as_freeipa_user("bob")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.views_membership.block_action_without_coc", return_value=None),
+        ):
+            resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode("utf-8")
+
+        mirror_label = 'value="mirror">Mirror Member<'
+        silver_label = 'value="silver">Silver Sponsor Member<'
+        gold_label = 'value="gold">Gold Sponsor Member<'
+
+        self.assertIn(mirror_label, body)
+        self.assertIn(silver_label, body)
+        self.assertIn(gold_label, body)
+        self.assertNotIn("Sponsorship ->", body)
+        self.assertNotIn("Mirror ->", body)
+
+        mirror_idx = body.find(mirror_label)
+        silver_idx = body.find(silver_label)
+        gold_idx = body.find(gold_label)
+        self.assertGreater(mirror_idx, -1)
+        self.assertLess(mirror_idx, silver_idx)
+        self.assertLess(silver_idx, gold_idx)
+
+        self.assertNotIn('<optgroup label="Mirror">', body)
+        self.assertIn('<optgroup label="Sponsorship">', body)
+
+        self.assertContains(resp, 'id="id_q_sponsorship_details"')
+        self.assertContains(resp, 'id="id_q_domain"')
+
+    def test_org_membership_request_blocks_category_with_pending_request(self) -> None:
+        from core.models import MembershipRequest, MembershipType, MembershipTypeCategory, Organization
+
+        MembershipTypeCategory.objects.filter(pk="sponsorship").update(is_organization=True, sort_order=1)
+        MembershipTypeCategory.objects.filter(pk="mirror").update(is_organization=True, sort_order=2)
+
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror Member",
+                "category_id": "mirror",
+                "sort_order": 3,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="Pending Org", representative="bob")
+        MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="gold",
+            status=MembershipRequest.Status.pending,
         )
 
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
@@ -946,25 +1180,216 @@ class OrganizationUserViewsTests(TestCase):
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=bob),
-            patch("core.views_organizations.block_action_without_coc", return_value=None),
+            patch("core.views_membership.block_action_without_coc", return_value=None),
         ):
-            resp = self.client.get(reverse("organization-sponsorship-manage", args=[org.pk]))
+            resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'value="gold" selected')
-        self.assertNotContains(resp, 'value="silver" selected')
+        body = resp.content.decode("utf-8")
+        self.assertNotIn('value="silver"', body)
+        self.assertNotIn('value="gold"', body)
+        self.assertIn('value="mirror"', body)
 
-    def test_sponsorship_manage_requires_signed_coc(self) -> None:
-        from core.backends import FreeIPAFASAgreement
-        from core.models import MembershipRequest, MembershipType, Organization
+    def test_org_membership_request_blocks_category_with_on_hold_request(self) -> None:
+        from core.models import MembershipRequest, MembershipType, MembershipTypeCategory, Organization
+
+        MembershipTypeCategory.objects.filter(pk="sponsorship").update(is_organization=True, sort_order=1)
+        MembershipTypeCategory.objects.filter(pk="mirror").update(is_organization=True, sort_order=2)
 
         MembershipType.objects.update_or_create(
             code="silver",
             defaults={
                 "name": "Silver Sponsor Member",
-                "description": "Silver Sponsor Member",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror Member",
+                "category_id": "mirror",
+                "sort_order": 3,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="OnHold Org", representative="bob")
+        MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="gold",
+            status=MembershipRequest.Status.on_hold,
+        )
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        self._login_as_freeipa_user("bob")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.views_membership.block_action_without_coc", return_value=None),
+        ):
+            resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode("utf-8")
+        self.assertNotIn('value="silver"', body)
+        self.assertNotIn('value="gold"', body)
+        self.assertIn('value="mirror"', body)
+
+    def test_org_membership_request_allows_other_type_in_category_when_active(self) -> None:
+        from core.models import Membership, MembershipType, MembershipTypeCategory, Organization
+
+        MembershipTypeCategory.objects.filter(pk="sponsorship").update(is_organization=True, sort_order=1)
+
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="Active Org", representative="bob")
+        Membership.objects.create(
+            target_organization=org,
+            membership_type_id="silver",
+            expires_at=timezone.now() + datetime.timedelta(days=200),
+        )
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        self._login_as_freeipa_user("bob")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.views_membership.block_action_without_coc", return_value=None),
+        ):
+            resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode("utf-8")
+        self.assertNotIn('value="silver"', body)
+        self.assertIn('value="gold"', body)
+
+    def test_org_membership_request_allows_renewal_when_expiring_soon(self) -> None:
+        from core.models import Membership, MembershipType, MembershipTypeCategory, Organization
+
+        MembershipTypeCategory.objects.filter(pk="sponsorship").update(is_organization=True, sort_order=1)
+
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="Expiring Org", representative="bob")
+        Membership.objects.create(
+            target_organization=org,
+            membership_type_id="silver",
+            expires_at=timezone.now() + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS - 1),
+        )
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        self._login_as_freeipa_user("bob")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.views_membership.block_action_without_coc", return_value=None),
+        ):
+            resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'value="silver"')
+
+    def test_org_membership_request_does_not_call_level_change_for_other_category(self) -> None:
+        from core.models import MembershipRequest, MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror Member",
+                "description": "Mirror Member",
+                "category_id": "mirror",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "description": "Gold Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(
+            name="Category Check",
+            website_logo="https://example.com/logo",
+            website="https://example.com/",
+            representative="bob",
+        )
+
+        Membership.objects.create(target_organization=org, membership_type_id="mirror")
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        self._login_as_freeipa_user("bob")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.views_membership.block_action_without_coc", return_value=None),
+        ):
+            resp = self.client.post(
+                reverse("organization-membership-request", args=[org.pk]),
+                data={
+                    "membership_type": "gold",
+                    "q_sponsorship_details": "Looking to sponsor.",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        messages = [m.message for m in get_messages(resp.wsgi_request)]
+        self.assertIn("Membership request submitted for review.", messages)
+        self.assertEqual(MembershipRequest.objects.filter(requested_organization=org).count(), 1)
+
+    def test_org_membership_request_requires_signed_coc(self) -> None:
+        from core.backends import FreeIPAFASAgreement
+        from core.models import MembershipRequest, MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror Member",
+                "description": "Mirror Member",
+                "category_id": "mirror",
                 "sort_order": 1,
                 "enabled": True,
             },
@@ -978,7 +1403,6 @@ class OrganizationUserViewsTests(TestCase):
             pr_marketing_contact_email="pr@example.org",
             technical_contact_name="Tech Person",
             technical_contact_email="tech@example.org",
-            membership_level_id="silver",
             website_logo="https://example.com/logo-options",
             website="https://example.com/",
             representative="bob",
@@ -999,10 +1423,10 @@ class OrganizationUserViewsTests(TestCase):
         with patch("core.backends.FreeIPAUser.get", autospec=True, return_value=bob):
             with patch("core.views_utils.FreeIPAFASAgreement.get", autospec=True, return_value=coc):
                 resp = self.client.post(
-                    reverse("organization-sponsorship-manage", args=[org.pk]),
+                    reverse("organization-membership-request", args=[org.pk]),
                     data={
-                        "membership_level": "silver",
-                        "additional_information": "Please renew.",
+                        "membership_type": "silver",
+                        "q_sponsorship_details": "Please renew.",
                     },
                     follow=False,
                 )
@@ -1018,7 +1442,7 @@ class OrganizationUserViewsTests(TestCase):
     def test_membership_admin_can_set_org_sponsorship_expiry_when_missing(self) -> None:
         import datetime
 
-        from core.models import MembershipType, Organization, OrganizationSponsorship
+        from core.models import Membership, MembershipType, Organization
         from core.permissions import ASTRA_CHANGE_MEMBERSHIP
 
         MembershipType.objects.update_or_create(
@@ -1026,16 +1450,15 @@ class OrganizationUserViewsTests(TestCase):
             defaults={
                 "name": "Gold",
                 "description": "Gold",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
                 "sort_order": 2,
                 "enabled": True,
             },
         )
 
-        org = Organization.objects.create(name="Acme", membership_level_id="gold", representative="bob")
-        sponsorship = OrganizationSponsorship.objects.create(
-            organization=org,
+        org = Organization.objects.create(name="Acme", representative="bob")
+        sponsorship = Membership.objects.create(
+            target_organization=org,
             membership_type_id="gold",
             expires_at=None,
         )
@@ -1046,7 +1469,10 @@ class OrganizationUserViewsTests(TestCase):
             principal_name="reviewer",
         )
 
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": []})
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": []},
+        )
         self._login_as_freeipa_user("reviewer")
 
         new_expires_on = datetime.date(2030, 1, 31)
@@ -1062,16 +1488,18 @@ class OrganizationUserViewsTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 302)
-        sponsorship.refresh_from_db()
+        # replace_within_category() deletes the old row and creates a new one,
+        # so re-query rather than refresh_from_db on the stale reference.
+        sponsorship = Membership.objects.get(target_organization=org)
         self.assertEqual(
             sponsorship.expires_at,
             datetime.datetime(2030, 1, 31, 23, 59, 59, tzinfo=datetime.UTC),
         )
 
-    def test_membership_admin_can_set_org_sponsorship_expiry_creates_row_when_absent(self) -> None:
+    def test_membership_admin_setting_expiry_in_past_terminates_org_sponsorship(self) -> None:
         import datetime
 
-        from core.models import FreeIPAPermissionGrant, MembershipType, Organization, OrganizationSponsorship
+        from core.models import FreeIPAPermissionGrant, Membership, MembershipLog, MembershipType, Organization
         from core.permissions import ASTRA_CHANGE_MEMBERSHIP
 
         MembershipType.objects.update_or_create(
@@ -1079,15 +1507,88 @@ class OrganizationUserViewsTests(TestCase):
             defaults={
                 "name": "Gold",
                 "description": "Gold",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
+                "sort_order": 2,
+                "enabled": True,
+                "group_cn": "sponsor-group",
+            },
+        )
+
+        org = Organization.objects.create(name="Acme", representative="bob")
+        Membership.objects.create(
+            target_organization=org,
+            membership_type_id="gold",
+            expires_at=timezone.now() + datetime.timedelta(days=30),
+        )
+
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_CHANGE_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": []})
+        self._login_as_freeipa_user("reviewer")
+
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": []},
+        )
+        rep = FreeIPAUser(
+            "bob",
+            {"uid": ["bob"], "mail": ["bob@example.com"], "memberof_group": ["sponsor-group"]},
+        )
+        past_date = datetime.date(2000, 1, 1)
+
+        def fake_get(username: str) -> FreeIPAUser | None:
+            if username == "bob":
+                return rep
+            return reviewer
+
+        with (
+            patch("core.backends.FreeIPAUser.get", side_effect=fake_get),
+            patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_from_group,
+        ):
+            resp = self.client.post(
+                reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"]),
+                data={
+                    "expires_on": past_date.isoformat(),
+                    "next": reverse("organization-detail", args=[org.pk]),
+                },
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(Membership.objects.filter(target_organization=org).exists())
+        remove_from_group.assert_called_once_with(rep, group_name="sponsor-group")
+        self.assertTrue(
+            MembershipLog.objects.filter(
+                action=MembershipLog.Action.terminated,
+                target_organization=org,
+                membership_type_id="gold",
+            ).exists()
+        )
+
+    def test_membership_admin_can_set_org_sponsorship_expiry_creates_row_when_absent(self) -> None:
+        """Setting expiry when no membership exists returns an error."""
+        import datetime
+
+        from core.models import FreeIPAPermissionGrant, Membership, MembershipType, Organization
+        from core.permissions import ASTRA_CHANGE_MEMBERSHIP
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold",
+                "description": "Gold",
+                "category_id": "sponsorship",
                 "sort_order": 2,
                 "enabled": True,
             },
         )
 
-        org = Organization.objects.create(name="Acme", membership_level_id="gold", representative="bob")
-        OrganizationSponsorship.objects.filter(organization=org).delete()
+        org = Organization.objects.create(name="Acme", representative="bob")
+        Membership.objects.filter(target_organization=org).delete()
 
         FreeIPAPermissionGrant.objects.create(
             permission=ASTRA_CHANGE_MEMBERSHIP,
@@ -1107,20 +1608,18 @@ class OrganizationUserViewsTests(TestCase):
                     "expires_on": new_expires_on.isoformat(),
                     "next": reverse("organization-detail", args=[org.pk]),
                 },
-                follow=False,
+                follow=True,
             )
 
-        self.assertEqual(resp.status_code, 302)
-        sponsorship = OrganizationSponsorship.objects.get(organization=org)
-        self.assertEqual(
-            sponsorship.expires_at,
-            datetime.datetime(2030, 1, 31, 23, 59, 59, tzinfo=datetime.UTC),
-        )
+        self.assertEqual(resp.status_code, 200)
+        messages = [m.message for m in get_messages(resp.wsgi_request)]
+        self.assertIn("That organization does not currently have an active sponsorship of that type.", messages)
+        self.assertFalse(Membership.objects.filter(target_organization=org).exists())
 
-    def test_membership_admin_can_set_org_sponsorship_expiry_when_membership_type_mismatch(self) -> None:
+    def test_membership_admin_cannot_set_expiry_on_expired_org_sponsorship(self) -> None:
         import datetime
 
-        from core.models import MembershipType, Organization, OrganizationSponsorship
+        from core.models import Membership, MembershipType, Organization
         from core.permissions import ASTRA_CHANGE_MEMBERSHIP
 
         MembershipType.objects.update_or_create(
@@ -1128,8 +1627,60 @@ class OrganizationUserViewsTests(TestCase):
             defaults={
                 "name": "Gold",
                 "description": "Gold",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="Acme", representative="bob")
+        expired_at = timezone.now() - datetime.timedelta(days=1)
+        Membership.objects.create(
+            target_organization=org,
+            membership_type_id="gold",
+            expires_at=expired_at,
+        )
+
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_CHANGE_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": []})
+        self._login_as_freeipa_user("reviewer")
+
+        new_expires_on = datetime.date(2030, 1, 31)
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.post(
+                reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"]),
+                data={
+                    "expires_on": new_expires_on.isoformat(),
+                    "next": reverse("organization-detail", args=[org.pk]),
+                },
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        messages = [m.message for m in get_messages(resp.wsgi_request)]
+        self.assertIn("That organization does not currently have an active sponsorship of that type.", messages)
+        sponsorship = Membership.objects.get(target_organization=org)
+        self.assertEqual(sponsorship.expires_at, expired_at)
+
+    def test_membership_admin_can_set_org_sponsorship_expiry_when_membership_type_mismatch(self) -> None:
+        """Setting expiry for a type the org does not hold returns an error."""
+        import datetime
+
+        from core.models import Membership, MembershipType, Organization
+        from core.permissions import ASTRA_CHANGE_MEMBERSHIP
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold",
+                "description": "Gold",
+                "category_id": "sponsorship",
                 "sort_order": 2,
                 "enabled": True,
             },
@@ -1139,19 +1690,17 @@ class OrganizationUserViewsTests(TestCase):
             defaults={
                 "name": "Silver",
                 "description": "Silver",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
                 "sort_order": 1,
                 "enabled": True,
             },
         )
 
-        org = Organization.objects.create(name="Acme", membership_level_id="gold", representative="bob")
+        org = Organization.objects.create(name="Acme", representative="bob")
 
-        # Simulate drift: the current-state sponsorship row exists but points at a different
-        # membership_type than the org's current membership_level.
-        OrganizationSponsorship.objects.create(
-            organization=org,
+        # Org has silver, but we will try to set expiry for gold.
+        Membership.objects.create(
+            target_organization=org,
             membership_type_id="silver",
             expires_at=None,
         )
@@ -1174,16 +1723,16 @@ class OrganizationUserViewsTests(TestCase):
                     "expires_on": new_expires_on.isoformat(),
                     "next": reverse("organization-detail", args=[org.pk]),
                 },
-                follow=False,
+                follow=True,
             )
 
-        self.assertEqual(resp.status_code, 302)
-        sponsorship = OrganizationSponsorship.objects.get(organization=org)
-        self.assertEqual(sponsorship.membership_type_id, "gold")
-        self.assertEqual(
-            sponsorship.expires_at,
-            datetime.datetime(2030, 1, 31, 23, 59, 59, tzinfo=datetime.UTC),
-        )
+        self.assertEqual(resp.status_code, 200)
+        messages = [m.message for m in get_messages(resp.wsgi_request)]
+        self.assertIn("That organization does not currently have an active sponsorship of that type.", messages)
+        # Silver membership should be untouched.
+        sponsorship = Membership.objects.get(target_organization=org)
+        self.assertEqual(sponsorship.membership_type_id, "silver")
+        self.assertIsNone(sponsorship.expires_at)
 
     def test_organization_detail_shows_committee_notes_with_request_link(self) -> None:
         from core.models import MembershipRequest, MembershipType, Note, Organization
@@ -1194,8 +1743,7 @@ class OrganizationUserViewsTests(TestCase):
             defaults={
                 "name": "Gold Sponsor Member",
                 "description": "Gold Sponsor Member (Annual dues: $20,000 USD)",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
                 "sort_order": 2,
                 "enabled": True,
             },
@@ -1228,6 +1776,183 @@ class OrganizationUserViewsTests(TestCase):
         self.assertContains(resp, f"(req. #{req.pk})")
         self.assertContains(resp, f'href="{reverse("membership-request-detail", args=[req.pk])}"')
 
+    def test_organization_detail_scopes_request_links_per_membership_type(self) -> None:
+        from core.models import Membership, MembershipLog, MembershipRequest, MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "description": "Gold Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror Member",
+                "description": "Mirror Member",
+                "category_id": "mirror",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="Acme", representative="bob")
+
+        Membership.objects.create(target_organization=org, membership_type_id="gold")
+        Membership.objects.create(target_organization=org, membership_type_id="mirror")
+
+        req_gold = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="gold",
+            status=MembershipRequest.Status.approved,
+            decided_at=timezone.now(),
+        )
+        req_mirror = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="mirror",
+            status=MembershipRequest.Status.approved,
+            decided_at=timezone.now(),
+        )
+
+        MembershipLog.objects.bulk_create(
+            [
+                MembershipLog(
+                    actor_username="reviewer",
+                    target_username="",
+                    target_organization=org,
+                    membership_type_id="gold",
+                    membership_request=req_gold,
+                    action=MembershipLog.Action.approved,
+                ),
+                MembershipLog(
+                    actor_username="reviewer",
+                    target_username="",
+                    target_organization=org,
+                    membership_type_id="mirror",
+                    membership_request=req_mirror,
+                    action=MembershipLog.Action.approved,
+                ),
+            ]
+        )
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        self._login_as_freeipa_user("bob")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, reverse("membership-request-self", args=[req_gold.pk]))
+        self.assertContains(resp, reverse("membership-request-self", args=[req_mirror.pk]))
+
+    def test_organization_detail_allows_renewal_when_other_type_pending(self) -> None:
+        from core.models import Membership, MembershipRequest, MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "description": "Gold Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror Member",
+                "description": "Mirror Member",
+                "category_id": "mirror",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="Acme", representative="bob")
+
+        expires_at = timezone.now() + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS - 1)
+        Membership.objects.create(
+            target_organization=org,
+            membership_type_id="gold",
+            expires_at=expires_at,
+        )
+        Membership.objects.create(
+            target_organization=org,
+            membership_type_id="mirror",
+            expires_at=expires_at,
+        )
+
+        MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="mirror",
+            status=MembershipRequest.Status.pending,
+        )
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        self._login_as_freeipa_user("bob")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'name="membership_type" value="gold"')
+        self.assertContains(resp, "Request renewal")
+
+    def test_organization_detail_hides_expired_memberships(self) -> None:
+        from core.models import Membership, MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "description": "Gold Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "description": "Silver Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="Acme", representative="bob")
+
+        Membership.objects.create(
+            target_organization=org,
+            membership_type_id="gold",
+            expires_at=timezone.now() + datetime.timedelta(days=30),
+        )
+        Membership.objects.create(
+            target_organization=org,
+            membership_type_id="mirror",
+            expires_at=timezone.now() - datetime.timedelta(days=1),
+        )
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        self._login_as_freeipa_user("bob")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Gold Sponsor Member")
+        self.assertNotContains(resp, "Mirror Member")
+
     def test_organization_aggregate_notes_allows_posting_but_hides_vote_buttons(self) -> None:
         from core.models import MembershipRequest, MembershipType, Note, Organization
 
@@ -1236,8 +1961,7 @@ class OrganizationUserViewsTests(TestCase):
             defaults={
                 "name": "Gold Sponsor Member",
                 "description": "Gold Sponsor Member (Annual dues: $20,000 USD)",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
                 "sort_order": 2,
                 "enabled": True,
             },
@@ -1248,8 +1972,7 @@ class OrganizationUserViewsTests(TestCase):
             defaults={
                 "name": "Silver Sponsor Member",
                 "description": "Silver Sponsor Member",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
                 "sort_order": 3,
                 "enabled": True,
             },
@@ -1321,15 +2044,14 @@ class OrganizationUserViewsTests(TestCase):
 
 
     def test_sponsorship_expiration_display_and_extend_request(self) -> None:
-        from core.models import MembershipLog, MembershipRequest, MembershipType, Organization, OrganizationSponsorship
+        from core.models import Membership, MembershipLog, MembershipRequest, MembershipType, Organization
 
         MembershipType.objects.update_or_create(
             code="gold",
             defaults={
                 "name": "Gold Sponsor Member",
                 "description": "Gold Sponsor Member (Annual dues: $20,000 USD)",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
                 "sort_order": 2,
                 "enabled": True,
             },
@@ -1345,7 +2067,6 @@ class OrganizationUserViewsTests(TestCase):
             pr_marketing_contact_email="pr@almalinux.org",
             technical_contact_name="Tech Person",
             technical_contact_email="tech@almalinux.org",
-            membership_level=gold,
             website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
             additional_information="Renewal note",
@@ -1353,8 +2074,8 @@ class OrganizationUserViewsTests(TestCase):
         )
 
         expires_at = timezone.now() + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS - 1)
-        OrganizationSponsorship.objects.create(
-            organization=org,
+        Membership.objects.create(
+            target_organization=org,
             membership_type=gold,
             expires_at=expires_at,
         )
@@ -1372,10 +2093,14 @@ class OrganizationUserViewsTests(TestCase):
             patch("core.backends.FreeIPAUser.get", return_value=bob),
             patch("core.views_organizations.block_action_without_coc", return_value=None),
         ):
-            resp = self.client.post(reverse("organization-sponsorship-extend", args=[org.pk]), follow=True)
+            resp = self.client.post(
+                reverse("organization-sponsorship-extend", args=[org.pk]),
+                data={"membership_type": "gold"},
+                follow=True,
+            )
         self.assertEqual(resp.status_code, 200)
         messages = [m.message for m in get_messages(resp.wsgi_request)]
-        self.assertIn("Sponsorship renewal request submitted for review.", messages)
+        self.assertIn("Membership renewal request submitted for review.", messages)
 
         req = MembershipRequest.objects.get(status=MembershipRequest.Status.pending)
         self.assertEqual(req.requested_organization_id, org.pk)
@@ -1390,17 +2115,142 @@ class OrganizationUserViewsTests(TestCase):
             ).exists()
         )
 
-    @override_settings(MEMBERSHIP_EXPIRING_SOON_DAYS=90)
-    def test_representative_cannot_submit_second_org_membership_request_while_one_open(self) -> None:
-        from core.models import MembershipRequest, MembershipType, Organization, OrganizationSponsorship
+    def test_sponsorship_extend_requires_membership_type(self) -> None:
+        from core.models import Membership, MembershipRequest, MembershipType, Organization
 
         MembershipType.objects.update_or_create(
             code="gold",
             defaults={
                 "name": "Gold Sponsor Member",
                 "description": "Gold Sponsor Member (Annual dues: $20,000 USD)",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+
+        gold = MembershipType.objects.get(code="gold")
+
+        org = Organization.objects.create(
+            name="Missing Membership Type",
+            business_contact_name="Business Person",
+            business_contact_email="contact@example.org",
+            pr_marketing_contact_name="PR Person",
+            pr_marketing_contact_email="pr@example.org",
+            technical_contact_name="Tech Person",
+            technical_contact_email="tech@example.org",
+            representative="bob",
+        )
+
+        expires_at = timezone.now() + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS - 1)
+        Membership.objects.create(
+            target_organization=org,
+            membership_type=gold,
+            expires_at=expires_at,
+        )
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        self._login_as_freeipa_user("bob")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.views_organizations.block_action_without_coc", return_value=None),
+        ):
+            resp = self.client.post(reverse("organization-sponsorship-extend", args=[org.pk]), follow=True)
+
+        self.assertEqual(resp.status_code, 200)
+        messages = [m.message for m in get_messages(resp.wsgi_request)]
+        self.assertIn("Select a membership to extend.", messages)
+        self.assertEqual(MembershipRequest.objects.count(), 0)
+
+    def test_sponsorship_extend_allows_pending_other_type(self) -> None:
+        from core.models import Membership, MembershipRequest, MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "description": "Gold Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror Member",
+                "description": "Mirror Member",
+                "category_id": "mirror",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(
+            name="Pending Type",
+            business_contact_name="Business Person",
+            business_contact_email="contact@example.org",
+            pr_marketing_contact_name="PR Person",
+            pr_marketing_contact_email="pr@example.org",
+            technical_contact_name="Tech Person",
+            technical_contact_email="tech@example.org",
+            representative="bob",
+        )
+
+        expires_at = timezone.now() + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS - 1)
+        Membership.objects.create(
+            target_organization=org,
+            membership_type_id="gold",
+            expires_at=expires_at,
+        )
+        Membership.objects.create(
+            target_organization=org,
+            membership_type_id="mirror",
+            expires_at=expires_at,
+        )
+
+        MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="mirror",
+            status=MembershipRequest.Status.pending,
+        )
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        self._login_as_freeipa_user("bob")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.views_organizations.block_action_without_coc", return_value=None),
+        ):
+            resp = self.client.post(
+                reverse("organization-sponsorship-extend", args=[org.pk]),
+                data={"membership_type": "gold"},
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        messages = [m.message for m in get_messages(resp.wsgi_request)]
+        self.assertIn("Membership renewal request submitted for review.", messages)
+        pending_types = set(
+            MembershipRequest.objects.filter(
+                requested_organization=org,
+                status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
+            ).values_list("membership_type_id", flat=True)
+        )
+        self.assertEqual(pending_types, {"gold", "mirror"})
+
+    @override_settings(MEMBERSHIP_EXPIRING_SOON_DAYS=90)
+    def test_representative_can_submit_second_org_membership_request_for_other_type(self) -> None:
+        from core.models import Membership, MembershipRequest, MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "description": "Gold Sponsor Member (Annual dues: $20,000 USD)",
+                "category_id": "sponsorship",
                 "sort_order": 2,
                 "enabled": True,
             },
@@ -1410,8 +2260,7 @@ class OrganizationUserViewsTests(TestCase):
             defaults={
                 "name": "Silver Sponsor Member",
                 "description": "Silver Sponsor Member (Annual dues: $2,500 USD)",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
                 "sort_order": 1,
                 "enabled": True,
             },
@@ -1427,7 +2276,6 @@ class OrganizationUserViewsTests(TestCase):
             pr_marketing_contact_email="pr@almalinux.org",
             technical_contact_name="Tech Person",
             technical_contact_email="tech@almalinux.org",
-            membership_level=gold,
             website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
             additional_information="Renewal note",
@@ -1435,8 +2283,8 @@ class OrganizationUserViewsTests(TestCase):
         )
 
         expires_at = timezone.now() + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS - 1)
-        OrganizationSponsorship.objects.create(
-            organization=org,
+        Membership.objects.create(
+            target_organization=org,
             membership_type=gold,
             expires_at=expires_at,
         )
@@ -1448,10 +2296,14 @@ class OrganizationUserViewsTests(TestCase):
             patch("core.backends.FreeIPAUser.get", return_value=bob),
             patch("core.views_organizations.block_action_without_coc", return_value=None),
         ):
-            resp = self.client.post(reverse("organization-sponsorship-extend", args=[org.pk]), follow=True)
+            resp = self.client.post(
+                reverse("organization-sponsorship-extend", args=[org.pk]),
+                data={"membership_type": "gold"},
+                follow=True,
+            )
         self.assertEqual(resp.status_code, 200)
         messages = [m.message for m in get_messages(resp.wsgi_request)]
-        self.assertIn("Sponsorship renewal request submitted for review.", messages)
+        self.assertIn("Membership renewal request submitted for review.", messages)
 
         self.assertEqual(
             MembershipRequest.objects.filter(
@@ -1463,19 +2315,19 @@ class OrganizationUserViewsTests(TestCase):
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=bob),
-            patch("core.views_organizations.block_action_without_coc", return_value=None),
+            patch("core.views_membership.block_action_without_coc", return_value=None),
         ):
             resp = self.client.post(
-                reverse("organization-sponsorship-manage", args=[org.pk]),
+                reverse("organization-membership-request", args=[org.pk]),
                 data={
-                    "membership_level": "silver",
-                    "additional_information": "Please review our sponsorship request.",
+                    "membership_type": "silver",
+                    "q_sponsorship_details": "Please review our sponsorship request.",
                 },
                 follow=True,
             )
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "A sponsorship request is already pending.")
+        self.assertContains(resp, "Select a valid choice")
         self.assertEqual(
             MembershipRequest.objects.filter(
                 requested_organization=org,
@@ -1487,10 +2339,10 @@ class OrganizationUserViewsTests(TestCase):
     def test_committee_can_edit_org_sponsorship_expiry_and_terminate(self) -> None:
         from core.models import (
             FreeIPAPermissionGrant,
+            Membership,
             MembershipLog,
             MembershipType,
             Organization,
-            OrganizationSponsorship,
         )
         from core.permissions import ASTRA_CHANGE_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP
 
@@ -1498,8 +2350,7 @@ class OrganizationUserViewsTests(TestCase):
             code="gold",
             defaults={
                 "name": "Gold Sponsor Member",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
                 "sort_order": 2,
                 "enabled": True,
             },
@@ -1515,14 +2366,13 @@ class OrganizationUserViewsTests(TestCase):
             pr_marketing_contact_email="pr@almalinux.org",
             technical_contact_name="Tech Person",
             technical_contact_email="tech@almalinux.org",
-            membership_level=gold,
             website="https://almalinux.org/",
             representative="bob",
         )
 
         expires_at = timezone.now() + datetime.timedelta(days=30)
-        OrganizationSponsorship.objects.create(
-            organization=org,
+        Membership.objects.create(
+            target_organization=org,
             membership_type=gold,
             expires_at=expires_at,
         )
@@ -1554,22 +2404,23 @@ class OrganizationUserViewsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Edit expiry")
         self.assertContains(resp, "Terminate")
-        self.assertContains(resp, 'data-target="#sponsorship-expiry-modal"')
-        self.assertContains(resp, 'id="sponsorship-expiry-modal"')
+        self.assertContains(resp, 'data-target="#sponsorship-expiry-modal-gold"')
+        self.assertContains(resp, 'id="sponsorship-expiry-modal-gold"')
         self.assertContains(
             resp,
             f'action="{reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"])}"',
         )
-        self.assertContains(resp, 'data-target="#sponsorship-terminate-modal"')
-        self.assertContains(resp, 'id="sponsorship-terminate-modal"')
+        self.assertContains(resp, 'data-target="#sponsorship-terminate-modal-gold"')
+        self.assertContains(resp, 'id="sponsorship-terminate-modal-gold"')
         self.assertContains(
             resp,
             f'action="{reverse("organization-sponsorship-terminate", args=[org.pk, "gold"])}"',
         )
 
+        self.assertContains(resp, "Terminate membership: Gold Sponsor Member")
         self.assertContains(
             resp,
-            f"Terminate sponsorship for <strong>{org.name}</strong> early?",
+            f"Terminate <strong>{org.name}</strong>&#x27;s Gold Sponsor Member membership early?",
         )
 
         with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
@@ -1586,7 +2437,7 @@ class OrganizationUserViewsTests(TestCase):
         self.assertEqual(resp.status_code, 302)
 
         org.refresh_from_db()
-        sponsorship = OrganizationSponsorship.objects.get(organization=org)
+        sponsorship = Membership.objects.get(target_organization=org)
         self.assertEqual(sponsorship.membership_type_id, "gold")
         self.assertIsNotNone(sponsorship.expires_at)
 
@@ -1603,7 +2454,7 @@ class OrganizationUserViewsTests(TestCase):
         self.assertEqual(resp.status_code, 302)
 
         org.refresh_from_db()
-        self.assertIsNone(org.membership_level_id)
+        self.assertFalse(Membership.objects.filter(target_organization=org).exists())
         self.assertTrue(
             MembershipLog.objects.filter(
                 action=MembershipLog.Action.terminated,
@@ -1613,14 +2464,13 @@ class OrganizationUserViewsTests(TestCase):
         )
 
     def test_representative_can_delete_org_and_terminates_sponsorship(self) -> None:
-        from core.models import MembershipLog, MembershipType, Organization, OrganizationSponsorship
+        from core.models import Membership, MembershipLog, MembershipType, Organization
 
         MembershipType.objects.update_or_create(
             code="gold",
             defaults={
                 "name": "Gold Sponsor Member",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
                 "sort_order": 2,
                 "enabled": True,
                 "group_cn": "sponsor-group",
@@ -1637,13 +2487,12 @@ class OrganizationUserViewsTests(TestCase):
             pr_marketing_contact_email="pr@almalinux.org",
             technical_contact_name="Tech Person",
             technical_contact_email="tech@almalinux.org",
-            membership_level=gold,
             website="https://almalinux.org/",
             representative="bob",
         )
 
-        OrganizationSponsorship.objects.create(
-            organization=org,
+        Membership.objects.create(
+            target_organization=org,
             membership_type=gold,
             expires_at=timezone.now() + datetime.timedelta(days=90),
         )
@@ -1701,14 +2550,13 @@ class OrganizationUserViewsTests(TestCase):
     def test_sponsorship_uninterrupted_extension_preserves_created_at(self) -> None:
         import datetime
 
-        from core.models import MembershipLog, MembershipType, Organization, OrganizationSponsorship
+        from core.models import Membership, MembershipLog, MembershipType, Organization
 
         MembershipType.objects.update_or_create(
             code="gold",
             defaults={
                 "name": "Gold Sponsor Member",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
                 "sort_order": 2,
                 "enabled": True,
             },
@@ -1717,7 +2565,6 @@ class OrganizationUserViewsTests(TestCase):
 
         org = Organization.objects.create(
             name="AlmaLinux",
-            membership_level_id="gold",
             representative="bob",
         )
 
@@ -1733,14 +2580,14 @@ class OrganizationUserViewsTests(TestCase):
                 membership_request=None,
             )
 
-        sponsorship = OrganizationSponsorship.objects.get(organization=org)
+        sponsorship = Membership.objects.get(target_organization=org)
         self.assertEqual(sponsorship.created_at, start_at)
 
         previous_expires_at = first_log.expires_at
         assert previous_expires_at is not None
 
         # Simulate drift: current-state row missing, but the term is uninterrupted.
-        OrganizationSponsorship.objects.filter(organization=org).delete()
+        Membership.objects.filter(target_organization=org).delete()
 
         with patch("django.utils.timezone.now", autospec=True, return_value=extend_at):
             MembershipLog.create_for_approval(
@@ -1751,21 +2598,20 @@ class OrganizationUserViewsTests(TestCase):
                 membership_request=None,
             )
 
-        recreated = OrganizationSponsorship.objects.get(organization=org)
+        recreated = Membership.objects.get(target_organization=org)
         self.assertEqual(recreated.created_at, start_at)
         self.assertGreater(recreated.expires_at, previous_expires_at)
 
     def test_expired_sponsorship_starts_new_term_and_resets_created_at(self) -> None:
         import datetime
 
-        from core.models import MembershipLog, MembershipType, Organization, OrganizationSponsorship
+        from core.models import Membership, MembershipLog, MembershipType, Organization
 
         MembershipType.objects.update_or_create(
             code="gold",
             defaults={
                 "name": "Gold Sponsor Member",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
                 "sort_order": 2,
                 "enabled": True,
             },
@@ -1774,7 +2620,6 @@ class OrganizationUserViewsTests(TestCase):
 
         org = Organization.objects.create(
             name="AlmaLinux",
-            membership_level_id="gold",
             representative="bob",
         )
 
@@ -1791,7 +2636,7 @@ class OrganizationUserViewsTests(TestCase):
             )
 
         # Force an expired current-state row.
-        OrganizationSponsorship.objects.filter(organization=org).update(expires_at=start_at)
+        Membership.objects.filter(target_organization=org).update(expires_at=start_at)
 
         with patch("django.utils.timezone.now", autospec=True, return_value=after_expiry_at):
             MembershipLog.create_for_approval(
@@ -1802,20 +2647,19 @@ class OrganizationUserViewsTests(TestCase):
                 membership_request=None,
             )
 
-        current = OrganizationSponsorship.objects.get(organization=org)
+        current = Membership.objects.get(target_organization=org)
         self.assertEqual(current.created_at, after_expiry_at)
 
     def test_representative_cannot_extend_expired_sponsorship(self) -> None:
         import datetime
 
-        from core.models import MembershipRequest, MembershipType, Organization, OrganizationSponsorship
+        from core.models import Membership, MembershipRequest, MembershipType, Organization
 
         MembershipType.objects.update_or_create(
             code="gold",
             defaults={
                 "name": "Gold Sponsor Member",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
                 "sort_order": 2,
                 "enabled": True,
             },
@@ -1823,13 +2667,12 @@ class OrganizationUserViewsTests(TestCase):
 
         org = Organization.objects.create(
             name="AlmaLinux",
-            membership_level_id="gold",
             representative="bob",
         )
 
         expired_at = timezone.now() - datetime.timedelta(days=1)
-        OrganizationSponsorship.objects.create(
-            organization=org,
+        Membership.objects.create(
+            target_organization=org,
             membership_type_id="gold",
             expires_at=expired_at,
         )
@@ -1855,8 +2698,7 @@ class OrganizationUserViewsTests(TestCase):
             code="silver",
             defaults={
                 "name": "Silver Sponsor Member",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
                 "sort_order": 1,
                 "enabled": True,
             },
@@ -1870,7 +2712,6 @@ class OrganizationUserViewsTests(TestCase):
             pr_marketing_contact_email="pr@almalinux.org",
             technical_contact_name="Tech Person",
             technical_contact_email="tech@almalinux.org",
-            membership_level_id="silver",
             website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
             representative="bob",
@@ -1891,8 +2732,7 @@ class OrganizationUserViewsTests(TestCase):
             code="silver",
             defaults={
                 "name": "Silver Sponsor Member",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
                 "sort_order": 1,
                 "enabled": True,
             },
@@ -1906,7 +2746,6 @@ class OrganizationUserViewsTests(TestCase):
             pr_marketing_contact_email="pr@almalinux.org",
             technical_contact_name="Tech Person",
             technical_contact_email="tech@almalinux.org",
-            membership_level_id="silver",
             website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
             representative="bob",
@@ -1920,8 +2759,7 @@ class OrganizationUserViewsTests(TestCase):
             defaults={
                 "name": "Silver Sponsor Member",
                 "description": "Silver Sponsor Member (Annual dues: $2,500 USD)",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
                 "sort_order": 1,
                 "enabled": True,
             },
@@ -1935,7 +2773,6 @@ class OrganizationUserViewsTests(TestCase):
             pr_marketing_contact_email="pr@almalinux.org",
             technical_contact_name="Tech Person",
             technical_contact_email="tech@almalinux.org",
-            membership_level_id="silver",
             website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
             representative="bob",
@@ -1974,7 +2811,6 @@ class OrganizationUserViewsTests(TestCase):
                     "technical_contact_name": "Tech Person",
                     "technical_contact_email": "tech@almalinux.org",
                     "technical_contact_phone": "",
-                    "membership_level": "silver",
                     "name": "AlmaLinux",
                     "website_logo": "https://example.com/logo-options",
                     "website": "https://almalinux.org/",
@@ -1995,8 +2831,7 @@ class OrganizationUserViewsTests(TestCase):
             code="gold",
             defaults={
                 "name": "Gold Sponsor Member",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
                 "sort_order": 2,
                 "enabled": True,
             },
@@ -2079,7 +2914,7 @@ class OrganizationUserViewsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, reverse("organization-detail", args=[created.pk]))
 
-    def test_organization_create_redirects_creator_to_sponsorship_manage(self) -> None:
+    def test_organization_create_redirects_creator_to_membership_request(self) -> None:
         from core.models import MembershipType, Organization
 
         MembershipType.objects.update_or_create(
@@ -2087,8 +2922,7 @@ class OrganizationUserViewsTests(TestCase):
             defaults={
                 "name": "Silver Sponsor Member",
                 "description": "Silver Sponsor Member (Annual dues: $2,500 USD)",
-                "isOrganization": True,
-                "isIndividual": False,
+                "category_id": "sponsorship",
                 "sort_order": 1,
                 "enabled": True,
             },
@@ -2122,19 +2956,18 @@ class OrganizationUserViewsTests(TestCase):
 
         self.assertEqual(resp.status_code, 302)
         created = Organization.objects.get(name="AlmaLinux")
-        self.assertEqual(created.representative, "bob")
         self.assertEqual(
             resp["Location"],
-            reverse("organization-sponsorship-manage", args=[created.pk]),
+            reverse("organization-membership-request", args=[created.pk]),
         )
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=bob),
             patch("core.views_utils.has_signed_coc", return_value=True),
         ):
-            manage_resp = self.client.get(reverse("organization-sponsorship-manage", args=[created.pk]))
-        self.assertEqual(manage_resp.status_code, 200)
-        self.assertContains(manage_resp, "Manage sponsorship")
+            request_resp = self.client.get(reverse("organization-membership-request", args=[created.pk]))
+        self.assertEqual(request_resp.status_code, 200)
+        self.assertContains(request_resp, "Request Membership")
 
     def test_org_edit_highlights_contact_tabs_with_validation_errors(self) -> None:
         from core.models import Organization
@@ -2222,7 +3055,7 @@ class OrganizationUserViewsTests(TestCase):
         created = Organization.objects.get(name="Acme")
         self.assertEqual(created.representative, "bob")
         self.assertContains(resp, reverse("organization-detail", args=[created.pk]))
-        self.assertContains(resp, "Sponsorship Level")
+        self.assertContains(resp, "Membership Level")
 
     def test_org_create_highlights_contact_tabs_with_validation_errors(self) -> None:
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})

@@ -33,8 +33,7 @@ class MembershipRequestRfiButtonTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -76,8 +75,7 @@ class MembershipRequestRfiButtonTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -116,8 +114,7 @@ class MembershipRequestRfiButtonTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -155,8 +152,7 @@ class MembershipRequestRfiButtonTests(TestCase):
             defaults={
                 "name": "Gold",
                 "group_cn": "almalinux-gold",
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "sponsorship",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -190,8 +186,7 @@ class MembershipRequestRfiButtonTests(TestCase):
             defaults={
                 "name": "Gold",
                 "group_cn": "almalinux-gold",
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "sponsorship",
                 "sort_order": 0,
                 "enabled": True,
             },

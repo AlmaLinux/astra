@@ -267,7 +267,7 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             code="voter",
             name="Voter",
             votes=2,
-            isIndividual=True,
+            category_id="individual",
             enabled=True,
         )
         m1 = Membership.objects.create(
@@ -396,7 +396,7 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             code="voter",
             name="Voter",
             votes=1,
-            isIndividual=True,
+            category_id="individual",
             enabled=True,
         )
         m = Membership.objects.create(
@@ -470,7 +470,7 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             code="voter",
             name="Voter",
             votes=1,
-            isIndividual=True,
+            category_id="individual",
             enabled=True,
         )
         m = Membership.objects.create(
@@ -531,7 +531,7 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             code="voter",
             name="Voter",
             votes=1,
-            isIndividual=True,
+            category_id="individual",
             enabled=True,
         )
         m = Membership.objects.create(
@@ -576,7 +576,7 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             code="voter",
             name="Voter",
             votes=1,
-            isIndividual=True,
+            category_id="individual",
             enabled=True,
         )
 
@@ -636,7 +636,7 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             code="voter",
             name="Voter",
             votes=1,
-            isIndividual=True,
+            category_id="individual",
             enabled=True,
         )
 
@@ -687,7 +687,7 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             code="voter",
             name="Voter",
             votes=1,
-            isIndividual=True,
+            category_id="individual",
             enabled=True,
         )
 
@@ -741,7 +741,7 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             code="voter",
             name="Voter",
             votes=1,
-            isIndividual=True,
+            category_id="individual",
             enabled=True,
         )
 
@@ -797,7 +797,7 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             code="voter",
             name="Voter",
             votes=1,
-            isIndividual=True,
+            category_id="individual",
             enabled=True,
         )
 
@@ -856,7 +856,7 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             code="voter",
             name="Voter",
             votes=1,
-            isIndividual=True,
+            category_id="individual",
             enabled=True,
         )
 
@@ -900,7 +900,7 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             code="voter",
             name="Voter",
             votes=1,
-            isIndividual=True,
+            category_id="individual",
             enabled=True,
         )
 
@@ -940,7 +940,7 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             code="voter",
             name="Voter",
             votes=1,
-            isIndividual=True,
+            category_id="individual",
             enabled=True,
         )
         m = Membership.objects.create(

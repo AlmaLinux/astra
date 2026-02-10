@@ -1,11 +1,13 @@
 
+import datetime
 from unittest.mock import patch
 from urllib.parse import parse_qs, quote, urlsplit
 
 from django.conf import settings
 from django.contrib.messages import get_messages
-from django.test import TestCase, override_settings
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from core.backends import FreeIPAUser
 from core.models import FreeIPAPermissionGrant
@@ -42,8 +44,7 @@ class MembershipRequestsFlowTests(TestCase):
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
                 "acceptance_template": None,
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -110,8 +111,7 @@ class MembershipRequestsFlowTests(TestCase):
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
                 "acceptance_template": None,
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -165,8 +165,7 @@ class MembershipRequestsFlowTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -176,8 +175,7 @@ class MembershipRequestsFlowTests(TestCase):
             defaults={
                 "name": "Mirror",
                 "group_cn": "almalinux-mirror",
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "mirror",
                 "sort_order": 1,
                 "enabled": True,
             },
@@ -210,6 +208,175 @@ class MembershipRequestsFlowTests(TestCase):
         self.assertNotContains(resp, 'value="individual"')
         self.assertContains(resp, 'value="mirror"')
 
+    def test_membership_request_blocks_category_with_pending_request(self) -> None:
+        from core.models import MembershipRequest, MembershipType, MembershipTypeCategory
+
+        MembershipTypeCategory.objects.filter(pk="individual").update(is_individual=True, sort_order=1)
+        MembershipTypeCategory.objects.filter(pk="mirror").update(is_individual=True, sort_order=2)
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="individual_plus",
+            defaults={
+                "name": "Individual Plus",
+                "group_cn": "almalinux-individual-plus",
+                "category_id": "individual",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror",
+                "group_cn": "almalinux-mirror",
+                "category_id": "mirror",
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+
+        MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.pending,
+        )
+
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["alice@example.com"],
+                "fasstatusnote": ["US"],
+                "memberof_group": [],
+            },
+        )
+        self._login_as_freeipa_user("alice")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.views_membership.block_action_without_coc", return_value=None),
+            patch("core.views_membership.block_action_without_country_code", return_value=None),
+        ):
+            resp = self.client.get(reverse("membership-request"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, 'value="individual"')
+        self.assertNotContains(resp, 'value="individual_plus"')
+        self.assertContains(resp, 'value="mirror"')
+
+    def test_membership_request_allows_other_type_in_category_when_active(self) -> None:
+        from core.models import Membership, MembershipType, MembershipTypeCategory
+
+        MembershipTypeCategory.objects.filter(pk="individual").update(is_individual=True, sort_order=1)
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="individual_plus",
+            defaults={
+                "name": "Individual Plus",
+                "group_cn": "almalinux-individual-plus",
+                "category_id": "individual",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        Membership.objects.create(
+            target_username="alice",
+            membership_type_id="individual",
+            expires_at=timezone.now() + datetime.timedelta(days=200),
+        )
+
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["alice@example.com"],
+                "fasstatusnote": ["US"],
+                "memberof_group": [],
+            },
+        )
+        self._login_as_freeipa_user("alice")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.views_membership.block_action_without_coc", return_value=None),
+            patch("core.views_membership.block_action_without_country_code", return_value=None),
+        ):
+            resp = self.client.get(reverse("membership-request"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, 'value="individual"')
+        self.assertContains(resp, 'value="individual_plus"')
+
+    def test_membership_request_allows_renewal_when_expiring_soon(self) -> None:
+        from core.models import Membership, MembershipType, MembershipTypeCategory
+
+        MembershipTypeCategory.objects.filter(pk="individual").update(is_individual=True, sort_order=1)
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        Membership.objects.create(
+            target_username="alice",
+            membership_type_id="individual",
+            expires_at=timezone.now() + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS - 1),
+        )
+
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["alice@example.com"],
+                "fasstatusnote": ["US"],
+                "memberof_group": [],
+            },
+        )
+        self._login_as_freeipa_user("alice")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.views_membership.block_action_without_coc", return_value=None),
+            patch("core.views_membership.block_action_without_country_code", return_value=None),
+        ):
+            resp = self.client.get(reverse("membership-request"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'value="individual"')
+
     def test_committee_can_approve_request_adds_user_to_group_logs_and_emails(self) -> None:
         from core.models import MembershipLog, MembershipRequest, MembershipType
 
@@ -218,8 +385,7 @@ class MembershipRequestsFlowTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -299,8 +465,7 @@ class MembershipRequestsFlowTests(TestCase):
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
                 "acceptance_template": None,
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -366,8 +531,7 @@ class MembershipRequestsFlowTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -454,8 +618,7 @@ class MembershipRequestsFlowTests(TestCase):
                 "name": "Silver Sponsor",
                 "group_cn": "almalinux-sponsor-silver",
                 "acceptance_template": template,
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "sponsorship",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -539,8 +702,7 @@ class MembershipRequestsFlowTests(TestCase):
                 "name": "Silver Sponsor",
                 "group_cn": "almalinux-sponsor-silver",
                 "acceptance_template": template,
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "sponsorship",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -613,8 +775,7 @@ class MembershipRequestsFlowTests(TestCase):
             defaults={
                 "name": "Silver Sponsor",
                 "group_cn": "almalinux-sponsor-silver",
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "sponsorship",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -704,8 +865,7 @@ class MembershipRequestsFlowTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -756,8 +916,7 @@ class MembershipRequestsFlowTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -801,8 +960,7 @@ class MembershipRequestsFlowTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -877,8 +1035,7 @@ class MembershipRequestsFlowTests(TestCase):
             defaults={
                 "name": "Silver Sponsor",
                 "group_cn": "",
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "sponsorship",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -958,8 +1115,7 @@ class MembershipRequestsFlowTests(TestCase):
             defaults={
                 "name": "Silver Sponsor",
                 "group_cn": "",
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "sponsorship",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -1033,8 +1189,7 @@ class MembershipRequestsFlowTests(TestCase):
                 "name": "Silver Sponsor",
                 "group_cn": "almalinux-sponsor-silver",
                 "acceptance_template": template,
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "sponsorship",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -1108,8 +1263,7 @@ class MembershipRequestsFlowTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -1184,8 +1338,7 @@ class MembershipRequestsFlowTests(TestCase):
             defaults={
                 "name": "Silver Sponsor",
                 "group_cn": "",
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "sponsorship",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -1271,8 +1424,7 @@ class MembershipRequestsFlowTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -1317,8 +1469,7 @@ class MembershipRequestsFlowTests(TestCase):
                 "name": "Silver Sponsor",
                 "group_cn": "almalinux-sponsor-silver",
                 "acceptance_template": template,
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "sponsorship",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -1391,8 +1542,7 @@ class MembershipRequestsFlowTests(TestCase):
             defaults={
                 "name": "Silver Sponsor",
                 "group_cn": "",
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "sponsorship",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -1477,8 +1627,7 @@ class MembershipRequestsFlowTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -1529,8 +1678,7 @@ class MembershipRequestsFlowTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -1605,8 +1753,7 @@ class MembershipRequestsFlowTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -1644,8 +1791,7 @@ class MembershipRequestsFlowTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -1679,8 +1825,7 @@ class MembershipRequestsFlowTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -1771,8 +1916,7 @@ class MembershipRequestsFlowTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -1820,8 +1964,7 @@ class MembershipRequestsFlowTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -1894,8 +2037,7 @@ class MembershipRequestsFlowTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -1944,8 +2086,7 @@ class MembershipRequestsFlowTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -1994,8 +2135,7 @@ class MembershipRequestsFlowTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -2035,3 +2175,53 @@ class MembershipRequestsFlowTests(TestCase):
         ignore_mock.assert_not_called()
         messages = [m.message for m in get_messages(resp.wsgi_request)]
         self.assertTrue(any("already ignored" in m for m in messages))
+
+
+class OrgApprovalTransactionTests(TransactionTestCase):
+    def test_org_approval_runs_in_transaction(self) -> None:
+        from core.membership_request_workflow import approve_membership_request
+        from core.models import MembershipRequest, MembershipType, MembershipTypeCategory, Organization
+
+        MembershipTypeCategory.objects.update_or_create(
+            pk="sponsorship",
+            defaults={
+                "is_individual": False,
+                "is_organization": True,
+                "sort_order": 1,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "group_cn": "almalinux-gold",
+                "category_id": "sponsorship",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="Acme", representative="rep1")
+        req = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="gold",
+            status=MembershipRequest.Status.pending,
+        )
+
+        rep = FreeIPAUser("rep1", {"uid": ["rep1"], "memberof_group": []})
+
+        with (
+            patch(
+                "core.membership_request_workflow.missing_required_agreements_for_user_in_group",
+                return_value=[],
+            ),
+            patch("core.backends.FreeIPAUser.get", return_value=rep),
+            patch.object(FreeIPAUser, "add_to_group", autospec=True),
+        ):
+            approve_membership_request(
+                membership_request=req,
+                actor_username="reviewer",
+                send_approved_email=False,
+                approved_email_template_name=None,
+            )

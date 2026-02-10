@@ -23,8 +23,7 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -34,8 +33,6 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
             defaults={
                 "name": "Mirror",
                 "group_cn": "almalinux-mirror",
-                "isIndividual": False,
-                "isOrganization": False,
                 "sort_order": 1,
                 "enabled": True,
             },
@@ -85,8 +82,7 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },

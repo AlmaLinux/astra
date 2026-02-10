@@ -1,0 +1,51 @@
+{% comment %}
+Membership status badge rendering for pending requests and memberships.
+
+Optional context:
+- request_obj: object with .status (str) and .pk (int)
+- membership: object with .membership_type (name/code)
+- request_id: int for linked membership requests
+- is_owner: bool for owner/self context
+- is_pill: bool for pill-style badges
+
+From context processors (auto-available):
+- membership_can_view: bool
+{% endcomment %}
+
+{% if request_obj %}
+  {% if request_obj.status == 'on_hold' %}
+    {% if is_owner %}
+      <a class="badge badge-danger alx-status-badge alx-status-badge--action" href="{% url 'membership-request-self' request_obj.pk %}">Action required</a>
+    {% elif membership_can_view %}
+      <a class="badge badge-danger alx-status-badge alx-status-badge--action" href="{% url 'membership-request-detail' request_obj.pk %}">On hold</a>
+    {% else %}
+      <span class="badge badge-danger alx-status-badge alx-status-badge--action">On hold</span>
+    {% endif %}
+  {% else %}
+    {% if is_owner %}
+      <a class="badge badge-secondary alx-status-badge alx-status-badge--review" href="{% url 'membership-request-self' request_obj.pk %}">Under review</a>
+    {% elif membership_can_view %}
+      <a class="badge badge-secondary alx-status-badge alx-status-badge--review" href="{% url 'membership-request-detail' request_obj.pk %}">Under review</a>
+    {% else %}
+      <span class="badge badge-secondary alx-status-badge alx-status-badge--review">Under review</span>
+    {% endif %}
+  {% endif %}
+{% elif membership %}
+  {% with badge_label=membership.membership_type.name %}
+    {% with tier=membership.membership_type.code|default:"" %}
+      {% with tier_slug=tier|lower %}
+        {% if request_id %}
+          {% if is_owner %}
+            <a class="badge alx-status-badge alx-status-badge--active{% if is_pill %} badge-pill p-2{% endif %} {% if tier_slug == 'platinum' %}badge-primary{% elif tier_slug == 'gold' %}badge-warning{% elif tier_slug == 'silver' %}badge-secondary{% elif tier_slug == 'ruby' %}badge-danger{% else %}badge-success{% endif %}" href="{% url 'membership-request-self' request_id %}">{{ badge_label }}</a>
+          {% elif membership_can_view %}
+            <a class="badge alx-status-badge alx-status-badge--active{% if is_pill %} badge-pill p-2{% endif %} {% if tier_slug == 'platinum' %}badge-primary{% elif tier_slug == 'gold' %}badge-warning{% elif tier_slug == 'silver' %}badge-secondary{% elif tier_slug == 'ruby' %}badge-danger{% else %}badge-success{% endif %}" href="{% url 'membership-request-detail' request_id %}">{{ badge_label }}</a>
+          {% else %}
+            <span class="badge alx-status-badge alx-status-badge--active{% if is_pill %} badge-pill p-2{% endif %} {% if tier_slug == 'platinum' %}badge-primary{% elif tier_slug == 'gold' %}badge-warning{% elif tier_slug == 'silver' %}badge-secondary{% elif tier_slug == 'ruby' %}badge-danger{% else %}badge-success{% endif %}">{{ badge_label }}</span>
+          {% endif %}
+        {% else %}
+          <span class="badge alx-status-badge alx-status-badge--active{% if is_pill %} badge-pill p-2{% endif %} {% if tier_slug == 'platinum' %}badge-primary{% elif tier_slug == 'gold' %}badge-warning{% elif tier_slug == 'silver' %}badge-secondary{% elif tier_slug == 'ruby' %}badge-danger{% else %}badge-success{% endif %}">{{ badge_label }}</span>
+        {% endif %}
+      {% endwith %}
+    {% endwith %}
+  {% endwith %}
+{% endif %}

@@ -39,21 +39,23 @@ Optional:
   {% endwith %}
 
 {% elif organization %}
-  {% url 'organization-sponsorship-set-expiry' organization.pk organization.membership_level.code as expiry_action_url %}
-  {% url 'organization-sponsorship-terminate' organization.pk organization.membership_level.code as terminate_action_url %}
+  {% url 'organization-sponsorship-set-expiry' organization.pk sponsorship.membership_type.code as expiry_action_url %}
+  {% url 'organization-sponsorship-terminate' organization.pk sponsorship.membership_type.code as terminate_action_url %}
 
-  <button type="button" class="btn btn-sm btn-outline-secondary" data-toggle="modal" data-target="#{{ expiry_modal_id }}" title="Change sponsorship expiration date">Edit expiry</button>
+  <button type="button" class="btn btn-sm btn-outline-secondary" data-toggle="modal" data-target="#{{ expiry_modal_id }}" title="Change membership expiration date">Edit expiry</button>
 
   {% if sponsorship and sponsorship.expires_at %}
     {% timezone 'UTC' %}
       {% with initial_value=sponsorship.expires_at|date:'Y-m-d' current_expiration=sponsorship.expires_at|date:"M j, Y" %}
-        {% include 'core/_modal_date_form.html' with modal_id=expiry_modal_id title="Edit sponsorship expiration" action_url=expiry_action_url input_id=expires_input_id next_url=next_url label="Expiration date (UTC)" initial_value=initial_value current_text="Current expiration: "|add:current_expiration|add:" (UTC)" help_text="Expiration is set as an end-of-day UTC date." %}
+        {% include 'core/_modal_date_form.html' with modal_id=expiry_modal_id title="Edit membership expiration" action_url=expiry_action_url input_id=expires_input_id next_url=next_url label="Expiration date (UTC)" initial_value=initial_value current_text="Current expiration: "|add:current_expiration|add:" (UTC)" help_text="Expiration is set as an end-of-day UTC date." %}
       {% endwith %}
     {% endtimezone %}
   {% else %}
-    {% include 'core/_modal_date_form.html' with modal_id=expiry_modal_id title="Edit sponsorship expiration" action_url=expiry_action_url input_id=expires_input_id next_url=next_url label="Expiration date (UTC)" help_text="Expiration is set as an end-of-day UTC date." %}
+    {% include 'core/_modal_date_form.html' with modal_id=expiry_modal_id title="Edit membership expiration" action_url=expiry_action_url input_id=expires_input_id next_url=next_url label="Expiration date (UTC)" help_text="Expiration is set as an end-of-day UTC date." %}
   {% endif %}
 
-  <button type="button" class="btn btn-sm btn-outline-danger" data-toggle="modal" data-target="#{{ terminate_modal_id }}" title="End this sponsorship early">Terminate</button>
-  {% include 'core/_modal_confirm.html' with modal_id=terminate_modal_id title="Terminate sponsorship" body_prefix="Terminate sponsorship for" body_emphasis=organization.name body_suffix=" early?" action_url=terminate_action_url submit_label="Terminate" submit_class="btn-danger" next_url=next_url %}
+  <button type="button" class="btn btn-sm btn-outline-danger" data-toggle="modal" data-target="#{{ terminate_modal_id }}" title="End this membership early">Terminate</button>
+  {% with terminate_title="Terminate membership: "|add:sponsorship.membership_type.name terminate_body_suffix="'s "|add:sponsorship.membership_type.name|add:" membership early?" %}
+    {% include 'core/_modal_confirm.html' with modal_id=terminate_modal_id title=terminate_title body_prefix="Terminate" body_emphasis=organization.name body_suffix=terminate_body_suffix action_url=terminate_action_url submit_label="Terminate" submit_class="btn-danger" next_url=next_url %}
+  {% endwith %}
 {% endif %}

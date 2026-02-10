@@ -61,13 +61,16 @@
           </div>
 
           <div class="d-flex align-items-center justify-content-end flex-wrap" style="gap: .5rem;">
-            {% if pending_membership_level_request %}
-              {% include 'core/_pending_request_badge.html' with request_obj=pending_membership_level_request is_owner=is_representative %}
-            {% elif organization.membership_level %}
-              <span class="badge badge-success alx-status-badge alx-status-badge--active">{{ membership_level_badge_text }}</span>
-            {% else %}
-              <span class="badge badge-light alx-status-badge alx-status-badge--empty">No sponsorship selected</span>
-            {% endif %}
+            {% for pending_request in pending_requests %}
+              {% include 'core/_membership_badge.html' with request_obj=pending_request is_owner=is_representative %}
+            {% endfor %}
+            {% for entry in sponsorship_entries %}
+              {% include 'core/_membership_badge.html' with membership=entry.sponsorship %}
+            {% empty %}
+              {% if not pending_requests %}
+                  <span class="badge badge-light alx-status-badge alx-status-badge--empty">No membership selected</span>
+              {% endif %}
+            {% endfor %}
           </div>
         </div>
       </div>
@@ -170,14 +173,14 @@
       <div class="card">
         <div class="card-header">
           <div class="d-flex justify-content-between align-items-center">
-            <h3 class="card-title mb-0">Sponsorship Level</h3>
+            <h3 class="card-title mb-0">Membership Level</h3>
             <div class="d-flex align-items-center" style="gap: .5rem;">
               {% if membership_can_view %}
-                <a href="{% url 'membership-audit-log-organization' organization.pk %}" class="btn btn-sm btn-outline-secondary" title="View sponsorship history">History</a>
+                <a href="{% url 'membership-audit-log-organization' organization.pk %}" class="btn btn-sm btn-outline-secondary" title="View membership history">History</a>
               {% endif %}
               {% if is_representative %}
-                <a href="{% url 'organization-sponsorship-manage' organization.pk %}" class="btn btn-sm btn-outline-primary" title="{% if organization.membership_level %}Change sponsorship tier{% else %}Request sponsorship{% endif %}">
-                  {% if organization.membership_level %}Change sponsorship tier{% else %}Request sponsorship{% endif %}
+                <a href="{% url 'organization-membership-request' organization.pk %}" class="btn btn-sm btn-outline-primary" title="{% if sponsorships %}Change membership tier{% else %}Request membership{% endif %}">
+                  {% if sponsorships %}Change membership tier{% else %}Request membership{% endif %}
                 </a>
               {% endif %}
             </div>
@@ -185,75 +188,70 @@
         </div>
         <div class="card-body p-0">
           <ul class="list-group list-group-flush">
-            {% if organization.membership_level or pending_membership_level_request %}
-              {% if organization.membership_level %}
-                <li class="list-group-item d-flex justify-content-between align-items-center">
-                  <div>
-                    <div class="font-weight-bold">{{ organization.membership_level.name }}</div>
-                    {% if organization.membership_level.description %}
-                      <div class="text-muted small">{{ organization.membership_level.description }}</div>
-                    {% endif %}
+            {% for entry in sponsorship_entries %}
+              <li class="list-group-item d-flex justify-content-between align-items-center">
+                <div>
+                  <div class="font-weight-bold">{{ entry.sponsorship.membership_type.name }}</div>
+                  {% if entry.sponsorship.membership_type.description %}
+                    <div class="text-muted small">{{ entry.sponsorship.membership_type.description }}</div>
+                  {% endif %}
 
-                    {% if sponsorship and sponsorship.expires_at %}
-                      {% if sponsorship_is_expiring_soon %}
-                        <div class="text-danger small">
-                          <i class="fas fa-exclamation-triangle mr-1"></i>
-                          {% timezone 'UTC' %}
-                            Expires {{ sponsorship.expires_at|date:"M j, Y H:i" }} (UTC)
-                          {% endtimezone %}
-                        </div>
-                      {% else %}
-                        <div class="text-muted small">
-                          {% timezone 'UTC' %}
-                            Expires {{ sponsorship.expires_at|date:"M j, Y" }}
-                          {% endtimezone %}
-                        </div>
-                      {% endif %}
-                    {% endif %}
-                  </div>
-                  <div class="d-flex align-items-center justify-content-end flex-wrap" style="gap: .5rem;">
-                    {% if is_representative and sponsorship_is_expiring_soon and not pending_membership_level_request %}
-                      <form method="post" action="{% url 'organization-sponsorship-extend' organization.pk %}" class="m-0 d-inline">
-                        {% csrf_token %}
-                        <button type="submit" class="btn btn-sm btn-primary" title="Request sponsorship renewal">Request renewal</button>
-                      </form>
-                      <div class="text-muted small">Submits a renewal request for Membership Committee review.</div>
+                  {% if entry.sponsorship.expires_at %}
+                    {% if entry.is_expiring_soon %}
+                      <div class="text-danger small">
+                        <i class="fas fa-exclamation-triangle mr-1"></i>
+                        {% timezone 'UTC' %}
+                          Expires {{ entry.sponsorship.expires_at|date:"M j, Y H:i" }} (UTC)
+                        {% endtimezone %}
+                      </div>
                     {% else %}
-                      {% if sponsorship_request_id %}
-                        {% if is_representative %}
-                          <a class="badge badge-success alx-status-badge alx-status-badge--active" href="{% url 'membership-request-self' sponsorship_request_id %}">Active</a>
-                        {% elif membership_can_view %}
-                          <a class="badge badge-success alx-status-badge alx-status-badge--active" href="{% url 'membership-request-detail' sponsorship_request_id %}">Active</a>
-                        {% else %}
-                          <span class="badge badge-success alx-status-badge alx-status-badge--active">Active</span>
-                        {% endif %}
-                      {% else %}
-                        <span class="badge badge-success alx-status-badge alx-status-badge--active">Active</span>
-                      {% endif %}
+                      <div class="text-muted small">
+                        {% timezone 'UTC' %}
+                          Expires {{ entry.sponsorship.expires_at|date:"M j, Y" }}
+                        {% endtimezone %}
+                      </div>
                     {% endif %}
+                  {% endif %}
+                </div>
+                <div class="d-flex align-items-center justify-content-end flex-wrap" style="gap: .5rem;">
+                  {% if is_representative and entry.is_expiring_soon and not entry.pending_request %}
+                    <form method="post" action="{% url 'organization-sponsorship-extend' organization.pk %}" class="m-0 d-inline">
+                      {% csrf_token %}
+                      <input type="hidden" name="membership_type" value="{{ entry.sponsorship.membership_type.code }}" />
+                      <button type="submit" class="btn btn-sm btn-primary" title="Request membership renewal">Request renewal</button>
+                    </form>
+                    <div class="text-muted small">Submits a renewal request for Membership Committee review.</div>
+                  {% else %}
+                    {% if entry.request_id %}
+                      {% include 'core/_membership_badge.html' with membership=entry.sponsorship request_id=entry.request_id is_owner=is_representative %}
+                    {% else %}
+                      {% include 'core/_membership_badge.html' with membership=entry.sponsorship %}
+                    {% endif %}
+                  {% endif %}
 
-                    {% if membership_can_change and membership_can_delete %}
-                      {% include 'core/_expiry_and_termination_actions.html' with organization=organization sponsorship=sponsorship id_prefix="sponsorship" next_url=request.get_full_path %}
-                    {% endif %}
-                  </div>
-                </li>
-              {% endif %}
+                  {% if membership_can_change and membership_can_delete %}
+                    {% include 'core/_expiry_and_termination_actions.html' with organization=organization sponsorship=entry.sponsorship id_prefix="sponsorship" id_suffix=entry.sponsorship.membership_type.code next_url=request.get_full_path %}
+                  {% endif %}
+                </div>
+              </li>
+            {% endfor %}
 
-              {% if pending_membership_level_request %}
-                <li class="list-group-item d-flex justify-content-between align-items-center text-muted">
-                  <div>
-                    <div class="font-weight-bold">{{ pending_membership_level_request.membership_type.name }}</div>
-                    {% if pending_membership_level_request.membership_type.description %}
-                      <div class="text-muted small">{{ pending_membership_level_request.membership_type.description }}</div>
-                    {% endif %}
-                  </div>
-                  {% include 'core/_pending_request_badge.html' with request_obj=pending_membership_level_request is_owner=is_representative %}
-                </li>
-              {% endif %}
-            {% else %}
+            {% for pending_request in pending_requests %}
               <li class="list-group-item d-flex justify-content-between align-items-center text-muted">
                 <div>
-                  No sponsorship level selected yet.
+                  <div class="font-weight-bold">{{ pending_request.membership_type.name }}</div>
+                  {% if pending_request.membership_type.description %}
+                    <div class="text-muted small">{{ pending_request.membership_type.description }}</div>
+                  {% endif %}
+                </div>
+                {% include 'core/_membership_badge.html' with request_obj=pending_request is_owner=is_representative %}
+              </li>
+            {% endfor %}
+
+            {% if not sponsorship_entries and not pending_requests %}
+              <li class="list-group-item d-flex justify-content-between align-items-center text-muted">
+                <div>
+                  No membership level selected yet.
                 </div>
               </li>
             {% endif %}
@@ -306,6 +304,6 @@
   </div>
 
   {% if can_delete_organization %}
-    {% include 'core/_modal_confirm.html' with modal_id='organization-delete-modal' title='Delete organization?' body_prefix='Delete organization ' body_emphasis=organization.name body_suffix='? This will terminate the sponsorship and remove the representative from the sponsor group. This cannot be undone.' action_url=organization_delete_url submit_label='Delete organization' submit_class='btn-danger' %}
+    {% include 'core/_modal_confirm.html' with modal_id='organization-delete-modal' title='Delete organization?' body_prefix='Delete organization ' body_emphasis=organization.name body_suffix='? This will terminate the membership and remove the representative from the member group. This cannot be undone.' action_url=organization_delete_url submit_label='Delete organization' submit_class='btn-danger' %}
   {% endif %}
 {% endblock %}

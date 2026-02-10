@@ -44,7 +44,7 @@ class ElectionEligibleGroupUiAndNominationTests(TestCase):
             code=f"mt_{username}",
             name=f"MT {username}",
             votes=1,
-            isIndividual=True,
+            category_id="individual",
             enabled=True,
         )
         m = Membership.objects.create(

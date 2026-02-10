@@ -20,8 +20,7 @@ class UserProfileMembershipActionRequiredAlertTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -56,7 +55,7 @@ class UserProfileMembershipActionRequiredAlertTests(TestCase):
         self.assertContains(resp, "Add details")
         self.assertContains(resp, reverse("membership-request-self", args=[req.pk]))
         self.assertContains(resp, "alert alert-danger")
-        self.assertContains(resp, ">Awaiting action<")
+        self.assertContains(resp, ">Action required<")
 
     def test_self_profile_shows_action_required_alert_for_on_hold_org_request(self) -> None:
         MembershipType.objects.update_or_create(
@@ -64,8 +63,7 @@ class UserProfileMembershipActionRequiredAlertTests(TestCase):
             defaults={
                 "name": "Organization",
                 "group_cn": "almalinux-org",
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "sponsorship",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -102,7 +100,7 @@ class UserProfileMembershipActionRequiredAlertTests(TestCase):
         self.assertContains(resp, "Add details")
         self.assertContains(resp, reverse("membership-request-self", args=[req.pk]))
         self.assertContains(resp, "alert alert-danger")
-        self.assertContains(resp, ">Awaiting action<")
+        self.assertContains(resp, ">Action required<")
         self.assertContains(resp, "Example Org")
 
     def test_other_profile_keeps_on_hold_badge_label(self) -> None:
@@ -111,8 +109,7 @@ class UserProfileMembershipActionRequiredAlertTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -156,4 +153,4 @@ class UserProfileMembershipActionRequiredAlertTests(TestCase):
         # Pending membership requests are only visible to the user themself or
         # membership reviewers.
         self.assertNotContains(resp, "On hold")
-        self.assertNotContains(resp, "Awaiting action")
+        self.assertNotContains(resp, "Action required")

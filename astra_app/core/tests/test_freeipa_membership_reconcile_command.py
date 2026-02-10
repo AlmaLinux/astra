@@ -8,7 +8,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from core.backends import FreeIPAGroup, FreeIPAUser
-from core.models import Membership, MembershipType, Organization, OrganizationSponsorship
+from core.models import Membership, MembershipType, Organization
 
 
 class FreeIPAMembershipReconcileCommandTests(TestCase):
@@ -27,8 +27,7 @@ class FreeIPAMembershipReconcileCommandTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -79,8 +78,7 @@ class FreeIPAMembershipReconcileCommandTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -122,8 +120,7 @@ class FreeIPAMembershipReconcileCommandTests(TestCase):
             defaults={
                 "name": "Gold Sponsor",
                 "group_cn": "almalinux-gold",
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "sponsorship",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -133,8 +130,7 @@ class FreeIPAMembershipReconcileCommandTests(TestCase):
             defaults={
                 "name": "Silver Sponsor",
                 "group_cn": "almalinux-silver",
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "sponsorship",
                 "sort_order": 1,
                 "enabled": True,
             },
@@ -142,17 +138,18 @@ class FreeIPAMembershipReconcileCommandTests(TestCase):
 
         org = Organization.objects.create(
             name="Acme",
-            membership_level_id="gold",
             representative="bob",
         )
-        OrganizationSponsorship.objects.create(
-            organization=org,
+        # Expired sponsorship — triggers the divergence warning.
+        Membership.objects.create(
+            target_organization=org,
             membership_type_id="silver",
-            expires_at=timezone.now() + datetime.timedelta(days=5),
+            expires_at=timezone.now() - datetime.timedelta(days=1),
         )
 
         admin_group = self._group(settings.FREEIPA_ADMIN_GROUP, ["admin"])
-        target_group = self._group("almalinux-gold", ["bob"])
+        gold_group = self._group("almalinux-gold", ["bob"])
+        silver_group = self._group("almalinux-silver", [])
         admin_user = FreeIPAUser(
             "admin",
             {
@@ -166,7 +163,9 @@ class FreeIPAMembershipReconcileCommandTests(TestCase):
             if cn == settings.FREEIPA_ADMIN_GROUP:
                 return admin_group
             if cn == "almalinux-gold":
-                return target_group
+                return gold_group
+            if cn == "almalinux-silver":
+                return silver_group
             return None
 
         with (
@@ -187,8 +186,7 @@ class FreeIPAMembershipReconcileCommandTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },

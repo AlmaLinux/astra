@@ -20,7 +20,7 @@ from tablib import Dataset
 from core.admin import MembershipCSVImportLinkAdmin
 from core.backends import FreeIPAUser
 from core.membership import get_valid_memberships_for_username
-from core.membership_csv_import import MembershipCSVImportResource
+from core.membership_csv_import import MembershipCSVImportForm, MembershipCSVImportResource
 from core.models import Membership, MembershipCSVImportLink, MembershipLog, MembershipRequest, MembershipType, Note
 
 
@@ -36,8 +36,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "enabled": True,
                 "sort_order": 0,
             },
@@ -116,6 +115,48 @@ class AdminImportMembershipsCSVTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
 
+    def test_import_form_membership_type_orders_by_category_then_sort(self) -> None:
+        from core.models import MembershipTypeCategory
+
+        MembershipTypeCategory.objects.filter(pk="mirror").update(is_organization=True, sort_order=1)
+        MembershipTypeCategory.objects.filter(pk="sponsorship").update(is_organization=True, sort_order=2)
+
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror",
+                "category_id": "mirror",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver",
+                "category_id": "sponsorship",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold",
+                "category_id": "sponsorship",
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+
+        form = MembershipCSVImportForm(
+            formats=[base_formats.CSV],
+            resources=[MembershipCSVImportResource],
+        )
+        codes = list(form.fields["membership_type"].queryset.values_list("code", flat=True))
+        self.assertLess(codes.index("mirror"), codes.index("silver"))
+        self.assertLess(codes.index("silver"), codes.index("gold"))
+
     def test_import_formats_csv_only(self) -> None:
         site = AdminSite()
         admin_instance = MembershipCSVImportLinkAdmin(MembershipCSVImportLink, site)
@@ -147,8 +188,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "enabled": True,
                 "sort_order": 0,
             },
@@ -272,8 +312,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "enabled": True,
                 "sort_order": 0,
             },
@@ -352,8 +391,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "enabled": True,
                 "sort_order": 0,
             },
@@ -434,8 +472,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "enabled": True,
                 "sort_order": 0,
             },
@@ -529,8 +566,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "enabled": True,
                 "sort_order": 0,
             },
@@ -614,8 +650,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "enabled": True,
                 "sort_order": 0,
             },
@@ -722,8 +757,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "enabled": True,
                 "sort_order": 0,
             },
@@ -790,8 +824,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "enabled": True,
                 "sort_order": 0,
             },
@@ -855,8 +888,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "enabled": True,
                 "sort_order": 0,
             },
@@ -920,8 +952,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "enabled": True,
                 "sort_order": 0,
             },
@@ -988,8 +1019,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "enabled": True,
                 "sort_order": 0,
             },
@@ -1082,8 +1112,6 @@ class AdminImportMembershipsCSVTests(TestCase):
             defaults={
                 "name": "Mirror",
                 "group_cn": "almalinux-mirror",
-                "isIndividual": False,
-                "isOrganization": False,
                 "enabled": True,
                 "sort_order": 0,
             },
@@ -1167,8 +1195,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "enabled": True,
                 "sort_order": 0,
             },
@@ -1246,8 +1273,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "enabled": True,
                 "sort_order": 0,
             },
@@ -1324,8 +1350,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "enabled": True,
                 "sort_order": 0,
             },
@@ -1406,8 +1431,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "enabled": True,
                 "sort_order": 0,
             },
@@ -1518,8 +1542,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "enabled": True,
                 "sort_order": 0,
             },
@@ -1613,8 +1636,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "enabled": True,
                 "sort_order": 0,
             },
@@ -1733,8 +1755,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "enabled": True,
                 "sort_order": 0,
             },
@@ -1814,8 +1835,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "enabled": True,
                 "sort_order": 0,
             },
@@ -1893,8 +1913,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "enabled": True,
                 "sort_order": 0,
             },
@@ -1986,8 +2005,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "enabled": True,
                 "sort_order": 0,
             },

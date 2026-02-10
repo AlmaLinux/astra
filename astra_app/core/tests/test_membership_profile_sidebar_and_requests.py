@@ -1,8 +1,11 @@
 
 import datetime
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.conf import settings
+from django.template.loader import render_to_string
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -71,8 +74,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -99,8 +101,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -117,7 +118,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
                         resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "In Review")
+        self.assertContains(resp, "Under review")
         self.assertContains(resp, "Individual")
 
     def test_committee_viewer_sees_in_review_badge_linked_to_request(self) -> None:
@@ -128,8 +129,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -156,7 +156,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
                         resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "In Review")
+        self.assertContains(resp, "Under review")
         self.assertContains(resp, f'href="{reverse("membership-request-detail", args=[req.pk])}"')
 
     def test_committee_viewer_sees_active_badge_linked_to_request(self) -> None:
@@ -167,8 +167,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -212,8 +211,45 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
                         resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Active")
+        self.assertContains(resp, "alx-status-badge--active")
+        self.assertContains(resp, "Individual")
         self.assertContains(resp, f'href="{reverse("membership-request-detail", args=[req.pk])}"')
+
+    def test_membership_badge_renders_active_without_expiry_label(self) -> None:
+        expires_at = timezone.now() + datetime.timedelta(days=30)
+        membership = SimpleNamespace(
+            membership_type=SimpleNamespace(name="Gold"),
+            expires_at=expires_at,
+        )
+
+        html = render_to_string(
+            "core/_membership_badge.html",
+            {
+                "membership": membership,
+                "membership_can_view": False,
+            },
+        )
+
+        self.assertIn("Gold", html)
+        self.assertNotIn("expires", html)
+
+    def test_membership_badge_ignores_expired_state(self) -> None:
+        expired_at = timezone.now() - datetime.timedelta(days=1)
+        membership = SimpleNamespace(
+            membership_type=SimpleNamespace(name="Gold"),
+            expires_at=expired_at,
+        )
+
+        html = render_to_string(
+            "core/_membership_badge.html",
+            {
+                "membership": membership,
+                "membership_can_view": False,
+            },
+        )
+
+        self.assertIn("Gold", html)
+        self.assertNotIn("expired", html)
 
     def test_committee_profile_renders_expiry_and_terminate_modals(self) -> None:
         from core.models import MembershipLog, MembershipType
@@ -223,8 +259,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -289,8 +324,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -300,8 +334,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Mirror",
                 "group_cn": "almalinux-mirror",
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "mirror",
                 "sort_order": 1,
                 "enabled": True,
             },
@@ -320,7 +353,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
                         resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "In Review")
+        self.assertContains(resp, "Under review")
         self.assertContains(resp, "Individual")
         self.assertContains(resp, "Mirror")
 
@@ -332,8 +365,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -379,8 +411,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -390,8 +421,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Mirror",
                 "group_cn": "almalinux-mirror",
-                "isIndividual": False,
-                "isOrganization": False,
+                "category_id": "mirror",
                 "sort_order": 10,
                 "enabled": True,
             },
@@ -422,8 +452,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -462,8 +491,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -512,8 +540,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -548,8 +575,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -609,8 +635,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -674,8 +699,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -735,8 +759,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -771,8 +794,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -806,8 +828,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Gold",
                 "group_cn": "almalinux-gold",
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "sponsorship",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -847,8 +868,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -879,8 +899,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -931,8 +950,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -975,8 +993,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -987,8 +1004,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Mirror",
                 "group_cn": "almalinux-mirror",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 1,
                 "enabled": True,
             },
@@ -1068,8 +1084,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -1115,8 +1130,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -1156,8 +1170,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -1195,8 +1208,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -1234,8 +1246,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -1269,8 +1280,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -1280,8 +1290,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Mirror",
                 "group_cn": "almalinux-mirror",
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "mirror",
                 "sort_order": 1,
                 "enabled": True,
             },
@@ -1337,6 +1346,216 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             ],
         )
 
+    def test_membership_request_blocks_category_with_pending_request(self) -> None:
+        from core.models import MembershipRequest, MembershipType, MembershipTypeCategory
+
+        MembershipType.objects.update(enabled=False)
+        MembershipTypeCategory.objects.update_or_create(
+            pk="individual",
+            defaults={"is_individual": True, "is_organization": False, "sort_order": 1},
+        )
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="community",
+            defaults={
+                "name": "Community",
+                "group_cn": "almalinux-community",
+                "category_id": "individual",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.pending,
+        )
+
+        alice = self._make_user("alice", full_name="Alice User")
+        self._login_as_freeipa_user("alice")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+            resp = self.client.get(reverse("membership-request"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, 'value="individual"')
+        self.assertNotContains(resp, 'value="community"')
+
+    def test_membership_request_blocks_category_with_on_hold_request(self) -> None:
+        from core.models import MembershipRequest, MembershipType, MembershipTypeCategory
+
+        MembershipType.objects.update(enabled=False)
+        MembershipTypeCategory.objects.update_or_create(
+            pk="individual",
+            defaults={"is_individual": True, "is_organization": False, "sort_order": 1},
+        )
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="community",
+            defaults={
+                "name": "Community",
+                "group_cn": "almalinux-community",
+                "category_id": "individual",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.on_hold,
+        )
+
+        alice = self._make_user("alice", full_name="Alice User")
+        self._login_as_freeipa_user("alice")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+            resp = self.client.get(reverse("membership-request"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, 'value="individual"')
+        self.assertNotContains(resp, 'value="community"')
+
+    def test_membership_request_allows_other_type_when_active(self) -> None:
+        from core.models import MembershipLog, MembershipType, MembershipTypeCategory
+
+        MembershipType.objects.update(enabled=False)
+        MembershipTypeCategory.objects.update_or_create(
+            pk="individual",
+            defaults={"is_individual": True, "is_organization": False, "sort_order": 1},
+        )
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="community",
+            defaults={
+                "name": "Community",
+                "group_cn": "almalinux-community",
+                "category_id": "individual",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        MembershipLog.objects.create(
+            actor_username="reviewer",
+            target_username="alice",
+            membership_type_id="individual",
+            requested_group_cn="almalinux-individual",
+            action=MembershipLog.Action.approved,
+            expires_at=timezone.now() + datetime.timedelta(days=200),
+        )
+
+        alice = self._make_user("alice", full_name="Alice User")
+        self._login_as_freeipa_user("alice")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+            resp = self.client.get(reverse("membership-request"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, 'value="individual"')
+        self.assertContains(resp, 'value="community"')
+
+    def test_membership_request_allows_renewal_when_expiring_soon(self) -> None:
+        from core.models import MembershipLog, MembershipType, MembershipTypeCategory
+
+        MembershipType.objects.update(enabled=False)
+        MembershipTypeCategory.objects.update_or_create(
+            pk="individual",
+            defaults={"is_individual": True, "is_organization": False, "sort_order": 1},
+        )
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        MembershipLog.objects.create(
+            actor_username="reviewer",
+            target_username="alice",
+            membership_type_id="individual",
+            requested_group_cn="almalinux-individual",
+            action=MembershipLog.Action.approved,
+            expires_at=timezone.now() + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS - 1),
+        )
+
+        alice = self._make_user("alice", full_name="Alice User")
+        self._login_as_freeipa_user("alice")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+            resp = self.client.get(reverse("membership-request"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'value="individual"')
+
+    def test_membership_request_renders_sponsorship_question(self) -> None:
+        from core.models import MembershipType, MembershipTypeCategory
+
+        MembershipType.objects.update(enabled=False)
+        MembershipTypeCategory.objects.update_or_create(
+            pk="individual",
+            defaults={"is_individual": True, "is_organization": False, "sort_order": 1},
+        )
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        alice = self._make_user("alice", full_name="Alice User")
+        self._login_as_freeipa_user("alice")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+            resp = self.client.get(reverse("membership-request"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Sponsorship")
+        self.assertContains(resp, "sponsorship goals and planned community participation")
+        self.assertContains(resp, 'id="id_q_sponsorship_details"')
+
     def test_membership_request_mirror_url_fields_are_validated(self) -> None:
         from core.models import MembershipRequest, MembershipType
 
@@ -1345,8 +1564,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Mirror",
                 "group_cn": "almalinux-mirror",
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "mirror",
                 "sort_order": 1,
                 "enabled": True,
             },
@@ -1374,6 +1592,11 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             ).exists()
         )
 
+    def test_user_profile_template_uses_pending_request_badge_include(self) -> None:
+        template_path = Path(__file__).resolve().parents[1] / "templates" / "core" / "user_profile.html"
+        source = template_path.read_text(encoding="utf-8")
+        self.assertIn("{% include 'core/_membership_badge.html'", source)
+
     def test_membership_request_detail_linkifies_mirror_url_responses(self) -> None:
         from core.models import MembershipRequest, MembershipType
 
@@ -1382,8 +1605,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Mirror",
                 "group_cn": "almalinux-mirror",
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "mirror",
                 "sort_order": 1,
                 "enabled": True,
             },
@@ -1419,8 +1641,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -1461,8 +1682,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -1503,8 +1723,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -1557,8 +1776,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -1595,8 +1813,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -1644,8 +1861,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -1689,8 +1905,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -1700,8 +1915,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Mirror",
                 "group_cn": "almalinux-mirror",
-                "isIndividual": False,
-                "isOrganization": True,
+                "category_id": "mirror",
                 "sort_order": 1,
                 "enabled": True,
             },
@@ -1746,8 +1960,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "almalinux-individual",
-                "isIndividual": True,
-                "isOrganization": False,
+                "category_id": "individual",
                 "sort_order": 0,
                 "enabled": True,
             },

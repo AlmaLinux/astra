@@ -72,7 +72,7 @@ class ElectionQuorumAuditTests(TestCase):
             code="voter",
             name="Voter",
             votes=1,
-            isIndividual=True,
+            category_id="individual",
             enabled=True,
         )
         m1 = Membership.objects.create(target_username="voter1", membership_type=voter_type, expires_at=None)

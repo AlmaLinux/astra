@@ -279,19 +279,19 @@ class ElectionBulkCredentialIssuanceTests(TestCase):
             code="voter1",
             name="Voter type 1",
             votes=1,
-            isIndividual=True,
+            category_id="individual",
         )
         voter2 = MembershipType.objects.create(
             code="voter2",
             name="Voter type 2",
             votes=2,
-            isIndividual=True,
+            category_id="individual",
         )
         nonvoter = MembershipType.objects.create(
             code="nonvoter",
             name="Non voter",
             votes=0,
-            isIndividual=True,
+            category_id="individual",
         )
 
         eligible_created_at = election.start_datetime - datetime.timedelta(days=100)
@@ -339,7 +339,7 @@ class ElectionBulkCredentialIssuanceTests(TestCase):
             code="voter",
             name="Voter",
             votes=1,
-            isIndividual=True,
+            category_id="individual",
         )
         eligible_created_at = election.start_datetime - datetime.timedelta(days=100)
         membership = Membership.objects.create(target_username="alice", membership_type=voter, expires_at=None)
@@ -997,7 +997,7 @@ class ElectionVoteEndpointTests(TestCase):
             code="voter",
             name="Voter",
             votes=1,
-            isIndividual=True,
+            category_id="individual",
             enabled=True,
         )
         Membership.objects.create(

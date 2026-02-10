@@ -10,8 +10,8 @@ User membership mode (pass these):
 - membership: MembershipLog-like membership object (expects .membership_type.code/.name and .expires_at)
 
 Organization sponsorship mode (pass these):
-- organization: Organization (expects .pk and .membership_level.code)
-- sponsorship: OrganizationSponsorship | None (expects .expires_at when present)
+- organization: Organization (expects .pk)
+- sponsorship: Membership | None (expects .membership_type.code and .expires_at when present)
 
 Optional:
 - id_prefix: str (e.g. "sponsorship" -> sponsorship-expiry-modal)

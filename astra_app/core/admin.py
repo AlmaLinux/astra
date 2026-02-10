@@ -75,8 +75,10 @@ from .models import (
     IPAFASAgreement,
     IPAGroup,
     IPAUser,
+    Membership,
     MembershipCSVImportLink,
     MembershipType,
+    MembershipTypeCategory,
     Organization,
     VotingCredential,
 )
@@ -1302,6 +1304,12 @@ class IPAFASAgreementAdmin(FreeIPAModelAdmin):
             raise FreeIPAOperationFailed(str(e))
 
 
+@admin.register(MembershipTypeCategory)
+class MembershipTypeCategoryAdmin(admin.ModelAdmin):
+    list_display = ("name", "sort_order", "is_individual", "is_organization")
+    ordering = ("sort_order", "name")
+
+
 @admin.register(MembershipType)
 class MembershipTypeAdmin(admin.ModelAdmin):
     class MembershipTypeAdminForm(forms.ModelForm):
@@ -1335,12 +1343,11 @@ class MembershipTypeAdmin(admin.ModelAdmin):
         "code",
         "name",
         "group_cn",
-        "isIndividual",
-        "isOrganization",
+        "category",
         "sort_order",
         "enabled",
     )
-    list_filter = ("enabled", "isIndividual", "isOrganization")
+    list_filter = ("enabled", "category")
     ordering = ("sort_order", "code")
     search_fields = ("code", "name")
 
@@ -1611,8 +1618,8 @@ class MembershipCSVImportLinkAdmin(ImportMixin, admin.ModelAdmin):
             membership_type = cleaned_data.get("membership_type")
         if membership_type is None:
             membership_type = (
-                MembershipType.objects.filter(enabled=True)
-                .order_by("sort_order", "code")
+                MembershipType.objects.enabled()
+                .ordered_for_display()
                 .first()
             )
 
@@ -1840,15 +1847,6 @@ class OrganizationAdmin(admin.ModelAdmin):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
 
-            if "membership_level" in self.fields:
-                self.fields["membership_level"].queryset = MembershipType.objects.filter(isOrganization=True).order_by(
-                    "sort_order",
-                    "code",
-                )
-                self.fields["membership_level"].label_from_instance = (
-                    lambda membership_type: membership_type.description or membership_type.name
-                )
-
             # Set short labels for each contact group's Name/Email/Phone fields
             # and assign per-group email help text. The fieldset descriptions
             # already provide the full context, so this just keeps the form clean.
@@ -1862,10 +1860,6 @@ class OrganizationAdmin(admin.ModelAdmin):
                 self.fields[f"{prefix}_email"].label = "Email"
                 self.fields[f"{prefix}_phone"].label = "Phone"
                 self.fields[f"{prefix}_email"].help_text = email_help
-
-            self.fields["membership_level"].help_text = (
-                "The full details of what each sponsorship level includes can be found here: almalinux.org/members"
-            )
 
             self.fields["name"].label = "Legal/Official name of the sponsor to be listed"
             self.fields["website_logo"].label = "High-quality logo that you would like used on the website"
@@ -1956,13 +1950,6 @@ class OrganizationAdmin(admin.ModelAdmin):
             },
         ),
         (
-            "Sponsorship Level",
-            {
-                "description": "The full details of what each sponsorship level includes can be found here: almalinux.org/members",
-                "fields": ("membership_level",),
-            },
-        ),
-        (
             "Branding",
             {
                 "fields": ("name", "website_logo", "website", "logo"),
@@ -1982,7 +1969,16 @@ class OrganizationAdmin(admin.ModelAdmin):
         ),
     )
 
-    list_display = ("id", "name", "membership_level", "business_contact_email", "website")
+    class MembershipInline(admin.TabularInline):
+        model = Membership
+        fk_name = "target_organization"
+        fields = ("membership_type", "category", "expires_at", "created_at")
+        readonly_fields = ("category", "created_at")
+        extra = 0
+
+    inlines = [MembershipInline]
+
+    list_display = ("id", "name", "business_contact_email", "website")
     search_fields = (
         "name",
         "business_contact_email",

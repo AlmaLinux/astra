@@ -8,7 +8,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from core.backends import FreeIPAGroup, FreeIPAUser
-from core.models import Membership, MembershipType, Organization, OrganizationSponsorship
+from core.models import Membership, MembershipType
 
 logger = logging.getLogger(__name__)
 
@@ -82,39 +82,18 @@ class Command(BaseCommand):
         if group_cn_filter:
             membership_types = membership_types.filter(group_cn=group_cn_filter)
 
-        sponsorships = list(
-            OrganizationSponsorship.objects.select_related("organization", "membership_type").all()
+        org_memberships = list(
+            Membership.objects.select_related("target_organization", "membership_type")
+            .filter(target_organization__isnull=False)
         )
-        sponsorship_by_org_id: dict[int, OrganizationSponsorship] = {
-            sponsorship.organization_id: sponsorship for sponsorship in sponsorships
-        }
 
-        for sponsorship in sponsorships:
-            org = sponsorship.organization
-            org_level = org.membership_level_id
-            if org_level is None:
+        for org_membership in org_memberships:
+            if org_membership.expires_at is not None and org_membership.expires_at <= now:
                 logger.warning(
-                    "sponsorship_divergence org_id=%s org_name=%s org_level=%s sponsorship_level=%s reason=org_missing_level",
-                    org.pk,
-                    org.name,
-                    org_level,
-                    sponsorship.membership_type_id,
-                )
-            elif org_level != sponsorship.membership_type_id:
-                logger.warning(
-                    "sponsorship_divergence org_id=%s org_name=%s org_level=%s sponsorship_level=%s reason=level_mismatch",
-                    org.pk,
-                    org.name,
-                    org_level,
-                    sponsorship.membership_type_id,
-                )
-            elif sponsorship.expires_at is not None and sponsorship.expires_at <= now:
-                logger.warning(
-                    "sponsorship_divergence org_id=%s org_name=%s org_level=%s sponsorship_level=%s reason=expired_sponsorship",
-                    org.pk,
-                    org.name,
-                    org_level,
-                    sponsorship.membership_type_id,
+                    "sponsorship_divergence org_id=%s org_name=%s sponsorship_level=%s reason=expired_sponsorship",
+                    org_membership.target_organization_id,
+                    org_membership.target_organization_name,
+                    org_membership.membership_type_id,
                 )
 
         group_reports: list[dict[str, object]] = []
@@ -129,7 +108,9 @@ class Command(BaseCommand):
                 continue
 
             expected: set[str] = set()
-            if membership_type.isIndividual:
+
+            # Individual members: active Membership rows for this type.
+            if membership_type.category.is_individual:
                 active_memberships = Membership.objects.filter(
                     membership_type=membership_type,
                 ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
@@ -139,21 +120,23 @@ class Command(BaseCommand):
                     if normalized:
                         expected.add(normalized)
 
-            if membership_type.isOrganization:
-                orgs = Organization.objects.filter(membership_level=membership_type).exclude(representative="")
-                for org in orgs:
-                    representative = str(org.representative or "").strip()
-                    if representative:
-                        expected.add(representative)
-
-                    if org.pk not in sponsorship_by_org_id:
-                        logger.warning(
-                            "sponsorship_divergence org_id=%s org_name=%s org_level=%s sponsorship_level=%s reason=missing_sponsorship",
-                            org.pk,
-                            org.name,
-                            org.membership_level_id,
-                            None,
-                        )
+            # Organization members: representatives of orgs with an active
+            # Membership row for this type (source of truth: Membership table).
+            if membership_type.category.is_organization:
+                active_org_memberships = (
+                    Membership.objects.filter(
+                        membership_type=membership_type,
+                        target_organization__isnull=False,
+                    )
+                    .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
+                    .select_related("target_organization")
+                )
+                for m in active_org_memberships:
+                    org = m.target_organization
+                    if org is not None:
+                        representative = str(org.representative or "").strip()
+                        if representative:
+                            expected.add(representative)
 
             group = FreeIPAGroup.get(group_cn)
             if group is None:

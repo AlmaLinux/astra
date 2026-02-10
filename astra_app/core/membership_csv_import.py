@@ -114,7 +114,7 @@ def _extract_csv_headers_from_uploaded_file(uploaded: UploadedFile) -> list[str]
 
 class MembershipCSVImportForm(ImportForm):
     membership_type = forms.ModelChoiceField(
-        queryset=MembershipType.objects.filter(enabled=True).order_by("sort_order", "code"),
+        queryset=MembershipType.objects.enabled().ordered_for_display(),
         required=True,
         help_text="Membership type to grant for all Active Member rows.",
     )
@@ -218,7 +218,7 @@ class MembershipCSVImportForm(ImportForm):
 
 class MembershipCSVConfirmImportForm(ConfirmImportForm):
     membership_type = forms.ModelChoiceField(
-        queryset=MembershipType.objects.filter(enabled=True).order_by("sort_order", "code"),
+        queryset=MembershipType.objects.enabled().ordered_for_display(),
         required=True,
         widget=forms.HiddenInput,
     )

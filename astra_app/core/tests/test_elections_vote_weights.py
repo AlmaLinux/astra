@@ -23,7 +23,6 @@ from core.models import (
     Membership,
     MembershipType,
     Organization,
-    OrganizationSponsorship,
     VotingCredential,
 )
 
@@ -51,21 +50,21 @@ class ElectionVoteWeightsTests(TestCase):
             code="voter_a",
             name="Voter A",
             votes=2,
-            isIndividual=True,
+            category_id="individual",
             enabled=True,
         )
         mt_b = MembershipType.objects.create(
             code="voter_b",
             name="Voter B",
             votes=3,
-            isIndividual=True,
+            category_id="individual",
             enabled=True,
         )
         mt_org = MembershipType.objects.create(
             code="org_sponsor",
             name="Org sponsor",
             votes=5,
-            isOrganization=True,
+            category_id="sponsorship",
             enabled=True,
         )
 
@@ -88,12 +87,12 @@ class ElectionVoteWeightsTests(TestCase):
             name="ACME",
             representative=username,
         )
-        sponsorship = OrganizationSponsorship.objects.create(
-            organization=org,
+        sponsorship = Membership.objects.create(
+            target_organization=org,
             membership_type=mt_org,
             expires_at=now + datetime.timedelta(days=365),
         )
-        OrganizationSponsorship.objects.filter(pk=sponsorship.pk).update(created_at=created_at)
+        Membership.objects.filter(pk=sponsorship.pk).update(created_at=created_at)
 
         return 2 + 3 + 5
 
@@ -174,7 +173,7 @@ class ElectionVoteWeightsTests(TestCase):
         # Once a credential is issued, vote submission must rely on the credential weight,
         # not re-check current memberships.
         Membership.objects.filter(target_username="voter1").delete()
-        OrganizationSponsorship.objects.all().delete()
+        Membership.objects.filter(target_organization__isnull=False).delete()
         Organization.objects.all().delete()
 
         self._login_as_freeipa_user("voter1")
@@ -292,7 +291,6 @@ class ElectionVoteWeightsTests(TestCase):
         # Even if membership data is later removed, the tally should still use the
         # stored ballot weights.
         Membership.objects.all().delete()
-        OrganizationSponsorship.objects.all().delete()
         Organization.objects.all().delete()
 
         result = tally_election(election=election)

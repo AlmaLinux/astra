@@ -6,7 +6,7 @@ from unittest.mock import patch
 from django.test import TestCase, override_settings
 
 from core.elections_eligibility import ineligible_voters_with_reasons
-from core.models import Election, Membership, MembershipType, Organization, OrganizationSponsorship
+from core.models import Election, Membership, MembershipType, Organization
 
 
 @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=30)
@@ -30,7 +30,7 @@ class IneligibleVotersWithReasonsTests(TestCase):
             code="voter-b2",
             name="Voter B2",
             votes=1,
-            isIndividual=True,
+            category_id="individual",
             enabled=True,
         )
 
@@ -151,12 +151,12 @@ class IneligibleVotersWithReasonsTests(TestCase):
             name="Test Org",
             representative="orgrep",
         )
-        s = OrganizationSponsorship.objects.create(
-            organization=org,
+        s = Membership.objects.create(
+            target_organization=org,
             membership_type=voter_type,
             expires_at=now + datetime.timedelta(days=365),
         )
-        OrganizationSponsorship.objects.filter(pk=s.pk).update(created_at=now - datetime.timedelta(days=60))
+        Membership.objects.filter(pk=s.pk).update(created_at=now - datetime.timedelta(days=60))
 
         with patch("core.elections_eligibility.FreeIPAUser.all", return_value=[
             type("U", (), {"username": "orgrep"})(),

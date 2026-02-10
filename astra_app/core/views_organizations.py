@@ -3,7 +3,7 @@ import logging
 
 from django.conf import settings
 from django.contrib import messages
-from django.db import IntegrityError
+from django.db import IntegrityError, models
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -11,10 +11,10 @@ from django.utils import timezone
 from django.views.decorators.http import require_GET
 
 from core.backends import FreeIPAUser
-from core.forms_organizations import OrganizationEditForm, OrganizationSponsorshipRequestForm
+from core.forms_organizations import OrganizationEditForm
 from core.membership_notes import add_note
 from core.membership_request_workflow import record_membership_request_created
-from core.models import MembershipLog, MembershipRequest, MembershipType, Organization, OrganizationSponsorship
+from core.models import Membership, MembershipLog, MembershipRequest, Organization
 from core.permissions import (
     ASTRA_ADD_MEMBERSHIP,
     ASTRA_CHANGE_MEMBERSHIP,
@@ -129,12 +129,11 @@ def organizations(request: HttpRequest) -> HttpResponse:
     )
 
     if can_manage_memberships:
-        orgs = Organization.objects.select_related("membership_level").all().order_by("name", "id")
+        orgs = Organization.objects.all().order_by("name", "id")
         empty_label = "No organizations found."
     else:
         orgs = (
-            Organization.objects.select_related("membership_level")
-            .filter(representative=username)
+            Organization.objects.filter(representative=username)
             .order_by("name", "id")
         )
         empty_label = "You don't represent any organizations yet."
@@ -217,9 +216,9 @@ def organization_create(request: HttpRequest) -> HttpResponse:
                 return _render_org_form(request, form, organization=None, is_create=True)
             messages.success(request, "Organization created.")
             if organization.representative == username:
-                return redirect("organization-sponsorship-manage", organization_id=organization.pk)
+                return redirect("organization-membership-request", organization_id=organization.pk)
 
-            messages.info(request, "Sponsorship requests must be submitted by the organization's representative.")
+            messages.info(request, "Membership requests must be submitted by the organization's representative.")
             return redirect("organization-detail", organization_id=organization.pk)
     else:
         form = OrganizationEditForm(
@@ -291,57 +290,71 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
         if representative_user is not None:
             representative_full_name = representative_user.full_name
 
-    sponsorship: OrganizationSponsorship | None = OrganizationSponsorship.objects.select_related("membership_type").filter(
-        organization=organization
-    ).first()
     now = timezone.now()
+    sponsorships = list(
+        Membership.objects.select_related("membership_type")
+        .filter(target_organization=organization)
+        .filter(models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=now))
+    )
     expiring_soon_by = now + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS)
-    sponsorship_is_expiring_soon = bool(sponsorship and sponsorship.expires_at and sponsorship.expires_at <= expiring_soon_by)
 
-    pending_membership_level_request = (
+    pending_requests = list(
         MembershipRequest.objects.select_related("membership_type")
         .filter(
             requested_organization=organization,
             status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
         )
-        .order_by("-requested_at")
-        .first()
+        .order_by("-requested_at", "-pk")
     )
+    pending_request_by_category: dict[str, MembershipRequest] = {}
+    for req in pending_requests:
+        category_id = req.membership_type.category_id
+        if category_id not in pending_request_by_category:
+            pending_request_by_category[category_id] = req
 
-    sponsorship_request_id: int | None = None
-    if organization.membership_level_id:
-        approved_log = (
-            MembershipLog.objects.filter(
-                target_organization=organization,
-                membership_request__isnull=False,
-                action=MembershipLog.Action.approved,
-            )
-            .only("membership_request_id", "created_at")
-            .order_by("-created_at", "-pk")
-            .first()
+    sponsorship_request_id_by_type: dict[str, int] = {}
+    approved_logs = (
+        MembershipLog.objects.filter(
+            target_organization=organization,
+            membership_request__isnull=False,
+            action=MembershipLog.Action.approved,
         )
-        if approved_log is not None and approved_log.membership_request_id is not None:
-            sponsorship_request_id = int(approved_log.membership_request_id)
-        else:
-            approved_req = (
-                MembershipRequest.objects.filter(
-                    requested_organization=organization,
-                    membership_type_id=organization.membership_level_id,
-                    status=MembershipRequest.Status.approved,
-                )
-                .only("pk", "decided_at", "requested_at")
-                .order_by("-decided_at", "-requested_at")
-                .first()
-            )
-            if approved_req is not None:
-                sponsorship_request_id = int(approved_req.pk)
+        .only("membership_request_id", "membership_type_id", "created_at")
+        .order_by("-created_at", "-pk")
+    )
+    for log in approved_logs:
+        if log.membership_request_id is None:
+            continue
+        if log.membership_type_id not in sponsorship_request_id_by_type:
+            sponsorship_request_id_by_type[log.membership_type_id] = int(log.membership_request_id)
+
+    approved_requests = (
+        MembershipRequest.objects.filter(
+            requested_organization=organization,
+            status=MembershipRequest.Status.approved,
+        )
+        .only("pk", "membership_type_id", "decided_at", "requested_at")
+        .order_by("-decided_at", "-requested_at", "-pk")
+    )
+    for req in approved_requests:
+        if req.membership_type_id not in sponsorship_request_id_by_type:
+            sponsorship_request_id_by_type[req.membership_type_id] = int(req.pk)
+
+    # Build per-sponsorship display entries for the template.
+    sponsorship_entries: list[dict[str, object]] = []
+    for s in sponsorships:
+        sponsorship_entries.append({
+            "sponsorship": s,
+            "badge_text": str(s.membership_type_id).replace("_", " ").title(),
+            "is_expiring_soon": bool(s.expires_at and s.expires_at <= expiring_soon_by),
+            "pending_request": pending_request_by_category.get(s.category_id),
+            "request_id": sponsorship_request_id_by_type.get(s.membership_type_id),
+        })
 
     can_edit_organization = _can_edit_organization(request, organization)
     can_delete_organization = _can_delete_organization(request, organization)
 
-    membership_level_badge_text = ""
-    if organization.membership_level_id:
-        membership_level_badge_text = str(organization.membership_level_id).replace("_", " ").title()
+
 
     # Build contact-group descriptors for looped rendering. Same pattern
     # as `contact_groups` in the edit form (see _render_org_form), but
@@ -377,13 +390,11 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
             "organization": organization,
             "representative_username": representative_username,
             "representative_full_name": representative_full_name,
-            "pending_membership_level_request": pending_membership_level_request,
-            "sponsorship": sponsorship,
-            "sponsorship_is_expiring_soon": sponsorship_is_expiring_soon,
-            "sponsorship_request_id": sponsorship_request_id,
+            "pending_requests": pending_requests,
+            "sponsorship_entries": sponsorship_entries,
+            "sponsorships": sponsorships,
             "is_representative": is_representative,
             "can_edit_organization": can_edit_organization,
-            "membership_level_badge_text": membership_level_badge_text,
             "can_delete_organization": can_delete_organization,
             "contact_display_groups": contact_display_groups,
         },
@@ -398,29 +409,38 @@ def organization_delete(request: HttpRequest, organization_id: int) -> HttpRespo
     if not _can_delete_organization(request, organization):
         raise Http404
 
-    membership_type = organization.membership_level
-    if membership_type is not None:
-        group_cn = str(membership_type.group_cn or "").strip()
-        rep_username = str(organization.representative or "").strip()
-        if group_cn and rep_username:
-            rep = FreeIPAUser.get(rep_username)
-            if rep is not None and group_cn in rep.groups_list:
-                try:
-                    rep.remove_from_group(group_name=group_cn)
-                except Exception:
-                    logger.exception(
-                        "organization_delete: failed to remove representative from group org_id=%s rep=%r group_cn=%r",
-                        organization.pk,
-                        rep_username,
-                        group_cn,
-                    )
-                    messages.error(request, "Failed to remove the representative from the FreeIPA group.")
-                    return redirect("organization-detail", organization_id=organization.pk)
+    # Remove representative from ALL active membership FreeIPA groups before
+    # deleting. CASCADE on Membership.target_organization handles DB cleanup.
+    rep_username = str(organization.representative or "").strip()
+    active_memberships = list(
+        Membership.objects.select_related("membership_type")
+        .filter(target_organization=organization)
+    )
 
+    if rep_username and active_memberships:
+        rep = FreeIPAUser.get(rep_username)
+        if rep is not None:
+            for membership in active_memberships:
+                group_cn = str(membership.membership_type.group_cn or "").strip()
+                if group_cn and group_cn in rep.groups_list:
+                    try:
+                        rep.remove_from_group(group_name=group_cn)
+                    except Exception:
+                        logger.exception(
+                            "organization_delete: failed to remove representative from group org_id=%s rep=%r group_cn=%r",
+                            organization.pk,
+                            rep_username,
+                            group_cn,
+                        )
+                        messages.error(request, "Failed to remove the representative from the FreeIPA group.")
+                        return redirect("organization-detail", organization_id=organization.pk)
+
+    actor_username = get_username(request)
+    for membership in active_memberships:
         MembershipLog.create_for_termination(
-            actor_username=get_username(request),
+            actor_username=actor_username,
             target_organization=organization,
-            membership_type=membership_type,
+            membership_type=membership.membership_type,
         )
 
     organization.delete()
@@ -438,45 +458,52 @@ def organization_sponsorship_extend(request: HttpRequest, organization_id: int) 
     blocked = block_action_without_coc(
         request,
         username=get_username(request),
-        action_label="request sponsorships",
+        action_label="request memberships",
     )
     if blocked is not None:
         return blocked
 
-    if organization.membership_level_id is None:
-        messages.error(request, "No sponsorship level set to extend.")
+    membership_type_code = str(request.POST.get("membership_type", "") or "").strip()
+    if not membership_type_code:
+        messages.error(request, "Select a membership to extend.")
         return redirect("organization-detail", organization_id=organization.pk)
 
-    membership_type = organization.membership_level
-    if membership_type is None:
-        messages.error(request, "No sponsorship level set to extend.")
+    sponsorship = (
+        Membership.objects.select_related("membership_type")
+        .filter(target_organization=organization, membership_type_id=membership_type_code)
+        .first()
+    )
+    if sponsorship is None:
+        messages.error(request, "No membership level set to extend.")
         return redirect("organization-detail", organization_id=organization.pk)
 
-    sponsorship = OrganizationSponsorship.objects.filter(organization=organization).first()
-    if sponsorship is None or sponsorship.expires_at is None:
-        messages.error(request, "No sponsorship expiration recorded to extend.")
+    membership_type = sponsorship.membership_type
+
+    if sponsorship.expires_at is None:
+        messages.error(request, "No membership expiration recorded to extend.")
         return redirect("organization-detail", organization_id=organization.pk)
 
     now = timezone.now()
     if sponsorship.expires_at <= now:
-        messages.error(request, "This sponsorship has already expired and cannot be extended. Submit a new sponsorship request.")
+        messages.error(request, "This membership has already expired and cannot be extended. Submit a new membership request.")
         return redirect("organization-detail", organization_id=organization.pk)
 
     expiring_soon_by = now + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS)
     if sponsorship.expires_at > expiring_soon_by:
-        messages.info(request, "This sponsorship is not expiring soon yet.")
+        messages.info(request, "This membership is not expiring soon yet.")
         return redirect("organization-detail", organization_id=organization.pk)
 
     existing = (
         MembershipRequest.objects.filter(
             requested_organization=organization,
+            membership_type=membership_type,
             status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
         )
         .order_by("-requested_at")
         .first()
     )
     if existing is not None:
-        messages.info(request, "A sponsorship request is already pending.")
+        messages.info(request, "A membership request is already pending.")
         return redirect("organization-detail", organization_id=organization.pk)
 
     responses: list[dict[str, str]] = []
@@ -495,90 +522,13 @@ def organization_sponsorship_extend(request: HttpRequest, organization_id: int) 
         actor_username=get_username(request),
         send_submitted_email=False,
     )
-    messages.success(request, "Sponsorship renewal request submitted for review.")
+    messages.success(request, "Membership renewal request submitted for review.")
     return redirect("organization-detail", organization_id=organization.pk)
-
-
-def organization_sponsorship_manage(request: HttpRequest, organization_id: int) -> HttpResponse:
-    organization = get_object_or_404(Organization, pk=organization_id)
-    _require_representative(request, organization)
-
-    blocked = block_action_without_coc(
-        request,
-        username=get_username(request),
-        action_label="request sponsorships",
-    )
-    if blocked is not None:
-        return blocked
-
-    pending_membership_level_request = (
-        MembershipRequest.objects.select_related("membership_type")
-        .filter(
-            requested_organization=organization,
-            status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
-        )
-        .order_by("-requested_at")
-        .first()
-    )
-
-    if request.method == "POST":
-        form = OrganizationSponsorshipRequestForm(request.POST)
-
-        if pending_membership_level_request is not None:
-            messages.info(request, "A sponsorship request is already pending.")
-            return redirect("organization-detail", organization_id=organization.pk)
-
-        if not form.is_valid():
-            messages.error(request, "Please correct the errors below.")
-        else:
-            requested_membership_level: MembershipType = form.cleaned_data["membership_level"]
-            additional_information = str(form.cleaned_data.get("additional_information") or "").strip()
-
-            responses: list[dict[str, str]] = []
-            if additional_information:
-                responses.append({"Additional Information": additional_information})
-
-            mr = MembershipRequest.objects.create(
-                requested_username="",
-                requested_organization=organization,
-                membership_type=requested_membership_level,
-                status=MembershipRequest.Status.pending,
-                responses=responses,
-            )
-
-            record_membership_request_created(
-                membership_request=mr,
-                actor_username=get_username(request),
-                send_submitted_email=False,
-            )
-
-            if organization.membership_level_id and requested_membership_level.code != organization.membership_level_id:
-                messages.success(request, "Sponsorship level change submitted for review.")
-            else:
-                messages.success(request, "Sponsorship request submitted for review.")
-            return redirect("organization-detail", organization_id=organization.pk)
-    else:
-        initial: dict[str, object] = {}
-        if organization.membership_level_id:
-            initial["membership_level"] = organization.membership_level_id
-        form = OrganizationSponsorshipRequestForm(initial=initial)
-
-    return render(
-        request,
-        "core/organization_sponsorship_manage.html",
-        {
-            "organization": organization,
-            "pending_membership_level_request": pending_membership_level_request,
-            "form": form,
-        },
-    )
 
 
 def organization_edit(request: HttpRequest, organization_id: int) -> HttpResponse:
     organization = get_object_or_404(Organization, pk=organization_id)
     _require_organization_edit_access(request, organization)
-
-    original_membership_level_id = organization.membership_level_id
 
     can_select_representatives = request.user.has_perm(ASTRA_CHANGE_MEMBERSHIP)
 
@@ -603,9 +553,7 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
 
         old_representative = ""
         new_representative = ""
-        group_cn = ""
-        sponsorship_active = False
-        synced_groups = False
+        synced_group_cns: list[str] = []
 
         if can_select_representatives and "representative" in form.fields:
             representative = form.cleaned_data.get("representative") or ""
@@ -617,55 +565,55 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
             new_representative = representative
             updated_org.representative = representative
 
-            # If the org currently has an active sponsorship, keep FreeIPA group membership
-            # aligned with the current representative.
-            if original_membership_level_id:
-                current_level = MembershipType.objects.filter(pk=original_membership_level_id).only("group_cn").first()
-                group_cn = str(current_level.group_cn or "").strip() if current_level is not None else ""
-
-            if group_cn and old_representative and old_representative != representative:
-                sponsorship = OrganizationSponsorship.objects.select_related("membership_type").filter(
-                    organization=organization,
-                    membership_type_id=original_membership_level_id,
-                ).first()
+            # Sync FreeIPA groups for ALL active memberships when the
+            # representative changes.
+            if old_representative and old_representative != representative:
                 now = timezone.now()
-                sponsorship_active = bool(sponsorship and sponsorship.expires_at and sponsorship.expires_at > now)
+                active_memberships = list(
+                    Membership.objects.select_related("membership_type")
+                    .filter(target_organization=organization)
+                    .filter(models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=now))
+                )
+                group_cns = [
+                    str(m.membership_type.group_cn or "").strip()
+                    for m in active_memberships
+                    if str(m.membership_type.group_cn or "").strip()
+                ]
 
-                if sponsorship_active:
+                if group_cns:
                     old_rep = FreeIPAUser.get(old_representative)
                     new_rep = FreeIPAUser.get(representative)
                     if new_rep is None:
-                        # This should already be prevented by OrganizationEditForm.clean_representative,
-                        # but keep the view defensive.
                         form.add_error("representative", f"Unknown user: {representative}")
                         return _render_org_form(request, form, organization=organization, is_create=False)
 
                     try:
-                        if old_rep is not None:
-                            old_rep.remove_from_group(group_name=group_cn)
-                        if group_cn not in new_rep.groups_list:
-                            new_rep.add_to_group(group_name=group_cn)
-                        synced_groups = True
+                        for gcn in group_cns:
+                            if old_rep is not None and gcn in old_rep.groups_list:
+                                old_rep.remove_from_group(group_name=gcn)
+                            if gcn not in new_rep.groups_list:
+                                new_rep.add_to_group(group_name=gcn)
+                            synced_group_cns.append(gcn)
                     except Exception:
                         logger.exception(
-                            "organization_edit: failed to sync representative group org_id=%s old=%r new=%r group_cn=%r",
+                            "organization_edit: failed to sync representative groups org_id=%s old=%r new=%r",
                             organization.pk,
                             old_representative,
                             representative,
-                            group_cn,
                         )
 
-                        # Best-effort rollback: if we removed the old rep, try restoring it.
-                        try:
-                            if old_rep is not None and group_cn not in old_rep.groups_list:
-                                old_rep.add_to_group(group_name=group_cn)
-                        except Exception:
-                            logger.exception(
-                                "organization_edit: failed to rollback representative group org_id=%s old=%r group_cn=%r",
-                                organization.pk,
-                                old_representative,
-                                group_cn,
-                            )
+                        # Best-effort rollback for groups we already synced.
+                        for gcn in synced_group_cns:
+                            try:
+                                if old_rep is not None and gcn not in old_rep.groups_list:
+                                    old_rep.add_to_group(group_name=gcn)
+                            except Exception:
+                                logger.exception(
+                                    "organization_edit: failed to rollback representative group org_id=%s old=%r group_cn=%r",
+                                    organization.pk,
+                                    old_representative,
+                                    gcn,
+                                )
 
                         form.add_error(None, "Failed to update FreeIPA group membership for the representative.")
                         return _render_org_form(request, form, organization=organization, is_create=False)
@@ -675,21 +623,21 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
         except IntegrityError:
             # Race-condition safety: DB is the source of truth.
             # Best-effort rollback if we already changed FreeIPA groups.
-            if synced_groups and group_cn and old_representative and new_representative and old_representative != new_representative:
+            if synced_group_cns and old_representative and new_representative and old_representative != new_representative:
                 try:
                     old_rep = FreeIPAUser.get(old_representative)
                     new_rep = FreeIPAUser.get(new_representative)
-                    if new_rep is not None and group_cn in new_rep.groups_list:
-                        new_rep.remove_from_group(group_name=group_cn)
-                    if old_rep is not None and group_cn not in old_rep.groups_list:
-                        old_rep.add_to_group(group_name=group_cn)
+                    for gcn in synced_group_cns:
+                        if new_rep is not None and gcn in new_rep.groups_list:
+                            new_rep.remove_from_group(group_name=gcn)
+                        if old_rep is not None and gcn not in old_rep.groups_list:
+                            old_rep.add_to_group(group_name=gcn)
                 except Exception:
                     logger.exception(
-                        "organization_edit: failed to rollback representative group after IntegrityError org_id=%s old=%r new=%r group_cn=%r",
+                        "organization_edit: failed to rollback representative groups after IntegrityError org_id=%s old=%r new=%r",
                         organization.pk,
                         old_representative,
                         new_representative,
-                        group_cn,
                     )
 
             form.add_error(

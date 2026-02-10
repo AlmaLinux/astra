@@ -28,7 +28,7 @@ class MembershipCountryRequirementsTests(TestCase):
             defaults={
                 "name": "Individual",
                 "group_cn": "members",
-                "isIndividual": True,
+                "category_id": "individual",
                 "enabled": True,
             },
         )
@@ -40,9 +40,9 @@ class MembershipCountryRequirementsTests(TestCase):
         if membership_type.group_cn != "members":
             membership_type.group_cn = "members"
             update_fields.append("group_cn")
-        if not membership_type.isIndividual:
-            membership_type.isIndividual = True
-            update_fields.append("isIndividual")
+        if membership_type.category_id != "individual":
+            membership_type.category_id = "individual"
+            update_fields.append("category")
         if not membership_type.enabled:
             membership_type.enabled = True
             update_fields.append("enabled")

@@ -18,15 +18,15 @@ from core.membership_notifications import (
     send_membership_notification,
     send_organization_sponsorship_notification,
 )
-from core.models import Membership, OrganizationSponsorship
+from core.models import Membership
 
 logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
     help = (
-        "Remove expired memberships and sponsorships: drop FreeIPA group membership, delete "
-        "Membership/OrganizationSponsorship rows, clear Organization.membership_level, and send "
+        "Remove expired memberships: drop FreeIPA group membership, delete "
+        "Membership rows, and send "
         "expired emails via django-post-office."
     )
 
@@ -52,13 +52,22 @@ class Command(BaseCommand):
 
         expired_memberships: Iterable[Membership] = (
             Membership.objects.select_related("membership_type")
-            .filter(expires_at__isnull=False, expires_at__lte=now)
+            .filter(
+                target_organization__isnull=True,
+                expires_at__isnull=False,
+                expires_at__lte=now,
+            )
+            .exclude(target_username="")
             .order_by("target_username", "membership_type_id")
         )
-        expired_sponsorships: Iterable[OrganizationSponsorship] = (
-            OrganizationSponsorship.objects.select_related("organization", "membership_type")
-            .filter(expires_at__isnull=False, expires_at__lte=now)
-            .order_by("organization_id", "membership_type_id")
+        expired_sponsorships: Iterable[Membership] = (
+            Membership.objects.select_related("target_organization", "membership_type")
+            .filter(
+                target_organization__isnull=False,
+                expires_at__isnull=False,
+                expires_at__lte=now,
+            )
+            .order_by("target_organization_id", "membership_type_id")
         )
 
         removed = 0
@@ -158,7 +167,9 @@ class Command(BaseCommand):
                 removed += 1
 
         for sponsorship in expired_sponsorships:
-            org = sponsorship.organization
+            org = sponsorship.target_organization
+            if org is None:
+                continue
             membership_type = sponsorship.membership_type
             group_cn = str(membership_type.group_cn or "").strip()
             rep_username = str(org.representative or "").strip()
@@ -208,16 +219,6 @@ class Command(BaseCommand):
                 )
                 continue
 
-            if org.membership_level_id == membership_type.code:
-                if dry_run:
-                    self.stdout.write(
-                        "[dry-run] Would clear organization membership level "
-                        f"for org {org.pk} (level={membership_type.code})."
-                    )
-                else:
-                    org.membership_level = None
-                    org.save(update_fields=["membership_level"])
-
             sponsor_context: dict[str, str]
             if rep is not None:
                 sponsor_context = (
@@ -230,11 +231,11 @@ class Command(BaseCommand):
             recipient_email = str(sponsor_context.get("email") or "").strip()
             if recipient_email:
                 base = str(settings.PUBLIC_BASE_URL or "").strip().rstrip("/")
-                manage_path = reverse(
-                    "organization-sponsorship-manage",
+                request_path = reverse(
+                    "organization-membership-request",
                     kwargs={"organization_id": org.pk},
                 )
-                manage_url = f"{base}{manage_path}" if base else manage_path
+                request_url = f"{base}{request_path}" if base else request_path
 
                 if dry_run:
                     would_queue = True
@@ -272,7 +273,7 @@ class Command(BaseCommand):
                         template_name=settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
                         expires_at=sponsorship.expires_at,
                         force=force,
-                        extend_url=manage_url,
+                        extend_url=request_url,
                         sponsor_context=sponsor_context,
                     )
                     if did_queue:

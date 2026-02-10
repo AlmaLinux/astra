@@ -1,16 +1,21 @@
+import datetime
+import json
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import override
 
 from django import forms
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import URLValidator
 from django.db.models import Q
+from django.utils import timezone
 
 from core.membership import (
     get_extendable_membership_type_codes_for_username,
     get_valid_membership_type_codes_for_username,
 )
-from core.models import MembershipRequest, MembershipType
+from core.models import Membership, MembershipRequest, MembershipType, MembershipTypeCategory, Organization
 
 
 class _AnswerKind(StrEnum):
@@ -87,8 +92,16 @@ class MembershipRequestForm(forms.Form):
         ),
     )
 
+    _SPONSORSHIP_QUESTIONS: tuple[_QuestionSpec, ...] = (
+        _QuestionSpec(
+            name="Sponsorship details",
+            title="Please describe your organization's sponsorship goals and planned community participation.",
+            required=True,
+        ),
+    )
+
     membership_type = forms.ModelChoiceField(
-        queryset=MembershipType.objects.filter(enabled=True).order_by("sort_order", "code"),
+        queryset=MembershipType.objects.enabled().ordered_for_display(),
         empty_label=None,
         to_field_name="code",
     )
@@ -97,6 +110,10 @@ class MembershipRequestForm(forms.Form):
     q_domain = forms.CharField(required=False)
     q_pull_request = forms.CharField(required=False)
     q_additional_info = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 4, "spellcheck": "true"}))
+    q_sponsorship_details = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 4, "spellcheck": "true"}),
+    )
 
     @classmethod
     def _question_spec_by_name(cls) -> dict[str, _QuestionSpec]:
@@ -118,16 +135,61 @@ class MembershipRequestForm(forms.Form):
 
     @classmethod
     def question_specs_for_membership_type(cls, membership_type: MembershipType) -> tuple[_QuestionSpec, ...]:
-        if membership_type.code == "mirror":
+        category_id = membership_type.category_id
+        if category_id == "mirror":
             return cls._MIRROR_QUESTIONS
+        if category_id == "sponsorship":
+            return cls._SPONSORSHIP_QUESTIONS
         return cls._INDIVIDUAL_QUESTIONS
 
     @classmethod
     def all_question_specs(cls) -> tuple[_QuestionSpec, ...]:
-        return (*cls._INDIVIDUAL_QUESTIONS, *cls._MIRROR_QUESTIONS)
+        return (*cls._INDIVIDUAL_QUESTIONS, *cls._MIRROR_QUESTIONS, *cls._SPONSORSHIP_QUESTIONS)
 
-    def __init__(self, *args, username: str, **kwargs) -> None:
+    @staticmethod
+    def _category_title(category: MembershipTypeCategory) -> str:
+        return str(category.name or "").replace("_", " ").title()
+
+    @classmethod
+    def _grouped_choices(
+        cls, membership_types: list[MembershipType]
+    ) -> list[tuple[str, str] | tuple[str, list[tuple[str, str]]]]:
+        if not membership_types:
+            return []
+
+        grouped: list[tuple[str, str] | tuple[str, list[tuple[str, str]]]] = []
+        current_category_id = ""
+        current_category_title = ""
+        current_options: list[tuple[str, str]] = []
+
+        def _flush_group() -> None:
+            if not current_options:
+                return
+            if len(current_options) == 1:
+                grouped.append(current_options[0])
+                return
+            grouped.append((current_category_title, list(current_options)))
+
+        for membership_type in membership_types:
+            if membership_type.category_id != current_category_id:
+                _flush_group()
+
+                current_category_id = membership_type.category_id
+                current_category_title = cls._category_title(membership_type.category)
+                current_options = []
+
+            current_options.append((membership_type.code, membership_type.name))
+
+        _flush_group()
+
+        return grouped
+
+    @override
+    def __init__(self, *args, username: str | None = None, organization: Organization | None = None, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+
+        if username is None and organization is None:
+            raise ValueError("MembershipRequestForm requires a username or organization.")
 
         for spec in self.all_question_specs():
             if spec.answer_kind == _AnswerKind.url:
@@ -140,32 +202,64 @@ class MembershipRequestForm(forms.Form):
             if isinstance(field.widget, forms.Textarea):
                 field.widget.attrs.setdefault("spellcheck", "true")
 
-        valid_codes = get_valid_membership_type_codes_for_username(username)
-        extendable_codes = get_extendable_membership_type_codes_for_username(username)
-        self._blocked_membership_type_codes = valid_codes - extendable_codes
+        if organization is None:
+            normalized_username = str(username or "").strip()
+            valid_codes = get_valid_membership_type_codes_for_username(normalized_username)
+            extendable_codes = get_extendable_membership_type_codes_for_username(normalized_username)
+            self._blocked_membership_type_codes = valid_codes - extendable_codes
 
-        self._pending_membership_type_codes = set(
-            MembershipRequest.objects.filter(
-                requested_username=username,
-                status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
-            ).values_list("membership_type_id", flat=True)
-        )
+            self._pending_membership_category_ids = set(
+                MembershipRequest.objects.filter(
+                    requested_username=normalized_username,
+                    status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
+                ).values_list("membership_type__category_id", flat=True)
+            )
+        else:
+            now = timezone.now()
+            expiring_soon_by = now + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS)
+            active_memberships = list(
+                Membership.objects.select_related("membership_type")
+                .filter(target_organization=organization)
+                .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
+            )
+            valid_codes = {m.membership_type_id for m in active_memberships}
+            extendable_codes = {
+                m.membership_type_id
+                for m in active_memberships
+                if m.expires_at is not None and m.expires_at <= expiring_soon_by
+            }
+            self._blocked_membership_type_codes = valid_codes - extendable_codes
+            self._pending_membership_category_ids = set(
+                MembershipRequest.objects.filter(
+                    requested_organization=organization,
+                    status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
+                ).values_list("membership_type__category_id", flat=True)
+            )
 
         membership_type_field = self.fields["membership_type"]
         assert isinstance(membership_type_field, forms.ModelChoiceField)
+        base = MembershipType.objects.enabled()
+        if organization is None:
+            base = base.filter(category__is_individual=True)
+        else:
+            base = base.filter(category__is_organization=True)
+
         membership_type_field.queryset = (
-            MembershipType.objects.filter(enabled=True).filter(Q(isIndividual=True) | Q(code="mirror"))
-            .exclude(code__in=self._blocked_membership_type_codes)
-            .exclude(code__in=self._pending_membership_type_codes)
-            .order_by("sort_order", "code")
+            base.exclude(code__in=self._blocked_membership_type_codes)
+            .exclude(category_id__in=self._pending_membership_category_ids)
+            .ordered_for_display()
+        )
+        membership_type_field.choices = self._grouped_choices(list(membership_type_field.queryset))
+        membership_type_field.widget.attrs["data-category-map"] = json.dumps(
+            {membership_type.code: membership_type.category_id for membership_type in membership_type_field.queryset}
         )
 
     def clean_membership_type(self) -> MembershipType:
         membership_type: MembershipType = self.cleaned_data["membership_type"]
+        if membership_type.category_id in self._pending_membership_category_ids:
+            raise ValidationError("You already have a pending request in that category.")
         if membership_type.code in self._blocked_membership_type_codes:
             raise ValidationError("You already have a valid membership of that type.")
-        if membership_type.code in self._pending_membership_type_codes:
-            raise ValidationError("You already have a pending request of that type.")
         return membership_type
 
     def clean(self) -> dict[str, object]:

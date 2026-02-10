@@ -75,7 +75,7 @@ class ProfileAccountSetupAlertTests(TestCase):
             defaults={
                 "name": "Individual",
                 "votes": 1,
-                "isIndividual": True,
+                "category_id": "individual",
                 "enabled": True,
                 "group_cn": "some-group",
             },
@@ -112,7 +112,7 @@ class ProfileAccountSetupAlertTests(TestCase):
             defaults={
                 "name": "Individual",
                 "votes": 1,
-                "isIndividual": True,
+                "category_id": "individual",
                 "enabled": True,
                 "group_cn": "some-group",
             },

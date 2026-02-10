@@ -9,7 +9,7 @@ from django.utils import timezone
 
 from core import backends
 from core.backends import FreeIPAGroup, FreeIPAMisconfiguredError, FreeIPAUnavailableError, FreeIPAUser
-from core.models import Election, Membership, OrganizationSponsorship
+from core.models import Election, Membership
 
 FREEIPA_UNAVAILABLE_MESSAGE = "FreeIPA is currently unavailable. Try again later."
 COMMITTEE_GROUP_MISSING_MESSAGE = (
@@ -69,7 +69,7 @@ def _eligible_voters_from_memberships(*, election: Election) -> list[EligibleVot
     cutoff = reference_datetime - datetime.timedelta(days=settings.ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS)
     eligible_qs = (
         Membership.objects.filter(
-            membership_type__isIndividual=True,
+            membership_type__category__is_individual=True,
             membership_type__enabled=True,
             membership_type__votes__gt=0,
             created_at__lte=cutoff,
@@ -88,26 +88,27 @@ def _eligible_voters_from_memberships(*, election: Election) -> list[EligibleVot
             continue
         weights_by_username[username] = weights_by_username.get(username, 0) + weight
 
-    sponsorships = (
-        OrganizationSponsorship.objects.select_related("organization", "membership_type")
+    org_memberships = (
+        Membership.objects.select_related("target_organization", "membership_type")
         .filter(
+            target_organization__isnull=False,
             membership_type__enabled=True,
             membership_type__votes__gt=0,
             created_at__lte=cutoff,
         )
         .filter(Q(expires_at__isnull=True) | Q(expires_at__gte=reference_datetime))
         .only(
-            "organization__representative",
+            "target_organization__representative",
             "membership_type__votes",
         )
     )
 
-    for sponsorship in sponsorships:
-        votes = int(sponsorship.membership_type.votes or 0)
+    for org_membership in org_memberships:
+        votes = int(org_membership.membership_type.votes or 0)
         if votes <= 0:
             continue
 
-        username = str(sponsorship.organization.representative or "").strip()
+        username = str(org_membership.target_organization.representative or "").strip()
         if not username:
             continue
         weights_by_username[username] = weights_by_username.get(username, 0) + votes
@@ -353,7 +354,7 @@ def ineligible_voters_with_reasons(*, election: Election) -> list[dict[str, obje
     has_active_vote_eligible_at_reference: set[str] = set()
 
     memberships = Membership.objects.filter(
-        membership_type__isIndividual=True,
+        membership_type__category__is_individual=True,
         membership_type__enabled=True,
         membership_type__votes__gt=0,
     ).values("target_username", "created_at", "expires_at")
@@ -376,24 +377,29 @@ def ineligible_voters_with_reasons(*, election: Election) -> list[dict[str, obje
         ):
             has_active_vote_eligible_at_reference.add(username)
 
-    sponsorships = OrganizationSponsorship.objects.select_related("organization").filter(
-        membership_type__enabled=True,
-        membership_type__votes__gt=0,
+    org_memberships = (
+        Membership.objects.select_related("target_organization")
+        .filter(
+            target_organization__isnull=False,
+            membership_type__enabled=True,
+            membership_type__votes__gt=0,
+        )
+        .only("target_organization__representative", "created_at", "expires_at")
     )
-    for sponsorship in sponsorships.only("organization__representative", "created_at", "expires_at"):
-        username = str(sponsorship.organization.representative or "").strip()
+    for org_membership in org_memberships:
+        username = str(org_membership.target_organization.representative or "").strip()
         if not username:
             continue
         username = username.lower()
 
         has_any_vote_eligible.add(username)
 
-        start_at = sponsorship.created_at
+        start_at = org_membership.created_at
         if isinstance(start_at, datetime.datetime):
             if username not in term_start_by_username or start_at < term_start_by_username[username]:
                 term_start_by_username[username] = start_at
 
-        expires_at = sponsorship.expires_at
+        expires_at = org_membership.expires_at
         if expires_at is None or expires_at >= reference_datetime:
             has_active_vote_eligible_at_reference.add(username)
 

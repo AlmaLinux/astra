@@ -5,7 +5,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from core.elections_eligibility import eligible_voters_from_memberships
-from core.models import Election, MembershipType, Organization, OrganizationSponsorship
+from core.models import Election, Membership, MembershipType, Organization
 
 
 @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=90)
@@ -25,24 +25,23 @@ class ElectionEligibilityOrganizationRepresentativesTests(TestCase):
             code="org",
             name="Org",
             votes=5,
-            isOrganization=True,
+            category_id="sponsorship",
             enabled=True,
         )
 
         org = Organization.objects.create(
             name="Acme",
-            membership_level=org_type,
             representative="rep1",
         )
 
-        sponsorship = OrganizationSponsorship.objects.create(
-            organization=org,
+        sponsorship = Membership.objects.create(
+            target_organization=org,
             membership_type=org_type,
             expires_at=None,
         )
 
         eligible_created_at = election.start_datetime - datetime.timedelta(days=120)
-        OrganizationSponsorship.objects.filter(pk=sponsorship.pk).update(created_at=eligible_created_at)
+        Membership.objects.filter(pk=sponsorship.pk).update(created_at=eligible_created_at)
 
         eligible = eligible_voters_from_memberships(election=election)
         eligible_by_username = {v.username: v.weight for v in eligible}
@@ -65,24 +64,23 @@ class ElectionEligibilityOrganizationRepresentativesTests(TestCase):
             code="org",
             name="Org",
             votes=5,
-            isOrganization=True,
+            category_id="sponsorship",
             enabled=True,
         )
 
         org = Organization.objects.create(
             name="Acme",
-            membership_level=org_type,
             representative="rep1",
         )
 
-        sponsorship = OrganizationSponsorship.objects.create(
-            organization=org,
+        sponsorship = Membership.objects.create(
+            target_organization=org,
             membership_type=org_type,
             expires_at=None,
         )
 
         eligible_created_at = election.start_datetime - datetime.timedelta(days=120)
-        OrganizationSponsorship.objects.filter(pk=sponsorship.pk).update(created_at=eligible_created_at)
+        Membership.objects.filter(pk=sponsorship.pk).update(created_at=eligible_created_at)
 
         eligible = eligible_voters_from_memberships(election=election)
         eligible_by_username = {v.username: v.weight for v in eligible}

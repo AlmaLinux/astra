@@ -107,7 +107,7 @@ class ElectionCommitteeDisqualificationSearchTests(TestCase):
             defaults={
                 "name": "Voter",
                 "votes": 1,
-                "isIndividual": True,
+                "category_id": "individual",
                 "enabled": True,
             },
         )

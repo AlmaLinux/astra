@@ -20,11 +20,11 @@
         <a href="{% url 'organization-detail' organization.pk %}">{{ organization.name }}</a>
       </div>
       <div class="mt-1">
-        {% if sponsorship_pill_text %}
-          <span class="p-2 badge badge-pill {{ sponsorship_badge_class }}">{{ sponsorship_pill_text }}</span>
-        {% else %}
-          <span class="p-2 badge badge-pill badge-light">No sponsorship</span>
-        {% endif %}
+        {% for membership in memberships %}
+          {% include 'core/_membership_badge.html' with membership=membership is_pill=True %}
+        {% empty %}
+          <span class="p-2 badge badge-pill badge-light">No membership</span>
+        {% endfor %}
       </div>
     </div>
   </div>

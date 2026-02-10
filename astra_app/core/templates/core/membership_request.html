@@ -4,7 +4,7 @@
 
 {% block title %}
   {% if req %}
-    {% if req.requested_organization_name or req.requested_organization %}Your Sponsorship Request #{{ req.pk }}{% else %}Your Membership Request #{{ req.pk }}{% endif %}
+    Your Membership Request #{{ req.pk }}
   {% else %}
     Request Membership
   {% endif %}
@@ -13,7 +13,7 @@
 {% block header %}
   {% if req %}
     <div class="d-flex align-items-center justify-content-between flex-wrap" style="gap: .5rem;">
-      <h1 class="m-0">{% if req.requested_organization_name or req.requested_organization %}Your Sponsorship Request #{{ req.pk }}{% else %}Your Membership Request #{{ req.pk }}{% endif %}</h1>
+      <h1 class="m-0">Your Membership Request #{{ req.pk }}</h1>
     </div>
   {% else %}
     <h1 class="m-0">Request Membership</h1>
@@ -70,7 +70,7 @@
       <form
         id="membership-request-form"
         method="{% if not req or req.status == 'on_hold' %}post{% else %}get{% endif %}"
-        {% if req %}novalidate data-membership-type="{{ req.membership_type.code }}"{% endif %}
+        {% if req %}novalidate data-membership-type="{{ req.membership_type.code }}" data-membership-category="{{ req.membership_type.category_id }}"{% endif %}
       >
         {% if not req or req.status == 'on_hold' %}
           {% csrf_token %}
@@ -101,10 +101,19 @@
             {% endfor %}
           </div>
 
+          <div id="questions-sponsorship" class="mt-3">
+            <h5>Sponsorship</h5>
+            {% for field in form %}
+              {% if field.name == 'q_sponsorship_details' %}
+                {% include 'core/_form_field.html' %}
+              {% endif %}
+            {% endfor %}
+          </div>
+
           <div id="questions-mirror" class="mt-3">
             <h5>Mirror Membership</h5>
             {% for field in form %}
-              {% if field.name|slice:':2' == 'q_' and field.name != 'q_contributions' %}
+              {% if field.name|slice:':2' == 'q_' and field.name != 'q_contributions' and field.name != 'q_sponsorship_details' %}
                 {% include 'core/_form_field.html' %}
               {% endif %}
             {% endfor %}
@@ -123,7 +132,7 @@
         {% endif %}
 
         <div class="d-flex justify-content-between flex-wrap mt-3" style="gap: .5rem;">
-          <a href="{% url 'user-profile' request.user.get_username %}" class="btn btn-secondary" title="Return to profile without changes">Cancel</a>
+          <a href="{{ cancel_url }}" class="btn btn-secondary" title="Return without changes">Cancel</a>
 
           {% if not req or req.status == 'on_hold' %}
             <button
@@ -140,7 +149,7 @@
                 form="membership-rescind-form"
                 formnovalidate
                 class="btn btn-outline-danger"
-                title="Cancel your {% if req.requested_organization_name or req.requested_organization %}sponsorship{% else %}membership{% endif %} request"
+                title="Cancel your membership request"
               >Rescind request</button>
             {% endif %}
           {% endif %}
@@ -155,15 +164,46 @@
       const select = document.getElementById('id_membership_type');
       const selectForm = (select && select.form) ? select.form : null;
       const individual = document.getElementById('questions-individual');
+      const sponsorship = document.getElementById('questions-sponsorship');
       const mirror = document.getElementById('questions-mirror');
 
       const contributions = document.getElementById('id_q_contributions');
+      const sponsorshipDetails = document.getElementById('id_q_sponsorship_details');
       const domain = document.getElementById('id_q_domain');
       const pullRequest = document.getElementById('id_q_pull_request');
 
+      function membershipTypeCategory() {
+        if (select) {
+          const code = select.value || '';
+          const rawMap = (select.dataset && select.dataset.categoryMap) ? select.dataset.categoryMap : '';
+          if (rawMap) {
+            try {
+              const map = JSON.parse(rawMap);
+              if (map && typeof map === 'object' && Object.prototype.hasOwnProperty.call(map, code)) {
+                return map[code] || '';
+              }
+            } catch (e) {
+              // Ignore parse failures and fall back to code-based handling.
+            }
+          }
+          if (code === 'mirror') return 'mirror';
+          return '';
+        }
+
+        const candidateForm = (sponsorshipDetails && sponsorshipDetails.form)
+          ? sponsorshipDetails.form
+          : ((domain && domain.form) ? domain.form : ((pullRequest && pullRequest.form) ? pullRequest.form : null));
+        if (candidateForm && candidateForm.dataset && candidateForm.dataset.membershipCategory) {
+          return candidateForm.dataset.membershipCategory;
+        }
+        return '';
+      }
+
       function membershipTypeCode() {
         if (select) return select.value || '';
-        const candidateForm = (domain && domain.form) ? domain.form : ((pullRequest && pullRequest.form) ? pullRequest.form : null);
+        const candidateForm = (sponsorshipDetails && sponsorshipDetails.form)
+          ? sponsorshipDetails.form
+          : ((domain && domain.form) ? domain.form : ((pullRequest && pullRequest.form) ? pullRequest.form : null));
         if (candidateForm && candidateForm.dataset && candidateForm.dataset.membershipType) return candidateForm.dataset.membershipType;
         return '';
       }
@@ -186,8 +226,8 @@
       }
 
       function validateMirrorFields() {
-        const code = membershipTypeCode();
-        if (code !== 'mirror') {
+        const category = membershipTypeCategory();
+        if (category !== 'mirror') {
           if (domain) domain.setCustomValidity('');
           if (pullRequest) pullRequest.setCustomValidity('');
           if (domain) domain.classList.remove('is-invalid');
@@ -244,23 +284,21 @@
       }
 
       function update() {
-        if (select && individual && mirror) {
-          const code = select.value || '';
-          if (code === 'mirror') {
-            individual.style.display = 'none';
-            mirror.style.display = '';
+        if (select && individual && mirror && sponsorship) {
+          const category = membershipTypeCategory();
+          const code = membershipTypeCode();
+          const isMirror = category === 'mirror' || code === 'mirror';
+          const isSponsorship = category === 'sponsorship';
+          const isIndividual = category === 'individual' || (!category && !isMirror);
 
-            if (contributions) contributions.required = false;
-            if (domain) domain.required = true;
-            if (pullRequest) pullRequest.required = true;
-          } else {
-            individual.style.display = '';
-            mirror.style.display = 'none';
+          individual.style.display = isIndividual ? '' : 'none';
+          sponsorship.style.display = isSponsorship ? '' : 'none';
+          mirror.style.display = isMirror ? '' : 'none';
 
-            if (contributions) contributions.required = true;
-            if (domain) domain.required = false;
-            if (pullRequest) pullRequest.required = false;
-          }
+          if (contributions) contributions.required = isIndividual;
+          if (sponsorshipDetails) sponsorshipDetails.required = isSponsorship;
+          if (domain) domain.required = isMirror;
+          if (pullRequest) pullRequest.required = isMirror;
         }
 
         validateMirrorFields();
@@ -277,7 +315,9 @@
         pullRequest.addEventListener('blur', validateMirrorFields);
       }
 
-      const submitForm = selectForm || ((domain && domain.form) ? domain.form : ((pullRequest && pullRequest.form) ? pullRequest.form : null));
+      const submitForm = selectForm || ((sponsorshipDetails && sponsorshipDetails.form)
+        ? sponsorshipDetails.form
+        : ((domain && domain.form) ? domain.form : ((pullRequest && pullRequest.form) ? pullRequest.form : null)));
       if (submitForm) {
         submitForm.addEventListener('submit', function (evt) {
           if (!validateMirrorFields()) {
