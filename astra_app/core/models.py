@@ -374,6 +374,16 @@ class MembershipRequest(models.Model):
         return f"{self.requested_username} → {self.membership_type_id}"
 
 
+
+class MembershipQuerySet(models.QuerySet["Membership"]):
+    def active(
+        self,
+        *,
+        at: datetime.datetime | None = None,
+    ) -> MembershipQuerySet:
+        reference = timezone.now() if at is None else at
+        return self.filter(Q(expires_at__isnull=True) | Q(expires_at__gte=reference))
+
 class AccountInvitation(models.Model):
     email = models.EmailField(unique=True)
     full_name = models.CharField(max_length=255, blank=True, default="")
@@ -534,6 +544,8 @@ class Membership(models.Model):
     expires_at = models.DateTimeField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    objects = MembershipQuerySet.as_manager()
 
     class Meta:
         constraints = [
@@ -736,13 +748,16 @@ class MembershipLog(models.Model):
 
         self._apply_user_side_effects()
 
-    def _resolve_term_start_at(self, *, log_filter: dict[str, object]) -> datetime.datetime:
-        """Compute the start of the current uninterrupted term from membership logs.
+    def _resolve_term_start_at(
+        self,
+        *,
+        existing: Membership | None,
+        log_filter: dict[str, object],
+    ) -> datetime.datetime:
+        """Compute the start of the current uninterrupted term from membership logs."""
+        if existing is not None and existing.expires_at is not None and existing.expires_at > self.created_at:
+            return existing.created_at
 
-        Both user-membership and org-sponsorship branches use identical logic:
-        check the existing current-state row, then fall back to log history.
-        This is extracted to avoid duplicating ~30 lines of query logic.
-        """
         start_at = self.created_at
 
         last_approved = (
@@ -807,10 +822,7 @@ class MembershipLog(models.Model):
             .first()
         )
 
-        if existing is not None and existing.expires_at is not None and existing.expires_at > self.created_at:
-            start_at = existing.created_at
-        else:
-            start_at = self._resolve_term_start_at(log_filter=log_filter)
+        start_at = self._resolve_term_start_at(existing=existing, log_filter=log_filter)
 
         row, _created = model_class.objects.update_or_create(
             **lookup_filter,
@@ -855,10 +867,7 @@ class MembershipLog(models.Model):
             "membership_type": self.membership_type,
         }
 
-        if existing is not None and existing.expires_at is not None and existing.expires_at > self.created_at:
-            start_at = existing.created_at
-        else:
-            start_at = self._resolve_term_start_at(log_filter=log_filter)
+        start_at = self._resolve_term_start_at(existing=existing, log_filter=log_filter)
 
         org = Organization.objects.filter(pk=self.target_organization_id).first()
         if org is None:

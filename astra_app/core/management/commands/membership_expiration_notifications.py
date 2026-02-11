@@ -11,10 +11,8 @@ from django.utils import timezone
 from core.backends import FreeIPAUser
 from core.email_context import organization_sponsor_email_context, user_email_context_from_user
 from core.ipa_user_attrs import _first
-from core.membership_notifications import (
-    send_membership_notification,
-    send_organization_sponsorship_notification,
-)
+from core.membership import get_expiring_memberships
+from core.membership_notifications import already_sent_today, send_membership_notification
 from core.models import Membership
 
 
@@ -49,17 +47,20 @@ class Command(BaseCommand):
             for divisor in schedule_divisors
         ]
 
-        memberships: Iterable[Membership] = (
-            Membership.objects.select_related("membership_type")
-            .exclude(target_username="")
-            .order_by("target_username", "membership_type_id")
-        )
-        sponsorships = Membership.objects.select_related(
-            "target_organization",
-            "membership_type",
-        ).filter(
-            target_organization__isnull=False,
-        ).order_by("target_organization_id", "membership_type_id")
+        max_schedule_days = max(schedule_days) if schedule_days else 0
+        window_days = max_schedule_days + 1
+        # The schedule uses day differences, so include the full cutoff date window.
+        expiring_memberships = get_expiring_memberships(days=window_days)
+        memberships: Iterable[Membership] = [
+            membership
+            for membership in expiring_memberships
+            if str(membership.target_username or "").strip()
+        ]
+        sponsorships: Iterable[Membership] = [
+            membership
+            for membership in expiring_memberships
+            if membership.target_organization_id is not None
+        ]
 
         queued = 0
         skipped = 0
@@ -87,15 +88,13 @@ class Command(BaseCommand):
             if dry_run:
                 would_queue = True
                 if not force:
-                    from post_office.models import Email
-
-                    today = timezone.localdate()
-                    already_sent = Email.objects.filter(
-                        to=fu.email,
-                        template__name=template,
-                        context__membership_type_code=membership.membership_type.code,
-                        created__date=today,
-                    ).exists()
+                    already_sent = already_sent_today(
+                        template_name=template,
+                        recipient_email=fu.email,
+                        extra_filters={
+                            "context__membership_type_code": membership.membership_type.code,
+                        },
+                    )
                     if already_sent:
                         would_queue = False
 
@@ -110,14 +109,14 @@ class Command(BaseCommand):
             else:
                 did_queue = send_membership_notification(
                     recipient_email=fu.email,
-                    username=membership.target_username,
                     membership_type=membership.membership_type,
                     template_name=template,
                     expires_at=membership.expires_at,
+                    username=membership.target_username,
                     days=days_until,
                     force=force,
                     tz_name=tz_name,
-                    user_context=user_email_context_from_user(user=fu),
+                    extra_context=user_email_context_from_user(user=fu),
                 )
                 if did_queue:
                     queued += 1
@@ -156,16 +155,14 @@ class Command(BaseCommand):
             if dry_run:
                 would_queue = True
                 if not force:
-                    from post_office.models import Email
-
-                    today = timezone.localdate()
-                    already_sent = Email.objects.filter(
-                        to=recipient_email,
-                        template__name=template,
-                        context__organization_id=sponsorship.target_organization_id,
-                        context__membership_type_code=sponsorship.membership_type.code,
-                        created__date=today,
-                    ).exists()
+                    already_sent = already_sent_today(
+                        template_name=template,
+                        recipient_email=recipient_email,
+                        extra_filters={
+                            "context__organization_id": sponsorship.target_organization_id,
+                            "context__membership_type_code": sponsorship.membership_type.code,
+                        },
+                    )
                     if already_sent:
                         would_queue = False
 
@@ -178,16 +175,25 @@ class Command(BaseCommand):
                     )
                     skipped += 1
             else:
-                did_queue = send_organization_sponsorship_notification(
+                rep_timezone = "UTC"
+                representative_username = str(sponsorship.target_organization.representative or "").strip()
+                if representative_username:
+                    rep_user = FreeIPAUser.get(representative_username)
+                    if rep_user is not None:
+                        rep_timezone = str(_first(rep_user._user_data, "fasTimezone", "") or "").strip() or "UTC"
+
+                did_queue = send_membership_notification(
                     recipient_email=recipient_email,
-                    organization=sponsorship.target_organization,
                     membership_type=sponsorship.membership_type,
                     template_name=template,
                     expires_at=sponsorship.expires_at,
+                    organization=sponsorship.target_organization,
                     days=days_until,
                     force=force,
-                    extend_url=extend_url,
-                    sponsor_context=sponsor_context,
+                    tz_name=rep_timezone,
+                    extra_context={
+                        "extend_url": extend_url,
+                    },
                 )
                 if did_queue:
                     queued += 1

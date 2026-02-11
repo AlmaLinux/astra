@@ -36,14 +36,14 @@ From context processors (auto-available):
       {% with tier_slug=tier|lower %}
         {% if request_id %}
           {% if is_owner %}
-            <a class="badge alx-status-badge alx-status-badge--active{% if is_pill %} badge-pill p-2{% endif %} {% if tier_slug == 'platinum' %}badge-primary{% elif tier_slug == 'gold' %}badge-warning{% elif tier_slug == 'silver' %}badge-secondary{% elif tier_slug == 'ruby' %}badge-danger{% else %}badge-success{% endif %}" href="{% url 'membership-request-self' request_id %}">{{ badge_label }}</a>
+            <a class="badge alx-status-badge{% if is_pill %} badge-pill p-2{% endif %} {% if tier_slug == 'platinum' %}badge-primary{% elif tier_slug == 'gold' %}badge-warning{% elif tier_slug == 'silver' %}badge-secondary{% elif tier_slug == 'ruby' %}badge-danger{% else %}badge-success{% endif %} alx-status-badge--active" href="{% url 'membership-request-self' request_id %}">{{ badge_label }}</a>
           {% elif membership_can_view %}
-            <a class="badge alx-status-badge alx-status-badge--active{% if is_pill %} badge-pill p-2{% endif %} {% if tier_slug == 'platinum' %}badge-primary{% elif tier_slug == 'gold' %}badge-warning{% elif tier_slug == 'silver' %}badge-secondary{% elif tier_slug == 'ruby' %}badge-danger{% else %}badge-success{% endif %}" href="{% url 'membership-request-detail' request_id %}">{{ badge_label }}</a>
+            <a class="badge alx-status-badge{% if is_pill %} badge-pill p-2{% endif %} {% if tier_slug == 'platinum' %}badge-primary{% elif tier_slug == 'gold' %}badge-warning{% elif tier_slug == 'silver' %}badge-secondary{% elif tier_slug == 'ruby' %}badge-danger{% else %}badge-success{% endif %} alx-status-badge--active" href="{% url 'membership-request-detail' request_id %}">{{ badge_label }}</a>
           {% else %}
-            <span class="badge alx-status-badge alx-status-badge--active{% if is_pill %} badge-pill p-2{% endif %} {% if tier_slug == 'platinum' %}badge-primary{% elif tier_slug == 'gold' %}badge-warning{% elif tier_slug == 'silver' %}badge-secondary{% elif tier_slug == 'ruby' %}badge-danger{% else %}badge-success{% endif %}">{{ badge_label }}</span>
+            <span class="badge alx-status-badge{% if is_pill %} badge-pill p-2{% endif %} {% if tier_slug == 'platinum' %}badge-primary{% elif tier_slug == 'gold' %}badge-warning{% elif tier_slug == 'silver' %}badge-secondary{% elif tier_slug == 'ruby' %}badge-danger{% else %}badge-success{% endif %} alx-status-badge--active">{{ badge_label }}</span>
           {% endif %}
         {% else %}
-          <span class="badge alx-status-badge alx-status-badge--active{% if is_pill %} badge-pill p-2{% endif %} {% if tier_slug == 'platinum' %}badge-primary{% elif tier_slug == 'gold' %}badge-warning{% elif tier_slug == 'silver' %}badge-secondary{% elif tier_slug == 'ruby' %}badge-danger{% else %}badge-success{% endif %}">{{ badge_label }}</span>
+          <span class="badge alx-status-badge{% if is_pill %} badge-pill p-2{% endif %} {% if tier_slug == 'platinum' %}badge-primary{% elif tier_slug == 'gold' %}badge-warning{% elif tier_slug == 'silver' %}badge-secondary{% elif tier_slug == 'ruby' %}badge-danger{% else %}badge-success{% endif %} alx-status-badge--active">{{ badge_label }}</span>
         {% endif %}
       {% endwith %}
     {% endwith %}

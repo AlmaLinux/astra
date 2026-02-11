@@ -1,21 +1,19 @@
-import datetime
 import json
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import override
 
 from django import forms
-from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import URLValidator
-from django.db.models import Q
-from django.utils import timezone
 
 from core.membership import (
+    expiring_soon_cutoff,
     get_extendable_membership_type_codes_for_username,
     get_valid_membership_type_codes_for_username,
+    get_valid_memberships,
 )
-from core.models import Membership, MembershipRequest, MembershipType, MembershipTypeCategory, Organization
+from core.models import MembershipRequest, MembershipType, MembershipTypeCategory, Organization
 
 
 class _AnswerKind(StrEnum):
@@ -215,13 +213,8 @@ class MembershipRequestForm(forms.Form):
                 ).values_list("membership_type__category_id", flat=True)
             )
         else:
-            now = timezone.now()
-            expiring_soon_by = now + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS)
-            active_memberships = list(
-                Membership.objects.select_related("membership_type")
-                .filter(target_organization=organization)
-                .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
-            )
+            expiring_soon_by = expiring_soon_cutoff()
+            active_memberships = get_valid_memberships(organization=organization)
             valid_codes = {m.membership_type_id for m in active_memberships}
             extendable_codes = {
                 m.membership_type_id

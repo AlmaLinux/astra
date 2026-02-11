@@ -690,7 +690,6 @@ class MembershipCSVImportResource(resources.ModelResource):
             responses_have_new = any(item not in existing_responses for item in responses)
 
         has_updates = (bool(csv_note) and not note_exists) or responses_have_new
-        now = timezone.now().astimezone(datetime.UTC)
 
         open_request = (
             MembershipRequest.objects.filter(
@@ -714,10 +713,10 @@ class MembershipCSVImportResource(resources.ModelResource):
             return ("IMPORT", "Active request, will be accepted")
 
         existing_membership = (
-            Membership.objects.filter(
+            Membership.objects.active()
+            .filter(
                 target_username=username,
                 membership_type=membership_type,
-                expires_at__gt=now,
             )
             .only("created_at")
             .first()

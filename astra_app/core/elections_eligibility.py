@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from django.conf import settings
-from django.db.models import Q, Sum
+from django.db.models import Sum
 from django.utils import timezone
 
 from core import backends
@@ -74,7 +74,7 @@ def _eligible_voters_from_memberships(*, election: Election) -> list[EligibleVot
             membership_type__votes__gt=0,
             created_at__lte=cutoff,
         )
-        .filter(Q(expires_at__isnull=True) | Q(expires_at__gte=reference_datetime))
+        .active(at=reference_datetime)
         .values("target_username")
         .annotate(weight=Sum("membership_type__votes"))
         .order_by("target_username")
@@ -96,7 +96,7 @@ def _eligible_voters_from_memberships(*, election: Election) -> list[EligibleVot
             membership_type__votes__gt=0,
             created_at__lte=cutoff,
         )
-        .filter(Q(expires_at__isnull=True) | Q(expires_at__gte=reference_datetime))
+        .active(at=reference_datetime)
         .only(
             "target_organization__representative",
             "membership_type__votes",

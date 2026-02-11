@@ -14,10 +14,8 @@ from core.email_context import (
     user_email_context_from_user,
 )
 from core.ipa_user_attrs import _first
-from core.membership_notifications import (
-    send_membership_notification,
-    send_organization_sponsorship_notification,
-)
+from core.membership import remove_user_from_group
+from core.membership_notifications import already_sent_today, send_membership_notification
 from core.models import Membership
 
 logger = logging.getLogger(__name__)
@@ -92,22 +90,24 @@ class Command(BaseCommand):
                 )
                 continue
 
-            if membership.membership_type.group_cn:
+            group_cn = str(membership.membership_type.group_cn or "").strip()
+            if group_cn:
                 if dry_run:
                     self.stdout.write(
                         "[dry-run] Would remove user "
-                        f"{membership.target_username} from group {membership.membership_type.group_cn}."
+                        f"{membership.target_username} from group {group_cn}."
                     )
                 else:
-                    try:
-                        fu.remove_from_group(group_name=membership.membership_type.group_cn)
-                    except Exception:
+                    if not remove_user_from_group(
+                        username=membership.target_username,
+                        group_cn=group_cn,
+                    ):
                         failed += 1
-                        logger.exception(
+                        logger.error(
                             "membership_expired_cleanup_failure user=%s membership_type=%s group_cn=%s reason=freeipa_remove_failed",
                             membership.target_username,
                             membership.membership_type_id,
-                            membership.membership_type.group_cn,
+                            group_cn,
                         )
                         continue
 
@@ -116,15 +116,13 @@ class Command(BaseCommand):
                 if dry_run:
                     would_queue = True
                     if not force:
-                        from post_office.models import Email
-
-                        today = timezone.localdate()
-                        already_sent = Email.objects.filter(
-                            to=fu.email,
-                            template__name=settings.MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
-                            context__membership_type_code=membership.membership_type.code,
-                            created__date=today,
-                        ).exists()
+                        already_sent = already_sent_today(
+                            template_name=settings.MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
+                            recipient_email=fu.email,
+                            extra_filters={
+                                "context__membership_type_code": membership.membership_type.code,
+                            },
+                        )
                         if already_sent:
                             would_queue = False
 
@@ -143,13 +141,13 @@ class Command(BaseCommand):
                 else:
                     did_queue = send_membership_notification(
                         recipient_email=fu.email,
-                        username=membership.target_username,
                         membership_type=membership.membership_type,
                         template_name=settings.MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
                         expires_at=membership.expires_at,
+                        username=membership.target_username,
                         force=force,
                         tz_name=tz_name,
-                        user_context=user_email_context_from_user(user=fu),
+                        extra_context=user_email_context_from_user(user=fu),
                     )
                     if did_queue:
                         emailed += 1
@@ -200,12 +198,10 @@ class Command(BaseCommand):
                             f"{rep_username} from group {group_cn}."
                         )
                     else:
-                        try:
-                            rep.remove_from_group(group_name=group_cn)
-                        except Exception:
+                        if not remove_user_from_group(username=rep_username, group_cn=group_cn):
                             sponsorship_failed += 1
                             removal_failed = True
-                            logger.exception(
+                            logger.error(
                                 "organization_sponsorship_expired_cleanup_failure org_id=%s membership_type=%s group_cn=%s representative=%s reason=freeipa_remove_failed",
                                 org.pk,
                                 membership_type.code,
@@ -240,16 +236,14 @@ class Command(BaseCommand):
                 if dry_run:
                     would_queue = True
                     if not force:
-                        from post_office.models import Email
-
-                        today = timezone.localdate()
-                        already_sent = Email.objects.filter(
-                            to=recipient_email,
-                            template__name=settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
-                            context__organization_id=org.pk,
-                            context__membership_type_code=membership_type.code,
-                            created__date=today,
-                        ).exists()
+                        already_sent = already_sent_today(
+                            template_name=settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
+                            recipient_email=recipient_email,
+                            extra_filters={
+                                "context__organization_id": org.pk,
+                                "context__membership_type_code": membership_type.code,
+                            },
+                        )
                         if already_sent:
                             would_queue = False
 
@@ -266,15 +260,18 @@ class Command(BaseCommand):
                         )
                         sponsorship_skipped += 1
                 else:
-                    did_queue = send_organization_sponsorship_notification(
+                    tz_name = "UTC"
+                    if rep is not None:
+                        tz_name = str(_first(rep._user_data, "fasTimezone", "") or "").strip() or "UTC"
+                    did_queue = send_membership_notification(
                         recipient_email=recipient_email,
-                        organization=org,
                         membership_type=membership_type,
                         template_name=settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
                         expires_at=sponsorship.expires_at,
+                        organization=org,
                         force=force,
-                        extend_url=request_url,
-                        sponsor_context=sponsor_context,
+                        tz_name=tz_name,
+                        extra_context=sponsor_context | {"extend_url": request_url},
                     )
                     if did_queue:
                         sponsorship_emailed += 1

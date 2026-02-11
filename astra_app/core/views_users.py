@@ -1,4 +1,3 @@
-import datetime
 import logging
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
@@ -19,11 +18,13 @@ from core.backends import FreeIPAGroup, FreeIPAUser
 from core.country_codes import country_code_status_from_user_data
 from core.ipa_user_attrs import _data_get, _first, _get_full_user, _value_to_text
 from core.membership import (
+    expiring_soon_cutoff,
     get_extendable_membership_type_codes_for_username,
     get_valid_membership_type_codes_for_username,
-    get_valid_memberships_for_username,
+    get_valid_memberships,
+    resolve_request_ids_by_membership_type,
 )
-from core.models import MembershipLog, MembershipRequest, MembershipType
+from core.models import MembershipRequest, MembershipType
 from core.views_utils import _normalize_str, get_username
 
 logger = logging.getLogger(__name__)
@@ -140,46 +141,17 @@ def _profile_context_for_user(
     profile_avatar_user: object = fu
 
     membership_request_url = reverse("membership-request")
-    valid_memberships = get_valid_memberships_for_username(fu.username)
+    valid_memberships = get_valid_memberships(username=fu.username)
     valid_membership_type_codes = get_valid_membership_type_codes_for_username(fu.username)
 
     has_individual_membership = any(m.membership_type.category.is_individual for m in valid_memberships)
 
     membership_type_ids = {m.membership_type_id for m in valid_memberships}
-
-    request_id_by_membership_type_id: dict[str, int] = {}
-    if membership_type_ids:
-        logs = (
-            MembershipLog.objects.filter(
-                target_username=fu.username,
-                membership_type_id__in=membership_type_ids,
-                membership_request__isnull=False,
-                action=MembershipLog.Action.approved,
-            )
-            .only("membership_type_id", "membership_request_id", "created_at")
-            .order_by("-created_at")
-        )
-        for log in logs:
-            req_id = log.membership_request_id
-            if req_id is None:
-                continue
-            request_id_by_membership_type_id.setdefault(log.membership_type_id, req_id)
-
-        missing = membership_type_ids - request_id_by_membership_type_id.keys()
-        if missing:
-            approved_requests = (
-                MembershipRequest.objects.filter(
-                    requested_username=fu.username,
-                    membership_type_id__in=missing,
-                    status=MembershipRequest.Status.approved,
-                )
-                .only("pk", "membership_type_id", "decided_at", "requested_at")
-                .order_by("-decided_at", "-requested_at")
-            )
-            for req in approved_requests:
-                request_id_by_membership_type_id.setdefault(req.membership_type_id, req.pk)
-    now = timezone.now()
-    expiring_soon_by = now + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS)
+    request_id_by_membership_type_id = resolve_request_ids_by_membership_type(
+        username=fu.username,
+        membership_type_ids=membership_type_ids,
+    )
+    expiring_soon_by = expiring_soon_cutoff()
 
     personal_pending_requests_qs = list(
         MembershipRequest.objects.select_related("membership_type")

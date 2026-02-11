@@ -12,7 +12,7 @@ from django.urls import reverse
 from core import views_membership, views_settings
 from core.country_codes import country_code_status_from_user_data, country_name_from_code
 from core.membership_notes import CUSTOS
-from core.models import MembershipRequest, MembershipType, Note
+from core.models import MembershipRequest, MembershipType, MembershipTypeCategory, Note, Organization
 
 
 class MembershipCountryRequirementsTests(TestCase):
@@ -23,6 +23,14 @@ class MembershipCountryRequirementsTests(TestCase):
         self.addCleanup(self._coc_patcher.stop)
 
     def _ensure_membership_type(self) -> MembershipType:
+        MembershipTypeCategory.objects.update_or_create(
+            pk="individual",
+            defaults={
+                "is_individual": True,
+                "is_organization": False,
+                "sort_order": 0,
+            },
+        )
         membership_type, _created = MembershipType.objects.get_or_create(
             code="individual",
             defaults={
@@ -62,6 +70,7 @@ class MembershipCountryRequirementsTests(TestCase):
             is_authenticated=True,
             get_username=lambda: username,
             email=f"{username}@example.org",
+            has_perm=lambda _perm: False,
         )
 
     def _committee_user(self, username: str = "committee"):
@@ -75,6 +84,42 @@ class MembershipCountryRequirementsTests(TestCase):
     @staticmethod
     def _fake_freeipa_user(*, username: str, user_data: dict) -> SimpleNamespace:
         return SimpleNamespace(username=username, _user_data=user_data)
+
+    def _ensure_org_membership_type(self) -> MembershipType:
+        MembershipTypeCategory.objects.update_or_create(
+            pk="sponsorship",
+            defaults={
+                "is_organization": True,
+                "sort_order": 1,
+            },
+        )
+        membership_type, _created = MembershipType.objects.get_or_create(
+            code="sponsor",
+            defaults={
+                "name": "Sponsor",
+                "group_cn": "sponsor-group",
+                "category_id": "sponsorship",
+                "enabled": True,
+            },
+        )
+
+        update_fields: list[str] = []
+        if membership_type.name != "Sponsor":
+            membership_type.name = "Sponsor"
+            update_fields.append("name")
+        if membership_type.group_cn != "sponsor-group":
+            membership_type.group_cn = "sponsor-group"
+            update_fields.append("group_cn")
+        if membership_type.category_id != "sponsorship":
+            membership_type.category_id = "sponsorship"
+            update_fields.append("category")
+        if not membership_type.enabled:
+            membership_type.enabled = True
+            update_fields.append("enabled")
+        if update_fields:
+            membership_type.save(update_fields=update_fields)
+
+        return membership_type
 
     def test_membership_request_blocks_when_country_missing(self) -> None:
         self._ensure_membership_type()
@@ -91,6 +136,26 @@ class MembershipCountryRequirementsTests(TestCase):
         self.assertEqual(response["Location"], reverse("settings") + "#profile")
         msgs = [m.message for m in get_messages(request)]
         self.assertTrue(any("country" in m.lower() for m in msgs))
+
+    def test_org_membership_request_blocks_when_representative_country_missing(self) -> None:
+        self._ensure_org_membership_type()
+
+        org = Organization.objects.create(
+            name="Example Org",
+            representative="bob",
+        )
+
+        request = self.factory.get(f"/organization/{org.pk}/membership/request/")
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("bob")
+
+        fake_user = self._fake_freeipa_user(username="bob", user_data={})
+        with patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_user):
+            response = views_membership.membership_request(request, organization_id=org.pk)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("settings") + "#profile")
+        self.assertFalse(MembershipRequest.objects.filter(requested_organization=org).exists())
 
     @override_settings(SELF_SERVICE_ADDRESS_COUNTRY_ATTR="c")
     def test_country_code_status_accepts_case_insensitive_attr(self) -> None:
@@ -177,6 +242,50 @@ class MembershipCountryRequirementsTests(TestCase):
         )
 
     @override_settings(MEMBERSHIP_EMBARGOED_COUNTRY_CODES=["RU", "IR"])
+    def test_org_membership_request_submits_and_persists_embargoed_country_note(self) -> None:
+        membership_type = self._ensure_org_membership_type()
+
+        org = Organization.objects.create(
+            name="Embargo Org",
+            representative="bob",
+        )
+
+        request = self.factory.post(
+            f"/organization/{org.pk}/membership/request/",
+            data={
+                "membership_type": membership_type.code,
+                "q_sponsorship_details": "Please consider our sponsorship request.",
+            },
+        )
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("bob")
+
+        fake_user = self._fake_freeipa_user(username="bob", user_data={"fasstatusnote": ["RU"]})
+
+        with patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_user):
+            with patch(
+                "core.views_membership.record_membership_request_created",
+                autospec=True,
+                return_value=None,
+            ):
+                response = views_membership.membership_request(request, organization_id=org.pk)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("organization-detail", kwargs={"organization_id": org.pk}))
+
+        mr = MembershipRequest.objects.get(requested_organization=org)
+        system_note = mr.notes.filter(username=CUSTOS).first()
+        self.assertIsNotNone(system_note)
+        assert system_note is not None
+        self.assertEqual(
+            system_note.content,
+            (
+                "This organization's representative's declared country, "
+                f"{country_name_from_code('RU')} (RU), is on the list of embargoed countries."
+            ),
+        )
+
+    @override_settings(MEMBERSHIP_EMBARGOED_COUNTRY_CODES=["RU", "IR"])
     def test_membership_committee_sees_embargoed_country_warning(self) -> None:
         self._ensure_membership_type()
 
@@ -205,6 +314,50 @@ class MembershipCountryRequirementsTests(TestCase):
             return HttpResponse("ok")
 
         with patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_target):
+            with patch("core.views_membership.render", autospec=True, side_effect=fake_render):
+                response = views_membership.membership_request_detail(request, pk=mr.pk)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(captured.get("template"), "core/membership_request_detail.html")
+        ctx = captured.get("context") or {}
+        self.assertEqual(ctx.get("embargoed_country_code"), "RU")
+        self.assertEqual(ctx.get("embargoed_country_label"), f"{country_name_from_code('RU')} (RU)")
+
+    @override_settings(MEMBERSHIP_EMBARGOED_COUNTRY_CODES=["RU", "IR"])
+    def test_membership_committee_sees_org_representative_embargo_warning(self) -> None:
+        membership_type = self._ensure_org_membership_type()
+
+        org = Organization.objects.create(
+            name="Embargo Org",
+            representative="bob",
+        )
+        mr = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type=membership_type,
+            status=MembershipRequest.Status.pending,
+            responses=[],
+        )
+
+        request = self.factory.get(f"/membership/requests/{mr.pk}/")
+        self._add_session_and_messages(request)
+        request.user = self._committee_user()
+
+        fake_rep = SimpleNamespace(
+            username="bob",
+            full_name="Bob Rep",
+            email="bob@example.com",
+            _user_data={"fasstatusnote": ["RU"]},
+        )
+
+        captured: dict[str, object] = {}
+
+        def fake_render(_request, template, context):
+            captured["template"] = template
+            captured["context"] = context
+            return HttpResponse("ok")
+
+        with patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_rep):
             with patch("core.views_membership.render", autospec=True, side_effect=fake_render):
                 response = views_membership.membership_request_detail(request, pk=mr.pk)
 

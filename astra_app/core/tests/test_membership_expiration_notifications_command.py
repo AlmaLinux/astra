@@ -6,17 +6,55 @@ from django.conf import settings
 from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
+from post_office.models import EmailTemplate
 
 from core.backends import FreeIPAUser
 from core.models import (
     Membership,
     MembershipLog,
     MembershipType,
+    MembershipTypeCategory,
     Organization,
 )
 
 
 class MembershipExpirationNotificationsCommandTests(TestCase):
+    def setUp(self) -> None:
+        MembershipTypeCategory.objects.update_or_create(
+            pk="individual",
+            defaults={
+                "is_individual": True,
+                "is_organization": False,
+                "sort_order": 0,
+            },
+        )
+        MembershipTypeCategory.objects.update_or_create(
+            pk="sponsorship",
+            defaults={
+                "is_organization": True,
+                "sort_order": 1,
+            },
+        )
+
+        EmailTemplate.objects.filter(
+            name=settings.MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME
+        ).delete()
+        EmailTemplate.objects.create(
+            name=settings.MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+            subject="Membership expiring soon",
+            content="Expires soon",
+            html_content="<p>Expires soon</p>",
+        )
+        EmailTemplate.objects.filter(
+            name=settings.ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME
+        ).delete()
+        EmailTemplate.objects.create(
+            name=settings.ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+            subject="Sponsorship expiring soon",
+            content="Sponsorship expires soon",
+            html_content="<p>Sponsorship expires soon</p>",
+        )
+
     def test_command_sends_expiring_soon_email_on_schedule(self) -> None:
         MembershipType.objects.update_or_create(
             code="individual",
@@ -312,6 +350,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 "givenname": ["Org"],
                 "sn": ["Rep"],
                 "mail": ["rep@example.com"],
+                "fasTimezone": ["America/New_York"],
                 "memberof_group": [],
             },
         )
@@ -343,7 +382,9 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
         ctx = dict(email.context or {})
         self.assertEqual(ctx.get("organization_id"), organization.id)
         self.assertEqual(ctx.get("membership_type_code"), membership_type.code)
+        self.assertTrue(str(ctx.get("expires_at") or "").endswith("(America/New_York)"))
         self.assertEqual(email.cc, [settings.MEMBERSHIP_COMMITTEE_EMAIL])
+        self.assertEqual((email.headers or {}).get("Reply-To"), settings.MEMBERSHIP_COMMITTEE_EMAIL)
         self.assertIn("/organization/", ctx.get("extend_url", ""))
 
     def test_command_dedupes_org_sponsorship_warnings_without_force(self) -> None:

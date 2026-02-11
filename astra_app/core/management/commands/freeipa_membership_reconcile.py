@@ -4,7 +4,6 @@ from typing import override
 import post_office.mail
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
-from django.db.models import Q
 from django.utils import timezone
 
 from core.backends import FreeIPAGroup, FreeIPAUser
@@ -113,7 +112,7 @@ class Command(BaseCommand):
             if membership_type.category.is_individual:
                 active_memberships = Membership.objects.filter(
                     membership_type=membership_type,
-                ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
+                ).active(at=now)
 
                 for username in active_memberships.values_list("target_username", flat=True):
                     normalized = str(username or "").strip()
@@ -128,7 +127,7 @@ class Command(BaseCommand):
                         membership_type=membership_type,
                         target_organization__isnull=False,
                     )
-                    .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
+                    .active(at=now)
                     .select_related("target_organization")
                 )
                 for m in active_org_memberships:

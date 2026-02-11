@@ -41,18 +41,40 @@ def _format_expires_at(*, expires_at: datetime.datetime | None, tz_name: str | N
     return f"{local.strftime('%b %d, %Y %H:%M')} ({target_tz_name})"
 
 
+def already_sent_today(
+    *,
+    template_name: str,
+    recipient_email: str | None = None,
+    extra_filters: dict[str, object] | None = None,
+    today: datetime.date | None = None,
+) -> bool:
+    from post_office.models import Email
+
+    target_date = today if today is not None else timezone.localdate()
+    filters: dict[str, object] = {
+        "template__name": template_name,
+        "created__date": target_date,
+    }
+    if recipient_email:
+        filters["to"] = recipient_email
+    if extra_filters:
+        filters |= extra_filters
+    return Email.objects.filter(**filters).exists()
+
+
 def send_membership_notification(
     *,
     recipient_email: str,
-    username: str,
     membership_type: MembershipType,
     template_name: str,
     expires_at: datetime.datetime | None,
+    username: str | None = None,
+    organization: Organization | None = None,
     days: int | None = None,
     force: bool = False,
     base_url: str | None = None,
     tz_name: str | None = None,
-    user_context: dict[str, str] | None = None,
+    extra_context: dict[str, str] | None = None,
 ) -> bool:
     """Queue a templated email via django-post-office.
 
@@ -65,90 +87,28 @@ def send_membership_notification(
 
     today = timezone.localdate()
 
-    if not force:
-        from post_office.models import Email
+    extra_filters = {
+        "context__membership_type_code": membership_type.code,
+    }
+    if organization is not None:
+        extra_filters["context__organization_id"] = organization.id
 
-        already_sent = Email.objects.filter(
-            to=address,
-            template__name=template_name,
-            context__membership_type_code=membership_type.code,
-            created__date=today,
-        ).exists()
+    if not force:
+        already_sent = already_sent_today(
+            template_name=template_name,
+            recipient_email=address,
+            extra_filters=extra_filters,
+            today=today,
+        )
         if already_sent:
             return False
 
-    base_ctx = user_context if user_context is not None else user_email_context(username=username)
-
-    queue_templated_email(
-        recipients=[address],
-        sender=settings.DEFAULT_FROM_EMAIL,
-        template_name=template_name,
-        context={
-            **base_ctx,
-            **membership_committee_email_context(),
-            "membership_type": membership_type.name,
-            "membership_type_code": membership_type.code,
-            "extend_url": membership_extend_url(membership_type_code=membership_type.code, base_url=base_url),
-            "expires_at": _format_expires_at(expires_at=expires_at, tz_name=tz_name),
-            "days": days,
-        },
-        reply_to=[settings.MEMBERSHIP_COMMITTEE_EMAIL],
-    )
-
-    return True
-
-
-def send_organization_sponsorship_notification(
-    *,
-    recipient_email: str,
-    organization: Organization,
-    membership_type: MembershipType,
-    template_name: str,
-    expires_at: datetime.datetime | None,
-    extend_url: str,
-    days: int | None = None,
-    force: bool = False,
-    sponsor_context: dict[str, str] | None = None,
-) -> bool:
-    """Queue a templated email for organization sponsorship expiry warnings.
-
-    Returns True if an email was queued, False if skipped (e.g. deduped).
-    """
-
-    address = str(recipient_email or "").strip()
-    if not address:
-        return False
-
-    today = timezone.localdate()
-
-    if not force:
-        from post_office.models import Email
-
-        already_sent = Email.objects.filter(
-            to=address,
-            template__name=template_name,
-            context__organization_id=organization.id,
-            context__membership_type_code=membership_type.code,
-            created__date=today,
-        ).exists()
-        if already_sent:
-            return False
-
-    base_ctx = (
-        sponsor_context
-        if sponsor_context is not None
-        else organization_sponsor_email_context(organization=organization)
-    )
-
-    committee_email = str(settings.MEMBERSHIP_COMMITTEE_EMAIL or "").strip()
-    cc = [committee_email] if committee_email else None
-    reply_to = [committee_email] if committee_email else None
-
-    queue_templated_email(
-        recipients=[address],
-        sender=settings.DEFAULT_FROM_EMAIL,
-        template_name=template_name,
-        context={
+    if organization is not None:
+        base_ctx = organization_sponsor_email_context(organization=organization)
+        committee_email = str(settings.MEMBERSHIP_COMMITTEE_EMAIL or "").strip()
+        cc = [committee_email] if committee_email else None
+        reply_to = [committee_email] if committee_email else None
+        context = {
             **base_ctx,
             **membership_committee_email_context(),
             **system_email_context(),
@@ -156,10 +116,37 @@ def send_organization_sponsorship_notification(
             "organization_name": str(organization.name or ""),
             "membership_type": membership_type.name,
             "membership_type_code": membership_type.code,
-            "extend_url": extend_url,
-            "expires_at": _format_expires_at(expires_at=expires_at, tz_name="UTC"),
+            "expires_at": _format_expires_at(expires_at=expires_at, tz_name=tz_name),
             "days": days,
-        },
+        }
+    else:
+        if username is None:
+            return False
+
+        base_ctx = user_email_context(username=username)
+        cc = None
+        reply_to = [settings.MEMBERSHIP_COMMITTEE_EMAIL]
+        context = {
+            **base_ctx,
+            **membership_committee_email_context(),
+            "membership_type": membership_type.name,
+            "membership_type_code": membership_type.code,
+            "extend_url": membership_extend_url(
+                membership_type_code=membership_type.code,
+                base_url=base_url,
+            ),
+            "expires_at": _format_expires_at(expires_at=expires_at, tz_name=tz_name),
+            "days": days,
+        }
+
+    if extra_context:
+        context |= extra_context
+
+    queue_templated_email(
+        recipients=[address],
+        sender=settings.DEFAULT_FROM_EMAIL,
+        template_name=template_name,
+        context=context,
         cc=cc,
         reply_to=reply_to,
     )

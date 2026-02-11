@@ -68,7 +68,7 @@ class MembershipCommitteeEmailContextTests(TestCase):
                 template_name=settings.MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
                 expires_at=None,
                 force=True,
-                user_context={
+                extra_context={
                     "username": "alice",
                     "first_name": "",
                     "last_name": "",

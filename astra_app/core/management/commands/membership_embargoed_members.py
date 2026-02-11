@@ -3,7 +3,6 @@ from typing import override
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
-from django.db.models import Q
 from django.utils import timezone
 
 from core.backends import FreeIPAGroup, FreeIPAUser
@@ -13,6 +12,7 @@ from core.country_codes import (
     embargoed_country_codes_from_settings,
 )
 from core.email_context import membership_committee_email_context
+from core.membership_notifications import already_sent_today
 from core.models import FreeIPAPermissionGrant, Membership
 from core.permissions import ASTRA_ADD_MEMBERSHIP
 from core.templated_email import queue_templated_email
@@ -48,7 +48,7 @@ class Command(BaseCommand):
 
         now = timezone.now()
         memberships = (
-            Membership.objects.filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
+            Membership.objects.active(at=now)
             .order_by("target_username")
             .values_list("target_username", flat=True)
         )
@@ -124,13 +124,9 @@ class Command(BaseCommand):
             raise CommandError(f"No email addresses found for any principals with {ASTRA_ADD_MEMBERSHIP}")
 
         if not force:
-            from post_office.models import Email
-
-            today = timezone.localdate()
-            already_sent = Email.objects.filter(
-                template__name=settings.MEMBERSHIP_COMMITTEE_EMBARGOED_MEMBERS_EMAIL_TEMPLATE_NAME,
-                created__date=today,
-            ).exists()
+            already_sent = already_sent_today(
+                template_name=settings.MEMBERSHIP_COMMITTEE_EMBARGOED_MEMBERS_EMAIL_TEMPLATE_NAME,
+            )
             if already_sent:
                 if dry_run:
                     self.stdout.write("[dry-run] Would skip; email already queued today.")

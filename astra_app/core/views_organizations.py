@@ -1,9 +1,7 @@
-import datetime
 import logging
 
-from django.conf import settings
 from django.contrib import messages
-from django.db import IntegrityError, models
+from django.db import IntegrityError
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -12,6 +10,12 @@ from django.views.decorators.http import require_GET
 
 from core.backends import FreeIPAUser
 from core.forms_organizations import OrganizationEditForm
+from core.membership import (
+    expiring_soon_cutoff,
+    get_valid_memberships,
+    remove_user_from_group,
+    resolve_request_ids_by_membership_type,
+)
 from core.membership_notes import add_note
 from core.membership_request_workflow import record_membership_request_created
 from core.models import Membership, MembershipLog, MembershipRequest, Organization
@@ -290,13 +294,8 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
         if representative_user is not None:
             representative_full_name = representative_user.full_name
 
-    now = timezone.now()
-    sponsorships = list(
-        Membership.objects.select_related("membership_type")
-        .filter(target_organization=organization)
-        .filter(models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=now))
-    )
-    expiring_soon_by = now + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS)
+    sponsorships = get_valid_memberships(organization=organization)
+    expiring_soon_by = expiring_soon_cutoff()
 
     pending_requests = list(
         MembershipRequest.objects.select_related("membership_type")
@@ -312,33 +311,10 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
         if category_id not in pending_request_by_category:
             pending_request_by_category[category_id] = req
 
-    sponsorship_request_id_by_type: dict[str, int] = {}
-    approved_logs = (
-        MembershipLog.objects.filter(
-            target_organization=organization,
-            membership_request__isnull=False,
-            action=MembershipLog.Action.approved,
-        )
-        .only("membership_request_id", "membership_type_id", "created_at")
-        .order_by("-created_at", "-pk")
+    sponsorship_request_id_by_type = resolve_request_ids_by_membership_type(
+        organization=organization,
+        membership_type_ids={s.membership_type_id for s in sponsorships},
     )
-    for log in approved_logs:
-        if log.membership_request_id is None:
-            continue
-        if log.membership_type_id not in sponsorship_request_id_by_type:
-            sponsorship_request_id_by_type[log.membership_type_id] = int(log.membership_request_id)
-
-    approved_requests = (
-        MembershipRequest.objects.filter(
-            requested_organization=organization,
-            status=MembershipRequest.Status.approved,
-        )
-        .only("pk", "membership_type_id", "decided_at", "requested_at")
-        .order_by("-decided_at", "-requested_at", "-pk")
-    )
-    for req in approved_requests:
-        if req.membership_type_id not in sponsorship_request_id_by_type:
-            sponsorship_request_id_by_type[req.membership_type_id] = int(req.pk)
 
     # Build per-sponsorship display entries for the template.
     sponsorship_entries: list[dict[str, object]] = []
@@ -423,10 +399,8 @@ def organization_delete(request: HttpRequest, organization_id: int) -> HttpRespo
             for membership in active_memberships:
                 group_cn = str(membership.membership_type.group_cn or "").strip()
                 if group_cn and group_cn in rep.groups_list:
-                    try:
-                        rep.remove_from_group(group_name=group_cn)
-                    except Exception:
-                        logger.exception(
+                    if not remove_user_from_group(username=rep_username, group_cn=group_cn):
+                        logger.error(
                             "organization_delete: failed to remove representative from group org_id=%s rep=%r group_cn=%r",
                             organization.pk,
                             rep_username,
@@ -484,11 +458,11 @@ def organization_sponsorship_extend(request: HttpRequest, organization_id: int) 
         return redirect("organization-detail", organization_id=organization.pk)
 
     now = timezone.now()
-    if sponsorship.expires_at <= now:
+    if sponsorship.expires_at < now:
         messages.error(request, "This membership has already expired and cannot be extended. Submit a new membership request.")
         return redirect("organization-detail", organization_id=organization.pk)
 
-    expiring_soon_by = now + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS)
+    expiring_soon_by = expiring_soon_cutoff(now=now)
     if sponsorship.expires_at > expiring_soon_by:
         messages.info(request, "This membership is not expiring soon yet.")
         return redirect("organization-detail", organization_id=organization.pk)
@@ -568,12 +542,7 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
             # Sync FreeIPA groups for ALL active memberships when the
             # representative changes.
             if old_representative and old_representative != representative:
-                now = timezone.now()
-                active_memberships = list(
-                    Membership.objects.select_related("membership_type")
-                    .filter(target_organization=organization)
-                    .filter(models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=now))
-                )
+                active_memberships = get_valid_memberships(organization=organization)
                 group_cns = [
                     str(m.membership_type.group_cn or "").strip()
                     for m in active_memberships
@@ -587,6 +556,7 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
                         form.add_error("representative", f"Unknown user: {representative}")
                         return _render_org_form(request, form, organization=organization, is_create=False)
 
+                    # Direct FreeIPA calls are intentional here to support the rollback flow below.
                     try:
                         for gcn in group_cns:
                             if old_rep is not None and gcn in old_rep.groups_list:

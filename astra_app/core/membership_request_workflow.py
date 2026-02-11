@@ -18,6 +18,7 @@ from core.email_context import (
     organization_sponsor_email_context,
     user_email_context_from_user,
 )
+from core.membership import remove_user_from_group
 from core.membership_notes import add_note
 from core.models import (
     Membership,
@@ -449,12 +450,12 @@ def approve_membership_request(
                     and old_membership.membership_type != membership_type
                     and old_membership.membership_type.group_cn
                 ):
-                    try:
-                        representative.remove_from_group(
-                            group_name=old_membership.membership_type.group_cn,
-                        )
-                    except Exception:
-                        logger.exception(
+                    removed = remove_user_from_group(
+                        username=representative.username,
+                        group_cn=old_membership.membership_type.group_cn,
+                    )
+                    if not removed:
+                        logger.error(
                             "%s: remove_from_group (old) failed request_id=%s org_id=%s representative=%r group_cn=%r",
                             log_prefix,
                             membership_request.pk,
@@ -462,7 +463,7 @@ def approve_membership_request(
                             representative.username,
                             old_membership.membership_type.group_cn,
                         )
-                        raise
+                        raise Exception("Failed to remove user from old group")
 
                 try:
                     representative.add_to_group(group_name=membership_type.group_cn)

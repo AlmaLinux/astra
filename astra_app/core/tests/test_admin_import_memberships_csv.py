@@ -19,7 +19,7 @@ from tablib import Dataset
 
 from core.admin import MembershipCSVImportLinkAdmin
 from core.backends import FreeIPAUser
-from core.membership import get_valid_memberships_for_username
+from core.membership import get_valid_memberships
 from core.membership_csv_import import MembershipCSVImportForm, MembershipCSVImportResource
 from core.models import Membership, MembershipCSVImportLink, MembershipLog, MembershipRequest, MembershipType, Note
 
@@ -1342,7 +1342,7 @@ class AdminImportMembershipsCSVTests(TestCase):
 
         self.assertEqual(resp.status_code, 302)
         self.assertTrue(Membership.objects.filter(target_username="alice", membership_type_id="individual").exists())
-        self.assertEqual(len(get_valid_memberships_for_username("alice")), 1)
+        self.assertEqual(len(get_valid_memberships(username="alice")), 1)
 
     def test_live_import_does_not_skip_expired_membership_row(self) -> None:
         membership_type, _ = MembershipType.objects.update_or_create(
@@ -1421,7 +1421,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             resp = self.client.post(process_url, data=confirm_data, follow=False)
 
         self.assertEqual(resp.status_code, 302)
-        self.assertEqual(len(get_valid_memberships_for_username("alice")), 1)
+        self.assertEqual(len(get_valid_memberships(username="alice")), 1)
 
     def test_live_import_reuses_existing_pending_request_without_null_requested_at(self) -> None:
         """CSV import should be idempotent when a pending request already exists."""

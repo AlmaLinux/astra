@@ -3,20 +3,24 @@ import datetime
 from io import BytesIO
 from pathlib import Path
 from tempfile import mkdtemp
+from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import quote
 
 from django.conf import settings
 from django.contrib.messages import get_messages
+from django.contrib.messages.storage.fallback import FallbackStorage
+from django.contrib.sessions.middleware import SessionMiddleware
 from django.contrib.staticfiles import finders
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, transaction
-from django.test import TestCase, override_settings
+from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
+from core import views_membership
 from core.backends import FreeIPAUser
-from core.models import FreeIPAPermissionGrant, Membership
+from core.models import FreeIPAPermissionGrant, Membership, MembershipTypeCategory
 from core.permissions import (
     ASTRA_ADD_MEMBERSHIP,
     ASTRA_CHANGE_MEMBERSHIP,
@@ -27,6 +31,44 @@ from core.permissions import (
 
 class OrganizationUserViewsTests(TestCase):
     _test_media_root = Path(mkdtemp(prefix="alx_test_media_"))
+
+    def setUp(self) -> None:
+        self._country_code_patcher = patch(
+            "core.views_membership.block_action_without_country_code",
+            return_value=None,
+        )
+        self._country_code_patcher.start()
+        self.addCleanup(self._country_code_patcher.stop)
+
+        MembershipTypeCategory.objects.update_or_create(
+            pk="individual",
+            defaults={
+                "is_individual": True,
+                "is_organization": False,
+                "sort_order": 0,
+            },
+        )
+        MembershipTypeCategory.objects.update_or_create(
+            pk="sponsorship",
+            defaults={
+                "is_organization": True,
+                "sort_order": 1,
+            },
+        )
+        MembershipTypeCategory.objects.update_or_create(
+            pk="mirror",
+            defaults={
+                "is_organization": True,
+                "sort_order": 2,
+            },
+        )
+        MembershipTypeCategory.objects.update_or_create(
+            pk="community",
+            defaults={
+                "is_organization": True,
+                "sort_order": 3,
+            },
+        )
 
     def _login_as_freeipa_user(self, username: str) -> None:
         session = self.client.session
@@ -58,7 +100,7 @@ class OrganizationUserViewsTests(TestCase):
             representative="bob",
         )
 
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
         with (
@@ -97,7 +139,7 @@ class OrganizationUserViewsTests(TestCase):
         )
 
         payload = self._valid_org_payload(name="Blocked Org")
-        alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": []})
+        alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
         with patch("core.backends.FreeIPAUser.get", autospec=True, return_value=alice):
             with patch("core.views_utils.FreeIPAFASAgreement.get", autospec=True, return_value=coc):
                 resp = self.client.post(reverse("organization-create"), data=payload, follow=False)
@@ -123,8 +165,8 @@ class OrganizationUserViewsTests(TestCase):
             representative="reviewer",
         )
 
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": []})
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
 
         def fake_get(username: str) -> FreeIPAUser | None:
             if username == "reviewer":
@@ -162,11 +204,11 @@ class OrganizationUserViewsTests(TestCase):
             principal_name="reviewer",
         )
 
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": []})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("reviewer")
 
-        bob_user = FreeIPAUser("bob", {"uid": ["bob"], "displayname": ["Bob Example"], "memberof_group": []})
-        bobby_user = FreeIPAUser("bobby", {"uid": ["bobby"], "displayname": ["Bobby Example"], "memberof_group": []})
+        bob_user = FreeIPAUser("bob", {"uid": ["bob"], "displayname": ["Bob Example"], "memberof_group": [], "c": ["US"]})
+        bobby_user = FreeIPAUser("bobby", {"uid": ["bobby"], "displayname": ["Bobby Example"], "memberof_group": [], "c": ["US"]})
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=reviewer),
@@ -210,9 +252,9 @@ class OrganizationUserViewsTests(TestCase):
             principal_name="reviewer",
         )
 
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": []})
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
-        carol = FreeIPAUser("carol", {"uid": ["carol"], "memberof_group": []})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
+        carol = FreeIPAUser("carol", {"uid": ["carol"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("reviewer")
 
         def fake_get(username: str) -> FreeIPAUser | None:
@@ -288,9 +330,9 @@ class OrganizationUserViewsTests(TestCase):
             principal_name="reviewer",
         )
 
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": []})
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
-        carol = FreeIPAUser("carol", {"uid": ["carol"], "memberof_group": []})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
+        carol = FreeIPAUser("carol", {"uid": ["carol"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("reviewer")
 
         def fake_get(username: str) -> FreeIPAUser | None:
@@ -365,9 +407,9 @@ class OrganizationUserViewsTests(TestCase):
             principal_name="reviewer",
         )
 
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": []})
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
-        carol = FreeIPAUser("carol", {"uid": ["carol"], "memberof_group": []})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
+        carol = FreeIPAUser("carol", {"uid": ["carol"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("reviewer")
 
         def fake_get(username: str) -> FreeIPAUser | None:
@@ -407,6 +449,7 @@ class OrganizationUserViewsTests(TestCase):
                 "category_id": "sponsorship",
                 "sort_order": 1,
                 "enabled": True,
+                "group_cn": "almalinux-silver",
             },
         )
 
@@ -425,7 +468,7 @@ class OrganizationUserViewsTests(TestCase):
 
         Membership.objects.create(target_organization=org, membership_type_id="silver")
 
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
         with patch("core.backends.FreeIPAUser.get", return_value=bob):
@@ -470,7 +513,7 @@ class OrganizationUserViewsTests(TestCase):
             expires_at=expires_at,
         )
 
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
         with patch("core.backends.FreeIPAUser.get", return_value=bob):
@@ -494,6 +537,7 @@ class OrganizationUserViewsTests(TestCase):
                 "category_id": "sponsorship",
                 "sort_order": 2,
                 "enabled": True,
+                "group_cn": "almalinux-gold",
             },
         )
         membership_type = MembershipType.objects.get(code="gold")
@@ -511,7 +555,7 @@ class OrganizationUserViewsTests(TestCase):
             responses=[{"Additional Information": "Org answers"}],
         )
 
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
         with patch("core.backends.FreeIPAUser.get", return_value=bob):
             resp_rep = self.client.get(reverse("organization-detail", args=[org.pk]))
@@ -525,7 +569,7 @@ class OrganizationUserViewsTests(TestCase):
         )
         reviewer = FreeIPAUser(
             "reviewer",
-            {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": []},
+            {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": [], "c": ["US"]},
         )
 
         self._login_as_freeipa_user("reviewer")
@@ -567,7 +611,7 @@ class OrganizationUserViewsTests(TestCase):
             principal_name="reviewer",
         )
 
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": []})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("reviewer")
 
         with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
@@ -594,8 +638,8 @@ class OrganizationUserViewsTests(TestCase):
             principal_name="reviewer",
         )
 
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": []})
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "cn": ["Bob Example"], "memberof_group": []})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "cn": ["Bob Example"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("reviewer")
 
         def fake_get(username: str) -> FreeIPAUser | None:
@@ -633,9 +677,15 @@ class OrganizationUserViewsTests(TestCase):
                 "description": "Gold Sponsor Member (Annual dues: $20,000 USD)",
                 "category_id": "sponsorship",
                 "sort_order": 2,
+                "group_cn": "almalinux-gold",
                 "enabled": True,
             },
         )
+        gold = MembershipType.objects.get(code="gold")
+        if gold.group_cn != "almalinux-gold":
+            gold.group_cn = "almalinux-gold"
+            gold.save(update_fields=["group_cn"])
+        self.assertEqual(gold.group_cn, "almalinux-gold")
 
         MembershipType.objects.get(code="gold")
 
@@ -652,7 +702,7 @@ class OrganizationUserViewsTests(TestCase):
             representative="bob",
         )
 
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
         with patch("core.backends.FreeIPAUser.get", return_value=bob):
@@ -702,6 +752,7 @@ class OrganizationUserViewsTests(TestCase):
                 "description": "Gold Sponsor Member (Annual dues: $20,000 USD)",
                 "category_id": "sponsorship",
                 "sort_order": 2,
+                "group_cn": "almalinux-gold",
                 "enabled": True,
             },
         )
@@ -716,7 +767,7 @@ class OrganizationUserViewsTests(TestCase):
 
         Membership.objects.create(target_organization=org, membership_type=gold)
 
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
         with patch("core.backends.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
@@ -777,7 +828,7 @@ class OrganizationUserViewsTests(TestCase):
             2,
         )
 
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
         with patch("core.backends.FreeIPAUser.get", return_value=bob):
@@ -845,7 +896,7 @@ class OrganizationUserViewsTests(TestCase):
             representative="bob",
         )
 
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
         jpeg = BytesIO()
@@ -923,9 +974,14 @@ class OrganizationUserViewsTests(TestCase):
                 "description": "Gold Sponsor Member (Annual dues: $20,000 USD)",
                 "category_id": "sponsorship",
                 "sort_order": 2,
+                "group_cn": "almalinux-gold",
                 "enabled": True,
             },
         )
+        gold = MembershipType.objects.get(code="gold")
+        if gold.group_cn != "almalinux-gold":
+            gold.group_cn = "almalinux-gold"
+            gold.save(update_fields=["group_cn"])
 
         org = Organization.objects.create(
             name="AlmaLinux",
@@ -943,21 +999,33 @@ class OrganizationUserViewsTests(TestCase):
         # Current sponsorship stored in Membership table
         Membership.objects.create(target_organization=org, membership_type_id="silver")
 
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
-        self._login_as_freeipa_user("bob")
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
+
+        factory = RequestFactory()
+        request = factory.post(
+            reverse("organization-membership-request", args=[org.pk]),
+            data={
+                "membership_type": "gold",
+                "q_sponsorship_details": "Please consider our updated membership level.",
+            },
+        )
+        SessionMiddleware(lambda r: None).process_request(request)
+        request.session.save()
+        request.session["_freeipa_username"] = "bob"
+        request.session.save()
+        setattr(request, "_messages", FallbackStorage(request))
+        request.user = SimpleNamespace(
+            is_authenticated=True,
+            get_username=lambda: "bob",
+            has_perm=lambda _perm: False,
+        )
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=bob),
             patch("core.views_membership.block_action_without_coc", return_value=None),
         ):
-            resp = self.client.post(
-                reverse("organization-membership-request", args=[org.pk]),
-                data={
-                    "membership_type": "gold",
-                    "q_sponsorship_details": "Please consider our updated membership level.",
-                },
-                follow=False,
-            )
+            resp = views_membership.membership_request(request, organization_id=org.pk)
+
         self.assertEqual(resp.status_code, 302)
 
         # The upgrade request is pending — the current-state Membership row is not changed yet
@@ -986,6 +1054,7 @@ class OrganizationUserViewsTests(TestCase):
         self.assertEqual(req_log.membership_type_id, "gold")
         self.assertEqual(req_log.membership_request_id, req.pk)
 
+        self._login_as_freeipa_user("bob")
         with patch("core.backends.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
             self.assertEqual(resp.status_code, 200)
@@ -998,9 +1067,21 @@ class OrganizationUserViewsTests(TestCase):
 
         MembershipType.objects.update_or_create(
             code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 1,
+                "enabled": True,
+            },
         )
         MembershipType.objects.update_or_create(
             code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 2,
+                "enabled": True,
+            },
         )
 
         org = Organization.objects.create(
@@ -1013,7 +1094,7 @@ class OrganizationUserViewsTests(TestCase):
         # Prefill is based on Membership row, not org field
         Membership.objects.create(target_organization=org, membership_type_id="gold")
 
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
         with (
@@ -1043,7 +1124,7 @@ class OrganizationUserViewsTests(TestCase):
 
         org = Organization.objects.create(name="Access Org", representative="bob")
 
-        alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": []})
+        alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("alice")
         with patch("core.backends.FreeIPAUser.get", return_value=alice):
             resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
@@ -1054,7 +1135,7 @@ class OrganizationUserViewsTests(TestCase):
             principal_type=FreeIPAPermissionGrant.PrincipalType.user,
             principal_name="reviewer",
         )
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": []})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("reviewer")
         with (
             patch("core.backends.FreeIPAUser.get", return_value=reviewer),
@@ -1098,7 +1179,7 @@ class OrganizationUserViewsTests(TestCase):
         )
 
         org = Organization.objects.create(name="Label Org", representative="bob")
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
         with (
@@ -1175,7 +1256,7 @@ class OrganizationUserViewsTests(TestCase):
             status=MembershipRequest.Status.pending,
         )
 
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
         with (
@@ -1232,7 +1313,7 @@ class OrganizationUserViewsTests(TestCase):
             status=MembershipRequest.Status.on_hold,
         )
 
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
         with (
@@ -1278,7 +1359,7 @@ class OrganizationUserViewsTests(TestCase):
             expires_at=timezone.now() + datetime.timedelta(days=200),
         )
 
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
         with (
@@ -1314,7 +1395,7 @@ class OrganizationUserViewsTests(TestCase):
             expires_at=timezone.now() + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS - 1),
         )
 
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
         with (
@@ -1346,6 +1427,7 @@ class OrganizationUserViewsTests(TestCase):
                 "description": "Gold Sponsor Member",
                 "category_id": "sponsorship",
                 "sort_order": 2,
+                "group_cn": "almalinux-gold",
                 "enabled": True,
             },
         )
@@ -1359,7 +1441,7 @@ class OrganizationUserViewsTests(TestCase):
 
         Membership.objects.create(target_organization=org, membership_type_id="mirror")
 
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
         with (
@@ -1419,7 +1501,7 @@ class OrganizationUserViewsTests(TestCase):
             },
         )
 
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         with patch("core.backends.FreeIPAUser.get", autospec=True, return_value=bob):
             with patch("core.views_utils.FreeIPAFASAgreement.get", autospec=True, return_value=coc):
                 resp = self.client.post(
@@ -1471,7 +1553,7 @@ class OrganizationUserViewsTests(TestCase):
 
         reviewer = FreeIPAUser(
             "reviewer",
-            {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": []},
+            {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": [], "c": ["US"]},
         )
         self._login_as_freeipa_user("reviewer")
 
@@ -1496,7 +1578,7 @@ class OrganizationUserViewsTests(TestCase):
             datetime.datetime(2030, 1, 31, 23, 59, 59, tzinfo=datetime.UTC),
         )
 
-    def test_membership_admin_setting_expiry_in_past_terminates_org_sponsorship(self) -> None:
+    def test_membership_admin_setting_expiry_in_past_logs_expiry_changed_and_keeps_row(self) -> None:
         import datetime
 
         from core.models import FreeIPAPermissionGrant, Membership, MembershipLog, MembershipType, Organization
@@ -1527,16 +1609,16 @@ class OrganizationUserViewsTests(TestCase):
             principal_name="reviewer",
         )
 
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": []})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("reviewer")
 
         reviewer = FreeIPAUser(
             "reviewer",
-            {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": []},
+            {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": [], "c": ["US"]},
         )
         rep = FreeIPAUser(
             "bob",
-            {"uid": ["bob"], "mail": ["bob@example.com"], "memberof_group": ["sponsor-group"]},
+            {"uid": ["bob"], "mail": ["bob@example.com"], "memberof_group": ["sponsor-group"], "c": ["US"]},
         )
         past_date = datetime.date(2000, 1, 1)
 
@@ -1559,9 +1641,20 @@ class OrganizationUserViewsTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 302)
-        self.assertFalse(Membership.objects.filter(target_organization=org).exists())
+        sponsorship = Membership.objects.get(target_organization=org, membership_type_id="gold")
+        self.assertEqual(
+            sponsorship.expires_at,
+            datetime.datetime(2000, 1, 1, 23, 59, 59, tzinfo=datetime.UTC),
+        )
         remove_from_group.assert_called_once_with(rep, group_name="sponsor-group")
         self.assertTrue(
+            MembershipLog.objects.filter(
+                action=MembershipLog.Action.expiry_changed,
+                target_organization=org,
+                membership_type_id="gold",
+            ).exists()
+        )
+        self.assertFalse(
             MembershipLog.objects.filter(
                 action=MembershipLog.Action.terminated,
                 target_organization=org,
@@ -1596,7 +1689,7 @@ class OrganizationUserViewsTests(TestCase):
             principal_name="reviewer",
         )
 
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": []})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("reviewer")
 
         new_expires_on = datetime.date(2030, 1, 31)
@@ -1647,7 +1740,7 @@ class OrganizationUserViewsTests(TestCase):
             principal_name="reviewer",
         )
 
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": []})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("reviewer")
 
         new_expires_on = datetime.date(2030, 1, 31)
@@ -1711,7 +1804,7 @@ class OrganizationUserViewsTests(TestCase):
             principal_name="reviewer",
         )
 
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": []})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("reviewer")
 
         new_expires_on = datetime.date(2030, 1, 31)
@@ -1764,7 +1857,7 @@ class OrganizationUserViewsTests(TestCase):
             principal_name="reviewer",
         )
 
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": []})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("reviewer")
 
         with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
@@ -1841,7 +1934,7 @@ class OrganizationUserViewsTests(TestCase):
             ]
         )
 
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
         with patch("core.backends.FreeIPAUser.get", return_value=bob):
@@ -1896,7 +1989,7 @@ class OrganizationUserViewsTests(TestCase):
             status=MembershipRequest.Status.pending,
         )
 
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
         with patch("core.backends.FreeIPAUser.get", return_value=bob):
@@ -1929,6 +2022,16 @@ class OrganizationUserViewsTests(TestCase):
                 "enabled": True,
             },
         )
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror Member",
+                "description": "Mirror Member",
+                "category_id": "mirror",
+                "sort_order": 3,
+                "enabled": True,
+            },
+        )
 
         org = Organization.objects.create(name="Acme", representative="bob")
 
@@ -1943,7 +2046,7 @@ class OrganizationUserViewsTests(TestCase):
             expires_at=timezone.now() - datetime.timedelta(days=1),
         )
 
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
         with patch("core.backends.FreeIPAUser.get", return_value=bob):
@@ -2002,7 +2105,7 @@ class OrganizationUserViewsTests(TestCase):
 
         reviewer = FreeIPAUser(
             "reviewer",
-            {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": []},
+            {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": [], "c": ["US"]},
         )
         self._login_as_freeipa_user("reviewer")
 
@@ -2080,7 +2183,7 @@ class OrganizationUserViewsTests(TestCase):
             expires_at=expires_at,
         )
 
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
         with patch("core.backends.FreeIPAUser.get", return_value=bob):
@@ -2149,7 +2252,7 @@ class OrganizationUserViewsTests(TestCase):
             expires_at=expires_at,
         )
 
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
         with (
@@ -2217,7 +2320,7 @@ class OrganizationUserViewsTests(TestCase):
             status=MembershipRequest.Status.pending,
         )
 
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
         with (
@@ -2240,6 +2343,108 @@ class OrganizationUserViewsTests(TestCase):
             ).values_list("membership_type_id", flat=True)
         )
         self.assertEqual(pending_types, {"gold", "mirror"})
+
+    def test_sponsorship_extend_allows_expiry_equal_now(self) -> None:
+        from core.models import Membership, MembershipRequest, MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "description": "Gold Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(
+            name="Boundary Org",
+            representative="bob",
+        )
+
+        frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            Membership.objects.create(
+                target_organization=org,
+                membership_type_id="gold",
+                expires_at=frozen_now,
+            )
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
+        self._login_as_freeipa_user("bob")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.views_organizations.block_action_without_coc", return_value=None),
+            patch("django.utils.timezone.now", return_value=frozen_now),
+        ):
+            resp = self.client.post(
+                reverse("organization-sponsorship-extend", args=[org.pk]),
+                data={"membership_type": "gold"},
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        messages = [m.message for m in get_messages(resp.wsgi_request)]
+        self.assertIn("Membership renewal request submitted for review.", messages)
+        self.assertTrue(
+            MembershipRequest.objects.filter(
+                requested_organization=org,
+                status=MembershipRequest.Status.pending,
+            ).exists()
+        )
+
+    def test_sponsorship_extend_rejects_expiry_before_now(self) -> None:
+        from core.models import Membership, MembershipRequest, MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "description": "Gold Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(
+            name="Expired Org",
+            representative="bob",
+        )
+
+        frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            Membership.objects.create(
+                target_organization=org,
+                membership_type_id="gold",
+                expires_at=frozen_now - datetime.timedelta(seconds=1),
+            )
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
+        self._login_as_freeipa_user("bob")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.views_organizations.block_action_without_coc", return_value=None),
+            patch("django.utils.timezone.now", return_value=frozen_now),
+        ):
+            resp = self.client.post(
+                reverse("organization-sponsorship-extend", args=[org.pk]),
+                data={"membership_type": "gold"},
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        messages = [m.message for m in get_messages(resp.wsgi_request)]
+        self.assertIn("This membership has already expired and cannot be extended.", " ".join(messages))
+        self.assertFalse(
+            MembershipRequest.objects.filter(
+                requested_organization=org,
+                status=MembershipRequest.Status.pending,
+            ).exists()
+        )
 
     @override_settings(MEMBERSHIP_EXPIRING_SOON_DAYS=90)
     def test_representative_can_submit_second_org_membership_request_for_other_type(self) -> None:
@@ -2289,7 +2494,7 @@ class OrganizationUserViewsTests(TestCase):
             expires_at=expires_at,
         )
 
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
         with (
@@ -2395,7 +2600,7 @@ class OrganizationUserViewsTests(TestCase):
 
         reviewer = FreeIPAUser(
             "reviewer",
-            {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": []},
+            {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": [], "c": ["US"]},
         )
         self._login_as_freeipa_user("reviewer")
 
@@ -2502,7 +2707,7 @@ class OrganizationUserViewsTests(TestCase):
             {
                 "uid": ["bob"],
                 "mail": ["bob@example.com"],
-                "memberof_group": ["sponsor-group"],
+                "memberof_group": ["sponsor-group"], "c": ["US"],
             },
         )
         self._login_as_freeipa_user("bob")
@@ -2538,7 +2743,7 @@ class OrganizationUserViewsTests(TestCase):
             representative="bob",
         )
 
-        alice = FreeIPAUser("alice", {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []})
+        alice = FreeIPAUser("alice", {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("alice")
 
         with patch("core.backends.FreeIPAUser.get", return_value=alice):
@@ -2677,7 +2882,7 @@ class OrganizationUserViewsTests(TestCase):
             expires_at=expired_at,
         )
 
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
         with patch("core.backends.FreeIPAUser.get", return_value=bob):
@@ -2717,7 +2922,7 @@ class OrganizationUserViewsTests(TestCase):
             representative="bob",
         )
 
-        alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": []})
+        alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("alice")
 
         with patch("core.backends.FreeIPAUser.get", return_value=alice):
@@ -2789,7 +2994,7 @@ class OrganizationUserViewsTests(TestCase):
             principal_name="reviewer",
         )
 
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": []})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("reviewer")
 
         with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
@@ -2868,7 +3073,7 @@ class OrganizationUserViewsTests(TestCase):
         self.assertTrue(MembershipLog.objects.filter(membership_request_id=req.pk).exists())
 
     def test_user_can_create_organization_and_becomes_representative(self) -> None:
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
         with (
@@ -2928,7 +3133,7 @@ class OrganizationUserViewsTests(TestCase):
             },
         )
 
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
         with (
@@ -2979,7 +3184,7 @@ class OrganizationUserViewsTests(TestCase):
             representative="bob",
         )
 
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
         with patch("core.backends.FreeIPAUser.get", return_value=bob):
@@ -3016,8 +3221,8 @@ class OrganizationUserViewsTests(TestCase):
             principal_name="reviewer",
         )
 
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": []})
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": [], "c": ["US"]})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("reviewer")
 
         def fake_get(username: str):
@@ -3058,7 +3263,7 @@ class OrganizationUserViewsTests(TestCase):
         self.assertContains(resp, "Membership Level")
 
     def test_org_create_highlights_contact_tabs_with_validation_errors(self) -> None:
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
         with (

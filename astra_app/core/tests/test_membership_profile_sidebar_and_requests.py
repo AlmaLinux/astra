@@ -444,7 +444,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         from django.utils import timezone
 
-        from core.membership import get_valid_memberships_for_username
+        from core.membership import get_valid_memberships
         from core.models import MembershipLog, MembershipType
 
         MembershipType.objects.update_or_create(
@@ -476,7 +476,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             expires_at=now,
         )
 
-        valid = get_valid_memberships_for_username("alice")
+        valid = get_valid_memberships(username="alice")
         self.assertEqual(valid, [])
 
     def test_user_cannot_request_membership_type_if_already_valid(self) -> None:
