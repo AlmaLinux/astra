@@ -18,8 +18,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from core.backends import FreeIPAUser
 from core.country_codes import (
     country_code_status_from_user_data,
-    country_label_from_code,
-    embargoed_country_codes_from_settings,
+    embargoed_country_match_from_user_data,
 )
 from core.email_context import (
     freeform_message_email_context,
@@ -32,7 +31,11 @@ from core.forms_membership import (
     MembershipRequestUpdateResponsesForm,
     MembershipUpdateExpiryForm,
 )
-from core.membership import get_valid_memberships, remove_user_from_group
+from core.membership import (
+    get_membership_request_eligibility,
+    get_valid_memberships,
+    remove_user_from_group,
+)
 from core.membership_notes import CUSTOS, add_note
 from core.membership_request_workflow import (
     approve_membership_request,
@@ -60,7 +63,6 @@ from core.permissions import (
     has_any_membership_permission,
     json_permission_required_any,
 )
-from core.views_organizations import _can_access_organization
 from core.views_utils import (
     _normalize_str,
     block_action_without_coc,
@@ -70,14 +72,6 @@ from core.views_utils import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _membership_request_target_label(membership_request: MembershipRequest) -> str:
-    if membership_request.requested_username:
-        return membership_request.requested_username
-
-    org = membership_request.requested_organization
-    return org.name if org is not None else (membership_request.requested_organization_name or "organization")
 
 
 def _send_mail_url(
@@ -112,7 +106,7 @@ def _custom_email_recipient_for_request(membership_request: MembershipRequest) -
     Organization.primary_contact_email().
     """
 
-    if membership_request.requested_username:
+    if membership_request.is_user_target:
         return ("users", membership_request.requested_username)
 
     org = membership_request.requested_organization
@@ -188,11 +182,9 @@ def _maybe_custom_email_redirect(
         "membership_type_code": membership_type.code,
     }
 
-    if membership_request.requested_username == "":
+    if membership_request.is_organization_target:
         org = membership_request.requested_organization
-        merged["organization_name"] = (
-            org.name if org is not None else (membership_request.requested_organization_name or "")
-        )
+        merged["organization_name"] = membership_request.organization_display_name
         if org is not None:
             merged.update(organization_sponsor_email_context(organization=org))
 
@@ -276,6 +268,78 @@ def _load_active_membership(
     return None
 
 
+def _load_committee_membership_type(membership_type_code: str) -> MembershipType:
+    normalized_code = _normalize_str(membership_type_code)
+    if not normalized_code:
+        raise Http404("Not found")
+    return get_object_or_404(MembershipType, pk=normalized_code)
+
+
+def _load_active_membership_or_redirect(
+    request: HttpRequest,
+    *,
+    membership_type: MembershipType,
+    username: str | None = None,
+    organization: Organization | None = None,
+    not_found_message: str,
+    redirect_name: str,
+    redirect_kwargs: dict[str, object],
+) -> Membership | HttpResponse:
+    active_membership = _load_active_membership(
+        membership_type=membership_type,
+        username=username,
+        organization=organization,
+    )
+    if active_membership is None:
+        messages.error(request, not_found_message)
+        return redirect(redirect_name, **redirect_kwargs)
+    return active_membership
+
+
+def _membership_group_cn(membership_type: MembershipType) -> str:
+    return str(membership_type.group_cn or "").strip()
+
+
+def _remove_group_membership_if_present(
+    *,
+    request: HttpRequest,
+    user: FreeIPAUser,
+    group_cn: str,
+    redirect_to: str,
+    error_message: str,
+    log_message: str,
+    log_args: tuple[object, ...],
+) -> HttpResponse | None:
+    normalized_group_cn = str(group_cn or "").strip()
+    if not normalized_group_cn or normalized_group_cn not in user.groups_list:
+        return None
+    return _remove_freeipa_group_membership(
+        request=request,
+        user=user,
+        group_cn=normalized_group_cn,
+        redirect_to=redirect_to,
+        error_message=error_message,
+        log_message=log_message,
+        log_args=log_args,
+    )
+
+
+def _parse_expiry_datetime_or_redirect(
+    request: HttpRequest,
+    *,
+    redirect_to: str,
+) -> datetime.datetime | HttpResponse:
+    form = MembershipUpdateExpiryForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, "Invalid expiration date.")
+        return redirect(redirect_to)
+
+    expires_on = form.cleaned_data["expires_on"]
+    # The committee sets an expiration DATE. Interpret that as end-of-day UTC
+    # (single source of truth), and rely on timezone conversion for display.
+    return datetime.datetime.combine(expires_on, datetime.time(23, 59, 59), tzinfo=datetime.UTC)
+
+
 def _load_user_membership(
     request: HttpRequest,
     username: str,
@@ -287,21 +351,26 @@ def _load_user_membership(
     or an ``HttpResponse`` redirect on validation failure.
     """
     username = _normalize_str(username)
-    membership_type_code = _normalize_str(membership_type_code)
-    if not username or not membership_type_code:
+    if not username:
         raise Http404("Not found")
 
-    membership_type = get_object_or_404(MembershipType, pk=membership_type_code)
+    membership_type = _load_committee_membership_type(membership_type_code)
 
     target = FreeIPAUser.get(username)
     if target is None:
         messages.error(request, "Unable to load the requested user from FreeIPA.")
         return redirect("user-profile", username=username)
 
-    active_membership = _load_active_membership(username=username, membership_type=membership_type)
-    if active_membership is None:
-        messages.error(request, "That user does not currently have an active membership of that type.")
-        return redirect("user-profile", username=username)
+    active_membership = _load_active_membership_or_redirect(
+        request,
+        membership_type=membership_type,
+        username=username,
+        not_found_message="That user does not currently have an active membership of that type.",
+        redirect_name="user-profile",
+        redirect_kwargs={"username": username},
+    )
+    if isinstance(active_membership, HttpResponse):
+        return active_membership
 
     return username, membership_type, target
 
@@ -312,19 +381,63 @@ def _load_organization_membership(
     membership_type_code: str,
 ) -> tuple[Organization, MembershipType, Membership] | HttpResponse:
     """Validate and load organization + membership type for committee actions."""
-    membership_type_code = _normalize_str(membership_type_code)
-    if organization_id <= 0 or not membership_type_code:
+    if organization_id <= 0:
         raise Http404("Not found")
 
     organization = get_object_or_404(Organization, pk=organization_id)
-    membership_type = get_object_or_404(MembershipType, pk=membership_type_code)
+    membership_type = _load_committee_membership_type(membership_type_code)
 
-    active_membership = _load_active_membership(organization=organization, membership_type=membership_type)
-    if active_membership is None:
-        messages.error(request, "That organization does not currently have an active sponsorship of that type.")
-        return redirect("organization-detail", organization_id=organization.pk)
+    active_membership = _load_active_membership_or_redirect(
+        request,
+        membership_type=membership_type,
+        organization=organization,
+        not_found_message="That organization does not currently have an active sponsorship of that type.",
+        redirect_name="organization-detail",
+        redirect_kwargs={"organization_id": organization.pk},
+    )
+    if isinstance(active_membership, HttpResponse):
+        return active_membership
 
     return organization, membership_type, active_membership
+
+
+def _membership_target_kwargs(
+    *,
+    username: str | None = None,
+    organization: Organization | None = None,
+) -> dict[str, object]:
+    if organization is not None:
+        return {"target_organization": organization}
+    return {"target_username": str(username or "").strip()}
+
+
+def _remove_organization_representative_group_membership_if_present(
+    *,
+    request: HttpRequest,
+    organization: Organization,
+    membership_type: MembershipType,
+    redirect_to: str,
+    error_message: str,
+    log_message: str,
+) -> HttpResponse | None:
+    group_cn = _membership_group_cn(membership_type)
+    rep_username = str(organization.representative or "").strip()
+    if not group_cn or not rep_username:
+        return None
+
+    representative = FreeIPAUser.get(rep_username)
+    if representative is None:
+        return None
+
+    return _remove_group_membership_if_present(
+        request=request,
+        user=representative,
+        group_cn=group_cn,
+        redirect_to=redirect_to,
+        error_message=error_message,
+        log_message=log_message,
+        log_args=(organization.pk, rep_username, group_cn),
+    )
 
 
 def _remove_freeipa_group_membership(
@@ -370,7 +483,7 @@ def _load_membership_request_for_action(
     redirect_to = _resolve_post_redirect(request, default=reverse("membership-requests"), use_referer=True)
 
     if req.status == already_status:
-        target_label = _membership_request_target_label(req)
+        target_label = req.requested_username if req.is_user_target else (req.organization_display_name or "organization")
         messages.info(request, f"Request for {target_label} is already {already_label}.")
         return redirect(redirect_to)
 
@@ -387,6 +500,19 @@ def _resolve_requested_by(username: str) -> tuple[str, bool]:
     return user.full_name, False
 
 
+def _pending_category_request_exists(
+    *,
+    membership_type: MembershipType,
+    username: str | None,
+    organization: Organization | None,
+) -> bool:
+    eligibility = get_membership_request_eligibility(
+        username=username,
+        organization=organization,
+    )
+    return membership_type.category_id in eligibility.pending_membership_category_ids
+
+
 def membership_request(request: HttpRequest, organization_id: int | None = None) -> HttpResponse:
     username = get_username(request)
     if not username:
@@ -395,7 +521,7 @@ def membership_request(request: HttpRequest, organization_id: int | None = None)
     organization = None
     if organization_id is not None:
         organization = get_object_or_404(Organization, pk=organization_id)
-        if not _can_access_organization(request, organization):
+        if get_username(request) != organization.representative:
             raise Http404("Not found")
 
     is_org_request = organization is not None
@@ -433,8 +559,10 @@ def membership_request(request: HttpRequest, organization_id: int | None = None)
     if blocked is not None:
         return blocked
 
+    target_username = None if is_org_request else username
+
     if request.method == "POST":
-        form = MembershipRequestForm(request.POST, username=username, organization=organization)
+        form = MembershipRequestForm(request.POST, username=target_username, organization=organization)
         if form.is_valid():
             membership_type: MembershipType = form.cleaned_data["membership_type"]
             if not membership_type.enabled:
@@ -446,25 +574,14 @@ def membership_request(request: HttpRequest, organization_id: int | None = None)
             elif not membership_type.group_cn:
                 form.add_error("membership_type", "That membership type is not currently linked to a group.")
             else:
-                existing_filters = {
-                    "membership_type__category_id": membership_type.category_id,
-                    "status__in": [MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
-                }
-                if is_org_request:
-                    existing_filters["requested_organization"] = organization
-                else:
-                    existing_filters["requested_username"] = username
-
-                existing = (
-                    MembershipRequest.objects.filter(**existing_filters)
-                    .order_by("-requested_at")
-                    .first()
-                )
-                if existing is not None:
+                if _pending_category_request_exists(
+                    membership_type=membership_type,
+                    username=target_username,
+                    organization=organization,
+                ):
+                    messages.info(request, "A membership request is already pending for that category.")
                     if is_org_request:
-                        messages.info(request, "A membership request is already pending for that category.")
                         return redirect("organization-detail", organization_id=organization.pk)
-                    messages.info(request, "You already have a pending request in that category.")
                     return redirect("user-profile", username=username)
 
                 responses = form.responses()
@@ -480,31 +597,33 @@ def membership_request(request: HttpRequest, organization_id: int | None = None)
                 record_membership_request_created(
                     membership_request=mr,
                     actor_username=username,
-                    send_submitted_email=not is_org_request,
+                    send_submitted_email=True,
                 )
 
                 try:
                     if not is_org_request:
-                        status = country_code_status_from_user_data(fu._user_data)
-                        if status.is_valid and status.code in embargoed_country_codes_from_settings():
+                        embargoed_match = embargoed_country_match_from_user_data(user_data=fu._user_data)
+                        if embargoed_match is not None:
                             add_note(
                                 membership_request=mr,
                                 username=CUSTOS,
                                 content=(
                                     "This user's declared country, "
-                                    f"{country_label_from_code(status.code)}, is on the list of embargoed countries."
+                                    f"{embargoed_match.label}, is on the list of embargoed countries."
                                 ),
                             )
                     else:
                         if representative_user is not None:
-                            status = country_code_status_from_user_data(representative_user._user_data)
-                            if status.is_valid and status.code in embargoed_country_codes_from_settings():
+                            embargoed_match = embargoed_country_match_from_user_data(
+                                user_data=representative_user._user_data,
+                            )
+                            if embargoed_match is not None:
                                 add_note(
                                     membership_request=mr,
                                     username=CUSTOS,
                                     content=(
                                         "This organization's representative's declared country, "
-                                        f"{country_label_from_code(status.code)}, is on the list of embargoed countries."
+                                        f"{embargoed_match.label}, is on the list of embargoed countries."
                                     ),
                                 )
                 except Exception:
@@ -518,14 +637,29 @@ def membership_request(request: HttpRequest, organization_id: int | None = None)
                 if is_org_request:
                     redirect_target = "organization-detail"
                     redirect_kwargs = {"organization_id": organization.pk}
-                    success_message = "Membership request submitted for review."
                 else:
                     redirect_target = "user-profile"
                     redirect_kwargs = {"username": username}
-                    success_message = "Membership request submitted."
 
-                messages.success(request, success_message)
+                messages.success(request, "Membership request submitted for review.")
                 return redirect(redirect_target, **redirect_kwargs)
+        else:
+            posted_membership_type_code = _normalize_str(request.POST.get("membership_type"))
+            if posted_membership_type_code:
+                posted_membership_type = (
+                    MembershipType.objects.select_related("category")
+                    .filter(pk=posted_membership_type_code)
+                    .first()
+                )
+                if (
+                    posted_membership_type is not None
+                    and _pending_category_request_exists(
+                        membership_type=posted_membership_type,
+                        username=target_username,
+                        organization=organization,
+                    )
+                ):
+                    messages.info(request, "A membership request is already pending for that category.")
     else:
         if is_org_request and not prefill_membership_type:
             prefill_membership_type = (
@@ -542,7 +676,7 @@ def membership_request(request: HttpRequest, organization_id: int | None = None)
             )
 
         form = MembershipRequestForm(
-            username=username,
+            username=target_username,
             organization=organization,
             initial={"membership_type": prefill_membership_type},
         )
@@ -639,7 +773,9 @@ def membership_request_self(request: HttpRequest, pk: int) -> HttpResponse:
         # For non-editable requests (pending/accepted/etc), render a read-only version of the
         # responses using the same form visualization as the on-hold update screen.
         has_additional_info = any(
-            isinstance(item, dict) and "Additional information" in item for item in (req.responses or [])
+            isinstance(item, dict)
+            and any(str(key).strip().lower() == "additional information" for key in item)
+            for item in (req.responses or [])
         )
         if not has_additional_info and "q_additional_information" in form.fields:
             del form.fields["q_additional_information"]
@@ -817,7 +953,7 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
             requested_by_username = requested_log.actor_username if requested_log is not None else ""
             requested_by_full_name, requested_by_deleted = _resolve_requested_by(requested_by_username)
 
-            if r.requested_username == "":
+            if r.is_organization_target:
                 org = r.requested_organization
                 if org is None:
                     # If the org is gone, the committee can't take action on it.
@@ -908,22 +1044,22 @@ def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
         target_deleted = target_user is None
         if target_user is not None:
             target_full_name = target_user.full_name
-            status = country_code_status_from_user_data(target_user._user_data)
-            embargoed_country_codes = embargoed_country_codes_from_settings()
-            if status.is_valid and status.code in embargoed_country_codes:
-                embargoed_country_code = status.code
-                embargoed_country_label = country_label_from_code(status.code)
+            embargoed_match = embargoed_country_match_from_user_data(user_data=target_user._user_data)
+            if embargoed_match is not None:
+                embargoed_country_code = embargoed_match.code
+                embargoed_country_label = embargoed_match.label
     else:
         org = req.requested_organization
         representative_username = str(org.representative or "").strip() if org is not None else ""
         if representative_username:
             representative_user = FreeIPAUser.get(representative_username)
             if representative_user is not None:
-                status = country_code_status_from_user_data(representative_user._user_data)
-                embargoed_country_codes = embargoed_country_codes_from_settings()
-                if status.is_valid and status.code in embargoed_country_codes:
-                    embargoed_country_code = status.code
-                    embargoed_country_label = country_label_from_code(status.code)
+                embargoed_match = embargoed_country_match_from_user_data(
+                    user_data=representative_user._user_data,
+                )
+                if embargoed_match is not None:
+                    embargoed_country_code = embargoed_match.code
+                    embargoed_country_label = embargoed_match.label
 
     requested_log = (
         req.logs.filter(action=MembershipLog.Action.requested)
@@ -1315,7 +1451,7 @@ def membership_request_approve(request: HttpRequest, pk: int) -> HttpResponse:
         messages.error(request, "Failed to approve the request.")
         return redirect(redirect_to)
 
-    target_label = _membership_request_target_label(req)
+    target_label = req.requested_username if req.is_user_target else (req.organization_display_name or "organization")
 
     template_name = settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME
     if membership_type.acceptance_template_id is not None:
@@ -1325,7 +1461,7 @@ def membership_request_approve(request: HttpRequest, pk: int) -> HttpResponse:
 
     # For user memberships, include group_cn in custom email context.
     approve_extras: dict[str, str] = {}
-    if req.requested_username:
+    if req.is_user_target:
         approve_extras["group_cn"] = membership_type.group_cn
 
     return _maybe_custom_email_redirect(
@@ -1363,7 +1499,7 @@ def membership_request_reject(request: HttpRequest, pk: int) -> HttpResponse:
         send_rejected_email=not custom_email,
     )
 
-    target_label = _membership_request_target_label(req)
+    target_label = req.requested_username if req.is_user_target else (req.organization_display_name or "organization")
     messages.success(request, f"Rejected request for {target_label}.")
 
     if email_error is not None:
@@ -1418,7 +1554,7 @@ def membership_request_rfi(request: HttpRequest, pk: int) -> HttpResponse:
     if email_redirect is not None:
         return email_redirect
 
-    target_label = _membership_request_target_label(req)
+    target_label = req.requested_username if req.is_user_target else (req.organization_display_name or "organization")
     messages.success(request, f"Sent Request for Information for {target_label}.")
     if email_error is not None:
         messages.error(request, "Request was put on hold, but the email could not be sent.")
@@ -1439,90 +1575,88 @@ def membership_request_ignore(request: HttpRequest, pk: int) -> HttpResponse:
         actor_username=get_username(request),
     )
 
-    target_label = _membership_request_target_label(req)
+    target_label = req.requested_username if req.is_user_target else (req.organization_display_name or "organization")
     messages.success(request, f"Ignored request for {target_label}.")
     return redirect(redirect_to)
 
 
 @permission_required(ASTRA_CHANGE_MEMBERSHIP, login_url=reverse_lazy("users"))
-def membership_set_expiry(request: HttpRequest, username: str, membership_type_code: str) -> HttpResponse:
+def membership_set_expiry(
+    request: HttpRequest,
+    username: str = "",
+    membership_type_code: str = "",
+    organization_id: int | None = None,
+) -> HttpResponse:
     if request.method != "POST":
         raise Http404("Not found")
 
-    result = _load_user_membership(request, username, membership_type_code)
-    if isinstance(result, HttpResponse):
-        return result
-    username, membership_type, target = result
+    if organization_id is not None:
+        result = _load_organization_membership(request, organization_id, membership_type_code)
+        if isinstance(result, HttpResponse):
+            return result
+        organization, membership_type, _active_membership = result
 
-    form = MembershipUpdateExpiryForm(request.POST)
-    if not form.is_valid():
-        messages.error(request, "Invalid expiration date.")
-        return redirect("user-profile", username=username)
+        redirect_to = _resolve_post_redirect(
+            request,
+            default=reverse("organization-detail", kwargs={"organization_id": organization.pk}),
+            use_referer=True,
+        )
 
-    expires_on = form.cleaned_data["expires_on"]
+        expires_at = _parse_expiry_datetime_or_redirect(request, redirect_to=redirect_to)
+        if isinstance(expires_at, HttpResponse):
+            return expires_at
 
-    # The committee sets an expiration DATE. Interpret that as end-of-day UTC
-    # (single source of truth), and rely on timezone conversion for display.
-    expires_at = datetime.datetime.combine(expires_on, datetime.time(23, 59, 59), tzinfo=datetime.UTC)
-
-    # If the committee sets expiry to now/past, ensure access is revoked immediately.
-    now = timezone.now()
-    redirect_to = reverse("user-profile", kwargs={"username": username})
-    if expires_at <= now:
-        group_cn = str(membership_type.group_cn or "").strip()
-        if group_cn and group_cn in target.groups_list:
-            error_redirect = _remove_freeipa_group_membership(
+        should_terminate_now = expires_at.date() <= timezone.localdate()
+        if should_terminate_now:
+            error_redirect = _remove_organization_representative_group_membership_if_present(
                 request=request,
-                user=target,
-                group_cn=group_cn,
+                organization=organization,
+                membership_type=membership_type,
                 redirect_to=redirect_to,
-                error_message="Failed to remove the user from the FreeIPA group.",
+                error_message="Failed to remove the representative from the FreeIPA group.",
                 log_message=(
-                    "membership_set_expiry: failed to remove user from group username=%s "
-                    "membership_type=%s group_cn=%s"
+                    "organization_sponsorship_set_expiry: failed to remove representative from group "
+                    "org_id=%s rep=%r group_cn=%r"
                 ),
-                log_args=(username, membership_type.code, group_cn),
             )
             if error_redirect is not None:
                 return error_redirect
 
-    MembershipLog.create_for_expiry_change(
-        actor_username=get_username(request),
-        target_username=username,
-        membership_type=membership_type,
-        expires_at=expires_at,
-    )
+        MembershipLog.create_for_expiry_change(
+            actor_username=get_username(request),
+            membership_type=membership_type,
+            expires_at=expires_at,
+            target_organization=organization,
+        )
 
-    if expires_at <= now:
-        Membership.objects.filter(target_username=username, membership_type=membership_type).delete()
+        if should_terminate_now:
+            messages.success(request, "Sponsorship expiration updated.")
+            return redirect(redirect_to)
 
-    messages.success(request, "Membership expiration updated.")
-    return redirect("user-profile", username=username)
-
-
-@permission_required(ASTRA_DELETE_MEMBERSHIP, login_url=reverse_lazy("users"))
-def membership_terminate(request: HttpRequest, username: str, membership_type_code: str) -> HttpResponse:
-    if request.method != "POST":
-        raise Http404("Not found")
+        messages.success(request, "Sponsorship expiration updated.")
+        return redirect(redirect_to)
 
     result = _load_user_membership(request, username, membership_type_code)
     if isinstance(result, HttpResponse):
         return result
-    username, membership_type, target = result
+    username, membership_type, _target = result
+    redirect_to = reverse("user-profile", kwargs={"username": username})
 
-    # Keep FreeIPA group membership as the primary source of truth for access.
-    # Termination must remove group membership immediately; deleting the Membership
-    # row alone is not sufficient.
-    group_cn = str(membership_type.group_cn or "").strip()
-    if group_cn and group_cn in target.groups_list:
-        error_redirect = _remove_freeipa_group_membership(
+    expires_at = _parse_expiry_datetime_or_redirect(request, redirect_to=redirect_to)
+    if isinstance(expires_at, HttpResponse):
+        return expires_at
+
+    should_terminate_now = expires_at.date() <= timezone.localdate()
+    if should_terminate_now:
+        group_cn = _membership_group_cn(membership_type)
+        error_redirect = _remove_group_membership_if_present(
             request=request,
-            user=target,
+            user=_target,
             group_cn=group_cn,
-            redirect_to=reverse("user-profile", kwargs={"username": username}),
+            redirect_to=redirect_to,
             error_message="Failed to remove the user from the FreeIPA group.",
             log_message=(
-                "membership_terminate: failed to remove user from group username=%s "
+                "membership_set_expiry: failed to remove user from group username=%s "
                 "membership_type=%s group_cn=%s"
             ),
             log_args=(username, membership_type.code, group_cn),
@@ -1530,126 +1664,92 @@ def membership_terminate(request: HttpRequest, username: str, membership_type_co
         if error_redirect is not None:
             return error_redirect
 
-    MembershipLog.create_for_termination(
-        actor_username=get_username(request),
-        target_username=username,
-        membership_type=membership_type,
-    )
-
-    messages.success(request, "Membership terminated.")
-    return redirect("user-profile", username=username)
-
-
-@permission_required(ASTRA_CHANGE_MEMBERSHIP, login_url=reverse_lazy("users"))
-def organization_sponsorship_set_expiry(request: HttpRequest, organization_id: int, membership_type_code: str) -> HttpResponse:
-    if request.method != "POST":
-        raise Http404("Not found")
-
-    result = _load_organization_membership(request, organization_id, membership_type_code)
-    if isinstance(result, HttpResponse):
-        return result
-    organization, membership_type, _active_membership = result
-    now = timezone.now()
-
-    redirect_to = _resolve_post_redirect(
-        request,
-        default=reverse("organization-detail", kwargs={"organization_id": organization.pk}),
-        use_referer=True,
-    )
-
-    form = MembershipUpdateExpiryForm(request.POST)
-    if not form.is_valid():
-        messages.error(request, "Invalid expiration date.")
-        return redirect(redirect_to)
-
-    expires_on = form.cleaned_data["expires_on"]
-    expires_at = datetime.datetime.combine(expires_on, datetime.time(23, 59, 59), tzinfo=datetime.UTC)
-
-    # If the committee sets expiry to now/past, ensure access is revoked immediately.
-    if expires_at <= now:
-        group_cn = str(membership_type.group_cn or "").strip()
-        rep_username = str(organization.representative or "").strip()
-        if group_cn and rep_username:
-            rep = FreeIPAUser.get(rep_username)
-            if rep is not None and group_cn in rep.groups_list:
-                error_redirect = _remove_freeipa_group_membership(
-                    request=request,
-                    user=rep,
-                    group_cn=group_cn,
-                    redirect_to=redirect_to,
-                    error_message="Failed to remove the representative from the FreeIPA group.",
-                    log_message=(
-                        "organization_sponsorship_set_expiry: failed to remove representative from group "
-                        "org_id=%s rep=%r group_cn=%r"
-                    ),
-                    log_args=(organization.pk, rep_username, group_cn),
-                )
-                if error_redirect is not None:
-                    return error_redirect
-
-        Membership.objects.filter(
-            target_organization=organization,
-            membership_type=membership_type,
-        ).update(expires_at=expires_at)
-        MembershipLog.create_for_expiry_change(
-            actor_username=get_username(request),
-            target_organization=organization,
-            membership_type=membership_type,
-            expires_at=expires_at,
-        )
-
-        messages.success(request, "Sponsorship expiration updated.")
-        return redirect(redirect_to)
-
     MembershipLog.create_for_expiry_change(
         actor_username=get_username(request),
-        target_organization=organization,
         membership_type=membership_type,
         expires_at=expires_at,
+        target_username=username,
     )
 
-    messages.success(request, "Sponsorship expiration updated.")
+    if should_terminate_now:
+        messages.success(request, "Membership expiration updated.")
+        return redirect(redirect_to)
+
+    messages.success(request, "Membership expiration updated.")
     return redirect(redirect_to)
 
 
 @permission_required(ASTRA_DELETE_MEMBERSHIP, login_url=reverse_lazy("users"))
-def organization_sponsorship_terminate(request: HttpRequest, organization_id: int, membership_type_code: str) -> HttpResponse:
+def membership_terminate(
+    request: HttpRequest,
+    username: str = "",
+    membership_type_code: str = "",
+    organization_id: int | None = None,
+    redirect_to: str | None = None,
+) -> HttpResponse:
     if request.method != "POST":
         raise Http404("Not found")
 
-    result = _load_organization_membership(request, organization_id, membership_type_code)
+    if organization_id is not None:
+        result = _load_organization_membership(request, organization_id, membership_type_code)
+        if isinstance(result, HttpResponse):
+            return result
+        organization, membership_type, _active_membership = result
+        resolved_redirect = redirect_to or reverse("organization-detail", kwargs={"organization_id": organization.pk})
+
+        error_redirect = _remove_organization_representative_group_membership_if_present(
+            request=request,
+            organization=organization,
+            membership_type=membership_type,
+            redirect_to=resolved_redirect,
+            error_message="Failed to remove the representative from the FreeIPA group.",
+            log_message=(
+                "organization_sponsorship_terminate: failed to remove representative from group "
+                "org_id=%s rep=%r group_cn=%r"
+            ),
+        )
+        if error_redirect is not None:
+            return error_redirect
+
+        MembershipLog.create_for_termination(
+            actor_username=get_username(request),
+            membership_type=membership_type,
+            target_organization=organization,
+        )
+
+        messages.success(request, "Sponsorship terminated.")
+        return redirect(resolved_redirect)
+
+    result = _load_user_membership(request, username, membership_type_code)
     if isinstance(result, HttpResponse):
         return result
-    organization, membership_type, _active_membership = result
+    username, membership_type, target = result
+    resolved_redirect = redirect_to or reverse("user-profile", kwargs={"username": username})
 
-    group_cn = str(membership_type.group_cn or "").strip()
-    rep_username = str(organization.representative or "").strip()
-    if group_cn and rep_username:
-        rep = FreeIPAUser.get(rep_username)
-        if rep is not None and group_cn in rep.groups_list:
-            error_redirect = _remove_freeipa_group_membership(
-                request=request,
-                user=rep,
-                group_cn=group_cn,
-                redirect_to=reverse("organization-detail", kwargs={"organization_id": organization.pk}),
-                error_message="Failed to remove the representative from the FreeIPA group.",
-                log_message=(
-                    "organization_sponsorship_terminate: failed to remove representative from group "
-                    "org_id=%s rep=%r group_cn=%r"
-                ),
-                log_args=(organization.pk, rep_username, group_cn),
-            )
-            if error_redirect is not None:
-                return error_redirect
+    group_cn = _membership_group_cn(membership_type)
+    error_redirect = _remove_group_membership_if_present(
+        request=request,
+        user=target,
+        group_cn=group_cn,
+        redirect_to=resolved_redirect,
+        error_message="Failed to remove the user from the FreeIPA group.",
+        log_message=(
+            "membership_terminate: failed to remove user from group username=%s "
+            "membership_type=%s group_cn=%s"
+        ),
+        log_args=(username, membership_type.code, group_cn),
+    )
+    if error_redirect is not None:
+        return error_redirect
 
     MembershipLog.create_for_termination(
         actor_username=get_username(request),
-        target_organization=organization,
         membership_type=membership_type,
+        target_username=username,
     )
 
-    messages.success(request, "Sponsorship terminated.")
-    return redirect("organization-detail", organization_id=organization.pk)
+    messages.success(request, "Membership terminated.")
+    return redirect(resolved_redirect)
 
 
 @user_passes_test(has_any_membership_permission, login_url=reverse_lazy("users"))

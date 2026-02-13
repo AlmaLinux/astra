@@ -1,0 +1,27 @@
+{% comment %}
+Reusable membership-request responses block.
+
+Expected context:
+- request_obj: MembershipRequest-like object with .responses
+- organization: optional organization object with .additional_information
+{% endcomment %}
+
+{% load core_membership_responses %}
+
+{% if as_details %}
+  <details class="mt-2">
+    <summary class="small text-muted">Request responses</summary>
+    <div class="mt-2">
+{% endif %}
+
+{% for item in request_obj.responses %}
+  {% for k,v in item.items %}
+    <div class="small text-muted font-weight-bold">{{ k }}</div>
+    <div class="small" style="white-space: pre-wrap;">{{ v|membership_response_value:k }}</div>
+  {% endfor %}
+{% endfor %}
+
+{% if as_details %}
+    </div>
+  </details>
+{% endif %}

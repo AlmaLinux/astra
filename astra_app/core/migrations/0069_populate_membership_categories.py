@@ -11,7 +11,6 @@ def populate_categories(apps, schema_editor):
     MembershipTypeCategory = apps.get_model("core", "MembershipTypeCategory")
     MembershipType = apps.get_model("core", "MembershipType")
     Membership = apps.get_model("core", "Membership")
-    Organization = apps.get_model("core", "Organization")
     OrganizationSponsorship = apps.get_model("core", "OrganizationSponsorship")
 
     # Step 1: Create category rows.

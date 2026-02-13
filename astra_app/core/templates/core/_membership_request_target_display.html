@@ -1,0 +1,28 @@
+{% comment %}
+Shared target display primitive for MembershipRequest user/org targets.
+
+Expected context:
+- req: MembershipRequest
+- full_name: optional full name for user targets
+- target_deleted: optional bool marker for deleted user targets
+{% endcomment %}
+
+{% if req.is_organization_target %}
+  {% if req.requested_organization %}
+    <a href="{% url 'organization-detail' req.requested_organization.pk %}">{{ req.requested_organization.name }}</a>
+  {% else %}
+    <span>{{ req.organization_display_name }}</span>
+    <span class="text-muted">(deleted)</span>
+  {% endif %}
+{% elif req.is_user_target %}
+  <a href="{% url 'user-profile' req.requested_username %}">
+    {% if full_name %}
+      {{ full_name }} <span class="text-muted small">({{ req.requested_username }})</span>
+    {% else %}
+      {{ req.requested_username }}
+    {% endif %}
+  </a>
+  {% if target_deleted %}
+    <span class="text-muted">(deleted)</span>
+  {% endif %}
+{% endif %}

@@ -1,5 +1,6 @@
 
 import datetime
+from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import parse_qs, quote, urlsplit
 
@@ -16,10 +17,18 @@ from core.permissions import (
     ASTRA_CHANGE_MEMBERSHIP,
     ASTRA_DELETE_MEMBERSHIP,
     ASTRA_VIEW_MEMBERSHIP,
+    ASTRA_VIEW_USER_DIRECTORY,
 )
+from core.tests.utils_test_data import ensure_core_categories, ensure_email_templates
 
 
 class MembershipRequestsFlowTests(TestCase):
+    @classmethod
+    def setUpTestData(cls) -> None:
+        super().setUpTestData()
+        ensure_core_categories()
+        ensure_email_templates()
+
     def setUp(self) -> None:
         super().setUp()
 
@@ -101,6 +110,103 @@ class MembershipRequestsFlowTests(TestCase):
         self.assertNotIn("displayname", kwargs["context"])
         self.assertEqual(kwargs["context"]["membership_type"], "Individual")
 
+    def test_user_membership_request_success_message_matches_org_flow(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "acceptance_template": None,
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["alice@example.com"],
+                "fasstatusnote": ["US"],
+                "memberof_group": [],
+            },
+        )
+        self._login_as_freeipa_user("alice")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.views_membership.block_action_without_coc", return_value=None),
+            patch("post_office.mail.send", autospec=True),
+        ):
+            resp = self.client.post(
+                reverse("membership-request"),
+                data={
+                    "membership_type": "individual",
+                    "q_contributions": "I contributed docs and CI improvements.",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        messages = [m.message for m in get_messages(resp.wsgi_request)]
+        self.assertIn("Membership request submitted for review.", messages)
+
+    def test_user_membership_request_duplicate_category_message_matches_org_flow(self) -> None:
+        from core.models import MembershipRequest, MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "acceptance_template": None,
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.pending,
+        )
+
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["alice@example.com"],
+                "fasstatusnote": ["US"],
+                "memberof_group": [],
+            },
+        )
+        self._login_as_freeipa_user("alice")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.views_membership.block_action_without_coc", return_value=None),
+            patch("core.views_membership.block_action_without_country_code", return_value=None),
+        ):
+            resp = self.client.post(
+                reverse("membership-request"),
+                data={
+                    "membership_type": "individual",
+                    "q_contributions": "Another request should be blocked.",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        messages = [m.message for m in get_messages(resp.wsgi_request)]
+        self.assertIn("A membership request is already pending for that category.", messages)
+
     def test_membership_request_requires_signed_coc(self) -> None:
         from core.backends import FreeIPAFASAgreement
         from core.models import MembershipRequest, MembershipType
@@ -157,7 +263,7 @@ class MembershipRequestsFlowTests(TestCase):
         self.assertEqual(resp["Location"], expected)
         self.assertEqual(MembershipRequest.objects.count(), 0)
 
-    def test_membership_request_form_hides_membership_types_with_pending_request(self) -> None:
+    def test_membership_request_form_uses_eligibility_helper_as_pending_ssot(self) -> None:
         from core.models import MembershipRequest, MembershipType
 
         MembershipType.objects.update_or_create(
@@ -198,15 +304,79 @@ class MembershipRequestsFlowTests(TestCase):
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=alice),
-            patch("core.forms_membership.get_valid_membership_type_codes_for_username", return_value=set()),
-            patch("core.forms_membership.get_extendable_membership_type_codes_for_username", return_value=set()),
+            patch(
+                "core.forms_membership.get_membership_request_eligibility",
+                return_value=SimpleNamespace(
+                    blocked_membership_type_codes=set(),
+                    pending_membership_category_ids=set(),
+                ),
+            ),
             patch("core.views_utils.has_signed_coc", return_value=True),
         ):
             resp = self.client.get(reverse("membership-request"))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertNotContains(resp, 'value="individual"')
+        self.assertContains(resp, 'value="individual"')
         self.assertContains(resp, 'value="mirror"')
+
+    def test_membership_request_post_blocks_when_eligibility_marks_category_under_review(self) -> None:
+        from core.models import MembershipRequest, MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["alice@example.com"],
+                "fasstatusnote": ["US"],
+                "memberof_group": [],
+            },
+        )
+        self._login_as_freeipa_user("alice")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.views_membership.block_action_without_coc", return_value=None),
+            patch("core.views_membership.block_action_without_country_code", return_value=None),
+            patch(
+                "core.views_membership.get_membership_request_eligibility",
+                create=True,
+                return_value=SimpleNamespace(
+                    blocked_membership_type_codes=set(),
+                    pending_membership_category_ids={"individual"},
+                ),
+            ),
+        ):
+            resp = self.client.post(
+                reverse("membership-request"),
+                data={
+                    "membership_type": "individual",
+                    "q_contributions": "Please review.",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        messages = [m.message for m in get_messages(resp.wsgi_request)]
+        self.assertIn("A membership request is already pending for that category.", messages)
+        self.assertFalse(
+            MembershipRequest.objects.filter(
+                requested_username="alice",
+                membership_type_id="individual",
+            ).exists()
+        )
 
     def test_membership_request_blocks_category_with_pending_request(self) -> None:
         from core.models import MembershipRequest, MembershipType, MembershipTypeCategory
@@ -1771,6 +1941,12 @@ class MembershipRequestsFlowTests(TestCase):
             },
         )
 
+        FreeIPAPermissionGrant.objects.update_or_create(
+            permission=ASTRA_VIEW_USER_DIRECTORY,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
         self._login_as_freeipa_user("reviewer")
         with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
             with patch("core.views_users.FreeIPAUser.all", autospec=True, return_value=[]):
@@ -2178,6 +2354,11 @@ class MembershipRequestsFlowTests(TestCase):
 
 
 class OrgApprovalTransactionTests(TransactionTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        ensure_core_categories()
+        ensure_email_templates()
+
     def test_org_approval_runs_in_transaction(self) -> None:
         from core.membership_request_workflow import approve_membership_request
         from core.models import MembershipRequest, MembershipType, MembershipTypeCategory, Organization

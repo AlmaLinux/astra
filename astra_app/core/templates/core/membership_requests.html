@@ -1,7 +1,6 @@
 {% extends 'core/base.html' %}
 
 {% load core_membership_notes %}
-{% load core_membership_responses %}
 
 {% block title %}Membership Requests{% endblock %}
 
@@ -71,29 +70,7 @@
               <td>
                 {{ r.membership_type.name }}
 
-                {% if r.responses %}
-                  <details class="mt-2">
-                    <summary class="small text-muted">Request responses</summary>
-                    <div class="mt-2">
-                      <div class="mt-2">
-                        {% for item in r.responses %}
-                          {% for k,v in item.items %}
-                            <div class="small text-muted font-weight-bold">{{ k }}</div>
-                            <div class="small" style="white-space: pre-wrap;">{{ v|membership_response_value:k }}</div>
-                          {% endfor %}
-                        {% endfor %}
-                      </div>
-                    </div>
-                  </details>
-                {% elif row.organization and row.organization.additional_information %}
-                  <details class="mt-2">
-                    <summary class="small text-muted">Request responses</summary>
-                    <div class="mt-2">
-                      <div class="small text-muted font-weight-bold">Additional Information</div>
-                      <div class="small" style="white-space: pre-wrap;">{{ row.organization.additional_information }}</div>
-                    </div>
-                  </details>
-                {% endif %}
+                {% include 'core/_membership_request_responses.html' with request_obj=r organization=row.organization as_details=True %}
 
               </td>
               <td class="text-right">

@@ -1,6 +1,7 @@
 
 from unittest.mock import patch
 
+from django.conf import settings
 from django.test import TestCase
 from post_office.models import Email
 
@@ -10,12 +11,22 @@ from core.membership_request_workflow import (
     record_membership_request_created,
     reject_membership_request,
 )
-from core.models import MembershipRequest, MembershipType, Note
+from core.models import MembershipRequest, MembershipType, MembershipTypeCategory, Note, Organization
+from core.tests.utils_test_data import ensure_email_templates
 
 
 class MembershipNotesActionTests(TestCase):
     def setUp(self) -> None:
         super().setUp()
+        ensure_email_templates()
+        MembershipTypeCategory.objects.update_or_create(
+            pk="individual",
+            defaults={
+                "is_individual": True,
+                "is_organization": False,
+                "sort_order": 0,
+            },
+        )
         MembershipType.objects.update_or_create(
             code="individual",
             defaults={
@@ -235,3 +246,105 @@ class MembershipNotesActionTests(TestCase):
                 action={"type": "request_ignored"},
             ).exists()
         )
+
+    def test_org_request_created_sends_submitted_email_to_representative(self) -> None:
+        organization = Organization.objects.create(
+            name="Acme",
+            representative="org-rep",
+            business_contact_email="fallback@example.com",
+        )
+        req = MembershipRequest.objects.create(
+            requested_organization=organization,
+            membership_type_id="individual",
+        )
+
+        rep = type(
+            "_Rep",
+            (),
+            {
+                "username": "org-rep",
+                "email": "rep@example.com",
+                "first_name": "Org",
+                "last_name": "Rep",
+                "full_name": "Org Rep",
+            },
+        )()
+
+        with (
+            patch("core.membership_request_workflow.FreeIPAUser.get", return_value=rep),
+            patch("core.membership_request_workflow.post_office.mail.send") as send_mail,
+        ):
+            record_membership_request_created(
+                membership_request=req,
+                actor_username="reviewer",
+                send_submitted_email=True,
+            )
+
+        send_mail.assert_called_once()
+        _args, kwargs = send_mail.call_args
+        self.assertEqual(kwargs.get("recipients"), ["rep@example.com"])
+        self.assertEqual(kwargs.get("template"), settings.MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME)
+
+    def test_org_request_created_falls_back_to_primary_contact_when_representative_email_missing(self) -> None:
+        organization = Organization.objects.create(
+            name="Acme",
+            representative="org-rep",
+            business_contact_email="fallback@example.com",
+        )
+        req = MembershipRequest.objects.create(
+            requested_organization=organization,
+            membership_type_id="individual",
+        )
+
+        rep = type(
+            "_Rep",
+            (),
+            {
+                "username": "org-rep",
+                "email": "",
+                "first_name": "",
+                "last_name": "",
+                "full_name": "",
+            },
+        )()
+
+        with (
+            patch("core.membership_request_workflow.FreeIPAUser.get", return_value=rep),
+            patch("core.membership_request_workflow.post_office.mail.send") as send_mail,
+        ):
+            record_membership_request_created(
+                membership_request=req,
+                actor_username="reviewer",
+                send_submitted_email=True,
+            )
+
+        send_mail.assert_called_once()
+        _args, kwargs = send_mail.call_args
+        self.assertEqual(kwargs.get("recipients"), ["fallback@example.com"])
+        self.assertEqual(kwargs.get("template"), settings.MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME)
+
+    def test_org_request_created_falls_back_to_primary_contact_when_representative_lookup_fails(self) -> None:
+        organization = Organization.objects.create(
+            name="Acme",
+            representative="org-rep",
+            business_contact_email="fallback@example.com",
+        )
+        req = MembershipRequest.objects.create(
+            requested_organization=organization,
+            membership_type_id="individual",
+        )
+
+        with (
+            patch("core.membership_request_workflow.FreeIPAUser.get", side_effect=RuntimeError("ipa down")),
+            patch("core.membership_request_workflow.post_office.mail.send") as send_mail,
+        ):
+            record_membership_request_created(
+                membership_request=req,
+                actor_username="reviewer",
+                send_submitted_email=True,
+            )
+
+        send_mail.assert_called_once()
+        _args, kwargs = send_mail.call_args
+        self.assertEqual(kwargs.get("recipients"), ["fallback@example.com"])
+        self.assertEqual(kwargs.get("template"), settings.MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME)

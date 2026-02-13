@@ -347,39 +347,27 @@ def _group_timeline_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any
     return groups
 
 
-@register.simple_tag(takes_context=True)
-def membership_notes_aggregate_for_user(
-    context: dict[str, Any],
-    username: str,
+def _render_membership_notes_aggregate(
     *,
-    compact: bool = True,
-    next_url: str | None = None,
-) -> SafeString | str:
+    context: dict[str, Any],
+    notes: list[Note],
+    dom_key: str,
+    compact: bool,
+    next_url: str | None,
+    aggregate_target_type: str,
+    aggregate_target: str,
+) -> SafeString:
     request = context.get("request")
     http_request = request if isinstance(request, HttpRequest) else None
 
-    membership_can_view = bool(context.get("membership_can_view", False))
-    if not membership_can_view:
-        return ""
-
-    normalized_username = str(username or "").strip()
-    if not normalized_username:
-        return ""
-
-    notes = list(
-        Note.objects.filter(membership_request__requested_username=normalized_username).order_by("timestamp", "pk")
-    )
     approvals, disapprovals = tally_last_votes(notes)
-
-    dom_id = _timeline_dom_id(f"user:{normalized_username}")
-    dummy_request = SimpleNamespace(pk=dom_id)
+    dummy_request = SimpleNamespace(pk=_timeline_dom_id(dom_key))
 
     resolved_next_url = next_url
     if resolved_next_url is None:
         resolved_next_url = http_request.get_full_path() if http_request is not None else ""
 
     post_url = reverse("membership-notes-aggregate-note-add")
-
     email_modals = _email_modals_for_notes(notes)
     email_modal_ids = {m["email_id"]: m["modal_id"] for m in email_modals}
 
@@ -400,14 +388,63 @@ def membership_notes_aggregate_for_user(
             "disapprovals": disapprovals,
             "can_vote": False,
             "post_url": post_url,
-            "aggregate_target_type": "user",
-            "aggregate_target": normalized_username,
+            "aggregate_target_type": aggregate_target_type,
+            "aggregate_target": aggregate_target,
             "next_url": resolved_next_url,
             "email_modals": email_modals,
         },
         request=http_request,
     )
     return mark_safe(html)
+
+
+def _membership_notes_aggregate_for_target(
+    context: dict[str, Any],
+    *,
+    notes_filter: dict[str, Any],
+    dom_key: str,
+    compact: bool,
+    next_url: str | None,
+    aggregate_target_type: str,
+    aggregate_target: str,
+) -> SafeString | str:
+    membership_can_view = bool(context.get("membership_can_view", False))
+    if not membership_can_view:
+        return ""
+
+    notes = list(Note.objects.filter(**notes_filter).order_by("timestamp", "pk"))
+    return _render_membership_notes_aggregate(
+        context=context,
+        notes=notes,
+        dom_key=dom_key,
+        compact=compact,
+        next_url=next_url,
+        aggregate_target_type=aggregate_target_type,
+        aggregate_target=aggregate_target,
+    )
+
+
+@register.simple_tag(takes_context=True)
+def membership_notes_aggregate_for_user(
+    context: dict[str, Any],
+    username: str,
+    *,
+    compact: bool = True,
+    next_url: str | None = None,
+) -> SafeString | str:
+    normalized_username = str(username or "").strip()
+    if not normalized_username:
+        return ""
+
+    return _membership_notes_aggregate_for_target(
+        context=context,
+        notes_filter={"membership_request__requested_username": normalized_username},
+        dom_key=f"user:{normalized_username}",
+        compact=compact,
+        next_url=next_url,
+        aggregate_target_type="user",
+        aggregate_target=normalized_username,
+    )
 
 
 @register.simple_tag(takes_context=True)
@@ -418,60 +455,18 @@ def membership_notes_aggregate_for_organization(
     compact: bool = True,
     next_url: str | None = None,
 ) -> SafeString | str:
-    request = context.get("request")
-    http_request = request if isinstance(request, HttpRequest) else None
-
-    membership_can_view = bool(context.get("membership_can_view", False))
-    if not membership_can_view:
-        return ""
-
     if not organization_id:
         return ""
 
-    notes = list(
-        Note.objects.filter(membership_request__requested_organization_id=organization_id).order_by(
-            "timestamp", "pk"
-        )
+    return _membership_notes_aggregate_for_target(
+        context=context,
+        notes_filter={"membership_request__requested_organization_id": organization_id},
+        dom_key=f"org:{organization_id}",
+        compact=compact,
+        next_url=next_url,
+        aggregate_target_type="org",
+        aggregate_target=str(organization_id),
     )
-    approvals, disapprovals = tally_last_votes(notes)
-
-    dom_id = _timeline_dom_id(f"org:{organization_id}")
-    dummy_request = SimpleNamespace(pk=dom_id)
-
-    resolved_next_url = next_url
-    if resolved_next_url is None:
-        resolved_next_url = http_request.get_full_path() if http_request is not None else ""
-
-    post_url = reverse("membership-notes-aggregate-note-add")
-
-    email_modals = _email_modals_for_notes(notes)
-    email_modal_ids = {m["email_id"]: m["modal_id"] for m in email_modals}
-
-    html = render_to_string(
-        "core/_membership_notes.html",
-        {
-            "compact": compact,
-            "membership_request": dummy_request,
-            "groups": _group_timeline_entries(
-                _timeline_entries_for_notes(
-                    notes,
-                    current_username=_current_username_from_request(http_request),
-                    email_modal_ids=email_modal_ids,
-                )
-            ),
-            "note_count": len(notes),
-            "approvals": approvals,
-            "disapprovals": disapprovals,
-            "can_vote": False,
-            "post_url": post_url,
-            "aggregate_target_type": "org",
-            "aggregate_target": str(organization_id),
-            "next_url": resolved_next_url,
-            "email_modals": email_modals,
-        },
-        request=http_request,
-    )
-    return mark_safe(html)
 
 
 @register.simple_tag(takes_context=True)

@@ -1,7 +1,6 @@
 {% extends 'core/base.html' %}
 
 {% load core_membership_notes %}
-{% load core_membership_responses %}
 
 {% block title %}Membership Request #{{ req.pk }}{% endblock %}
 
@@ -50,28 +49,10 @@
           </dd>
         {% endif %}
 
-        {% if req.requested_username == '' or not requested_by_username or req.requested_username != requested_by_username %}
+        {% if req.is_organization_target or not requested_by_username or req.target_identifier != requested_by_username %}
           <dt class="col-sm-3">Requested for</dt>
           <dd class="col-sm-9">
-            {% if req.requested_username == '' %}
-              {% if req.requested_organization %}
-                <a href="{% url 'organization-detail' req.requested_organization.pk %}">{{ req.requested_organization.name }}</a>
-              {% else %}
-                <span>{{ req.requested_organization_name }}</span>
-                <span class="text-muted">(deleted)</span>
-              {% endif %}
-            {% else %}
-              <a href="{% url 'user-profile' req.requested_username %}">
-                {% if target_full_name %}
-                  {{ target_full_name }} <span class="text-muted">({{ req.requested_username }})</span>
-                {% else %}
-                  {{ req.requested_username }}
-                {% endif %}
-              </a>
-              {% if target_deleted %}
-                <span class="text-muted">(deleted)</span>
-              {% endif %}
-            {% endif %}
+            {% include 'core/_membership_request_target_display.html' with req=req full_name=target_full_name target_deleted=target_deleted %}
           </dd>
         {% endif %}
 
@@ -92,12 +73,7 @@
       {% if req.responses %}
         <hr>
         <h6 class="text-muted">Request responses</h6>
-        {% for item in req.responses %}
-          {% for k,v in item.items %}
-            <div class="small text-muted font-weight-bold">{{ k }}</div>
-            <div class="small" style="white-space: pre-wrap;">{{ v|membership_response_value:k }}</div>
-          {% endfor %}
-        {% endfor %}
+        {% include 'core/_membership_request_responses.html' with request_obj=req organization=None as_details=False %}
       {% endif %}
 
       {% if membership_can_view %}

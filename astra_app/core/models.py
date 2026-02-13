@@ -1,4 +1,5 @@
 import datetime
+import enum
 import hashlib
 import json
 import logging
@@ -297,6 +298,10 @@ class Organization(models.Model):
 
 
 class MembershipRequest(models.Model):
+    class TargetKind(enum.StrEnum):
+        user = "user"
+        organization = "organization"
+
     class Status(models.TextChoices):
         pending = "pending", "Pending"
         on_hold = "on_hold", "On Hold"
@@ -368,10 +373,45 @@ class MembershipRequest(models.Model):
         super().save(*args, **kwargs)
 
     def __str__(self) -> str:
-        if self.requested_username == "":
-            code = self.requested_organization_code or (self.requested_organization_id or "")
-            return f"org:{code} → {self.membership_type_id}"
-        return f"{self.requested_username} → {self.membership_type_id}"
+        if self.target_kind == self.TargetKind.user:
+            return f"{self.requested_username} → {self.membership_type_id}"
+        return f"org:{self.target_identifier} → {self.membership_type_id}"
+
+    @property
+    def target_kind(self) -> TargetKind:
+        if self.requested_username:
+            return self.TargetKind.user
+        return self.TargetKind.organization
+
+    @property
+    def is_user_target(self) -> bool:
+        return self.target_kind == self.TargetKind.user
+
+    @property
+    def is_organization_target(self) -> bool:
+        return self.target_kind == self.TargetKind.organization
+
+    @property
+    def organization_identifier(self) -> str:
+        if self.requested_organization_code:
+            return self.requested_organization_code
+        if self.requested_organization_id is not None:
+            return str(self.requested_organization_id)
+        return ""
+
+    @property
+    def organization_display_name(self) -> str:
+        if self.requested_organization_name:
+            return self.requested_organization_name
+        if self.requested_organization is None:
+            return ""
+        return self.requested_organization.name
+
+    @property
+    def target_identifier(self) -> str:
+        if self.target_kind == self.TargetKind.user:
+            return self.requested_username
+        return self.organization_identifier or "?"
 
 
 
@@ -743,10 +783,26 @@ class MembershipLog(models.Model):
             return
 
         if self.target_organization_code:
-            # Organization-target logs without a live FK should never affect current-state tables.
+            self._cleanup_orphaned_organization_memberships()
             return
 
         self._apply_user_side_effects()
+
+    def _cleanup_orphaned_organization_memberships(self) -> None:
+        if self.action not in {self.Action.approved, self.Action.expiry_changed, self.Action.terminated}:
+            return
+
+        try:
+            organization_id = int(self.target_organization_code)
+        except ValueError:
+            return
+
+        deleted_count, _ = Membership.objects.filter(target_organization_id=organization_id).delete()
+        if deleted_count > 0:
+            logger.info(
+                "_cleanup_orphaned_organization_memberships: removed memberships for orphan org_code=%s",
+                self.target_organization_code,
+            )
 
     def _resolve_term_start_at(
         self,
@@ -793,55 +849,8 @@ class MembershipLog(models.Model):
 
         return start_at
 
-    def _apply_side_effects(
-        self,
-        *,
-        model_class: type[models.Model],
-        delete_filter: dict[str, object],
-        lookup_filter: dict[str, object],
-        log_filter: dict[str, object],
-        create_defaults: dict[str, object],
-    ) -> None:
-        """Shared 4-step side-effect algorithm for both user membership and org sponsorship.
-
-        1. Skip actions that don't affect current-state rows
-        2. On termination: delete the current-state row
-        3. Determine the start of the current uninterrupted term
-        4. Upsert the current-state row with new expiry and correct start date
-        """
-        if self.action not in {self.Action.approved, self.Action.expiry_changed, self.Action.terminated}:
-            return
-
-        if self.action == self.Action.terminated:
-            model_class.objects.filter(**delete_filter).delete()
-            return
-
-        existing = (
-            model_class.objects.filter(**lookup_filter)
-            .only("created_at", "expires_at")
-            .first()
-        )
-
-        start_at = self._resolve_term_start_at(existing=existing, log_filter=log_filter)
-
-        row, _created = model_class.objects.update_or_create(
-            **lookup_filter,
-            defaults={
-                **create_defaults,
-                "expires_at": self.expires_at,
-            },
-        )
-
-        if row.created_at != start_at:
-            model_class.objects.filter(pk=row.pk).update(created_at=start_at)
-
     def _apply_org_side_effects(self) -> None:
-        """Side-effects for organization membership changes.
-
-        Uses replace_within_category() for approval/expiry-change paths so
-        that within-category upgrades (e.g. gold -> platinum) correctly
-        replace the old membership row (DD-02).
-        """
+        """Side-effects for organization membership changes."""
         if self.action not in {self.Action.approved, self.Action.expiry_changed, self.Action.terminated}:
             return
 
@@ -852,7 +861,6 @@ class MembershipLog(models.Model):
             ).delete()
             return
 
-        # Check for an existing membership of the SAME type for term start.
         existing = (
             Membership.objects.filter(
                 target_organization_id=self.target_organization_id,
@@ -892,19 +900,51 @@ class MembershipLog(models.Model):
             )
 
     def _apply_user_side_effects(self) -> None:
-        lookup = {
+        if self.action not in {self.Action.approved, self.Action.expiry_changed, self.Action.terminated}:
+            return
+
+        category_id = self.membership_type.category_id
+        membership_qs = Membership.objects.filter(
+            target_username=self.target_username,
+            category_id=category_id,
+        )
+
+        if self.action == self.Action.terminated:
+            membership_qs.filter(membership_type=self.membership_type).delete()
+            return
+
+        existing_same_type = (
+            membership_qs.filter(membership_type=self.membership_type)
+            .only("created_at", "expires_at")
+            .first()
+        )
+        log_filter = {
             "target_username": self.target_username,
             "membership_type": self.membership_type,
         }
-        self._apply_side_effects(
-            model_class=Membership,
-            delete_filter=lookup,
-            lookup_filter=lookup,
-            log_filter=lookup,
-            create_defaults={
-                "category": self.membership_type.category,
-            },
-        )
+        start_at = self._resolve_term_start_at(existing=existing_same_type, log_filter=log_filter)
+
+        with transaction.atomic():
+            removed_count, _ = membership_qs.exclude(membership_type=self.membership_type).delete()
+            row, _created = Membership.objects.update_or_create(
+                target_username=self.target_username,
+                membership_type=self.membership_type,
+                defaults={
+                    "category": self.membership_type.category,
+                    "expires_at": self.expires_at,
+                },
+            )
+
+            if row.created_at != start_at:
+                Membership.objects.filter(pk=row.pk).update(created_at=start_at)
+
+        if removed_count > 0:
+            logger.info(
+                "_apply_user_side_effects: enforced one-per-category target=%s category=%s removed=%s",
+                self.target_username,
+                category_id,
+                removed_count,
+            )
 
     def __str__(self) -> str:
         if self.target_username == "":

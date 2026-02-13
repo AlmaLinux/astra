@@ -585,7 +585,38 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
             and any(str(k).strip().lower() == "additional information" for k in item.keys())
         ]
         self.assertEqual(len(additional_info_items), 1)
-        self.assertTrue(any(item.get("Additional Information") == "New" for item in additional_info_items))
+        self.assertTrue(any(item.get("Additional information") == "New" for item in additional_info_items))
+
+    def test_membership_request_self_readonly_shows_legacy_additional_information_key(self) -> None:
+        from core.models import MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="org",
+            defaults={
+                "name": "Organization",
+                "group_cn": "almalinux-org",
+                "category_id": "sponsorship",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="Acme", representative="bob")
+        req = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="org",
+            status=MembershipRequest.Status.pending,
+            responses=[{"Additional Information": "Legacy details"}],
+        )
+
+        self._add_freeipa_user(username="bob", email="bob@example.com")
+        self._login_as_freeipa_user("bob")
+
+        resp = self.client.get(reverse("membership-request-self", args=[req.pk]))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Additional information")
+        self.assertContains(resp, "Legacy details")
 
     def test_user_can_edit_on_hold_request_and_submit_returns_to_pending(self) -> None:
         from core.models import MembershipLog, MembershipType, Note

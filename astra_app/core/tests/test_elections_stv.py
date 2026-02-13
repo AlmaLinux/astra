@@ -6,6 +6,8 @@ from decimal import Decimal
 from django.test import TestCase
 from django.utils import timezone
 
+from core.tests.utils_test_data import ensure_core_categories, ensure_email_templates
+
 
 class STVTallyTests(TestCase):
     def test_wikipedia_example(self) -> None:
@@ -464,6 +466,12 @@ class STVTallyTests(TestCase):
 
 
 class ElectionPrivacyFlowTests(TestCase):
+    @classmethod
+    def setUpTestData(cls) -> None:
+        super().setUpTestData()
+        ensure_core_categories()
+        ensure_email_templates()
+
     def test_ballot_hash_receipt_and_anonymization(self) -> None:
         from core.models import Candidate, Election, Membership, MembershipType
 

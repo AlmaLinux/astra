@@ -18,13 +18,15 @@ from core.backends import FreeIPAGroup, FreeIPAUser
 from core.country_codes import country_code_status_from_user_data
 from core.ipa_user_attrs import _data_get, _first, _get_full_user, _value_to_text
 from core.membership import (
+    build_pending_request_context,
     expiring_soon_cutoff,
-    get_extendable_membership_type_codes_for_username,
-    get_valid_membership_type_codes_for_username,
+    get_membership_request_eligibility,
     get_valid_memberships,
+    membership_request_can_request_any,
     resolve_request_ids_by_membership_type,
 )
-from core.models import MembershipRequest, MembershipType
+from core.membership_notifications import membership_extend_url
+from core.models import MembershipRequest
 from core.views_utils import _normalize_str, get_username
 
 logger = logging.getLogger(__name__)
@@ -142,7 +144,7 @@ def _profile_context_for_user(
 
     membership_request_url = reverse("membership-request")
     valid_memberships = get_valid_memberships(username=fu.username)
-    valid_membership_type_codes = get_valid_membership_type_codes_for_username(fu.username)
+    membership_eligibility = get_membership_request_eligibility(username=fu.username)
 
     has_individual_membership = any(m.membership_type.category.is_individual for m in valid_memberships)
 
@@ -162,7 +164,11 @@ def _profile_context_for_user(
         .order_by("requested_at")
     )
 
-    pending_request_category_ids = {r.membership_type.category_id for r in personal_pending_requests_qs}
+    personal_pending_context = build_pending_request_context(
+        personal_pending_requests_qs,
+        is_organization=False,
+    )
+    pending_request_category_ids = personal_pending_context.category_ids
 
     memberships: list[dict[str, object]] = []
     for membership in valid_memberships:
@@ -175,7 +181,10 @@ def _profile_context_for_user(
                 "expires_at": expires_at,
                 "is_expiring_soon": is_expiring_soon,
                 "has_pending_request_in_category": membership.category_id in pending_request_category_ids,
-                "extend_url": f"{membership_request_url}?membership_type={membership.membership_type.code}",
+                "extend_url": membership_extend_url(
+                    membership_type_code=membership.membership_type.code,
+                    base_url="",
+                ),
                 "request_id": request_id_by_membership_type_id.get(membership.membership_type_id),
             }
         )
@@ -190,33 +199,11 @@ def _profile_context_for_user(
         .order_by("requested_at")
     )
 
-    personal_pending_requests: list[dict[str, object]] = [
-        {
-            "membership_type": r.membership_type,
-            "requested_at": r.requested_at,
-            "pk": r.pk,
-            "request_id": r.pk,
-            "status": r.status,
-            "on_hold_at": r.on_hold_at,
-            "is_organization": False,
-            "organization_name": "",
-        }
-        for r in personal_pending_requests_qs
-    ]
-
-    org_pending_requests: list[dict[str, object]] = [
-        {
-            "membership_type": r.membership_type,
-            "requested_at": r.requested_at,
-            "pk": r.pk,
-            "request_id": r.pk,
-            "status": r.status,
-            "on_hold_at": r.on_hold_at,
-            "is_organization": True,
-            "organization_name": r.requested_organization_name or (r.requested_organization.name if r.requested_organization else ""),
-        }
-        for r in org_pending_requests_qs
-    ]
+    personal_pending_requests = personal_pending_context.entries
+    org_pending_requests = build_pending_request_context(
+        org_pending_requests_qs,
+        is_organization=True,
+    ).entries
 
     pending_requests: list[dict[str, object]] = sorted(
         [*personal_pending_requests, *org_pending_requests],
@@ -227,15 +214,9 @@ def _profile_context_for_user(
         r for r in pending_requests if r.get("status") == MembershipRequest.Status.on_hold
     ]
 
-    extendable_membership_type_codes = get_extendable_membership_type_codes_for_username(fu.username)
-    blocked_membership_type_codes = valid_membership_type_codes - extendable_membership_type_codes
-
-    membership_can_request_any = (
-        MembershipType.objects.filter(enabled=True, category__is_individual=True)
-        .exclude(code__in=blocked_membership_type_codes)
-        .exclude(category_id__in=pending_request_category_ids)
-        .exclude(group_cn="")
-        .exists()
+    membership_can_request_any = membership_request_can_request_any(
+        username=fu.username,
+        eligibility=membership_eligibility,
     )
 
     email_is_blacklisted = False

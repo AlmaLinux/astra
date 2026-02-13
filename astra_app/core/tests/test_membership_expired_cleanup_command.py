@@ -1,5 +1,6 @@
 
 import datetime
+from io import StringIO
 from unittest.mock import patch
 
 from django.conf import settings
@@ -215,7 +216,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
 
         request_path = reverse("organization-membership-request", kwargs={"organization_id": org.pk})
         base = str(settings.PUBLIC_BASE_URL or "").strip().rstrip("/")
-        expected_extend_url = f"{base}{request_path}" if base else request_path
+        expected_extend_url = f"{base}{request_path}?membership_type=gold" if base else f"{request_path}?membership_type=gold"
 
         self.assertTrue(
             Email.objects.filter(
@@ -418,3 +419,103 @@ class MembershipExpiredCleanupCommandTests(TestCase):
                 context__membership_type_code="gold",
             ).exists()
         )
+
+    def test_command_falls_back_to_primary_contact_when_representative_email_missing(self) -> None:
+        membership_type, _ = MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor",
+                "group_cn": "almalinux-gold",
+                "category_id": "sponsorship",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
+        org = Organization.objects.create(
+            name="No Rep Email Org",
+            representative="rep-no-email",
+            business_contact_email="fallback@example.com",
+        )
+        Membership.objects.create(
+            target_organization=org,
+            membership_type=membership_type,
+            expires_at=frozen_now - datetime.timedelta(days=1),
+        )
+
+        rep = FreeIPAUser(
+            "rep-no-email",
+            {
+                "uid": ["rep-no-email"],
+                "mail": [""],
+                "memberof_group": ["almalinux-gold"],
+            },
+        )
+
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            stderr = StringIO()
+            with patch("core.backends.FreeIPAUser.get", return_value=rep):
+                with patch.object(FreeIPAUser, "remove_from_group", autospec=True):
+                    call_command("membership_expired_cleanup", stderr=stderr)
+
+        from post_office.models import Email
+
+        self.assertTrue(
+            Email.objects.filter(
+                to="fallback@example.com",
+                template__name=settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
+                context__organization_id=org.pk,
+                context__membership_type_code="gold",
+            ).exists()
+        )
+        self.assertEqual("", stderr.getvalue().strip())
+
+    def test_command_warns_and_continues_when_recipient_lookup_fails_and_no_fallback(self) -> None:
+        membership_type, _ = MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor",
+                "group_cn": "",
+                "category_id": "sponsorship",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
+        org = Organization.objects.create(
+            name="No Contact Org",
+            representative="rep-no-email",
+            business_contact_email="",
+            pr_marketing_contact_email="",
+            technical_contact_email="",
+        )
+        Membership.objects.create(
+            target_organization=org,
+            membership_type=membership_type,
+            expires_at=frozen_now - datetime.timedelta(days=1),
+        )
+
+        stderr = StringIO()
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            with (
+                patch(
+                    "core.management.commands.membership_expired_cleanup.organization_sponsor_email_context",
+                    return_value={},
+                ),
+                patch("core.backends.FreeIPAUser.get", side_effect=RuntimeError("ipa down")),
+            ):
+                call_command("membership_expired_cleanup", stderr=stderr)
+
+        from post_office.models import Email
+
+        self.assertFalse(
+            Email.objects.filter(
+                template__name=settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
+                context__organization_id=org.pk,
+                context__membership_type_code="gold",
+            ).exists()
+        )
+        self.assertIn("No recipient resolved for organization id=", stderr.getvalue())
+        self.assertIn("organization sponsorship expired-cleanup", stderr.getvalue())

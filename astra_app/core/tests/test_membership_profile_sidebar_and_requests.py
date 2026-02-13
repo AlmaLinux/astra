@@ -1595,7 +1595,13 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
     def test_user_profile_template_uses_pending_request_badge_include(self) -> None:
         template_path = Path(__file__).resolve().parents[1] / "templates" / "core" / "user_profile.html"
         source = template_path.read_text(encoding="utf-8")
-        self.assertIn("{% include 'core/_membership_badge.html'", source)
+        self.assertIn("{% include 'core/_membership_profile_section.html'", source)
+
+        section_template_path = (
+            Path(__file__).resolve().parents[1] / "templates" / "core" / "_membership_profile_section.html"
+        )
+        section_source = section_template_path.read_text(encoding="utf-8")
+        self.assertIn("{% include 'core/_membership_badge.html'", section_source)
 
     def test_membership_request_detail_linkifies_mirror_url_responses(self) -> None:
         from core.models import MembershipRequest, MembershipType

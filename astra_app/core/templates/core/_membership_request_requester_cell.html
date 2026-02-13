@@ -11,22 +11,12 @@ Expected context (inherited from parent via {% include %}):
 
 {% load core_membership_notes %}
 
-{% if row.organization %}
-  <div>
-    <a href="{% url 'organization-detail' row.organization.pk %}">{{ row.organization.name }}</a>
-  </div>
-{% elif r.requested_username %}
-  <a href="{% url 'user-profile' r.requested_username %}">
-    {% if row.full_name %}
-      <div>{{ row.full_name }} <span class="text-muted small">({{ r.requested_username }})</span></div>
-    {% else %}
-      <div>{{ r.requested_username }}</div>
-    {% endif %}
-  </a>
-{% endif %}
+<div>
+  {% include 'core/_membership_request_target_display.html' with req=r full_name=row.full_name target_deleted=False %}
+</div>
 
 {% if row.requested_by_username %}
-  {% if r.requested_username and row.requested_by_username != r.requested_username or not r.requested_username and row.organization %}
+  {% if r.is_user_target and row.requested_by_username != r.requested_username or r.is_organization_target and row.organization %}
     <div class="text-muted small">
       Requested by:
       <a href="{% url 'user-profile' row.requested_by_username %}">

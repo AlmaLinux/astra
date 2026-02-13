@@ -22,9 +22,16 @@ from core.backends import FreeIPAUser
 from core.membership import get_valid_memberships
 from core.membership_csv_import import MembershipCSVImportForm, MembershipCSVImportResource
 from core.models import Membership, MembershipCSVImportLink, MembershipLog, MembershipRequest, MembershipType, Note
+from core.tests.utils_test_data import ensure_core_categories, ensure_email_templates
 
 
 class AdminImportMembershipsCSVTests(TestCase):
+    @classmethod
+    def setUpTestData(cls) -> None:
+        super().setUpTestData()
+        ensure_core_categories()
+        ensure_email_templates()
+
     def _login_as_freeipa_admin(self, username: str = "alex") -> None:
         session = self.client.session
         session["_freeipa_username"] = username
@@ -1112,6 +1119,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             defaults={
                 "name": "Mirror",
                 "group_cn": "almalinux-mirror",
+                "category_id": "mirror",
                 "enabled": True,
                 "sort_order": 0,
             },

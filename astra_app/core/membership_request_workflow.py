@@ -20,6 +20,7 @@ from core.email_context import (
 )
 from core.membership import remove_user_from_group
 from core.membership_notes import add_note
+from core.membership_notifications import organization_sponsor_notification_recipient_email
 from core.models import (
     Membership,
     MembershipLog,
@@ -29,11 +30,6 @@ from core.models import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# MembershipTarget — encapsulates user-vs-org differences for workflow steps
-# ---------------------------------------------------------------------------
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -48,29 +44,17 @@ class MembershipTarget:
     email_context: dict[str, object]
     target_username: str
     target_organization: Organization | None
-    target_organization_code: str
-    target_organization_name: str
-
-    @property
-    def log_kwargs(self) -> dict[str, object]:
-        """Keyword arguments for MembershipLog factory methods."""
-        kwargs: dict[str, object] = {"target_username": self.target_username}
-        if self.target_organization is not None:
-            kwargs["target_organization"] = self.target_organization
-        return kwargs
 
 
 def _build_membership_target(membership_request: MembershipRequest) -> MembershipTarget:
     """Resolve the notification target from a membership request."""
-    if membership_request.requested_username:
+    if membership_request.target_kind == MembershipRequest.TargetKind.user:
         user = FreeIPAUser.get(membership_request.requested_username)
         return MembershipTarget(
             email=user.email if user is not None else "",
             email_context=user_email_context_from_user(user=user) if user is not None else {},
             target_username=membership_request.requested_username,
             target_organization=None,
-            target_organization_code="",
-            target_organization_name="",
         )
     org = membership_request.requested_organization
     if org is not None:
@@ -83,25 +67,16 @@ def _build_membership_target(membership_request: MembershipRequest) -> Membershi
             },
             target_username="",
             target_organization=org,
-            target_organization_code=str(org.pk),
-            target_organization_name=org.name,
         )
     # Orphaned org request: org FK is None but code/name may exist on the request.
     return MembershipTarget(
         email="",
         email_context={
-            "organization_name": membership_request.requested_organization_name or "",
+            "organization_name": membership_request.organization_display_name,
         },
         target_username="",
         target_organization=None,
-        target_organization_code=membership_request.requested_organization_code or "",
-        target_organization_name=membership_request.requested_organization_name or "",
     )
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _ensure_configured_email_template_exists(*, template_name: str) -> None:
@@ -136,14 +111,11 @@ def _organization_notification_email(organization: Organization) -> str:
     FreeIPA user with an email address; otherwise fall back to the organization's
     primary contact email.
     """
-
-    representative_username = organization.representative
-    if representative_username:
-        representative = FreeIPAUser.get(representative_username)
-        if representative is not None and representative.email:
-            return representative.email
-
-    return organization.primary_contact_email()
+    recipient_email, _recipient_warning = organization_sponsor_notification_recipient_email(
+        organization=organization,
+        notification_kind="organization workflow notification",
+    )
+    return recipient_email
 
 
 def _resolve_approval_template_name(
@@ -209,20 +181,19 @@ def _create_status_change_log(
     rejection_reason: str = "",
 ) -> MembershipLog:
     """Create a MembershipLog for a status change, routing user vs org target."""
-    org = membership_request.requested_organization
-    # For requests with org code but no live FK, pass identifiers directly
-    # so _create_log records them in a single DB write.
-    org_code = ""
-    org_name = ""
-    if not membership_request.requested_username and org is None:
-        org_code = membership_request.requested_organization_code or ""
-        org_name = membership_request.requested_organization_name or ""
+    organization = membership_request.requested_organization
+    organization_identifier = ""
+    organization_name = ""
+    if membership_request.target_kind == MembershipRequest.TargetKind.organization and organization is None:
+        organization_identifier = membership_request.organization_identifier
+        organization_name = membership_request.organization_display_name
+
     return MembershipLog._create_log(
         actor_username=actor_username,
         target_username=membership_request.requested_username,
-        target_organization=org,
-        target_organization_code=org_code,
-        target_organization_name=org_name,
+        target_organization=organization,
+        target_organization_code=organization_identifier,
+        target_organization_name=organization_name,
         membership_type=membership_type,
         membership_request=membership_request,
         action=action,
@@ -230,31 +201,29 @@ def _create_status_change_log(
     )
 
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-
-def previous_expires_at_for_extension(*, username: str, membership_type: MembershipType) -> datetime.datetime | None:
+def previous_expires_at_for_extension(
+    *,
+    membership_request: MembershipRequest,
+    membership_type: MembershipType,
+) -> datetime.datetime | None:
     """Return the expiry for an active membership if it can be extended.
 
     Only extend active memberships; if the current row is missing or already
     expired, return None so approval starts a new term.
     """
-    return _active_expires_at(
-        Membership.objects.filter(target_username=username, membership_type=membership_type)
-    )
+    filters: dict[str, object] = {"membership_type": membership_type}
+    if membership_request.target_kind == MembershipRequest.TargetKind.user:
+        normalized_username = str(membership_request.requested_username or "").strip()
+        if not normalized_username:
+            return None
+        filters["target_username"] = normalized_username
+    else:
+        organization = membership_request.requested_organization
+        if organization is None:
+            return None
+        filters["target_organization_id"] = organization.pk
 
-
-def previous_expires_at_for_org_extension(
-    *, organization_id: int, membership_type: MembershipType,
-) -> datetime.datetime | None:
-    return _active_expires_at(
-        Membership.objects.filter(
-            target_organization_id=organization_id,
-            membership_type=membership_type,
-        )
-    )
+    return _active_expires_at(Membership.objects.filter(**filters))
 
 
 def record_membership_request_created(
@@ -275,7 +244,7 @@ def record_membership_request_created(
         log_prefix=log_prefix,
     )
 
-    if membership_request.requested_username:
+    if membership_request.target_kind == MembershipRequest.TargetKind.user:
         email_error: Exception | None = None
         sent_email = None
 
@@ -345,6 +314,54 @@ def record_membership_request_created(
         return
 
     # Organization request (with or without live FK).
+    email_error: Exception | None = None
+    sent_email = None
+    organization = membership_request.requested_organization
+    if send_submitted_email and organization is not None:
+        recipient_email, recipient_warning = organization_sponsor_notification_recipient_email(
+            organization=organization,
+            notification_kind="organization membership request submitted",
+        )
+        if recipient_warning:
+            logger.warning(
+                "%s: %s request_id=%s org_id=%s",
+                log_prefix,
+                recipient_warning,
+                membership_request.pk,
+                organization.pk,
+            )
+        elif recipient_email:
+            try:
+                sent_email = post_office.mail.send(
+                    recipients=[recipient_email],
+                    sender=settings.DEFAULT_FROM_EMAIL,
+                    template=settings.MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME,
+                    context={
+                        **organization_sponsor_email_context(organization=organization),
+                        **membership_committee_email_context(),
+                        "organization_name": organization.name,
+                        "membership_type": membership_type.name,
+                        "membership_type_code": membership_type.code,
+                    },
+                    headers={"Reply-To": settings.MEMBERSHIP_COMMITTEE_EMAIL},
+                )
+            except Exception as e:
+                logger.exception(
+                    "%s: sending submitted email failed request_id=%s org_id=%s",
+                    log_prefix,
+                    membership_request.pk,
+                    organization.pk,
+                )
+                email_error = e
+
+    _try_record_email_note(
+        membership_request=membership_request,
+        actor_username=actor_username,
+        sent_email=sent_email,
+        email_kind="submitted",
+        log_prefix=log_prefix,
+    )
+
     try:
         _create_status_change_log(
             membership_request=membership_request,
@@ -361,6 +378,9 @@ def record_membership_request_created(
             membership_type.code,
         )
         raise
+
+    if email_error is not None:
+        raise email_error
 
 
 def approve_membership_request(
@@ -384,8 +404,7 @@ def approve_membership_request(
     if membership_request.status != MembershipRequest.Status.pending:
         raise ValidationError("Only pending requests can be approved")
 
-    if not membership_request.requested_username:
-        # --- Organization request path ---
+    if membership_request.target_kind == MembershipRequest.TargetKind.organization:
         org = membership_request.requested_organization
         if org is None:
             raise ValidationError("Organization not found")
@@ -404,7 +423,6 @@ def approve_membership_request(
 
         email_recipient = _organization_notification_email(org)
 
-        # Validate email template early (before FreeIPA side-effects).
         template_name: str | None = None
         if send_approved_email and email_recipient:
             template_name = _resolve_approval_template_name(
@@ -412,13 +430,11 @@ def approve_membership_request(
             )
             _ensure_configured_email_template_exists(template_name=template_name)
 
-        # Capture before any membership/sponsorship updates.
-        previous_expires_at = previous_expires_at_for_org_extension(
-            organization_id=org.pk, membership_type=membership_type,
+        previous_expires_at = previous_expires_at_for_extension(
+            membership_request=membership_request,
+            membership_type=membership_type,
         )
 
-        # DD-03: Capture OLD membership in same category BEFORE creating
-        # MembershipLog, so we can remove rep from the old FreeIPA group.
         old_membership = (
             Membership.objects.select_related("membership_type")
             .filter(
@@ -442,9 +458,6 @@ def approve_membership_request(
                 raise
 
             if representative is not None:
-                # Stale-group fix: remove rep from old group before adding to
-                # new one when switching types within the same category
-                # (e.g. gold -> platinum).
                 if (
                     old_membership is not None
                     and old_membership.membership_type != membership_type
@@ -492,7 +505,6 @@ def approve_membership_request(
         log_kwargs: dict[str, object] = {"target_organization": org}
 
     else:
-        # --- User request path ---
         if not membership_type.group_cn:
             raise ValidationError("This membership type is not linked to a group")
 
@@ -522,7 +534,6 @@ def approve_membership_request(
 
         email_recipient = user.email
 
-        # Validate email template early (before FreeIPA side-effects).
         template_name = None
         if send_approved_email and email_recipient:
             template_name = _resolve_approval_template_name(
@@ -530,9 +541,8 @@ def approve_membership_request(
             )
             _ensure_configured_email_template_exists(template_name=template_name)
 
-        # Capture before adding the user to the group.
         previous_expires_at = previous_expires_at_for_extension(
-            username=membership_request.requested_username,
+            membership_request=membership_request,
             membership_type=membership_type,
         )
         try:
@@ -559,8 +569,6 @@ def approve_membership_request(
             else {}
         )
         log_kwargs = {"target_username": membership_request.requested_username}
-
-    # --- Common approval tail: status update, email, log, notes ---
 
     membership_request.status = MembershipRequest.Status.approved
     membership_request.decided_at = decided

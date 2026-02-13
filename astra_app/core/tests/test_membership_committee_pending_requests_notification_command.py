@@ -9,9 +9,16 @@ from django.test import TestCase
 from core.backends import FreeIPAGroup, FreeIPAUser
 from core.models import FreeIPAPermissionGrant, MembershipRequest, MembershipType
 from core.permissions import ASTRA_ADD_MEMBERSHIP
+from core.tests.utils_test_data import ensure_core_categories, ensure_email_templates
 
 
 class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
+    @classmethod
+    def setUpTestData(cls) -> None:
+        super().setUpTestData()
+        ensure_core_categories()
+        ensure_email_templates()
+
     def setUp(self) -> None:
         super().setUp()
         FreeIPAPermissionGrant.objects.get_or_create(

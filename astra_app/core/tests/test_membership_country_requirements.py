@@ -206,22 +206,20 @@ class MembershipCountryRequirementsTests(TestCase):
         fake_user = self._fake_freeipa_user(username="alice", user_data={"fasstatusnote": ["RU"]})
 
         with patch(
-            "core.forms_membership.get_valid_membership_type_codes_for_username",
+            "core.forms_membership.get_membership_request_eligibility",
             autospec=True,
-            return_value=set(),
+            return_value=SimpleNamespace(
+                blocked_membership_type_codes=set(),
+                pending_membership_category_ids=set(),
+            ),
         ):
-            with patch(
-                "core.forms_membership.get_extendable_membership_type_codes_for_username",
-                autospec=True,
-                return_value=set(),
-            ):
-                with patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_user):
-                    with patch(
-                        "core.views_membership.record_membership_request_created",
-                        autospec=True,
-                        return_value=None,
-                    ):
-                        response = views_membership.membership_request(request)
+            with patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_user):
+                with patch(
+                    "core.views_membership.record_membership_request_created",
+                    autospec=True,
+                    return_value=None,
+                ):
+                    response = views_membership.membership_request(request)
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], reverse("user-profile", kwargs={"username": "alice"}))

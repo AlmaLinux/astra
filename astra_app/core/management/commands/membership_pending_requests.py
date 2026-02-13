@@ -1,24 +1,17 @@
-import datetime
 from typing import override
 
 from django.conf import settings
-from django.core.management.base import BaseCommand, CommandError
-from django.urls import reverse
-from django.utils import timezone
+from django.core.management.base import BaseCommand
 
-from core.backends import FreeIPAGroup, FreeIPAUser
 from core.email_context import membership_committee_email_context
-from core.models import FreeIPAPermissionGrant, MembershipRequest
+from core.membership_notifications import (
+    committee_recipient_emails_for_permission_graceful,
+    membership_requests_url,
+    would_queue_membership_pending_requests_notification,
+)
+from core.models import MembershipRequest
 from core.permissions import ASTRA_ADD_MEMBERSHIP
 from core.templated_email import queue_templated_email
-
-
-def _membership_requests_url(*, base_url: str) -> str:
-    path = reverse("membership-requests")
-    base = str(base_url or "").strip().rstrip("/")
-    if not base:
-        return path
-    return f"{base}{path}"
 
 
 class Command(BaseCommand):
@@ -47,66 +40,28 @@ class Command(BaseCommand):
             self.stdout.write("No pending membership requests.")
             return
 
-        grants = list(FreeIPAPermissionGrant.objects.filter(permission=ASTRA_ADD_MEMBERSHIP))
-        if not grants:
-            raise CommandError(f"No FreeIPA grants exist for permission: {ASTRA_ADD_MEMBERSHIP}")
-
-        direct_usernames: list[str] = []
-        group_names: list[str] = []
-        for grant in grants:
-            if grant.principal_type == FreeIPAPermissionGrant.PrincipalType.user:
-                direct_usernames.append(grant.principal_name)
-            elif grant.principal_type == FreeIPAPermissionGrant.PrincipalType.group:
-                group_names.append(grant.principal_name)
-
-        recipients: list[str] = []
-        seen: set[str] = set()
-
-        expanded_usernames: list[str] = [*direct_usernames]
-        for group_name in group_names:
-            group = FreeIPAGroup.get(group_name)
-            if group is None:
-                raise CommandError(f"Unable to load FreeIPA group referenced by permission grant: {group_name}")
-            expanded_usernames.extend(list(group.members))
-
-        for username in expanded_usernames:
-            user = FreeIPAUser.get(username)
-            if user is None or not user.email:
-                continue
-            addr = str(user.email or "").strip()
-            if not addr or addr in seen:
-                continue
-            seen.add(addr)
-            recipients.append(addr)
-
+        recipients, recipient_warnings = committee_recipient_emails_for_permission_graceful(
+            permission=ASTRA_ADD_MEMBERSHIP,
+        )
+        for warning in recipient_warnings:
+            self.stderr.write(f"Warning: {warning}")
         if not recipients:
-            raise CommandError(f"No email addresses found for any principals with {ASTRA_ADD_MEMBERSHIP}")
-
-        if not force:
-            from post_office.models import Email
-
-            today = timezone.localdate()
-            template_name = settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME
-
-            if today.weekday() == 0:
-                already_sent = Email.objects.filter(
-                    template__name=template_name,
-                    created__date=today,
-                ).exists()
+            if dry_run:
+                self.stdout.write("[dry-run] Would skip; no recipients resolved.")
             else:
-                this_weeks_monday = today - datetime.timedelta(days=today.weekday())
-                already_sent = Email.objects.filter(
-                    template__name=template_name,
-                    created__date__gte=this_weeks_monday,
-                ).exists()
-            if already_sent:
-                if dry_run:
-                    self.stdout.write("[dry-run] Would skip; email already queued this week.")
-                else:
-                    self.stdout.write("Skipped; email already queued this week.")
-                return
+                self.stdout.write("Skipped; no recipients resolved.")
+            return
 
-        recipients.sort()
+        if not would_queue_membership_pending_requests_notification(
+            force=force,
+            template_name=settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME,
+        ):
+            if dry_run:
+                self.stdout.write("[dry-run] Would skip; email already queued this week.")
+            else:
+                self.stdout.write("Skipped; email already queued this week.")
+            return
+
         if dry_run:
             self.stdout.write(
                 "[dry-run] Would queue 1 email to "
@@ -121,7 +76,7 @@ class Command(BaseCommand):
             context={
                 **membership_committee_email_context(),
                 "pending_count": pending_count,
-                "requests_url": _membership_requests_url(base_url=settings.PUBLIC_BASE_URL),
+                "requests_url": membership_requests_url(base_url=settings.PUBLIC_BASE_URL),
             },
             reply_to=[settings.MEMBERSHIP_COMMITTEE_EMAIL],
         )

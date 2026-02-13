@@ -1,14 +1,11 @@
 from typing import Any, cast
 
-from django.core.paginator import Paginator
-from django.http import HttpRequest
 from django.template import Context, Library
-from django.template.loader import render_to_string
-from django.utils.safestring import mark_safe
 
 from core.backends import FreeIPAGroup, FreeIPAUser, _clean_str_list
+from core.templatetags._grid_tag_utils import paginate_grid_items, render_widget_grid, resolve_grid_request
 from core.templatetags._user_helpers import try_get_full_name
-from core.views_utils import _normalize_str, pagination_window
+from core.views_utils import _normalize_str
 
 register = Library()
 
@@ -34,21 +31,7 @@ def _normalize_groups(groups_raw: object) -> list[str]:
 
 @register.simple_tag(takes_context=True, name="user_grid")
 def user_grid(context: Context, **kwargs: Any) -> str:
-    request = context.get("request")
-    http_request = request if isinstance(request, HttpRequest) else None
-
-    q = ""
-    page_number: str | None = None
-    base_query = ""
-    page_url_prefix = "?page="
-    if http_request is not None:
-        q = _normalize_str(http_request.GET.get("q"))
-        page_number = _normalize_str(http_request.GET.get("page")) or None
-
-        params = http_request.GET.copy()
-        params.pop("page", None)
-        base_query = params.urlencode()
-        page_url_prefix = f"?{base_query}&page=" if base_query else "?page="
+    http_request, q, page_number, base_query, page_url_prefix = resolve_grid_request(context)
 
     per_page = 28
 
@@ -111,8 +94,11 @@ def user_grid(context: Context, **kwargs: Any) -> str:
             {"kind": "group", "cn": cn} for cn in groups_sorted
         ] + [{"kind": "user", "username": u} for u in users_sorted]
 
-        paginator = Paginator(items_all, per_page)
-        page_obj = paginator.get_page(page_number)
+        paginator, page_obj, page_numbers, show_first, show_last = paginate_grid_items(
+            cast(list[object], items_all),
+            page_number=page_number,
+            per_page=per_page,
+        )
         items_page = cast(list[dict[str, str]], page_obj.object_list)
 
         empty_label = "No members found."
@@ -137,15 +123,14 @@ def user_grid(context: Context, **kwargs: Any) -> str:
 
         users_sorted = sorted(users_list, key=_get_username_for_sort)
 
-        paginator = Paginator(users_sorted, per_page)
-        page_obj = paginator.get_page(page_number)
+        paginator, page_obj, page_numbers, show_first, show_last = paginate_grid_items(
+            users_sorted,
+            page_number=page_number,
+            per_page=per_page,
+        )
         users_page = cast(list[object], page_obj.object_list)
 
         empty_label = "No users found."
-
-    page_numbers, show_first, show_last = pagination_window(paginator, page_obj.number)
-
-    template_name = "core/_widget_grid.html"
 
     effective_manage = member_manage_enabled and bool(member_manage_group_cn)
 
@@ -177,19 +162,16 @@ def user_grid(context: Context, **kwargs: Any) -> str:
                 "extra_style": "opacity:0.55;" if is_muted else "",
             })
 
-    template_context: dict[str, object] = {
-        "title": title,
-        "empty_label": empty_label,
-        "base_query": base_query,
-        "page_url_prefix": page_url_prefix,
-        "paginator": paginator,
-        "page_obj": page_obj,
-        "is_paginated": paginator.num_pages > 1,
-        "page_numbers": page_numbers,
-        "show_first": show_first,
-        "show_last": show_last,
-        "grid_items": grid_items,
-    }
-
-    html = render_to_string(template_name, template_context, request=http_request)
-    return mark_safe(html)
+    return render_widget_grid(
+        http_request=http_request,
+        title=title,
+        empty_label=empty_label,
+        base_query=base_query,
+        page_url_prefix=page_url_prefix,
+        paginator=paginator,
+        page_obj=page_obj,
+        page_numbers=page_numbers,
+        show_first=show_first,
+        show_last=show_last,
+        grid_items=grid_items,
+    )

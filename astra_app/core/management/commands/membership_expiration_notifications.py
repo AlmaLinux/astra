@@ -2,17 +2,22 @@ import datetime
 import math
 from collections.abc import Iterable
 from typing import override
+from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.core.management.base import BaseCommand
-from django.urls import reverse
 from django.utils import timezone
 
 from core.backends import FreeIPAUser
-from core.email_context import organization_sponsor_email_context, user_email_context_from_user
+from core.email_context import user_email_context_from_user
 from core.ipa_user_attrs import _first
 from core.membership import get_expiring_memberships
-from core.membership_notifications import already_sent_today, send_membership_notification
+from core.membership_notifications import (
+    organization_membership_request_url,
+    organization_sponsor_notification_recipient_email,
+    send_membership_notification,
+    would_queue_membership_notification,
+)
 from core.models import Membership
 
 
@@ -86,17 +91,12 @@ class Command(BaseCommand):
 
             tz_name = str(_first(fu._user_data, "fasTimezone", "") or "").strip() or "UTC"
             if dry_run:
-                would_queue = True
-                if not force:
-                    already_sent = already_sent_today(
-                        template_name=template,
-                        recipient_email=fu.email,
-                        extra_filters={
-                            "context__membership_type_code": membership.membership_type.code,
-                        },
-                    )
-                    if already_sent:
-                        would_queue = False
+                would_queue = would_queue_membership_notification(
+                    force=force,
+                    template_name=template,
+                    recipient_email=fu.email,
+                    membership_type=membership.membership_type,
+                )
 
                 if would_queue:
                     self.stdout.write(f"[dry-run] Would queue {template} to {fu.email}.")
@@ -138,33 +138,30 @@ class Command(BaseCommand):
 
             template = settings.ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME
 
-            sponsor_context = organization_sponsor_email_context(
-                organization=sponsorship.target_organization,
+            target_organization = sponsorship.target_organization
+            recipient_email, recipient_warning = organization_sponsor_notification_recipient_email(
+                organization=target_organization,
+                notification_kind="organization sponsorship expiring-soon",
             )
-            recipient_email = str(sponsor_context.get("email") or "").strip()
+            if recipient_warning:
+                self.stderr.write(f"Warning: {recipient_warning}")
             if not recipient_email:
                 continue
 
-            base = str(settings.PUBLIC_BASE_URL or "").strip().rstrip("/")
-            extend_path = reverse(
-                "organization-sponsorship-extend",
-                kwargs={"organization_id": sponsorship.target_organization_id},
+            extend_url = organization_membership_request_url(
+                organization_id=sponsorship.target_organization_id,
+                membership_type_code=sponsorship.membership_type.code,
+                base_url=settings.PUBLIC_BASE_URL,
             )
-            extend_url = f"{base}{extend_path}" if base else extend_path
 
             if dry_run:
-                would_queue = True
-                if not force:
-                    already_sent = already_sent_today(
-                        template_name=template,
-                        recipient_email=recipient_email,
-                        extra_filters={
-                            "context__organization_id": sponsorship.target_organization_id,
-                            "context__membership_type_code": sponsorship.membership_type.code,
-                        },
-                    )
-                    if already_sent:
-                        would_queue = False
+                would_queue = would_queue_membership_notification(
+                    force=force,
+                    template_name=template,
+                    recipient_email=recipient_email,
+                    membership_type=sponsorship.membership_type,
+                    organization=target_organization,
+                )
 
                 if would_queue:
                     self.stdout.write(f"[dry-run] Would queue {template} to {recipient_email}.")
@@ -175,12 +172,19 @@ class Command(BaseCommand):
                     )
                     skipped += 1
             else:
-                rep_timezone = "UTC"
+                rep_timezone: str = "UTC"
                 representative_username = str(sponsorship.target_organization.representative or "").strip()
                 if representative_username:
                     rep_user = FreeIPAUser.get(representative_username)
                     if rep_user is not None:
-                        rep_timezone = str(_first(rep_user._user_data, "fasTimezone", "") or "").strip() or "UTC"
+                        candidate_tz = str(_first(rep_user._user_data, "fasTimezone", "") or "").strip()
+                        if candidate_tz:
+                            try:
+                                ZoneInfo(candidate_tz)
+                            except Exception:
+                                rep_timezone = "UTC"
+                            else:
+                                rep_timezone = candidate_tz
 
                 did_queue = send_membership_notification(
                     recipient_email=recipient_email,

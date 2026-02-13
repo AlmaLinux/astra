@@ -6,6 +6,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from core.membership import (
+    build_pending_request_context,
     expiring_soon_cutoff,
     get_expiring_memberships,
     get_valid_memberships,
@@ -23,6 +24,77 @@ from core.models import (
 
 
 class MembershipHelperTests(TestCase):
+    def test_build_pending_request_context_returns_entries_and_category_index(self) -> None:
+        MembershipTypeCategory.objects.update_or_create(
+            pk="sponsorship",
+            defaults={"is_organization": True, "sort_order": 1},
+        )
+        MembershipTypeCategory.objects.update_or_create(
+            pk="mirror",
+            defaults={"is_organization": True, "sort_order": 2},
+        )
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold",
+                "category_id": "sponsorship",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver",
+                "category_id": "sponsorship",
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror",
+                "category_id": "mirror",
+                "sort_order": 3,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="Context Org", representative="bob")
+        first = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="gold",
+            status=MembershipRequest.Status.pending,
+        )
+        MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="silver",
+            status=MembershipRequest.Status.on_hold,
+        )
+        mirror = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="mirror",
+            status=MembershipRequest.Status.pending,
+        )
+
+        ordered = list(
+            MembershipRequest.objects.select_related("membership_type", "requested_organization")
+            .filter(requested_organization=org)
+            .order_by("requested_at", "pk")
+        )
+
+        context = build_pending_request_context(ordered, is_organization=True)
+
+        self.assertEqual(len(context.entries), 3)
+        self.assertEqual(context.category_ids, {"sponsorship", "mirror"})
+        self.assertEqual(context.by_category["sponsorship"]["request_id"], first.pk)
+        self.assertEqual(context.by_category["mirror"]["request_id"], mirror.pk)
+
     def test_membership_queryset_active_inclusive_by_default(self) -> None:
         MembershipType.objects.update_or_create(
             code="basic",

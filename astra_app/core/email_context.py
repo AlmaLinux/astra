@@ -28,7 +28,10 @@ def user_email_context(*, username: str) -> dict[str, str]:
     if not normalized_username:
         return {"username": "", "first_name": "", "last_name": "", "full_name": "", "email": ""}
 
-    user = FreeIPAUser.get(normalized_username)
+    try:
+        user = FreeIPAUser.get(normalized_username)
+    except Exception:
+        user = None
     if user is None:
         return {
             "username": normalized_username,
@@ -75,7 +78,10 @@ def organization_sponsor_email_context(*, organization: Organization) -> dict[st
 
     representative_username = str(organization.representative or "").strip()
     if representative_username:
-        representative = FreeIPAUser.get(representative_username)
+        try:
+            representative = FreeIPAUser.get(representative_username)
+        except Exception:
+            representative = None
         representative_context = (
             user_email_context_from_user(user=representative)
             if representative is not None

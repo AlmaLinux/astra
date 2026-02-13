@@ -9,13 +9,7 @@ support safe redirects using Referer when `next` isn't provided.
 {% endcomment %}
 
 {% with membership_request=request %}
-  {% with pk_str=membership_request.pk|stringformat:"s" membership_type_name=membership_request.membership_type.name %}
-    {% if membership_request.requested_username %}
-      {% include 'core/_membership_request_actions_inner.html' with membership_request=membership_request pk_str=pk_str membership_type_name=membership_type_name requester_display=membership_request.requested_username %}
-    {% elif membership_request.requested_organization %}
-      {% include 'core/_membership_request_actions_inner.html' with membership_request=membership_request pk_str=pk_str membership_type_name=membership_type_name requester_display=membership_request.requested_organization.name %}
-    {% else %}
-      {% include 'core/_membership_request_actions_inner.html' with membership_request=membership_request pk_str=pk_str membership_type_name=membership_type_name requester_display=membership_request.requested_organization_name %}
-    {% endif %}
+  {% with pk_str=membership_request.pk|stringformat:"s" membership_type_name=membership_request.membership_type.name requester_display=membership_request.requested_username|default:membership_request.organization_display_name %}
+    {% include 'core/_membership_request_actions_inner.html' with membership_request=membership_request pk_str=pk_str membership_type_name=membership_type_name requester_display=requester_display %}
   {% endwith %}
 {% endwith %}

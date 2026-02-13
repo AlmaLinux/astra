@@ -27,6 +27,7 @@ from core.permissions import (
     ASTRA_DELETE_MEMBERSHIP,
     ASTRA_VIEW_MEMBERSHIP,
 )
+from core.tests.utils_test_data import ensure_core_categories, ensure_email_templates
 
 
 class OrganizationUserViewsTests(TestCase):
@@ -40,28 +41,9 @@ class OrganizationUserViewsTests(TestCase):
         self._country_code_patcher.start()
         self.addCleanup(self._country_code_patcher.stop)
 
-        MembershipTypeCategory.objects.update_or_create(
-            pk="individual",
-            defaults={
-                "is_individual": True,
-                "is_organization": False,
-                "sort_order": 0,
-            },
-        )
-        MembershipTypeCategory.objects.update_or_create(
-            pk="sponsorship",
-            defaults={
-                "is_organization": True,
-                "sort_order": 1,
-            },
-        )
-        MembershipTypeCategory.objects.update_or_create(
-            pk="mirror",
-            defaults={
-                "is_organization": True,
-                "sort_order": 2,
-            },
-        )
+        ensure_core_categories()
+        ensure_email_templates()
+
         MembershipTypeCategory.objects.update_or_create(
             pk="community",
             defaults={
@@ -775,7 +757,7 @@ class OrganizationUserViewsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Edit details")
         self.assertContains(resp, reverse("organization-edit", args=[org.pk]))
-        self.assertContains(resp, "Change membership tier")
+        self.assertContains(resp, "Request membership")
         self.assertContains(resp, reverse("organization-membership-request", args=[org.pk]))
 
         self.assertNotContains(resp, "Active sponsor")
@@ -1108,7 +1090,7 @@ class OrganizationUserViewsTests(TestCase):
         self.assertNotContains(resp, 'value="gold"')
         self.assertContains(resp, 'value="silver"')
 
-    def test_org_membership_request_requires_rep_or_committee(self) -> None:
+    def test_org_membership_request_requires_representative(self) -> None:
         from core.models import FreeIPAPermissionGrant, MembershipType, Organization
         from core.permissions import ASTRA_VIEW_MEMBERSHIP
 
@@ -1142,7 +1124,82 @@ class OrganizationUserViewsTests(TestCase):
             patch("core.views_membership.block_action_without_coc", return_value=None),
         ):
             resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
+        self.assertEqual(resp.status_code, 404)
+
+    def test_org_detail_renewal_cta_uses_canonical_membership_request_link(self) -> None:
+        from core.models import Membership, MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "description": "Gold Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="Acme", representative="bob")
+
+        expires_at = timezone.now() + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS - 1)
+        Membership.objects.create(
+            target_organization=org,
+            membership_type_id="gold",
+            expires_at=expires_at,
+        )
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
+        self._login_as_freeipa_user("bob")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+
         self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, reverse("organization-sponsorship-extend", args=[org.pk]))
+        self.assertContains(
+            resp,
+            reverse("organization-membership-request", args=[org.pk]) + "?membership_type=gold",
+        )
+
+    def test_sponsorship_extend_endpoint_redirects_to_canonical_request_form(self) -> None:
+        from core.models import Membership, MembershipRequest, MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "description": "Gold Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="Acme", representative="bob")
+        expires_at = timezone.now() + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS - 1)
+        Membership.objects.create(
+            target_organization=org,
+            membership_type_id="gold",
+            expires_at=expires_at,
+        )
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
+        self._login_as_freeipa_user("bob")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            resp = self.client.post(
+                reverse("organization-sponsorship-extend", args=[org.pk]),
+                data={"membership_type": "gold"},
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(
+            resp["Location"],
+            reverse("organization-membership-request", args=[org.pk]) + "?membership_type=gold",
+        )
+        self.assertFalse(MembershipRequest.objects.filter(requested_organization=org).exists())
 
     def test_org_membership_request_dropdown_labels_and_order(self) -> None:
         from core.models import MembershipType, MembershipTypeCategory, Organization
@@ -1578,7 +1635,7 @@ class OrganizationUserViewsTests(TestCase):
             datetime.datetime(2030, 1, 31, 23, 59, 59, tzinfo=datetime.UTC),
         )
 
-    def test_membership_admin_setting_expiry_in_past_logs_expiry_changed_and_keeps_row(self) -> None:
+    def test_membership_admin_setting_expiry_in_past_logs_expiry_changed_and_marks_membership_inactive(self) -> None:
         import datetime
 
         from core.models import FreeIPAPermissionGrant, Membership, MembershipLog, MembershipType, Organization
@@ -1641,10 +1698,11 @@ class OrganizationUserViewsTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 302)
-        sponsorship = Membership.objects.get(target_organization=org, membership_type_id="gold")
-        self.assertEqual(
-            sponsorship.expires_at,
-            datetime.datetime(2000, 1, 1, 23, 59, 59, tzinfo=datetime.UTC),
+        membership = Membership.objects.filter(target_organization=org, membership_type_id="gold").first()
+        self.assertIsNotNone(membership)
+        self.assertIsNotNone(membership.expires_at)
+        self.assertFalse(
+            Membership.objects.active().filter(target_organization=org, membership_type_id="gold").exists()
         )
         remove_from_group.assert_called_once_with(rep, group_name="sponsor-group")
         self.assertTrue(
@@ -1838,6 +1896,7 @@ class OrganizationUserViewsTests(TestCase):
                 "description": "Gold Sponsor Member (Annual dues: $20,000 USD)",
                 "category_id": "sponsorship",
                 "sort_order": 2,
+                "group_cn": "sponsor-group",
                 "enabled": True,
             },
         )
@@ -1996,8 +2055,53 @@ class OrganizationUserViewsTests(TestCase):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'name="membership_type" value="gold"')
+        self.assertContains(
+            resp,
+            reverse("organization-membership-request", args=[org.pk]) + "?membership_type=gold",
+        )
         self.assertContains(resp, "Request renewal")
+
+    def test_organization_detail_pending_request_context_uses_standardized_entry_shape(self) -> None:
+        from core.models import Membership, MembershipRequest, MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "description": "Gold Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="Acme", representative="bob")
+        expires_at = timezone.now() + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS - 1)
+        Membership.objects.create(
+            target_organization=org,
+            membership_type_id="gold",
+            expires_at=expires_at,
+        )
+        pending = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="gold",
+            status=MembershipRequest.Status.pending,
+        )
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
+        self._login_as_freeipa_user("bob")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        sponsorship_entries = resp.context["sponsorship_entries"]
+        self.assertEqual(len(sponsorship_entries), 1)
+        pending_context = sponsorship_entries[0]["pending_request"]
+        self.assertIsInstance(pending_context, dict)
+        self.assertEqual(pending_context["request_id"], pending.pk)
+        self.assertEqual(pending_context["status"], MembershipRequest.Status.pending)
 
     def test_organization_detail_hides_expired_memberships(self) -> None:
         from core.models import Membership, MembershipType, Organization
@@ -2066,6 +2170,7 @@ class OrganizationUserViewsTests(TestCase):
                 "description": "Gold Sponsor Member (Annual dues: $20,000 USD)",
                 "category_id": "sponsorship",
                 "sort_order": 2,
+                "group_cn": "almalinux-gold",
                 "enabled": True,
             },
         )
@@ -2157,6 +2262,7 @@ class OrganizationUserViewsTests(TestCase):
                 "category_id": "sponsorship",
                 "sort_order": 2,
                 "enabled": True,
+                "group_cn": "sponsor-group",
             },
         )
 
@@ -2194,21 +2300,31 @@ class OrganizationUserViewsTests(TestCase):
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=bob),
-            patch("core.views_organizations.block_action_without_coc", return_value=None),
+            patch("core.views_membership.block_action_without_coc", return_value=None),
         ):
-            resp = self.client.post(
+            shim_resp = self.client.post(
                 reverse("organization-sponsorship-extend", args=[org.pk]),
                 data={"membership_type": "gold"},
+                follow=False,
+            )
+            self.assertEqual(shim_resp.status_code, 302)
+            self.assertEqual(
+                shim_resp["Location"],
+                reverse("organization-membership-request", args=[org.pk]) + "?membership_type=gold",
+            )
+            resp = self.client.post(
+                reverse("organization-membership-request", args=[org.pk]),
+                data={"membership_type": "gold", "q_sponsorship_details": "Please review our renewal."},
                 follow=True,
             )
         self.assertEqual(resp.status_code, 200)
         messages = [m.message for m in get_messages(resp.wsgi_request)]
-        self.assertIn("Membership renewal request submitted for review.", messages)
+        self.assertIn("Membership request submitted for review.", messages)
 
         req = MembershipRequest.objects.get(status=MembershipRequest.Status.pending)
         self.assertEqual(req.requested_organization_id, org.pk)
         self.assertEqual(req.membership_type_id, "gold")
-        self.assertEqual(req.responses, [{"Additional Information": "Renewal note"}])
+        self.assertEqual(req.responses, [{"Sponsorship details": "Please review our renewal."}])
 
         self.assertTrue(
             MembershipLog.objects.filter(
@@ -2255,10 +2371,7 @@ class OrganizationUserViewsTests(TestCase):
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
-        with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
-            patch("core.views_organizations.block_action_without_coc", return_value=None),
-        ):
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
             resp = self.client.post(reverse("organization-sponsorship-extend", args=[org.pk]), follow=True)
 
         self.assertEqual(resp.status_code, 200)
@@ -2323,19 +2436,25 @@ class OrganizationUserViewsTests(TestCase):
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
-        with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
-            patch("core.views_organizations.block_action_without_coc", return_value=None),
-        ):
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
             resp = self.client.post(
                 reverse("organization-sponsorship-extend", args=[org.pk]),
                 data={"membership_type": "gold"},
-                follow=True,
+                follow=False,
             )
 
-        self.assertEqual(resp.status_code, 200)
-        messages = [m.message for m in get_messages(resp.wsgi_request)]
-        self.assertIn("Membership renewal request submitted for review.", messages)
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(
+            resp["Location"],
+            reverse("organization-membership-request", args=[org.pk]) + "?membership_type=gold",
+        )
+
+        MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="gold",
+            status=MembershipRequest.Status.pending,
+        )
         pending_types = set(
             MembershipRequest.objects.filter(
                 requested_organization=org,
@@ -2376,24 +2495,20 @@ class OrganizationUserViewsTests(TestCase):
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=bob),
-            patch("core.views_organizations.block_action_without_coc", return_value=None),
             patch("django.utils.timezone.now", return_value=frozen_now),
         ):
             resp = self.client.post(
                 reverse("organization-sponsorship-extend", args=[org.pk]),
                 data={"membership_type": "gold"},
-                follow=True,
+                follow=False,
             )
 
-        self.assertEqual(resp.status_code, 200)
-        messages = [m.message for m in get_messages(resp.wsgi_request)]
-        self.assertIn("Membership renewal request submitted for review.", messages)
-        self.assertTrue(
-            MembershipRequest.objects.filter(
-                requested_organization=org,
-                status=MembershipRequest.Status.pending,
-            ).exists()
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(
+            resp["Location"],
+            reverse("organization-membership-request", args=[org.pk]) + "?membership_type=gold",
         )
+        self.assertFalse(MembershipRequest.objects.filter(requested_organization=org).exists())
 
     def test_sponsorship_extend_rejects_expiry_before_now(self) -> None:
         from core.models import Membership, MembershipRequest, MembershipType, Organization
@@ -2427,24 +2542,20 @@ class OrganizationUserViewsTests(TestCase):
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=bob),
-            patch("core.views_organizations.block_action_without_coc", return_value=None),
             patch("django.utils.timezone.now", return_value=frozen_now),
         ):
             resp = self.client.post(
                 reverse("organization-sponsorship-extend", args=[org.pk]),
                 data={"membership_type": "gold"},
-                follow=True,
+                follow=False,
             )
 
-        self.assertEqual(resp.status_code, 200)
-        messages = [m.message for m in get_messages(resp.wsgi_request)]
-        self.assertIn("This membership has already expired and cannot be extended.", " ".join(messages))
-        self.assertFalse(
-            MembershipRequest.objects.filter(
-                requested_organization=org,
-                status=MembershipRequest.Status.pending,
-            ).exists()
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(
+            resp["Location"],
+            reverse("organization-membership-request", args=[org.pk]) + "?membership_type=gold",
         )
+        self.assertFalse(MembershipRequest.objects.filter(requested_organization=org).exists())
 
     @override_settings(MEMBERSHIP_EXPIRING_SOON_DAYS=90)
     def test_representative_can_submit_second_org_membership_request_for_other_type(self) -> None:
@@ -2499,16 +2610,25 @@ class OrganizationUserViewsTests(TestCase):
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=bob),
-            patch("core.views_organizations.block_action_without_coc", return_value=None),
+            patch("core.views_membership.block_action_without_coc", return_value=None),
         ):
-            resp = self.client.post(
+            shim_resp = self.client.post(
                 reverse("organization-sponsorship-extend", args=[org.pk]),
                 data={"membership_type": "gold"},
-                follow=True,
+                follow=False,
             )
-        self.assertEqual(resp.status_code, 200)
-        messages = [m.message for m in get_messages(resp.wsgi_request)]
-        self.assertIn("Membership renewal request submitted for review.", messages)
+        self.assertEqual(shim_resp.status_code, 302)
+        self.assertEqual(
+            shim_resp["Location"],
+            reverse("organization-membership-request", args=[org.pk]) + "?membership_type=gold",
+        )
+
+        MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="gold",
+            status=MembershipRequest.Status.pending,
+        )
 
         self.assertEqual(
             MembershipRequest.objects.filter(
@@ -3260,7 +3380,7 @@ class OrganizationUserViewsTests(TestCase):
         created = Organization.objects.get(name="Acme")
         self.assertEqual(created.representative, "bob")
         self.assertContains(resp, reverse("organization-detail", args=[created.pk]))
-        self.assertContains(resp, "Membership Level")
+        self.assertContains(resp, "Membership")
 
     def test_org_create_highlights_contact_tabs_with_validation_errors(self) -> None:
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})

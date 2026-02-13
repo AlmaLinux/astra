@@ -9,9 +9,16 @@ from django.core.cache import cache
 from django.test import RequestFactory, TestCase, override_settings
 
 from core.backends import FreeIPAUser
+from core.tests.utils_test_data import ensure_core_categories, ensure_email_templates
 
 
 class EmailChangeValidationFlowTests(TestCase):
+    @classmethod
+    def setUpTestData(cls) -> None:
+        super().setUpTestData()
+        ensure_core_categories()
+        ensure_email_templates()
+
     def setUp(self):
         super().setUp()
         cache.clear()

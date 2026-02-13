@@ -1,5 +1,6 @@
 
 import datetime
+from io import StringIO
 from unittest.mock import patch
 
 from django.conf import settings
@@ -488,3 +489,112 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 second_count = Email.objects.count()
 
         self.assertEqual(first_count + 1, second_count)
+
+    def test_command_falls_back_to_primary_contact_when_representative_email_missing(self) -> None:
+        membership_type, _ = MembershipType.objects.update_or_create(
+            code="sponsor",
+            defaults={
+                "name": "Sponsor",
+                "group_cn": "almalinux-sponsor",
+                "category_id": "sponsorship",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        organization = Organization.objects.create(
+            name="No Rep Email Org",
+            representative="org-rep-no-email",
+            business_contact_email="fallback@example.com",
+        )
+
+        frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
+        rep_user = FreeIPAUser(
+            "org-rep-no-email",
+            {
+                "uid": ["org-rep-no-email"],
+                "mail": [""],
+                "memberof_group": [],
+            },
+        )
+
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            today_utc = timezone.now().astimezone(datetime.UTC).date()
+            expires_in_days = settings.MEMBERSHIP_EXPIRING_SOON_DAYS // 2
+            expires_on_utc = today_utc + datetime.timedelta(days=expires_in_days)
+            expires_at_utc = datetime.datetime.combine(
+                expires_on_utc, datetime.time(23, 59, 59), tzinfo=datetime.UTC
+            )
+
+            Membership.objects.create(
+                target_organization=organization,
+                membership_type=membership_type,
+                expires_at=expires_at_utc,
+            )
+
+            stderr = StringIO()
+            with patch("core.backends.FreeIPAUser.get", return_value=rep_user):
+                call_command("membership_expiration_notifications", stderr=stderr)
+
+        from post_office.models import Email
+
+        self.assertTrue(
+            Email.objects.filter(
+                to="fallback@example.com",
+                template__name=settings.ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+                context__organization_id=organization.pk,
+                context__membership_type_code="sponsor",
+            ).exists()
+        )
+        self.assertEqual("", stderr.getvalue().strip())
+
+    def test_command_warns_and_continues_when_representative_lookup_fails_and_no_fallback(self) -> None:
+        membership_type, _ = MembershipType.objects.update_or_create(
+            code="sponsor",
+            defaults={
+                "name": "Sponsor",
+                "group_cn": "almalinux-sponsor",
+                "category_id": "sponsorship",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        organization = Organization.objects.create(
+            name="No Contact Org",
+            representative="org-rep",
+            business_contact_email="",
+            pr_marketing_contact_email="",
+            technical_contact_email="",
+        )
+
+        frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            today_utc = timezone.now().astimezone(datetime.UTC).date()
+            expires_in_days = settings.MEMBERSHIP_EXPIRING_SOON_DAYS // 2
+            expires_on_utc = today_utc + datetime.timedelta(days=expires_in_days)
+            expires_at_utc = datetime.datetime.combine(
+                expires_on_utc, datetime.time(23, 59, 59), tzinfo=datetime.UTC
+            )
+
+            Membership.objects.create(
+                target_organization=organization,
+                membership_type=membership_type,
+                expires_at=expires_at_utc,
+            )
+
+            stderr = StringIO()
+            with patch("core.backends.FreeIPAUser.get", side_effect=RuntimeError("ipa down")):
+                call_command("membership_expiration_notifications", stderr=stderr)
+
+        from post_office.models import Email
+
+        self.assertFalse(
+            Email.objects.filter(
+                template__name=settings.ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+                context__organization_id=organization.pk,
+                context__membership_type_code="sponsor",
+            ).exists()
+        )
+        self.assertIn("No recipient resolved for organization id=", stderr.getvalue())
+        self.assertIn("organization sponsorship expiring-soon", stderr.getvalue())

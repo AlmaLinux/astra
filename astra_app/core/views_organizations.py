@@ -1,23 +1,23 @@
 import logging
+from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.db import IntegrityError
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
-from django.utils import timezone
 from django.views.decorators.http import require_GET
 
 from core.backends import FreeIPAUser
 from core.forms_organizations import OrganizationEditForm
 from core.membership import (
+    build_pending_request_context,
     expiring_soon_cutoff,
     get_valid_memberships,
     remove_user_from_group,
     resolve_request_ids_by_membership_type,
 )
 from core.membership_notes import add_note
-from core.membership_request_workflow import record_membership_request_created
 from core.models import Membership, MembershipLog, MembershipRequest, Organization
 from core.permissions import (
     ASTRA_ADD_MEMBERSHIP,
@@ -305,11 +305,11 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
         )
         .order_by("-requested_at", "-pk")
     )
-    pending_request_by_category: dict[str, MembershipRequest] = {}
-    for req in pending_requests:
-        category_id = req.membership_type.category_id
-        if category_id not in pending_request_by_category:
-            pending_request_by_category[category_id] = req
+    pending_request_context = build_pending_request_context(
+        pending_requests,
+        is_organization=True,
+    )
+    pending_request_entries = pending_request_context.entries
 
     sponsorship_request_id_by_type = resolve_request_ids_by_membership_type(
         organization=organization,
@@ -323,7 +323,7 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
             "sponsorship": s,
             "badge_text": str(s.membership_type_id).replace("_", " ").title(),
             "is_expiring_soon": bool(s.expires_at and s.expires_at <= expiring_soon_by),
-            "pending_request": pending_request_by_category.get(s.category_id),
+            "pending_request": pending_request_context.by_category.get(s.category_id),
             "request_id": sponsorship_request_id_by_type.get(s.membership_type_id),
         })
 
@@ -366,7 +366,7 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
             "organization": organization,
             "representative_username": representative_username,
             "representative_full_name": representative_full_name,
-            "pending_requests": pending_requests,
+            "pending_requests": pending_request_entries,
             "sponsorship_entries": sponsorship_entries,
             "sponsorships": sponsorships,
             "is_representative": is_representative,
@@ -429,75 +429,13 @@ def organization_sponsorship_extend(request: HttpRequest, organization_id: int) 
     organization = get_object_or_404(Organization, pk=organization_id)
     _require_representative(request, organization)
 
-    blocked = block_action_without_coc(
-        request,
-        username=get_username(request),
-        action_label="request memberships",
-    )
-    if blocked is not None:
-        return blocked
-
     membership_type_code = str(request.POST.get("membership_type", "") or "").strip()
     if not membership_type_code:
         messages.error(request, "Select a membership to extend.")
         return redirect("organization-detail", organization_id=organization.pk)
 
-    sponsorship = (
-        Membership.objects.select_related("membership_type")
-        .filter(target_organization=organization, membership_type_id=membership_type_code)
-        .first()
-    )
-    if sponsorship is None:
-        messages.error(request, "No membership level set to extend.")
-        return redirect("organization-detail", organization_id=organization.pk)
-
-    membership_type = sponsorship.membership_type
-
-    if sponsorship.expires_at is None:
-        messages.error(request, "No membership expiration recorded to extend.")
-        return redirect("organization-detail", organization_id=organization.pk)
-
-    now = timezone.now()
-    if sponsorship.expires_at < now:
-        messages.error(request, "This membership has already expired and cannot be extended. Submit a new membership request.")
-        return redirect("organization-detail", organization_id=organization.pk)
-
-    expiring_soon_by = expiring_soon_cutoff(now=now)
-    if sponsorship.expires_at > expiring_soon_by:
-        messages.info(request, "This membership is not expiring soon yet.")
-        return redirect("organization-detail", organization_id=organization.pk)
-
-    existing = (
-        MembershipRequest.objects.filter(
-            requested_organization=organization,
-            membership_type=membership_type,
-            status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
-        )
-        .order_by("-requested_at")
-        .first()
-    )
-    if existing is not None:
-        messages.info(request, "A membership request is already pending.")
-        return redirect("organization-detail", organization_id=organization.pk)
-
-    responses: list[dict[str, str]] = []
-    if organization.additional_information.strip():
-        responses.append({"Additional Information": organization.additional_information.strip()})
-
-    mr = MembershipRequest.objects.create(
-        requested_username="",
-        requested_organization=organization,
-        membership_type=membership_type,
-        status=MembershipRequest.Status.pending,
-        responses=responses,
-    )
-    record_membership_request_created(
-        membership_request=mr,
-        actor_username=get_username(request),
-        send_submitted_email=False,
-    )
-    messages.success(request, "Membership renewal request submitted for review.")
-    return redirect("organization-detail", organization_id=organization.pk)
+    request_path = reverse("organization-membership-request", kwargs={"organization_id": organization.pk})
+    return redirect(f"{request_path}?{urlencode({'membership_type': membership_type_code})}")
 
 
 def organization_edit(request: HttpRequest, organization_id: int) -> HttpResponse:

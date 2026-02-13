@@ -1,0 +1,20 @@
+{% comment %}
+Pending membership request title row used on profile-like pages.
+
+Expected context:
+- req: pending request object with request_id and membership_type.name
+- is_self: bool
+- membership_can_view: bool
+{% endcomment %}
+
+{% if is_self %}
+  <div class="font-weight-bold">
+    <a href="{% url 'membership-request-self' req.request_id %}">{{ req.membership_type.name }}</a>
+  </div>
+{% elif membership_can_view %}
+  <div class="font-weight-bold">
+    <a href="{% url 'membership-request-detail' req.request_id %}">{{ req.membership_type.name }}</a>
+  </div>
+{% else %}
+  <div class="font-weight-bold">{{ req.membership_type.name }}</div>
+{% endif %}

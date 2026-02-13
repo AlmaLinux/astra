@@ -49,12 +49,12 @@ urlpatterns = [
     ),
     path(
         "organization/<int:organization_id>/sponsorship/<str:membership_type_code>/expiry/",
-        views_membership.organization_sponsorship_set_expiry,
+        views_membership.membership_set_expiry,
         name="organization-sponsorship-set-expiry",
     ),
     path(
         "organization/<int:organization_id>/sponsorship/<str:membership_type_code>/terminate/",
-        views_membership.organization_sponsorship_terminate,
+        views_membership.membership_terminate,
         name="organization-sponsorship-terminate",
     ),
     path("organization/<int:organization_id>/edit/", views_organizations.organization_edit, name="organization-edit"),

@@ -1,0 +1,154 @@
+{% load tz %}
+{% load core_membership_notes %}
+
+<ul class="list-group mb-3">
+  <li class="list-group-item d-flex justify-content-between align-items-center">
+    <strong>Membership</strong>
+    <div class="d-flex align-items-center" style="gap: .5rem;">
+      {% if membership_can_view %}
+        <a href="{% if membership_target_kind == 'organization' %}
+            {% url 'membership-audit-log-organization' organization.pk %}
+            {% else %}
+            {% url 'membership-audit-log-user' fu.username %}
+            {% endif %}"
+          class="btn btn-sm btn-outline-secondary" title="View membership history">History</a>
+      {% endif %}
+      {% if membership_is_owner and membership_can_request_any %}
+        <a href="{{ membership_request_url }}" class="btn btn-sm btn-outline-primary" title="Request membership">Request membership</a>
+      {% endif %}
+    </div>
+  </li>
+
+  {% for entry in membership_entries %}
+    <li class="list-group-item d-flex justify-content-between align-items-center">
+      {% if membership_target_kind == 'organization' %}
+      {% with sponsorship=entry.sponsorship is_expiring_soon=entry.is_expiring_soon has_pending_request_in_category=entry.pending_request request_id=entry.request_id %}
+        <div>
+          <div class="font-weight-bold">{{ sponsorship.membership_type.name }}</div>
+          {% if sponsorship.membership_type.description %}
+            <div class="text-muted small">{{ sponsorship.membership_type.description }}</div>
+          {% endif %}
+          <div class="text-muted small">
+            {% with tz=timezone_name|default:"UTC" %}
+              {% timezone tz %}
+                Member since {{ sponsorship.created_at|date:"F Y" }}
+              {% endtimezone %}
+            {% endwith %}
+          </div>
+          {% if membership_is_owner or membership_can_view %}
+            {% if is_expiring_soon %}
+              <div class="text-danger small">
+                <i class="fas fa-exclamation-triangle mr-1"></i>
+                {% with tz=timezone_name|default:"UTC" %}
+                  {% timezone tz %}
+                    Expires {{ sponsorship.expires_at|date:"M j, Y H:i" }} ({{ tz }})
+                  {% endtimezone %}
+                {% endwith %}
+              </div>
+            {% else %}
+              <div class="text-muted small">
+                {% with tz=timezone_name|default:"UTC" %}
+                  {% timezone tz %}
+                    Expires {{ sponsorship.expires_at|date:"M j, Y" }}
+                  {% endtimezone %}
+                {% endwith %}
+              </div>
+            {% endif %}
+          {% endif %}
+        </div>
+        <div class="d-flex align-items-center justify-content-end flex-wrap" style="gap: .5rem;">
+          {% if membership_is_owner and is_expiring_soon and not has_pending_request_in_category %}
+            <a href="{% url 'organization-membership-request' organization.pk %}?membership_type={{ sponsorship.membership_type.code }}" class="btn btn-sm btn-primary" title="Request renewal for this membership">Request renewal</a>
+          {% else %}
+            {% include 'core/_membership_badge.html' with membership=sponsorship request_id=request_id is_owner=membership_is_owner %}
+          {% endif %}
+
+          {% if membership_can_change and membership_can_delete %}
+            {% include 'core/_expiry_and_termination_actions.html' with organization=organization sponsorship=sponsorship id_prefix="sponsorship" id_suffix=sponsorship.membership_type.code next_url=request.get_full_path %}
+          {% endif %}
+        </div>
+      {% endwith %}
+      {% else %}
+      {% with membership=entry is_expiring_soon=entry.is_expiring_soon has_pending_request_in_category=entry.has_pending_request_in_category request_id=entry.request_id %}
+        <div>
+          <div class="font-weight-bold">{{ membership.membership_type.name }}</div>
+          <div class="text-muted small">
+            {% with tz=timezone_name|default:"UTC" %}
+              {% timezone tz %}
+                Member since {{ membership.created_at|date:"F Y" }}
+              {% endtimezone %}
+            {% endwith %}
+          </div>
+          {% if membership_is_owner or membership_can_view %}
+            {% if is_expiring_soon %}
+              <div class="text-danger small">
+                <i class="fas fa-exclamation-triangle mr-1"></i>
+                {% with tz=timezone_name|default:"UTC" %}
+                  {% timezone tz %}
+                    Expires {{ membership.expires_at|date:"M j, Y H:i" }} ({{ tz }})
+                  {% endtimezone %}
+                {% endwith %}
+              </div>
+            {% else %}
+              <div class="text-muted small">
+                {% with tz=timezone_name|default:"UTC" %}
+                  {% timezone tz %}
+                    Expires {{ membership.expires_at|date:"M j, Y" }}
+                  {% endtimezone %}
+                {% endwith %}
+              </div>
+            {% endif %}
+          {% endif %}
+        </div>
+        <div class="d-flex align-items-center justify-content-end flex-wrap" style="gap: .5rem;">
+          {% if membership_is_owner and is_expiring_soon and not has_pending_request_in_category %}
+            <a href="{{ membership.extend_url }}" class="btn btn-sm btn-primary" title="Request renewal for this membership">Request renewal</a>
+          {% else %}
+            {% include 'core/_membership_badge.html' with membership=membership request_id=request_id is_owner=membership_is_owner %}
+          {% endif %}
+
+          {% if membership_can_change and membership_can_delete %}
+            {% with counter_str=forloop.counter|stringformat:"s" %}
+              {% include 'core/_expiry_and_termination_actions.html' with user=fu membership=membership id_suffix=counter_str %}
+            {% endwith %}
+          {% endif %}
+        </div>
+      {% endwith %}
+      {% endif %}
+    </li>
+  {% empty %}
+    {% if not membership_pending_requests %}
+      <li class="list-group-item text-muted">
+        No memberships yet.
+        {% if membership_is_owner and membership_can_request_any %}
+          <a href="{{ membership_request_url }}">Request membership</a>
+        {% endif %}
+      </li>
+    {% endif %}
+  {% endfor %}
+
+  {% if membership_is_owner or membership_can_view %}
+    {% for pending_request in membership_pending_requests %}
+      <li class="list-group-item d-flex justify-content-between align-items-center text-muted">
+        <div>
+          {% include 'core/_membership_pending_request_title.html' with req=pending_request is_self=membership_is_owner membership_can_view=membership_can_view %}
+          {% if pending_request.organization_name %}
+            <div class="small text-muted">Organization: {{ pending_request.organization_name }}</div>
+          {% endif %}
+          {% if pending_request.membership_type.description %}
+            <div class="small text-muted">{{ pending_request.membership_type.description }}</div>
+          {% endif %}
+        </div>
+        {% include 'core/_membership_badge.html' with request_obj=pending_request is_owner=membership_is_owner %}
+      </li>
+    {% endfor %}
+  {% endif %}
+
+  {% if membership_can_view %}
+    {% if membership_target_kind == 'organization' %}
+      {% membership_notes_aggregate_for_organization organization.pk compact=True %}
+    {% else %}
+      {% membership_notes_aggregate_for_user fu.username compact=True %}
+    {% endif %}
+  {% endif %}
+</ul>

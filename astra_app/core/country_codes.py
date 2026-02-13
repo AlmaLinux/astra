@@ -10,6 +10,12 @@ class CountryCodeStatus:
     is_valid: bool
 
 
+@dataclass(frozen=True, slots=True)
+class EmbargoedCountryMatch:
+    code: str
+    label: str
+
+
 def country_attr_name() -> str:
     name = str(settings.SELF_SERVICE_ADDRESS_COUNTRY_ATTR or "").strip()
     return name or "c"
@@ -79,3 +85,35 @@ def country_label_from_code(code: str) -> str:
     if not normalized:
         return ""
     return f"{country_name_from_code(normalized)} ({normalized})"
+
+
+def embargoed_country_match_from_user_data(
+    *,
+    user_data: dict | None,
+    embargoed_codes: set[str] | None = None,
+) -> EmbargoedCountryMatch | None:
+    status = country_code_status_from_user_data(user_data)
+    if not status.is_valid or not status.code:
+        return None
+
+    normalized_code = status.code.strip().upper()
+    active_embargoed_codes = embargoed_codes if embargoed_codes is not None else embargoed_country_codes_from_settings()
+    if normalized_code not in active_embargoed_codes:
+        return None
+
+    return EmbargoedCountryMatch(
+        code=normalized_code,
+        label=country_label_from_code(normalized_code),
+    )
+
+
+def embargoed_country_label_from_user_data(
+    *,
+    user_data: dict | None,
+    embargoed_codes: set[str] | None = None,
+) -> str | None:
+    match = embargoed_country_match_from_user_data(
+        user_data=user_data,
+        embargoed_codes=embargoed_codes,
+    )
+    return match.label if match is not None else None

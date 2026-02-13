@@ -8,10 +8,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import URLValidator
 
 from core.membership import (
-    expiring_soon_cutoff,
-    get_extendable_membership_type_codes_for_username,
-    get_valid_membership_type_codes_for_username,
-    get_valid_memberships,
+    get_membership_request_eligibility,
 )
 from core.models import MembershipRequest, MembershipType, MembershipTypeCategory, Organization
 
@@ -200,34 +197,9 @@ class MembershipRequestForm(forms.Form):
             if isinstance(field.widget, forms.Textarea):
                 field.widget.attrs.setdefault("spellcheck", "true")
 
-        if organization is None:
-            normalized_username = str(username or "").strip()
-            valid_codes = get_valid_membership_type_codes_for_username(normalized_username)
-            extendable_codes = get_extendable_membership_type_codes_for_username(normalized_username)
-            self._blocked_membership_type_codes = valid_codes - extendable_codes
-
-            self._pending_membership_category_ids = set(
-                MembershipRequest.objects.filter(
-                    requested_username=normalized_username,
-                    status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
-                ).values_list("membership_type__category_id", flat=True)
-            )
-        else:
-            expiring_soon_by = expiring_soon_cutoff()
-            active_memberships = get_valid_memberships(organization=organization)
-            valid_codes = {m.membership_type_id for m in active_memberships}
-            extendable_codes = {
-                m.membership_type_id
-                for m in active_memberships
-                if m.expires_at is not None and m.expires_at <= expiring_soon_by
-            }
-            self._blocked_membership_type_codes = valid_codes - extendable_codes
-            self._pending_membership_category_ids = set(
-                MembershipRequest.objects.filter(
-                    requested_organization=organization,
-                    status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
-                ).values_list("membership_type__category_id", flat=True)
-            )
+        eligibility = get_membership_request_eligibility(username=username, organization=organization)
+        self._blocked_membership_type_codes = eligibility.blocked_membership_type_codes
+        self._pending_membership_category_ids = eligibility.pending_membership_category_ids
 
         membership_type_field = self.fields["membership_type"]
         assert isinstance(membership_type_field, forms.ModelChoiceField)
@@ -297,7 +269,11 @@ class MembershipRequestUpdateResponsesForm(forms.Form):
             if not isinstance(item, dict):
                 continue
             for question, answer in item.items():
-                spec = _QuestionSpec(name=str(question), title=str(question), required=False)
+                question_name = str(question)
+                if question_name.strip().lower() == "additional information":
+                    # Canonicalize legacy casing variants onto one persisted key.
+                    question_name = "Additional information"
+                spec = _QuestionSpec(name=question_name, title=question_name, required=False)
                 if spec.field_name in self.fields:
                     continue
 

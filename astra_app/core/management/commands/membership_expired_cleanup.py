@@ -4,7 +4,6 @@ from typing import override
 
 from django.conf import settings
 from django.core.management.base import BaseCommand
-from django.urls import reverse
 from django.utils import timezone
 
 from core.backends import FreeIPAUser
@@ -15,7 +14,12 @@ from core.email_context import (
 )
 from core.ipa_user_attrs import _first
 from core.membership import remove_user_from_group
-from core.membership_notifications import already_sent_today, send_membership_notification
+from core.membership_notifications import (
+    organization_membership_request_url,
+    organization_sponsor_notification_recipient_email,
+    send_membership_notification,
+    would_queue_membership_notification,
+)
 from core.models import Membership
 
 logger = logging.getLogger(__name__)
@@ -114,17 +118,12 @@ class Command(BaseCommand):
             if fu.email:
                 tz_name = str(_first(fu._user_data, "fasTimezone", "") or "").strip() or "UTC"
                 if dry_run:
-                    would_queue = True
-                    if not force:
-                        already_sent = already_sent_today(
-                            template_name=settings.MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
-                            recipient_email=fu.email,
-                            extra_filters={
-                                "context__membership_type_code": membership.membership_type.code,
-                            },
-                        )
-                        if already_sent:
-                            would_queue = False
+                    would_queue = would_queue_membership_notification(
+                        force=force,
+                        template_name=settings.MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
+                        recipient_email=fu.email,
+                        membership_type=membership.membership_type,
+                    )
 
                     if would_queue:
                         self.stdout.write(
@@ -224,28 +223,27 @@ class Command(BaseCommand):
             else:
                 sponsor_context = organization_sponsor_email_context(organization=org)
 
-            recipient_email = str(sponsor_context.get("email") or "").strip()
+            recipient_email, recipient_warning = organization_sponsor_notification_recipient_email(
+                organization=org,
+                notification_kind="organization sponsorship expired-cleanup",
+            )
+            if recipient_warning:
+                self.stderr.write(f"Warning: {recipient_warning}")
             if recipient_email:
-                base = str(settings.PUBLIC_BASE_URL or "").strip().rstrip("/")
-                request_path = reverse(
-                    "organization-membership-request",
-                    kwargs={"organization_id": org.pk},
+                request_url = organization_membership_request_url(
+                    organization_id=org.pk,
+                    membership_type_code=membership_type.code,
+                    base_url=settings.PUBLIC_BASE_URL,
                 )
-                request_url = f"{base}{request_path}" if base else request_path
 
                 if dry_run:
-                    would_queue = True
-                    if not force:
-                        already_sent = already_sent_today(
-                            template_name=settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
-                            recipient_email=recipient_email,
-                            extra_filters={
-                                "context__organization_id": org.pk,
-                                "context__membership_type_code": membership_type.code,
-                            },
-                        )
-                        if already_sent:
-                            would_queue = False
+                    would_queue = would_queue_membership_notification(
+                        force=force,
+                        template_name=settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
+                        recipient_email=recipient_email,
+                        membership_type=membership_type,
+                        organization=org,
+                    )
 
                     if would_queue:
                         self.stdout.write(

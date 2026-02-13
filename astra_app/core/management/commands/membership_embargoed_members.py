@@ -2,18 +2,20 @@ import logging
 from typing import override
 
 from django.conf import settings
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand
 from django.utils import timezone
 
-from core.backends import FreeIPAGroup, FreeIPAUser
+from core.backends import FreeIPAUser
 from core.country_codes import (
-    country_code_status_from_user_data,
-    country_name_from_code,
     embargoed_country_codes_from_settings,
+    embargoed_country_match_from_user_data,
 )
 from core.email_context import membership_committee_email_context
-from core.membership_notifications import already_sent_today
-from core.models import FreeIPAPermissionGrant, Membership
+from core.membership_notifications import (
+    already_sent_today,
+    committee_recipient_emails_for_permission_graceful,
+)
+from core.models import Membership
 from core.permissions import ASTRA_ADD_MEMBERSHIP
 from core.templated_email import queue_templated_email
 
@@ -65,20 +67,21 @@ class Command(BaseCommand):
             if user is None:
                 continue
 
-            status = country_code_status_from_user_data(user._user_data)
-            if not status.is_valid or not status.code:
-                continue
-            code = status.code
-            if code not in embargoed_codes:
+            embargoed_match = embargoed_country_match_from_user_data(
+                user_data=user._user_data,
+                embargoed_codes=embargoed_codes,
+            )
+            if embargoed_match is None:
                 continue
 
             full_name = str(user.full_name or "").strip()
+            country_name = embargoed_match.label.rsplit(" (", maxsplit=1)[0]
             embargoed_members.append(
                 {
                     "username": uname,
                     "full_name": full_name or uname,
-                    "country_code": code,
-                    "country_name": country_name_from_code(code),
+                    "country_code": embargoed_match.code,
+                    "country_name": country_name,
                 }
             )
 
@@ -86,42 +89,17 @@ class Command(BaseCommand):
             self.stdout.write("No active members from embargoed countries.")
             return
 
-        grants = list(FreeIPAPermissionGrant.objects.filter(permission=ASTRA_ADD_MEMBERSHIP))
-        if not grants:
-            raise CommandError(f"No FreeIPA grants exist for permission: {ASTRA_ADD_MEMBERSHIP}")
-
-        direct_usernames: list[str] = []
-        group_names: list[str] = []
-        for grant in grants:
-            if grant.principal_type == FreeIPAPermissionGrant.PrincipalType.user:
-                direct_usernames.append(grant.principal_name)
-            elif grant.principal_type == FreeIPAPermissionGrant.PrincipalType.group:
-                group_names.append(grant.principal_name)
-
-        recipients: list[str] = []
-        seen: set[str] = set()
-
-        expanded_usernames: list[str] = [*direct_usernames]
-        for group_name in group_names:
-            group = FreeIPAGroup.get(group_name)
-            if group is None:
-                raise CommandError(
-                    f"Unable to load FreeIPA group referenced by permission grant: {group_name}"
-                )
-            expanded_usernames.extend(list(group.members))
-
-        for username in expanded_usernames:
-            user = FreeIPAUser.get(username)
-            if user is None or not user.email:
-                continue
-            addr = str(user.email or "").strip()
-            if not addr or addr in seen:
-                continue
-            seen.add(addr)
-            recipients.append(addr)
-
+        recipients, recipient_warnings = committee_recipient_emails_for_permission_graceful(
+            permission=ASTRA_ADD_MEMBERSHIP,
+        )
+        for warning in recipient_warnings:
+            self.stderr.write(f"Warning: {warning}")
         if not recipients:
-            raise CommandError(f"No email addresses found for any principals with {ASTRA_ADD_MEMBERSHIP}")
+            if dry_run:
+                self.stdout.write("[dry-run] Would skip; no recipients resolved.")
+            else:
+                self.stdout.write("Skipped; no recipients resolved.")
+            return
 
         if not force:
             already_sent = already_sent_today(
@@ -135,7 +113,6 @@ class Command(BaseCommand):
                 return
 
         embargoed_members.sort(key=lambda row: (row.get("country_code") or "", row.get("username") or ""))
-        recipients.sort()
 
         if dry_run:
             self.stdout.write(
