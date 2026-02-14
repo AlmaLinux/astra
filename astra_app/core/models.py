@@ -225,7 +225,6 @@ class Organization(models.Model):
         null=True,
     )
 
-    additional_information = models.TextField(blank=True, default="")
     representative = models.CharField(max_length=255)
 
     class Meta:

@@ -1869,7 +1869,6 @@ class OrganizationAdmin(admin.ModelAdmin):
                 "Please provide the exact URL that you would like the logo to link to - this can be a dedicated page or just your primary URL"
             )
             self.fields["logo"].label = "Logo upload for AlmaLinux Accounts"
-            self.fields["additional_information"].label = "Please provide any additional information the Membership Committee should take into account"
 
             usernames, users_by_username = _freeipa_user_data()
 
@@ -1953,12 +1952,6 @@ class OrganizationAdmin(admin.ModelAdmin):
             "Branding",
             {
                 "fields": ("name", "website_logo", "website", "logo"),
-            },
-        ),
-        (
-            "Additional Information",
-            {
-                "fields": ("additional_information",),
             },
         ),
         (

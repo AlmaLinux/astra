@@ -71,7 +71,6 @@ class OrganizationUserViewsTests(TestCase):
             "technical_contact_phone": "",
             "website_logo": "https://example.com/logo-options",
             "website": "https://example.com/",
-            "additional_information": "",
         }
 
     def test_non_committee_representative_cannot_create_second_org(self) -> None:
@@ -997,7 +996,6 @@ class OrganizationUserViewsTests(TestCase):
                     "name": "AlmaLinux",
                     "website_logo": "https://example.com/logo-options",
                     "website": "https://almalinux.org/",
-                    "additional_information": "",
                     "logo": logo_upload,
                 },
                 follow=False,
@@ -2417,7 +2415,6 @@ class OrganizationUserViewsTests(TestCase):
             technical_contact_email="tech@almalinux.org",
             website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
-            additional_information="Renewal note",
             representative="bob",
         )
 
@@ -2733,7 +2730,6 @@ class OrganizationUserViewsTests(TestCase):
             technical_contact_email="tech@almalinux.org",
             website_logo="https://example.com/logo-options",
             website="https://almalinux.org/",
-            additional_information="Renewal note",
             representative="bob",
         )
 
@@ -3311,7 +3307,6 @@ class OrganizationUserViewsTests(TestCase):
                     "name": "AlmaLinux",
                     "website_logo": "https://example.com/logo-options",
                     "website": "https://almalinux.org/",
-                    "additional_information": "",
                     "representative": "carol",
                 },
                 follow=False,
@@ -3394,7 +3389,6 @@ class OrganizationUserViewsTests(TestCase):
                     "technical_contact_phone": "",
                     "website_logo": "https://example.com/logo-options",
                     "website": "https://almalinux.org/",
-                    "additional_information": "We would like to join.",
                 },
                 follow=False,
             )

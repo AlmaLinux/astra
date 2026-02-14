@@ -7,9 +7,13 @@ from django.test import TestCase
 from django.urls import reverse
 
 from core.backends import FreeIPAUser
+from core.tests.utils_test_data import ensure_core_categories
 
 
 class AdminOrganizationCRUDTests(TestCase):
+    def setUp(self) -> None:
+        ensure_core_categories()
+
     def _login_as_freeipa_admin(self, username: str = "alice") -> None:
         session = self.client.session
         session["_freeipa_username"] = username
@@ -50,7 +54,6 @@ class AdminOrganizationCRUDTests(TestCase):
                     "technical_contact_email": "tech@almalinux.org",
                     "website_logo": "https://example.com/logo-options",
                     "website": "https://almalinux.org/",
-                    "additional_information": "",
                     "notes": "Internal notes",
                     "representative": "bob",
                     # MembershipInline management form (no inline rows).
@@ -79,3 +82,13 @@ class AdminOrganizationCRUDTests(TestCase):
         self.assertEqual(entry.user_id, shadow_user.pk)
         self.assertEqual(entry.action_flag, ADDITION)
         self.assertEqual(entry.object_id, str(org.pk))
+
+    def test_admin_add_form_hides_legacy_additional_information_field(self) -> None:
+        self._login_as_freeipa_admin("alice")
+
+        admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})
+        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+            resp = self.client.get(reverse("admin:core_organization_add"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, 'id="id_additional_information"')

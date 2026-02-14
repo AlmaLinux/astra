@@ -29,7 +29,6 @@ class OrganizationCreateRepresentativesTests(TestCase):
             "technical_contact_phone": "",
             "website_logo": "https://example.com/logo",
             "website": "https://example.com/",
-            "additional_information": "",
         }
 
     def test_create_defaults_representative_to_creator(self) -> None:
