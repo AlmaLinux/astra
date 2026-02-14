@@ -1,18 +1,13 @@
 {% load tz %}
 
-<button type="button" class="btn btn-sm btn-outline-secondary" data-toggle="modal" data-target="#{{ expiry_modal_id }}" title="Change membership expiration date">Edit expiry</button>
+<button type="button" class="btn btn-sm btn-outline-secondary" data-toggle="modal" data-target="#{{ expiry_modal_id }}" title="Edit membership expiration date">Edit expiration</button>
 
 {% if expiry_value %}
   {% timezone 'UTC' %}
     {% with initial_value=expiry_value|date:'Y-m-d' current_expiration=expiry_value|date:"M j, Y" %}
-      {% include 'core/_modal_date_form.html' with modal_id=expiry_modal_id title=modal_title action_url=expiry_action_url input_id=expires_input_id next_url=next_url label=expiry_label initial_value=initial_value current_text="Current expiration: "|add:current_expiration|add:current_text_suffix help_text="Expiration is set as an end-of-day UTC date." %}
+      {% include 'core/_modal_expiry_and_terminate.html' with modal_id=expiry_modal_id title=modal_title expiry_action_url=expiry_action_url terminate_action_url=terminate_action_url input_id=expires_input_id next_url=next_url label=expiry_label initial_value=initial_value current_text="Current expiration: "|add:current_expiration|add:current_text_suffix help_text="Expiration is an end-of-day date in UTC." terminator=terminator membership_type_name=membership_type_name %}
     {% endwith %}
   {% endtimezone %}
 {% else %}
-  {% include 'core/_modal_date_form.html' with modal_id=expiry_modal_id title=modal_title action_url=expiry_action_url input_id=expires_input_id next_url=next_url label=expiry_label help_text="Expiration is set as an end-of-day UTC date." %}
+  {% include 'core/_modal_expiry_and_terminate.html' with modal_id=expiry_modal_id title=modal_title expiry_action_url=expiry_action_url terminate_action_url=terminate_action_url input_id=expires_input_id next_url=next_url label=expiry_label help_text="Expiration is an end-of-day date in UTC." terminator=terminator membership_type_name=membership_type_name %}
 {% endif %}
-
-<button type="button" class="btn btn-sm btn-outline-danger" data-toggle="modal" data-target="#{{ terminate_modal_id }}" title="End this membership early">Terminate</button>
-{% with terminate_title="Terminate membership: "|add:current_target.membership_type.name terminate_body_suffix="'s "|add:current_target.membership_type.name|add:" membership early?" %}
-  {% include 'core/_modal_confirm.html' with modal_id=terminate_modal_id title=terminate_title body_prefix="Terminate" body_emphasis=terminator body_suffix=terminate_body_suffix action_url=terminate_action_url submit_label="Terminate" submit_class="btn-danger" next_url=next_url %}
-{% endwith %}

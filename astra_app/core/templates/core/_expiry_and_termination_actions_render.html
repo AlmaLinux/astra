@@ -3,7 +3,6 @@ Internal helper for core/_expiry_and_termination_actions.html.
 
 Expected context:
 - expiry_modal_id: str
-- terminate_modal_id: str
 - expires_input_id: str
 
 Either:
@@ -20,7 +19,7 @@ Optional:
 {% if membership %}
   {% url 'membership-set-expiry' user.username membership.membership_type.code as expiry_action_url %}
   {% url 'membership-terminate' user.username membership.membership_type.code as terminate_action_url %}
-  {% with current_target=membership modal_title="Edit expiration" expiry_label="Expiration date" terminator=user.username expiry_value=membership.expires_at current_text_suffix="" %}
+  {% with modal_title="Manage membership" expiry_label="Expiration date" terminator=user.username membership_type_name=membership.membership_type.name expiry_value=membership.expires_at current_text_suffix="" %}
     {% include 'core/_expiry_and_termination_actions_shared.html' %}
   {% endwith %}
 {% endif %}
@@ -28,7 +27,7 @@ Optional:
 {% if organization %}
   {% url 'organization-sponsorship-set-expiry' organization.pk sponsorship.membership_type.code as expiry_action_url %}
   {% url 'organization-sponsorship-terminate' organization.pk sponsorship.membership_type.code as terminate_action_url %}
-  {% with current_target=sponsorship modal_title="Edit membership expiration" expiry_label="Expiration date (UTC)" terminator=organization.name expiry_value=sponsorship.expires_at current_text_suffix=" (UTC)" %}
+  {% with modal_title="Manage membership" expiry_label="Expiration date" terminator=organization.name membership_type_name=sponsorship.membership_type.name expiry_value=sponsorship.expires_at current_text_suffix=" (UTC)" %}
     {% include 'core/_expiry_and_termination_actions_shared.html' %}
   {% endwith %}
 {% endif %}

@@ -1,0 +1,223 @@
+{% comment %}
+Single modal for membership expiration and termination.
+
+Required context:
+- modal_id: str
+- expiry_action_url: str
+- terminate_action_url: str
+- input_id: str
+- terminator: str
+- membership_type_name: str
+
+Optional context:
+- next_url: str
+- label: str
+- initial_value: str (YYYY-MM-DD)
+- current_text: str
+- help_text: str
+{% endcomment %}
+
+<div
+  class="modal fade"
+  id="{{ modal_id }}"
+  tabindex="-1"
+  role="dialog"
+  aria-labelledby="{{ modal_id }}-label"
+  aria-hidden="true"
+>
+  <div class="modal-dialog" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div class="mr-3">
+          <h5 class="modal-title mb-0" id="{{ modal_id }}-label">Manage membership: {{ membership_type_name }} for {{ terminator }}</h5>
+        </div>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+
+      <div class="modal-body">
+        {% if current_text %}
+          <div class="mb-3">{{ current_text }}</div>
+        {% endif %}
+
+        <form method="post" action="{{ expiry_action_url }}" novalidate>
+          {% csrf_token %}
+          {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}" />{% endif %}
+
+          <div class="form-group">
+            <label for="{{ input_id }}">{{ label|default:"Expiration date" }}</label>
+            <input
+              id="{{ input_id }}"
+              name="expires_on"
+              type="date"
+              class="form-control"
+              value="{{ initial_value|default:'' }}"
+              required
+            />
+          </div>
+
+          {% if help_text %}
+            <div class="text-muted small mb-3">{{ help_text }}</div>
+          {% endif %}
+
+          <div class="d-flex justify-content-between">
+            <button
+              type="button"
+              class="btn btn-secondary"
+              data-dismiss="modal"
+              aria-label="Cancel"
+              title="Close dialog without saving"
+            >Cancel</button>
+            <button type="submit" class="btn btn-primary" title="Save expiration date">Save expiration</button>
+          </div>
+        </form>
+
+        <div class="mt-4 pt-3 border-top">
+          <div class="border border-danger rounded p-3 bg-light">
+            <div class="font-weight-bold text-danger mb-1">Danger zone</div>
+
+            <div class="small text-muted mb-3">
+              Ends this membership early.
+            </div>
+
+            <div class="d-flex justify-content-end">
+              <button
+                type="button"
+                class="btn btn-outline-danger"
+                data-toggle="collapse"
+                data-target="#{{ modal_id }}-terminate-collapse"
+                aria-expanded="false"
+                aria-controls="{{ modal_id }}-terminate-collapse"
+                title="Show termination confirmation"
+              >Terminate membership&hellip;</button>
+            </div>
+
+            <div class="collapse mt-3" id="{{ modal_id }}-terminate-collapse">
+              <div class="alert alert-danger mb-3" role="alert">
+                This will end the membership early and cannot be undone.
+              </div>
+
+              <form method="post" action="{{ terminate_action_url }}" class="m-0" novalidate>
+                {% csrf_token %}
+                {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}" />{% endif %}
+
+                <div class="form-group">
+                  <label for="{{ modal_id }}-terminate-confirm-input">Type the name to confirm</label>
+                  <input
+                    id="{{ modal_id }}-terminate-confirm-input"
+                    name="confirm"
+                    type="text"
+                    class="form-control"
+                    placeholder="{{ terminator }}"
+                    autocomplete="off"
+                    data-terminate-target="{{ terminator|escapejs }}"
+                    required
+                  />
+                  <div class="invalid-feedback">
+                    Does not match. Type the name to enable termination (case-insensitive).
+                  </div>
+                </div>
+
+                <div class="d-flex justify-content-end">
+                  <button
+                    type="button"
+                    class="btn btn-outline-secondary"
+                    data-terminate-action="cancel"
+                    title="Cancel termination and collapse this section"
+                  >Cancel termination</button>
+                  <button
+                    type="submit"
+                    class="btn btn-danger ml-2"
+                    id="{{ modal_id }}-terminate-submit"
+                    disabled
+                    aria-disabled="true"
+                    title="Terminate membership (enabled after confirmation)"
+                  >Terminate membership</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function () {
+    var modalId = '{{ modal_id|escapejs }}';
+    var modalSel = '#' + modalId;
+    var collapseSel = '#' + modalId + '-terminate-collapse';
+    var inputId = modalId + '-terminate-confirm-input';
+    var submitId = modalId + '-terminate-submit';
+
+    function normalize(s) {
+      return (s || '').toLowerCase().trim();
+    }
+
+    function bindHandlers() {
+      var jq = window.jQuery;
+      if (!jq) {
+        // This partial is rendered before the global JS bundle on some pages.
+        // Retry shortly so handlers still bind once jQuery is available.
+        window.setTimeout(bindHandlers, 50);
+        return;
+      }
+
+      var $modal = jq(modalSel);
+      if (!$modal.length || $modal.data('expiryTerminateBound')) {
+        return;
+      }
+      $modal.data('expiryTerminateBound', true);
+
+      jq(document).on('input', '#' + inputId, function() {
+        var $input = jq(this);
+        var $submit = jq('#' + submitId);
+
+        var target = normalize($input.attr('data-terminate-target'));
+        var value = normalize($input.val());
+
+        if (!value) {
+          $input.removeClass('is-valid is-invalid');
+          $submit.prop('disabled', true).attr('aria-disabled', 'true');
+          return;
+        }
+
+        var matches = (value === target);
+        $input.toggleClass('is-valid', matches).toggleClass('is-invalid', !matches);
+        $submit.prop('disabled', !matches).attr('aria-disabled', !matches ? 'true' : 'false');
+      });
+
+      jq(document).on('click', '[data-terminate-action="cancel"]', function() {
+        var $input = jq('#' + inputId);
+        var $submit = jq('#' + submitId);
+
+        $input.val('').removeClass('is-valid is-invalid');
+        $submit.prop('disabled', true).attr('aria-disabled', 'true');
+        jq(collapseSel).collapse('hide');
+      });
+
+      jq(collapseSel).on('shown.bs.collapse', function() {
+        jq('#' + inputId).focus();
+      });
+
+      jq(collapseSel).on('hidden.bs.collapse', function() {
+        var $input = jq('#' + inputId);
+        var $submit = jq('#' + submitId);
+        $input.val('').removeClass('is-valid is-invalid');
+        $submit.prop('disabled', true).attr('aria-disabled', 'true');
+      });
+
+      jq(modalSel).on('hidden.bs.modal', function() {
+        var $input = jq('#' + inputId);
+        var $submit = jq('#' + submitId);
+        $input.val('').removeClass('is-valid is-invalid');
+        $submit.prop('disabled', true).attr('aria-disabled', 'true');
+        jq(collapseSel).collapse('hide');
+      });
+    }
+
+    bindHandlers();
+  })();
+</script>

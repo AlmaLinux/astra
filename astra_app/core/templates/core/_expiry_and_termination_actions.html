@@ -1,7 +1,7 @@
 {% comment %}
-Renders the paired actions used together on membership/sponsorship cards:
-- "Edit expiry" button + expiration date modal
-- "Terminate" button + confirmation modal
+Renders membership/sponsorship management action with a single consolidated modal:
+- "Edit expiration" button
+- Modal with both expiration edit and termination confirmation states
 
 Call-sites should pass full objects; this template decides what it needs and owns all UI copy.
 
@@ -21,19 +21,19 @@ Optional:
 
 {% with prefix=id_prefix|default:"" suffix=id_suffix|default:"" %}
   {% if prefix and suffix %}
-    {% with expiry_modal_id=prefix|add:"-expiry-modal-"|add:suffix terminate_modal_id=prefix|add:"-terminate-modal-"|add:suffix expires_input_id=prefix|add:"-expires-on-"|add:suffix %}
+    {% with expiry_modal_id=prefix|add:"-expiry-modal-"|add:suffix expires_input_id=prefix|add:"-expires-on-"|add:suffix %}
       {% include 'core/_expiry_and_termination_actions_render.html' %}
     {% endwith %}
   {% elif prefix %}
-    {% with expiry_modal_id=prefix|add:"-expiry-modal" terminate_modal_id=prefix|add:"-terminate-modal" expires_input_id=prefix|add:"-expires-on" %}
+    {% with expiry_modal_id=prefix|add:"-expiry-modal" expires_input_id=prefix|add:"-expires-on" %}
       {% include 'core/_expiry_and_termination_actions_render.html' %}
     {% endwith %}
   {% elif suffix %}
-    {% with expiry_modal_id="expiry-modal-"|add:suffix terminate_modal_id="terminate-modal-"|add:suffix expires_input_id="expires-on-"|add:suffix %}
+    {% with expiry_modal_id="expiry-modal-"|add:suffix expires_input_id="expires-on-"|add:suffix %}
       {% include 'core/_expiry_and_termination_actions_render.html' %}
     {% endwith %}
   {% else %}
-    {% with expiry_modal_id="expiry-modal" terminate_modal_id="terminate-modal" expires_input_id="expires-on" %}
+    {% with expiry_modal_id="expiry-modal" expires_input_id="expires-on" %}
       {% include 'core/_expiry_and_termination_actions_render.html' %}
     {% endwith %}
   {% endif %}

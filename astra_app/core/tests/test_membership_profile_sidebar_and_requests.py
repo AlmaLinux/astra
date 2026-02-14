@@ -18,11 +18,13 @@ from core.permissions import (
     ASTRA_DELETE_MEMBERSHIP,
     ASTRA_VIEW_MEMBERSHIP,
 )
+from core.tests.utils_test_data import ensure_core_categories
 
 
 class MembershipProfileSidebarAndRequestsTests(TestCase):
     def setUp(self) -> None:
         super().setUp()
+        ensure_core_categories()
 
         self._coc_patcher = patch("core.views_membership.block_action_without_coc", return_value=None)
         self._coc_patcher.start()
@@ -306,15 +308,50 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertContains(resp, 'data-target="#expiry-modal-1"')
         self.assertContains(resp, 'id="expiry-modal-1"')
         self.assertContains(resp, f'action="{set_expiry_url}"')
+        self.assertContains(resp, "Edit expiration")
 
-        self.assertContains(resp, 'data-target="#terminate-modal-1"')
-        self.assertContains(resp, 'id="terminate-modal-1"')
+        self.assertNotContains(resp, 'data-target="#terminate-modal-1"')
+        self.assertNotContains(resp, 'id="terminate-modal-1"')
         self.assertContains(resp, f'action="{terminate_url}"')
-
-        self.assertContains(
-            resp,
-            "Terminate <strong>alice</strong>&#x27;s Individual membership early?",
-        )
+        self.assertContains(resp, "Manage membership: Individual for alice")
+        self.assertNotContains(resp, "Target:")
+        self.assertContains(resp, "Expiration date")
+        self.assertContains(resp, "Expiration is an end-of-day date in UTC.")
+        self.assertContains(resp, "Save expiration")
+        self.assertContains(resp, "Danger zone")
+        self.assertContains(resp, "Ends this membership early.")
+        self.assertContains(resp, "Terminate membership&hellip;", html=True)
+        self.assertContains(resp, 'data-target="#expiry-modal-1-terminate-collapse"')
+        self.assertContains(resp, 'id="expiry-modal-1-terminate-collapse"')
+        self.assertContains(resp, "This will end the membership early and cannot be undone.")
+        self.assertContains(resp, "Type the name to confirm")
+        self.assertContains(resp, 'placeholder="alice"')
+        self.assertContains(resp, 'data-terminate-target="alice"')
+        self.assertContains(resp, "Does not match. Type the name to enable termination (case-insensitive).")
+        self.assertContains(resp, 'data-terminate-action="cancel"')
+        self.assertContains(resp, "Cancel termination")
+        self.assertContains(resp, 'id="expiry-modal-1-terminate-submit"')
+        self.assertContains(resp, "disabled")
+        self.assertContains(resp, "aria-disabled=\"true\"")
+        self.assertContains(resp, "attr('data-terminate-target')")
+        self.assertContains(resp, "var modalId = 'expiry\\u002Dmodal\\u002D1';")
+        self.assertContains(resp, "var inputId = modalId + '-terminate-confirm-input';")
+        self.assertContains(resp, "var submitId = modalId + '-terminate-submit';")
+        self.assertContains(resp, "jq(document).on('input', '#' + inputId, function() {")
+        self.assertContains(resp, "var $input = jq(this);")
+        self.assertContains(resp, "jq(document).on('click', '[data-terminate-action=\"cancel\"]', function() {")
+        self.assertContains(resp, "jq(collapseSel).on('shown.bs.collapse', function() {")
+        self.assertContains(resp, "jq(collapseSel).on('hidden.bs.collapse', function() {")
+        self.assertContains(resp, "jq(modalSel).on('hidden.bs.modal', function() {")
+        self.assertContains(resp, "$submit.prop('disabled', !matches).attr('aria-disabled', !matches ? 'true' : 'false');")
+        self.assertNotContains(resp, "$input.off('input.terminate');")
+        self.assertNotContains(resp, "$input.on('input.terminate', updateConfirmState);")
+        self.assertNotContains(resp, "jq(collapseSel).on('click', '[data-terminate-action=\"cancel\"]', function () {")
+        self.assertNotContains(resp, "jq(modalSel).on('shown.bs.modal hidden.bs.modal', function () {")
+        self.assertNotContains(resp, "function setDisabled(btn, disabled) {")
+        self.assertNotContains(resp, "data-expiry-modal-state")
+        self.assertNotContains(resp, 'data-expiry-action="go-confirm-terminate"')
+        self.assertNotContains(resp, 'data-expiry-action="back-to-edit"')
 
     def test_profile_shows_all_pending_membership_requests(self) -> None:
         from core.models import MembershipRequest, MembershipType

@@ -1,13 +1,16 @@
 from django.test import TestCase
 from post_office.models import EmailTemplate
 
-from core.models import MembershipTypeCategory
+from core.models import MembershipType, MembershipTypeCategory
 from core.templated_email import configured_email_template_names
 from core.tests.utils_test_data import ensure_core_categories, ensure_email_templates
 
 
 class UtilsTestDataTests(TestCase):
     def test_ensure_core_categories_creates_required_rows(self) -> None:
+        # Membership types are seeded by migrations and reference categories via PROTECT.
+        # Delete types first to keep this test robust to future seeds.
+        MembershipType.objects.all().delete()
         MembershipTypeCategory.objects.all().delete()
 
         ensure_core_categories()
@@ -21,6 +24,10 @@ class UtilsTestDataTests(TestCase):
 
     def test_ensure_email_templates_creates_required_rows(self) -> None:
         configured_names = sorted(configured_email_template_names())
+
+        # Membership types are seeded by migrations and reference email templates via PROTECT.
+        # Delete types first so we can delete and recreate the templates.
+        MembershipType.objects.all().delete()
         EmailTemplate.objects.filter(name__in=configured_names).delete()
 
         ensure_email_templates()

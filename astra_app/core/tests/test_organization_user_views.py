@@ -2727,26 +2727,59 @@ class OrganizationUserViewsTests(TestCase):
         with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Edit expiry")
-        self.assertContains(resp, "Terminate")
+        self.assertContains(resp, "Edit expiration")
         self.assertContains(resp, 'data-target="#sponsorship-expiry-modal-gold"')
         self.assertContains(resp, 'id="sponsorship-expiry-modal-gold"')
         self.assertContains(
             resp,
             f'action="{reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"])}"',
         )
-        self.assertContains(resp, 'data-target="#sponsorship-terminate-modal-gold"')
-        self.assertContains(resp, 'id="sponsorship-terminate-modal-gold"')
+        self.assertNotContains(resp, 'data-target="#sponsorship-terminate-modal-gold"')
+        self.assertNotContains(resp, 'id="sponsorship-terminate-modal-gold"')
         self.assertContains(
             resp,
             f'action="{reverse("organization-sponsorship-terminate", args=[org.pk, "gold"])}"',
         )
 
-        self.assertContains(resp, "Terminate membership: Gold Sponsor Member")
-        self.assertContains(
-            resp,
-            f"Terminate <strong>{org.name}</strong>&#x27;s Gold Sponsor Member membership early?",
-        )
+        self.assertContains(resp, f"Manage membership: Gold Sponsor Member for {org.name}")
+        self.assertNotContains(resp, "Target:")
+        self.assertContains(resp, "Expiration date")
+        self.assertContains(resp, "Expiration is an end-of-day date in UTC.")
+        self.assertContains(resp, "Save expiration")
+        self.assertContains(resp, "Danger zone")
+        self.assertContains(resp, "Ends this membership early.")
+        self.assertContains(resp, "Terminate membership&hellip;", html=True)
+        self.assertContains(resp, 'data-target="#sponsorship-expiry-modal-gold-terminate-collapse"')
+        self.assertContains(resp, 'id="sponsorship-expiry-modal-gold-terminate-collapse"')
+        self.assertContains(resp, "This will end the membership early and cannot be undone.")
+        self.assertContains(resp, "Type the name to confirm")
+        self.assertContains(resp, f'placeholder="{org.name}"')
+        self.assertContains(resp, f'data-terminate-target="{org.name}"')
+        self.assertContains(resp, "Does not match. Type the name to enable termination (case-insensitive).")
+        self.assertContains(resp, 'data-terminate-action="cancel"')
+        self.assertContains(resp, "Cancel termination")
+        self.assertContains(resp, 'id="sponsorship-expiry-modal-gold-terminate-submit"')
+        self.assertContains(resp, "disabled")
+        self.assertContains(resp, "aria-disabled=\"true\"")
+        self.assertContains(resp, "attr('data-terminate-target')")
+        self.assertContains(resp, "var modalId = 'sponsorship\\u002Dexpiry\\u002Dmodal\\u002Dgold';")
+        self.assertContains(resp, "var inputId = modalId + '-terminate-confirm-input';")
+        self.assertContains(resp, "var submitId = modalId + '-terminate-submit';")
+        self.assertContains(resp, "jq(document).on('input', '#' + inputId, function() {")
+        self.assertContains(resp, "var $input = jq(this);")
+        self.assertContains(resp, "jq(document).on('click', '[data-terminate-action=\"cancel\"]', function() {")
+        self.assertContains(resp, "jq(collapseSel).on('shown.bs.collapse', function() {")
+        self.assertContains(resp, "jq(collapseSel).on('hidden.bs.collapse', function() {")
+        self.assertContains(resp, "jq(modalSel).on('hidden.bs.modal', function() {")
+        self.assertContains(resp, "$submit.prop('disabled', !matches).attr('aria-disabled', !matches ? 'true' : 'false');")
+        self.assertNotContains(resp, "$input.off('input.terminate');")
+        self.assertNotContains(resp, "$input.on('input.terminate', updateConfirmState);")
+        self.assertNotContains(resp, "jq(collapseSel).on('click', '[data-terminate-action=\"cancel\"]', function () {")
+        self.assertNotContains(resp, "jq(modalSel).on('shown.bs.modal hidden.bs.modal', function () {")
+        self.assertNotContains(resp, "function setDisabled(btn, disabled) {")
+        self.assertNotContains(resp, "data-expiry-modal-state")
+        self.assertNotContains(resp, 'data-expiry-action="go-confirm-terminate"')
+        self.assertNotContains(resp, 'data-expiry-action="back-to-edit"')
 
         with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"]))
