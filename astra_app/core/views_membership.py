@@ -513,6 +513,49 @@ def _pending_category_request_exists(
     return membership_type.category_id in eligibility.pending_membership_category_ids
 
 
+def _renewal_prefill_responses(
+    *,
+    membership_type_code: str,
+    username: str | None,
+    organization: Organization | None,
+) -> dict[str, str]:
+    """Return initial form values from the latest request for this renewal target/type."""
+    membership_type_code = str(membership_type_code or "").strip()
+    if not membership_type_code:
+        return {}
+
+    requests = MembershipRequest.objects.filter(membership_type_id=membership_type_code)
+    if organization is not None:
+        requests = requests.filter(requested_organization=organization)
+    else:
+        normalized_username = str(username or "").strip()
+        if not normalized_username:
+            return {}
+        requests = requests.filter(requested_username=normalized_username)
+
+    latest = requests.only("responses").order_by("-requested_at", "-pk").first()
+    if latest is None:
+        return {}
+
+    spec_by_name = MembershipRequestForm._question_spec_by_name()
+    initial: dict[str, str] = {}
+    for item in latest.responses or []:
+        if not isinstance(item, dict):
+            continue
+        for question, answer in item.items():
+            question_name = str(question or "").strip()
+            if question_name.lower() == "additional information":
+                # Legacy request update forms used "Additional information";
+                # canonical request forms use "Additional info".
+                question_name = "Additional info"
+            spec = spec_by_name.get(question_name)
+            if spec is None:
+                continue
+            initial[spec.field_name] = str(answer or "")
+
+    return initial
+
+
 def membership_request(request: HttpRequest, organization_id: int | None = None) -> HttpResponse:
     username = get_username(request)
     if not username:
@@ -675,10 +718,19 @@ def membership_request(request: HttpRequest, organization_id: int | None = None)
                 or ""
             )
 
+        initial = {"membership_type": prefill_membership_type}
+        initial.update(
+            _renewal_prefill_responses(
+                membership_type_code=prefill_membership_type,
+                username=target_username,
+                organization=organization,
+            )
+        )
+
         form = MembershipRequestForm(
             username=target_username,
             organization=organization,
-            initial={"membership_type": prefill_membership_type},
+            initial=initial,
         )
 
     cancel_url = reverse("user-profile", kwargs={"username": username})

@@ -1464,6 +1464,53 @@ class OrganizationUserViewsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'value="silver"')
 
+    def test_org_membership_request_renewal_prefills_last_request_answers(self) -> None:
+        from core.models import Membership, MembershipRequest, MembershipType, MembershipTypeCategory, Organization
+
+        MembershipTypeCategory.objects.filter(pk="sponsorship").update(is_organization=True, sort_order=1)
+
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="Expiring Org", representative="bob")
+        Membership.objects.create(
+            target_organization=org,
+            membership_type_id="silver",
+            expires_at=timezone.now() + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS - 1),
+        )
+
+        MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="silver",
+            status=MembershipRequest.Status.approved,
+            responses=[{"Sponsorship details": "Previously submitted sponsor details"}],
+        )
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
+        self._login_as_freeipa_user("bob")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.views_membership.block_action_without_coc", return_value=None),
+        ):
+            resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        form = resp.context["form"]
+        self.assertEqual(
+            form.initial.get("q_sponsorship_details"),
+            "Previously submitted sponsor details",
+        )
+        self.assertFalse(form.fields["q_sponsorship_details"].disabled)
+
     def test_org_membership_request_does_not_call_level_change_for_other_category(self) -> None:
         from core.models import MembershipRequest, MembershipType, Organization
 

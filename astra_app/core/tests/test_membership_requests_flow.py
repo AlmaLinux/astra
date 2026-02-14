@@ -439,7 +439,7 @@ class MembershipRequestsFlowTests(TestCase):
             patch("core.views_membership.block_action_without_coc", return_value=None),
             patch("core.views_membership.block_action_without_country_code", return_value=None),
         ):
-            resp = self.client.get(reverse("membership-request"))
+            resp = self.client.get(f"{reverse('membership-request')}?membership_type=individual")
 
         self.assertEqual(resp.status_code, 200)
         self.assertNotContains(resp, 'value="individual"')
@@ -496,7 +496,7 @@ class MembershipRequestsFlowTests(TestCase):
             patch("core.views_membership.block_action_without_coc", return_value=None),
             patch("core.views_membership.block_action_without_country_code", return_value=None),
         ):
-            resp = self.client.get(reverse("membership-request"))
+            resp = self.client.get(f"{reverse('membership-request')}?membership_type=individual")
 
         self.assertEqual(resp.status_code, 200)
         self.assertNotContains(resp, 'value="individual"')
@@ -546,6 +546,60 @@ class MembershipRequestsFlowTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'value="individual"')
+
+    def test_membership_request_renewal_prefills_last_request_answers(self) -> None:
+        from core.models import Membership, MembershipRequest, MembershipType, MembershipTypeCategory
+
+        MembershipTypeCategory.objects.filter(pk="individual").update(is_individual=True, sort_order=1)
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        Membership.objects.create(
+            target_username="alice",
+            membership_type_id="individual",
+            expires_at=timezone.now() + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS - 1),
+        )
+
+        MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.approved,
+            responses=[{"Contributions": "Prior renewal context"}],
+        )
+
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["alice@example.com"],
+                "fasstatusnote": ["US"],
+                "memberof_group": [],
+            },
+        )
+        self._login_as_freeipa_user("alice")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.views_membership.block_action_without_coc", return_value=None),
+            patch("core.views_membership.block_action_without_country_code", return_value=None),
+        ):
+            resp = self.client.get(f"{reverse('membership-request')}?membership_type=individual")
+
+        self.assertEqual(resp.status_code, 200)
+        form = resp.context["form"]
+        self.assertEqual(form.initial.get("q_contributions"), "Prior renewal context")
+        self.assertFalse(form.fields["q_contributions"].disabled)
 
     def test_committee_can_approve_request_adds_user_to_group_logs_and_emails(self) -> None:
         from core.models import MembershipLog, MembershipRequest, MembershipType
