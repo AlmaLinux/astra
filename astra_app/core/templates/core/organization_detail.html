@@ -61,9 +61,6 @@
           </div>
 
           <div class="d-flex align-items-center justify-content-end flex-wrap" style="gap: .5rem;">
-            {% for pending_request in pending_requests %}
-              {% include 'core/_membership_badge.html' with request_obj=pending_request is_owner=is_representative %}
-            {% endfor %}
             {% for entry in sponsorship_entries %}
               {% include 'core/_membership_badge.html' with membership=entry.sponsorship %}
             {% empty %}
