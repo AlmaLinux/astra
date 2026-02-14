@@ -32,6 +32,7 @@ _COLUMN_FIELDS = (
     "name_column",
     "active_member_column",
     "membership_start_date_column",
+    "membership_end_date_column",
     "committee_notes_column",
     "membership_type_column",
 )
@@ -139,6 +140,11 @@ class MembershipCSVImportForm(ImportForm):
         choices=[("", "Auto-detect")],
         help_text="Optional: select the CSV header for the membership start date column. Leave as Auto-detect to infer.",
     )
+    membership_end_date_column = forms.ChoiceField(
+        required=False,
+        choices=[("", "Auto-detect")],
+        help_text="Optional: select the CSV header for the membership end date column. Leave as Auto-detect to infer.",
+    )
     committee_notes_column = forms.ChoiceField(
         required=False,
         choices=[("", "Auto-detect")],
@@ -227,6 +233,7 @@ class MembershipCSVConfirmImportForm(ConfirmImportForm):
     name_column = forms.CharField(required=False, widget=forms.HiddenInput)
     active_member_column = forms.CharField(required=False, widget=forms.HiddenInput)
     membership_start_date_column = forms.CharField(required=False, widget=forms.HiddenInput)
+    membership_end_date_column = forms.CharField(required=False, widget=forms.HiddenInput)
     committee_notes_column = forms.CharField(required=False, widget=forms.HiddenInput)
     membership_type_column = forms.CharField(required=False, widget=forms.HiddenInput)
 
@@ -281,6 +288,7 @@ class MembershipCSVImportResource(resources.ModelResource):
         name_column: str = "",
         active_member_column: str = "",
         membership_start_date_column: str = "",
+        membership_end_date_column: str = "",
         committee_notes_column: str = "",
         membership_type_column: str = "",
         question_column_overrides: dict[str, str] | None = None,
@@ -295,6 +303,7 @@ class MembershipCSVImportResource(resources.ModelResource):
         self._name_column_override = name_column
         self._active_member_column_override = active_member_column
         self._membership_start_date_column_override = membership_start_date_column
+        self._membership_end_date_column_override = membership_end_date_column
         self._committee_notes_column_override = committee_notes_column
         self._membership_type_column_override = membership_type_column
         self._question_column_overrides = question_column_overrides or {}
@@ -304,6 +313,7 @@ class MembershipCSVImportResource(resources.ModelResource):
         self._name_header: str | None = None
         self._active_header: str | None = None
         self._start_header: str | None = None
+        self._end_header: str | None = None
         self._note_header: str | None = None
         self._type_header: str | None = None
 
@@ -432,6 +442,14 @@ class MembershipCSVImportResource(resources.ModelResource):
         self._start_header = _resolve_override(self._membership_start_date_column_override) or (
             header_by_norm.get("membershipstartdate") or header_by_norm.get("startdate")
         )
+        self._end_header = _resolve_override(self._membership_end_date_column_override) or (
+            header_by_norm.get("membershipenddate")
+            or header_by_norm.get("enddate")
+            or header_by_norm.get("membershipexpirydate")
+            or header_by_norm.get("membershipexpirationdate")
+            or header_by_norm.get("expirydate")
+            or header_by_norm.get("expirationdate")
+        )
         self._note_header = _resolve_override(self._committee_notes_column_override) or (
             header_by_norm.get("committeenotes")
             or header_by_norm.get("committeenote")
@@ -487,12 +505,13 @@ class MembershipCSVImportResource(resources.ModelResource):
                     self._name_to_usernames.setdefault(key, set()).add(username)
 
         logger.info(
-            "Membership CSV import: headers=%d email_header=%r name_header=%r active_header=%r start_header=%r note_header=%r type_header=%r freeipa_users=%d unique_emails=%d",
+            "Membership CSV import: headers=%d email_header=%r name_header=%r active_header=%r start_header=%r end_header=%r note_header=%r type_header=%r freeipa_users=%d unique_emails=%d",
             len(headers),
             self._email_header,
             self._name_header,
             self._active_header,
             self._start_header,
+            self._end_header,
             self._note_header,
             self._type_header,
             len(users),
@@ -624,6 +643,14 @@ class MembershipCSVImportResource(resources.ModelResource):
             return None
         return _parse_date(self._row_value(row, self._start_header))
 
+    def _row_expires_at(self, row: Any) -> datetime.datetime | None:
+        if self._end_header is None:
+            return None
+        return _parse_date(self._row_value(row, self._end_header))
+
+    def _row_has_expiry_value(self, row: Any) -> bool:
+        return bool(_normalize_str(self._row_value(row, self._end_header)))
+
     def _row_note(self, row: Any) -> str:
         return _normalize_str(self._row_value(row, self._note_header))
 
@@ -663,6 +690,15 @@ class MembershipCSVImportResource(resources.ModelResource):
             )
 
         start_at = self._row_approved_at(row)
+        expires_at = self._row_expires_at(row)
+        if self._row_has_expiry_value(row) and expires_at is None:
+            return ("SKIP", "Invalid membership end date")
+
+        if expires_at is not None:
+            effective_start_at = start_at or timezone.now().astimezone(datetime.UTC)
+            if expires_at <= effective_start_at:
+                return ("SKIP", "Membership end date must be after start date")
+
         csv_note = self._row_note(row)
         responses = self._row_responses(row)
         existing_request = (
@@ -778,6 +814,7 @@ class MembershipCSVImportResource(resources.ModelResource):
             _norm_header(self._name_header) if self._name_header else "",
             _norm_header(self._active_header) if self._active_header else "",
             _norm_header(self._start_header) if self._start_header else "",
+            _norm_header(self._end_header) if self._end_header else "",
             _norm_header(self._note_header) if self._note_header else "",
             _norm_header(self._type_header) if self._type_header else "",
         }
@@ -952,6 +989,7 @@ class MembershipCSVImportResource(resources.ModelResource):
         )
 
         start_at = self._row_approved_at(row)
+        expires_at = self._row_expires_at(row)
         now = timezone.now().astimezone(datetime.UTC)
         if start_at is None:
             start_at = now
@@ -1036,7 +1074,12 @@ class MembershipCSVImportResource(resources.ModelResource):
                 membership_type=instance.membership_type,
             ).update(created_at=start_at)
 
-            if preserved_expires_at is not None:
+            if expires_at is not None and expires_at > start_at:
+                Membership.objects.filter(
+                    target_username=instance.requested_username,
+                    membership_type=instance.membership_type,
+                ).update(expires_at=expires_at)
+            elif preserved_expires_at is not None:
                 Membership.objects.filter(
                     target_username=instance.requested_username,
                     membership_type=instance.membership_type,

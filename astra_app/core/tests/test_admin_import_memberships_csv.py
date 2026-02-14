@@ -1638,6 +1638,161 @@ class AdminImportMembershipsCSVTests(TestCase):
         add_to_group.assert_called()
         send_mail.assert_not_called()
 
+    def test_live_import_sets_expires_at_from_membership_end_date_column(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "enabled": True,
+                "sort_order": 0,
+            },
+        )
+
+        self._login_as_freeipa_admin("alex")
+
+        csv_content = (
+            b"Email,Start date,End date,Notes\n"
+            b"alice@example.org,2024-01-02,2026-04-15,Imported note\n"
+        )
+        uploaded = SimpleUploadedFile("members.csv", csv_content, content_type="text/csv")
+
+        admin_user = FreeIPAUser(
+            "alex",
+            {
+                "uid": ["alex"],
+                "mail": ["alex@example.org"],
+                "memberof_group": ["admins"],
+            },
+        )
+        alice_user = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.org"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "alex":
+                return admin_user
+            if username == "alice":
+                return alice_user
+            return None
+
+        with (
+            patch("core.membership_csv_import.FreeIPAUser.all", return_value=[admin_user, alice_user]),
+            patch("core.membership_csv_import.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
+            patch.object(FreeIPAUser, "add_to_group", autospec=True),
+        ):
+            import_url = reverse("admin:core_membershipcsvimportlink_import")
+            preview_resp = self.client.post(
+                import_url,
+                data={
+                    "resource": "0",
+                    "format": "0",
+                    "membership_type": "individual",
+                    "import_file": uploaded,
+                },
+                follow=False,
+            )
+
+            self.assertEqual(preview_resp.status_code, 200)
+            confirm_form = preview_resp.context.get("confirm_form")
+            self.assertIsNotNone(confirm_form)
+
+            process_url = reverse("admin:core_membershipcsvimportlink_process_import")
+            confirm_data = dict(confirm_form.initial)
+            confirm_data["membership_type"] = "individual"
+            resp = self.client.post(process_url, data=confirm_data, follow=False)
+
+        self.assertEqual(resp.status_code, 302)
+
+        membership = Membership.objects.get(target_username="alice", membership_type_id="individual")
+        self.assertEqual(
+            membership.expires_at,
+            datetime.datetime(2026, 4, 15, 0, 0, 0, tzinfo=datetime.UTC),
+        )
+
+    def test_live_import_skips_row_when_membership_end_date_is_not_after_start_date(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "enabled": True,
+                "sort_order": 0,
+            },
+        )
+
+        self._login_as_freeipa_admin("alex")
+
+        csv_content = (
+            b"Email,Start date,End date,Notes\n"
+            b"alice@example.org,2024-01-02,2024-01-02,Imported note\n"
+        )
+        uploaded = SimpleUploadedFile("members.csv", csv_content, content_type="text/csv")
+
+        admin_user = FreeIPAUser(
+            "alex",
+            {
+                "uid": ["alex"],
+                "mail": ["alex@example.org"],
+                "memberof_group": ["admins"],
+            },
+        )
+        alice_user = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.org"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "alex":
+                return admin_user
+            if username == "alice":
+                return alice_user
+            return None
+
+        with (
+            patch("core.membership_csv_import.FreeIPAUser.all", return_value=[admin_user, alice_user]),
+            patch("core.membership_csv_import.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
+            patch.object(FreeIPAUser, "add_to_group", autospec=True),
+        ):
+            import_url = reverse("admin:core_membershipcsvimportlink_import")
+            preview_resp = self.client.post(
+                import_url,
+                data={
+                    "resource": "0",
+                    "format": "0",
+                    "membership_type": "individual",
+                    "import_file": uploaded,
+                },
+                follow=False,
+            )
+
+            self.assertEqual(preview_resp.status_code, 200)
+            confirm_form = preview_resp.context.get("confirm_form")
+            self.assertIsNotNone(confirm_form)
+
+            process_url = reverse("admin:core_membershipcsvimportlink_process_import")
+            confirm_data = dict(confirm_form.initial)
+            confirm_data["membership_type"] = "individual"
+            resp = self.client.post(process_url, data=confirm_data, follow=False)
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(Membership.objects.filter(target_username="alice", membership_type_id="individual").exists())
+
     def test_live_import_on_hold_request_adds_note_without_updating_membership(self) -> None:
         MembershipType.objects.update_or_create(
             code="individual",
