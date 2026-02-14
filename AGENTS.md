@@ -106,6 +106,13 @@ When you notice duplicated logic across files:
 - Prefer a small shared primitive API (e.g. `make_signed_token(payload)` / `read_signed_token(token)`) over per-feature wrappers.
 - Prefer removing indirection over adding it (don’t introduce `_ttl()` / `_salt()` helpers that just return settings).
 
+Common-code-first rule (required):
+- If a request changes behavior that is already computed by an existing helper/function, DO NOT re-implement that logic in views/templates/callers.
+- First, adapt the shared helper so it can serve both old and new call sites (for example: return a queryset/list used by both a boolean check and additional filtering).
+- Then make existing call sites consume that helper output (instead of cloning query/filter code nearby).
+- Only add a new helper when it becomes the single source of truth used by 2+ call sites immediately.
+- If you are about to copy even ~3 lines of business-rule query logic from another function, stop and refactor the original shared function instead.
+
 Guardrails:
 - Avoid “double defaults” (a default in settings + another default in code) because it silently diverges.
 - Prefer deleting code over adding code during refactors.

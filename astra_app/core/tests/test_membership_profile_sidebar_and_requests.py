@@ -439,6 +439,56 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertEqual(resp_request.status_code, 200)
         self.assertContains(resp_request, 'value="individual" selected')
 
+    def test_profile_shows_change_tier_button_for_multi_type_category(self) -> None:
+        from core.models import MembershipLog, MembershipType
+
+        # Keep deterministic with --keepdb: only same-category individual tiers.
+        MembershipType.objects.update(enabled=False)
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="individual_plus",
+            defaults={
+                "name": "Individual Plus",
+                "group_cn": "almalinux-individual-plus",
+                "category_id": "individual",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        MembershipLog.objects.create(
+            actor_username="reviewer",
+            target_username="alice",
+            membership_type_id="individual",
+            requested_group_cn="almalinux-individual",
+            action=MembershipLog.Action.approved,
+            expires_at=timezone.now() + datetime.timedelta(days=200),
+        )
+
+        alice = self._make_user("alice", full_name="Alice User")
+        self._login_as_freeipa_user("alice")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+            with patch("core.views_users._get_full_user", return_value=alice):
+                with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
+                    with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
+                        resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Change tier")
+        self.assertContains(resp, reverse("membership-request") + "?membership_type=individual")
+        self.assertNotContains(resp, "Request membership")
+
     def test_membership_request_prefills_mirror_type(self) -> None:
         """When ?membership_type=mirror is passed, the mirror option should be selected."""
         from core.models import MembershipType

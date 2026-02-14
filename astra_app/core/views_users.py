@@ -23,6 +23,7 @@ from core.membership import (
     get_membership_request_eligibility,
     get_valid_memberships,
     membership_request_can_request_any,
+    requestable_membership_types_for_target,
     resolve_request_ids_by_membership_type,
 )
 from core.membership_notifications import membership_extend_url
@@ -170,20 +171,43 @@ def _profile_context_for_user(
     )
     pending_request_category_ids = personal_pending_context.category_ids
 
+    requestable_membership_type_rows = list(
+        requestable_membership_types_for_target(
+            username=fu.username,
+            eligibility=membership_eligibility,
+        )
+        .values_list("category_id", "code")
+    )
+    requestable_codes_by_category: dict[str, set[str]] = {}
+    for category_id, code in requestable_membership_type_rows:
+        category_id_value = str(category_id or "")
+        code_value = str(code or "")
+        if not category_id_value or not code_value:
+            continue
+        requestable_codes_by_category.setdefault(category_id_value, set()).add(code_value)
+
     memberships: list[dict[str, object]] = []
     for membership in valid_memberships:
         expires_at = membership.expires_at
         is_expiring_soon = bool(expires_at and expires_at <= expiring_soon_by)
+        has_pending_request_in_category = membership.category_id in pending_request_category_ids
         memberships.append(
             {
                 "membership_type": membership.membership_type,
                 "created_at": membership.created_at,
                 "expires_at": expires_at,
                 "is_expiring_soon": is_expiring_soon,
-                "has_pending_request_in_category": membership.category_id in pending_request_category_ids,
+                "has_pending_request_in_category": has_pending_request_in_category,
                 "extend_url": membership_extend_url(
                     membership_type_code=membership.membership_type.code,
                     base_url="",
+                ),
+                "can_request_tier_change": (
+                    any(
+                        code != membership.membership_type.code
+                        for code in requestable_codes_by_category.get(membership.category_id, set())
+                    )
+                    and not has_pending_request_in_category
                 ),
                 "request_id": request_id_by_membership_type_id.get(membership.membership_type_id),
             }
@@ -218,6 +242,12 @@ def _profile_context_for_user(
         username=fu.username,
         eligibility=membership_eligibility,
     )
+    if membership_can_request_any:
+        held_category_ids = {membership.category_id for membership in valid_memberships}
+        membership_can_request_any = any(
+            category_id not in held_category_ids
+            for category_id, _code in requestable_membership_type_rows
+        )
 
     email_is_blacklisted = False
     if is_self and fu.email:

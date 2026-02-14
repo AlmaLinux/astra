@@ -22,7 +22,7 @@
   {% for entry in membership_entries %}
     <li class="list-group-item d-flex justify-content-between align-items-center">
       {% if membership_target_kind == 'organization' %}
-      {% with sponsorship=entry.sponsorship is_expiring_soon=entry.is_expiring_soon has_pending_request_in_category=entry.pending_request request_id=entry.request_id %}
+      {% with sponsorship=entry.sponsorship is_expiring_soon=entry.is_expiring_soon has_pending_request_in_category=entry.pending_request request_id=entry.request_id can_request_tier_change=entry.can_request_tier_change tier_change_url=entry.tier_change_url %}
         <div>
           <div class="font-weight-bold">{{ sponsorship.membership_type.name }}</div>
           {% if sponsorship.membership_type.description %}
@@ -57,10 +57,14 @@
           {% endif %}
         </div>
         <div class="d-flex align-items-center justify-content-end flex-wrap" style="gap: .5rem;">
+          {% include 'core/_membership_badge.html' with membership=sponsorship request_id=request_id is_owner=membership_is_owner %}
+
           {% if membership_is_owner and is_expiring_soon and not has_pending_request_in_category %}
             <a href="{% url 'organization-membership-request' organization.pk %}?membership_type={{ sponsorship.membership_type.code }}" class="btn btn-sm btn-primary" title="Request renewal for this membership">Request renewal</a>
-          {% else %}
-            {% include 'core/_membership_badge.html' with membership=sponsorship request_id=request_id is_owner=membership_is_owner %}
+          {% endif %}
+
+          {% if membership_is_owner and can_request_tier_change %}
+            <a href="{{ tier_change_url }}" class="btn btn-sm btn-outline-primary" title="Request a change of tier">Change tier</a>
           {% endif %}
 
           {% if membership_can_change and membership_can_delete %}
@@ -69,7 +73,7 @@
         </div>
       {% endwith %}
       {% else %}
-      {% with membership=entry is_expiring_soon=entry.is_expiring_soon has_pending_request_in_category=entry.has_pending_request_in_category request_id=entry.request_id %}
+      {% with membership=entry is_expiring_soon=entry.is_expiring_soon has_pending_request_in_category=entry.has_pending_request_in_category request_id=entry.request_id can_request_tier_change=entry.can_request_tier_change %}
         <div>
           <div class="font-weight-bold">{{ membership.membership_type.name }}</div>
           <div class="text-muted small">
@@ -101,10 +105,14 @@
           {% endif %}
         </div>
         <div class="d-flex align-items-center justify-content-end flex-wrap" style="gap: .5rem;">
+          {% include 'core/_membership_badge.html' with membership=membership request_id=request_id is_owner=membership_is_owner %}
+
           {% if membership_is_owner and is_expiring_soon and not has_pending_request_in_category %}
             <a href="{{ membership.extend_url }}" class="btn btn-sm btn-primary" title="Request renewal for this membership">Request renewal</a>
-          {% else %}
-            {% include 'core/_membership_badge.html' with membership=membership request_id=request_id is_owner=membership_is_owner %}
+          {% endif %}
+
+          {% if membership_is_owner and can_request_tier_change %}
+            <a href="{{ membership.extend_url }}" class="btn btn-sm btn-outline-primary" title="Request a change of tier">Change tier</a>
           {% endif %}
 
           {% if membership_can_change and membership_can_delete %}

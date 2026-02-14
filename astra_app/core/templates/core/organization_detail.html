@@ -171,7 +171,7 @@
       </div>
 
       {% url 'organization-membership-request' organization.pk as organization_membership_request_url %}
-      {% include 'core/_membership_profile_section.html' with membership_target_kind='organization' membership_is_owner=is_representative membership_can_request_any=is_representative membership_entries=sponsorship_entries membership_pending_requests=pending_requests membership_request_url=organization_membership_request_url %}
+      {% include 'core/_membership_profile_section.html' with membership_target_kind='organization' membership_is_owner=is_representative membership_can_request_any=membership_can_request_any membership_entries=sponsorship_entries membership_pending_requests=pending_requests membership_request_url=organization_membership_request_url %}
     </div>
 
     <div class="col-md-5">

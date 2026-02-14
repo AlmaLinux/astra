@@ -727,6 +727,9 @@ class OrganizationUserViewsTests(TestCase):
     def test_org_detail_header_shows_separate_actions_and_level_badge(self) -> None:
         from core.models import MembershipType, Organization
 
+        # Keep deterministic with --keepdb: only one requestable org type.
+        MembershipType.objects.update(enabled=False)
+
         MembershipType.objects.update_or_create(
             code="gold",
             defaults={
@@ -757,8 +760,8 @@ class OrganizationUserViewsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Edit details")
         self.assertContains(resp, reverse("organization-edit", args=[org.pk]))
-        self.assertContains(resp, "Request membership")
-        self.assertContains(resp, reverse("organization-membership-request", args=[org.pk]))
+        self.assertNotContains(resp, "Request membership")
+        self.assertNotContains(resp, reverse("organization-membership-request", args=[org.pk]))
 
         self.assertNotContains(resp, "Active sponsor")
         self.assertContains(resp, 'alx-status-badge--active">Gold')
@@ -841,6 +844,93 @@ class OrganizationUserViewsTests(TestCase):
                         },
                     )[0],
                 )
+
+    def test_org_detail_shows_change_tier_button_for_multi_type_category(self) -> None:
+        from core.models import MembershipType, Organization
+
+        # Keep deterministic with --keepdb: only same-category sponsorship tiers.
+        MembershipType.objects.update(enabled=False)
+
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 1,
+                "enabled": True,
+                "group_cn": "almalinux-silver",
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 2,
+                "enabled": True,
+                "group_cn": "almalinux-gold",
+            },
+        )
+
+        org = Organization.objects.create(name="Tiered Org", representative="bob")
+        Membership.objects.create(target_organization=org, membership_type_id="silver")
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
+        self._login_as_freeipa_user("bob")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Change tier")
+        self.assertContains(
+            resp,
+            reverse("organization-membership-request", args=[org.pk]) + "?membership_type=silver",
+        )
+        self.assertNotContains(resp, "Request membership")
+
+    def test_org_detail_hides_request_membership_button_when_no_more_categories_available(self) -> None:
+        from core.models import MembershipType, Organization
+
+        # Keep deterministic with --keepdb: only these requestable org types.
+        MembershipType.objects.update(enabled=False)
+
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "description": "Silver",
+                "category_id": "sponsorship",
+                "sort_order": 1,
+                "enabled": True,
+                "group_cn": "almalinux-silver",
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror Member",
+                "description": "Mirror",
+                "category_id": "mirror",
+                "sort_order": 2,
+                "enabled": True,
+                "group_cn": "almalinux-mirror",
+            },
+        )
+
+        org = Organization.objects.create(name="Complete Org", representative="bob")
+        Membership.objects.create(target_organization=org, membership_type_id="silver")
+        Membership.objects.create(target_organization=org, membership_type_id="mirror")
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
+        self._login_as_freeipa_user("bob")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "Request membership")
+        self.assertNotContains(resp, reverse("organization-membership-request", args=[org.pk]))
 
     @override_settings(
         STORAGES={

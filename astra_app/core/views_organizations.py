@@ -13,8 +13,11 @@ from core.forms_organizations import OrganizationEditForm
 from core.membership import (
     build_pending_request_context,
     expiring_soon_cutoff,
+    get_membership_request_eligibility,
     get_valid_memberships,
+    membership_request_can_request_any,
     remove_user_from_group,
+    requestable_membership_types_for_target,
     resolve_request_ids_by_membership_type,
 )
 from core.membership_notes import add_note
@@ -311,6 +314,22 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
     )
     pending_request_entries = pending_request_context.entries
 
+    eligibility = get_membership_request_eligibility(organization=organization)
+    requestable_membership_type_rows = list(
+        requestable_membership_types_for_target(
+            organization=organization,
+            eligibility=eligibility,
+        )
+        .values_list("category_id", "code")
+    )
+    requestable_codes_by_category: dict[str, set[str]] = {}
+    for category_id, code in requestable_membership_type_rows:
+        category_id_value = str(category_id or "")
+        code_value = str(code or "")
+        if not category_id_value or not code_value:
+            continue
+        requestable_codes_by_category.setdefault(category_id_value, set()).add(code_value)
+
     sponsorship_request_id_by_type = resolve_request_ids_by_membership_type(
         organization=organization,
         membership_type_ids={s.membership_type_id for s in sponsorships},
@@ -319,16 +338,41 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
     # Build per-sponsorship display entries for the template.
     sponsorship_entries: list[dict[str, object]] = []
     for s in sponsorships:
+        has_pending_request_in_category = s.category_id in pending_request_context.category_ids
         sponsorship_entries.append({
             "sponsorship": s,
             "badge_text": str(s.membership_type_id).replace("_", " ").title(),
             "is_expiring_soon": bool(s.expires_at and s.expires_at <= expiring_soon_by),
             "pending_request": pending_request_context.by_category.get(s.category_id),
+            "can_request_tier_change": (
+                any(
+                    code != s.membership_type.code
+                    for code in requestable_codes_by_category.get(s.category_id, set())
+                )
+                and not has_pending_request_in_category
+            ),
+            "tier_change_url": (
+                reverse("organization-membership-request", kwargs={"organization_id": organization.pk})
+                + "?"
+                + urlencode({"membership_type": s.membership_type.code})
+            ),
             "request_id": sponsorship_request_id_by_type.get(s.membership_type_id),
         })
 
     can_edit_organization = _can_edit_organization(request, organization)
     can_delete_organization = _can_delete_organization(request, organization)
+    membership_can_request_any = False
+    if is_representative:
+        membership_can_request_any = membership_request_can_request_any(
+            organization=organization,
+            eligibility=eligibility,
+        )
+        if membership_can_request_any:
+            held_category_ids = {sponsorship.category_id for sponsorship in sponsorships}
+            membership_can_request_any = any(
+                category_id not in held_category_ids
+                for category_id, _code in requestable_membership_type_rows
+            )
 
 
 
@@ -370,6 +414,7 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
             "sponsorship_entries": sponsorship_entries,
             "sponsorships": sponsorships,
             "is_representative": is_representative,
+            "membership_can_request_any": membership_can_request_any,
             "can_edit_organization": can_edit_organization,
             "can_delete_organization": can_delete_organization,
             "contact_display_groups": contact_display_groups,

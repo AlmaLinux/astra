@@ -318,9 +318,24 @@ def membership_request_can_request_any(
 ) -> bool:
     """Return whether the selected target can submit at least one membership request."""
 
+    return requestable_membership_types_for_target(
+        username=username,
+        organization=organization,
+        eligibility=eligibility,
+    ).exists()
+
+
+def requestable_membership_types_for_target(
+    *,
+    username: str | None = None,
+    organization: Organization | None = None,
+    eligibility: MembershipRequestEligibility | None = None,
+):
+    """Return membership types currently requestable for the selected target."""
+
     target_filter = _membership_target_filter(username=username, organization=organization)
     if target_filter is None:
-        return False
+        return MembershipType.objects.none()
 
     resolved_eligibility = (
         eligibility
@@ -338,7 +353,6 @@ def membership_request_can_request_any(
         base.exclude(code__in=resolved_eligibility.blocked_membership_type_codes)
         .exclude(category_id__in=resolved_eligibility.pending_membership_category_ids)
         .exclude(group_cn="")
-        .exists()
     )
 
 
