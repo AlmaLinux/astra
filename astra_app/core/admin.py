@@ -49,6 +49,7 @@ from core.membership_csv_import import (
     MembershipCSVImportForm,
     MembershipCSVImportResource,
 )
+from core.organization_claim import make_organization_claim_token
 from core.protected_resources import protected_freeipa_group_cns
 from core.user_labels import user_choice, user_choice_with_fallback, user_choices_from_users
 from core.views_utils import _normalize_str
@@ -1834,7 +1835,7 @@ class MembershipCSVImportLinkAdmin(ImportMixin, admin.ModelAdmin):
 class OrganizationAdmin(admin.ModelAdmin):
     class OrganizationAdminForm(forms.ModelForm):
         representative = forms.ChoiceField(
-            required=True,
+            required=False,
             widget=forms.Select(attrs={"class": "form-control", "size": 12}),
             help_text="Select the FreeIPA user who is the organization's representative.",
         )
@@ -1869,6 +1870,7 @@ class OrganizationAdmin(admin.ModelAdmin):
                 "Please provide the exact URL that you would like the logo to link to - this can be a dedicated page or just your primary URL"
             )
             self.fields["logo"].label = "Logo upload for AlmaLinux Accounts"
+            self.fields["status"].required = False
 
             usernames, users_by_username = _freeipa_user_data()
 
@@ -1897,6 +1899,10 @@ class OrganizationAdmin(admin.ModelAdmin):
 
         def clean_representative(self) -> str:
             username = str(self.cleaned_data.get("representative") or "").strip()
+            status = str(self.cleaned_data.get("status") or "").strip() or Organization.Status.unclaimed
+
+            if status == Organization.Status.unclaimed and not username:
+                return ""
 
             if not username:
                 raise forms.ValidationError("A representative is required.", code="required")
@@ -1957,7 +1963,7 @@ class OrganizationAdmin(admin.ModelAdmin):
         (
             "Access",
             {
-                "fields": ("id", "representative"),
+                "fields": ("id", "status", "representative"),
             },
         ),
     )
@@ -1970,6 +1976,8 @@ class OrganizationAdmin(admin.ModelAdmin):
         extra = 0
 
     inlines = [MembershipInline]
+
+    actions = ("generate_claim_url",)
 
     list_display = ("id", "name", "business_contact_email", "website")
     search_fields = (
@@ -1987,6 +1995,27 @@ class OrganizationAdmin(admin.ModelAdmin):
         if "id" not in readonly:
             readonly.append("id")
         return tuple(readonly)
+
+    @admin.action(description="Generate claim URL")
+    def generate_claim_url(self, request: HttpRequest, queryset) -> None:
+        unclaimed_orgs = list(queryset.filter(status=Organization.Status.unclaimed).order_by("name", "id"))
+        claimed_count = queryset.count() - len(unclaimed_orgs)
+
+        if claimed_count:
+            self.message_user(
+                request,
+                f"Skipped {claimed_count} organization(s) because they are already claimed.",
+                level=messages.WARNING,
+            )
+
+        if not unclaimed_orgs:
+            self.message_user(request, "No unclaimed organizations selected.", level=messages.WARNING)
+            return
+
+        for organization in unclaimed_orgs:
+            token = make_organization_claim_token(organization)
+            claim_url = request.build_absolute_uri(reverse("organization-claim", args=[token]))
+            self.message_user(request, f"{organization.name}: {claim_url}", level=messages.INFO)
 
 
 @admin.register(FreeIPAPermissionGrant)

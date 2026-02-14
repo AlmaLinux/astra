@@ -164,6 +164,85 @@ class RegistrationFlowTests(TestCase):
         self.assertIn("alice", invitation.freeipa_matched_usernames)
 
     @override_settings(REGISTRATION_OPEN=True, DEFAULT_FROM_EMAIL="noreply@example.com")
+    def test_register_activate_with_org_linked_invite_keeps_invitation_pending(self) -> None:
+        from core.models import Organization
+
+        client = Client()
+
+        organization = Organization.objects.create(
+            name="Pending Claim Org",
+            business_contact_email="invitee@example.com",
+        )
+        invitation = AccountInvitation.objects.create(
+            email="invitee@example.com",
+            full_name="Invitee",
+            note="",
+            invited_by_username="committee",
+            organization=organization,
+        )
+        token = str(invitation.invitation_token)
+
+        ipa_client = SimpleNamespace()
+        ipa_client.stageuser_add = lambda *args, **kwargs: {
+            "result": {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["invitee@example.com"],
+            }
+        }
+
+        with patch("core.views_registration.FreeIPAUser.get_client", autospec=True, return_value=ipa_client):
+            with patch("post_office.mail.send", autospec=True) as post_office_send_mock:
+                resp = client.post(
+                    f"/register/?invite={token}",
+                    data={
+                        "username": "alice",
+                        "first_name": "Alice",
+                        "last_name": "User",
+                        "email": "invitee@example.com",
+                        "over_16": "on",
+                        "invitation_token": token,
+                    },
+                    follow=False,
+                )
+
+        self.assertEqual(resp.status_code, 302)
+        activate_url = post_office_send_mock.call_args.kwargs.get("context", {}).get("activate_url", "")
+        token_match = re.search(r"token=([^\s&]+)", activate_url)
+        self.assertIsNotNone(token_match)
+        assert token_match is not None
+        activation_token = token_match.group(1)
+
+        ipa_client2 = SimpleNamespace()
+        ipa_client2.stageuser_show = lambda *args, **kwargs: {
+            "result": {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["invitee@example.com"],
+            }
+        }
+        ipa_client2.stageuser_activate = lambda *args, **kwargs: {"result": {"uid": ["alice"]}}
+        ipa_client2.user_mod = lambda *args, **kwargs: {"result": {"uid": ["alice"]}}
+
+        with patch("core.views_registration.FreeIPAUser.get_client", autospec=True, return_value=ipa_client2):
+            with patch("core.views_registration._build_freeipa_client", autospec=True) as mocked_build:
+                client_meta = mocked_build.return_value
+                client_meta.change_password.return_value = None
+
+                activation_post = client.post(
+                    f"/register/activate/?token={activation_token}",
+                    data={"password": "S3curePassword!", "password_confirm": "S3curePassword!"},
+                    follow=False,
+                )
+
+        self.assertEqual(activation_post.status_code, 302)
+        invitation.refresh_from_db()
+        self.assertIsNone(invitation.accepted_at)
+        self.assertIn("alice", invitation.freeipa_matched_usernames)
+
+    @override_settings(REGISTRATION_OPEN=True, DEFAULT_FROM_EMAIL="noreply@example.com")
     def test_activate_flow_happy_path(self):
         client = Client()
 

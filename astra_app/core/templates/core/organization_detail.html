@@ -7,9 +7,22 @@
 
 {% block header %}
   <div class="d-flex align-items-center justify-content-between">
-    <h1 class="h3 mb-0">{{ organization.name }}</h1>
-    {% if can_edit_organization or is_representative %}
+    <h1 class="h3 mb-0">
+      {{ organization.name }}
+      {% if organization.status == 'unclaimed' %}
+        <span class="badge badge-warning alx-status-badge ml-2">Unclaimed</span>
+      {% endif %}
+    </h1>
+    {% if can_edit_organization or is_representative or can_send_claim_invitation %}
       <div class="d-flex align-items-center" style="gap: .5rem;">
+        {% if can_send_claim_invitation %}
+          <form method="post" action="{{ send_claim_invitation_action }}" class="m-0">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-sm btn-warning" title="Send claim invitation email">
+              Send claim invitation
+            </button>
+          </form>
+        {% endif %}
         {% if can_edit_organization %}
           <a class="btn btn-sm btn-outline-primary" href="{% url 'organization-edit' organization.pk %}" title="Edit organization details">
             <i class="fas fa-edit mr-1"></i> Edit details

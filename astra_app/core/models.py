@@ -202,6 +202,10 @@ class MembershipType(models.Model):
 
 
 class Organization(models.Model):
+    class Status(models.TextChoices):
+        unclaimed = "unclaimed", "Unclaimed"
+        active = "active", "Active"
+
     name = models.CharField(max_length=255)
 
     business_contact_name = models.CharField(max_length=255, blank=True, default="")
@@ -225,19 +229,28 @@ class Organization(models.Model):
         null=True,
     )
 
-    representative = models.CharField(max_length=255)
+    representative = models.CharField(max_length=255, blank=True, default="")
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.unclaimed, db_index=True)
+    claim_secret = models.CharField(max_length=255, blank=True, default="")
 
     class Meta:
         ordering = ("name", "id")
         constraints = [
-            models.CheckConstraint(
-                condition=~models.Q(representative=""),
-                name="core_organization_representative_not_empty",
-            ),
             models.UniqueConstraint(
                 fields=["representative"],
                 condition=~models.Q(representative=""),
                 name="core_organization_unique_representative",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    (models.Q(status="unclaimed") & models.Q(representative=""))
+                    | (models.Q(status="active") & ~models.Q(representative=""))
+                ),
+                name="core_organization_status_matches_representative",
+            ),
+            models.CheckConstraint(
+                condition=~(models.Q(status="unclaimed") & models.Q(claim_secret="")),
+                name="core_organization_unclaimed_requires_claim_secret",
             ),
         ]
 
@@ -255,6 +268,16 @@ class Organization(models.Model):
     @override
     def save(self, *args, **kwargs) -> None:
         self.representative = str(self.representative or "").strip()
+        self.claim_secret = str(self.claim_secret or "").strip()
+
+        if self.representative:
+            self.status = self.Status.active
+        else:
+            self.status = self.Status.unclaimed
+            if not self.claim_secret:
+                # Unclaimed organizations need a stable server-side secret so
+                # claim links can be invalidated by rotating this value.
+                self.claim_secret = secrets.token_urlsafe(32)
 
         if self.pk is None and self.logo:
             # The storage path is based on the autoincrement PK; ensure we have
@@ -427,6 +450,13 @@ class AccountInvitation(models.Model):
     email = models.EmailField(unique=True)
     full_name = models.CharField(max_length=255, blank=True, default="")
     note = models.TextField(blank=True, default="")
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name="account_invitations",
+    )
     invitation_token = models.CharField(max_length=512, unique=True, editable=False)
     invited_by_username = models.CharField(max_length=255)
     invited_at = models.DateTimeField(auto_now_add=True)

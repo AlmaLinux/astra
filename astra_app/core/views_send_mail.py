@@ -519,6 +519,13 @@ def _preview_for_users(usernames: list[str]) -> tuple[RecipientPreview, list[dic
     return preview, recipients
 
 
+def _send_mail_templates(*, recipient_mode: str) -> list[EmailTemplate]:
+    templates_qs = EmailTemplate.objects.all().order_by("name")
+    if recipient_mode == SendMailForm.RECIPIENT_MODE_CSV:
+        templates_qs = templates_qs.exclude(name=settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME)
+    return list(templates_qs)
+
+
 @permission_required(ASTRA_ADD_SEND_MAIL, login_url=reverse_lazy("users"))
 def send_mail(request: HttpRequest) -> HttpResponse:
     group_choices = _group_select_choices()
@@ -674,6 +681,14 @@ def send_mail(request: HttpRequest) -> HttpResponse:
             selected_template = None
             if selected_template_id:
                 selected_template = EmailTemplate.objects.filter(pk=selected_template_id).first()
+
+            if (
+                recipient_mode == SendMailForm.RECIPIENT_MODE_CSV
+                and selected_template is not None
+                and selected_template.name == settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME
+            ):
+                messages.error(request, "The organization claim template cannot be used with CSV recipients.")
+                action = ""
 
             if action == "save" and selected_template is not None:
                 update_email_template(
@@ -904,7 +919,7 @@ def send_mail(request: HttpRequest) -> HttpResponse:
 
     # Compute templates at the end so any newly-created template is visible
     # immediately after Save as.
-    templates = list(EmailTemplate.objects.all().order_by("name"))
+    templates = _send_mail_templates(recipient_mode=selected_recipient_mode)
 
     first_context = preview.first_context if preview else {}
 

@@ -119,12 +119,15 @@ class FreeIPALoginView(auth_views.LoginView):
             return response
 
         now = timezone.now()
-        invitation.accepted_at = invitation.accepted_at or now
+        update_fields = ["freeipa_matched_usernames", "freeipa_last_checked_at"]
+        if invitation.organization_id is None:
+            invitation.accepted_at = invitation.accepted_at or now
+            update_fields.insert(0, "accepted_at")
         usernames = set(invitation.freeipa_matched_usernames)
         usernames.add(username)
         invitation.freeipa_matched_usernames = sorted(usernames)
         invitation.freeipa_last_checked_at = now
-        invitation.save(update_fields=["accepted_at", "freeipa_matched_usernames", "freeipa_last_checked_at"])
+        invitation.save(update_fields=update_fields)
 
         return response
 

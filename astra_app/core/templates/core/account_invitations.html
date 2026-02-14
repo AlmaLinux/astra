@@ -41,6 +41,7 @@
             </th>
             <th>Email</th>
             <th>Full name</th>
+            <th>Organization</th>
             <th>Note</th>
             <th>Status</th>
             <th>Accepted at</th>
@@ -62,6 +63,13 @@
               </td>
               <td>{{ invitation.email }}</td>
               <td>{{ invitation.full_name }}</td>
+              <td>
+                {% if invitation.organization_id %}
+                  <a href="{% url 'organization-detail' invitation.organization_id %}">{{ invitation.organization.name }}</a>
+                {% else %}
+                  -
+                {% endif %}
+              </td>
               <td>{{ invitation.note }}</td>
               <td>
                 {% if invitation.freeipa_matched_usernames|length > 1 %}
@@ -85,7 +93,7 @@
             </tr>
           {% empty %}
             <tr>
-              <td colspan="7" class="text-muted text-center py-3">No accepted invitations.</td>
+              <td colspan="8" class="text-muted text-center py-3">No accepted invitations.</td>
             </tr>
           {% endfor %}
         </tbody>
@@ -124,6 +132,7 @@
             </th>
             <th>Email</th>
             <th>Full name</th>
+            <th>Organization</th>
             <th>Note</th>
             <th>Invited by</th>
             <th>Invited at</th>
@@ -147,6 +156,13 @@
               </td>
               <td>{{ invitation.email }}</td>
               <td>{{ invitation.full_name }}</td>
+              <td>
+                {% if invitation.organization_id %}
+                  <a href="{% url 'organization-detail' invitation.organization_id %}">{{ invitation.organization.name }}</a>
+                {% else %}
+                  -
+                {% endif %}
+              </td>
               <td>{{ invitation.note }}</td>
               <td>{{ invitation.invited_by_username }}</td>
               <td>{{ invitation.invited_at }}</td>
@@ -165,7 +181,7 @@
             </tr>
           {% empty %}
             <tr>
-              <td colspan="9" class="text-muted text-center py-3">No pending invitations.</td>
+              <td colspan="10" class="text-muted text-center py-3">No pending invitations.</td>
             </tr>
           {% endfor %}
         </tbody>

@@ -799,9 +799,16 @@ ACCOUNT_INVITE_EMAIL_TEMPLATE_NAME = _env_str(
     "ACCOUNT_INVITE_EMAIL_TEMPLATE_NAME",
     default="account-invite",
 )
+ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME = _env_str(
+    "ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME",
+    default="account-invite-org-claim",
+)
 ACCOUNT_INVITATION_EMAIL_TEMPLATE_NAMES = _env_list(
     "ACCOUNT_INVITATION_EMAIL_TEMPLATE_NAMES",
-    default=[ACCOUNT_INVITE_EMAIL_TEMPLATE_NAME],
+    default=[
+        str(ACCOUNT_INVITE_EMAIL_TEMPLATE_NAME or "").strip(),
+        str(ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME or "").strip(),
+    ],
 )
 
 # Map FreeIPA groups to Django permissions.

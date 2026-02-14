@@ -509,6 +509,85 @@ class SendMailTests(TestCase):
         # HTML bodies are shown in a textarea, so they appear HTML-escaped in the page source.
         self.assertContains(resp, "&lt;p&gt;HTML body for {{ email }}&lt;/p&gt;")
 
+    def test_csv_mode_hides_org_claim_template_choice(self) -> None:
+        from post_office.models import EmailTemplate
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
+
+        EmailTemplate.objects.update_or_create(
+            name="account-invite",
+            defaults={
+                "subject": "Account invite",
+                "content": "Hello {{ email }}",
+                "html_content": "<p>Hello {{ email }}</p>",
+            },
+        )
+        EmailTemplate.objects.update_or_create(
+            name=settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME,
+            defaults={
+                "subject": "Org claim",
+                "content": "Claim {{ organization_name }}",
+                "html_content": "<p>Claim {{ organization_name }}</p>",
+            },
+        )
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.backends.FreeIPAUser.all", return_value=[]),
+        ):
+            resp = self.client.get(reverse("send-mail") + "?type=csv")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "account-invite")
+        self.assertNotContains(resp, settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME)
+
+    def test_csv_mode_send_rejects_org_claim_template_even_if_posted(self) -> None:
+        from post_office.models import EmailTemplate
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
+
+        template = EmailTemplate.objects.create(
+            name=settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME,
+            subject="Org claim",
+            content="Claim {{ organization_name }}",
+            html_content="<p>Claim {{ organization_name }}</p>",
+        )
+
+        session = self.client.session
+        session["send_mail_csv_payload_v1"] = json.dumps(
+            {
+                "header_to_var": {"Email": "email"},
+                "recipients": [{"email": "alice@example.com"}],
+            }
+        )
+        session.save()
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.backends.FreeIPAUser.all", return_value=[]),
+            patch("core.views_send_mail.EmailMultiAlternatives.send") as send_mock,
+        ):
+            resp = self.client.post(
+                reverse("send-mail"),
+                data={
+                    "recipient_mode": "csv",
+                    "email_template_id": str(template.pk),
+                    "subject": "Hello",
+                    "html_content": "<p>Hello</p>",
+                    "text_content": "Hello",
+                    "action": "send",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "cannot be used with CSV recipients")
+        send_mock.assert_not_called()
+
     def test_compose_shows_html_to_text_button_and_variables_card(self) -> None:
         self._login_as_freeipa_user("reviewer")
 

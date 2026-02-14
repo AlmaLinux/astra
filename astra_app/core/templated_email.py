@@ -70,6 +70,7 @@ def configured_email_template_names() -> frozenset[str]:
             settings.REGISTRATION_EMAIL_TEMPLATE_NAME,
             settings.EMAIL_VALIDATION_EMAIL_TEMPLATE_NAME,
             settings.ACCOUNT_INVITE_EMAIL_TEMPLATE_NAME,
+            settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME,
             *settings.ACCOUNT_INVITATION_EMAIL_TEMPLATE_NAMES,
         }
     )

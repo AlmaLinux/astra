@@ -18,6 +18,9 @@
     <div class="flex-grow-1 ms-2">
       <div class="my-0 font-weight-bold">
         <a href="{% url 'organization-detail' organization.pk %}">{{ organization.name }}</a>
+        {% if organization.status == 'unclaimed' %}
+          <span class="badge badge-warning alx-status-badge ml-2">Unclaimed</span>
+        {% endif %}
       </div>
       <div class="mt-1">
         {% for membership in memberships %}

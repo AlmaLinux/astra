@@ -144,5 +144,6 @@ Pre-change checklist (must answer mentally before finishing):
 - You can run more tests with: `podman-compose exec -T web python manage.py test`
   - IMPORTANT: There are a lot of tests and they take a while to run, plus it's hard to miss the relevant output.
     Run the full test suite like this: `podman-compose exec -T web python manage.py test --keepdb 2>&1 | grep -E "^(FAIL|ERROR|OK|FAILED|Ran )"`. This will show you *which* tests fail and then you can run just those to see the details.
+    Run a specific test like this: `podman-compose exec -T web python manage.py test -v 2 core.tests.test_elections_eligibility_org_reps`
 - Add ruff after you're done making changes: `podman-compose exec -T web ruff check --fix /app/astra_app`
 - Stop and restart everything: `podman-compose down && podman-compose up -d --build`. NEVER RUN `podman-compose down -v` as that will delete your database!

@@ -21,8 +21,10 @@ from django.utils import timezone
 from core import views_membership
 from core.backends import FreeIPAUser
 from core.models import FreeIPAPermissionGrant, Membership, MembershipTypeCategory
+from core.organization_claim import make_organization_claim_token
 from core.permissions import (
     ASTRA_ADD_MEMBERSHIP,
+    ASTRA_ADD_SEND_MAIL,
     ASTRA_CHANGE_MEMBERSHIP,
     ASTRA_DELETE_MEMBERSHIP,
     ASTRA_VIEW_MEMBERSHIP,
@@ -636,6 +638,348 @@ class OrganizationUserViewsTests(TestCase):
             self.assertContains(resp, "Representative")
             self.assertContains(resp, "Bob Example")
             self.assertContains(resp, reverse("user-profile", args=["bob"]))
+
+    def test_unclaimed_organization_shows_badge_in_grid_and_detail(self) -> None:
+        from core.models import Organization
+
+        organization = Organization.objects.create(
+            name="Unclaimed Org",
+            business_contact_email="contact@example.com",
+        )
+
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]})
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            organizations_response = self.client.get(reverse("organizations"))
+            self.assertEqual(organizations_response.status_code, 200)
+            self.assertContains(organizations_response, "Unclaimed")
+
+            detail_response = self.client.get(reverse("organization-detail", args=[organization.pk]))
+            self.assertEqual(detail_response.status_code, 200)
+            self.assertContains(detail_response, "Unclaimed")
+
+    def test_unclaimed_org_detail_shows_send_claim_invitation_button_for_send_mail_permission(self) -> None:
+        from core.models import Organization
+
+        organization = Organization.objects.create(
+            name="Unclaimed Org",
+            business_contact_email="contact@example.com",
+        )
+
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_ADD_SEND_MAIL,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]})
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            response = self.client.get(reverse("organization-detail", args=[organization.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Send claim invitation")
+        self.assertContains(
+            response,
+            reverse("organization-send-claim-invitation", args=[organization.pk]),
+        )
+        self.assertNotContains(response, f"template={settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME}")
+
+    def test_send_claim_invitation_creates_account_invitation_and_send_with_claim_context(self) -> None:
+        from core.models import AccountInvitation, AccountInvitationSend, Organization
+
+        organization = Organization.objects.create(
+            name="Unclaimed Org",
+            business_contact_email="contact@example.com",
+        )
+
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_ADD_SEND_MAIL,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]})
+        self._login_as_freeipa_user("reviewer")
+
+        queued_email = SimpleNamespace(id=123)
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.views_account_invitations.queue_templated_email", return_value=queued_email) as queue_mock,
+        ):
+            response = self.client.post(
+                reverse("organization-send-claim-invitation", args=[organization.pk]),
+                follow=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        invitation = AccountInvitation.objects.get(email="contact@example.com")
+        self.assertEqual(invitation.organization_id, organization.pk)
+        self.assertEqual(invitation.email_template_name, settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME)
+        self.assertEqual(invitation.send_count, 1)
+
+        send = AccountInvitationSend.objects.get(invitation=invitation)
+        self.assertEqual(send.result, AccountInvitationSend.Result.queued)
+        self.assertEqual(send.template_name, settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME)
+
+        _args, kwargs = queue_mock.call_args
+        self.assertEqual(kwargs["template_name"], settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME)
+        self.assertEqual(kwargs["recipients"], ["contact@example.com"])
+        self.assertEqual(kwargs["context"]["organization_name"], "Unclaimed Org")
+        self.assertIn("claim_url", kwargs["context"])
+        self.assertIn("/organizations/claim/", kwargs["context"]["claim_url"])
+
+    @override_settings(PUBLIC_BASE_URL="")
+    def test_send_claim_invitation_surfaces_public_base_url_configuration_error(self) -> None:
+        from core.models import Organization
+
+        organization = Organization.objects.create(
+            name="Config Org",
+            business_contact_email="contact@example.com",
+        )
+
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_ADD_SEND_MAIL,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]})
+        self._login_as_freeipa_user("reviewer")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.views_account_invitations.queue_templated_email") as queue_mock,
+        ):
+            response = self.client.post(
+                reverse("organization-send-claim-invitation", args=[organization.pk]),
+                follow=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "PUBLIC_BASE_URL")
+        self.assertContains(response, "must be configured")
+        queue_mock.assert_not_called()
+
+    @override_settings(ACCOUNT_INVITATION_RESEND_LIMIT=1, ACCOUNT_INVITATION_RESEND_WINDOW_SECONDS=600)
+    def test_send_claim_invitation_is_rate_limited_after_threshold(self) -> None:
+        from core.models import Organization
+
+        organization = Organization.objects.create(
+            name="Rate Limited Org",
+            business_contact_email="contact@example.com",
+        )
+
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_ADD_SEND_MAIL,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]})
+        self._login_as_freeipa_user("reviewer")
+
+        queued_email = SimpleNamespace(id=321)
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.views_account_invitations.queue_templated_email", return_value=queued_email),
+        ):
+            first = self.client.post(
+                reverse("organization-send-claim-invitation", args=[organization.pk]),
+                follow=True,
+            )
+            second = self.client.post(
+                reverse("organization-send-claim-invitation", args=[organization.pk]),
+                follow=True,
+            )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertContains(second, "Too many send attempts")
+
+    def test_organization_claim_marks_linked_invitation_accepted(self) -> None:
+        from core.models import AccountInvitation, Organization
+
+        organization = Organization.objects.create(
+            name="Claim Accept Org",
+            business_contact_email="contact@example.com",
+        )
+        invitation = AccountInvitation.objects.create(
+            email="contact@example.com",
+            invited_by_username="reviewer",
+            organization=organization,
+            email_template_name=settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME,
+        )
+        token = make_organization_claim_token(organization)
+
+        claimant = FreeIPAUser("claimant", {"uid": ["claimant"], "memberof_group": [], "c": ["US"]})
+        self._login_as_freeipa_user("claimant")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=claimant),
+            patch("core.views_organizations.block_action_without_coc", return_value=None),
+            patch("core.views_organizations.block_action_without_country_code", return_value=None),
+        ):
+            response = self.client.post(reverse("organization-claim", args=[token]), follow=False)
+
+        self.assertEqual(response.status_code, 302)
+        invitation.refresh_from_db()
+        self.assertIsNotNone(invitation.accepted_at)
+
+    def test_send_claim_invitation_conflict_message_points_to_account_invitations(self) -> None:
+        from core.models import AccountInvitation, Organization
+
+        target_org = Organization.objects.create(
+            name="Target Org",
+            business_contact_email="contact@example.com",
+        )
+        other_org = Organization.objects.create(
+            name="Other Org",
+            business_contact_email="other@example.com",
+        )
+
+        AccountInvitation.objects.create(
+            email="contact@example.com",
+            full_name="",
+            note="",
+            invited_by_username="reviewer",
+            organization=other_org,
+        )
+
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_ADD_SEND_MAIL,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]})
+        self._login_as_freeipa_user("reviewer")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.views_account_invitations.queue_templated_email") as queue_mock,
+        ):
+            response = self.client.post(
+                reverse("organization-send-claim-invitation", args=[target_org.pk]),
+                follow=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Account Invitations")
+        self.assertContains(response, reverse("account-invitations"))
+        queue_mock.assert_not_called()
+
+    def test_send_claim_invitation_does_not_overwrite_invitation_linked_to_different_org(self) -> None:
+        from core.models import AccountInvitation, Organization
+
+        target_org = Organization.objects.create(
+            name="Target Org",
+            business_contact_email="contact@example.com",
+        )
+        other_org = Organization.objects.create(
+            name="Other Org",
+            business_contact_email="other@example.com",
+        )
+
+        AccountInvitation.objects.create(
+            email="contact@example.com",
+            full_name="",
+            note="",
+            invited_by_username="reviewer",
+            organization=other_org,
+        )
+
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_ADD_SEND_MAIL,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]})
+        self._login_as_freeipa_user("reviewer")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.views_account_invitations.queue_templated_email") as queue_mock,
+        ):
+            response = self.client.post(
+                reverse("organization-send-claim-invitation", args=[target_org.pk]),
+                follow=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        queue_mock.assert_not_called()
+
+        invitation = AccountInvitation.objects.get(email="contact@example.com")
+        self.assertEqual(invitation.organization_id, other_org.pk)
+
+    def test_active_org_detail_hides_send_claim_invitation_link(self) -> None:
+        from core.models import Organization
+
+        organization = Organization.objects.create(
+            name="Active Org",
+            representative="bob",
+            business_contact_email="contact@example.com",
+        )
+
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_ADD_SEND_MAIL,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]})
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            response = self.client.get(reverse("organization-detail", args=[organization.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Send claim invitation")
+        self.assertNotContains(response, f"template={settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME}")
 
     def test_representative_can_edit_org_data_notes_hidden(self) -> None:
         from core.models import MembershipType, Organization

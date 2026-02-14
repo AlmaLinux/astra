@@ -1,11 +1,16 @@
 import logging
+import secrets
 from urllib.parse import urlencode
 
+from django.conf import settings
 from django.contrib import messages
-from django.db import IntegrityError
+from django.contrib.auth.decorators import login_required
+from django.core import signing
+from django.db import IntegrityError, transaction
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.http import require_GET
 
 from core.backends import FreeIPAUser
@@ -21,17 +26,119 @@ from core.membership import (
     resolve_request_ids_by_membership_type,
 )
 from core.membership_notes import add_note
-from core.models import Membership, MembershipLog, MembershipRequest, Organization
+from core.models import AccountInvitation, Membership, MembershipLog, MembershipRequest, Organization
+from core.organization_claim import (
+    build_organization_claim_url,
+    read_organization_claim_token,
+)
 from core.permissions import (
     ASTRA_ADD_MEMBERSHIP,
+    ASTRA_ADD_SEND_MAIL,
     ASTRA_CHANGE_MEMBERSHIP,
     ASTRA_DELETE_MEMBERSHIP,
     ASTRA_VIEW_MEMBERSHIP,
     json_permission_required_any,
 )
-from core.views_utils import _normalize_str, block_action_without_coc, get_username
+from core.rate_limit import allow_request
+from core.views_account_invitations import send_organization_claim_invitation
+from core.views_utils import _normalize_str, block_action_without_coc, block_action_without_country_code, get_username
 
 logger = logging.getLogger(__name__)
+
+
+def _render_organization_claim_page(
+    request: HttpRequest,
+    *,
+    state: str,
+    organization: Organization | None = None,
+) -> HttpResponse:
+    return render(
+        request,
+        "core/organization_claim.html",
+        {
+            "state": state,
+            "organization": organization,
+        },
+    )
+
+
+@login_required
+def organization_claim(request: HttpRequest, token: str) -> HttpResponse:
+    username = get_username(request)
+    if not username:
+        raise Http404
+
+    try:
+        payload = read_organization_claim_token(token)
+    except (signing.BadSignature, signing.SignatureExpired):
+        return _render_organization_claim_page(request, state="invalid")
+
+    organization = Organization.objects.filter(pk=payload.organization_id).first()
+    if organization is None:
+        return _render_organization_claim_page(request, state="invalid")
+
+    if organization.status != Organization.Status.unclaimed:
+        return _render_organization_claim_page(request, state="already_claimed", organization=organization)
+
+    blocked = block_action_without_coc(
+        request,
+        username=username,
+        action_label="claim this organization",
+    )
+    if blocked is not None:
+        return blocked
+
+    user = FreeIPAUser.get(username)
+    blocked = block_action_without_country_code(
+        request,
+        user_data=user._user_data if user is not None else None,
+        action_label="claim this organization",
+    )
+    if blocked is not None:
+        return blocked
+
+    if request.method != "POST":
+        return _render_organization_claim_page(request, state="ready", organization=organization)
+
+    try:
+        refreshed_payload = read_organization_claim_token(token)
+    except (signing.BadSignature, signing.SignatureExpired):
+        return _render_organization_claim_page(request, state="invalid")
+
+    try:
+        claim_completed_at = timezone.now()
+        with transaction.atomic():
+            locked_organization = Organization.objects.select_for_update().get(pk=refreshed_payload.organization_id)
+
+            if locked_organization.status != Organization.Status.unclaimed:
+                return _render_organization_claim_page(
+                    request,
+                    state="already_claimed",
+                    organization=locked_organization,
+                )
+
+            if locked_organization.claim_secret != refreshed_payload.claim_secret:
+                return _render_organization_claim_page(request, state="invalid")
+
+            locked_organization.representative = username
+            locked_organization.status = Organization.Status.active
+            locked_organization.claim_secret = secrets.token_urlsafe(32)
+            locked_organization.save(update_fields=["representative", "status", "claim_secret"])
+
+            AccountInvitation.objects.filter(
+                organization=locked_organization,
+                dismissed_at__isnull=True,
+                accepted_at__isnull=True,
+            ).update(accepted_at=claim_completed_at)
+    except IntegrityError:
+        messages.error(
+            request,
+            "You already represent an organization and cannot claim another. Contact the membership committee if you need to create an additional organization.",
+        )
+        return _render_organization_claim_page(request, state="ready", organization=organization)
+
+    messages.success(request, "You are now the representative for this organization.")
+    return redirect("organization-detail", organization_id=organization.pk)
 
 
 def _is_representative(request: HttpRequest, organization: Organization) -> bool:
@@ -403,6 +510,19 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
         },
     ]
 
+    claim_url = ""
+    can_send_claim_invitation = False
+    send_claim_invitation_action = ""
+    if organization.status == Organization.Status.unclaimed:
+        claim_url = build_organization_claim_url(organization=organization, request=request)
+
+        if request.user.has_perm(ASTRA_ADD_SEND_MAIL):
+            can_send_claim_invitation = True
+            send_claim_invitation_action = reverse(
+                "organization-send-claim-invitation",
+                args=[organization.pk],
+            )
+
     return render(
         request,
         "core/organization_detail.html",
@@ -418,8 +538,73 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
             "can_edit_organization": can_edit_organization,
             "can_delete_organization": can_delete_organization,
             "contact_display_groups": contact_display_groups,
+            "claim_url": claim_url,
+            "can_send_claim_invitation": can_send_claim_invitation,
+            "send_claim_invitation_action": send_claim_invitation_action,
         },
     )
+
+
+def organization_send_claim_invitation(request: HttpRequest, organization_id: int) -> HttpResponse:
+    if request.method != "POST":
+        raise Http404("Not found")
+
+    organization = get_object_or_404(Organization, pk=organization_id)
+    _require_organization_access(request, organization)
+
+    if not request.user.has_perm(ASTRA_ADD_SEND_MAIL):
+        raise Http404
+
+    if organization.status != Organization.Status.unclaimed:
+        messages.error(request, "Only unclaimed organizations can receive claim invitations.")
+        return redirect("organization-detail", organization_id=organization.pk)
+
+    actor_username = get_username(request)
+    if not allow_request(
+        scope="organization_claim_invitation_send",
+        key_parts=[actor_username, str(organization.pk)],
+        limit=settings.ACCOUNT_INVITATION_RESEND_LIMIT,
+        window_seconds=settings.ACCOUNT_INVITATION_RESEND_WINDOW_SECONDS,
+    ):
+        messages.error(request, "Too many send attempts. Try again shortly.")
+        return redirect("organization-detail", organization_id=organization.pk)
+
+    recipient_email = str(organization.primary_contact_email() or "").strip()
+    if not recipient_email:
+        messages.error(request, "This organization has no contact email to send an invitation.")
+        return redirect("organization-detail", organization_id=organization.pk)
+
+    result, existing_invitation = send_organization_claim_invitation(
+        organization=organization,
+        actor_username=actor_username,
+        recipient_email=recipient_email,
+        now=timezone.now(),
+    )
+
+    if result == "queued":
+        messages.success(request, "Claim invitation queued.")
+    elif result == "config_error":
+        messages.error(
+            request,
+            "Claim invitation email configuration error: PUBLIC_BASE_URL must be configured to build invitation links.",
+        )
+    elif result == "invalid_email":
+        messages.error(request, "The organization contact email is invalid.")
+    elif result == "conflict":
+        if existing_invitation is not None and existing_invitation.organization_id is not None:
+            account_invitations_url = reverse("account-invitations")
+            messages.error(
+                request,
+                "An invitation for this email is already linked to another organization. "
+                "Use a different contact email or resolve the existing invitation in "
+                f"Account Invitations ({account_invitations_url}).",
+            )
+        else:
+            messages.error(request, "Unable to send claim invitation due to invitation linkage conflict.")
+    else:
+        messages.error(request, "Failed to queue claim invitation.")
+
+    return redirect("organization-detail", organization_id=organization.pk)
 
 
 def organization_delete(request: HttpRequest, organization_id: int) -> HttpResponse:

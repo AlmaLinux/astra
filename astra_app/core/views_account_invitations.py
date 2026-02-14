@@ -23,7 +23,8 @@ from core.account_invitations import (
     parse_invitation_csv,
 )
 from core.email_context import membership_committee_email_context, system_email_context
-from core.models import AccountInvitation, AccountInvitationSend
+from core.models import AccountInvitation, AccountInvitationSend, Organization
+from core.organization_claim import build_organization_claim_url
 from core.permissions import ASTRA_ADD_MEMBERSHIP
 from core.rate_limit import allow_request
 from core.templated_email import queue_templated_email
@@ -32,10 +33,32 @@ from core.views_utils import get_username
 logger = logging.getLogger(__name__)
 
 _PREVIEW_SESSION_KEY = "account_invitation_preview_v1"
+_INVITATION_PUBLIC_BASE_URL_ERROR_MESSAGE = (
+    "Invitation email configuration error: PUBLIC_BASE_URL must be configured to build invitation links."
+)
+
+
+class InvitationEmailConfigurationError(ValueError):
+    """Raised when invitation email link configuration is invalid."""
 
 
 def _invitation_template_names() -> list[str]:
     return [str(name).strip() for name in settings.ACCOUNT_INVITATION_EMAIL_TEMPLATE_NAMES if str(name).strip()]
+
+
+def _bulk_invitation_template_names() -> list[str]:
+    return [
+        name
+        for name in _invitation_template_names()
+        if name != settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME
+    ]
+
+
+def _public_base_url() -> str:
+    base = str(settings.PUBLIC_BASE_URL or "").strip().rstrip("/")
+    if not base:
+        raise InvitationEmailConfigurationError("PUBLIC_BASE_URL must be configured to build absolute invitation links.")
+    return base
 
 
 def _select_invitation_template_name(
@@ -53,10 +76,10 @@ def _select_invitation_template_name(
 
 
 def _invitation_register_url(*, token: str) -> str:
-    base = str(settings.PUBLIC_BASE_URL or "").strip().rstrip("/")
+    base = _public_base_url()
     path = reverse("register")
-    if not base or not path:
-        return ""
+    if not path:
+        raise InvitationEmailConfigurationError("Register URL path is unavailable.")
     url = f"{base}{path}"
     normalized_token = str(token or "").strip()
     if normalized_token:
@@ -65,15 +88,147 @@ def _invitation_register_url(*, token: str) -> str:
 
 
 def _invitation_login_url(*, token: str) -> str:
-    base = str(settings.PUBLIC_BASE_URL or "").strip().rstrip("/")
+    base = _public_base_url()
     path = reverse("login")
-    if not base or not path:
-        return ""
+    if not path:
+        raise InvitationEmailConfigurationError("Login URL path is unavailable.")
     url = f"{base}{path}"
     normalized_token = str(token or "").strip()
     if normalized_token:
         url = f"{url}?{urlencode({'invite': normalized_token})}"
     return url
+
+
+def _build_invitation_email_context(*, invitation: AccountInvitation, actor_username: str) -> dict[str, object]:
+    invitation_token = str(invitation.invitation_token or "").strip()
+    context: dict[str, object] = {
+        "full_name": invitation.full_name,
+        "email": invitation.email,
+        "invited_by_username": actor_username,
+        "invitation_token": invitation_token,
+        **system_email_context(),
+        "register_url": _invitation_register_url(token=invitation_token),
+        "login_url": _invitation_login_url(token=invitation_token),
+        **membership_committee_email_context(),
+    }
+
+    if invitation.organization_id is not None:
+        organization = Organization.objects.filter(pk=invitation.organization_id).first()
+        if organization is not None:
+            context["organization_name"] = organization.name
+            context["claim_url"] = build_organization_claim_url(organization=organization)
+
+    return context
+
+
+def _send_account_invitation_email(
+    *,
+    invitation: AccountInvitation,
+    actor_username: str,
+    template_name: str,
+    now: timezone.datetime,
+) -> str:
+    try:
+        email = queue_templated_email(
+            recipients=[invitation.email],
+            sender=settings.DEFAULT_FROM_EMAIL,
+            template_name=template_name,
+            context=_build_invitation_email_context(
+                invitation=invitation,
+                actor_username=actor_username,
+            ),
+            reply_to=[settings.MEMBERSHIP_COMMITTEE_EMAIL],
+        )
+    except InvitationEmailConfigurationError as exc:
+        logger.warning("Account invitation email configuration error: %s", exc)
+        AccountInvitationSend.objects.create(
+            invitation=invitation,
+            sent_by_username=actor_username,
+            sent_at=now,
+            template_name=template_name,
+            result=AccountInvitationSend.Result.failed,
+            error_category="configuration_error",
+        )
+        return "config_error"
+    except Exception:
+        logger.exception("Failed to queue account invitation email")
+        AccountInvitationSend.objects.create(
+            invitation=invitation,
+            sent_by_username=actor_username,
+            sent_at=now,
+            template_name=template_name,
+            result=AccountInvitationSend.Result.failed,
+            error_category="send_error",
+        )
+        return "failed"
+
+    invitation.dismissed_at = None
+    invitation.dismissed_by_username = ""
+    invitation.last_sent_at = now
+    invitation.send_count += 1
+    invitation.email_template_name = template_name
+    invitation.save(
+        update_fields=[
+            "dismissed_at",
+            "dismissed_by_username",
+            "last_sent_at",
+            "send_count",
+            "email_template_name",
+        ]
+    )
+
+    AccountInvitationSend.objects.create(
+        invitation=invitation,
+        sent_by_username=actor_username,
+        sent_at=now,
+        template_name=template_name,
+        post_office_email_id=email.id if email else None,
+        result=AccountInvitationSend.Result.queued,
+    )
+
+    return "queued"
+
+
+def send_organization_claim_invitation(
+    *,
+    organization: Organization,
+    actor_username: str,
+    recipient_email: str,
+    now: timezone.datetime,
+) -> tuple[str, AccountInvitation | None]:
+    normalized_email = normalize_invitation_email(recipient_email)
+    if not normalized_email:
+        return "invalid_email", None
+
+    try:
+        validate_email(normalized_email)
+    except ValidationError:
+        return "invalid_email", None
+
+    invitation, _created = AccountInvitation.objects.get_or_create(
+        email=normalized_email,
+        defaults={
+            "invited_by_username": actor_username,
+            "email_template_name": settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME,
+            "organization": organization,
+        },
+    )
+
+    if invitation.organization_id is not None and invitation.organization_id != organization.pk:
+        return "conflict", invitation
+
+    invitation.organization = organization
+    invitation.invited_by_username = actor_username
+    invitation.email_template_name = settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME
+    invitation.save(update_fields=["organization", "invited_by_username", "email_template_name"])
+
+    result = _send_account_invitation_email(
+        invitation=invitation,
+        actor_username=actor_username,
+        template_name=settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME,
+        now=now,
+    )
+    return result, invitation
 
 
 def _refresh_pending_invitations(*, pending: list[AccountInvitation], now: timezone.datetime) -> tuple[int, int]:
@@ -83,10 +238,13 @@ def _refresh_pending_invitations(*, pending: list[AccountInvitation], now: timez
         checked += 1
         matches = find_account_invitation_matches(invitation.email)
         if matches:
-            invitation.accepted_at = invitation.accepted_at or now
             invitation.freeipa_matched_usernames = matches
             invitation.freeipa_last_checked_at = now
-            invitation.save(update_fields=["accepted_at", "freeipa_matched_usernames", "freeipa_last_checked_at"])
+            if invitation.organization_id is None:
+                invitation.accepted_at = invitation.accepted_at or now
+                invitation.save(update_fields=["accepted_at", "freeipa_matched_usernames", "freeipa_last_checked_at"])
+            else:
+                invitation.save(update_fields=["freeipa_matched_usernames", "freeipa_last_checked_at"])
             updated += 1
         else:
             invitation.freeipa_matched_usernames = []
@@ -125,13 +283,14 @@ def _resend_invitation(
     template_names: list[str],
     now: timezone.datetime,
 ) -> str:
-    matches = find_account_invitation_matches(invitation.email)
-    if matches:
-        invitation.accepted_at = invitation.accepted_at or now
-        invitation.freeipa_matched_usernames = matches
-        invitation.freeipa_last_checked_at = now
-        invitation.save(update_fields=["accepted_at", "freeipa_matched_usernames", "freeipa_last_checked_at"])
-        return "accepted"
+    if invitation.organization_id is None:
+        matches = find_account_invitation_matches(invitation.email)
+        if matches:
+            invitation.accepted_at = invitation.accepted_at or now
+            invitation.freeipa_matched_usernames = matches
+            invitation.freeipa_last_checked_at = now
+            invitation.save(update_fields=["accepted_at", "freeipa_matched_usernames", "freeipa_last_checked_at"])
+            return "accepted"
 
     if not template_names:
         return "template_missing"
@@ -147,51 +306,12 @@ def _resend_invitation(
     if not EmailTemplate.objects.filter(name=template_name).exists():
         return "template_missing"
 
-    invitation_token = str(invitation.invitation_token or "").strip()
-    try:
-        email = queue_templated_email(
-            recipients=[invitation.email],
-            sender=settings.DEFAULT_FROM_EMAIL,
-            template_name=template_name,
-            context={
-                "full_name": invitation.full_name,
-                "email": invitation.email,
-                "invited_by_username": actor_username,
-                "invitation_token": invitation_token,
-                **system_email_context(),
-                "register_url": _invitation_register_url(token=invitation_token),
-                "login_url": _invitation_login_url(token=invitation_token),
-                **membership_committee_email_context(),
-            },
-            reply_to=[settings.MEMBERSHIP_COMMITTEE_EMAIL],
-        )
-    except Exception:
-        logger.exception("Failed to resend account invitation")
-        AccountInvitationSend.objects.create(
-            invitation=invitation,
-            sent_by_username=actor_username,
-            sent_at=now,
-            template_name=template_name,
-            result=AccountInvitationSend.Result.failed,
-            error_category="send_error",
-        )
-        return "failed"
-
-    invitation.last_sent_at = now
-    invitation.send_count += 1
-    invitation.email_template_name = template_name
-    invitation.save(update_fields=["last_sent_at", "send_count", "email_template_name"])
-
-    AccountInvitationSend.objects.create(
+    return _send_account_invitation_email(
         invitation=invitation,
-        sent_by_username=actor_username,
-        sent_at=now,
+        actor_username=actor_username,
         template_name=template_name,
-        post_office_email_id=email.id if email else None,
-        result=AccountInvitationSend.Result.queued,
+        now=now,
     )
-
-    return "queued"
 
 
 class AccountInvitationUploadForm(forms.Form):
@@ -204,19 +324,22 @@ class AccountInvitationUploadForm(forms.Form):
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
 def account_invitations(request: HttpRequest) -> HttpResponse:
     pending_invitations = list(
-        AccountInvitation.objects.filter(dismissed_at__isnull=True, accepted_at__isnull=True)
+        AccountInvitation.objects.select_related("organization")
+        .filter(dismissed_at__isnull=True, accepted_at__isnull=True)
         .order_by("-invited_at")
         .all()
     )
     if pending_invitations:
         _refresh_pending_invitations(pending=pending_invitations, now=timezone.now())
         pending_invitations = list(
-            AccountInvitation.objects.filter(dismissed_at__isnull=True, accepted_at__isnull=True)
+            AccountInvitation.objects.select_related("organization")
+            .filter(dismissed_at__isnull=True, accepted_at__isnull=True)
             .order_by("-invited_at")
             .all()
         )
     accepted_invitations = (
-        AccountInvitation.objects.filter(dismissed_at__isnull=True, accepted_at__isnull=False)
+        AccountInvitation.objects.select_related("organization")
+        .filter(dismissed_at__isnull=True, accepted_at__isnull=False)
         .order_by("-accepted_at", "-invited_at")
         .all()
     )
@@ -224,7 +347,8 @@ def account_invitations(request: HttpRequest) -> HttpResponse:
     if accepted_list:
         _refresh_accepted_invitations(accepted=accepted_list, now=timezone.now())
         accepted_invitations = (
-            AccountInvitation.objects.filter(dismissed_at__isnull=True, accepted_at__isnull=False)
+            AccountInvitation.objects.select_related("organization")
+            .filter(dismissed_at__isnull=True, accepted_at__isnull=False)
             .order_by("-accepted_at", "-invited_at")
             .all()
         )
@@ -241,7 +365,7 @@ def account_invitations(request: HttpRequest) -> HttpResponse:
 
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
 def account_invitations_upload(request: HttpRequest) -> HttpResponse:
-    template_names = _invitation_template_names()
+    template_names = _bulk_invitation_template_names()
     email_templates = list(EmailTemplate.objects.filter(name__in=template_names).order_by("name"))
 
     if request.method == "POST":
@@ -344,10 +468,15 @@ def account_invitations_send(request: HttpRequest) -> HttpResponse:
         messages.error(request, "Invitation preview data is missing. Please upload the CSV again.")
         return redirect("account-invitations")
 
-    template_names = _invitation_template_names()
+    requested_template_name = str(request.POST.get("email_template") or payload.get("template_name") or "").strip()
+    if requested_template_name == settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME:
+        messages.error(request, "The organization claim template cannot be used for CSV bulk invitations.")
+        return redirect("account-invitations")
+
+    template_names = _bulk_invitation_template_names()
     template_name = _select_invitation_template_name(
         template_names=template_names,
-        selected_name=str(request.POST.get("email_template") or payload.get("template_name") or "").strip(),
+        selected_name=requested_template_name,
         allow_default=False,
     )
     if not template_names:
@@ -356,7 +485,6 @@ def account_invitations_send(request: HttpRequest) -> HttpResponse:
     if not template_name:
         messages.error(request, "Select a valid email template.")
         return redirect("account-invitations")
-
     if not EmailTemplate.objects.filter(name=template_name).exists():
         messages.error(request, "The selected email template is not available.")
         return redirect("account-invitations")
@@ -368,7 +496,9 @@ def account_invitations_send(request: HttpRequest) -> HttpResponse:
     existing = 0
     invalid = 0
     skipped_duplicate = 0
+    skipped_org_linked = 0
     failed = 0
+    config_error = 0
     seen: set[str] = set()
     lookup_cache: dict[str, list[str]] = {}
     email_map = build_freeipa_email_lookup()
@@ -404,19 +534,22 @@ def account_invitations_send(request: HttpRequest) -> HttpResponse:
                 matches = find_account_invitation_matches(normalized)
             lookup_cache[normalized] = matches
 
-        if matches:
+        if matches and template_name != settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME:
             existing += 1
             continue
 
-        invitation, _created = AccountInvitation.objects.get_or_create(
-            email=normalized,
-            defaults={
-                "full_name": full_name,
-                "note": note,
-                "invited_by_username": actor_username,
-                "email_template_name": template_name,
-            },
-        )
+        invitation = AccountInvitation.objects.filter(email=normalized).first()
+        if invitation is None:
+            invitation = AccountInvitation.objects.create(
+                email=normalized,
+                full_name=full_name,
+                note=note,
+                invited_by_username=actor_username,
+                email_template_name=template_name,
+            )
+        elif invitation.organization_id is not None:
+            skipped_org_linked += 1
+            continue
 
         if full_name:
             invitation.full_name = full_name
@@ -425,72 +558,38 @@ def account_invitations_send(request: HttpRequest) -> HttpResponse:
         invitation.invited_by_username = actor_username
         invitation.email_template_name = template_name
 
-        invitation_token = str(invitation.invitation_token or "").strip()
-        try:
-            email = queue_templated_email(
-                recipients=[normalized],
-                sender=settings.DEFAULT_FROM_EMAIL,
-                template_name=template_name,
-                context={
-                    "full_name": full_name,
-                    "email": normalized,
-                    "invited_by_username": actor_username,
-                    "invitation_token": invitation_token,
-                    **system_email_context(),
-                    "register_url": _invitation_register_url(token=invitation_token),
-                    "login_url": _invitation_login_url(token=invitation_token),
-                    **membership_committee_email_context(),
-                },
-                reply_to=[settings.MEMBERSHIP_COMMITTEE_EMAIL],
-            )
-        except Exception:
-            logger.exception("Failed to queue account invitation email")
-            AccountInvitationSend.objects.create(
-                invitation=invitation,
-                sent_by_username=actor_username,
-                sent_at=now,
-                template_name=template_name,
-                result=AccountInvitationSend.Result.failed,
-                error_category="send_error",
-            )
-            failed += 1
-            continue
-
-        invitation.dismissed_at = None
-        invitation.dismissed_by_username = ""
-        invitation.last_sent_at = now
-        invitation.send_count += 1
         invitation.save(
             update_fields=[
                 "full_name",
                 "note",
                 "invited_by_username",
                 "email_template_name",
-                "dismissed_at",
-                "dismissed_by_username",
-                "last_sent_at",
-                "send_count",
             ]
         )
 
-        AccountInvitationSend.objects.create(
+        result = _send_account_invitation_email(
             invitation=invitation,
-            sent_by_username=actor_username,
-            sent_at=now,
+            actor_username=actor_username,
             template_name=template_name,
-            post_office_email_id=email.id if email else None,
-            result=AccountInvitationSend.Result.queued,
+            now=now,
         )
-        sent += 1
+        if result == "queued":
+            sent += 1
+        elif result == "config_error":
+            config_error += 1
+        else:
+            failed += 1
 
     request.session.pop(_PREVIEW_SESSION_KEY, None)
 
     logger.info(
-        "Account invitation bulk send queued=%s existing=%s invalid=%s duplicate=%s failed=%s",
+        "Account invitation bulk send queued=%s existing=%s invalid=%s duplicate=%s skipped_org_linked=%s config_error=%s failed=%s",
         sent,
         existing,
         invalid,
         skipped_duplicate,
+        skipped_org_linked,
+        config_error,
         failed,
     )
 
@@ -498,10 +597,14 @@ def account_invitations_send(request: HttpRequest) -> HttpResponse:
         messages.success(request, f"Queued {sent} invitation(s).")
     if existing:
         messages.info(request, f"Skipped {existing} existing account(s).")
+    if skipped_org_linked:
+        messages.info(request, f"Skipped {skipped_org_linked} organization-linked invitation row(s).")
     if skipped_duplicate:
         messages.info(request, f"Skipped {skipped_duplicate} duplicate row(s).")
     if invalid:
         messages.error(request, f"Skipped {invalid} invalid row(s).")
+    if config_error:
+        messages.error(request, _INVITATION_PUBLIC_BASE_URL_ERROR_MESSAGE)
     if failed:
         messages.error(request, f"Failed to queue {failed} invitation(s).")
 
@@ -574,6 +677,7 @@ def account_invitations_bulk(request: HttpRequest) -> HttpResponse:
     queued = 0
     accepted = 0
     failed = 0
+    config_error = 0
     template_error = 0
 
     for invitation in invitations:
@@ -589,6 +693,8 @@ def account_invitations_bulk(request: HttpRequest) -> HttpResponse:
             accepted += 1
         elif result == "failed":
             failed += 1
+        elif result == "config_error":
+            config_error += 1
         else:
             template_error += 1
 
@@ -598,6 +704,8 @@ def account_invitations_bulk(request: HttpRequest) -> HttpResponse:
         messages.info(request, f"Skipped {accepted} already accepted invitation(s).")
     if failed:
         messages.error(request, f"Failed to resend {failed} invitation(s).")
+    if config_error:
+        messages.error(request, _INVITATION_PUBLIC_BASE_URL_ERROR_MESSAGE)
     if template_error:
         messages.error(request, "One or more invitations could not be resent due to template configuration.")
 
@@ -640,6 +748,8 @@ def account_invitation_resend(request: HttpRequest, invitation_id: int) -> HttpR
         messages.info(request, "That invitation is already accepted.")
     elif result == "queued":
         messages.success(request, "Invitation resent.")
+    elif result == "config_error":
+        messages.error(request, _INVITATION_PUBLIC_BASE_URL_ERROR_MESSAGE)
     elif result == "failed":
         messages.error(request, "Failed to resend the invitation.")
     else:

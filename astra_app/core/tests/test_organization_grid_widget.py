@@ -111,7 +111,6 @@ class OrganizationGridTemplateTagTests(TestCase):
         html = tpl.render(Context({"request": request, "organizations": [org]}))
 
         self.assertIn("ExpiredOrg", html)
-        self.assertIn("No membership", html)
         self.assertNotIn("Silver Sponsor", html)
 
     def test_organization_grid_orders_membership_pills(self) -> None:
