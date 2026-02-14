@@ -765,6 +765,8 @@ class OrganizationUserViewsTests(TestCase):
 
         self.assertNotContains(resp, "Active sponsor")
         self.assertContains(resp, 'alx-status-badge--active">Gold')
+        self.assertContains(resp, "membership-gold")
+        self.assertNotContains(resp, "badge-warning")
 
         body = resp.content.decode("utf-8")
         self.assertLess(body.find('class="col-md-7"'), body.find('id="org-contacts-tabs"'))

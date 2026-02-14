@@ -466,6 +466,39 @@ a.alx-status-badge:focus-visible {
   outline-offset: 2px;
 }
 
+/* Membership badge palette is app-owned so theme changes do not remap tier meaning. */
+.membership-under-review{
+  color: #fff;
+  background-color: #6c757d;
+}
+
+.membership-action-required,
+.membership-ruby {
+  color: #fff;
+  background-color: #dc3545;
+}
+
+.membership-platinum {
+  color: #000;
+  background-color: #d0d0d0;
+  box-shadow: 3px 3px 2px rgba(0,0,0,.16),0 3px 6px rgba(0,0,0,.23);
+}
+
+.membership-gold {
+  color: #000;
+  background-color: #ffc107;
+}
+
+.membership-silver {
+  color: #fff;
+  background-color: #848484;
+}
+
+.membership-standard {
+  color: #fff;
+  background-color: #28a745;
+}
+
 .organization-form-footer .card-footer {
   background: rgba(0, 0, 0, 0.02);
 }
