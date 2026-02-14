@@ -23,7 +23,7 @@
         {% for membership in memberships %}
           {% include 'core/_membership_badge.html' with membership=membership is_pill=True %}
         {% empty %}
-          <span class="p-2 badge badge-pill badge-light">No membership</span>
+          <span class="p-2"></span>
         {% endfor %}
       </div>
     </div>
