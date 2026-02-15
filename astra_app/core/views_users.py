@@ -27,7 +27,7 @@ from core.membership import (
 from core.membership_notifications import membership_extend_url
 from core.models import MembershipRequest
 from core.permissions import can_view_user_directory
-from core.views_utils import _normalize_str, agreement_settings_url, get_username
+from core.views_utils import _normalize_str, agreement_settings_url, get_username, settings_url
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +100,7 @@ def _profile_context_for_user(
         )
         coc_signed = bool(coc_agreement and coc_agreement.signed)
         coc_settings_url = (
-            agreement_settings_url(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN)
+            agreement_settings_url(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN, return_to="profile")
             if is_self
             else None
         )
@@ -265,7 +265,7 @@ def _profile_context_for_user(
                 {
                     "id": "country-code-missing-alert",
                     "label": "Add a valid ISO 3166-1 alpha-2 country code",
-                    "url": f"{reverse('settings')}#profile",
+                    "url": settings_url(tab="profile", highlight="country_code"),
                     "url_label": "Set country code",
                 }
             )
@@ -275,7 +275,7 @@ def _profile_context_for_user(
                 {
                     "id": "email-blacklisted-alert",
                     "label": "We're having trouble delivering emails",
-                    "url": f"{reverse('settings')}#emails",
+                    "url": settings_url(tab="emails"),
                     "url_label": "Update your email",
                 }
             )

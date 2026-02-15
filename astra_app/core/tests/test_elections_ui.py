@@ -1,7 +1,7 @@
 
 import datetime
 from unittest.mock import patch
-from urllib.parse import quote
+from urllib.parse import quote_plus
 
 from django.conf import settings
 from django.test import TestCase
@@ -72,7 +72,7 @@ class ElectionsVoteAccessTests(TestCase):
 
         self.assertEqual(resp.status_code, 302)
         expected = (
-            f"{reverse('settings')}?agreement={quote(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN)}#agreements"
+            f"{reverse('settings')}?tab=agreements&agreement={quote_plus(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN)}"
         )
         self.assertEqual(resp["Location"], expected)
 

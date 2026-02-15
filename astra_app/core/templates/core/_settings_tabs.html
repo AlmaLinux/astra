@@ -1,19 +1,19 @@
 <ul class="nav nav-tabs" role="tablist">
   <li class="nav-item">
-    <a class="nav-link {% if active_tab == 'profile' %}active{% endif %}" href="#profile" data-toggle="tab" role="tab">Profile</a>
+    <a class="nav-link {% if active_tab == 'profile' %}active{% endif %}" href="{% url 'settings' %}?tab=profile" data-toggle="tab" data-target="#profile" role="tab">Profile</a>
   </li>
   <li class="nav-item">
-    <a class="nav-link {% if active_tab == 'emails' %}active{% endif %}" href="#emails" data-toggle="tab" role="tab">Emails</a>
+    <a class="nav-link {% if active_tab == 'emails' %}active{% endif %}" href="{% url 'settings' %}?tab=emails" data-toggle="tab" data-target="#emails" role="tab">Emails</a>
   </li>
   <li class="nav-item">
-    <a class="nav-link {% if active_tab == 'keys' %}active{% endif %}" href="#keys" data-toggle="tab" role="tab">SSH &amp; GPG Keys</a>
+    <a class="nav-link {% if active_tab == 'keys' %}active{% endif %}" href="{% url 'settings' %}?tab=keys" data-toggle="tab" data-target="#keys" role="tab">SSH &amp; GPG Keys</a>
   </li>
   <li class="nav-item">
-    <a class="nav-link {% if active_tab == 'security' %}active{% endif %}" href="#security" data-toggle="tab" role="tab">Security</a>
+    <a class="nav-link {% if active_tab == 'security' %}active{% endif %}" href="{% url 'settings' %}?tab=security" data-toggle="tab" data-target="#security" role="tab">Security</a>
   </li>
   {% if show_agreements_tab %}
     <li class="nav-item">
-      <a class="nav-link {% if active_tab == 'agreements' %}active{% endif %}" href="#agreements" data-toggle="tab" role="tab">Agreements</a>
+      <a class="nav-link {% if active_tab == 'agreements' %}active{% endif %}" href="{% url 'settings' %}?tab=agreements" data-toggle="tab" data-target="#agreements" role="tab">Agreements</a>
     </li>
   {% endif %}
 </ul>

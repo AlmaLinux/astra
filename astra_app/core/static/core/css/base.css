@@ -10,6 +10,7 @@
   --alx-ink: #000518;
   --alx-link: #264154;
   --alx-border: #d8dde6;
+  --alx-red: #ff0018;
 }
 
 @import url("https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&display=swap");
@@ -41,6 +42,14 @@ body {
 
 .settings-profile-avatar {
   flex: 0 0 auto;
+}
+
+.settings-page .settings-field-highlight {
+  border: 1px solid color-mix(in srgb, var(--alx-red) 35%, #fff);
+  border-radius: 0.375rem;
+  background: color-mix(in srgb, var(--alx-red) 8%, #fff);
+  box-shadow: 0 0 0 0.15rem color-mix(in srgb, var(--alx-red) 18%, transparent);
+  padding: 0.75rem;
 }
 
 /* Only the legacy top-nav/public layout uses a flex wrapper.
@@ -192,6 +201,10 @@ a:hover {
   max-width: 1080px;
   margin: 1.5rem auto 0;
   padding-bottom: 2rem;
+}
+
+.profile-page .alert-link {
+  color: #000;
 }
 
 .profile-page .card {

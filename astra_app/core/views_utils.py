@@ -7,7 +7,7 @@ import logging
 from collections.abc import Callable
 from functools import wraps
 from typing import Any
-from urllib.parse import quote, urlencode
+from urllib.parse import urlencode
 
 from django.conf import settings
 from django.contrib import messages
@@ -21,6 +21,9 @@ from core.backends import FreeIPAFASAgreement
 from core.country_codes import country_code_status_from_user_data
 
 logger = logging.getLogger(__name__)
+
+_SETTINGS_TABS: frozenset[str] = frozenset({"profile", "emails", "keys", "security", "agreements"})
+_SETTINGS_HIGHLIGHTS: frozenset[str] = frozenset({"country_code"})
 
 
 def send_mail_url(
@@ -166,12 +169,51 @@ def settings_context(active_tab: str) -> dict[str, object]:
     }
 
 
-def agreement_settings_url(agreement_cn: str | None) -> str:
+def settings_url(
+    *,
+    tab: str | None = None,
+    agreement: str | None = None,
+    highlight: str | None = None,
+    status: str | None = None,
+    return_to: str | None = None,
+) -> str:
+    """Build canonical settings URL with allowlisted query parameters."""
+
+    params: dict[str, str] = {}
+
+    tab_value = str(tab or "").strip()
+    if tab_value in _SETTINGS_TABS:
+        params["tab"] = tab_value
+
+    agreement_value = str(agreement or "").strip()
+    if agreement_value:
+        params["agreement"] = agreement_value
+
+    highlight_value = str(highlight or "").strip()
+    if highlight_value in _SETTINGS_HIGHLIGHTS:
+        params["highlight"] = highlight_value
+
+    status_value = str(status or "").strip()
+    if status_value:
+        params["status"] = status_value
+
+    # Only `profile` is valid for cross-flow return behavior.
+    return_value = str(return_to or "").strip()
+    if return_value == "profile":
+        params["return"] = return_value
+
+    base = reverse("settings")
+    if not params:
+        return base
+    return f"{base}?{urlencode(params)}"
+
+
+def agreement_settings_url(agreement_cn: str | None, *, return_to: str | None = None) -> str:
     """Return the canonical settings deep-link for agreement signing."""
     agreement_cn_value = str(agreement_cn or "").strip()
     if not agreement_cn_value:
-        return f"{reverse('settings')}#agreements"
-    return f"{reverse('settings')}?agreement={quote(agreement_cn_value)}#agreements"
+        return settings_url(tab="agreements", return_to=return_to)
+    return settings_url(tab="agreements", agreement=agreement_cn_value, return_to=return_to)
 
 
 def block_action_without_country_code(
@@ -194,7 +236,7 @@ def block_action_without_country_code(
         request,
         f"A valid country code is required before you can {action_label}. Please set it on the Profile tab.",
     )
-    return redirect(f"{reverse('settings')}#profile")
+    return redirect(settings_url(tab="profile", highlight="country_code"))
 
 
 def _coc_agreement_for_user(username: str) -> FreeIPAFASAgreement | None:

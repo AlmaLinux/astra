@@ -12,15 +12,32 @@ from core.views_utils import (
     build_page_url_prefix,
     build_url_for_page,
     get_username,
+    settings_url,
 )
 
 
 class ViewsUtilsSSOTTests(SimpleTestCase):
     def test_agreement_settings_url_builds_expected_shapes(self):
-        self.assertEqual(agreement_settings_url(None), reverse("settings") + "#agreements")
+        self.assertEqual(agreement_settings_url(None), reverse("settings") + "?tab=agreements")
         self.assertEqual(
             agreement_settings_url("cla"),
-            reverse("settings") + "?agreement=cla#agreements",
+            reverse("settings") + "?tab=agreements&agreement=cla",
+        )
+        self.assertEqual(
+            agreement_settings_url("cla", return_to="profile"),
+            reverse("settings") + "?tab=agreements&agreement=cla&return=profile",
+        )
+
+    def test_settings_url_builds_allowlisted_query_shapes(self):
+        self.assertEqual(settings_url(), reverse("settings"))
+        self.assertEqual(settings_url(tab="profile"), reverse("settings") + "?tab=profile")
+        self.assertEqual(
+            settings_url(tab="profile", highlight="country_code"),
+            reverse("settings") + "?tab=profile&highlight=country_code",
+        )
+        self.assertEqual(
+            settings_url(tab="agreements", status="saved"),
+            reverse("settings") + "?tab=agreements&status=saved",
         )
 
     def test_get_username_can_skip_user_fallback_without_forcing_lazy_user(self):

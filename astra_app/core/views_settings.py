@@ -67,10 +67,10 @@ from core.tokens import make_signed_token, read_signed_token
 from core.views_utils import (
     MSG_SERVICE_UNAVAILABLE,
     _normalize_str,
-    agreement_settings_url,
     block_action_without_country_code,
     get_username,
     settings_context,
+    settings_url,
 )
 
 logger = logging.getLogger(__name__)
@@ -90,25 +90,8 @@ OTP_KEY_LENGTH: Final[int] = 35
 AVATAR_MAX_SIZE: Final[int] = 512
 
 
-def _settings_fragment(tab: str) -> str:
-    if tab not in _SETTINGS_TABS:
-        tab = "profile"
-    return f"#{tab}"
-
-
-def _settings_url(tab: str, *, agreement_cn: str | None = None) -> str:
-    base = reverse("settings")
-    if agreement_cn is None:
-        return f"{base}{_settings_fragment(tab)}"
-    if tab == "agreements":
-        return agreement_settings_url(agreement_cn)
-    return f"{base}?agreement={quote(agreement_cn)}{_settings_fragment(tab)}"
-
-
 def _block_settings_change_without_country_code(request: HttpRequest, *, user_data: dict | None) -> HttpResponse | None:
     return block_action_without_country_code(request, user_data=user_data, action_label="change settings")
-
-
 
 
 def _send_email_validation_email(
@@ -203,24 +186,24 @@ def avatar_manage(request: HttpRequest) -> HttpResponse:
         return redirect(manage_url)
 
     messages.info(request, "Your current avatar provider does not support direct avatar updates here.")
-    return redirect(_settings_url("profile"))
+    return redirect(settings_url(tab="profile"))
 
 
 @login_required
 def avatar_upload(request: HttpRequest) -> HttpResponse:
     if request.method != "POST":
-        return redirect(_settings_url("profile"))
+        return redirect(settings_url(tab="profile"))
 
     upload = request.FILES.get("avatar")
     if not upload:
         messages.error(request, "No avatar file provided.")
-        return redirect(_settings_url("profile"))
+        return redirect(settings_url(tab="profile"))
 
     try:
         from PIL import Image, ImageOps
     except Exception:
         messages.error(request, "Avatar uploads are unavailable (missing image library).")
-        return redirect(_settings_url("profile"))
+        return redirect(settings_url(tab="profile"))
 
     try:
         img = Image.open(upload)
@@ -236,7 +219,7 @@ def avatar_upload(request: HttpRequest) -> HttpResponse:
         png_bytes = out.getvalue()
     except Exception:
         messages.error(request, "Invalid image file.")
-        return redirect(_settings_url("profile"))
+        return redirect(settings_url(tab="profile"))
 
     key = avatar_path_handler(instance=SimpleNamespace(user=request.user), ext="png")
 
@@ -259,20 +242,20 @@ def avatar_upload(request: HttpRequest) -> HttpResponse:
         pass
 
     messages.success(request, "Avatar updated.")
-    return redirect(_settings_url("profile"))
+    return redirect(settings_url(tab="profile"))
 
 
 @login_required
 def avatar_delete(request: HttpRequest) -> HttpResponse:
     if request.method != "POST":
-        return redirect(_settings_url("profile"))
+        return redirect(settings_url(tab="profile"))
 
     key = avatar_path_handler(instance=SimpleNamespace(user=request.user), ext="png")
     try:
         default_storage.delete(key)
     except Exception:
         messages.error(request, "Failed to delete avatar.")
-        return redirect(_settings_url("profile"))
+        return redirect(settings_url(tab="profile"))
 
     try:
         from avatar.utils import invalidate_cache
@@ -283,7 +266,7 @@ def avatar_delete(request: HttpRequest) -> HttpResponse:
         pass
 
     messages.success(request, "Avatar deleted.")
-    return redirect(_settings_url("profile"))
+    return redirect(settings_url(tab="profile"))
 
 
 type TokenDict = dict[str, Any]
@@ -646,6 +629,9 @@ def settings_root(request: HttpRequest) -> HttpResponse:
 
     username = get_username(request)
     requested_tab = _normalize_str(request.POST.get("tab") or request.GET.get("tab")) or "profile"
+    highlight = _normalize_str(request.GET.get("highlight"))
+    if highlight != "country_code":
+        highlight = ""
     if requested_tab not in _SETTINGS_TABS:
         requested_tab = "profile"
 
@@ -658,7 +644,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
             request,
             MSG_SERVICE_UNAVAILABLE,
         )
-        return redirect(_settings_url(requested_tab))
+        return redirect(settings_url(tab=requested_tab))
 
     try:
         fu = _get_full_user(username)
@@ -770,32 +756,32 @@ def settings_root(request: HttpRequest) -> HttpResponse:
                     passwd(username, o_password=current, o_new_password=new)
 
             messages.success(request, "Password changed.")
-            return redirect(_settings_url("security"))
+            return redirect(settings_url(tab="security"))
         except exceptions.PWChangePolicyError as e:
             logger.info("Password change rejected by policy username=%s error=%s", username, e)
             messages.error(request, "Password change rejected by policy. Please choose a stronger password.")
-            return redirect(_settings_url("security"))
+            return redirect(settings_url(tab="security"))
         except exceptions.PWChangeInvalidPassword:
             # Most commonly: wrong/missing OTP for OTP-enabled accounts.
             logger.info("Password change rejected (invalid current password/OTP) username=%s", username)
             messages.error(request, "Incorrect current password or OTP.")
-            return redirect(_settings_url("security"))
+            return redirect(settings_url(tab="security"))
         except exceptions.PasswordExpired:
             messages.error(request, "Password is expired; please change it below.")
-            return redirect(_settings_url("security"))
+            return redirect(settings_url(tab="security"))
         except (exceptions.InvalidSessionPassword, exceptions.Unauthorized):
             # Treat auth failures as a normal user error, not a crash.
             logger.info("Password change rejected (bad credentials) username=%s", username)
             messages.error(request, "Incorrect current password or OTP.")
-            return redirect(_settings_url("security"))
+            return redirect(settings_url(tab="security"))
         except exceptions.FreeIPAError as e:
             logger.warning("Password change failed (FreeIPA error) username=%s error=%s", username, e)
             messages.error(request, "Unable to change password due to a FreeIPA error.")
-            return redirect(_settings_url("security"))
+            return redirect(settings_url(tab="security"))
         except Exception:
             logger.exception("Failed to change password username=%s", username)
             messages.error(request, "Failed to change password due to an internal error.")
-            return redirect(_settings_url("security"))
+            return redirect(settings_url(tab="security"))
 
     using_otp = False
     try:
@@ -911,7 +897,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
                     otp_confirm_form.add_error(None, "Cannot create the token.")
             else:
                 messages.success(request, "The token has been created.")
-                return redirect(_settings_url("security"))
+                return redirect(settings_url(tab="security"))
 
     if secret:
         try:
@@ -987,7 +973,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
     if not show_agreements_tab and (requested_tab == "agreements" or agreement_cn):
         # If agreements are not available (disabled or FreeIPA unreachable),
         # do not render a broken/empty tab. Keep the user on a safe tab.
-        return redirect(_settings_url("profile"))
+        return redirect(settings_url(tab="profile"))
 
     # Context
     avatar_provider_path, avatar_url = _detect_avatar_provider(request.user, size=96)
@@ -1010,6 +996,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
         "agreement_cn": agreement_cn,
         "rename_form": OTPTokenRenameForm(prefix="rename"),
         "show_agreements_tab": show_agreements_tab,
+        "highlight": highlight,
         "avatar_provider": _avatar_provider_label(avatar_provider_path),
         "avatar_url": avatar_url,
         "avatar_is_local": bool(avatar_provider_path and avatar_provider_path.endswith("LocalS3AvatarProvider")),
@@ -1098,7 +1085,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
 
         if not (profile_has_changes or emails_has_changes or keys_has_changes):
             messages.info(request, "No changes to save.")
-            return redirect(_settings_url(requested_tab))
+            return redirect(settings_url(tab=requested_tab))
 
         if profile_has_changes or emails_has_changes or keys_has_changes:
             # In save-all mode, allow the submitted profile country code to satisfy
@@ -1143,7 +1130,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
                 request, context, requested_tab, e, tab_label="settings", username=username,
             )
 
-        return redirect(_settings_url(requested_tab))
+        return redirect(settings_url(tab=requested_tab))
 
     if requested_tab == "profile" and profile_form.is_valid():
         direct_updates, addattrs, setattrs, delattrs, old_country, new_country = _build_profile_changes(
@@ -1154,7 +1141,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
 
         if not direct_updates and not addattrs and not setattrs and not delattrs:
             messages.info(request, "No changes to save.")
-            return redirect(_settings_url("profile"))
+            return redirect(settings_url(tab="profile", highlight=highlight))
 
         effective_user_data = dict(data)
         if new_country:
@@ -1178,7 +1165,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
             return _settings_update_error_response(
                 request, context, "profile", e, tab_label="profile", username=username,
             )
-        return redirect(_settings_url("profile"))
+        return redirect(settings_url(tab="profile", highlight=highlight, status="saved"))
 
     if requested_tab == "emails" and emails_form.is_valid():
         direct_updates, setattrs, delattrs, pending_validations = _build_emails_changes(
@@ -1187,7 +1174,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
 
         if not pending_validations and not direct_updates and not setattrs and not delattrs:
             messages.info(request, "No changes to save.")
-            return redirect(_settings_url("emails"))
+            return redirect(settings_url(tab="emails"))
 
         blocked = _block_settings_change_without_country_code(request, user_data=data)
         if blocked is not None:
@@ -1204,7 +1191,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
                 request, context, "emails", e, tab_label="email settings", username=username,
             )
 
-        return redirect(_settings_url("emails"))
+        return redirect(settings_url(tab="emails"))
 
     if requested_tab == "keys" and keys_form.is_valid():
         addattrs, setattrs, delattrs = _build_keys_changes(
@@ -1213,7 +1200,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
 
         if not addattrs and not setattrs and not delattrs:
             messages.info(request, "No changes to save.")
-            return redirect(_settings_url("keys"))
+            return redirect(settings_url(tab="keys"))
 
         blocked = _block_settings_change_without_country_code(request, user_data=data)
         if blocked is not None:
@@ -1230,7 +1217,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
                 request, context, "keys", e, tab_label="keys", username=username,
             )
 
-        return redirect(_settings_url("keys"))
+        return redirect(settings_url(tab="keys"))
 
     if requested_tab == "security":
         if is_add or is_confirm:
@@ -1242,7 +1229,9 @@ def settings_root(request: HttpRequest) -> HttpResponse:
 
     if requested_tab == "agreements":
         if not has_enabled_agreements():
-            return redirect(_settings_url("profile"))
+            return redirect(settings_url(tab="profile"))
+
+        return_target = _normalize_str(request.GET.get("return"))
 
         action = _normalize_str(request.POST.get("action")).lower()
         cn = _normalize_str(request.POST.get("cn"))
@@ -1252,7 +1241,9 @@ def settings_root(request: HttpRequest) -> HttpResponse:
                 raise Http404("Agreement not found")
             if username in set(agreement_obj.users):
                 messages.info(request, "You have already signed this agreement.")
-                return redirect(_settings_url("agreements"))
+                if return_target == "profile":
+                    return redirect(reverse("user-profile", kwargs={"username": username}))
+                return redirect(settings_url(tab="agreements"))
 
             try:
                 agreement_obj.add_user(username)
@@ -1264,7 +1255,9 @@ def settings_root(request: HttpRequest) -> HttpResponse:
                 else:
                     messages.error(request, "Failed to sign agreement due to an internal error.")
 
-        return redirect(_settings_url("agreements"))
+        if return_target == "profile":
+            return redirect(reverse("user-profile", kwargs={"username": username}))
+        return redirect(settings_url(tab="agreements"))
 
     context["force_tab"] = requested_tab
     return render(request, "core/settings.html", context)
@@ -1294,7 +1287,7 @@ def _security_otp_toggle(request: HttpRequest, *, disable: bool) -> HttpResponse
             messages.success(request, f"OTP token {verb}d.")
     else:
         messages.error(request, "Token must not be empty")
-    return redirect(_settings_url("security"))
+    return redirect(settings_url(tab="security"))
 
 
 def security_otp_enable(request: HttpRequest) -> HttpResponse:
@@ -1326,7 +1319,7 @@ def security_otp_delete(request: HttpRequest) -> HttpResponse:
             messages.success(request, "OTP token deleted.")
     else:
         messages.error(request, "Token must not be empty")
-    return redirect(_settings_url("security"))
+    return redirect(settings_url(tab="security"))
 
 
 def security_otp_rename(request: HttpRequest) -> HttpResponse:
@@ -1354,7 +1347,7 @@ def security_otp_rename(request: HttpRequest) -> HttpResponse:
             messages.error(request, str(first_error))
         else:
             messages.error(request, "Token must not be empty")
-    return redirect(_settings_url("security"))
+    return redirect(settings_url(tab="security"))
 
 
 def settings_email_validate(request: HttpRequest) -> HttpResponse:
@@ -1362,16 +1355,16 @@ def settings_email_validate(request: HttpRequest) -> HttpResponse:
     token_string = _normalize_str(request.GET.get("token"))
     if not token_string:
         messages.warning(request, "No token provided, please check your email validation link.")
-        return redirect(_settings_url("emails"))
+        return redirect(settings_url(tab="emails"))
 
     try:
         token = read_signed_token(token_string)
     except signing.SignatureExpired:
         messages.warning(request, "This token is no longer valid, please request a new validation email.")
-        return redirect(_settings_url("emails"))
+        return redirect(settings_url(tab="emails"))
     except signing.BadSignature:
         messages.warning(request, "The token is invalid, please request a new validation email.")
-        return redirect(_settings_url("emails"))
+        return redirect(settings_url(tab="emails"))
 
     token_user = _normalize_str(token.get("u"))
     attr = _normalize_str(token.get("a"))
@@ -1379,11 +1372,11 @@ def settings_email_validate(request: HttpRequest) -> HttpResponse:
 
     if token_user != username:
         messages.warning(request, "This token does not belong to you.")
-        return redirect(_settings_url("emails"))
+        return redirect(settings_url(tab="emails"))
 
     if attr not in {"mail", "fasRHBZEmail"}:
         messages.warning(request, "The token is invalid, please request a validation email.")
-        return redirect(_settings_url("emails"))
+        return redirect(settings_url(tab="emails"))
 
     try:
         fu = _get_full_user(username)
@@ -1392,7 +1385,7 @@ def settings_email_validate(request: HttpRequest) -> HttpResponse:
             request,
             MSG_SERVICE_UNAVAILABLE,
         )
-        return redirect(_settings_url("emails"))
+        return redirect(settings_url(tab="emails"))
     if not fu:
         messages.error(request, "Unable to load your FreeIPA profile.")
         return redirect("home")
@@ -1416,17 +1409,17 @@ def settings_email_validate(request: HttpRequest) -> HttpResponse:
                 request,
                 MSG_SERVICE_UNAVAILABLE,
             )
-            return redirect(_settings_url("emails"))
+            return redirect(settings_url(tab="emails"))
         except Exception as e:
             logger.exception("Email validation apply failed username=%s attr=%s", username, attr)
             if settings.DEBUG:
                 messages.error(request, f"Failed to validate email (debug): {e}")
             else:
                 messages.error(request, "Failed to validate email due to an internal error.")
-            return redirect(_settings_url("emails"))
+            return redirect(settings_url(tab="emails"))
 
         messages.success(request, "Your email address has been validated.")
-        return redirect(_settings_url("emails"))
+        return redirect(settings_url(tab="emails"))
 
     return render(
         request,

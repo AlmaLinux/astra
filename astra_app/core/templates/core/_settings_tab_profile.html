@@ -48,7 +48,12 @@
 			</datalist>
 		</div>
 
-		{% include "core/_form_field.html" with field=profile_form.country_code %}
+		<div id="country-code-field-wrapper" class="form-group {% if highlight == 'country_code' %}settings-field-highlight{% endif %}">
+			{{ profile_form.country_code.label_tag }}
+			{{ profile_form.country_code }}
+			{% if profile_form.country_code.errors %}<div class="text-danger">{{ profile_form.country_code.errors }}</div>{% endif %}
+			{% if profile_form.country_code.help_text %}<small class="form-text text-muted">{{ profile_form.country_code.help_text }}</small>{% endif %}
+		</div>
 
 		{% include "core/_form_field.html" with field=profile_form.fasLocale %}
 
@@ -214,6 +219,13 @@
 				placeholder: 'https://example.com/rss.xml',
 				splitComma: true
 			});
+
+			if ('{{ highlight|default:""|escapejs }}' === 'country_code') {
+				var countryInput = document.getElementById('id_country_code');
+				if (countryInput && typeof countryInput.focus === 'function') {
+					countryInput.focus();
+				}
+			}
 		});
 	})();
 </script>

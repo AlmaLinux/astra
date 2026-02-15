@@ -133,3 +133,33 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
             any(a.get("id") == "membership-request-recommended-alert" for a in recommended),
             "Did not expect a membership request recommendation after a rejected request.",
         )
+
+    def test_user_profile_required_actions_use_context_aware_settings_links(self) -> None:
+        MembershipType.objects.update(enabled=False)
+
+        alex = FreeIPAUser(
+            "alex",
+            {
+                "uid": ["alex"],
+                "mail": ["alex@example.com"],
+                "memberof_group": [],
+                "givenname": ["Alex"],
+                "sn": ["User"],
+            },
+        )
+
+        agreement = type("Agreement", (), {"cn": "coc", "enabled": True, "signed": False})
+
+        self._login_as_freeipa_user("alex")
+        with (
+            patch("core.views_users.has_enabled_agreements", return_value=True),
+            patch("core.views_users.list_agreements_for_user", return_value=[agreement]),
+            patch("core.views_users.FreeIPAGroup.all", return_value=[]),
+            patch("core.backends.FreeIPAUser.get", return_value=alex),
+        ):
+            resp = self.client.get(reverse("user-profile", kwargs={"username": "alex"}))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, '/settings/?tab=agreements')
+        self.assertContains(resp, 'return=profile')
+        self.assertContains(resp, 'href="/settings/?tab=profile&amp;highlight=country_code"')

@@ -324,7 +324,7 @@ class SelfServiceSettingsPagesTests(TestCase):
                 response = views_settings.settings_root(request)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], reverse("settings") + "#profile")
+        self.assertEqual(response["Location"], reverse("settings") + "?tab=profile")
         msgs = [m.message for m in get_messages(request)]
         self.assertIn("No changes to save.", msgs)
         mocked_update.assert_not_called()
@@ -633,7 +633,7 @@ class SelfServiceSettingsPagesTests(TestCase):
                     response = views_settings.settings_root(request)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], reverse("settings") + "#profile")
+        self.assertEqual(response["Location"], reverse("settings") + "?tab=profile")
         self.assertEqual(mocked_update.call_count, 2)
 
     @override_settings(
@@ -698,7 +698,7 @@ class SelfServiceSettingsPagesTests(TestCase):
                     response = views_settings.settings_root(request)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], reverse("settings") + "#profile")
+        self.assertEqual(response["Location"], reverse("settings") + "?tab=profile")
         self.assertEqual(mocked_update.call_count, 1)
 
     @override_settings(
@@ -762,7 +762,7 @@ class SelfServiceSettingsPagesTests(TestCase):
                 response = views_settings.settings_root(request)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], reverse("settings") + "#profile")
+        self.assertEqual(response["Location"], reverse("settings") + "?tab=profile")
         self.assertEqual(mocked_update.call_count, 1)
 
     @override_settings(
@@ -814,7 +814,7 @@ class SelfServiceSettingsPagesTests(TestCase):
                 response = views_settings.settings_root(request)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], reverse("settings") + "#profile")
+        self.assertEqual(response["Location"], reverse("settings") + "?tab=profile&status=saved")
 
         kwargs = mocked_update.call_args.kwargs
         direct_updates = kwargs.get("direct_updates", {})
@@ -885,7 +885,7 @@ class SelfServiceSettingsPagesTests(TestCase):
                 response = views_settings.settings_root(request)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], reverse("settings") + "#profile")
+        self.assertEqual(response["Location"], reverse("settings") + "?tab=profile")
         self.assertEqual(mocked_update.call_count, 1)
 
     @override_settings(
@@ -985,7 +985,7 @@ class SelfServiceSettingsPagesTests(TestCase):
                 response = views_settings.settings_root(request)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], reverse("settings") + "#emails")
+        self.assertEqual(response["Location"], reverse("settings") + "?tab=emails")
         msgs = [m.message for m in get_messages(request)]
         self.assertIn("No changes to save.", msgs)
         mocked_update.assert_not_called()
@@ -1015,7 +1015,7 @@ class SelfServiceSettingsPagesTests(TestCase):
                 response = views_settings.settings_email_validate(request)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], reverse("settings") + "#emails")
+        self.assertEqual(response["Location"], reverse("settings") + "?tab=emails")
         msgs = [m.message for m in get_messages(request)]
         self.assertIn(
             "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
@@ -1052,7 +1052,7 @@ class SelfServiceSettingsPagesTests(TestCase):
                     response = views_settings.settings_email_validate(request)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], reverse("settings") + "#emails")
+        self.assertEqual(response["Location"], reverse("settings") + "?tab=emails")
         msgs = [m.message for m in get_messages(request)]
         self.assertIn(
             "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
@@ -1094,7 +1094,7 @@ class SelfServiceSettingsPagesTests(TestCase):
                 response = views_settings.settings_root(request)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], reverse("settings") + "#keys")
+        self.assertEqual(response["Location"], reverse("settings") + "?tab=keys")
         msgs = [m.message for m in get_messages(request)]
         self.assertIn("No changes to save.", msgs)
         mocked_update.assert_not_called()
@@ -1127,7 +1127,7 @@ class SelfServiceSettingsPagesTests(TestCase):
                 response = views_settings.settings_root(request)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], reverse("settings") + "#security")
+        self.assertEqual(response["Location"], reverse("settings") + "?tab=security")
         mocked_client.change_password.assert_called_once_with("alice", "newpw", "oldpw", otp=None)
 
     @override_settings(
@@ -1159,7 +1159,7 @@ class SelfServiceSettingsPagesTests(TestCase):
                 response = views_settings.settings_root(request)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], reverse("settings") + "#security")
+        self.assertEqual(response["Location"], reverse("settings") + "?tab=security")
         mocked_client.change_password.assert_called_once_with("alice", "newpw", "oldpw", otp="123456")
 
     @override_settings(
@@ -1191,8 +1191,274 @@ class SelfServiceSettingsPagesTests(TestCase):
                 response = views_settings.settings_root(request)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], reverse("settings") + "#security")
+        self.assertEqual(response["Location"], reverse("settings") + "?tab=security")
         msgs = [m.message for m in get_messages(request)]
         self.assertEqual(len(msgs), 1)
         self.assertNotIn("(debug)", msgs[0])
         self.assertIn("Incorrect current password", msgs[0])
+
+    @override_settings(
+        FREEIPA_HOST="ipa.test",
+        FREEIPA_VERIFY_SSL=False,
+        FREEIPA_SERVICE_USER="svc",
+        FREEIPA_SERVICE_PASSWORD="pw",
+    )
+    def test_settings_agreement_sign_from_profile_redirects_back_to_profile(self):
+        factory = RequestFactory()
+        request = factory.post(
+            "/settings/?return=profile",
+            data={
+                "tab": "agreements",
+                "action": "sign",
+                "cn": "coc",
+            },
+        )
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        fake_user = SimpleNamespace(
+            username="alice",
+            email="a@example.org",
+            is_authenticated=True,
+            _user_data={"givenname": ["Alice"], "sn": ["User"], "cn": ["Alice User"]},
+            groups_list=[],
+        )
+        agreement = SimpleNamespace(enabled=True, users=[], add_user=lambda _username: None)
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            with patch("core.views_settings.has_enabled_agreements", return_value=True):
+                with patch("core.views_settings.list_agreements_for_user", autospec=True, return_value=[]):
+                    with patch("core.views_settings.FreeIPAFASAgreement.get", autospec=True, return_value=agreement):
+                        response = views_settings.settings_root(request)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("user-profile", kwargs={"username": "alice"}))
+
+    @override_settings(
+        FREEIPA_HOST="ipa.test",
+        FREEIPA_VERIFY_SSL=False,
+        FREEIPA_SERVICE_USER="svc",
+        FREEIPA_SERVICE_PASSWORD="pw",
+    )
+    def test_settings_agreement_sign_without_return_stays_on_agreements_tab(self):
+        factory = RequestFactory()
+        request = factory.post(
+            "/settings/",
+            data={
+                "tab": "agreements",
+                "action": "sign",
+                "cn": "coc",
+            },
+        )
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        fake_user = SimpleNamespace(
+            username="alice",
+            email="a@example.org",
+            is_authenticated=True,
+            _user_data={"givenname": ["Alice"], "sn": ["User"], "cn": ["Alice User"]},
+            groups_list=[],
+        )
+        agreement = SimpleNamespace(enabled=True, users=[], add_user=lambda _username: None)
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            with patch("core.views_settings.has_enabled_agreements", return_value=True):
+                with patch("core.views_settings.list_agreements_for_user", autospec=True, return_value=[]):
+                    with patch("core.views_settings.FreeIPAFASAgreement.get", autospec=True, return_value=agreement):
+                        response = views_settings.settings_root(request)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("settings") + "?tab=agreements")
+
+    @override_settings(
+        FREEIPA_HOST="ipa.test",
+        FREEIPA_VERIFY_SSL=False,
+        FREEIPA_SERVICE_USER="svc",
+        FREEIPA_SERVICE_PASSWORD="pw",
+    )
+    def test_settings_agreement_sign_with_invalid_return_stays_on_agreements_tab(self):
+        factory = RequestFactory()
+        request = factory.post(
+            "/settings/?return=bogus",
+            data={
+                "tab": "agreements",
+                "action": "sign",
+                "cn": "coc",
+            },
+        )
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        fake_user = SimpleNamespace(
+            username="alice",
+            email="a@example.org",
+            is_authenticated=True,
+            _user_data={"givenname": ["Alice"], "sn": ["User"], "cn": ["Alice User"]},
+            groups_list=[],
+        )
+        agreement = SimpleNamespace(enabled=True, users=[], add_user=lambda _username: None)
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            with patch("core.views_settings.has_enabled_agreements", return_value=True):
+                with patch("core.views_settings.list_agreements_for_user", autospec=True, return_value=[]):
+                    with patch("core.views_settings.FreeIPAFASAgreement.get", autospec=True, return_value=agreement):
+                        response = views_settings.settings_root(request)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("settings") + "?tab=agreements")
+
+    @override_settings(
+        FREEIPA_HOST="ipa.test",
+        FREEIPA_VERIFY_SSL=False,
+        FREEIPA_SERVICE_USER="svc",
+        FREEIPA_SERVICE_PASSWORD="pw",
+        SELF_SERVICE_ADDRESS_COUNTRY_ATTR="c",
+    )
+    def test_settings_profile_save_redirects_with_query_tab_and_preserves_highlight(self):
+        factory = RequestFactory()
+
+        fake_user = SimpleNamespace(
+            username="alice",
+            email="a@example.org",
+            is_authenticated=True,
+            _user_data={
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "cn": ["Alice User"],
+                "c": ["US"],
+                "fasLocale": ["en_US"],
+                "fasTimezone": ["UTC"],
+                "fasIsPrivate": ["FALSE"],
+            },
+        )
+
+        request = factory.post(
+            "/settings/?highlight=country_code",
+            data={
+                "tab": "profile",
+                "givenname": "Alicia",
+                "sn": "User",
+                "country_code": "US",
+                "fasPronoun": "",
+                "fasLocale": "en-US",
+                "fasTimezone": "UTC",
+                "fasWebsiteUrl": "",
+                "fasRssUrl": "",
+                "fasIRCNick": "",
+                "fasGitHubUsername": "",
+                "fasGitLabUsername": "",
+                "fasIsPrivate": "",
+            },
+        )
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            with patch("core.views_settings._update_user_attrs", autospec=True, return_value=([], True)):
+                response = views_settings.settings_root(request)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("settings") + "?tab=profile&highlight=country_code&status=saved")
+
+    @override_settings(
+        FREEIPA_HOST="ipa.test",
+        FREEIPA_VERIFY_SSL=False,
+        FREEIPA_SERVICE_USER="svc",
+        FREEIPA_SERVICE_PASSWORD="pw",
+    )
+    def test_settings_get_exposes_highlight_context(self):
+        factory = RequestFactory()
+
+        fake_user = SimpleNamespace(
+            username="alice",
+            email="a@example.org",
+            is_authenticated=True,
+            _user_data={"givenname": ["Alice"], "sn": ["User"], "cn": ["Alice User"]},
+        )
+
+        request = factory.get("/settings/?tab=profile&highlight=country_code")
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        captured: dict[str, object] = {}
+
+        def fake_render(_request, template, context):
+            captured["template"] = template
+            captured["context"] = context
+            return HttpResponse("ok")
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            with patch("core.views_settings.render", autospec=True, side_effect=fake_render):
+                response = views_settings.settings_root(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(captured["context"].get("highlight"), "country_code")
+
+    @override_settings(
+        FREEIPA_HOST="ipa.test",
+        FREEIPA_VERIFY_SSL=False,
+        FREEIPA_SERVICE_USER="svc",
+        FREEIPA_SERVICE_PASSWORD="pw",
+    )
+    def test_settings_get_invalid_highlight_is_ignored(self):
+        factory = RequestFactory()
+
+        fake_user = SimpleNamespace(
+            username="alice",
+            email="a@example.org",
+            is_authenticated=True,
+            _user_data={"givenname": ["Alice"], "sn": ["User"], "cn": ["Alice User"]},
+        )
+
+        request = factory.get("/settings/?tab=profile&highlight=not_a_real_field")
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        captured: dict[str, object] = {}
+
+        def fake_render(_request, template, context):
+            captured["template"] = template
+            captured["context"] = context
+            return HttpResponse("ok")
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            with patch("core.views_settings.render", autospec=True, side_effect=fake_render):
+                response = views_settings.settings_root(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(captured["context"].get("highlight"), "")
+
+    @override_settings(
+        FREEIPA_HOST="ipa.test",
+        FREEIPA_VERIFY_SSL=False,
+        FREEIPA_SERVICE_USER="svc",
+        FREEIPA_SERVICE_PASSWORD="pw",
+    )
+    def test_settings_get_without_highlight_defaults_to_empty(self):
+        factory = RequestFactory()
+
+        fake_user = SimpleNamespace(
+            username="alice",
+            email="a@example.org",
+            is_authenticated=True,
+            _user_data={"givenname": ["Alice"], "sn": ["User"], "cn": ["Alice User"]},
+        )
+
+        request = factory.get("/settings/?tab=profile")
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        captured: dict[str, object] = {}
+
+        def fake_render(_request, template, context):
+            captured["template"] = template
+            captured["context"] = context
+            return HttpResponse("ok")
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            with patch("core.views_settings.render", autospec=True, side_effect=fake_render):
+                response = views_settings.settings_root(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(captured["context"].get("highlight"), "")

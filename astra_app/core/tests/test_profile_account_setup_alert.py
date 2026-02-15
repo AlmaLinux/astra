@@ -1,16 +1,22 @@
 
 from types import SimpleNamespace
 from unittest.mock import patch
-from urllib.parse import quote
 
 from django.test import TestCase
 from django.urls import reverse
 
 from core.backends import FreeIPAFASAgreement, FreeIPAUser
-from core.models import MembershipRequest, MembershipType
+from core.models import MembershipRequest, MembershipType, MembershipTypeCategory
 
 
 class ProfileAccountSetupAlertTests(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        MembershipTypeCategory.objects.update_or_create(
+            pk="individual",
+            defaults={"is_individual": True, "is_organization": False, "sort_order": 0},
+        )
+
     def _login_as_freeipa(self, username: str) -> None:
         session = self.client.session
         session["_freeipa_username"] = username
@@ -56,8 +62,8 @@ class ProfileAccountSetupAlertTests(TestCase):
         self.assertContains(resp, "Please complete these steps to finish setting up your account")
         self.assertNotContains(resp, "Please address the following issues")
         self.assertContains(resp, coc_cn)
-        settings_url = f"{reverse('settings')}?agreement={quote(coc_cn)}#agreements"
-        self.assertContains(resp, f'href="{settings_url}"')
+        self.assertContains(resp, f'href="{reverse("settings")}?tab=agreements')
+        self.assertContains(resp, "return=profile")
 
     def test_shows_recommended_membership_request_when_no_individual_membership(self) -> None:
         bob = FreeIPAUser(

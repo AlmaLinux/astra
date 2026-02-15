@@ -49,39 +49,87 @@
 	<script>
 		(function () {
 			var forceTab = '{{ force_tab|default:""|escapejs }}';
+			var allowedTabs = ['profile', 'emails', 'keys', 'security', 'agreements'];
 
-			function activateFromHash() {
-				var hash = window.location.hash || '';
-				if (forceTab) {
-					hash = '#' + forceTab;
-					forceTab = '';
-					if (window.location.hash !== hash) {
-						window.location.hash = hash;
-					}
-				}
-				if (!hash) {
+			function isAllowedTab(tab) {
+				return allowedTabs.indexOf(tab) !== -1;
+			}
+
+			function updateUrlTab(tab, replace) {
+				if (!isAllowedTab(tab) || !window.history || !window.history.replaceState) {
 					return;
 				}
-				var $link = document.querySelector('a[data-toggle="tab"][href="' + hash + '"]');
-				if (!$link || !window.jQuery) {
+				var url = new URL(window.location.href);
+				url.searchParams.set('tab', tab);
+				url.hash = '';
+				if (replace) {
+					window.history.replaceState({}, '', url.toString());
+				} else if (window.history.pushState) {
+					window.history.pushState({}, '', url.toString());
+				}
+			}
+
+			function resolveActiveTab() {
+				if (forceTab && isAllowedTab(forceTab)) {
+					return forceTab;
+				}
+
+				var url = new URL(window.location.href);
+				var tab = (url.searchParams.get('tab') || '').trim();
+				if (isAllowedTab(tab)) {
+					return tab;
+				}
+
+				var hash = (window.location.hash || '').replace('#', '').trim();
+				if (isAllowedTab(hash)) {
+					updateUrlTab(hash, true);
+					return hash;
+				}
+
+				return 'profile';
+			}
+
+			function activateTab(tab, replaceUrl) {
+				if (!isAllowedTab(tab)) {
+					tab = 'profile';
+				}
+				var link = document.querySelector('a[data-toggle="tab"][data-target="#' + tab + '"]');
+				if (!link || !window.jQuery) {
 					return;
 				}
-				window.jQuery($link).tab('show');
+				window.jQuery(link).tab('show');
+				updateUrlTab(tab, !!replaceUrl);
 			}
 
 			if (window.jQuery) {
 				window.jQuery('a[data-toggle="tab"]').on('shown.bs.tab', function (e) {
 					if (e && e.target && e.target.getAttribute) {
-						var href = e.target.getAttribute('href');
-						if (href && href.startsWith('#')) {
-							window.location.hash = href;
+						var target = e.target.getAttribute('data-target') || '';
+						if (target.startsWith('#')) {
+							var tab = target.slice(1);
+							if (isAllowedTab(tab)) {
+								updateUrlTab(tab, true);
+							}
+						}
+					}
+				});
+
+				window.jQuery('a[data-toggle="tab"]').on('click', function (event) {
+					if (!event || !event.currentTarget) {
+						return;
+					}
+					var target = event.currentTarget.getAttribute('data-target') || '';
+					if (target.startsWith('#')) {
+						var tab = target.slice(1);
+						if (isAllowedTab(tab)) {
+							event.preventDefault();
+							activateTab(tab, true);
 						}
 					}
 				});
 			}
 
-			window.addEventListener('hashchange', activateFromHash);
-			activateFromHash();
+			activateTab(resolveActiveTab(), true);
 		})();
 	</script>
 	<script>

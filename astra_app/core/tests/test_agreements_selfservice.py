@@ -124,7 +124,7 @@ class AgreementsSelfServiceTests(TestCase):
         self.assertEqual(missing[0]["cn"], "cla")
         self.assertEqual(
             missing[0]["settings_url"],
-            reverse("settings") + "?agreement=cla#agreements",
+            reverse("settings") + "?tab=agreements&agreement=cla",
         )
 
     def test_settings_agreements_lists_enabled_agreements(self):
@@ -307,7 +307,7 @@ class AgreementsSelfServiceTests(TestCase):
                             resp = views_settings.settings_root(request)
 
         self.assertEqual(resp.status_code, 302)
-        self.assertEqual(resp["Location"], reverse("settings") + "#agreements")
+        self.assertEqual(resp["Location"], reverse("settings") + "?tab=agreements")
         mocked_add.assert_called_once_with("alice")
         msgs = [m.message for m in get_messages(request)]
         self.assertTrue(any("signed" in m.lower() for m in msgs))
@@ -331,4 +331,4 @@ class AgreementsSelfServiceTests(TestCase):
                 resp = views_settings.settings_root(request)
 
         self.assertEqual(resp.status_code, 302)
-        self.assertEqual(resp["Location"], reverse("settings") + "#profile")
+        self.assertEqual(resp["Location"], reverse("settings") + "?tab=profile")

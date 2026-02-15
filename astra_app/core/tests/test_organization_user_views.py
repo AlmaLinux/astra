@@ -5,7 +5,7 @@ from pathlib import Path
 from tempfile import mkdtemp
 from types import SimpleNamespace
 from unittest.mock import patch
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import parse_qs, quote_plus, urlparse
 
 from django.conf import settings
 from django.contrib.messages import get_messages
@@ -129,7 +129,7 @@ class OrganizationUserViewsTests(TestCase):
 
         self.assertEqual(resp.status_code, 302)
         expected = (
-            f"{reverse('settings')}?agreement={quote(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN)}#agreements"
+            f"{reverse('settings')}?tab=agreements&agreement={quote_plus(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN)}"
         )
         self.assertEqual(resp["Location"], expected)
         self.assertFalse(Organization.objects.filter(name="Blocked Org").exists())
@@ -1847,7 +1847,7 @@ class OrganizationUserViewsTests(TestCase):
 
         self.assertEqual(resp.status_code, 302)
         expected = (
-            f"{reverse('settings')}?agreement={quote(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN)}#agreements"
+            f"{reverse('settings')}?tab=agreements&agreement={quote_plus(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN)}"
         )
         self.assertEqual(resp["Location"], expected)
         self.assertEqual(MembershipRequest.objects.count(), 0)

@@ -6,13 +6,18 @@ from django.test import TestCase
 from django.urls import reverse
 
 from core.backends import FreeIPAUser
-from core.models import FreeIPAPermissionGrant, MembershipLog, MembershipRequest, MembershipType
+from core.models import FreeIPAPermissionGrant, MembershipLog, MembershipRequest, MembershipType, MembershipTypeCategory
 from core.permissions import ASTRA_VIEW_MEMBERSHIP
 
 
 class MembershipRequestDetailRequestedForRowTests(TestCase):
     def setUp(self) -> None:
         super().setUp()
+
+        MembershipTypeCategory.objects.update_or_create(
+            pk="individual",
+            defaults={"is_individual": True, "is_organization": False, "sort_order": 0},
+        )
 
         FreeIPAPermissionGrant.objects.get_or_create(
             permission=ASTRA_VIEW_MEMBERSHIP,
@@ -77,7 +82,7 @@ class MembershipRequestDetailRequestedForRowTests(TestCase):
         self.assertContains(resp, "Requested by")
         self.assertContains(resp, "Alice User")
         self.assertContains(resp, "(alice)")
-        self.assertNotContains(resp, "Requested for")
+        self.assertNotContains(resp, "<dt class=\"col-sm-3\">Requested for</dt>", html=True)
 
     def test_requested_for_row_shown_and_formatted_when_different(self) -> None:
         MembershipType.objects.update_or_create(

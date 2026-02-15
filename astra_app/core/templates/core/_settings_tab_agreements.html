@@ -59,7 +59,7 @@
 								</div>
 							</td>
 							<td class="text-right" style="white-space: nowrap;">
-								<a class="btn btn-sm btn-outline-secondary" href="{% url 'settings' %}?agreement={{ a.cn|urlencode }}#agreements" title="View agreement details">View agreement</a>
+								<a class="btn btn-sm btn-outline-secondary" href="{% url 'settings' %}?tab=agreements&agreement={{ a.cn|urlencode }}" title="View agreement details">View agreement</a>
 								{% if not a.signed %}
 									<form method="post" class="d-inline" novalidate>
 										{% csrf_token %}

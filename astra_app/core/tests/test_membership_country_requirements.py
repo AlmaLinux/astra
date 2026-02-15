@@ -133,7 +133,7 @@ class MembershipCountryRequirementsTests(TestCase):
             response = views_membership.membership_request(request)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], reverse("settings") + "#profile")
+        self.assertEqual(response["Location"], reverse("settings") + "?tab=profile&highlight=country_code")
         msgs = [m.message for m in get_messages(request)]
         self.assertTrue(any("country" in m.lower() for m in msgs))
 
@@ -154,7 +154,7 @@ class MembershipCountryRequirementsTests(TestCase):
             response = views_membership.membership_request(request, organization_id=org.pk)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], reverse("settings") + "#profile")
+        self.assertEqual(response["Location"], reverse("settings") + "?tab=profile&highlight=country_code")
         self.assertFalse(MembershipRequest.objects.filter(requested_organization=org).exists())
 
     @override_settings(SELF_SERVICE_ADDRESS_COUNTRY_ATTR="c")
@@ -411,7 +411,7 @@ class MembershipCountryRequirementsTests(TestCase):
                 response = views_settings.settings_root(request)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], reverse("settings") + "#profile")
+        self.assertEqual(response["Location"], reverse("settings") + "?tab=profile&status=saved")
 
         notes = list(Note.objects.filter(membership_request=mr, username=CUSTOS).order_by("timestamp", "pk"))
         self.assertTrue(

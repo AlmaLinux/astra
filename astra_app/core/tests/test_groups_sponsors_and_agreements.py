@@ -100,7 +100,7 @@ class GroupsSponsorsAndAgreementsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         html = response.content.decode("utf-8")
         self.assertIn("Missing Agreement", html)
-        self.assertIn(reverse("settings") + "?agreement=cla#agreements", html)
+        self.assertIn(reverse("settings") + "?tab=agreements&amp;agreement=cla", html)
 
     def test_group_detail_shows_required_agreements_with_signed_status_and_link(self):
         factory = RequestFactory()
@@ -139,7 +139,7 @@ class GroupsSponsorsAndAgreementsTests(TestCase):
         html = response.content.decode("utf-8")
         self.assertIn("Required agreements", html)
         self.assertIn("Unsigned", html)
-        self.assertIn(reverse("settings") + "#agreements", html)
+        self.assertIn(reverse("settings") + "?tab=agreements", html)
 
     def test_group_detail_greys_out_members_and_sponsors_missing_required_agreements(self):
         factory = RequestFactory()

@@ -2,7 +2,7 @@
 import datetime
 from types import SimpleNamespace
 from unittest.mock import patch
-from urllib.parse import parse_qs, quote, urlsplit
+from urllib.parse import parse_qs, quote_plus, urlsplit
 
 from django.conf import settings
 from django.contrib.messages import get_messages
@@ -315,7 +315,7 @@ class MembershipRequestsFlowTests(TestCase):
 
         self.assertEqual(resp.status_code, 302)
         expected = (
-            f"{reverse('settings')}?agreement={quote(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN)}#agreements"
+            f"{reverse('settings')}?tab=agreements&agreement={quote_plus(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN)}"
         )
         self.assertEqual(resp["Location"], expected)
         self.assertEqual(MembershipRequest.objects.count(), 0)
