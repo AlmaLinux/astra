@@ -16,32 +16,33 @@
           {% elif state == "already_claimed" %}
             <div class="alert alert-warning mb-0">This organization has already been claimed. If you need access, contact the membership committee.</div>
           {% else %}
-            <p>Claim this organization to become its representative.</p>
+            <p>
+              Claim this organization to become its representative.
+              As the representative, you will be able to manage the organization's sponsorship and vote on its behalf.
+            </p>
 
-            {% if organization %}
-              <dl class="row mb-4">
-                <dt class="col-sm-4">Organization</dt>
-                <dd class="col-sm-8">{{ organization.name }}</dd>
+            <dl class="row mb-4">
+              <dt class="col-sm-4">Organization</dt>
+              <dd class="col-sm-8">{{ organization.name }}</dd>
 
-                <dt class="col-sm-4">Website</dt>
-                <dd class="col-sm-8">
-                  {% if organization.website %}
-                    <a href="{{ organization.website }}" rel="noopener noreferrer">{{ organization.website }}</a>
-                  {% else %}
-                    —
-                  {% endif %}
-                </dd>
+              <dt class="col-sm-4">Website</dt>
+              <dd class="col-sm-8">
+                {% if organization.website %}
+                  <a href="{{ organization.website }}" rel="noopener noreferrer">{{ organization.website }}</a>
+                {% else %}
+                  —
+                {% endif %}
+              </dd>
 
-                <dt class="col-sm-4">Contact email</dt>
-                <dd class="col-sm-8">
-                  {% if organization.primary_contact_email %}
-                    {{ organization.primary_contact_email }}
-                  {% else %}
-                    —
-                  {% endif %}
-                </dd>
-              </dl>
-            {% endif %}
+              <dt class="col-sm-4">Contact email</dt>
+              <dd class="col-sm-8">
+                {% if organization.primary_contact_email %}
+                  {{ organization.primary_contact_email }}
+                {% else %}
+                  —
+                {% endif %}
+              </dd>
+            </dl>
 
             <form method="post">
               {% csrf_token %}

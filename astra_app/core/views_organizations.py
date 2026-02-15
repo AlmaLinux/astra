@@ -91,7 +91,7 @@ def organization_claim(request: HttpRequest, token: str) -> HttpResponse:
         return _render_organization_claim_page(request, state="invalid")
 
     if organization.status != Organization.Status.unclaimed:
-        return _render_organization_claim_page(request, state="already_claimed", organization=organization)
+        return _render_organization_claim_page(request, state="already_claimed")
 
     blocked = block_action_without_coc(
         request,
@@ -127,7 +127,6 @@ def organization_claim(request: HttpRequest, token: str) -> HttpResponse:
                 return _render_organization_claim_page(
                     request,
                     state="already_claimed",
-                    organization=locked_organization,
                 )
 
             if locked_organization.claim_secret != refreshed_payload.claim_secret:
