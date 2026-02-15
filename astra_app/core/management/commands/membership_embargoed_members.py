@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
-    help = "Notify the membership committee about active members in embargoed countries."
+    help = "Notify the Membership Committee about active members in embargoed countries."
 
     @override
     def add_arguments(self, parser) -> None:

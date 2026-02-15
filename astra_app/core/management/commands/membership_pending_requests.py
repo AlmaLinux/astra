@@ -15,7 +15,7 @@ from core.templated_email import queue_templated_email
 
 
 class Command(BaseCommand):
-    help = "Notify the membership committee when pending membership requests exist."
+    help = "Notify the Membership Committee when pending membership requests exist."
 
     @override
     def add_arguments(self, parser) -> None:

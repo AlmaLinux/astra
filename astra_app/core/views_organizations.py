@@ -145,7 +145,7 @@ def organization_claim(request: HttpRequest, token: str) -> HttpResponse:
     except IntegrityError:
         messages.error(
             request,
-            "You already represent an organization and cannot claim another. Contact the membership committee if you need to create an additional organization.",
+            "You already represent an organization and cannot claim another. Contact the Membership Committee if you need to create an additional organization.",
         )
         return _render_organization_claim_page(request, state="ready", organization=organization)
 
@@ -285,7 +285,7 @@ def organization_create(request: HttpRequest) -> HttpResponse:
     if not can_select_representatives and Organization.objects.filter(representative=username).exists():
         messages.error(
             request,
-            "You already represent an organization and cannot create another. Contact the membership committee if you need to create an additional organization.",
+            "You already represent an organization and cannot create another. Contact the Membership Committee if you need to create an additional organization.",
         )
         return redirect("organizations")
 
@@ -326,7 +326,7 @@ def organization_create(request: HttpRequest) -> HttpResponse:
                 else:
                     form.add_error(
                         None,
-                        "You already represent an organization and cannot create another. Contact the membership committee if you need to create an additional organization.",
+                        "You already represent an organization and cannot create another. Contact the Membership Committee if you need to create an additional organization.",
                     )
                 return _render_org_form(request, form, organization=None, is_create=True)
             messages.success(request, "Organization created.")
