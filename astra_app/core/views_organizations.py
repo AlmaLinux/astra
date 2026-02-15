@@ -47,13 +47,13 @@ from core.permissions import (
     has_any_membership_permission,
     json_permission_required_any,
 )
-from core.views_membership import _send_mail_url
 from core.views_utils import (
     _normalize_str,
     block_action_without_coc,
     block_action_without_country_code,
     get_username,
     post_only_404,
+    send_mail_url,
 )
 
 logger = logging.getLogger(__name__)
@@ -496,7 +496,7 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
         recipient_email = str(organization.primary_contact_email() or "").strip()
         if request.user.has_perm(ASTRA_ADD_SEND_MAIL) and recipient_email:
             can_send_claim_invitation = True
-            send_claim_invitation_url = _send_mail_url(
+            send_claim_invitation_url = send_mail_url(
                 to_type="manual",
                 to=recipient_email,
                 template_name=settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME,

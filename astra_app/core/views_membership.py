@@ -1,6 +1,5 @@
 import datetime
 import logging
-from urllib.parse import urlencode
 
 from django.conf import settings
 from django.contrib import messages
@@ -78,33 +77,10 @@ from core.views_utils import (
     paginate_and_build_context,
     post_only_404,
     require_post_or_404,
+    send_mail_url,
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _send_mail_url(
-    *,
-    to_type: str,
-    to: str,
-    template_name: str,
-    extra_context: dict[str, str],
-    action_status: str = "",
-    reply_to: str | None = None,
-) -> str:
-    query_params = {
-        "type": to_type,
-        "to": to,
-        "template": template_name,
-        **extra_context,
-    }
-    reply_to_value = str(reply_to or "").strip()
-    if reply_to_value:
-        query_params["reply_to"] = reply_to_value
-    if action_status:
-        query_params["action_status"] = action_status
-    send_mail_url = reverse("send-mail")
-    return f"{send_mail_url}?{urlencode(query_params)}"
 
 
 def _custom_email_recipient_for_request(membership_request: MembershipRequest) -> tuple[str, str] | None:
@@ -154,7 +130,7 @@ def _custom_email_redirect(
     merged_context.setdefault("membership_request_id", str(membership_request.pk))
     merged_context.update(membership_committee_email_context())
     return redirect(
-        _send_mail_url(
+        send_mail_url(
             to_type=to_type,
             to=to,
             template_name=template_name,
@@ -1075,7 +1051,7 @@ def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
         recipient = _custom_email_recipient_for_request(req)
         if recipient is not None:
             to_type, to = recipient
-            contact_url = _send_mail_url(
+            contact_url = send_mail_url(
                 to_type=to_type,
                 to=to,
                 template_name="",

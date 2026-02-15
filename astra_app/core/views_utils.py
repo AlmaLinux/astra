@@ -23,6 +23,64 @@ from core.country_codes import country_code_status_from_user_data
 logger = logging.getLogger(__name__)
 
 
+def send_mail_url(
+    *,
+    to_type: str,
+    to: str,
+    template_name: str,
+    extra_context: dict[str, str],
+    action_status: str = "",
+    reply_to: str | None = None,
+) -> str:
+    """Build a deep-link URL for the send-mail view.
+
+    Args:
+        to_type: Recipient mode for send-mail (for example ``"users"``,
+            ``"group"``, ``"manual"``, or ``"csv"``).
+        to: Recipient identifier for the selected mode. For ``"csv"`` this
+            is typically an empty string because recipients come from session
+            CSV data.
+        template_name: Email template identifier to preselect.
+        extra_context: Additional query parameters that become template
+            variables in the send-mail flow.
+        action_status: Optional action state marker (for example
+            ``"approved"``).
+        reply_to: Optional reply-to address list (comma-separated when
+            multiple values are needed).
+
+    Returns:
+        Absolute path for ``send-mail`` including URL-encoded query params.
+
+    Examples:
+        send_mail_url(
+            to_type="manual",
+            to="user@example.com",
+            template_name="org_claim",
+            extra_context={"organization_name": "Example Org"},
+            reply_to="committee@example.com",
+        )
+        send_mail_url(
+            to_type="csv",
+            to="",
+            template_name="election_voting_credentials",
+            extra_context={"election_committee_email": "vote@example.com"},
+        )
+    """
+    query_params = {
+        "type": to_type,
+        "to": to,
+        "template": template_name,
+        **extra_context,
+    }
+    reply_to_value = str(reply_to or "").strip()
+    if reply_to_value:
+        query_params["reply_to"] = reply_to_value
+    if action_status:
+        query_params["action_status"] = action_status
+    send_mail_path = reverse("send-mail")
+    return f"{send_mail_path}?{urlencode(query_params)}"
+
+
 def require_post_or_404(request: HttpRequest, *, message: str = "Not found") -> None:
     """Raise a 404 when an endpoint is accessed with a non-POST method.
 

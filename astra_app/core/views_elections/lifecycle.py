@@ -1,13 +1,12 @@
 """Election lifecycle actions: credential re-send, conclude, extend end date."""
 import json
-from urllib.parse import urlencode
 
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import permission_required
 from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest
 from django.shortcuts import redirect
-from django.urls import reverse, reverse_lazy
+from django.urls import reverse_lazy
 from django.views.decorators.http import require_POST
 
 from core import elections_services
@@ -19,7 +18,7 @@ from core.permissions import ASTRA_ADD_ELECTION
 from core.rate_limit import allow_request
 from core.views_elections._helpers import _extend_election_end_from_post, _get_active_election
 from core.views_send_mail import _CSV_SESSION_KEY
-from core.views_utils import get_username
+from core.views_utils import get_username, send_mail_url
 
 
 @require_POST
@@ -112,17 +111,15 @@ def election_send_mail_credentials(request: HttpRequest, election_id: int) -> Ht
         }
     )
 
-    send_mail_url = reverse("send-mail")
-    template_name = settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME
-    query = urlencode(
-        {
-            "type": "csv",
-            "template": template_name,
-            "election_committee_email": settings.ELECTION_COMMITTEE_EMAIL,
-            "reply_to": settings.ELECTION_COMMITTEE_EMAIL,
-        }
+    return redirect(
+        send_mail_url(
+            to_type="csv",
+            to="",
+            template_name=settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME,
+            extra_context={"election_committee_email": settings.ELECTION_COMMITTEE_EMAIL},
+            reply_to=settings.ELECTION_COMMITTEE_EMAIL,
+        )
     )
-    return redirect(f"{send_mail_url}?{query}")
 
 
 def _confirm_election_action(*, request: HttpRequest, election: Election) -> bool:

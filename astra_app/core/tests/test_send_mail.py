@@ -3,6 +3,7 @@ import io
 import json
 from unittest.mock import patch
 from urllib.parse import quote
+from urllib.parse import parse_qs, urlsplit
 
 from django.conf import settings
 from django.test import SimpleTestCase, TestCase, override_settings
@@ -12,6 +13,35 @@ from core.backends import FreeIPAUser
 from core.models import AccountInvitation, AccountInvitationSend, FreeIPAPermissionGrant, Organization
 from core.permissions import ASTRA_ADD_SEND_MAIL
 from core.views_send_mail import SendMailForm
+
+
+class SendMailUrlHelperTests(SimpleTestCase):
+    def test_send_mail_url_builds_expected_query_params(self) -> None:
+        from core.views_utils import send_mail_url
+
+        url = send_mail_url(
+            to_type="manual",
+            to="user@example.com",
+            template_name="template.name",
+            extra_context={
+                "membership_request_id": "42",
+                "organization_name": "Example Org",
+            },
+            action_status="approved",
+            reply_to="committee@example.com",
+        )
+
+        parts = urlsplit(url)
+        query = parse_qs(parts.query)
+
+        self.assertEqual(parts.path, reverse("send-mail"))
+        self.assertEqual(query["type"], ["manual"])
+        self.assertEqual(query["to"], ["user@example.com"])
+        self.assertEqual(query["template"], ["template.name"])
+        self.assertEqual(query["membership_request_id"], ["42"])
+        self.assertEqual(query["organization_name"], ["Example Org"])
+        self.assertEqual(query["reply_to"], ["committee@example.com"])
+        self.assertEqual(query["action_status"], ["approved"])
 
 
 class SendMailTests(TestCase):
