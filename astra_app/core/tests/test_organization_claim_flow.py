@@ -95,7 +95,11 @@ class OrganizationClaimFlowTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(
             response,
-            "This organization has already been claimed. If you need access, contact the Membership Committee.",
+            (
+                'This organization has already been claimed. If you need access, '
+                '<a href="mailto:membership@almalinux.org">contact the Membership Committee</a>.'
+            ),
+            html=True,
         )
         organization.refresh_from_db()
         self.assertEqual(organization.representative, "carol")

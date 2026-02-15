@@ -11,6 +11,7 @@ from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.html import format_html
 from django.views.decorators.http import require_GET
 
 from core.backends import FreeIPAUser
@@ -71,6 +72,7 @@ def _render_organization_claim_page(
         {
             "state": state,
             "organization": organization,
+            "membership_committee_email": settings.MEMBERSHIP_COMMITTEE_EMAIL,
         },
     )
 
@@ -145,7 +147,10 @@ def organization_claim(request: HttpRequest, token: str) -> HttpResponse:
     except IntegrityError:
         messages.error(
             request,
-            "You already represent an organization and cannot claim another. Contact the Membership Committee if you need to create an additional organization.",
+            format_html(
+                'You already represent an organization and cannot claim another. <a href="mailto:{}">Contact the Membership Committee</a> if you need to create an additional organization.',
+                settings.MEMBERSHIP_COMMITTEE_EMAIL,
+            ),
         )
         return _render_organization_claim_page(request, state="ready", organization=organization)
 
@@ -285,7 +290,10 @@ def organization_create(request: HttpRequest) -> HttpResponse:
     if not can_select_representatives and Organization.objects.filter(representative=username).exists():
         messages.error(
             request,
-            "You already represent an organization and cannot create another. Contact the Membership Committee if you need to create an additional organization.",
+            format_html(
+                'You already represent an organization and cannot create another. <a href="mailto:{}">Contact the Membership Committee</a> if you need to create an additional organization.',
+                settings.MEMBERSHIP_COMMITTEE_EMAIL,
+            ),
         )
         return redirect("organizations")
 
@@ -326,7 +334,10 @@ def organization_create(request: HttpRequest) -> HttpResponse:
                 else:
                     form.add_error(
                         None,
-                        "You already represent an organization and cannot create another. Contact the Membership Committee if you need to create an additional organization.",
+                        format_html(
+                            'You already represent an organization and cannot create another. <a href="mailto:{}">Contact the Membership Committee</a> if you need to create an additional organization.',
+                            settings.MEMBERSHIP_COMMITTEE_EMAIL,
+                        ),
                     )
                 return _render_org_form(request, form, organization=None, is_create=True)
             messages.success(request, "Organization created.")
