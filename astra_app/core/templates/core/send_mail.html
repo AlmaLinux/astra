@@ -39,6 +39,8 @@
     <input type="hidden" name="save_as_name" id="send-mail-save-as-name" value="" />
     <input type="hidden" name="recipient_mode" id="send-mail-recipient-mode" value="{% if selected_recipient_mode %}{{ selected_recipient_mode }}{% endif %}" />
     <input type="hidden" name="action_status" value="{% if action_status %}{{ action_status }}{% endif %}" />
+    {{ form.invitation_action }}
+    {{ form.invitation_org_id }}
     {{ form.extra_context_json }}
     <input type="hidden" id="send-mail-has-saved-csv" value="{% if has_saved_csv_recipients %}1{% else %}0{% endif %}" />
     <input type="hidden" id="send-mail-autoload-template-id" value="{% if created_template_id %}{{ created_template_id }}{% endif %}" />

@@ -9,7 +9,7 @@ from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 
 from core.backends import FreeIPAUser
-from core.models import FreeIPAPermissionGrant
+from core.models import AccountInvitation, AccountInvitationSend, FreeIPAPermissionGrant, Organization
 from core.permissions import ASTRA_ADD_SEND_MAIL
 from core.views_send_mail import SendMailForm
 
@@ -1082,6 +1082,218 @@ class SendMailTests(TestCase):
         self.assertEqual(queue_mock.call_count, 2)
         self.assertContains(resp, "Queued 1 email")
         self.assertContains(resp, "Failed to queue 1 email")
+
+    def test_send_mail_org_claim_action_creates_account_invitation_on_send(self) -> None:
+        from types import SimpleNamespace
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
+        organization = Organization.objects.create(name="Org Claim", business_contact_email="contact@example.com")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.views_send_mail.queue_composed_email") as queue_composed_mock,
+            patch("core.views_account_invitations.queue_templated_email", return_value=SimpleNamespace(id=777)),
+        ):
+            response = self.client.post(
+                reverse("send-mail"),
+                data={
+                    "recipient_mode": "manual",
+                    "manual_to": "contact@example.com",
+                    "subject": "Claim invitation",
+                    "text_content": "Claim {{ organization_name }}",
+                    "html_content": "<p>Claim {{ organization_name }}</p>",
+                    "action": "send",
+                    "invitation_action": "org_claim",
+                    "invitation_org_id": str(organization.pk),
+                },
+                follow=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Queued 1 email")
+        queue_composed_mock.assert_not_called()
+
+        invitation = AccountInvitation.objects.get(email="contact@example.com")
+        self.assertEqual(invitation.organization_id, organization.pk)
+        self.assertEqual(invitation.email_template_name, settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME)
+        self.assertEqual(invitation.invited_by_username, "reviewer")
+        self.assertEqual(invitation.send_count, 1)
+        self.assertIsNotNone(invitation.last_sent_at)
+
+        send_record = AccountInvitationSend.objects.get(invitation=invitation)
+        self.assertEqual(send_record.result, AccountInvitationSend.Result.queued)
+        self.assertEqual(send_record.template_name, settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME)
+        self.assertEqual(send_record.sent_by_username, "reviewer")
+        self.assertEqual(send_record.post_office_email_id, 777)
+
+    def test_send_mail_org_claim_action_applies_rate_limit(self) -> None:
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
+        organization = Organization.objects.create(name="Rate Limited Org", business_contact_email="contact@example.com")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.views_send_mail.allow_request", return_value=False),
+            patch("core.views_send_mail.queue_composed_email") as queue_composed_mock,
+            patch("core.views_account_invitations.queue_templated_email") as queue_templated_mock,
+        ):
+            response = self.client.post(
+                reverse("send-mail"),
+                data={
+                    "recipient_mode": "manual",
+                    "manual_to": "contact@example.com",
+                    "subject": "Claim invitation",
+                    "text_content": "Claim {{ organization_name }}",
+                    "html_content": "<p>Claim {{ organization_name }}</p>",
+                    "action": "send",
+                    "invitation_action": "org_claim",
+                    "invitation_org_id": str(organization.pk),
+                },
+                follow=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Too many invitation send attempts")
+        queue_composed_mock.assert_not_called()
+        queue_templated_mock.assert_not_called()
+        self.assertFalse(AccountInvitation.objects.filter(email="contact@example.com").exists())
+
+    def test_send_mail_org_claim_action_rejects_conflict_with_other_organization(self) -> None:
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
+        target_organization = Organization.objects.create(name="Target Org", business_contact_email="contact@example.com")
+        other_organization = Organization.objects.create(name="Other Org", business_contact_email="other@example.com")
+        invitation = AccountInvitation.objects.create(
+            email="contact@example.com",
+            invited_by_username="committee",
+            organization=other_organization,
+            email_template_name=settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME,
+        )
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.views_send_mail.queue_composed_email") as queue_composed_mock,
+            patch("core.views_account_invitations.queue_templated_email") as queue_templated_mock,
+        ):
+            response = self.client.post(
+                reverse("send-mail"),
+                data={
+                    "recipient_mode": "manual",
+                    "manual_to": "contact@example.com",
+                    "subject": "Claim invitation",
+                    "text_content": "Claim {{ organization_name }}",
+                    "html_content": "<p>Claim {{ organization_name }}</p>",
+                    "action": "send",
+                    "invitation_action": "org_claim",
+                    "invitation_org_id": str(target_organization.pk),
+                },
+                follow=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "linked to a different organization")
+        queue_composed_mock.assert_not_called()
+        queue_templated_mock.assert_not_called()
+
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.organization_id, other_organization.pk)
+        self.assertEqual(invitation.send_count, 0)
+
+    def test_send_mail_org_claim_action_rejects_invalid_manual_email(self) -> None:
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
+        organization = Organization.objects.create(name="Invalid Email Org", business_contact_email="contact@example.com")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.views_send_mail.queue_composed_email") as queue_composed_mock,
+            patch("core.views_account_invitations.queue_templated_email") as queue_templated_mock,
+        ):
+            response = self.client.post(
+                reverse("send-mail"),
+                data={
+                    "recipient_mode": "manual",
+                    "manual_to": "invalid-email",
+                    "subject": "Claim invitation",
+                    "text_content": "Claim {{ organization_name }}",
+                    "html_content": "<p>Claim {{ organization_name }}</p>",
+                    "action": "send",
+                    "invitation_action": "org_claim",
+                    "invitation_org_id": str(organization.pk),
+                },
+                follow=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Fix the form errors and try again")
+        queue_composed_mock.assert_not_called()
+        queue_templated_mock.assert_not_called()
+        self.assertFalse(AccountInvitation.objects.filter(email="invalid-email").exists())
+
+    def test_send_mail_org_claim_action_requires_manual_recipient_mode(self) -> None:
+        import io
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
+        organization = Organization.objects.create(name="Non-Manual Mode Org", business_contact_email="contact@example.com")
+
+        csv_bytes = b"Email,Display Name\ncontact@example.com,Contact User\n"
+        csv_file = io.BytesIO(csv_bytes)
+        csv_file.name = "recipients.csv"
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.backends.FreeIPAUser.all", return_value=[]),
+            patch("core.views_send_mail.queue_composed_email") as queue_composed_mock,
+            patch("core.views_account_invitations.queue_templated_email") as queue_templated_mock,
+        ):
+            response = self.client.post(
+                reverse("send-mail"),
+                data={
+                    "recipient_mode": "csv",
+                    "csv_file": csv_file,
+                    "subject": "Claim invitation",
+                    "text_content": "Claim {{ organization_name }}",
+                    "html_content": "<p>Claim {{ organization_name }}</p>",
+                    "action": "send",
+                    "invitation_action": "org_claim",
+                    "invitation_org_id": str(organization.pk),
+                },
+                follow=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Organization claim invitations require manual recipients")
+        queue_composed_mock.assert_not_called()
+        queue_templated_mock.assert_not_called()
+        self.assertFalse(AccountInvitation.objects.filter(email="contact@example.com").exists())
+
+    def test_get_prefills_org_claim_invitation_hidden_fields_from_query_params(self) -> None:
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
+
+        url = (
+            reverse("send-mail")
+            + "?type=manual&to=contact@example.com&invitation_action=org_claim&invitation_org_id=123"
+        )
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.backends.FreeIPAUser.all", return_value=[]),
+        ):
+            response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'name="invitation_action"')
+        self.assertContains(response, 'value="org_claim"')
+        self.assertContains(response, 'name="invitation_org_id"')
+        self.assertContains(response, 'value="123"')
 
 
 class UnifiedEmailPreviewSendMailTests(TestCase):

@@ -16,12 +16,9 @@
     {% if can_edit_organization or is_representative or can_send_claim_invitation %}
       <div class="d-flex align-items-center" style="gap: .5rem;">
         {% if can_send_claim_invitation %}
-          <form method="post" action="{{ send_claim_invitation_action }}" class="m-0">
-            {% csrf_token %}
-            <button type="submit" class="btn btn-sm btn-warning" title="Send claim invitation email">
-              Send claim invitation
-            </button>
-          </form>
+          <a href="{{ send_claim_invitation_url }}" class="btn btn-sm btn-warning" title="Send claim invitation email">
+            Send claim invitation
+          </a>
         {% endif %}
         {% if can_edit_organization %}
           <a class="btn btn-sm btn-outline-primary" href="{% url 'organization-edit' organization.pk %}" title="Edit organization details">

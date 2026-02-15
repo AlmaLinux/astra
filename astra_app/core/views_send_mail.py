@@ -5,23 +5,27 @@ import logging
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import datetime
 
 from django import forms
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import permission_required
+from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.http import HttpRequest, HttpResponse, JsonResponse, QueryDict
 from django.shortcuts import render
 from django.urls import reverse_lazy
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 from post_office.models import EmailTemplate
 
 from core.backends import FreeIPAGroup, FreeIPAUser
 from core.email_context import system_email_context, user_email_context_from_user
 from core.membership_notes import add_note
-from core.models import MembershipRequest
+from core.models import MembershipRequest, Organization
 from core.permissions import ASTRA_ADD_SEND_MAIL, json_permission_required
+from core.rate_limit import allow_request
 from core.templated_email import (
     create_email_template_unique,
     preview_drop_inline_image_tags,
@@ -31,6 +35,7 @@ from core.templated_email import (
     render_templated_email_preview_response,
     update_email_template,
 )
+from core.views_account_invitations import send_organization_claim_invitation
 from core.views_utils import get_username
 
 logger = logging.getLogger(__name__)
@@ -115,6 +120,8 @@ def _extra_context_from_query(query: QueryDict) -> dict[str, str]:
         "cc",
         "reply_to",
         "action_status",
+        "invitation_action",
+        "invitation_org_id",
     }
 
     raw_items: list[tuple[str, str]] = []
@@ -417,6 +424,8 @@ class SendMailForm(forms.Form):
 
     action = forms.CharField(required=False)
     save_as_name = forms.CharField(required=False)
+    invitation_action = forms.CharField(required=False, widget=forms.HiddenInput())
+    invitation_org_id = forms.CharField(required=False, widget=forms.HiddenInput())
 
     extra_context_json = forms.CharField(required=False, widget=forms.HiddenInput())
 
@@ -477,6 +486,45 @@ class SendMailForm(forms.Form):
                 continue
             out[key] = value
         return out
+
+
+def _handle_send_mail_org_claim_invitation(
+    *,
+    organization_id: int,
+    recipient_email: str,
+    actor_username: str,
+    now: datetime,
+) -> tuple[bool, str | None]:
+    if not allow_request(
+        scope="send_mail_account_invitation_org_claim",
+        key_parts=[actor_username, str(organization_id)],
+        limit=settings.ACCOUNT_INVITATION_RESEND_LIMIT,
+        window_seconds=settings.ACCOUNT_INVITATION_RESEND_WINDOW_SECONDS,
+    ):
+        return False, "Too many invitation send attempts. Try again shortly."
+
+    organization = Organization.objects.filter(pk=organization_id).first()
+    if organization is None:
+        return False, "Selected organization was not found."
+
+    result, _invitation = send_organization_claim_invitation(
+        organization=organization,
+        actor_username=actor_username,
+        recipient_email=recipient_email,
+        now=now,
+    )
+    if result == "queued":
+        return True, None
+    if result == "invalid_email":
+        return False, "Invalid invitation recipient email address."
+    if result == "conflict":
+        return False, "An invitation already exists for this email and is linked to a different organization."
+    if result == "config_error":
+        return (
+            False,
+            "Invitation email configuration error: PUBLIC_BASE_URL must be configured to build invitation links.",
+        )
+    return False, "Failed to queue the organization claim invitation email."
 
 
 def _preview_for_manual(emails: list[str]) -> tuple[RecipientPreview, list[dict[str, str]]]:
@@ -605,6 +653,14 @@ def send_mail(request: HttpRequest) -> HttpResponse:
         if reply_to_raw:
             initial["reply_to"] = reply_to_raw
 
+        invitation_action = str(request.GET.get("invitation_action") or "").strip().lower()
+        if invitation_action:
+            initial["invitation_action"] = invitation_action
+
+        invitation_org_id = str(request.GET.get("invitation_org_id") or "").strip()
+        if invitation_org_id:
+            initial["invitation_org_id"] = invitation_org_id
+
         if extra_context:
             initial["extra_context_json"] = json.dumps(extra_context)
 
@@ -673,6 +729,8 @@ def send_mail(request: HttpRequest) -> HttpResponse:
             subject = str(form.cleaned_data.get("subject") or "")
             html_content = str(form.cleaned_data.get("html_content") or "")
             text_content = str(form.cleaned_data.get("text_content") or "")
+            invitation_action = str(form.cleaned_data.get("invitation_action") or "").strip().lower()
+            invitation_org_id = str(form.cleaned_data.get("invitation_org_id") or "").strip()
 
             selected_template_id = form.cleaned_data.get("email_template_id")
             selected_template = None
@@ -715,6 +773,36 @@ def send_mail(request: HttpRequest) -> HttpResponse:
             if action == "send":
                 if preview is None or not recipients:
                     messages.error(request, "No recipients to send to.")
+                elif invitation_action == "org_claim":
+                    if recipient_mode != SendMailForm.RECIPIENT_MODE_MANUAL:
+                        messages.error(request, "Organization claim invitations require manual recipients.")
+                    elif len(manual_to) != 1:
+                        messages.error(request, "Organization claim invitations require exactly one recipient email.")
+                    elif not invitation_org_id.isdigit():
+                        messages.error(request, "Organization claim invitation is missing organization context.")
+                    else:
+                        recipient_email = str(manual_to[0]).strip()
+                        try:
+                            validate_email(recipient_email)
+                        except ValidationError:
+                            messages.error(request, "Invalid invitation recipient email address.")
+                        else:
+                            actor_username = get_username(request)
+                            if not actor_username:
+                                messages.error(request, "Unable to determine the acting username.")
+                            else:
+                                success, error_message = _handle_send_mail_org_claim_invitation(
+                                    organization_id=int(invitation_org_id),
+                                    recipient_email=recipient_email,
+                                    actor_username=actor_username,
+                                    now=timezone.now(),
+                                )
+                                if success:
+                                    messages.success(request, "Queued 1 email.")
+                                    action_notice = ""
+                                    action_status = ""
+                                else:
+                                    messages.error(request, error_message or "Failed to queue the invitation email.")
                 else:
                     raw_request_id = str(posted_extra_context.get("membership_request_id") or "").strip()
                     membership_request = None
@@ -801,6 +889,8 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                     "html_content": html_content,
                     "text_content": text_content,
                     "extra_context_json": json.dumps(posted_extra_context) if posted_extra_context else "",
+                    "invitation_action": invitation_action,
+                    "invitation_org_id": invitation_org_id,
                 }
             )
 

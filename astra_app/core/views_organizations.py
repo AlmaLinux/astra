@@ -47,8 +47,7 @@ from core.permissions import (
     has_any_membership_permission,
     json_permission_required_any,
 )
-from core.rate_limit import allow_request
-from core.views_account_invitations import send_organization_claim_invitation
+from core.views_membership import _send_mail_url
 from core.views_utils import (
     _normalize_str,
     block_action_without_coc,
@@ -490,15 +489,24 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
 
     claim_url = ""
     can_send_claim_invitation = False
-    send_claim_invitation_action = ""
+    send_claim_invitation_url = ""
     if organization.status == Organization.Status.unclaimed:
         claim_url = build_organization_claim_url(organization=organization, request=request)
 
-        if request.user.has_perm(ASTRA_ADD_SEND_MAIL):
+        recipient_email = str(organization.primary_contact_email() or "").strip()
+        if request.user.has_perm(ASTRA_ADD_SEND_MAIL) and recipient_email:
             can_send_claim_invitation = True
-            send_claim_invitation_action = reverse(
-                "organization-send-claim-invitation",
-                args=[organization.pk],
+            send_claim_invitation_url = _send_mail_url(
+                to_type="manual",
+                to=recipient_email,
+                template_name=settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME,
+                extra_context={
+                    "invitation_action": "org_claim",
+                    "invitation_org_id": str(organization.pk),
+                    "organization_name": organization.name,
+                    "claim_url": claim_url,
+                },
+                reply_to=settings.MEMBERSHIP_COMMITTEE_EMAIL,
             )
 
     return render(
@@ -518,70 +526,9 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
             "contact_display_groups": contact_display_groups,
             "claim_url": claim_url,
             "can_send_claim_invitation": can_send_claim_invitation,
-            "send_claim_invitation_action": send_claim_invitation_action,
+            "send_claim_invitation_url": send_claim_invitation_url,
         },
     )
-
-
-@post_only_404
-def organization_send_claim_invitation(request: HttpRequest, organization_id: int) -> HttpResponse:
-    organization = get_object_or_404(Organization, pk=organization_id)
-    _require_organization_access(request, organization)
-
-    if not request.user.has_perm(ASTRA_ADD_SEND_MAIL):
-        raise Http404
-
-    if organization.status != Organization.Status.unclaimed:
-        messages.error(request, "Only unclaimed organizations can receive claim invitations.")
-        return redirect("organization-detail", organization_id=organization.pk)
-
-    actor_username = get_username(request)
-    if not allow_request(
-        scope="organization_claim_invitation_send",
-        key_parts=[actor_username, str(organization.pk)],
-        limit=settings.ACCOUNT_INVITATION_RESEND_LIMIT,
-        window_seconds=settings.ACCOUNT_INVITATION_RESEND_WINDOW_SECONDS,
-    ):
-        messages.error(request, "Too many send attempts. Try again shortly.")
-        return redirect("organization-detail", organization_id=organization.pk)
-
-    recipient_email = str(organization.primary_contact_email() or "").strip()
-    if not recipient_email:
-        messages.error(request, "This organization has no contact email to send an invitation.")
-        return redirect("organization-detail", organization_id=organization.pk)
-
-    result, existing_invitation = send_organization_claim_invitation(
-        organization=organization,
-        actor_username=actor_username,
-        recipient_email=recipient_email,
-        now=timezone.now(),
-    )
-
-    if result == "queued":
-        messages.success(request, "Claim invitation queued.")
-    elif result == "config_error":
-        messages.error(
-            request,
-            "Claim invitation email configuration error: PUBLIC_BASE_URL must be configured to build invitation links.",
-        )
-    elif result == "invalid_email":
-        messages.error(request, "The organization contact email is invalid.")
-    elif result == "conflict":
-        if existing_invitation is not None and existing_invitation.organization_id is not None:
-            account_invitations_url = reverse("account-invitations")
-            messages.error(
-                request,
-                "An invitation for this email is already linked to another organization. "
-                "Use a different contact email or resolve the existing invitation in "
-                f"Account Invitations ({account_invitations_url}).",
-            )
-        else:
-            messages.error(request, "Unable to send claim invitation due to invitation linkage conflict.")
-    else:
-        messages.error(request, "Failed to queue claim invitation.")
-
-    return redirect("organization-detail", organization_id=organization.pk)
-
 
 @post_only_404
 def organization_delete(request: HttpRequest, organization_id: int) -> HttpResponse:
