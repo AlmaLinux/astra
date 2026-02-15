@@ -47,6 +47,9 @@
     setText(modal, '.js-body-prefix', trigger.getAttribute('data-body-prefix'));
     setText(modal, '.js-body-emphasis', trigger.getAttribute('data-body-emphasis'));
     setText(modal, '.js-body-suffix', trigger.getAttribute('data-body-suffix'));
+    setText(modal, '.js-request-id', trigger.getAttribute('data-request-id'));
+    setText(modal, '.js-request-target', trigger.getAttribute('data-request-target'));
+    setText(modal, '.js-membership-type', trigger.getAttribute('data-membership-type'));
 
     resetFormFields(modal);
   }

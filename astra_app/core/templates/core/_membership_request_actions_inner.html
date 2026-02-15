@@ -22,6 +22,9 @@ Expected context:
     data-target="#shared-approve-modal"
     data-action-url="{{ approve_url }}"
     data-modal-title="{{ approve_title }}"
+    data-request-id="{{ pk_str }}"
+    data-request-target="{{ requester }}"
+    data-membership-type="{{ membership_type_name }}"
     data-body-prefix="{{ approve_prefix }}"
     data-body-emphasis="{{ requester }}"
     data-body-suffix="?"
@@ -40,6 +43,9 @@ Expected context:
     data-target="#shared-reject-modal"
     data-action-url="{{ reject_url }}"
     data-modal-title="{{ reject_title }}"
+    data-request-id="{{ pk_str }}"
+    data-request-target="{{ requester }}"
+    data-membership-type="{{ membership_type_name }}"
     title="Reject this request"
   >Reject</button>
   {% endwith %}
@@ -57,6 +63,9 @@ Expected context:
     data-target="#shared-rfi-modal"
     data-action-url="{{ rfi_url }}"
     data-modal-title="{{ rfi_title }}"
+    data-request-id="{{ pk_str }}"
+    data-request-target="{{ requester }}"
+    data-membership-type="{{ membership_type_name }}"
   >RFI</button>
   {% endwith %}
 {% endif %}
@@ -71,6 +80,9 @@ Expected context:
     data-target="#shared-ignore-modal"
     data-action-url="{{ ignore_url }}"
     data-modal-title="{{ ignore_title }}"
+    data-request-id="{{ pk_str }}"
+    data-request-target="{{ requester }}"
+    data-membership-type="{{ membership_type_name }}"
     data-body-prefix="{{ ignore_prefix }}"
     data-body-emphasis="{{ requester }}"
     data-body-suffix="{{ ignore_suffix }}"

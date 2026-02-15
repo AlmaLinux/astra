@@ -162,6 +162,13 @@ class Phase9ServerRenderedContractsTests(TestCase):
         self.assertIn('data-body-prefix="', html)
         self.assertIn('data-body-emphasis="', html)
         self.assertIn('data-body-suffix="', html)
+        self.assertIn('data-request-id="', html)
+        self.assertIn('data-request-target="', html)
+        self.assertIn('data-membership-type="', html)
+
+        self.assertIn('Request #<strong class="js-request-id"></strong>', html)
+        self.assertIn('Requested for <strong class="js-request-target"></strong>', html)
+        self.assertIn('Membership type <strong class="js-membership-type"></strong>', html)
 
         self.assertIn('src="/static/core/js/membership_request_shared_modals.js"', html)
 

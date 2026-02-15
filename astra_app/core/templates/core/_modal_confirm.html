@@ -23,6 +23,15 @@ Alternative body rendering (use instead of `body` when you need one emphasized v
 {% endcomment %}
 
 {% block modal_body %}
+        {% if show_request_context %}
+          <div class="alert alert-light border py-2 px-3 small" role="note">
+            <div>Confirming action for:</div>
+            <div>Request #<strong class="js-request-id"></strong></div>
+            <div>Requested for <strong class="js-request-target"></strong></div>
+            <div>Membership type <strong class="js-membership-type"></strong></div>
+          </div>
+        {% endif %}
+
         <div class="mb-3">
           {% if dynamic_body %}
             <span class="js-body-prefix"></span> <strong class="js-body-emphasis"></strong><span class="js-body-suffix"></span>
