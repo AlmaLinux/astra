@@ -1,0 +1,24 @@
+<div class="form-group{% if wrapper_class %} {{ wrapper_class }}{% endif %}">
+  {{ field.label_tag }}
+  <div class="input-group">
+    {% if prefix %}
+      <div class="input-group-prepend">
+        <span class="input-group-text">{{ prefix }}</span>
+      </div>
+    {% endif %}
+    {{ field }}
+    {% if suffix %}
+      <div class="input-group-append">
+        <span class="input-group-text">{{ suffix }}</span>
+      </div>
+    {% endif %}
+  </div>
+  {% if field.errors %}
+    <div class="text-danger">{{ field.errors }}</div>
+  {% endif %}
+  {% if help_text_override %}
+    <small class="form-text text-muted">{{ help_text_override }}</small>
+  {% elif field.help_text %}
+    <small class="form-text text-muted">{{ field.help_text }}</small>
+  {% endif %}
+</div>

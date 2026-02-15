@@ -21,18 +21,9 @@
             <div class="alert alert-danger">{{ form.non_field_errors }}</div>
           {% endif %}
 
-          <div class="form-group">
-            <label for="id_password">Password</label>
-            {{ form.password }}
-            {% if form.password.errors %}<div class="text-danger">{{ form.password.errors }}</div>{% endif %}
-            {% if form.password.help_text %}<small class="form-text text-muted">{{ form.password.help_text }}</small>{% endif %}
-          </div>
+          {% include 'core/_form_field.html' with field=form.password %}
 
-          <div class="form-group">
-            <label for="id_password_confirm">Confirm password</label>
-            {{ form.password_confirm }}
-            {% if form.password_confirm.errors %}<div class="text-danger">{{ form.password_confirm.errors }}</div>{% endif %}
-          </div>
+          {% include 'core/_form_field.html' with field=form.password_confirm %}
         </div>
         <div class="card-footer d-flex justify-content-between align-items-center">
           <button type="submit" class="btn btn-primary" title="Activate account and set password">Activate</button>

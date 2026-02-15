@@ -186,6 +186,13 @@ class ProfileForm(StyledForm):
         required=False,
         help_text="Example: en-US",
         choices=(),
+        widget=forms.TextInput(
+            attrs={
+                "autocomplete": "off",
+                "list": "locale-options",
+                "placeholder": "Start typing (e.g. en-US)",
+            }
+        ),
     )
     fasTimezone = forms.ChoiceField(
         label="Timezone",

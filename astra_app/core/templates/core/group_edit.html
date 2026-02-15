@@ -24,25 +24,13 @@
         <form method="post">
           {% csrf_token %}
           <div class="card-body">
-            <div class="form-group">
-              <label for="id_description">Description</label>
-              {{ form.description }}
-            </div>
+            {% include 'core/_form_field.html' with field=form.description show_errors=0 %}
 
-            <div class="form-group">
-              <label for="id_fas_url">URL</label>
-              {{ form.fas_url }}
-            </div>
+            {% include 'core/_form_field.html' with field=form.fas_url show_errors=0 %}
 
-            <div class="form-group">
-              <label for="id_fas_mailing_list">Mailing list</label>
-              {{ form.fas_mailing_list }}
-            </div>
+            {% include 'core/_form_field.html' with field=form.fas_mailing_list show_errors=0 %}
 
-            <div class="form-group">
-              <label for="id_fas_discussion_url">Discussion URL</label>
-              {{ form.fas_discussion_url }}
-            </div>
+            {% include 'core/_form_field.html' with field=form.fas_discussion_url show_errors=0 %}
 
             <div class="form-group mb-0">
               {{ form.fas_irc_channels.label_tag }}

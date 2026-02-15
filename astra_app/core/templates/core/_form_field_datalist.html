@@ -1,0 +1,17 @@
+<div class="form-group{% if wrapper_class %} {{ wrapper_class }}{% endif %}">
+  {{ field.label_tag }}
+  {{ field }}
+  <datalist id="{{ datalist_id }}">
+    {% for value, label in datalist_options %}
+      {% if value %}<option value="{{ value }}"></option>{% endif %}
+    {% endfor %}
+  </datalist>
+  {% if field.errors %}
+    <div class="text-danger">{{ field.errors }}</div>
+  {% endif %}
+  {% if help_text_override %}
+    <small class="form-text text-muted">{{ help_text_override }}</small>
+  {% elif field.help_text %}
+    <small class="form-text text-muted">{{ field.help_text }}</small>
+  {% endif %}
+</div>

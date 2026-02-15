@@ -23,20 +23,12 @@
             <h3 class="card-title">Template details</h3>
           </div>
           <div class="card-body">
-            <div class="form-group">
-              <label for="{{ form.name.id_for_label }}">Name</label>
-              {{ form.name }}
-              {% if is_locked %}
-                <div class="text-muted small mt-1">This template is referenced by the app configuration and cannot be renamed.</div>
-              {% endif %}
-              {% if form.name.errors %}<div class="text-danger">{{ form.name.errors }}</div>{% endif %}
-            </div>
+            {% include 'core/_form_field.html' with field=form.name %}
+            {% if is_locked %}
+              <div class="text-muted small mt-1">This template is referenced by the app configuration and cannot be renamed.</div>
+            {% endif %}
 
-            <div class="form-group mb-0">
-              <label for="{{ form.description.id_for_label }}">Description</label>
-              {{ form.description }}
-              {% if form.description.errors %}<div class="text-danger">{{ form.description.errors }}</div>{% endif %}
-            </div>
+            {% include 'core/_form_field.html' with field=form.description wrapper_class='mb-0' %}
           </div>
         </div>
       </div>

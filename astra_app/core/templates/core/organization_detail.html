@@ -52,7 +52,7 @@
           <div class="d-flex align-items-center" style="gap: 1rem;">
             <div class="organization-hero-logo">
               {% if organization.logo %}
-                <img src="{{ organization.logo.url }}" alt="{{ organization.name }} Accounts logo" />
+                <img src="{{ organization.logo.url }}" alt="{{ organization.name }}" />
               {% else %}
                 <div class="organization-hero-logo--placeholder" aria-hidden="true">
                   <i class="fas fa-building"></i>
@@ -189,8 +189,7 @@
         <div class="card-body">
           {% if organization.logo %}
             <div class="mb-3">
-              <div class="small text-muted">Accounts logo</div>
-              <img src="{{ organization.logo.url }}" alt="{{ organization.name }} Accounts logo" class="organization-branding-logo" />
+              <img src="{{ organization.logo.url }}" alt="{{ organization.name }}" class="organization-branding-logo" />
             </div>
           {% endif %}
 

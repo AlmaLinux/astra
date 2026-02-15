@@ -12,11 +12,8 @@
 	{% include "core/_form_field.html" with field=password_form.current_password %}
 
 	{% if using_otp %}
-		<div class="form-group" id="otpinput">
-			<label for="{{ password_form.otp.id_for_label }}">{{ password_form.otp.label }}</label>
-			{{ password_form.otp }}
-			{% if password_form.otp.errors %}<div class="text-danger">{{ password_form.otp.errors }}</div>{% endif %}
-			<small class="form-text text-muted">Your account has OTP enabled; enter your current OTP.</small>
+		<div id="otpinput">
+			{% include 'core/_form_field.html' with field=password_form.otp help_text_override='Your account has OTP enabled; enter your current OTP.' %}
 		</div>
 	{% endif %}
 
@@ -101,12 +98,7 @@
 					{% include "core/_form_field.html" with field=otp_add_form.password %}
 
 					{% if otp_tokens %}
-						<div class="form-group">
-							<label for="{{ otp_add_form.otp.id_for_label }}">{{ otp_add_form.otp.label }}</label>
-							{{ otp_add_form.otp }}
-							{% if otp_add_form.otp.errors %}<div class="text-danger">{{ otp_add_form.otp.errors }}</div>{% endif %}
-							{% if otp_add_form.otp.help_text %}<small class="form-text text-muted">{{ otp_add_form.otp.help_text }}</small>{% endif %}
-						</div>
+						{% include 'core/_form_field.html' with field=otp_add_form.otp help_text_override='Enter your current OTP to authorize adding a new token.' %}
 					{% endif %}
 
 					{% if otp_add_form.non_field_errors %}

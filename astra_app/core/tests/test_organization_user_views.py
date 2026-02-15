@@ -134,6 +134,47 @@ class OrganizationUserViewsTests(TestCase):
         self.assertEqual(resp["Location"], expected)
         self.assertFalse(Organization.objects.filter(name="Blocked Org").exists())
 
+    def test_organization_create_form_renders_without_required_text(self) -> None:
+        self._login_as_freeipa_user("alice")
+
+        alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.views_utils.has_signed_coc", return_value=True),
+        ):
+            resp = self.client.get(reverse("organization-create"), follow=False)
+
+        self.assertEqual(resp.status_code, 200)
+
+        # Spot-check that the include-based rendering preserves labels and help text.
+        self.assertContains(resp, "Organization name")
+        self.assertContains(resp, "Website URL")
+        self.assertContains(resp, "Share a direct link to your logo file, or a link to your brand assets.")
+        self.assertContains(
+            resp,
+            "Enter the URL you want your logo to link to (homepage or a dedicated landing page).",
+        )
+
+        # The standardization intentionally removes any hard-coded required indicator.
+        self.assertNotContains(resp, "(required)")
+        self.assertNotContains(resp, "alx-required-indicator")
+
+        payload = self._valid_org_payload(name="")
+        payload["website"] = ""
+        payload["website_logo"] = ""
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.views_utils.has_signed_coc", return_value=True),
+        ):
+            resp = self.client.post(reverse("organization-create"), data=payload, follow=False)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "This field is required.")
+        self.assertContains(resp, "text-danger")
+        self.assertNotContains(resp, "(required)")
+
     def test_committee_can_create_org_for_other_rep_even_if_already_rep(self) -> None:
         from core.models import Organization
 

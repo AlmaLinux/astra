@@ -6,17 +6,9 @@
 		<div class="alert alert-danger">{{ emails_form.non_field_errors }}</div>
 	{% endif %}
 
-	<div class="form-group">
-		<label for="{{ emails_form.mail.id_for_label }}">{{ emails_form.mail.label }}</label>
-		{{ emails_form.mail }}
-		{% if emails_form.mail.errors %}<div class="text-danger">{{ emails_form.mail.errors }}</div>{% endif %}
-	</div>
+	{% include 'core/_form_field.html' with field=emails_form.mail %}
 
-	<div class="form-group">
-		<label for="{{ emails_form.fasRHBZEmail.id_for_label }}">{{ emails_form.fasRHBZEmail.label }}</label>
-		{{ emails_form.fasRHBZEmail }}
-		{% if emails_form.fasRHBZEmail.errors %}<div class="text-danger">{{ emails_form.fasRHBZEmail.errors }}</div>{% endif %}
-	</div>
+	{% include 'core/_form_field.html' with field=emails_form.fasRHBZEmail %}
 
 	<button type="submit" class="btn btn-primary" title="Save email settings">Save</button>
 </form>

@@ -88,18 +88,14 @@
 
     <div class="row">
       <div class="col-md-12">
-        <div class="form-group">
-          <label for="id_subject">Subject</label>
-          {{ form.subject }}
-          {% if form.subject.errors %}<div class="text-danger">{{ form.subject.errors }}</div>{% endif %}
-        </div>
+        {% include 'core/_form_field.html' with field=form.subject %}
       </div>
     </div>
 
     <div class="row">
       <div class="col-md">
         <label for="id_html_content">HTML content</label>
-        {{ form.html_content }}
+        {% include 'core/_form_field_inner.html' with field=form.html_content show_label=0 show_help=0 %}
       </div>
 
       <div class="col-md-auto d-flex align-items-center justify-content-center px-1">
@@ -117,7 +113,7 @@
 
       <div class="col-md">
         <label for="id_text_content">Text content</label>
-        {{ form.text_content }}
+        {% include 'core/_form_field_inner.html' with field=form.text_content show_label=0 show_help=0 %}
       </div>
     </div>
 

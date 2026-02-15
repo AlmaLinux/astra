@@ -15,14 +15,7 @@
       <form method="post" enctype="multipart/form-data">
         {% csrf_token %}
 
-        <div class="form-group">
-          <label for="id_csv_file">CSV file</label>
-          {{ form.csv_file }}
-          {% if form.csv_file.errors %}
-            <div class="text-danger small mt-1">{{ form.csv_file.errors }}</div>
-          {% endif %}
-          <div class="text-muted small mt-1">Columns: email, full_name, note.</div>
-        </div>
+        {% include "core/_form_field.html" with field=form.csv_file help_text_override='Columns: email, full_name, note.' %}
 
         <button type="submit" class="btn btn-primary" title="Preview invitations before sending">Preview invitations</button>
       </form>

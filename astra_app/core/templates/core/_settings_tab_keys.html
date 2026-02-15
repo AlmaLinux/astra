@@ -6,43 +6,9 @@
 		<div class="alert alert-danger">{{ keys_form.non_field_errors }}</div>
 	{% endif %}
 
-	<div class="form-group">
-		<label>{{ keys_form.fasGPGKeyId.label }}</label>
+	{% include 'core/_form_field_widget_fallback.html' with field=keys_form.fasGPGKeyId widget_id='gpg-keys-widget' fallback_id='gpg-keys-fallback' table_id='gpg-keys-table' add_button_id='gpg-keys-add' add_button_title='Add another GPG key ID' add_button_text='Add GPG key ID' %}
 
-		<div id="gpg-keys-widget" class="d-none">
-			<div class="table-responsive">
-				<table class="table table-sm table-bordered align-middle mb-2" id="gpg-keys-table">
-					<tbody></tbody>
-				</table>
-			</div>
-			<button type="button" class="btn btn-sm btn-outline-secondary" id="gpg-keys-add" title="Add another GPG key ID">Add GPG key ID</button>
-		</div>
-
-		<div id="gpg-keys-fallback">
-			{{ keys_form.fasGPGKeyId }}
-			{% if keys_form.fasGPGKeyId.help_text %}<small class="form-text text-muted">{{ keys_form.fasGPGKeyId.help_text }}</small>{% endif %}
-			{% if keys_form.fasGPGKeyId.errors %}<div class="text-danger">{{ keys_form.fasGPGKeyId.errors }}</div>{% endif %}
-		</div>
-	</div>
-
-	<div class="form-group">
-		<label>{{ keys_form.ipasshpubkey.label }}</label>
-
-		<div id="ssh-keys-widget" class="d-none">
-			<div class="table-responsive">
-				<table class="table table-sm table-bordered align-middle mb-2" id="ssh-keys-table">
-					<tbody></tbody>
-				</table>
-			</div>
-			<button type="button" class="btn btn-sm btn-outline-secondary" id="ssh-keys-add" title="Add another SSH key">Add SSH key</button>
-		</div>
-
-		<div id="ssh-keys-fallback">
-			{{ keys_form.ipasshpubkey }}
-			{% if keys_form.ipasshpubkey.help_text %}<small class="form-text text-muted">{{ keys_form.ipasshpubkey.help_text }}</small>{% endif %}
-			{% if keys_form.ipasshpubkey.errors %}<div class="text-danger">{{ keys_form.ipasshpubkey.errors }}</div>{% endif %}
-		</div>
-	</div>
+	{% include 'core/_form_field_widget_fallback.html' with field=keys_form.ipasshpubkey widget_id='ssh-keys-widget' fallback_id='ssh-keys-fallback' table_id='ssh-keys-table' add_button_id='ssh-keys-add' add_button_title='Add another SSH key' add_button_text='Add SSH key' %}
 
 	<button type="submit" class="btn btn-primary" title="Save key settings">Save</button>
 </form>

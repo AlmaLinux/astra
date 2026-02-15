@@ -43,47 +43,22 @@
             {% endif %}
           </div>
           <div class="card-body">
-            <div class="form-group">
-              <label for="{{ details_form.name.id_for_label }}">Name</label>
-              {{ details_form.name }}
-              {% if details_form.name.errors %}<div class="text-danger">{{ details_form.name.errors }}</div>{% endif %}
-            </div>
+            {% include 'core/_form_field.html' with field=details_form.name %}
 
-            <div class="form-group">
-              <label for="{{ details_form.description.id_for_label }}">Description</label>
-              {{ details_form.description }}
-              {% if details_form.description.errors %}<div class="text-danger">{{ details_form.description.errors }}</div>{% endif %}
-            </div>
+            {% include 'core/_form_field.html' with field=details_form.description %}
 
-            <div class="form-group">
-              <label for="{{ details_form.url.id_for_label }}">URL</label>
-              {{ details_form.url }}
-              {% if details_form.url.errors %}<div class="text-danger">{{ details_form.url.errors }}</div>{% endif %}
+            {% include 'core/_form_field.html' with field=details_form.url %}
+
+            <div class="form-row">
+              {% include 'core/_form_field.html' with field=details_form.start_datetime wrapper_class='col-md-6' %}
+              {% include 'core/_form_field.html' with field=details_form.end_datetime wrapper_class='col-md-6' %}
             </div>
 
             <div class="form-row">
-              <div class="form-group col-md-6">
-                <label for="{{ details_form.start_datetime.id_for_label }}">Start</label>
-                {{ details_form.start_datetime }}
-                {% if details_form.start_datetime.errors %}<div class="text-danger">{{ details_form.start_datetime.errors }}</div>{% endif %}
-              </div>
-              <div class="form-group col-md-6">
-                <label for="{{ details_form.end_datetime.id_for_label }}">End</label>
-                {{ details_form.end_datetime }}
-                {% if details_form.end_datetime.errors %}<div class="text-danger">{{ details_form.end_datetime.errors }}</div>{% endif %}
-              </div>
-            </div>
-
-            <div class="form-row">
-              <div class="form-group col-md-6">
-                <label for="{{ details_form.number_of_seats.id_for_label }}">Number of seats</label>
-                {{ details_form.number_of_seats }}
-                {% if details_form.number_of_seats.errors %}<div class="text-danger">{{ details_form.number_of_seats.errors }}</div>{% endif %}
-              </div>
+              {% include 'core/_form_field.html' with field=details_form.number_of_seats wrapper_class='col-md-6' %}
               <div class="form-group col-md-6">
                 <label for="{{ details_form.quorum.id_for_label }}">Quorum (%)</label>
-                {{ details_form.quorum }}
-                {% if details_form.quorum.errors %}<div class="text-danger">{{ details_form.quorum.errors }}</div>{% endif %}
+                {% include 'core/_form_field_inner.html' with field=details_form.quorum show_label=0 show_help=0 %}
                 <div class="text-muted small mt-1">
                   Minimum turnout percentage required by both voter count and vote weight; if not reached, the end date may be extended.
                 </div>
@@ -92,8 +67,7 @@
 
             <div class="form-group">
               <label for="{{ details_form.eligible_group_cn.id_for_label }}">Eligible group (optional)</label>
-              {{ details_form.eligible_group_cn }}
-              {% if details_form.eligible_group_cn.errors %}<div class="text-danger">{{ details_form.eligible_group_cn.errors }}</div>{% endif %}
+              {% include 'core/_form_field_inner.html' with field=details_form.eligible_group_cn show_label=0 show_help=0 %}
               <div class="text-muted small mt-1">
                 If set, only members of this group will receive voting credentials when the election starts, and only members of this group can be candidates.
               </div>
@@ -197,20 +171,16 @@
                     <tr class="candidate-form-row">
                       <td>
                         {{ f.id }}
-                        {{ f.freeipa_username }}
-                        {% if f.freeipa_username.errors %}<div class="text-danger">{{ f.freeipa_username.errors }}</div>{% endif %}
+                        {% include 'core/_form_field_inner.html' with field=f.freeipa_username show_label=0 show_help=0 %}
                       </td>
                       <td>
-                        {{ f.nominated_by }}
-                        {% if f.nominated_by.errors %}<div class="text-danger">{{ f.nominated_by.errors }}</div>{% endif %}
+                        {% include 'core/_form_field_inner.html' with field=f.nominated_by show_label=0 show_help=0 %}
                       </td>
                       <td>
-                        {{ f.description }}
-                        {% if f.description.errors %}<div class="text-danger">{{ f.description.errors }}</div>{% endif %}
+                        {% include 'core/_form_field_inner.html' with field=f.description show_label=0 show_help=0 %}
                       </td>
                       <td>
-                        {{ f.url }}
-                        {% if f.url.errors %}<div class="text-danger">{{ f.url.errors }}</div>{% endif %}
+                        {% include 'core/_form_field_inner.html' with field=f.url show_label=0 show_help=0 %}
                       </td>
                       <td class="text-center">
                         <div class="d-none">{{ f.DELETE }}</div>
@@ -270,16 +240,13 @@
                         <tr class="group-form-row">
                           <td>
                             {{ g.id }}
-                            {{ g.name }}
-                            {% if g.name.errors %}<div class="text-danger">{{ g.name.errors }}</div>{% endif %}
+                            {% include 'core/_form_field_inner.html' with field=g.name show_label=0 show_help=0 %}
                           </td>
                           <td>
-                            {{ g.max_elected }}
-                            {% if g.max_elected.errors %}<div class="text-danger">{{ g.max_elected.errors }}</div>{% endif %}
+                            {% include 'core/_form_field_inner.html' with field=g.max_elected show_label=0 show_help=0 %}
                           </td>
                           <td>
-                            {{ g.candidate_usernames }}
-                            {% if g.candidate_usernames.errors %}<div class="text-danger">{{ g.candidate_usernames.errors }}</div>{% endif %}
+                            {% include 'core/_form_field_inner.html' with field=g.candidate_usernames show_label=0 show_help=0 %}
                             {% if g.candidate_usernames.help_text %}<div class="text-muted small">{{ g.candidate_usernames.help_text }}</div>{% endif %}
                           </td>
                           <td class="text-center">

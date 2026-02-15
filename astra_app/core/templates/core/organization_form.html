@@ -59,30 +59,13 @@
         <h3 class="card-title">Branding</h3>
       </div>
       <div class="card-body">
-        <div class="form-group">
-          <label for="{{ form.name.id_for_label }}">{{ form.name.label }} <span class="text-danger">(required)</span></label>
-          {{ form.name }}
-          {% if form.name.errors %}<div class="text-danger">{{ form.name.errors }}</div>{% endif %}
-        </div>
+        {% include 'core/_form_field.html' with field=form.name %}
 
-        <div class="form-group">
-          <label for="{{ form.website_logo.id_for_label }}">{{ form.website_logo.label }} <span class="text-danger">(required)</span></label>
-          {{ form.website_logo }}
-          {% if form.website_logo.help_text %}<small class="form-text text-muted">{{ form.website_logo.help_text }}</small>{% endif %}
-          {% if form.website_logo.errors %}<div class="text-danger">{{ form.website_logo.errors }}</div>{% endif %}
-        </div>
+        {% include 'core/_form_field.html' with field=form.website_logo %}
 
-        <div class="form-group">
-          <label for="{{ form.website.id_for_label }}">{{ form.website.label }} <span class="text-danger">(required)</span></label>
-          {{ form.website }}
-          {% if form.website.help_text %}<small class="form-text text-muted">{{ form.website.help_text }}</small>{% endif %}
-          {% if form.website.errors %}<div class="text-danger">{{ form.website.errors }}</div>{% endif %}
-        </div>
+        {% include 'core/_form_field.html' with field=form.website %}
 
-        <div class="form-group">
-          <label for="{{ form.logo.id_for_label }}">{{ form.logo.label }}</label>
-          {{ form.logo }}
-          {% if form.logo.errors %}<div class="text-danger">{{ form.logo.errors }}</div>{% endif %}
+        {% include 'core/_form_field.html' with field=form.logo %}
           {% if not is_create and organization and organization.logo %}
             <div class="mt-2">
               <img src="{{ organization.logo.url }}" alt="{{ organization.name }} logo" style="max-height: 120px;" />
@@ -91,7 +74,6 @@
               <a href="{{ organization.logo.url }}" rel="noopener noreferrer">View current uploaded logo</a>
             </div>
           {% endif %}
-        </div>
       </div>
     </div>
 

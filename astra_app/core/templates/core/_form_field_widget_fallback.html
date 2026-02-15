@@ -1,0 +1,36 @@
+<div class="form-group{% if wrapper_class %} {{ wrapper_class }}{% endif %}">
+  {% if show_label|default:True %}
+    {% if label_override %}
+      <label>{{ label_override }}</label>
+    {% else %}
+      {{ field.label_tag }}
+    {% endif %}
+  {% endif %}
+
+  <div
+    id="{{ widget_id }}"
+    class="{% if widget_class %}{{ widget_class }}{% else %}d-none{% endif %}"
+    {% if data_textarea_id %}data-textarea-id="{{ data_textarea_id }}"{% endif %}
+    {% if data_fallback_id %}data-fallback-id="{{ data_fallback_id }}"{% endif %}
+    {% if data_mattermost_default_server %}data-mattermost-default-server="{{ data_mattermost_default_server }}"{% endif %}
+    {% if data_mattermost_default_team %}data-mattermost-default-team="{{ data_mattermost_default_team }}"{% endif %}
+    {% if data_irc_default_server %}data-irc-default-server="{{ data_irc_default_server }}"{% endif %}
+    {% if data_matrix_default_server %}data-matrix-default-server="{{ data_matrix_default_server }}"{% endif %}
+    {% if widget_attrs %} {{ widget_attrs }}{% endif %}
+  >
+    {% if table_id %}
+      <div class="table-responsive">
+        <table class="table table-sm table-bordered align-middle mb-2" id="{{ table_id }}">
+          <tbody></tbody>
+        </table>
+      </div>
+    {% endif %}
+    {% if add_button_id %}
+      <button type="button" class="btn btn-sm btn-outline-secondary{% if add_button_class %} {{ add_button_class }}{% endif %}" id="{{ add_button_id }}" title="{{ add_button_title }}">{{ add_button_text }}</button>
+    {% endif %}
+  </div>
+
+  <div id="{{ fallback_id }}"{% if fallback_attrs %} {{ fallback_attrs }}{% endif %}>
+    {% include 'core/_form_field_inner.html' with field=field show_label=0 %}
+  </div>
+</div>

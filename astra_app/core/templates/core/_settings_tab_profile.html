@@ -24,154 +24,47 @@
 		</div>
 
 		<div class="form-row">
-			<div class="form-group col-md-6">
-				{{ profile_form.givenname.label_tag }}
-				{{ profile_form.givenname }}
-				{% if profile_form.givenname.errors %}<div class="text-danger">{{ profile_form.givenname.errors }}</div>{% endif %}
-			</div>
-			<div class="form-group col-md-6">
-				{{ profile_form.sn.label_tag }}
-				{{ profile_form.sn }}
-				{% if profile_form.sn.errors %}<div class="text-danger">{{ profile_form.sn.errors }}</div>{% endif %}
-			</div>
+			{% include 'core/_form_field.html' with field=profile_form.givenname wrapper_class='col-md-6' %}
+			{% include 'core/_form_field.html' with field=profile_form.sn wrapper_class='col-md-6' %}
 		</div>
 
-		<div class="form-group">
-			{{ profile_form.fasPronoun.label_tag }}
-			{{ profile_form.fasPronoun }}
-			{% if profile_form.fasPronoun.errors %}<div class="text-danger">{{ profile_form.fasPronoun.errors }}</div>{% endif %}
-			{% if profile_form.fasPronoun.help_text %}<small class="form-text text-muted">{{ profile_form.fasPronoun.help_text }}</small>{% endif %}
-			<datalist id="pronoun-options">
-				<option value="she / her / hers"></option>
-				<option value="he / him / his"></option>
-				<option value="they / them / theirs"></option>
-			</datalist>
-		</div>
+		{% include 'core/_form_field.html' with field=profile_form.fasPronoun %}
 
-		<div id="country-code-field-wrapper" class="form-group {% if highlight == 'country_code' %}settings-field-highlight{% endif %}">
-			{{ profile_form.country_code.label_tag }}
-			{{ profile_form.country_code }}
-			{% if profile_form.country_code.errors %}<div class="text-danger">{{ profile_form.country_code.errors }}</div>{% endif %}
-			{% if profile_form.country_code.help_text %}<small class="form-text text-muted">{{ profile_form.country_code.help_text }}</small>{% endif %}
-		</div>
+		<datalist id="pronoun-options">
+			<option value="she / her / hers"></option>
+			<option value="he / him / his"></option>
+			<option value="they / them / theirs"></option>
+		</datalist>
 
-		{% include "core/_form_field.html" with field=profile_form.fasLocale %}
+		{% if highlight == 'country_code' %}
+			{% include 'core/_form_field.html' with field=profile_form.country_code wrapper_class='settings-field-highlight' wrapper_attrs='id="country-code-field-wrapper"' %}
+		{% else %}
+			{% include 'core/_form_field.html' with field=profile_form.country_code wrapper_attrs='id="country-code-field-wrapper"' %}
+		{% endif %}
 
-		<div class="form-group">
-			{{ profile_form.fasTimezone.label_tag }}
-			{{ profile_form.fasTimezone }}
-			<datalist id="timezone-options">
-				{% for value, label in profile_form.fasTimezone.field.choices %}
-					{% if value %}<option value="{{ value }}"></option>{% endif %}
-				{% endfor %}
-			</datalist>
-			{% if profile_form.fasTimezone.errors %}<div class="text-danger">{{ profile_form.fasTimezone.errors }}</div>{% endif %}
-			{% if profile_form.fasTimezone.help_text %}<small class="form-text text-muted">{{ profile_form.fasTimezone.help_text }}</small>{% endif %}
-		</div>
+		{% include 'core/_form_field_datalist.html' with field=profile_form.fasLocale datalist_id='locale-options' datalist_options=profile_form.fasLocale.field.choices %}
 
-		<div class="form-group">
-			<label>{{ profile_form.fasWebsiteUrl.label }}</label>
+		{% include 'core/_form_field_datalist.html' with field=profile_form.fasTimezone datalist_id='timezone-options' datalist_options=profile_form.fasTimezone.field.choices %}
 
-			<div id="website-urls-widget" class="d-none">
-				<div class="table-responsive">
-					<table class="table table-sm table-bordered align-middle mb-2" id="website-urls-table">
-						<tbody></tbody>
-					</table>
-				</div>
-				<button type="button" class="btn btn-sm btn-outline-secondary" id="website-urls-add" title="Add another website URL">Add website URL</button>
-			</div>
+		{% include 'core/_form_field_widget_fallback.html' with field=profile_form.fasWebsiteUrl widget_id='website-urls-widget' fallback_id='website-urls-fallback' table_id='website-urls-table' add_button_id='website-urls-add' add_button_title='Add another website URL' add_button_text='Add website URL' %}
 
-			<div id="website-urls-fallback">
-				{{ profile_form.fasWebsiteUrl }}
-				{% if profile_form.fasWebsiteUrl.errors %}<div class="text-danger">{{ profile_form.fasWebsiteUrl.errors }}</div>{% endif %}
-			</div>
-			{% if profile_form.fasWebsiteUrl.help_text %}<small class="form-text text-muted">{{ profile_form.fasWebsiteUrl.help_text }}</small>{% endif %}
-		</div>
+		{% include 'core/_form_field_widget_fallback.html' with field=profile_form.fasRssUrl widget_id='rss-urls-widget' fallback_id='rss-urls-fallback' table_id='rss-urls-table' add_button_id='rss-urls-add' add_button_title='Add another RSS URL' add_button_text='Add RSS URL' %}
 
-		<div class="form-group">
-			<label>{{ profile_form.fasRssUrl.label }}</label>
+		<small class="form-text text-muted">
+			The format is either <strong>username</strong> or <strong>username:server.name</strong> (IRC/Matrix). For Mattermost custom servers use <strong>@username:server.name:team</strong>:
+			<ul class="mb-0">
+				<li>For Mattermost: <strong>{{ chat_networks.mattermost.default_server }}</strong> (team <strong>{{ chat_networks.mattermost.default_team }}</strong>)</li>
+				<li>For IRC: <strong>{{ chat_networks.irc.default_server }}</strong></li>
+				<li>For Matrix: <strong>{{ chat_networks.matrix.default_server }}</strong></li>
+			</ul>
+		</small>
+		{% include 'core/_form_field_widget_fallback.html' with field=profile_form.fasIRCNick widget_id='chat-nicks-widget' fallback_id='chat-nicks-fallback' widget_class='d-none js-chat-nicks-editor' data_textarea_id=profile_form.fasIRCNick.id_for_label data_fallback_id='chat-nicks-fallback' data_mattermost_default_server=chat_networks.mattermost.default_server data_mattermost_default_team=chat_networks.mattermost.default_team data_irc_default_server=chat_networks.irc.default_server data_matrix_default_server=chat_networks.matrix.default_server table_id='chat-nicks-table' add_button_id='chat-nicks-add' add_button_class='js-chat-nicks-add' add_button_title='Add another chat nickname' add_button_text='Add nickname' %}
 
-			<div id="rss-urls-widget" class="d-none">
-				<div class="table-responsive">
-					<table class="table table-sm table-bordered align-middle mb-2" id="rss-urls-table">
-						<tbody></tbody>
-					</table>
-				</div>
-				<button type="button" class="btn btn-sm btn-outline-secondary" id="rss-urls-add" title="Add another RSS URL">Add RSS URL</button>
-			</div>
+		{% include 'core/_form_field_input_group.html' with field=profile_form.fasGitHubUsername prefix='@' %}
 
-			<div id="rss-urls-fallback">
-				{{ profile_form.fasRssUrl }}
-				{% if profile_form.fasRssUrl.errors %}<div class="text-danger">{{ profile_form.fasRssUrl.errors }}</div>{% endif %}
-			</div>
-			{% if profile_form.fasRssUrl.help_text %}<small class="form-text text-muted">{{ profile_form.fasRssUrl.help_text }}</small>{% endif %}
-		</div>
+		{% include 'core/_form_field_input_group.html' with field=profile_form.fasGitLabUsername prefix='@' %}
 
-		<div class="form-group">
-			<label>Chat Nicknames</label>
-
-			<small class="form-text text-muted">
-				The format is either <strong>username</strong> or <strong>username:server.name</strong> (IRC/Matrix). For Mattermost custom servers use <strong>@username:server.name:team</strong>:
-				<ul class="mb-0">
-					<li>For Mattermost: <strong>{{ chat_networks.mattermost.default_server }}</strong> (team <strong>{{ chat_networks.mattermost.default_team }}</strong>)</li>
-					<li>For IRC: <strong>{{ chat_networks.irc.default_server }}</strong></li>
-					<li>For Matrix: <strong>{{ chat_networks.matrix.default_server }}</strong></li>
-				</ul>
-			</small>
-
-			<div
-				id="chat-nicks-widget"
-				class="d-none js-chat-nicks-editor"
-				data-textarea-id="{{ profile_form.fasIRCNick.id_for_label }}"
-				data-fallback-id="chat-nicks-fallback"
-				data-mattermost-default-server="{{ chat_networks.mattermost.default_server }}"
-				data-mattermost-default-team="{{ chat_networks.mattermost.default_team }}"
-				data-irc-default-server="{{ chat_networks.irc.default_server }}"
-				data-matrix-default-server="{{ chat_networks.matrix.default_server }}"
-			>
-				<div class="table-responsive">
-					<table class="table table-sm table-bordered align-middle mb-2" id="chat-nicks-table">
-						<tbody></tbody>
-					</table>
-				</div>
-				<button type="button" class="btn btn-sm btn-outline-secondary js-chat-nicks-add" id="chat-nicks-add" title="Add another chat nickname">Add nickname</button>
-			</div>
-
-			<div id="chat-nicks-fallback">
-				{{ profile_form.fasIRCNick.label_tag }}
-				{{ profile_form.fasIRCNick }}
-				{% if profile_form.fasIRCNick.errors %}<div class="text-danger">{{ profile_form.fasIRCNick.errors }}</div>{% endif %}
-				{% if profile_form.fasIRCNick.help_text %}<small class="form-text text-muted">{{ profile_form.fasIRCNick.help_text }}</small>{% endif %}
-			</div>
-		</div>
-
-		<div class="form-group">
-			{{ profile_form.fasGitHubUsername.label_tag }}
-			<div class="input-group">
-				<div class="input-group-prepend">
-					<span class="input-group-text">@</span>
-				</div>
-				{{ profile_form.fasGitHubUsername }}
-			</div>
-			{% if profile_form.fasGitHubUsername.errors %}<div class="text-danger">{{ profile_form.fasGitHubUsername.errors }}</div>{% endif %}
-		</div>
-
-		<div class="form-group">
-			{{ profile_form.fasGitLabUsername.label_tag }}
-			<div class="input-group">
-				<div class="input-group-prepend">
-					<span class="input-group-text">@</span>
-				</div>
-				{{ profile_form.fasGitLabUsername }}
-			</div>
-			{% if profile_form.fasGitLabUsername.errors %}<div class="text-danger">{{ profile_form.fasGitLabUsername.errors }}</div>{% endif %}
-		</div>
-
-		<div class="form-group form-check">
-			{{ profile_form.fasIsPrivate }}
-			<label class="form-check-label" for="{{ profile_form.fasIsPrivate.id_for_label }}">{{ profile_form.fasIsPrivate.label }} <small class="text-muted">Hide personal details (including your name and email) from other signed-in users. Your profile stays visible, as do your groups and memberships.</small></label>
-			{% if profile_form.fasIsPrivate.errors %}<div class="text-danger">{{ profile_form.fasIsPrivate.errors }}</div>{% endif %}
-		</div>
+		{% include 'core/_form_field_checkbox.html' with field=profile_form.fasIsPrivate help_text_override='Hide personal details (including your name and email) from other signed-in users. Your profile stays visible, as do your groups and memberships.' %}
 	</div>
 
 	<div class="d-flex justify-content-end">
