@@ -1,13 +1,51 @@
 """Shared private helpers used across election view sub-modules."""
 
+import datetime
+from dataclasses import dataclass
+
 from django.http import Http404
 from django.urls import reverse
 
 from core import elections_services
 from core.backends import FreeIPAUser
+from core.elections_services import ElectionError
 from core.email_context import user_email_context
+from core.forms_elections import ElectionEndDateForm
 from core.models import Election
 from core.views_utils import get_username
+
+
+@dataclass(frozen=True)
+class ElectionEndExtensionResult:
+    success: bool
+    errors: tuple[str, ...]
+
+
+def _extend_election_end_from_post(*, request, election: Election) -> ElectionEndExtensionResult:
+    if election.status != Election.Status.open:
+        return ElectionEndExtensionResult(success=False, errors=("Only open elections can be extended.",))
+
+    end_form = ElectionEndDateForm(request.POST, instance=election)
+    if not end_form.is_valid():
+        errors = tuple(str(msg) for msg in end_form.errors.get("end_datetime", []))
+        if not errors:
+            errors = ("Invalid end datetime.",)
+        return ElectionEndExtensionResult(success=False, errors=errors)
+
+    new_end = end_form.cleaned_data.get("end_datetime")
+    if not isinstance(new_end, datetime.datetime):
+        return ElectionEndExtensionResult(success=False, errors=("Invalid end datetime.",))
+
+    try:
+        elections_services.extend_election_end_datetime(
+            election=election,
+            new_end_datetime=new_end,
+            actor=get_username(request) or None,
+        )
+    except ElectionError as exc:
+        return ElectionEndExtensionResult(success=False, errors=(str(exc),))
+
+    return ElectionEndExtensionResult(success=True, errors=())
 
 
 def _get_active_election(election_id: int, *, fields: list[str] | None = None) -> Election:

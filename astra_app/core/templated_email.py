@@ -13,10 +13,13 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
+from django.core.mail import EmailMultiAlternatives
 from django.http import HttpRequest, JsonResponse
 from django.template import Context, Template, engines
 from django.template.exceptions import TemplateSyntaxError
 from post_office.models import Email, EmailTemplate
+
+from core.email_context import system_email_context
 
 _VAR_PATTERN = re.compile(r"{{\s*([A-Za-z0-9_]+)")
 _PLURALIZE_PATTERN = re.compile(
@@ -291,47 +294,123 @@ def queue_templated_email(
                     f"Vote receipt EmailTemplate is missing required variable: {var} (template={template_name})",
                 )
 
+    email = queue_composed_email(
+        recipients=recipients,
+        sender=sender,
+        subject_source=template.subject or "",
+        text_source=template.content or "",
+        html_source=template.html_content or "",
+        context=context,
+        cc=cc,
+        bcc=bcc,
+        reply_to=reply_to,
+        strict_inline_images=strict_inline_images,
+    )
+
+    # Preserve linkage to the EmailTemplate and original context so the admin UI
+    # and any dedupe logic based on template/context continue to work.
+    try:
+        email.template = template
+        email.context = dict(context)
+        email.save(update_fields=["template", "context"])
+    except Exception:
+        logger.exception("Failed to persist post_office template/context metadata template=%s", template_name)
+
+    return email
+
+
+def _attachments_from_html_template(*, html_template: Template, rendered_html: str) -> dict[str, object]:
+    attachments: dict[str, object] = {}
+
+    # `_attached_images` is provided by the post_office template backend when
+    # `{% inline_image %}` is used. We guard with `hasattr` because plain Django
+    # templates do not expose this attribute.
+    attached_images = html_template._attached_images if hasattr(html_template, "_attached_images") else []
+    if not attached_images and hasattr(html_template, "attach_related"):
+        probe = EmailMultiAlternatives(
+            subject="",
+            body="",
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            to=[settings.DEFAULT_FROM_EMAIL],
+        )
+        probe.attach_alternative(rendered_html or " ", "text/html")
+        html_template.attach_related(probe)
+        attached_images = [
+            attachment
+            for attachment in probe.attachments
+            if hasattr(attachment, "get") and hasattr(attachment, "get_payload")
+        ]
+    for image in attached_images or []:
+        cid = str(image.get("Content-ID") or "").strip().strip("<>")
+        if not cid:
+            continue
+        payload = image.get_payload(decode=True) or b""
+        content_type = str(image.get_content_type() or "application/octet-stream")
+        headers = {str(k): str(v) for k, v in image.items()}
+
+        filename = cid
+        subtype = content_type.split("/", 1)[-1]
+        if subtype and subtype.isalnum():
+            filename = f"{cid}.{subtype}"
+
+        attachments[filename] = {
+            "file": ContentFile(payload),
+            "mimetype": content_type,
+            "headers": headers,
+        }
+
+    return attachments
+
+
+def queue_composed_email(
+    *,
+    recipients: list[str],
+    sender: str,
+    subject_source: str,
+    text_source: str,
+    html_source: str,
+    context: Mapping[str, object],
+    cc: list[str] | None = None,
+    bcc: list[str] | None = None,
+    reply_to: list[str] | None = None,
+    strict_inline_images: bool = False,
+) -> Email:
+    """Queue operator/template-composed email through the SSOT pipeline.
+
+    This helper is intentionally metadata-agnostic: callers that need
+    `Email.template` / `Email.context` persistence (template-based sends)
+    should set those fields after calling this helper.
+    """
+
     staged_files: list[str] = []
     try:
         staged_html_content, staged_files = stage_inline_images_for_sending(
-            template.html_content or "",
+            html_source,
             strict=strict_inline_images,
         )
 
         template_engine = engines["post_office"]
-        subject_template = template_engine.from_string(template.subject or "")
-        text_template = template_engine.from_string(preview_drop_inline_image_tags(template.content or ""))
+        subject_template = template_engine.from_string(subject_source)
+        text_template = template_engine.from_string(preview_drop_inline_image_tags(text_source))
         html_template = template_engine.from_string(staged_html_content)
 
-        rendered_subject = subject_template.render(dict(context))
-        rendered_text = text_template.render(dict(context))
-        rendered_html = html_template.render(dict(context))
-
-        attachments: dict[str, object] = {}
-        for image in getattr(html_template, "_attached_images", []) or []:
-            cid = str(image.get("Content-ID") or "").strip().strip("<>")
-            if not cid:
-                continue
-            payload = image.get_payload(decode=True) or b""
-            content_type = str(image.get_content_type() or "application/octet-stream")
-            headers = {str(k): str(v) for k, v in image.items()}
-
-            filename = cid
-            subtype = content_type.split("/", 1)[-1]
-            if subtype and subtype.isalnum():
-                filename = f"{cid}.{subtype}"
-
-            attachments[filename] = {
-                "file": ContentFile(payload),
-                "mimetype": content_type,
-                "headers": headers,
-            }
+        rendered_context = {
+            **system_email_context(),
+            **dict(context),
+        }
+        rendered_subject = subject_template.render(rendered_context)
+        rendered_text = text_template.render(rendered_context)
+        rendered_html = html_template.render(rendered_context)
+        attachments = _attachments_from_html_template(
+            html_template=html_template,
+            rendered_html=rendered_html,
+        )
 
         headers: dict[str, str] | None = None
         if reply_to:
             headers = {"Reply-To": ", ".join(reply_to)}
 
-        email = post_office.mail.send(
+        return post_office.mail.send(
             recipients=recipients,
             sender=sender,
             subject=rendered_subject,
@@ -343,17 +422,6 @@ def queue_templated_email(
             bcc=bcc,
             headers=headers,
         )
-
-        # Preserve linkage to the EmailTemplate and original context so the admin UI
-        # and any dedupe logic based on template/context continue to work.
-        try:
-            email.template = template
-            email.context = dict(context)
-            email.save(update_fields=["template", "context"])
-        except Exception:
-            logger.exception("Failed to persist post_office template/context metadata template=%s", template_name)
-
-        return email
     finally:
         for path in staged_files:
             try:

@@ -11,6 +11,8 @@ from django.core.cache import cache
 from django.http import HttpResponse
 from django.test import RequestFactory, TestCase, override_settings
 
+from core.forms_security import PasswordConfirmationMixin, make_otp_field
+from core.forms_selfservice import OTPAddForm, PasswordChangeFreeIPAForm
 from core.views_settings import OTP_KEY_LENGTH, settings_root
 
 
@@ -310,4 +312,26 @@ class SettingsOTPViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(captured["context"]["otp_uri"].startswith("otpauth://"))
         self.assertEqual(captured["context"]["otp_add_form"].errors, {})
+
+
+class SelfServiceOTPFormsConsolidationTests(TestCase):
+    def test_password_change_form_uses_shared_confirmation_mixin(self) -> None:
+        self.assertTrue(issubclass(PasswordChangeFreeIPAForm, PasswordConfirmationMixin))
+
+    def test_selfservice_otp_fields_use_shared_otp_field_primitive(self) -> None:
+        otp_add_form = OTPAddForm()
+        expected_add_otp = make_otp_field(
+            help_text="If your account already has OTP enabled, enter your current OTP.",
+        )
+        self.assertEqual(otp_add_form.fields["otp"].label, expected_add_otp.label)
+        self.assertEqual(otp_add_form.fields["otp"].help_text, expected_add_otp.help_text)
+        self.assertEqual(otp_add_form.fields["otp"].required, expected_add_otp.required)
+
+        password_change_form = PasswordChangeFreeIPAForm()
+        expected_change_otp = make_otp_field(
+            help_text="If your account has OTP enabled, enter your current OTP.",
+        )
+        self.assertEqual(password_change_form.fields["otp"].label, expected_change_otp.label)
+        self.assertEqual(password_change_form.fields["otp"].help_text, expected_change_otp.help_text)
+        self.assertEqual(password_change_form.fields["otp"].required, expected_change_otp.required)
 

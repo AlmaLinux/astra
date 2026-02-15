@@ -6,6 +6,11 @@ from django.test import TestCase, override_settings
 
 from core.elections_eligibility import eligible_vote_weight_for_username, eligible_voters_from_memberships
 from core.models import Election, Membership, MembershipLog, MembershipType
+from core.tests.utils_test_data import ensure_core_categories
+
+
+def setUpModule() -> None:
+    ensure_core_categories()
 
 
 @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=30)

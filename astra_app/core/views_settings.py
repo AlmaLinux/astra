@@ -8,7 +8,6 @@ from types import SimpleNamespace
 from typing import Any, Final
 from urllib.parse import quote
 
-import post_office.mail
 import requests
 from django.conf import settings
 from django.contrib import messages
@@ -34,7 +33,7 @@ from core.backends import (
     _get_freeipa_client,
 )
 from core.country_codes import country_label_from_code
-from core.email_context import user_email_context
+from core.email_context import system_email_context, user_email_context
 from core.forms_selfservice import (
     EmailsForm,
     KeysForm,
@@ -63,10 +62,12 @@ from core.ipa_user_attrs import (
 from core.ipa_utils import bool_from_ipa, bool_to_ipa
 from core.membership_notes import CUSTOS, add_note
 from core.models import MembershipRequest
+from core.templated_email import queue_templated_email
 from core.tokens import make_signed_token, read_signed_token
 from core.views_utils import (
     MSG_SERVICE_UNAVAILABLE,
     _normalize_str,
+    agreement_settings_url,
     block_action_without_country_code,
     get_username,
     settings_context,
@@ -99,6 +100,8 @@ def _settings_url(tab: str, *, agreement_cn: str | None = None) -> str:
     base = reverse("settings")
     if agreement_cn is None:
         return f"{base}{_settings_fragment(tab)}"
+    if tab == "agreements":
+        return agreement_settings_url(agreement_cn)
     return f"{base}?agreement={quote(agreement_cn)}{_settings_fragment(tab)}"
 
 
@@ -124,11 +127,12 @@ def _send_email_validation_email(
     valid_until = timezone.now() + datetime.timedelta(seconds=ttl_seconds)
     valid_until_utc = valid_until.astimezone(datetime.UTC).strftime("%H:%M")
 
-    post_office.mail.send(
+    queue_templated_email(
         recipients=[email_to_validate],
         sender=settings.DEFAULT_FROM_EMAIL,
-        template=settings.EMAIL_VALIDATION_EMAIL_TEMPLATE_NAME,
+        template_name=settings.EMAIL_VALIDATION_EMAIL_TEMPLATE_NAME,
         context={
+            **system_email_context(),
             **base_ctx,
             "name": name or base_ctx["full_name"],
             "attr": attr,
@@ -670,7 +674,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
 
     data = fu._user_data
 
-    country_attr = str(settings.SELF_SERVICE_ADDRESS_COUNTRY_ATTR).strip() or "c"
+    country_attr = str(settings.SELF_SERVICE_ADDRESS_COUNTRY_ATTR).strip()
     country_attr_lower = country_attr.lower()
 
     # --- Profile ---

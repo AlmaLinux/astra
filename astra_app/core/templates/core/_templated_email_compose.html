@@ -1,4 +1,4 @@
-{% load core_dict static %}
+{% load core_dict %}
 
 <div
   class="templated-email-compose"
@@ -153,44 +153,6 @@
     </div>
     </div>
   </div>
-
-<link rel="stylesheet" href="{% static 'core/vendor/codemirror/codemirror.min.css' %}">
-<link rel="stylesheet" href="{% static 'core/vendor/codemirror/mdn-like.min.css' %}">
-<link rel="stylesheet" href="{% static 'core/vendor/codemirror/lint.css' %}">
-
-<style>
-  /* Ensure CodeMirror editors feel like AdminLTE form-controls. */
-  .CodeMirror {
-    height: 420px;
-    border: 1px solid rgba(0, 0, 0, 0.125);
-    border-radius: 0.25rem;
-    font-size: 0.9rem;
-  }
-
-  .CodeMirror-focused {
-    border-color: #80bdff;
-    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
-  }
-
-  .cm-mustache {
-    color: #d63384;
-    font-weight: 600;
-  }
-</style>
-
-<script src="{% static 'core/vendor/codemirror/codemirror.min.js' %}"></script>
-<script src="{% static 'core/vendor/codemirror/xml.min.js' %}"></script>
-<script src="{% static 'core/vendor/codemirror/javascript.min.js' %}"></script>
-<script src="{% static 'core/vendor/codemirror/css.min.js' %}"></script>
-<script src="{% static 'core/vendor/codemirror/htmlmixed.min.js' %}"></script>
-<script src="{% static 'core/vendor/codemirror/overlay.min.js' %}"></script>
-
-<script src="{% static 'core/vendor/codemirror/lint.js' %}"></script>
-<script src="{% static 'core/vendor/htmlhint/htmlhint.min.js' %}"></script>
-<script src="{% static 'core/vendor/codemirror/html-lint.js' %}"></script>
-
-<script src="{% static 'core/js/templated_email.js' %}"></script>
-
 {% if show_save_buttons != False %}
   <div data-compose-modal="save">
     {% include 'core/_modal_confirm.html' with modal_id='' title='Save email template' body='Overwrite the selected email template with the current subject and contents?' action_url='#' submit_label='Save' submit_class='btn-primary' %}

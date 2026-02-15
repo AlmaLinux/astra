@@ -1,7 +1,6 @@
 """Election listing, detail view, and voter eligibility context."""
 
 import datetime
-from urllib.parse import urlencode
 
 from django.conf import settings
 from django.contrib import messages
@@ -29,7 +28,7 @@ from core.views_elections._helpers import (
     _load_candidate_users,
     _tally_elected_ids,
 )
-from core.views_utils import get_username, paginate_and_build_context
+from core.views_utils import build_page_url_prefix, get_username, paginate_and_build_context
 
 
 @require_GET
@@ -328,20 +327,14 @@ def _eligible_voters_context(*, request, election: Election, enabled: bool) -> d
     grid_items = [{"kind": "user", "username": username} for username in grid_usernames]
 
     page_number = str(request.GET.get("eligible_page") or "1").strip()
-    qs = dict(request.GET.items())
-    qs.pop("eligible_page", None)
-    page_url_prefix = f"?{urlencode(qs)}&eligible_page=" if qs else "?eligible_page="
+    _, page_url_prefix = build_page_url_prefix(request.GET, page_param="eligible_page")
     page_ctx = paginate_and_build_context(grid_items, page_number, 24, page_url_prefix=page_url_prefix)
 
     ineligible_grid_items = [
         {"kind": "user", "username": str(v["username"])} for v in ineligible_voters if str(v.get("username") or "").strip()
     ]
     ineligible_page_number = str(request.GET.get("ineligible_page") or "1").strip()
-    ineligible_qs = dict(request.GET.items())
-    ineligible_qs.pop("ineligible_page", None)
-    ineligible_page_url_prefix = (
-        f"?{urlencode(ineligible_qs)}&ineligible_page=" if ineligible_qs else "?ineligible_page="
-    )
+    _, ineligible_page_url_prefix = build_page_url_prefix(request.GET, page_param="ineligible_page")
     ineligible_page_ctx = paginate_and_build_context(
         ineligible_grid_items, ineligible_page_number, 24, page_url_prefix=ineligible_page_url_prefix,
     )

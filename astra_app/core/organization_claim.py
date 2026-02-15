@@ -1,12 +1,12 @@
 import datetime
 from dataclasses import dataclass
 
-from django.conf import settings
 from django.core import signing
 from django.http import HttpRequest
 from django.urls import reverse
 
 from core.models import Organization
+from core.public_urls import build_public_absolute_url
 from core.tokens import make_signed_token, read_signed_token
 from core.views_utils import _normalize_str
 
@@ -35,11 +35,7 @@ def build_organization_claim_url(*, organization: Organization, request: HttpReq
     path = reverse("organization-claim", args=[token])
     if request is not None:
         return request.build_absolute_uri(path)
-
-    base = str(settings.PUBLIC_BASE_URL or "").strip().rstrip("/")
-    if not base:
-        raise ValueError("PUBLIC_BASE_URL must be configured to build absolute organization claim links.")
-    return f"{base}{path}"
+    return build_public_absolute_url(path, on_missing="raise")
 
 
 def read_organization_claim_token(token: str) -> OrganizationClaimTokenPayload:

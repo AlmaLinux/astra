@@ -1,6 +1,5 @@
 """Election creation and editing views."""
 
-import datetime
 
 from django.conf import settings
 from django.contrib import messages
@@ -15,24 +14,26 @@ from core import elections_eligibility, elections_services
 from core.backends import FreeIPAUser
 from core.elections_eligibility import ElectionEligibilityError
 from core.elections_services import (
-    ElectionError,
     election_genesis_chain_hash,
     issue_voting_credentials_from_memberships,
 )
 from core.forms_elections import (
     CandidateWizardFormSet,
     ElectionDetailsForm,
-    ElectionEndDateForm,
     ElectionVotingEmailForm,
     ExclusionGroupWizardFormSet,
+    is_self_nomination,
 )
 from core.ipa_user_attrs import _get_freeipa_timezone_name
 from core.models import AuditLogEntry, Candidate, Election, ExclusionGroup, ExclusionGroupCandidate
 from core.permissions import ASTRA_ADD_ELECTION
 from core.templated_email import placeholderize_empty_values, render_templated_email_preview
 from core.user_labels import user_choice_from_freeipa
-from core.views_elections._helpers import _election_email_preview_context, _get_active_election
-from core.views_utils import get_username
+from core.views_elections._helpers import (
+    _election_email_preview_context,
+    _extend_election_end_from_post,
+    _get_active_election,
+)
 
 # ---------------------------------------------------------------------------
 # election_edit helpers
@@ -358,10 +359,10 @@ def _handle_start_election(
         {
             str(c.freeipa_username or "").strip()
             for c in candidates
-            if str(c.freeipa_username or "").strip()
-            and str(c.nominated_by or "").strip()
-            and str(c.freeipa_username or "").strip().lower()
-            == str(c.nominated_by or "").strip().lower()
+            if is_self_nomination(
+                candidate_username=c.freeipa_username,
+                nominator_username=c.nominated_by,
+            )
         },
         key=str.lower,
     )
@@ -572,29 +573,14 @@ def election_edit(request, election_id: int):
         if action == "extend_end":
             if election is None:
                 messages.error(request, "Save the draft first.")
-            elif election.status != Election.Status.open:
-                messages.error(request, "Only open elections can be extended.")
             else:
-                end_form = ElectionEndDateForm(request.POST, instance=election)
-                if not end_form.is_valid():
-                    for msg in end_form.errors.get("end_datetime", []):
-                        details_form.add_error("end_datetime", msg)
-                    messages.error(request, "Please correct the errors below.")
-                    end_form = None
-                new_end = end_form.cleaned_data.get("end_datetime") if end_form is not None else None
-                if isinstance(new_end, datetime.datetime):
-                    actor = get_username(request) or None
-                    try:
-                        elections_services.extend_election_end_datetime(
-                            election=election,
-                            new_end_datetime=new_end,
-                            actor=actor,
-                        )
-                    except ElectionError as exc:
-                        details_form.add_error("end_datetime", str(exc))
-                    else:
-                        messages.success(request, "Election end date extended.")
-                        return redirect("election-edit", election_id=election.id)
+                result = _extend_election_end_from_post(request=request, election=election)
+                if result.success:
+                    messages.success(request, "Election end date extended.")
+                    return redirect("election-edit", election_id=election.id)
+                for msg in result.errors:
+                    details_form.add_error("end_datetime", msg)
+                    messages.error(request, msg)
 
         email_save_mode = str(request.POST.get("email_save_mode") or "").strip()
 

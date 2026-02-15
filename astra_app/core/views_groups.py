@@ -1,12 +1,10 @@
 from typing import cast
-from urllib.parse import quote
 
 import requests
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
-from django.urls import reverse
 from django.views.decorators.http import require_GET
 
 from core.agreements import missing_required_agreements_for_user_in_group, required_agreements_for_group
@@ -20,7 +18,14 @@ from core.backends import (
 )
 from core.forms_groups import GroupEditForm
 from core.permissions import ASTRA_ADD_ELECTION, json_permission_required
-from core.views_utils import MSG_SERVICE_UNAVAILABLE, _normalize_str, get_username, paginate_and_build_context
+from core.views_utils import (
+    MSG_SERVICE_UNAVAILABLE,
+    _normalize_str,
+    agreement_settings_url,
+    build_page_url_prefix,
+    get_username,
+    paginate_and_build_context,
+)
 
 
 @require_GET
@@ -71,10 +76,8 @@ def groups(request: HttpRequest) -> HttpResponse:
     for g in groups_sorted:
         g.member_count = g.member_count_recursive()
 
-    page_ctx = paginate_and_build_context(
-        groups_sorted, page_number, 30,
-        page_url_prefix=f"?q={q}&page=" if q else "?page=",
-    )
+    _, page_url_prefix = build_page_url_prefix(request.GET, page_param="page")
+    page_ctx = paginate_and_build_context(groups_sorted, page_number, 30, page_url_prefix=page_url_prefix)
 
     return render(
         request,
@@ -148,8 +151,8 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
                 {
                     "cn": agreement_cn,
                     "signed": username in users_signed,
-                    "detail_url": f"{reverse('settings')}?agreement={quote(agreement_cn)}#agreements",
-                    "list_url": f"{reverse('settings')}#agreements",
+                    "detail_url": agreement_settings_url(agreement_cn),
+                    "list_url": agreement_settings_url(None),
                 }
             )
 

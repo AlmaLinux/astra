@@ -1,4 +1,5 @@
 {% extends 'core/base.html' %}
+{% load static %}
 
 {% load core_membership_notes %}
 
@@ -14,7 +15,16 @@
   <div class="card">
     <div class="card-header">
       <div class="d-flex align-items-center justify-content-between flex-wrap" style="gap: 0.5rem;">
-        <form id="bulk-action-form" method="post" action="{% url 'membership-requests-bulk' %}" class="form-inline">
+        <form
+          id="bulk-action-form"
+          method="post"
+          action="{% url 'membership-requests-bulk' %}"
+          class="form-inline"
+          data-bulk-table-form
+          data-bulk-select-all-id="select-all-requests"
+          data-bulk-checkbox-selector=".request-checkbox--pending"
+          data-bulk-apply-id="bulk-apply"
+        >
           {% csrf_token %}
           <div class="input-group input-group-sm">
             <select name="bulk_action" class="custom-select custom-select-sm" aria-label="Bulk action">
@@ -53,7 +63,7 @@
               <td class="text-center align-top">
                 <input
                   type="checkbox"
-                  class="request-checkbox"
+                  class="request-checkbox request-checkbox--pending"
                   name="selected"
                   value="{{ r.pk }}"
                   form="bulk-action-form"
@@ -95,7 +105,16 @@
     <div class="card">
       <div class="card-header">
         <div class="d-flex align-items-center justify-content-between flex-wrap" style="gap: 0.5rem;">
-          <form id="bulk-action-form-on-hold" method="post" action="{% url 'membership-requests-bulk' %}" class="form-inline">
+          <form
+            id="bulk-action-form-on-hold"
+            method="post"
+            action="{% url 'membership-requests-bulk' %}"
+            class="form-inline"
+            data-bulk-table-form
+            data-bulk-select-all-id="select-all-requests-on-hold"
+            data-bulk-checkbox-selector=".request-checkbox--on-hold"
+            data-bulk-apply-id="bulk-apply-on-hold"
+          >
             {% csrf_token %}
             <input type="hidden" name="bulk_scope" value="on_hold" />
             <div class="input-group input-group-sm">
@@ -135,10 +154,10 @@
                   <td class="text-center align-top">
                   <input
                     type="checkbox"
-                    class="request-checkbox"
+                    class="request-checkbox request-checkbox--on-hold"
                     name="selected"
                     value="{{ r.pk }}"
-                    form="bulk-action-form"
+                    form="bulk-action-form-on-hold"
                     aria-label="Select request"
                   >
                 </td>
@@ -175,53 +194,10 @@
         </table>
       </div>
     </div>
-
-  <script>
-    (function () {
-      function setupBulk(formId, selectAllId, checkboxSelector, applyBtnId) {
-        const selectAll = document.getElementById(selectAllId);
-        const applyBtn = document.getElementById(applyBtnId);
-        const form = document.getElementById(formId);
-        if (!selectAll || !applyBtn || !form) return;
-
-        function getCheckboxes() {
-          return Array.from(document.querySelectorAll(checkboxSelector));
-        }
-
-        function updateApply() {
-          const anyChecked = getCheckboxes().some(cb => cb.checked);
-          const action = (form.querySelector('select[name="bulk_action"]') || {}).value || '';
-          applyBtn.disabled = !(anyChecked && action);
-        }
-
-        selectAll.addEventListener('change', function () {
-          for (const cb of getCheckboxes()) {
-            cb.checked = selectAll.checked;
-          }
-          updateApply();
-        });
-
-        document.addEventListener('change', function (evt) {
-          const target = evt.target;
-          if (!target) return;
-          if (target.matches && target.matches(checkboxSelector)) {
-            const boxes = getCheckboxes();
-            selectAll.checked = boxes.length > 0 && boxes.every(cb => cb.checked);
-            updateApply();
-            return;
-          }
-          if (target.name === 'bulk_action' && form.contains(target)) {
-            updateApply();
-          }
-        });
-
-        updateApply();
-      }
-
-      setupBulk('bulk-action-form', 'select-all-requests', '.request-checkbox:not(.request-checkbox--on-hold)', 'bulk-apply');
-      setupBulk('bulk-action-form-on-hold', 'select-all-requests-on-hold', '.request-checkbox--on-hold', 'bulk-apply-on-hold');
-    })();
-  </script>
-
   {% include 'core/_membership_request_shared_modals.html' %}
+{% endblock %}
+
+{% block scripts %}
+  {{ block.super }}
+  <script src="{% static 'core/js/bulk_table_actions.js' %}"></script>
 {% endblock %}

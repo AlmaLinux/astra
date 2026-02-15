@@ -665,16 +665,6 @@ AWS_STORAGE_BUCKET_NAME = _env_str("AWS_STORAGE_BUCKET_NAME", default="")
 AWS_S3_REGION_NAME = _env_str("AWS_S3_REGION_NAME", default="us-east-1")
 AWS_S3_ENDPOINT_URL = (_env_str("AWS_S3_ENDPOINT_URL", default="") or "").strip() or None
 
-# Optional: separate the URL used in rendered pages from the internal API endpoint.
-# This is useful in docker-compose where Django must reach MinIO via the service
-# name (e.g. http://minio:9000) but browsers reach it via localhost port mapping.
-#
-# Historically we used AWS_S3_URL_PROTOCOL + AWS_S3_CUSTOM_DOMAIN for this, but
-# those settings have been replaced by PUBLIC_BASE_URL + AWS_STORAGE_BUCKET_NAME.
-_public_base_url_raw = str(PUBLIC_BASE_URL or "").strip()
-if "://" not in _public_base_url_raw:
-    _public_base_url_raw = f"https://{_public_base_url_raw}"
-
 _aws_s3_domain_raw = _env_str("AWS_S3_DOMAIN", default="")
 if not _ALLOW_MISSING_RUNTIME_SECRETS:
     if not AWS_STORAGE_BUCKET_NAME:

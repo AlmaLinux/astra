@@ -1,6 +1,4 @@
 """Election lifecycle actions: credential re-send, conclude, extend end date."""
-
-import datetime
 import json
 from urllib.parse import urlencode
 
@@ -15,12 +13,11 @@ from django.views.decorators.http import require_POST
 from core import elections_services
 from core.backends import FreeIPAUser
 from core.elections_services import ElectionError, issue_voting_credentials_from_memberships
-from core.forms_elections import ElectionEndDateForm
 from core.ipa_user_attrs import _get_freeipa_timezone_name
 from core.models import Election, VotingCredential
 from core.permissions import ASTRA_ADD_ELECTION
 from core.rate_limit import allow_request
-from core.views_elections._helpers import _get_active_election
+from core.views_elections._helpers import _extend_election_end_from_post, _get_active_election
 from core.views_send_mail import _CSV_SESSION_KEY
 from core.views_utils import get_username
 
@@ -178,31 +175,10 @@ def election_extend_end(request, election_id: int):
     if not _confirm_election_action(request=request, election=election):
         return HttpResponseBadRequest("Confirmation required.")
 
-    if election.status != Election.Status.open:
-        messages.error(request, "Only open elections can be extended.")
-        return redirect("election-detail", election_id=election.id)
-
-    end_form = ElectionEndDateForm(request.POST, instance=election)
-    if not end_form.is_valid():
-        for msg in end_form.errors.get("end_datetime", []):
+    result = _extend_election_end_from_post(request=request, election=election)
+    if not result.success:
+        for msg in result.errors:
             messages.error(request, str(msg))
-        return redirect("election-detail", election_id=election.id)
-
-    new_end = end_form.cleaned_data.get("end_datetime")
-    if not isinstance(new_end, datetime.datetime):
-        messages.error(request, "Invalid end datetime.")
-        return redirect("election-detail", election_id=election.id)
-
-    actor = get_username(request) or None
-
-    try:
-        elections_services.extend_election_end_datetime(
-            election=election,
-            new_end_datetime=new_end,
-            actor=actor,
-        )
-    except ElectionError as exc:
-        messages.error(request, str(exc))
         return redirect("election-detail", election_id=election.id)
 
     messages.success(request, "Election end date extended.")

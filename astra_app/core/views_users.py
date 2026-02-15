@@ -1,5 +1,4 @@
 import logging
-from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
@@ -19,16 +18,16 @@ from core.country_codes import country_code_status_from_user_data
 from core.ipa_user_attrs import _data_get, _first, _get_full_user, _value_to_text
 from core.membership import (
     build_pending_request_context,
+    compute_membership_requestability_context,
     expiring_soon_cutoff,
     get_membership_request_eligibility,
     get_valid_memberships,
-    membership_request_can_request_any,
-    requestable_membership_types_for_target,
     resolve_request_ids_by_membership_type,
 )
 from core.membership_notifications import membership_extend_url
 from core.models import MembershipRequest
-from core.views_utils import _normalize_str, get_username
+from core.permissions import can_view_user_directory
+from core.views_utils import _normalize_str, agreement_settings_url, get_username
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +100,7 @@ def _profile_context_for_user(
         )
         coc_signed = bool(coc_agreement and coc_agreement.signed)
         coc_settings_url = (
-            f"{reverse('settings')}?agreement={quote(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN)}#agreements"
+            agreement_settings_url(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN)
             if is_self
             else None
         )
@@ -115,7 +114,7 @@ def _profile_context_for_user(
             {
                 "cn": agreement_cn,
                 "required_by": sorted(required_by, key=str.lower),
-                "settings_url": f"{reverse('settings')}?agreement={quote(agreement_cn)}#agreements"
+                "settings_url": agreement_settings_url(agreement_cn)
                 if is_self
                 else None,
             }
@@ -171,20 +170,12 @@ def _profile_context_for_user(
     )
     pending_request_category_ids = personal_pending_context.category_ids
 
-    requestable_membership_type_rows = list(
-        requestable_membership_types_for_target(
-            username=fu.username,
-            eligibility=membership_eligibility,
-        )
-        .values_list("category_id", "code")
+    requestability_context = compute_membership_requestability_context(
+        username=fu.username,
+        eligibility=membership_eligibility,
+        held_category_ids={membership.category_id for membership in valid_memberships},
     )
-    requestable_codes_by_category: dict[str, set[str]] = {}
-    for category_id, code in requestable_membership_type_rows:
-        category_id_value = str(category_id or "")
-        code_value = str(code or "")
-        if not category_id_value or not code_value:
-            continue
-        requestable_codes_by_category.setdefault(category_id_value, set()).add(code_value)
+    requestable_codes_by_category = requestability_context.requestable_codes_by_category
 
     memberships: list[dict[str, object]] = []
     for membership in valid_memberships:
@@ -238,16 +229,7 @@ def _profile_context_for_user(
         r for r in pending_requests if r.get("status") == MembershipRequest.Status.on_hold
     ]
 
-    membership_can_request_any = membership_request_can_request_any(
-        username=fu.username,
-        eligibility=membership_eligibility,
-    )
-    if membership_can_request_any:
-        held_category_ids = {membership.category_id for membership in valid_memberships}
-        membership_can_request_any = any(
-            category_id not in held_category_ids
-            for category_id, _code in requestable_membership_type_rows
-        )
+    membership_can_request_any = requestability_context.membership_can_request_any
 
     email_is_blacklisted = False
     if is_self and fu.email:
@@ -406,9 +388,7 @@ def user_profile(request: HttpRequest, username: str) -> HttpResponse:
 
 
 def users(request: HttpRequest) -> HttpResponse:
-    from core.permissions import ASTRA_VIEW_USER_DIRECTORY
-
-    if not request.user.has_perm(ASTRA_VIEW_USER_DIRECTORY):
+    if not can_view_user_directory(request.user):
         raise Http404
 
     users_list = FreeIPAUser.all()

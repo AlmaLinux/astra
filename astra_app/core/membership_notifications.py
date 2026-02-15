@@ -15,26 +15,18 @@ from core.email_context import (
     user_email_context,
 )
 from core.models import FreeIPAPermissionGrant, MembershipType, Organization
+from core.public_urls import build_public_absolute_url
 from core.templated_email import queue_templated_email
-
-
-def _join_base_url_with_path(*, path: str, base_url: str | None = None) -> str:
-    base = (base_url if base_url is not None else settings.PUBLIC_BASE_URL) or ""
-    normalized_base = str(base).strip().rstrip("/")
-    if not normalized_base:
-        # Fallback for misconfiguration; prefer sending a link over crashing.
-        return path
-    return f"{normalized_base}{path}"
 
 
 def membership_extend_url(*, membership_type_code: str, base_url: str | None = None) -> str:
     path = f"{reverse('membership-request')}?{urlencode({'membership_type': membership_type_code})}"
-    return _join_base_url_with_path(path=path, base_url=base_url)
+    return build_public_absolute_url(path=path, on_missing="relative", base_url=base_url)
 
 
 def membership_requests_url(*, base_url: str | None = None) -> str:
     path = reverse("membership-requests")
-    return _join_base_url_with_path(path=path, base_url=base_url)
+    return build_public_absolute_url(path=path, on_missing="relative", base_url=base_url)
 
 
 def organization_membership_request_url(
@@ -48,7 +40,7 @@ def organization_membership_request_url(
     if normalized_type_code:
         path = f"{path}?{urlencode({'membership_type': normalized_type_code})}"
 
-    return _join_base_url_with_path(path=path, base_url=base_url)
+    return build_public_absolute_url(path=path, on_missing="relative", base_url=base_url)
 
 
 def organization_sponsor_notification_recipient_email(

@@ -6,6 +6,7 @@ from urllib.parse import parse_qs, quote, urlsplit
 
 from django.conf import settings
 from django.contrib.messages import get_messages
+from django.http import HttpResponse
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -44,6 +45,62 @@ class MembershipRequestsFlowTests(TestCase):
         session["_freeipa_username"] = username
         session.save()
 
+    def test_committee_action_views_delegate_to_runner(self) -> None:
+        from core.models import MembershipRequest, MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "acceptance_template": None,
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        membership_request = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.pending,
+        )
+
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "givenname": ["Review"],
+                "sn": ["Er"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+            },
+        )
+        self._login_as_freeipa_user("reviewer")
+
+        endpoints = {
+            "membership-request-approve": "approve",
+            "membership-request-reject": "reject",
+            "membership-request-rfi": "rfi",
+            "membership-request-ignore": "ignore",
+        }
+
+        for route_name, action in endpoints.items():
+            with self.subTest(route_name=route_name):
+                with (
+                    patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+                    patch(
+                        "core.views_membership.run_membership_request_action",
+                        create=True,
+                        return_value=HttpResponse(status=204),
+                    ) as runner_mock,
+                ):
+                    response = self.client.post(reverse(route_name, args=[membership_request.pk]), data={})
+
+                self.assertEqual(response.status_code, 204)
+                self.assertEqual(runner_mock.call_count, 1)
+                self.assertEqual(runner_mock.call_args.args[1], membership_request.pk)
+                self.assertEqual(runner_mock.call_args.kwargs["action"], action)
+
     def test_user_can_request_membership_and_email_is_sent(self) -> None:
         from core.models import MembershipLog, MembershipRequest, MembershipType
 
@@ -77,7 +134,7 @@ class MembershipRequestsFlowTests(TestCase):
             patch("core.backends.FreeIPAUser.get", return_value=alice),
             patch("core.views_membership.block_action_without_coc", return_value=None),
         ):
-            with patch("post_office.mail.send", autospec=True) as send_mock:
+            with patch("core.membership_request_workflow.queue_templated_email", autospec=True) as send_mock:
                 resp = self.client.post(
                     reverse("membership-request"),
                     data={
@@ -102,7 +159,7 @@ class MembershipRequestsFlowTests(TestCase):
         _, kwargs = send_mock.call_args
         self.assertEqual(kwargs["recipients"], ["alice@example.com"])
         self.assertEqual(kwargs["sender"], settings.DEFAULT_FROM_EMAIL)
-        self.assertEqual(kwargs["template"], settings.MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME)
+        self.assertEqual(kwargs["template_name"], settings.MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME)
         self.assertEqual(kwargs["context"]["username"], "alice")
         self.assertIn("first_name", kwargs["context"])
         self.assertIn("last_name", kwargs["context"])
@@ -645,7 +702,7 @@ class MembershipRequestsFlowTests(TestCase):
 
         with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
             with patch.object(FreeIPAUser, "add_to_group", autospec=True) as add_mock:
-                with patch("post_office.mail.send", autospec=True) as send_mock:
+                with patch("core.membership_request_workflow.queue_templated_email", autospec=True) as send_mock:
                     resp = self.client.post(
                         reverse("membership-request-approve", args=[req.pk]),
                         follow=False,
@@ -670,7 +727,7 @@ class MembershipRequestsFlowTests(TestCase):
         send_mock.assert_called_once()
         _, kwargs = send_mock.call_args
         self.assertEqual(kwargs["recipients"], ["alice@example.com"])
-        self.assertEqual(kwargs["template"], "membership-request-approved-individual")
+        self.assertEqual(kwargs["template_name"], "membership-request-approved-individual")
 
     def test_committee_approve_is_blocked_if_configured_template_is_missing(self) -> None:
         import uuid
@@ -889,7 +946,7 @@ class MembershipRequestsFlowTests(TestCase):
 
         with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
             with patch.object(FreeIPAUser, "add_to_group", autospec=True) as add_mock:
-                with patch("post_office.mail.send", autospec=True) as send_mock:
+                with patch("core.membership_request_workflow.queue_templated_email", autospec=True) as send_mock:
                     resp = self.client.post(
                         reverse("membership-request-approve", args=[req.pk]),
                         follow=False,
@@ -903,7 +960,7 @@ class MembershipRequestsFlowTests(TestCase):
         send_mock.assert_called_once()
         _, kwargs = send_mock.call_args
         self.assertEqual(kwargs["recipients"], ["bob@example.com"])
-        self.assertEqual(kwargs["template"], "membership-request-approved-silver")
+        self.assertEqual(kwargs["template_name"], "membership-request-approved-silver")
 
     def test_committee_can_approve_org_request_with_custom_email_redirects_to_send_mail(self) -> None:
         from post_office.models import EmailTemplate
@@ -1052,7 +1109,7 @@ class MembershipRequestsFlowTests(TestCase):
 
         with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
             with patch.object(FreeIPAUser, "add_to_group", autospec=True):
-                with patch("post_office.mail.send", autospec=True) as send_mock:
+                with patch("core.membership_request_workflow.queue_templated_email", autospec=True) as send_mock:
                     resp = self.client.post(
                         reverse("membership-request-approve", args=[req.pk]),
                         follow=False,
@@ -1220,7 +1277,7 @@ class MembershipRequestsFlowTests(TestCase):
         self._login_as_freeipa_user("reviewer")
 
         with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
-            with patch("post_office.mail.send", autospec=True) as send_mock:
+            with patch("core.membership_request_workflow.queue_templated_email", autospec=True) as send_mock:
                 resp = self.client.post(
                     reverse("membership-request-reject", args=[req.pk]),
                     data={"reason": "Missing required info"},
@@ -1244,7 +1301,7 @@ class MembershipRequestsFlowTests(TestCase):
         send_mock.assert_called_once()
         _, kwargs = send_mock.call_args
         self.assertEqual(kwargs["recipients"], ["alice@example.com"])
-        self.assertEqual(kwargs["template"], settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME)
+        self.assertEqual(kwargs["template_name"], settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME)
         self.assertIn("first_name", kwargs["context"])
         self.assertIn("last_name", kwargs["context"])
         self.assertIn("full_name", kwargs["context"])
@@ -1379,7 +1436,7 @@ class MembershipRequestsFlowTests(TestCase):
             return None
 
         with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
-            with patch("post_office.mail.send", autospec=True) as send_mock:
+            with patch("core.membership_request_workflow.queue_templated_email", autospec=True) as send_mock:
                 resp = self.client.post(
                     reverse("membership-requests-bulk"),
                     data={"bulk_action": "reject", "selected": [str(req.pk)]},
@@ -1390,7 +1447,7 @@ class MembershipRequestsFlowTests(TestCase):
         send_mock.assert_called_once()
         _, kwargs = send_mock.call_args
         self.assertEqual(kwargs["recipients"], ["bob@example.com"])
-        self.assertEqual(kwargs["template"], settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME)
+        self.assertEqual(kwargs["template_name"], settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME)
 
     def test_bulk_actions_send_org_approve_email(self) -> None:
         from post_office.models import EmailTemplate
@@ -1460,7 +1517,7 @@ class MembershipRequestsFlowTests(TestCase):
 
         with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
             with patch.object(FreeIPAUser, "add_to_group", autospec=True) as add_mock:
-                with patch("post_office.mail.send", autospec=True) as send_mock:
+                with patch("core.membership_request_workflow.queue_templated_email", autospec=True) as send_mock:
                     resp = self.client.post(
                         reverse("membership-requests-bulk"),
                         data={"bulk_action": "approve", "selected": [str(req.pk)]},
@@ -1475,7 +1532,7 @@ class MembershipRequestsFlowTests(TestCase):
         send_mock.assert_called_once()
         _, kwargs = send_mock.call_args
         self.assertEqual(kwargs["recipients"], ["bob@example.com"])
-        self.assertEqual(kwargs["template"], "membership-request-approved-silver")
+        self.assertEqual(kwargs["template_name"], "membership-request-approved-silver")
 
     def test_committee_can_reject_request_with_custom_email_redirects_to_send_mail(self) -> None:
         from urllib.parse import parse_qs, urlparse
@@ -1614,7 +1671,7 @@ class MembershipRequestsFlowTests(TestCase):
         self._login_as_freeipa_user("reviewer")
 
         with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
-            with patch("post_office.mail.send", autospec=True) as send_mock:
+            with patch("core.membership_request_workflow.queue_templated_email", autospec=True) as send_mock:
                 resp = self.client.post(
                     reverse("membership-request-reject", args=[req.pk]),
                     data={"reason": "Nope"},

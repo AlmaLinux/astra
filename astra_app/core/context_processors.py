@@ -3,64 +3,40 @@ from django.conf import settings
 from core.build_info import get_build_sha
 from core.models import AccountInvitation, MembershipRequest
 from core.permissions import (
-    ASTRA_ADD_MEMBERSHIP,
-    ASTRA_ADD_SEND_MAIL,
-    ASTRA_CHANGE_MEMBERSHIP,
-    ASTRA_DELETE_MEMBERSHIP,
-    ASTRA_VIEW_MEMBERSHIP,
+    membership_review_permissions,
 )
-
-# Map context key → permission codename for the membership review sidebar.
-_MEMBERSHIP_PERMS: dict[str, str] = {
-    "membership_can_add": ASTRA_ADD_MEMBERSHIP,
-    "membership_can_change": ASTRA_CHANGE_MEMBERSHIP,
-    "membership_can_delete": ASTRA_DELETE_MEMBERSHIP,
-    "membership_can_view": ASTRA_VIEW_MEMBERSHIP,
-    "send_mail_can_add": ASTRA_ADD_SEND_MAIL,
-}
+from core.views_utils import get_username
 
 
 def membership_review(request) -> dict[str, object]:
     # Some template-tag tests render templates with a minimal request object.
     if not hasattr(request, "user"):
-        return {
-            **{k: False for k in _MEMBERSHIP_PERMS},
-            "membership_requests_pending_count": 0,
-            "membership_requests_on_hold_count": 0,
-            "account_invitations_accepted_count": 0,
-        }
+        return dict(membership_review_permissions(user=object()))
 
     user = request.user
-    try:
-        perms = {key: bool(user.has_perm(perm)) for key, perm in _MEMBERSHIP_PERMS.items()}
-    except Exception:
-        perms = {key: False for key in _MEMBERSHIP_PERMS}
+    perms: dict[str, object] = dict(membership_review_permissions(user=user))
 
     # Requests UI + approve/reject/ignore is guarded by "add".
-    pending_count = 0
-    on_hold_count = 0
-    accepted_invitations_count = 0
     if perms["membership_can_add"]:
-        pending_count = MembershipRequest.objects.filter(status=MembershipRequest.Status.pending).count()
-        on_hold_count = MembershipRequest.objects.filter(status=MembershipRequest.Status.on_hold).count()
-        accepted_invitations_count = AccountInvitation.objects.filter(
+        perms["membership_requests_pending_count"] = MembershipRequest.objects.filter(
+            status=MembershipRequest.Status.pending
+        ).count()
+        perms["membership_requests_on_hold_count"] = MembershipRequest.objects.filter(
+            status=MembershipRequest.Status.on_hold
+        ).count()
+        perms["account_invitations_accepted_count"] = AccountInvitation.objects.filter(
             dismissed_at__isnull=True,
             accepted_at__isnull=False,
         ).count()
 
-    return {
-        **perms,
-        "membership_requests_pending_count": pending_count,
-        "membership_requests_on_hold_count": on_hold_count,
-        "account_invitations_accepted_count": accepted_invitations_count,
-    }
+    return perms
 
 
 def organization_nav(request) -> dict[str, object]:
     """Navigation visibility for organizations; True for any authenticated user."""
     try:
         if hasattr(request, "user") and request.user.is_authenticated:
-            if str(request.user.get_username() or "").strip():
+            if get_username(request):
                 return {"has_organizations": True}
     except Exception:
         pass

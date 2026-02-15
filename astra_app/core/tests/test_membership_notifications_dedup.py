@@ -13,6 +13,7 @@ from core.membership_notifications import (
     would_queue_membership_pending_requests_notification,
 )
 from core.models import Organization
+from core.public_urls import normalize_public_base_url
 
 
 class AlreadySentTodayTests(TestCase):
@@ -66,7 +67,7 @@ class AlreadySentTodayTests(TestCase):
         self.assertEqual(membership_requests_url(base_url=""), "/membership/requests/")
 
     def test_membership_requests_url_uses_public_base_when_present(self) -> None:
-        base = str(settings.PUBLIC_BASE_URL or "").strip().rstrip("/")
+        base = normalize_public_base_url(settings.PUBLIC_BASE_URL)
         if not base:
             self.skipTest("PUBLIC_BASE_URL is empty in this environment")
 

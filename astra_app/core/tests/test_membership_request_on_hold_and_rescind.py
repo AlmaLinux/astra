@@ -17,11 +17,14 @@ from core.permissions import (
     ASTRA_DELETE_MEMBERSHIP,
     ASTRA_VIEW_MEMBERSHIP,
 )
+from core.tests.utils_test_data import ensure_core_categories, ensure_email_templates
 
 
 class MembershipRequestOnHoldAndRescindTests(TestCase):
     def setUp(self) -> None:
         super().setUp()
+        ensure_core_categories()
+        ensure_email_templates()
 
         self._freeipa_users: dict[str, FreeIPAUser] = {}
         patcher = patch("core.backends.FreeIPAUser.get", side_effect=self._get_freeipa_user)
@@ -114,7 +117,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
             html_message="",
         )
 
-        with patch("post_office.mail.send", autospec=True, return_value=email) as send_mock:
+        with patch("core.membership_request_workflow.queue_templated_email", autospec=True, return_value=email) as send_mock:
             resp = self.client.post(
                 reverse("membership-request-rfi", args=[req.pk]),
                 data={"rfi_message": "Please clarify your contributions."},
@@ -163,7 +166,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
         send_mock.assert_called_once()
         _, kwargs = send_mock.call_args
         self.assertEqual(kwargs["recipients"], ["alice@example.com"])
-        self.assertEqual(kwargs["template"], settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME)
+        self.assertEqual(kwargs["template_name"], settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME)
         self.assertIn("rfi_message", kwargs["context"])
         self.assertIn("application_url", kwargs["context"])
         self.assertTrue(kwargs["context"]["application_url"].endswith(reverse("membership-request-self", args=[req.pk])))
@@ -212,7 +215,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
             action=MembershipLog.Action.on_hold,
         ).count()
 
-        with patch("post_office.mail.send", autospec=True) as send_mock:
+        with patch("core.membership_request_workflow.queue_templated_email", autospec=True) as send_mock:
             resp = self.client.post(
                 reverse("membership-request-rfi", args=[req.pk]),
                 data={"rfi_message": "Already on hold."},
@@ -330,7 +333,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
         )
 
         self._login_as_freeipa_user("reviewer")
-        with patch("post_office.mail.send", autospec=True):
+        with patch("core.membership_request_workflow.queue_templated_email", autospec=True):
             resp = self.client.post(
                 reverse("membership-request-reject", args=[req.pk]),
                 data={"reason": "No."},
@@ -518,7 +521,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
         )
 
         self._login_as_freeipa_user("reviewer")
-        with patch("post_office.mail.send", autospec=True):
+        with patch("core.membership_request_workflow.queue_templated_email", autospec=True):
             resp = self.client.post(
                 reverse("membership-request-reject", args=[req.pk]),
                 data={"reason": "No."},
@@ -874,7 +877,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("post_office.mail.send", autospec=True) as send_mock:
+        with patch("core.membership_request_workflow.queue_templated_email", autospec=True) as send_mock:
             resp = self.client.post(
                 reverse("membership-request-rfi", args=[req.pk]),
                 data={"rfi_message": ""},
@@ -904,7 +907,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
         send_mock.assert_called_once()
         _, kwargs = send_mock.call_args
         self.assertEqual(kwargs["recipients"], ["alice@example.com"])
-        self.assertEqual(kwargs["template"], settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME)
+        self.assertEqual(kwargs["template_name"], settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME)
         self.assertIn("rfi_message", kwargs["context"])
         self.assertEqual(kwargs["context"]["rfi_message"], "")
 

@@ -25,7 +25,13 @@ from core.elections_services import (
 )
 from core.models import AuditLogEntry, Ballot, Candidate, Election, Membership, MembershipType, VotingCredential
 from core.tests.ballot_chain import compute_chain_hash
+from core.tests.utils_test_data import ensure_core_categories, ensure_email_templates
 from core.tokens import election_genesis_chain_hash
+
+
+def setUpModule() -> None:
+    ensure_core_categories()
+    ensure_email_templates()
 
 
 class ElectionCredentialAndBallotTests(TestCase):

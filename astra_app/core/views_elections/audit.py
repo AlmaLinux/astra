@@ -18,6 +18,7 @@ from core.elections_services import candidate_username_by_id_map
 from core.models import AuditLogEntry, Ballot, Candidate, Election
 from core.permissions import ASTRA_ADD_ELECTION
 from core.views_elections._helpers import _elected_candidate_display, _get_active_election, _tally_elected_ids
+from core.views_utils import build_url_for_page
 
 
 def _get_exportable_election(*, election_id: int) -> Election:
@@ -140,13 +141,26 @@ def election_audit_log(request, election_id: int):
 
     base_url = reverse("election-audit-log", args=[election.id])
 
-    def _url_for_page(page: int) -> str:
-        q = request.GET.copy()
-        q["page"] = str(page)
-        return f"{base_url}?{q.urlencode()}"
-
-    newer_url = _url_for_page(page_obj.previous_page_number()) if page_obj.has_previous() else ""
-    older_url = _url_for_page(page_obj.next_page_number()) if page_obj.has_next() else ""
+    newer_url = (
+        build_url_for_page(
+            base_url,
+            query=request.GET,
+            page_param="page",
+            page_value=page_obj.previous_page_number(),
+        )
+        if page_obj.has_previous()
+        else ""
+    )
+    older_url = (
+        build_url_for_page(
+            base_url,
+            query=request.GET,
+            page_param="page",
+            page_value=page_obj.next_page_number(),
+        )
+        if page_obj.has_next()
+        else ""
+    )
 
     ballot_preview_by_date: dict[str, list[dict[str, object]]] = {}
     ballot_preview_limit = 50
@@ -187,7 +201,7 @@ def election_audit_log(request, election_id: int):
                     )
                 ballot_preview_by_date[day.isoformat()] = preview
 
-    ballot_agg = Ballot.objects.filter(election=election, superseded_by__isnull=True).aggregate(
+    ballot_agg = Ballot.objects.for_election(election=election).final().aggregate(
         ballots=Count("id"),
         weight_total=Sum("weight"),
     )

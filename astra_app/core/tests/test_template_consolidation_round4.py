@@ -32,3 +32,37 @@ class Round4TemplateConsolidationTests(SimpleTestCase):
         source = self._template_source("_membership_request_actions.html")
 
         self.assertNotIn("organization_display_name|default:membership_request.requested_username", source)
+
+    def test_phase9_bulk_pages_use_shared_bulk_table_actions_module(self) -> None:
+        invitations = self._template_source("account_invitations.html")
+        requests = self._template_source("membership_requests.html")
+
+        self.assertIn("core/js/bulk_table_actions.js", invitations)
+        self.assertIn("core/js/bulk_table_actions.js", requests)
+        self.assertNotIn("function setupBulk", invitations)
+        self.assertNotIn("function setupBulk", requests)
+
+    def test_phase9_membership_shared_modals_compose_canonical_modal_includes(self) -> None:
+        source = self._template_source("_membership_request_shared_modals.html")
+
+        self.assertIn("_modal_confirm.html", source)
+        self.assertIn("_modal_preset_textarea.html", source)
+        self.assertNotIn("<div class=\"modal fade\"", source)
+
+    def test_phase9_compose_template_is_markup_only_and_uses_include_contract(self) -> None:
+        compose = self._template_source("_templated_email_compose.html")
+        send_mail = self._template_source("send_mail.html")
+        election_edit = self._template_source("election_edit.html")
+        email_template_edit = self._template_source("email_template_edit.html")
+
+        self.assertNotIn("core/vendor/codemirror", compose)
+        self.assertNotIn("<script src=", compose)
+        self.assertNotIn("<style>", compose)
+
+        self.assertIn("_templated_email_compose_assets_head.html", send_mail)
+        self.assertIn("_templated_email_compose_assets_head.html", election_edit)
+        self.assertIn("_templated_email_compose_assets_head.html", email_template_edit)
+
+        self.assertIn("_templated_email_compose_assets_scripts.html", send_mail)
+        self.assertIn("_templated_email_compose_assets_scripts.html", election_edit)
+        self.assertIn("_templated_email_compose_assets_scripts.html", email_template_edit)

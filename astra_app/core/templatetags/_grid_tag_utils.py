@@ -6,7 +6,7 @@ from django.template import Context
 from django.template.loader import render_to_string
 from django.utils.safestring import mark_safe
 
-from core.views_utils import _normalize_str, pagination_window
+from core.views_utils import _normalize_str, build_page_url_prefix, pagination_window
 
 
 def parse_grid_query(request: HttpRequest | None) -> tuple[str, str | None, str, str]:
@@ -16,10 +16,7 @@ def parse_grid_query(request: HttpRequest | None) -> tuple[str, str | None, str,
     query = _normalize_str(request.GET.get("q"))
     page_number = _normalize_str(request.GET.get("page")) or None
 
-    params = request.GET.copy()
-    params.pop("page", None)
-    base_query = params.urlencode()
-    page_url_prefix = f"?{base_query}&page=" if base_query else "?page="
+    base_query, page_url_prefix = build_page_url_prefix(request.GET, page_param="page")
     return query, page_number, base_query, page_url_prefix
 
 

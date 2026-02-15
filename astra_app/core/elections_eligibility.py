@@ -4,7 +4,6 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from django.conf import settings
-from django.db.models import Sum
 from django.utils import timezone
 
 from core import backends
@@ -42,6 +41,111 @@ class CandidateValidationResult:
     ineligible_nominators: set[str]
 
 
+@dataclass(frozen=True)
+class EligibilityFacts:
+    weight: int
+    term_start_at: datetime.datetime | None
+    has_any_vote_eligible: bool
+    has_active_vote_eligible_at_reference: bool
+
+
+def _election_reference_datetime(*, election: Election) -> datetime.datetime:
+    reference_datetime = election.start_datetime
+    if election.status == Election.Status.draft:
+        reference_datetime = max(election.start_datetime, timezone.now())
+    return reference_datetime
+
+
+def _eligibility_facts_by_username(*, election: Election) -> dict[str, EligibilityFacts]:
+    reference_datetime = _election_reference_datetime(election=election)
+    cutoff = reference_datetime - datetime.timedelta(days=settings.ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS)
+
+    weights_by_username: dict[str, int] = {}
+    term_start_by_username: dict[str, datetime.datetime] = {}
+    has_any_vote_eligible: set[str] = set()
+    has_active_vote_eligible_at_reference: set[str] = set()
+
+    memberships = Membership.objects.filter(
+        membership_type__category__is_individual=True,
+        membership_type__enabled=True,
+        membership_type__votes__gt=0,
+    ).values("target_username", "created_at", "expires_at", "membership_type__votes")
+    for row in memberships:
+        username = str(row.get("target_username") or "").strip().lower()
+        if not username:
+            continue
+
+        votes = int(row.get("membership_type__votes") or 0)
+        if votes <= 0:
+            continue
+
+        has_any_vote_eligible.add(username)
+
+        start_at = row.get("created_at")
+        if isinstance(start_at, datetime.datetime):
+            if username not in term_start_by_username or start_at < term_start_by_username[username]:
+                term_start_by_username[username] = start_at
+
+        expires_at = row.get("expires_at")
+        is_active_at_reference = expires_at is None or (
+            isinstance(expires_at, datetime.datetime) and expires_at >= reference_datetime
+        )
+        if is_active_at_reference:
+            has_active_vote_eligible_at_reference.add(username)
+
+        if is_active_at_reference and isinstance(start_at, datetime.datetime) and start_at <= cutoff:
+            weights_by_username[username] = weights_by_username.get(username, 0) + votes
+
+    org_memberships = (
+        Membership.objects.select_related("target_organization", "membership_type")
+        .filter(
+            target_organization__isnull=False,
+            membership_type__enabled=True,
+            membership_type__votes__gt=0,
+        )
+        .only(
+            "target_organization__representative",
+            "membership_type__votes",
+            "created_at",
+            "expires_at",
+        )
+    )
+    for membership in org_memberships:
+        username = str(membership.target_organization.representative or "").strip().lower()
+        if not username:
+            continue
+
+        votes = int(membership.membership_type.votes or 0)
+        if votes <= 0:
+            continue
+
+        has_any_vote_eligible.add(username)
+
+        start_at = membership.created_at
+        if isinstance(start_at, datetime.datetime):
+            if username not in term_start_by_username or start_at < term_start_by_username[username]:
+                term_start_by_username[username] = start_at
+
+        expires_at = membership.expires_at
+        is_active_at_reference = expires_at is None or expires_at >= reference_datetime
+        if is_active_at_reference:
+            has_active_vote_eligible_at_reference.add(username)
+
+        if is_active_at_reference and start_at <= cutoff:
+            weights_by_username[username] = weights_by_username.get(username, 0) + votes
+
+    usernames = set(weights_by_username) | set(term_start_by_username) | has_any_vote_eligible | has_active_vote_eligible_at_reference
+    return {
+        username: EligibilityFacts(
+            weight=weights_by_username.get(username, 0),
+            term_start_at=term_start_by_username.get(username),
+            has_any_vote_eligible=username in has_any_vote_eligible,
+            has_active_vote_eligible_at_reference=username in has_active_vote_eligible_at_reference,
+        )
+        for username in usernames
+    }
+
+
 def _raise_unavailable(exc: Exception) -> None:
     raise ElectionEligibilityError(FREEIPA_UNAVAILABLE_MESSAGE, status_code=503) from exc
 
@@ -62,60 +166,14 @@ def _get_required_group(*, group_cn: str, require_fresh: bool, missing_message: 
 
 
 def _eligible_voters_from_memberships(*, election: Election) -> list[EligibleVoter]:
-    reference_datetime = election.start_datetime
-    if election.status == Election.Status.draft:
-        reference_datetime = max(election.start_datetime, timezone.now())
-
-    cutoff = reference_datetime - datetime.timedelta(days=settings.ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS)
-    eligible_qs = (
-        Membership.objects.filter(
-            membership_type__category__is_individual=True,
-            membership_type__enabled=True,
-            membership_type__votes__gt=0,
-            created_at__lte=cutoff,
-        )
-        .active(at=reference_datetime)
-        .values("target_username")
-        .annotate(weight=Sum("membership_type__votes"))
-        .order_by("target_username")
-    )
-
-    weights_by_username: dict[str, int] = {}
-    for row in eligible_qs:
-        username = str(row["target_username"])
-        weight = int(row["weight"] or 0)
-        if not username.strip() or weight <= 0:
-            continue
-        weights_by_username[username] = weights_by_username.get(username, 0) + weight
-
-    org_memberships = (
-        Membership.objects.select_related("target_organization", "membership_type")
-        .filter(
-            target_organization__isnull=False,
-            membership_type__enabled=True,
-            membership_type__votes__gt=0,
-            created_at__lte=cutoff,
-        )
-        .active(at=reference_datetime)
-        .only(
-            "target_organization__representative",
-            "membership_type__votes",
-        )
-    )
-
-    for org_membership in org_memberships:
-        votes = int(org_membership.membership_type.votes or 0)
-        if votes <= 0:
-            continue
-
-        username = str(org_membership.target_organization.representative or "").strip()
-        if not username:
-            continue
-        weights_by_username[username] = weights_by_username.get(username, 0) + votes
+    facts_by_username = _eligibility_facts_by_username(election=election)
 
     return [
         EligibleVoter(username=username, weight=weight)
-        for username, weight in sorted(weights_by_username.items(), key=lambda kv: kv[0].lower())
+        for username, weight in sorted(
+            ((username, facts.weight) for username, facts in facts_by_username.items()),
+            key=lambda kv: kv[0].lower(),
+        )
         if weight > 0
     ]
 
@@ -344,64 +402,8 @@ def ineligible_voters_with_reasons(*, election: Election) -> list[dict[str, obje
     eligible = _eligible_voters_from_memberships(election=election)
     eligible_usernames_lower = {v.username.lower() for v in eligible if v.username.strip()}
 
-    reference_datetime = election.start_datetime
-    if election.status == Election.Status.draft:
-        reference_datetime = max(election.start_datetime, timezone.now())
-
-    # Build maps of vote-bearing membership/sponsorship data for reason classification.
-    term_start_by_username: dict[str, datetime.datetime] = {}
-    has_any_vote_eligible: set[str] = set()
-    has_active_vote_eligible_at_reference: set[str] = set()
-
-    memberships = Membership.objects.filter(
-        membership_type__category__is_individual=True,
-        membership_type__enabled=True,
-        membership_type__votes__gt=0,
-    ).values("target_username", "created_at", "expires_at")
-    for row in memberships:
-        username = str(row.get("target_username") or "").strip()
-        if not username:
-            continue
-        username = username.lower()
-
-        has_any_vote_eligible.add(username)
-
-        start_at = row.get("created_at")
-        if isinstance(start_at, datetime.datetime):
-            if username not in term_start_by_username or start_at < term_start_by_username[username]:
-                term_start_by_username[username] = start_at
-
-        expires_at = row.get("expires_at")
-        if expires_at is None or (
-            isinstance(expires_at, datetime.datetime) and expires_at >= reference_datetime
-        ):
-            has_active_vote_eligible_at_reference.add(username)
-
-    org_memberships = (
-        Membership.objects.select_related("target_organization")
-        .filter(
-            target_organization__isnull=False,
-            membership_type__enabled=True,
-            membership_type__votes__gt=0,
-        )
-        .only("target_organization__representative", "created_at", "expires_at")
-    )
-    for org_membership in org_memberships:
-        username = str(org_membership.target_organization.representative or "").strip()
-        if not username:
-            continue
-        username = username.lower()
-
-        has_any_vote_eligible.add(username)
-
-        start_at = org_membership.created_at
-        if isinstance(start_at, datetime.datetime):
-            if username not in term_start_by_username or start_at < term_start_by_username[username]:
-                term_start_by_username[username] = start_at
-
-        expires_at = org_membership.expires_at
-        if expires_at is None or expires_at >= reference_datetime:
-            has_active_vote_eligible_at_reference.add(username)
+    reference_datetime = _election_reference_datetime(election=election)
+    facts_by_username = _eligibility_facts_by_username(election=election)
 
     # Determine the electorate: group members if eligible_group_cn is set, else all FreeIPA users.
     group_cn = str(election.eligible_group_cn or "").strip()
@@ -438,16 +440,17 @@ def ineligible_voters_with_reasons(*, election: Election) -> list[dict[str, obje
         days_at_start: int | str = ""
         days_short: int | str = ""
 
-        start_at = term_start_by_username.get(username)
+        facts = facts_by_username.get(username)
+        start_at = facts.term_start_at if facts is not None else None
         term_start_day: datetime.date | None = None
         if isinstance(start_at, datetime.datetime):
             term_start_day = timezone.localtime(start_at).date()
             term_start_date = term_start_day.isoformat()
             days_at_start = (election_start_day - term_start_day).days
 
-        if username not in has_any_vote_eligible:
+        if facts is None or not facts.has_any_vote_eligible:
             reason = "no_membership"
-        elif username not in has_active_vote_eligible_at_reference:
+        elif not facts.has_active_vote_eligible_at_reference:
             reason = "expired"
         else:
             reason = "too_new"

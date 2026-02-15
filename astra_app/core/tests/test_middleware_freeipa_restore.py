@@ -11,6 +11,8 @@ from django.utils.functional import SimpleLazyObject
 
 from core import backends
 from core.middleware import FreeIPAAuthenticationMiddleware, FreeIPAUnavailableMiddleware
+from core.templatetags.core_membership_notes import _current_username_from_request
+from core.views_utils import get_username
 
 
 class FreeIPAMiddlewareRestoreTests(TestCase):
@@ -204,3 +206,29 @@ class FreeIPAMiddlewareRestoreTests(TestCase):
 
         self.assertIsInstance(user, backends.DegradedFreeIPAUser)
         backends._reset_freeipa_circuit_failures()
+
+    def test_username_ssot_session_authoritative_across_layers_without_lazy_evaluation(self):
+        factory = RequestFactory()
+        request = factory.get("/")
+        self._add_session(request)
+        request.session["_freeipa_username"] = "alice"
+        request.session.save()
+
+        lazy_eval_count = {"count": 0}
+
+        def _build_lazy_user():
+            lazy_eval_count["count"] += 1
+            return SimpleNamespace(is_authenticated=True, get_username=lambda: "bob", username="bob")
+
+        request.user = SimpleLazyObject(_build_lazy_user)
+
+        middleware = FreeIPAAuthenticationMiddleware(lambda req: HttpResponse("ok"))
+
+        with patch("core.middleware.set_current_viewer_username", autospec=True) as mocked_set_viewer:
+            response = middleware(request)
+
+        self.assertEqual(response.status_code, 200)
+        mocked_set_viewer.assert_called_once_with("alice")
+        self.assertEqual(get_username(request), "alice")
+        self.assertEqual(_current_username_from_request(request), "alice")
+        self.assertEqual(lazy_eval_count["count"], 0)

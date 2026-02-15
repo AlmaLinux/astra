@@ -16,7 +16,8 @@ from django.urls import reverse
 
 from core.backends import FreeIPAUser
 from core.models import FreeIPAPermissionGrant, MembershipRequest, MembershipType
-from core.permissions import ASTRA_VIEW_MEMBERSHIP
+from core.permissions import ASTRA_ADD_MEMBERSHIP
+from core.tests.utils_test_data import ensure_core_categories
 
 
 class SharedModalScriptDeferredTests(TestCase):
@@ -24,8 +25,9 @@ class SharedModalScriptDeferredTests(TestCase):
 
     def setUp(self) -> None:
         super().setUp()
+        ensure_core_categories()
         FreeIPAPermissionGrant.objects.get_or_create(
-            permission=ASTRA_VIEW_MEMBERSHIP,
+            permission=ASTRA_ADD_MEMBERSHIP,
             principal_type=FreeIPAPermissionGrant.PrincipalType.group,
             principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
         )
@@ -73,9 +75,8 @@ class SharedModalScriptDeferredTests(TestCase):
         # The shared modals must be present.
         self.assertIn('id="shared-approve-modal"', content)
 
-        # The script that binds show.bs.modal handlers MUST defer until
-        # DOMContentLoaded so jQuery is loaded.
-        self.assertIn("DOMContentLoaded", content)
+        # The shared-modal binding must be loaded as a dedicated static module.
+        self.assertIn('src="/static/core/js/membership_request_shared_modals.js"', content)
 
 
 class GroupDetailModalScriptDeferredTests(TestCase):

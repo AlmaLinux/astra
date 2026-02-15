@@ -1,13 +1,13 @@
 import logging
 from typing import override
 
-import post_office.mail
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
 from core.backends import FreeIPAGroup, FreeIPAUser
 from core.models import Membership, MembershipType
+from core.templated_email import queue_templated_email
 
 logger = logging.getLogger(__name__)
 
@@ -269,10 +269,10 @@ class Command(BaseCommand):
             )
             return
 
-        post_office.mail.send(
+        queue_templated_email(
             recipients=unique_recipients,
             sender=settings.DEFAULT_FROM_EMAIL,
-            template=settings.FREEIPA_MEMBERSHIP_RECONCILE_ALERT_EMAIL_TEMPLATE_NAME,
+            template_name=settings.FREEIPA_MEMBERSHIP_RECONCILE_ALERT_EMAIL_TEMPLATE_NAME,
             context=context,
         )
 

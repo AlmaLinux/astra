@@ -6,6 +6,7 @@ from django.urls import reverse
 from django.utils.safestring import SafeString, mark_safe
 
 from core.backends import FreeIPAUser
+from core.public_urls import build_public_absolute_url, normalize_public_base_url
 
 if TYPE_CHECKING:
     from core.models import Organization
@@ -105,20 +106,10 @@ def election_committee_email_context() -> dict[str, str]:
     }
 
 
-def _absolute_url(path: str) -> str:
-    base = str(settings.PUBLIC_BASE_URL or "").strip().rstrip("/")
-    normalized = str(path or "").strip()
-    if not base or not normalized:
-        return ""
-    if not normalized.startswith("/"):
-        normalized = f"/{normalized}"
-    return f"{base}{normalized}"
-
-
 def system_email_context() -> dict[str, str]:
-    public_base_url = str(settings.PUBLIC_BASE_URL or "").strip().rstrip("/")
-    register_url = _absolute_url(reverse("register"))
-    login_url = _absolute_url(reverse("login"))
+    public_base_url = normalize_public_base_url(settings.PUBLIC_BASE_URL)
+    register_url = build_public_absolute_url(reverse("register"), on_missing="empty")
+    login_url = build_public_absolute_url(reverse("login"), on_missing="empty")
     return {
         "public_base_url": public_base_url,
         "register_url": register_url,

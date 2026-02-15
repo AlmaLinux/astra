@@ -1,6 +1,12 @@
 {% extends "core/base.html" %}
+{% load static %}
 
 {% block title %}{% if is_create %}New template{% else %}Edit template{% endif %}{% endblock %}
+
+{% block extra_head %}
+  {{ block.super }}
+  {% include 'core/_templated_email_compose_assets_head.html' %}
+{% endblock %}
 
 {% block header %}
   <h1 class="m-0">{% if is_create %}New template{% else %}Edit template{% endif %}</h1>
@@ -71,4 +77,9 @@
   {% if template and not is_locked %}
     {% include 'core/_modal_confirm.html' with modal_id='email-template-delete-modal' title='Delete email template?' body_prefix='Delete template:' body_emphasis=template.name body_suffix='<p>This cannot be undone.</p>' action_url=template_delete_url submit_label='Delete' submit_class='btn-danger' %}
   {% endif %}
+{% endblock %}
+
+{% block scripts %}
+  {{ block.super }}
+  {% include 'core/_templated_email_compose_assets_scripts.html' %}
 {% endblock %}

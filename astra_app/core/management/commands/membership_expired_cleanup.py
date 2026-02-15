@@ -13,7 +13,13 @@ from core.email_context import (
     user_email_context_from_user,
 )
 from core.ipa_user_attrs import _first
-from core.membership import remove_user_from_group
+from core.membership import (
+    FreeIPACallerMode,
+    FreeIPAGroupRemovalOutcome,
+    FreeIPAMissingUserPolicy,
+    remove_organization_representative_from_group_if_present,
+    remove_user_from_group,
+)
 from core.membership_notifications import (
     organization_membership_request_url,
     organization_sponsor_notification_recipient_email,
@@ -197,7 +203,13 @@ class Command(BaseCommand):
                             f"{rep_username} from group {group_cn}."
                         )
                     else:
-                        if not remove_user_from_group(username=rep_username, group_cn=group_cn):
+                        outcome = remove_organization_representative_from_group_if_present(
+                            representative_username=rep_username,
+                            group_cn=group_cn,
+                            caller_mode=FreeIPACallerMode.best_effort,
+                            missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
+                        )
+                        if outcome == FreeIPAGroupRemovalOutcome.failed:
                             sponsorship_failed += 1
                             removal_failed = True
                             logger.error(

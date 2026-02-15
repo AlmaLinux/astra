@@ -8,6 +8,7 @@ from django.urls import reverse
 from core.backends import FreeIPAUser
 from core.models import FreeIPAPermissionGrant, MembershipType
 from core.permissions import ASTRA_ADD_SEND_MAIL
+from core.tests.utils_test_data import ensure_core_categories
 
 
 class EmailTemplatesUiTests(TestCase):
@@ -18,6 +19,7 @@ class EmailTemplatesUiTests(TestCase):
 
     def setUp(self) -> None:
         super().setUp()
+        ensure_core_categories()
         FreeIPAPermissionGrant.objects.get_or_create(
             permission=ASTRA_ADD_SEND_MAIL,
             principal_type=FreeIPAPermissionGrant.PrincipalType.group,

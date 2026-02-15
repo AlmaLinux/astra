@@ -32,8 +32,12 @@ from core.forms_membership import (
     MembershipUpdateExpiryForm,
 )
 from core.membership import (
+    FreeIPACallerMode,
+    FreeIPAGroupRemovalOutcome,
+    FreeIPAMissingUserPolicy,
     get_membership_request_eligibility,
     get_valid_memberships,
+    remove_organization_representative_from_group_if_present,
     remove_user_from_group,
 )
 from core.membership_notes import CUSTOS, add_note
@@ -60,15 +64,20 @@ from core.permissions import (
     ASTRA_DELETE_MEMBERSHIP,
     ASTRA_VIEW_MEMBERSHIP,
     MEMBERSHIP_PERMISSIONS,
+    has_any_membership_manage_permission,
     has_any_membership_permission,
     json_permission_required_any,
+    membership_review_permissions,
 )
 from core.views_utils import (
     _normalize_str,
     block_action_without_coc,
     block_action_without_country_code,
+    build_page_url_prefix,
     get_username,
     paginate_and_build_context,
+    post_only_404,
+    require_post_or_404,
 )
 
 logger = logging.getLogger(__name__)
@@ -240,8 +249,7 @@ def _paginate_and_render_audit_log(
     if q:
         query_params["q"] = q
     query_params.update(extra_query_params)
-    qs = urlencode(query_params)
-    page_url_prefix = f"?{qs}&page=" if qs else "?page="
+    _, page_url_prefix = build_page_url_prefix(query_params, page_param="page")
     page_ctx = paginate_and_build_context(logs, page_number, 50, page_url_prefix=page_url_prefix)
     return render(
         request,
@@ -401,16 +409,6 @@ def _load_organization_membership(
     return organization, membership_type, active_membership
 
 
-def _membership_target_kwargs(
-    *,
-    username: str | None = None,
-    organization: Organization | None = None,
-) -> dict[str, object]:
-    if organization is not None:
-        return {"target_organization": organization}
-    return {"target_username": str(username or "").strip()}
-
-
 def _remove_organization_representative_group_membership_if_present(
     *,
     request: HttpRequest,
@@ -425,19 +423,23 @@ def _remove_organization_representative_group_membership_if_present(
     if not group_cn or not rep_username:
         return None
 
-    representative = FreeIPAUser.get(rep_username)
-    if representative is None:
+    outcome = remove_organization_representative_from_group_if_present(
+        representative_username=rep_username,
+        group_cn=group_cn,
+        caller_mode=FreeIPACallerMode.best_effort,
+        missing_user_policy=FreeIPAMissingUserPolicy.treat_as_noop,
+    )
+    if outcome in {
+        FreeIPAGroupRemovalOutcome.noop_blank_input,
+        FreeIPAGroupRemovalOutcome.user_not_found,
+        FreeIPAGroupRemovalOutcome.already_not_member,
+        FreeIPAGroupRemovalOutcome.removed,
+    }:
         return None
 
-    return _remove_group_membership_if_present(
-        request=request,
-        user=representative,
-        group_cn=group_cn,
-        redirect_to=redirect_to,
-        error_message=error_message,
-        log_message=log_message,
-        log_args=(organization.pk, rep_username, group_cn),
-    )
+    logger.error(log_message, organization.pk, rep_username, group_cn)
+    messages.error(request, error_message)
+    return redirect(redirect_to)
 
 
 def _remove_freeipa_group_membership(
@@ -473,8 +475,7 @@ def _load_membership_request_for_action(
     Returns (membership_request, redirect_to) on success, or an
     HttpResponse redirect when the request is already in the target state.
     """
-    if request.method != "POST":
-        raise Http404("Not found")
+    require_post_or_404(request)
 
     req = get_object_or_404(
         MembershipRequest.objects.select_related("membership_type", "requested_organization"),
@@ -851,10 +852,8 @@ def membership_request_self(request: HttpRequest, pk: int) -> HttpResponse:
     )
 
 
+@post_only_404
 def membership_request_rescind(request: HttpRequest, pk: int) -> HttpResponse:
-    if request.method != "POST":
-        raise Http404("Not found")
-
     username = get_username(request)
     if not username:
         raise Http404("User not found")
@@ -891,7 +890,7 @@ def membership_audit_log(request: HttpRequest) -> HttpResponse:
     if username:
         logs = logs.filter(target_username=username)
     if organization_id is not None:
-        logs = logs.filter(Q(target_organization_id=organization_id) | Q(target_organization_code=str(organization_id)))
+        logs = logs.for_organization_identifier(organization_id)
     if q:
         logs = logs.filter(
             Q(target_username__icontains=q)
@@ -936,7 +935,7 @@ def membership_audit_log_organization(request: HttpRequest, organization_id: int
             "membership_request__membership_type",
             "target_organization",
         )
-        .filter(Q(target_organization_id=organization_id) | Q(target_organization_code=str(organization_id)))
+        .for_organization_identifier(organization_id)
         .order_by("-created_at")
     )
     if q:
@@ -1141,18 +1140,9 @@ def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
 
 
 @permission_required(ASTRA_VIEW_MEMBERSHIP, login_url=reverse_lazy("users"))
+@post_only_404
 def membership_request_note_add(request: HttpRequest, pk: int) -> HttpResponse:
-    if request.method != "POST":
-        raise Http404("Not found")
-
-    can_vote = any(
-        request.user.has_perm(p)
-        for p in (
-            ASTRA_ADD_MEMBERSHIP,
-            ASTRA_CHANGE_MEMBERSHIP,
-            ASTRA_DELETE_MEMBERSHIP,
-        )
-    )
+    can_vote = has_any_membership_manage_permission(request.user)
 
     req = get_object_or_404(
         MembershipRequest.objects.select_related("membership_type", "requested_organization"),
@@ -1202,12 +1192,7 @@ def membership_request_note_add(request: HttpRequest, pk: int) -> HttpResponse:
             from core.templatetags.core_membership_notes import membership_notes
 
             html = membership_notes(
-                {
-                    "request": request,
-                    "membership_can_add": request.user.has_perm(ASTRA_ADD_MEMBERSHIP),
-                    "membership_can_change": request.user.has_perm(ASTRA_CHANGE_MEMBERSHIP),
-                    "membership_can_delete": request.user.has_perm(ASTRA_DELETE_MEMBERSHIP),
-                },
+                {"request": request, **membership_review_permissions(request.user)},
                 req,
                 compact=False,
                 next_url=redirect_to,
@@ -1216,6 +1201,10 @@ def membership_request_note_add(request: HttpRequest, pk: int) -> HttpResponse:
 
         messages.success(request, user_message)
         return redirect(redirect_to)
+    except PermissionDenied:
+        if is_ajax:
+            return JsonResponse({"ok": False, "error": "Permission denied."}, status=403)
+        raise
     except Exception:
         logger.exception("Failed to add membership note request_pk=%s actor=%s", req.pk, actor_username)
         if is_ajax:
@@ -1226,10 +1215,8 @@ def membership_request_note_add(request: HttpRequest, pk: int) -> HttpResponse:
 
 
 @permission_required(ASTRA_VIEW_MEMBERSHIP, login_url=reverse_lazy("users"))
+@post_only_404
 def membership_notes_aggregate_note_add(request: HttpRequest) -> HttpResponse:
-    if request.method != "POST":
-        raise Http404("Not found")
-
     redirect_to = _resolve_post_redirect(request, default=reverse("users"))
 
     actor_username = get_username(request)
@@ -1336,10 +1323,8 @@ def membership_notes_aggregate_note_add(request: HttpRequest) -> HttpResponse:
         return redirect(redirect_to)
 
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
+@post_only_404
 def membership_requests_bulk(request: HttpRequest) -> HttpResponse:
-    if request.method != "POST":
-        raise Http404("Not found")
-
     bulk_scope = _normalize_str(request.POST.get("bulk_scope")).lower() or "pending"
 
     allowed_statuses: set[str]
@@ -1476,172 +1461,200 @@ def membership_requests_bulk(request: HttpRequest) -> HttpResponse:
     return redirect("membership-requests")
 
 
-@permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
-def membership_request_approve(request: HttpRequest, pk: int) -> HttpResponse:
-    result = _load_membership_request_for_action(
-        request, pk, already_status=MembershipRequest.Status.approved, already_label="approved",
-    )
-    if isinstance(result, HttpResponse):
-        return result
-    req, redirect_to = result
-    membership_type = req.membership_type
-    custom_email = bool(str(request.POST.get("custom_email") or "").strip())
+def run_membership_request_action(request: HttpRequest, pk: int, *, action: str) -> HttpResponse:
+    if action == "approve":
+        result = _load_membership_request_for_action(
+            request,
+            pk,
+            already_status=MembershipRequest.Status.approved,
+            already_label="approved",
+        )
+        if isinstance(result, HttpResponse):
+            return result
 
-    try:
-        approve_membership_request(
+        req, redirect_to = result
+        membership_type = req.membership_type
+        custom_email = bool(str(request.POST.get("custom_email") or "").strip())
+
+        try:
+            approve_membership_request(
+                membership_request=req,
+                actor_username=get_username(request),
+                send_approved_email=not custom_email,
+                approved_email_template_name=None,
+            )
+        except ValidationError as exc:
+            message = exc.messages[0] if exc.messages else str(exc)
+            messages.error(request, message)
+            return redirect(redirect_to)
+        except Exception:
+            logger.exception("Failed to approve membership request pk=%s", req.pk)
+            messages.error(request, "Failed to approve the request.")
+            return redirect(redirect_to)
+
+        target_label = req.requested_username if req.is_user_target else (req.organization_display_name or "organization")
+
+        template_name = settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME
+        if membership_type.acceptance_template_id is not None:
+            template_name = membership_type.acceptance_template.name
+
+        messages.success(request, f"Approved request for {target_label}.")
+
+        approve_extras: dict[str, str] = {}
+        if req.is_user_target:
+            approve_extras["group_cn"] = membership_type.group_cn
+
+        return _maybe_custom_email_redirect(
+            request=request,
+            membership_request=req,
+            custom_email=custom_email,
+            template_name=template_name,
+            extra_context=approve_extras,
+            redirect_to=redirect_to,
+            action_status="approved",
+        ) or redirect(redirect_to)
+
+    if action == "reject":
+        result = _load_membership_request_for_action(
+            request,
+            pk,
+            already_status=MembershipRequest.Status.rejected,
+            already_label="rejected",
+        )
+        if isinstance(result, HttpResponse):
+            return result
+
+        req, redirect_to = result
+        custom_email = bool(str(request.POST.get("custom_email") or "").strip())
+
+        form = MembershipRejectForm(request.POST)
+        if not form.is_valid():
+            messages.error(request, "Invalid rejection reason.")
+            return redirect(redirect_to)
+
+        reason = str(form.cleaned_data.get("reason") or "").strip()
+
+        _, email_error = reject_membership_request(
             membership_request=req,
             actor_username=get_username(request),
-            send_approved_email=not custom_email,
-            approved_email_template_name=None,
+            rejection_reason=reason,
+            send_rejected_email=not custom_email,
         )
-    except ValidationError as exc:
-        message = exc.messages[0] if exc.messages else str(exc)
-        messages.error(request, message)
+
+        target_label = req.requested_username if req.is_user_target else (req.organization_display_name or "organization")
+        messages.success(request, f"Rejected request for {target_label}.")
+
+        if email_error is not None:
+            messages.error(request, "Request was rejected, but the email could not be sent.")
+
+        return _maybe_custom_email_redirect(
+            request=request,
+            membership_request=req,
+            custom_email=custom_email,
+            template_name=settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME,
+            extra_context=freeform_message_email_context(key="rejection_reason", value=reason),
+            redirect_to=redirect_to,
+            action_status="rejected",
+        ) or redirect(redirect_to)
+
+    if action == "rfi":
+        result = _load_membership_request_for_action(
+            request,
+            pk,
+            already_status=MembershipRequest.Status.on_hold,
+            already_label="on hold",
+        )
+        if isinstance(result, HttpResponse):
+            return result
+
+        req, redirect_to = result
+        custom_email = bool(str(request.POST.get("custom_email") or "").strip())
+        rfi_message = str(request.POST.get("rfi_message") or "").strip()
+
+        application_url = request.build_absolute_uri(reverse("membership-request-self", args=[req.pk]))
+
+        _log, email_error = put_membership_request_on_hold(
+            membership_request=req,
+            actor_username=get_username(request),
+            rfi_message=rfi_message,
+            send_rfi_email=not custom_email,
+            application_url=application_url,
+        )
+
+        rfi_extras = {
+            "rfi_message": rfi_message,
+            "application_url": application_url,
+            **freeform_message_email_context(key="rfi_message", value=rfi_message),
+        }
+        email_redirect = _maybe_custom_email_redirect(
+            request=request,
+            membership_request=req,
+            custom_email=custom_email,
+            template_name=settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME,
+            extra_context=rfi_extras,
+            redirect_to=redirect_to,
+            action_status="on_hold",
+        )
+        if email_redirect is not None:
+            return email_redirect
+
+        target_label = req.requested_username if req.is_user_target else (req.organization_display_name or "organization")
+        messages.success(request, f"Sent Request for Information for {target_label}.")
+        if email_error is not None:
+            messages.error(request, "Request was put on hold, but the email could not be sent.")
         return redirect(redirect_to)
-    except Exception:
-        logger.exception("Failed to approve membership request pk=%s", req.pk)
-        messages.error(request, "Failed to approve the request.")
+
+    if action == "ignore":
+        result = _load_membership_request_for_action(
+            request,
+            pk,
+            already_status=MembershipRequest.Status.ignored,
+            already_label="ignored",
+        )
+        if isinstance(result, HttpResponse):
+            return result
+
+        req, redirect_to = result
+        ignore_membership_request(
+            membership_request=req,
+            actor_username=get_username(request),
+        )
+
+        target_label = req.requested_username if req.is_user_target else (req.organization_display_name or "organization")
+        messages.success(request, f"Ignored request for {target_label}.")
         return redirect(redirect_to)
 
-    target_label = req.requested_username if req.is_user_target else (req.organization_display_name or "organization")
+    raise Http404("Not found")
 
-    template_name = settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME
-    if membership_type.acceptance_template_id is not None:
-        template_name = membership_type.acceptance_template.name
 
-    messages.success(request, f"Approved request for {target_label}.")
-
-    # For user memberships, include group_cn in custom email context.
-    approve_extras: dict[str, str] = {}
-    if req.is_user_target:
-        approve_extras["group_cn"] = membership_type.group_cn
-
-    return _maybe_custom_email_redirect(
-        request=request,
-        membership_request=req,
-        custom_email=custom_email,
-        template_name=template_name,
-        extra_context=approve_extras,
-        redirect_to=redirect_to,
-        action_status="approved",
-    ) or redirect(redirect_to)
+@permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
+def membership_request_approve(request: HttpRequest, pk: int) -> HttpResponse:
+    return run_membership_request_action(request, pk, action="approve")
 
 
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_request_reject(request: HttpRequest, pk: int) -> HttpResponse:
-    result = _load_membership_request_for_action(
-        request, pk, already_status=MembershipRequest.Status.rejected, already_label="rejected",
-    )
-    if isinstance(result, HttpResponse):
-        return result
-    req, redirect_to = result
-    custom_email = bool(str(request.POST.get("custom_email") or "").strip())
-
-    form = MembershipRejectForm(request.POST)
-    if not form.is_valid():
-        messages.error(request, "Invalid rejection reason.")
-        return redirect(redirect_to)
-
-    reason = str(form.cleaned_data.get("reason") or "").strip()
-
-    _, email_error = reject_membership_request(
-        membership_request=req,
-        actor_username=get_username(request),
-        rejection_reason=reason,
-        send_rejected_email=not custom_email,
-    )
-
-    target_label = req.requested_username if req.is_user_target else (req.organization_display_name or "organization")
-    messages.success(request, f"Rejected request for {target_label}.")
-
-    if email_error is not None:
-        messages.error(request, "Request was rejected, but the email could not be sent.")
-
-    return _maybe_custom_email_redirect(
-        request=request,
-        membership_request=req,
-        custom_email=custom_email,
-        template_name=settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME,
-        extra_context=freeform_message_email_context(key="rejection_reason", value=reason),
-        redirect_to=redirect_to,
-        action_status="rejected",
-    ) or redirect(redirect_to)
+    return run_membership_request_action(request, pk, action="reject")
 
 
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_request_rfi(request: HttpRequest, pk: int) -> HttpResponse:
-    result = _load_membership_request_for_action(
-        request, pk, already_status=MembershipRequest.Status.on_hold, already_label="on hold",
-    )
-    if isinstance(result, HttpResponse):
-        return result
-    req, redirect_to = result
-    custom_email = bool(str(request.POST.get("custom_email") or "").strip())
-    rfi_message = str(request.POST.get("rfi_message") or "").strip()
-
-    application_url = request.build_absolute_uri(reverse("membership-request-self", args=[req.pk]))
-
-    _log, email_error = put_membership_request_on_hold(
-        membership_request=req,
-        actor_username=get_username(request),
-        rfi_message=rfi_message,
-        send_rfi_email=not custom_email,
-        application_url=application_url,
-    )
-
-    rfi_extras = {
-        "rfi_message": rfi_message,
-        "application_url": application_url,
-        **freeform_message_email_context(key="rfi_message", value=rfi_message),
-    }
-    email_redirect = _maybe_custom_email_redirect(
-        request=request,
-        membership_request=req,
-        custom_email=custom_email,
-        template_name=settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME,
-        extra_context=rfi_extras,
-        redirect_to=redirect_to,
-        action_status="on_hold",
-    )
-    if email_redirect is not None:
-        return email_redirect
-
-    target_label = req.requested_username if req.is_user_target else (req.organization_display_name or "organization")
-    messages.success(request, f"Sent Request for Information for {target_label}.")
-    if email_error is not None:
-        messages.error(request, "Request was put on hold, but the email could not be sent.")
-    return redirect(redirect_to)
+    return run_membership_request_action(request, pk, action="rfi")
 
 
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_request_ignore(request: HttpRequest, pk: int) -> HttpResponse:
-    result = _load_membership_request_for_action(
-        request, pk, already_status=MembershipRequest.Status.ignored, already_label="ignored",
-    )
-    if isinstance(result, HttpResponse):
-        return result
-    req, redirect_to = result
-
-    ignore_membership_request(
-        membership_request=req,
-        actor_username=get_username(request),
-    )
-
-    target_label = req.requested_username if req.is_user_target else (req.organization_display_name or "organization")
-    messages.success(request, f"Ignored request for {target_label}.")
-    return redirect(redirect_to)
+    return run_membership_request_action(request, pk, action="ignore")
 
 
 @permission_required(ASTRA_CHANGE_MEMBERSHIP, login_url=reverse_lazy("users"))
+@post_only_404
 def membership_set_expiry(
     request: HttpRequest,
     username: str = "",
     membership_type_code: str = "",
     organization_id: int | None = None,
 ) -> HttpResponse:
-    if request.method != "POST":
-        raise Http404("Not found")
-
     if organization_id is not None:
         result = _load_organization_membership(request, organization_id, membership_type_code)
         if isinstance(result, HttpResponse):
@@ -1732,6 +1745,7 @@ def membership_set_expiry(
 
 
 @permission_required(ASTRA_DELETE_MEMBERSHIP, login_url=reverse_lazy("users"))
+@post_only_404
 def membership_terminate(
     request: HttpRequest,
     username: str = "",
@@ -1739,9 +1753,6 @@ def membership_terminate(
     organization_id: int | None = None,
     redirect_to: str | None = None,
 ) -> HttpResponse:
-    if request.method != "POST":
-        raise Http404("Not found")
-
     if organization_id is not None:
         result = _load_organization_membership(request, organization_id, membership_type_code)
         if isinstance(result, HttpResponse):

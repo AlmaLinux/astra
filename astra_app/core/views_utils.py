@@ -4,13 +4,15 @@ FreeIPA attribute manipulation helpers live in ``core.ipa_user_attrs``.
 """
 
 import logging
+from collections.abc import Callable
+from functools import wraps
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from django.conf import settings
 from django.contrib import messages
 from django.core.paginator import Paginator
-from django.http import HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect
 from django.urls import reverse
 
@@ -21,19 +23,76 @@ from core.country_codes import country_code_status_from_user_data
 logger = logging.getLogger(__name__)
 
 
-def get_username(request: HttpRequest) -> str:
+def require_post_or_404(request: HttpRequest, *, message: str = "Not found") -> None:
+    """Raise a 404 when an endpoint is accessed with a non-POST method.
+
+    Astra has historical behavior where these endpoints intentionally return
+    404 (not 405) for non-POST access.
+    """
+
+    if request.method != "POST":
+        raise Http404(message)
+
+
+def post_only_404[**P, R](view_func: Callable[P, R]) -> Callable[P, R]:
+    """Decorator variant of ``require_post_or_404`` for view functions."""
+
+    @wraps(view_func)
+    def _wrapped(*args: P.args, **kwargs: P.kwargs) -> R:
+        request = args[0]
+        require_post_or_404(request)
+        return view_func(*args, **kwargs)
+
+    return _wrapped
+
+
+def try_get_username_from_user(user: object) -> str:
+    """Best-effort username extraction for user-like objects.
+
+    This is used in template tags and utility code that may receive
+    FreeIPA users, Django users, or test doubles.
+    """
+    if user is None:
+        return ""
+
+    username: str | None = None
+    if hasattr(user, "username"):
+        try:
+            username_obj = user.username
+        except Exception:
+            username_obj = ""
+        username = str(username_obj or "").strip()
+        if username:
+            return username
+
+    if hasattr(user, "get_username"):
+        try:
+            username_func = user.get_username
+        except Exception:
+            username_func = None
+        if callable(username_func):
+            try:
+                username = str(username_func() or "").strip()
+            except Exception:
+                username = ""
+            if username:
+                return username
+
+    return ""
+
+
+def get_username(request: HttpRequest, *, allow_user_fallback: bool = True) -> str:
     """Extract the authenticated username from session (authoritative) or user object.
 
     The FreeIPA auth backend stores the canonical username in the session
     at login time. This is the most reliable source since the Django user
     object may be loaded from cache with a different casing or format.
     """
-    # Session may not exist in test RequestFactory requests.
-    session = getattr(request, "session", None)
+    session = request.session if hasattr(request, "session") else None
     username = str((session.get("_freeipa_username") if session else None) or "").strip()
-    if not username:
-        username = str(request.user.get_username() or "").strip()
-    return username
+    if username or not allow_user_fallback:
+        return username
+    return try_get_username_from_user(request.user)
 
 
 MSG_SERVICE_UNAVAILABLE = (
@@ -47,6 +106,14 @@ def settings_context(active_tab: str) -> dict[str, object]:
         "active_tab": active_tab,
         "show_agreements_tab": has_enabled_agreements(),
     }
+
+
+def agreement_settings_url(agreement_cn: str | None) -> str:
+    """Return the canonical settings deep-link for agreement signing."""
+    agreement_cn_value = str(agreement_cn or "").strip()
+    if not agreement_cn_value:
+        return f"{reverse('settings')}#agreements"
+    return f"{reverse('settings')}?agreement={quote(agreement_cn_value)}#agreements"
 
 
 def block_action_without_country_code(
@@ -70,13 +137,6 @@ def block_action_without_country_code(
         f"A valid country code is required before you can {action_label}. Please set it on the Profile tab.",
     )
     return redirect(f"{reverse('settings')}#profile")
-
-
-def _coc_settings_url() -> str:
-    agreement_cn = str(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN or "").strip()
-    if not agreement_cn:
-        return f"{reverse('settings')}#agreements"
-    return f"{reverse('settings')}?agreement={quote(agreement_cn)}#agreements"
 
 
 def _coc_agreement_for_user(username: str) -> FreeIPAFASAgreement | None:
@@ -114,7 +174,7 @@ def block_action_without_coc(
     agreement_cn = str(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN or "").strip()
     label = agreement_cn or "Community Code of Conduct"
     messages.error(request, f"You must sign the {label} before you can {action_label}.")
-    return redirect(_coc_settings_url())
+    return redirect(agreement_settings_url(agreement_cn))
 
 
 def _normalize_str(value: object) -> str:
@@ -164,3 +224,47 @@ def paginate_and_build_context(
         "show_last": show_last,
         "page_url_prefix": page_url_prefix,
     }
+
+
+def build_page_url_prefix(query: object, *, page_param: str = "page") -> tuple[str, str]:
+    """Build ``(base_query, page_url_prefix)`` while retaining non-page params."""
+    if hasattr(query, "copy"):
+        params = query.copy()
+    elif isinstance(query, dict):
+        params = query.copy()
+    else:
+        params = {}
+
+    if hasattr(params, "pop"):
+        params.pop(page_param, None)
+
+    if hasattr(params, "urlencode"):
+        base_query = str(params.urlencode())
+    else:
+        base_query = urlencode(params, doseq=True)
+
+    page_url_prefix = f"?{base_query}&{page_param}=" if base_query else f"?{page_param}="
+    return base_query, page_url_prefix
+
+
+def build_url_for_page(
+    base_url: str,
+    *,
+    query: object,
+    page_param: str,
+    page_value: int | str,
+) -> str:
+    """Build a page URL preserving all query params except for the target page value."""
+    if hasattr(query, "copy"):
+        params = query.copy()
+    elif isinstance(query, dict):
+        params = query.copy()
+    else:
+        params = {}
+
+    params[page_param] = str(page_value)
+    if hasattr(params, "urlencode"):
+        encoded = str(params.urlencode())
+    else:
+        encoded = urlencode(params, doseq=True)
+    return f"{base_url}?{encoded}" if encoded else base_url

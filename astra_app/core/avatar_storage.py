@@ -53,7 +53,7 @@ def avatar_path_handler(
     if resolved_ext:
         basename = f"{basename}.{resolved_ext}"
 
-    base_dir = str(settings.AVATAR_STORAGE_DIR or "avatars").strip("/")
+    base_dir = str(settings.AVATAR_STORAGE_DIR).strip("/")
     parts = [base_dir]
     if width or height:
         parts.extend(["resized", str(width or ""), str(height or "")])

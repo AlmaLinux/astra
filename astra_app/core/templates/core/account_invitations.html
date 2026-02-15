@@ -1,4 +1,5 @@
 {% extends 'core/base.html' %}
+{% load static %}
 
 {% block title %}Account Invitations{% endblock %}
 
@@ -15,7 +16,16 @@
   <div class="card">
     <div class="card-header">
       <div class="d-flex align-items-center justify-content-between flex-wrap" style="gap: 0.5rem;">
-        <form id="bulk-invitations-accepted-form" method="post" action="{% url 'account-invitations-bulk' %}" class="form-inline">
+        <form
+          id="bulk-invitations-accepted-form"
+          method="post"
+          action="{% url 'account-invitations-bulk' %}"
+          class="form-inline"
+          data-bulk-table-form
+          data-bulk-select-all-id="select-all-invitations-accepted"
+          data-bulk-checkbox-selector=".invitation-checkbox--accepted"
+          data-bulk-apply-id="bulk-apply-accepted"
+        >
           {% csrf_token %}
           <input type="hidden" name="bulk_scope" value="accepted" />
           <div class="input-group input-group-sm">
@@ -106,7 +116,16 @@
   <div class="card mb-4">
     <div class="card-header">
       <div class="d-flex align-items-center justify-content-between flex-wrap" style="gap: 0.5rem;">
-        <form id="bulk-invitations-pending-form" method="post" action="{% url 'account-invitations-bulk' %}" class="form-inline">
+        <form
+          id="bulk-invitations-pending-form"
+          method="post"
+          action="{% url 'account-invitations-bulk' %}"
+          class="form-inline"
+          data-bulk-table-form
+          data-bulk-select-all-id="select-all-invitations-pending"
+          data-bulk-checkbox-selector=".invitation-checkbox--pending"
+          data-bulk-apply-id="bulk-apply-pending"
+        >
           {% csrf_token %}
           <div class="input-group input-group-sm">
             <select name="bulk_action" class="custom-select custom-select-sm" aria-label="Bulk action">
@@ -188,51 +207,9 @@
       </table>
     </div>
   </div>
+{% endblock %}
 
-  <script>
-    (function () {
-      function setupBulk(formId, selectAllId, checkboxSelector, applyBtnId) {
-        const selectAll = document.getElementById(selectAllId);
-        const applyBtn = document.getElementById(applyBtnId);
-        const form = document.getElementById(formId);
-        if (!selectAll || !applyBtn || !form) return;
-
-        function getCheckboxes() {
-          return Array.from(document.querySelectorAll(checkboxSelector));
-        }
-
-        function updateApply() {
-          const anyChecked = getCheckboxes().some(cb => cb.checked);
-          const action = (form.querySelector('select[name="bulk_action"]') || {}).value || '';
-          applyBtn.disabled = !(anyChecked && action);
-        }
-
-        selectAll.addEventListener('change', function () {
-          for (const cb of getCheckboxes()) {
-            cb.checked = selectAll.checked;
-          }
-          updateApply();
-        });
-
-        document.addEventListener('change', function (evt) {
-          const target = evt.target;
-          if (!target) return;
-          if (target.matches && target.matches(checkboxSelector)) {
-            const boxes = getCheckboxes();
-            selectAll.checked = boxes.length > 0 && boxes.every(cb => cb.checked);
-            updateApply();
-            return;
-          }
-          if (target.name === 'bulk_action' && form.contains(target)) {
-            updateApply();
-          }
-        });
-
-        updateApply();
-      }
-
-      setupBulk('bulk-invitations-pending-form', 'select-all-invitations-pending', '.invitation-checkbox--pending', 'bulk-apply-pending');
-      setupBulk('bulk-invitations-accepted-form', 'select-all-invitations-accepted', '.invitation-checkbox--accepted', 'bulk-apply-accepted');
-    })();
-  </script>
+{% block scripts %}
+  {{ block.super }}
+  <script src="{% static 'core/js/bulk_table_actions.js' %}"></script>
 {% endblock %}

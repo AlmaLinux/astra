@@ -2,6 +2,7 @@ import datetime
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
+from enum import StrEnum
 
 from django.conf import settings
 from django.utils import timezone
@@ -27,7 +28,55 @@ class PendingRequestContext:
     category_ids: set[str]
 
 
-def _membership_target_filter(
+@dataclass(frozen=True, slots=True)
+class MembershipRequestabilityContext:
+    requestable_codes_by_category: dict[str, set[str]]
+    requestable_rows: list[tuple[str, str]]
+    membership_can_request_any: bool
+
+
+class FreeIPACallerMode(StrEnum):
+    raise_on_error = "raise_on_error"
+    log_and_continue = "log_and_continue"
+    best_effort = "best_effort"
+
+
+class FreeIPAMissingUserPolicy(StrEnum):
+    treat_as_error = "treat_as_error"
+    treat_as_noop = "treat_as_noop"
+
+
+class FreeIPAGroupRemovalOutcome(StrEnum):
+    noop_blank_input = "noop_blank_input"
+    user_not_found = "user_not_found"
+    already_not_member = "already_not_member"
+    removed = "removed"
+    failed = "failed"
+
+
+@dataclass(frozen=True, slots=True)
+class FreeIPARepresentativeSyncJournal:
+    targeted_group_cns: tuple[str, ...]
+    skipped_group_cns: tuple[str, ...]
+    old_removed_group_cns: tuple[str, ...]
+    new_added_group_cns: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class FreeIPARepresentativeSyncResult:
+    journal: FreeIPARepresentativeSyncJournal
+    failed_group_cns: tuple[str, ...]
+    failure_details: dict[str, str]
+
+
+class FreeIPARepresentativeSyncError(RuntimeError):
+    def __init__(self, result: FreeIPARepresentativeSyncResult) -> None:
+        self.result = result
+        details = ", ".join(f"{group_cn}: {message}" for group_cn, message in result.failure_details.items())
+        super().__init__(f"FreeIPA representative group sync failed: {details}")
+
+
+def membership_target_filter(
     *,
     username: str | None = None,
     organization: Organization | None = None,
@@ -44,6 +93,260 @@ def _membership_target_filter(
     return {"target_organization": organization}
 
 
+def _normalized_group_cns(group_cns: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    targeted_group_cns: list[str] = []
+    skipped_group_cns: list[str] = []
+    seen: set[str] = set()
+
+    for raw_group_cn in group_cns:
+        group_cn = str(raw_group_cn or "").strip()
+        if not group_cn:
+            skipped_group_cns.append(group_cn)
+            continue
+        if group_cn in seen:
+            continue
+        seen.add(group_cn)
+        targeted_group_cns.append(group_cn)
+
+    return tuple(targeted_group_cns), tuple(skipped_group_cns)
+
+
+def _should_raise_for_failure(caller_mode: FreeIPACallerMode) -> bool:
+    return caller_mode == FreeIPACallerMode.raise_on_error
+
+
+def compute_membership_requestability_context(
+    *,
+    username: str | None = None,
+    organization: Organization | None = None,
+    eligibility: MembershipRequestEligibility | None = None,
+    held_category_ids: set[str] | None = None,
+) -> MembershipRequestabilityContext:
+    target_filter = membership_target_filter(username=username, organization=organization)
+    if target_filter is None:
+        return MembershipRequestabilityContext(
+            requestable_codes_by_category={},
+            requestable_rows=[],
+            membership_can_request_any=False,
+        )
+
+    resolved_eligibility = (
+        eligibility
+        if eligibility is not None
+        else get_membership_request_eligibility(username=username, organization=organization)
+    )
+    requestable_rows = [
+        (str(category_id), str(code))
+        for category_id, code in requestable_membership_types_for_target(
+            username=username,
+            organization=organization,
+            eligibility=resolved_eligibility,
+        ).values_list("category_id", "code")
+        if str(category_id or "").strip() and str(code or "").strip()
+    ]
+
+    requestable_codes_by_category: dict[str, set[str]] = {}
+    for category_id, code in requestable_rows:
+        requestable_codes_by_category.setdefault(category_id, set()).add(code)
+
+    resolved_held_category_ids = (
+        held_category_ids
+        if held_category_ids is not None
+        else {membership.category_id for membership in get_valid_memberships(username=username, organization=organization)}
+    )
+
+    membership_can_request_any = membership_request_can_request_any(
+        username=username,
+        organization=organization,
+        eligibility=resolved_eligibility,
+    )
+    if membership_can_request_any:
+        membership_can_request_any = any(
+            category_id not in resolved_held_category_ids
+            for category_id, _code in requestable_rows
+        )
+
+    return MembershipRequestabilityContext(
+        requestable_codes_by_category=requestable_codes_by_category,
+        requestable_rows=requestable_rows,
+        membership_can_request_any=membership_can_request_any,
+    )
+
+
+def sync_organization_representative_groups(
+    *,
+    old_representative: str,
+    new_representative: str,
+    group_cns: tuple[str, ...],
+    caller_mode: FreeIPACallerMode,
+    missing_user_policy: FreeIPAMissingUserPolicy,
+) -> FreeIPARepresentativeSyncResult:
+    normalized_old = str(old_representative or "").strip()
+    normalized_new = str(new_representative or "").strip()
+    targeted_group_cns, skipped_group_cns = _normalized_group_cns(group_cns)
+
+    old_user = FreeIPAUser.get(normalized_old) if normalized_old else None
+    new_user = FreeIPAUser.get(normalized_new) if normalized_new else None
+    old_groups = set(old_user.groups_list) if old_user is not None else set()
+    new_groups = set(new_user.groups_list) if new_user is not None else set()
+
+    old_removed_group_cns: list[str] = []
+    new_added_group_cns: list[str] = []
+    failed_group_cns: list[str] = []
+    failure_details: dict[str, str] = {}
+
+    for group_cn in targeted_group_cns:
+        try:
+            if normalized_old:
+                if old_user is None:
+                    if missing_user_policy == FreeIPAMissingUserPolicy.treat_as_error:
+                        raise RuntimeError(f"old representative not found in FreeIPA: {normalized_old}")
+                elif group_cn in old_groups:
+                    old_user.remove_from_group(group_name=group_cn)
+                    old_groups.discard(group_cn)
+                    old_removed_group_cns.append(group_cn)
+
+            if normalized_new:
+                if new_user is None:
+                    if missing_user_policy == FreeIPAMissingUserPolicy.treat_as_error:
+                        raise RuntimeError(f"new representative not found in FreeIPA: {normalized_new}")
+                elif group_cn not in new_groups:
+                    new_user.add_to_group(group_name=group_cn)
+                    new_groups.add(group_cn)
+                    new_added_group_cns.append(group_cn)
+        except Exception as exc:
+            failed_group_cns.append(group_cn)
+            failure_details[group_cn] = str(exc)
+
+    result = FreeIPARepresentativeSyncResult(
+        journal=FreeIPARepresentativeSyncJournal(
+            targeted_group_cns=targeted_group_cns,
+            skipped_group_cns=skipped_group_cns,
+            old_removed_group_cns=tuple(old_removed_group_cns),
+            new_added_group_cns=tuple(new_added_group_cns),
+        ),
+        failed_group_cns=tuple(failed_group_cns),
+        failure_details=failure_details,
+    )
+
+    if failed_group_cns and _should_raise_for_failure(caller_mode):
+        raise FreeIPARepresentativeSyncError(result)
+
+    if failed_group_cns and caller_mode == FreeIPACallerMode.log_and_continue:
+        logger.warning(
+            "sync_organization_representative_groups completed with failures old=%r new=%r failed=%r",
+            normalized_old,
+            normalized_new,
+            failed_group_cns,
+        )
+
+    return result
+
+
+def rollback_organization_representative_groups(
+    *,
+    old_representative: str,
+    new_representative: str,
+    journal: FreeIPARepresentativeSyncJournal,
+) -> None:
+    normalized_old = str(old_representative or "").strip()
+    normalized_new = str(new_representative or "").strip()
+
+    for group_cn in journal.new_added_group_cns:
+        if not normalized_new or not group_cn:
+            continue
+        try:
+            new_user = FreeIPAUser.get(normalized_new)
+            if new_user is None:
+                continue
+            new_user.remove_from_group(group_name=group_cn)
+        except Exception:
+            logger.exception(
+                "rollback_organization_representative_groups failed to remove new representative from group new=%r group_cn=%r",
+                normalized_new,
+                group_cn,
+            )
+
+    for group_cn in journal.old_removed_group_cns:
+        if not normalized_old or not group_cn:
+            continue
+        try:
+            old_user = FreeIPAUser.get(normalized_old)
+            if old_user is None:
+                continue
+            old_user.add_to_group(group_name=group_cn)
+        except Exception:
+            logger.exception(
+                "rollback_organization_representative_groups failed to re-add old representative to group old=%r group_cn=%r",
+                normalized_old,
+                group_cn,
+            )
+
+
+def remove_organization_representative_from_group_if_present(
+    *,
+    representative_username: str,
+    group_cn: str,
+    caller_mode: FreeIPACallerMode,
+    missing_user_policy: FreeIPAMissingUserPolicy,
+) -> FreeIPAGroupRemovalOutcome:
+    normalized_username = str(representative_username or "").strip()
+    normalized_group_cn = str(group_cn or "").strip()
+    if not normalized_username or not normalized_group_cn:
+        return FreeIPAGroupRemovalOutcome.noop_blank_input
+
+    representative = FreeIPAUser.get(normalized_username)
+    if representative is None:
+        outcome = FreeIPAGroupRemovalOutcome.user_not_found
+        if (
+            missing_user_policy == FreeIPAMissingUserPolicy.treat_as_error
+            and _should_raise_for_failure(caller_mode)
+        ):
+            raise FreeIPARepresentativeSyncError(
+                FreeIPARepresentativeSyncResult(
+                    journal=FreeIPARepresentativeSyncJournal(
+                        targeted_group_cns=(normalized_group_cn,),
+                        skipped_group_cns=(),
+                        old_removed_group_cns=(),
+                        new_added_group_cns=(),
+                    ),
+                    failed_group_cns=(normalized_group_cn,),
+                    failure_details={
+                        normalized_group_cn: f"representative not found in FreeIPA: {normalized_username}",
+                    },
+                )
+            )
+        return outcome
+
+    if normalized_group_cn not in representative.groups_list:
+        return FreeIPAGroupRemovalOutcome.already_not_member
+
+    try:
+        representative.remove_from_group(group_name=normalized_group_cn)
+    except Exception as exc:
+        if _should_raise_for_failure(caller_mode):
+            raise FreeIPARepresentativeSyncError(
+                FreeIPARepresentativeSyncResult(
+                    journal=FreeIPARepresentativeSyncJournal(
+                        targeted_group_cns=(normalized_group_cn,),
+                        skipped_group_cns=(),
+                        old_removed_group_cns=(),
+                        new_added_group_cns=(),
+                    ),
+                    failed_group_cns=(normalized_group_cn,),
+                    failure_details={normalized_group_cn: str(exc)},
+                )
+            ) from exc
+        logger.exception(
+            "remove_organization_representative_from_group_if_present failed username=%s group_cn=%s",
+            normalized_username,
+            normalized_group_cn,
+        )
+        return FreeIPAGroupRemovalOutcome.failed
+
+    return FreeIPAGroupRemovalOutcome.removed
+
+
 def get_valid_memberships(
     *,
     username: str | None = None,
@@ -51,7 +354,7 @@ def get_valid_memberships(
 ) -> list[Membership]:
     """Return the current unexpired active memberships for a user or organization."""
 
-    search = _membership_target_filter(username=username, organization=organization)
+    search = membership_target_filter(username=username, organization=organization)
     if search is None:
         return []
 
@@ -107,7 +410,7 @@ def resolve_request_ids_by_membership_type(
 ) -> dict[str, int]:
     """Resolve approved request IDs for each membership type for a user or organization."""
 
-    target_filter = _membership_target_filter(username=username, organization=organization)
+    target_filter = membership_target_filter(username=username, organization=organization)
     if target_filter is None:
         return {}
 
@@ -287,7 +590,7 @@ def get_membership_request_eligibility(
     }
     blocked_membership_type_codes = valid_membership_type_codes - extendable_membership_type_codes
 
-    target_filter = _membership_target_filter(username=username, organization=organization)
+    target_filter = membership_target_filter(username=username, organization=organization)
     if target_filter is None:
         pending_membership_category_ids: set[str] = set()
     else:
@@ -333,7 +636,7 @@ def requestable_membership_types_for_target(
 ):
     """Return membership types currently requestable for the selected target."""
 
-    target_filter = _membership_target_filter(username=username, organization=organization)
+    target_filter = membership_target_filter(username=username, organization=organization)
     if target_filter is None:
         return MembershipType.objects.none()
 

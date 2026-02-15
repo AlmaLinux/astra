@@ -5,10 +5,21 @@ from django.test import TestCase
 from django.urls import reverse
 
 from core.backends import FreeIPAUser
-from core.models import MembershipRequest, MembershipType
+from core.models import MembershipRequest, MembershipType, MembershipTypeCategory
 
 
 class UserProfileMembershipCanRequestAnyTests(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        MembershipTypeCategory.objects.update_or_create(
+            pk="individual",
+            defaults={"is_individual": True, "is_organization": False, "sort_order": 0},
+        )
+        MembershipTypeCategory.objects.update_or_create(
+            pk="mirror",
+            defaults={"is_organization": True, "sort_order": 1},
+        )
+
     def _login_as_freeipa_user(self, username: str) -> None:
         session = self.client.session
         session["_freeipa_username"] = username
@@ -33,6 +44,7 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
             defaults={
                 "name": "Mirror",
                 "group_cn": "almalinux-mirror",
+                "category_id": "mirror",
                 "sort_order": 1,
                 "enabled": True,
             },

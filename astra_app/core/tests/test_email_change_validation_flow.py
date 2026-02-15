@@ -78,14 +78,14 @@ class EmailChangeValidationFlowTests(TestCase):
                     "full_name": "Alice User",
                     "email": "old@example.org",
                 }):
-                    with patch("post_office.mail.send", autospec=True) as send_mock:
+                    with patch("core.views_settings.queue_templated_email", autospec=True) as send_mock:
                         update_mock.return_value = ([], True)
                         resp = views_settings.settings_root(request)
 
         self.assertEqual(resp.status_code, 302)
         update_mock.assert_not_called()
         self.assertEqual(send_mock.call_count, 1)
-        self.assertEqual(send_mock.call_args.kwargs.get("template"), "settings-email-validation")
+        self.assertEqual(send_mock.call_args.kwargs.get("template_name"), "settings-email-validation")
 
         ctx = send_mock.call_args.kwargs.get("context") or {}
         self.assertEqual(ctx.get("username"), "alice")
@@ -129,7 +129,7 @@ class EmailChangeValidationFlowTests(TestCase):
                     "full_name": "Alice User",
                     "email": "verified@example.org",
                 }):
-                    with patch("post_office.mail.send", autospec=True) as send_mock:
+                    with patch("core.views_settings.queue_templated_email", autospec=True) as send_mock:
                         update_mock.return_value = ([], True)
                         resp = views_settings.settings_root(request)
 
@@ -174,7 +174,7 @@ class EmailChangeValidationFlowTests(TestCase):
                     "full_name": "Alice User",
                     "email": "verified@example.org",
                 }):
-                    with patch("post_office.mail.send", autospec=True) as send_mock:
+                    with patch("core.views_settings.queue_templated_email", autospec=True) as send_mock:
                         update_mock.return_value = ([], True)
                         resp = views_settings.settings_root(request)
 

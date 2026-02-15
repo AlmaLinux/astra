@@ -17,6 +17,14 @@ _DATETIME_LOCAL_INPUT_FORMATS: list[str] = [
 ]
 
 
+def is_self_nomination(*, candidate_username: str, nominator_username: str) -> bool:
+    candidate = str(candidate_username or "").strip().lower()
+    nominator = str(nominator_username or "").strip().lower()
+    if not candidate or not nominator:
+        return False
+    return candidate == nominator
+
+
 class ElectionDetailsForm(forms.ModelForm):
     eligible_group_cn = forms.ChoiceField(
         required=False,
@@ -195,7 +203,7 @@ class CandidateWizardForm(forms.ModelForm):
 
         candidate = str(cleaned.get("freeipa_username") or "").strip()
         nominator = str(cleaned.get("nominated_by") or "").strip()
-        if candidate and nominator and candidate.lower() == nominator.lower():
+        if is_self_nomination(candidate_username=candidate, nominator_username=nominator):
             self.add_error("nominated_by", "Candidates cannot nominate themselves.")
 
         return cleaned

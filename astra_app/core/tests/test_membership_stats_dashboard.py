@@ -193,7 +193,7 @@ class MembershipStatsDashboardTests(TestCase):
             },
         )
 
-        country_attr = str(settings.SELF_SERVICE_ADDRESS_COUNTRY_ATTR or "c").strip() or "c"
+        country_attr = str(settings.SELF_SERVICE_ADDRESS_COUNTRY_ATTR).strip()
         alice = FreeIPAUser("alice", {"uid": ["alice"], country_attr: ["US"], "memberof_group": []})
         bob = FreeIPAUser("bob", {"uid": ["bob"], country_attr: ["CA"], "memberof_group": []})
         carol = FreeIPAUser(

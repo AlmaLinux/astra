@@ -1,8 +1,8 @@
 
 from django import forms
 
-from core.form_validators import clean_password_confirm
 from core.forms_base import StyledForm
+from core.forms_security import PasswordConfirmationMixin, make_password_confirmation_field, make_password_field
 from core.profanity import validate_no_profanity_or_hate_speech
 from core.views_utils import _normalize_str
 
@@ -70,24 +70,18 @@ class ResendRegistrationEmailForm(forms.Form):
     username = forms.CharField(widget=forms.HiddenInput, required=True)
 
 
-class PasswordSetForm(StyledForm):
-    password = forms.CharField(
+class PasswordSetForm(PasswordConfirmationMixin, StyledForm):
+    password_field_name = "password"
+    confirm_password_field_name = "password_confirm"
+
+    password = make_password_field(
         label="Password",
-        widget=forms.PasswordInput,
-        required=True,
         min_length=6,
         max_length=122,
         help_text="Choose a strong password.",
     )
-    password_confirm = forms.CharField(
+    password_confirm = make_password_confirmation_field(
         label="Confirm password",
-        widget=forms.PasswordInput,
-        required=True,
         min_length=6,
         max_length=122,
     )
-
-    def clean(self):
-        cleaned = super().clean()
-        clean_password_confirm(cleaned, password_field="password", confirm_field="password_confirm")
-        return cleaned

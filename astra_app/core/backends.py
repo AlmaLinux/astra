@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 _service_client_local = threading.local()
 _viewer_username_local = threading.local()
 
-_FREEIPA_REQUEST_TIMEOUT_SECONDS: int = getattr(settings, "FREEIPA_REQUEST_TIMEOUT_SECONDS", 10)  # env-tunable
+_FREEIPA_REQUEST_TIMEOUT_SECONDS: int = settings.FREEIPA_REQUEST_TIMEOUT_SECONDS
 
 
 class _FreeIPATimeoutSession(requests.Session):

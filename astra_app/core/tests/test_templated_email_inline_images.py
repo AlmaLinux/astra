@@ -1,4 +1,4 @@
-
+import io
 from unittest.mock import patch
 
 from django.test import TestCase, override_settings
@@ -57,3 +57,45 @@ class TemplatedEmailInlineImagesTests(TestCase):
         self.assertIn("message", kwargs)
         self.assertIn("html_message", kwargs)
         self.assertIn("http://example.test/reset", kwargs.get("html_message") or "")
+
+    @override_settings(AWS_STORAGE_BUCKET_NAME="astra-media")
+    def test_queue_composed_email_preserves_inline_image_attachment_content_id(self) -> None:
+        from core.templated_email import queue_composed_email
+
+        html = "{% load post_office %}<img src=\"{% inline_image 'http://localhost:9000/astra-media/mail-images/logo.png' %}\" />"
+
+        # Minimal valid 1x1 PNG for MIME type detection in inline-image rendering.
+        png_bytes = (
+            b"\x89PNG\r\n\x1a\n"
+            b"\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+            b"\x00\x00\x00\x0bIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4"
+            b"\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+
+        class _DummyEmail:
+            id = 123
+
+        with (
+            patch("core.templated_email.default_storage.open", return_value=io.BytesIO(png_bytes)),
+            patch("core.templated_email.post_office.mail.send", return_value=_DummyEmail()) as send_mock,
+        ):
+            queue_composed_email(
+                recipients=["alice@example.com"],
+                sender="noreply@example.com",
+                subject_source="Hello {{ username }}",
+                text_source="Hi {{ username }}",
+                html_source=html,
+                context={"username": "alice"},
+            )
+
+        _args, kwargs = send_mock.call_args
+        self.assertEqual(kwargs.get("render_on_delivery"), False)
+        attachments = kwargs.get("attachments") or {}
+        self.assertTrue(attachments)
+        has_content_id = any(
+            isinstance(meta, dict)
+            and isinstance(meta.get("headers"), dict)
+            and bool(meta["headers"].get("Content-ID"))
+            for meta in attachments.values()
+        )
+        self.assertTrue(has_content_id)

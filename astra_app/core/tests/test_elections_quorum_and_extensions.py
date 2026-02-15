@@ -20,7 +20,13 @@ from core.models import (
 )
 from core.permissions import ASTRA_ADD_ELECTION
 from core.tests.ballot_chain import compute_chain_hash
+from core.tests.utils_test_data import ensure_core_categories, ensure_email_templates
 from core.tokens import election_genesis_chain_hash
+
+
+def setUpModule() -> None:
+    ensure_core_categories()
+    ensure_email_templates()
 
 
 class ElectionQuorumAuditTests(TestCase):

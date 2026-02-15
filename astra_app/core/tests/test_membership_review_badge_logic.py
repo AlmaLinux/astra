@@ -9,7 +9,7 @@ from django.utils import timezone
 from core.backends import FreeIPAUser
 from core.context_processors import membership_review
 from core.models import AccountInvitation, FreeIPAPermissionGrant, MembershipRequest, MembershipType
-from core.permissions import ASTRA_ADD_MEMBERSHIP
+from core.permissions import ASTRA_ADD_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP
 
 
 class MembershipReviewBadgeLogicTests(TestCase):
@@ -69,3 +69,45 @@ class MembershipReviewBadgeLogicTests(TestCase):
         self.assertEqual(ctx["membership_requests_pending_count"], 0)
         self.assertEqual(ctx["membership_requests_on_hold_count"], 2)
         self.assertEqual(ctx["account_invitations_accepted_count"], 1)
+
+    def test_context_processor_hides_counts_for_view_only_user(self) -> None:
+        MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.pending,
+        )
+        AccountInvitation.objects.create(
+            email="accepted@example.com",
+            full_name="Accepted User",
+            note="",
+            invited_by_username="committee",
+            accepted_at=timezone.now(),
+        )
+
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="viewer",
+        )
+
+        viewer = FreeIPAUser(
+            "viewer",
+            {
+                "uid": ["viewer"],
+                "mail": ["viewer@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        rf = RequestFactory()
+        request = rf.get("/")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+            request.user = viewer
+            ctx = membership_review(request)
+
+        self.assertTrue(ctx["membership_can_view"])
+        self.assertFalse(ctx["membership_can_add"])
+        self.assertNotIn("membership_requests_pending_count", ctx)
+        self.assertNotIn("membership_requests_on_hold_count", ctx)
+        self.assertNotIn("account_invitations_accepted_count", ctx)

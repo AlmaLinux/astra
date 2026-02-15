@@ -1,0 +1,24 @@
+{% load static %}
+
+<link rel="stylesheet" href="{% static 'core/vendor/codemirror/codemirror.min.css' %}">
+<link rel="stylesheet" href="{% static 'core/vendor/codemirror/mdn-like.min.css' %}">
+<link rel="stylesheet" href="{% static 'core/vendor/codemirror/lint.css' %}">
+
+<style>
+  .CodeMirror {
+    height: 420px;
+    border: 1px solid rgba(0, 0, 0, 0.125);
+    border-radius: 0.25rem;
+    font-size: 0.9rem;
+  }
+
+  .CodeMirror-focused {
+    border-color: #80bdff;
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+  }
+
+  .cm-mustache {
+    color: #d63384;
+    font-weight: 600;
+  }
+</style>

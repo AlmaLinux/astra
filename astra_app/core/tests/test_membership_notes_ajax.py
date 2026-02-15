@@ -12,7 +12,7 @@ from django.utils import timezone
 from core.backends import FreeIPAUser
 from core.membership_notes import CUSTOS
 from core.models import FreeIPAPermissionGrant, MembershipRequest, MembershipType, Note
-from core.permissions import ASTRA_ADD_MEMBERSHIP
+from core.permissions import ASTRA_ADD_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP
 
 
 class MembershipNotesAjaxTests(TestCase):
@@ -245,3 +245,77 @@ class MembershipNotesAjaxTests(TestCase):
         self.assertIn("User contacted", group_html)
         bubble_class_hits = re.findall(r'\bmembership-notes-bubble\b', group_html)
         self.assertEqual(len(bubble_class_hits), 2)
+
+    def test_view_only_user_cannot_submit_vote_actions(self) -> None:
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="viewer",
+        )
+
+        self._login_as_freeipa_user("viewer")
+        viewer = FreeIPAUser(
+            "viewer",
+            {
+                "uid": ["viewer"],
+                "mail": ["viewer@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+            resp = self.client.post(
+                reverse("membership-request-note-add", args=[req.pk]),
+                data={
+                    "note_action": "vote_approve",
+                    "message": "approve",
+                    "next": reverse("membership-requests"),
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+
+        self.assertEqual(resp.status_code, 403)
+        self.assertFalse(
+            Note.objects.filter(
+                membership_request=req,
+                username="viewer",
+                action={"type": "vote", "value": "approve"},
+            ).exists()
+        )
+
+    def test_manage_user_can_submit_vote_actions(self) -> None:
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+            },
+        )
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.post(
+                reverse("membership-request-note-add", args=[req.pk]),
+                data={
+                    "note_action": "vote_approve",
+                    "message": "approve",
+                    "next": reverse("membership-requests"),
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        payload = json.loads(resp.content)
+        self.assertTrue(payload.get("ok"))
+        self.assertTrue(
+            Note.objects.filter(
+                membership_request=req,
+                username="reviewer",
+                action={"type": "vote", "value": "approve"},
+            ).exists()
+        )

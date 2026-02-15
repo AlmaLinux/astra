@@ -18,6 +18,8 @@ class _StyledFormMixin:
         for _name, field in self.fields.items():
             if isinstance(field.widget, forms.CheckboxInput):
                 field.widget.attrs.setdefault("class", "form-check-input")
+            elif isinstance(field.widget, forms.ClearableFileInput):
+                field.widget.attrs.setdefault("class", "form-control-file")
             elif isinstance(field.widget, forms.SelectMultiple):
                 field.widget.attrs.setdefault("class", "form-control")
             elif isinstance(field.widget, forms.Textarea):
@@ -25,6 +27,13 @@ class _StyledFormMixin:
                 field.widget.attrs.setdefault("spellcheck", "true")
             else:
                 field.widget.attrs.setdefault("class", "form-control")
+
+    def _append_css_class(self, class_name: str) -> None:
+        for field in self.fields.values():
+            current = str(field.widget.attrs.get("class", "")).strip()
+            classes = {css for css in current.split(" ") if css}
+            classes.add(class_name)
+            field.widget.attrs["class"] = " ".join(sorted(classes))
 
     def _apply_invalid_classes(self) -> None:
         """Mark invalid widgets with is-invalid for AdminLTE/Bootstrap highlighting."""

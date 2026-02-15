@@ -5,13 +5,24 @@ from unittest.mock import patch
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
+from core.backends import FreeIPAUser
 from core.membership import (
+    FreeIPACallerMode,
+    FreeIPAGroupRemovalOutcome,
+    FreeIPAMissingUserPolicy,
+    FreeIPARepresentativeSyncError,
+    FreeIPARepresentativeSyncJournal,
     build_pending_request_context,
+    compute_membership_requestability_context,
     expiring_soon_cutoff,
     get_expiring_memberships,
     get_valid_memberships,
+    membership_target_filter,
+    remove_organization_representative_from_group_if_present,
     remove_user_from_group,
     resolve_request_ids_by_membership_type,
+    rollback_organization_representative_groups,
+    sync_organization_representative_groups,
 )
 from core.models import (
     Membership,
@@ -24,6 +35,140 @@ from core.models import (
 
 
 class MembershipHelperTests(TestCase):
+    def test_membership_target_filter_enforces_exactly_one_target(self) -> None:
+        org = Organization.objects.create(name="Acme", representative="bob")
+
+        with self.assertRaises(ValueError):
+            membership_target_filter()
+
+        with self.assertRaises(ValueError):
+            membership_target_filter(username="alice", organization=org)
+
+        self.assertIsNone(membership_target_filter(username="   "))
+        self.assertEqual(
+            membership_target_filter(username=" alice "),
+            {"target_username": "alice"},
+        )
+        self.assertEqual(
+            membership_target_filter(organization=org),
+            {"target_organization": org},
+        )
+
+    def test_compute_membership_requestability_context_applies_held_category_exclusion(self) -> None:
+        MembershipType.objects.update(enabled=False)
+
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver",
+                "category_id": "sponsorship",
+                "sort_order": 1,
+                "enabled": True,
+                "group_cn": "almalinux-silver",
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror",
+                "category_id": "mirror",
+                "sort_order": 2,
+                "enabled": True,
+                "group_cn": "almalinux-mirror",
+            },
+        )
+
+        eligibility = {
+            "valid_membership_type_codes": set(),
+            "extendable_membership_type_codes": set(),
+            "blocked_membership_type_codes": set(),
+            "pending_membership_category_ids": set(),
+        }
+        org = Organization.objects.create(name="Req Org", representative="bob")
+
+        context = compute_membership_requestability_context(
+            organization=org,
+            eligibility=SimpleNamespace(**eligibility),
+            held_category_ids={"sponsorship", "mirror"},
+        )
+        self.assertFalse(context.membership_can_request_any)
+
+        context_with_open_category = compute_membership_requestability_context(
+            organization=org,
+            eligibility=SimpleNamespace(**eligibility),
+            held_category_ids={"sponsorship"},
+        )
+        self.assertTrue(context_with_open_category.membership_can_request_any)
+        self.assertEqual(
+            context_with_open_category.requestable_codes_by_category,
+            {
+                "sponsorship": {"silver"},
+                "mirror": {"mirror"},
+            },
+        )
+
+    def test_sync_representative_groups_raise_mode_exposes_partial_journal(self) -> None:
+        old_user = FreeIPAUser("old", {"uid": ["old"], "memberof_group": ["g1", "g2"]})
+        new_user = FreeIPAUser("new", {"uid": ["new"], "memberof_group": []})
+
+        def _failing_add(user: FreeIPAUser, *, group_name: str) -> None:
+            if group_name == "g2":
+                raise RuntimeError("add failure")
+
+        with (
+            patch("core.membership.FreeIPAUser.get", side_effect=[old_user, new_user]),
+            patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_mock,
+            patch.object(FreeIPAUser, "add_to_group", autospec=True, side_effect=_failing_add),
+        ):
+            with self.assertRaises(FreeIPARepresentativeSyncError) as ctx:
+                sync_organization_representative_groups(
+                    old_representative="old",
+                    new_representative="new",
+                    group_cns=("g1", "g2"),
+                    caller_mode=FreeIPACallerMode.raise_on_error,
+                    missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
+                )
+
+        self.assertEqual(remove_mock.call_count, 2)
+        self.assertIn("g2", ctx.exception.result.failed_group_cns)
+        self.assertIn("g1", ctx.exception.result.journal.new_added_group_cns)
+        self.assertIn("g2", ctx.exception.result.journal.old_removed_group_cns)
+
+    def test_rollback_representative_groups_scoped_to_journal_only(self) -> None:
+        old_user = FreeIPAUser("old", {"uid": ["old"], "memberof_group": []})
+        new_user = FreeIPAUser("new", {"uid": ["new"], "memberof_group": []})
+        journal = FreeIPARepresentativeSyncJournal(
+            targeted_group_cns=("g1", "g2", "g3"),
+            skipped_group_cns=(),
+            old_removed_group_cns=("g2",),
+            new_added_group_cns=("g1",),
+        )
+
+        with (
+            patch("core.membership.FreeIPAUser.get", side_effect=[old_user, new_user]),
+            patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_mock,
+            patch.object(FreeIPAUser, "add_to_group", autospec=True) as add_mock,
+        ):
+            rollback_organization_representative_groups(
+                old_representative="old",
+                new_representative="new",
+                journal=journal,
+            )
+
+        remove_mock.assert_called_once()
+        self.assertEqual(remove_mock.call_args.kwargs["group_name"], "g1")
+        add_mock.assert_called_once()
+        self.assertEqual(add_mock.call_args.kwargs["group_name"], "g2")
+
+    def test_remove_organization_representative_from_group_if_present_blank_is_noop(self) -> None:
+        outcome = remove_organization_representative_from_group_if_present(
+            representative_username="",
+            group_cn="",
+            caller_mode=FreeIPACallerMode.best_effort,
+            missing_user_policy=FreeIPAMissingUserPolicy.treat_as_noop,
+        )
+        self.assertEqual(outcome, FreeIPAGroupRemovalOutcome.noop_blank_input)
+
     def test_build_pending_request_context_returns_entries_and_category_index(self) -> None:
         MembershipTypeCategory.objects.update_or_create(
             pk="sponsorship",

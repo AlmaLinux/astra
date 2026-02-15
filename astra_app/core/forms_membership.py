@@ -7,6 +7,7 @@ from django import forms
 from django.core.exceptions import ValidationError
 from django.core.validators import URLValidator
 
+from core.forms_base import StyledForm
 from core.membership import (
     get_membership_request_eligibility,
 )
@@ -54,7 +55,7 @@ class _HttpURLField(forms.URLField):
     default_validators = [URLValidator(schemes=["http", "https"])]
 
 
-class MembershipRequestForm(forms.Form):
+class MembershipRequestForm(StyledForm):
     _INDIVIDUAL_QUESTIONS: tuple[_QuestionSpec, ...] = (
         _QuestionSpec(
             name="Contributions",
@@ -192,10 +193,8 @@ class MembershipRequestForm(forms.Form):
             self.fields[spec.field_name].label = spec.title
             self.fields[spec.field_name].required = False
 
-        for field in self.fields.values():
-            field.widget.attrs.setdefault("class", "form-control w-100")
-            if isinstance(field.widget, forms.Textarea):
-                field.widget.attrs.setdefault("spellcheck", "true")
+        self._apply_css_classes()
+        self._append_css_class("w-100")
 
         eligibility = get_membership_request_eligibility(username=username, organization=organization)
         self._blocked_membership_type_codes = eligibility.blocked_membership_type_codes
@@ -259,7 +258,7 @@ class MembershipRejectForm(forms.Form):
     reason = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 3, "spellcheck": "true"}))
 
 
-class MembershipRequestUpdateResponsesForm(forms.Form):
+class MembershipRequestUpdateResponsesForm(StyledForm):
     def __init__(self, *args, membership_request: MembershipRequest, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
@@ -301,10 +300,8 @@ class MembershipRequestUpdateResponsesForm(forms.Form):
             )
             self._question_specs.append(extra_spec)
 
-        for field in self.fields.values():
-            field.widget.attrs.setdefault("class", "form-control w-100")
-            if isinstance(field.widget, forms.Textarea):
-                field.widget.attrs.setdefault("spellcheck", "true")
+        self._apply_css_classes()
+        self._append_css_class("w-100")
 
     def responses(self) -> list[dict[str, str]]:
         out: list[dict[str, str]] = []

@@ -18,6 +18,7 @@ from django.db.models import Q
 from django.utils import timezone
 from PIL import Image
 
+from core.membership_targets import MembershipTargetIdentity, MembershipTargetKind
 from core.tokens import make_signed_token
 
 logger = logging.getLogger(__name__)
@@ -400,10 +401,18 @@ class MembershipRequest(models.Model):
         return f"org:{self.target_identifier} → {self.membership_type_id}"
 
     @property
+    def target_identity(self) -> MembershipTargetIdentity:
+        return MembershipTargetIdentity.from_target_fields(
+            username=self.requested_username,
+            organization_id=self.requested_organization_id,
+            organization_code=self.requested_organization_code,
+            organization_name=self.requested_organization_name,
+            organization_fk_name=self.requested_organization.name if self.requested_organization is not None else "",
+        )
+
+    @property
     def target_kind(self) -> TargetKind:
-        if self.requested_username:
-            return self.TargetKind.user
-        return self.TargetKind.organization
+        return self.TargetKind(self.target_identity.kind.value)
 
     @property
     def is_user_target(self) -> bool:
@@ -415,25 +424,17 @@ class MembershipRequest(models.Model):
 
     @property
     def organization_identifier(self) -> str:
-        if self.requested_organization_code:
-            return self.requested_organization_code
-        if self.requested_organization_id is not None:
-            return str(self.requested_organization_id)
-        return ""
+        return self.target_identity.organization_identifier
 
     @property
     def organization_display_name(self) -> str:
-        if self.requested_organization_name:
-            return self.requested_organization_name
-        if self.requested_organization is None:
-            return ""
-        return self.requested_organization.name
+        return self.target_identity.organization_display_name
 
     @property
     def target_identifier(self) -> str:
         if self.target_kind == self.TargetKind.user:
-            return self.requested_username
-        return self.organization_identifier or "?"
+            return self.target_identity.identifier
+        return self.target_identity.organization_identifier or "?"
 
 
 
@@ -672,6 +673,32 @@ class Membership(models.Model):
 
         super().save(*args, **kwargs)
 
+    @property
+    def target_identity(self) -> MembershipTargetIdentity:
+        return MembershipTargetIdentity.from_target_fields(
+            username=self.target_username,
+            organization_id=self.target_organization_id,
+            organization_code=self.target_organization_code,
+            organization_name=self.target_organization_name,
+            organization_fk_name=self.target_organization.name if self.target_organization is not None else "",
+        )
+
+    @property
+    def target_kind(self) -> MembershipTargetKind:
+        return self.target_identity.kind
+
+    @property
+    def organization_identifier(self) -> str:
+        return self.target_identity.organization_identifier
+
+    @property
+    def organization_display_name(self) -> str:
+        return self.target_identity.organization_display_name
+
+    @property
+    def target_identifier(self) -> str:
+        return self.target_identity.identifier
+
     @classmethod
     def replace_within_category(
         cls,
@@ -728,10 +755,17 @@ class Membership(models.Model):
             return new, old_copy
 
     def __str__(self) -> str:
-        if self.target_username:
-            return f"{self.target_username} ({self.membership_type_id})"
-        code = self.target_organization_code or (self.target_organization_id or "?")
+        if self.target_kind == MembershipTargetKind.user:
+            return f"{self.target_identifier} ({self.membership_type_id})"
+        code = self.organization_identifier or "?"
         return f"org:{code} ({self.membership_type_id})"
+
+
+class MembershipLogQuerySet(models.QuerySet["MembershipLog"]):
+    def for_organization_identifier(self, organization_id: int) -> MembershipLogQuerySet:
+        return self.filter(
+            Q(target_organization_id=organization_id) | Q(target_organization_code=str(organization_id))
+        )
 
 
 class MembershipLog(models.Model):
@@ -772,6 +806,8 @@ class MembershipLog(models.Model):
     rejection_reason = models.TextField(blank=True, default="")
     expires_at = models.DateTimeField(blank=True, null=True)
 
+    objects = MembershipLogQuerySet.as_manager()
+
     class Meta:
         constraints = [
             models.CheckConstraint(
@@ -799,6 +835,32 @@ class MembershipLog(models.Model):
             models.Index(fields=["expires_at"], name="ml_exp_at"),
         ]
         ordering = ("-created_at",)
+
+    @property
+    def target_identity(self) -> MembershipTargetIdentity:
+        return MembershipTargetIdentity.from_target_fields(
+            username=self.target_username,
+            organization_id=self.target_organization_id,
+            organization_code=self.target_organization_code,
+            organization_name=self.target_organization_name,
+            organization_fk_name=self.target_organization.name if self.target_organization is not None else "",
+        )
+
+    @property
+    def target_kind(self) -> MembershipTargetKind:
+        return self.target_identity.kind
+
+    @property
+    def organization_identifier(self) -> str:
+        return self.target_identity.organization_identifier
+
+    @property
+    def organization_display_name(self) -> str:
+        return self.target_identity.organization_display_name
+
+    @property
+    def target_identifier(self) -> str:
+        return self.target_identity.identifier
 
     @override
     def save(self, *args, **kwargs) -> None:
@@ -899,10 +961,8 @@ class MembershipLog(models.Model):
             .first()
         )
 
-        log_filter = {
-            "target_organization_id": self.target_organization_id,
-            "membership_type": self.membership_type,
-        }
+        log_filter = self.target_identity.for_membership_log_filter()
+        log_filter["membership_type"] = self.membership_type
 
         start_at = self._resolve_term_start_at(existing=existing, log_filter=log_filter)
 
@@ -947,10 +1007,8 @@ class MembershipLog(models.Model):
             .only("created_at", "expires_at")
             .first()
         )
-        log_filter = {
-            "target_username": self.target_username,
-            "membership_type": self.membership_type,
-        }
+        log_filter = self.target_identity.for_membership_log_filter()
+        log_filter["membership_type"] = self.membership_type
         start_at = self._resolve_term_start_at(existing=existing_same_type, log_filter=log_filter)
 
         with transaction.atomic():
@@ -976,10 +1034,10 @@ class MembershipLog(models.Model):
             )
 
     def __str__(self) -> str:
-        if self.target_username == "":
-            code = self.target_organization_code or (self.target_organization_id or "")
+        if self.target_kind == MembershipTargetKind.organization:
+            code = self.organization_identifier
             return f"{self.action}: org:{code} ({self.membership_type_id})"
-        return f"{self.action}: {self.target_username} ({self.membership_type_id})"
+        return f"{self.action}: {self.target_identifier} ({self.membership_type_id})"
 
     @classmethod
     def expiry_for_approval_at(
@@ -1358,6 +1416,22 @@ class VotingCredential(models.Model):
         return secrets.token_urlsafe(32)
 
 
+class BallotQuerySet(models.QuerySet["Ballot"]):
+    def for_election(self, *, election: Election) -> BallotQuerySet:
+        return self.filter(election=election)
+
+    def final(self) -> BallotQuerySet:
+        return self.filter(superseded_by__isnull=True)
+
+    def latest_chain_head_hash_for_election(self, *, election: Election) -> str | None:
+        return (
+            self.for_election(election=election)
+            .order_by("-created_at", "-id")
+            .values_list("chain_hash", flat=True)
+            .first()
+        )
+
+
 class Ballot(models.Model):
     election = models.ForeignKey(Election, on_delete=models.CASCADE, related_name="ballots")
 
@@ -1382,6 +1456,8 @@ class Ballot(models.Model):
     previous_chain_hash = models.CharField(max_length=64)
     chain_hash = models.CharField(max_length=64)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = BallotQuerySet.as_manager()
 
     class Meta:
         constraints = [

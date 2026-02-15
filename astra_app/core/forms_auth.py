@@ -2,8 +2,13 @@
 from django import forms
 from django.contrib.auth.forms import AuthenticationForm
 
-from core.form_validators import clean_password_confirm
 from core.forms_base import StyledForm, _StyledFormMixin
+from core.forms_security import (
+    PasswordConfirmationMixin,
+    make_otp_field,
+    make_password_confirmation_field,
+    make_password_field,
+)
 from core.views_utils import _normalize_str
 
 
@@ -14,7 +19,7 @@ class FreeIPAAuthenticationForm(_StyledFormMixin, AuthenticationForm):
     calling Django's authenticate().
     """
 
-    otp = forms.CharField(label="One-Time Password", required=False)
+    otp = make_otp_field()
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -29,17 +34,12 @@ class FreeIPAAuthenticationForm(_StyledFormMixin, AuthenticationForm):
         return super().clean()
 
 
-class ExpiredPasswordChangeForm(StyledForm):
+class ExpiredPasswordChangeForm(PasswordConfirmationMixin, StyledForm):
     username = forms.CharField(label="Username", required=True)
-    current_password = forms.CharField(label="Current Password", widget=forms.PasswordInput, required=True)
-    otp = forms.CharField(label="One-Time Password", required=False)
-    new_password = forms.CharField(label="New Password", widget=forms.PasswordInput, required=True)
-    confirm_new_password = forms.CharField(label="Confirm New Password", widget=forms.PasswordInput, required=True)
-
-    def clean(self):
-        cleaned = super().clean()
-        clean_password_confirm(cleaned)
-        return cleaned
+    current_password = make_password_field(label="Current Password")
+    otp = make_otp_field()
+    new_password = make_password_field(label="New Password")
+    confirm_new_password = make_password_confirmation_field(label="Confirm New Password")
 
 
 class SyncTokenForm(StyledForm):
@@ -73,37 +73,29 @@ class PasswordResetRequestForm(StyledForm):
         return _normalize_str(self.cleaned_data.get("username_or_email"))
 
 
-class PasswordResetSetForm(StyledForm):
-    password = forms.CharField(
+class PasswordResetSetForm(PasswordConfirmationMixin, StyledForm):
+    password_field_name = "password"
+    confirm_password_field_name = "password_confirm"
+
+    password = make_password_field(
         label="New password",
-        widget=forms.PasswordInput,
-        required=True,
         min_length=6,
         max_length=122,
     )
-    password_confirm = forms.CharField(
+    password_confirm = make_password_confirmation_field(
         label="Confirm new password",
-        widget=forms.PasswordInput,
-        required=True,
         min_length=6,
         max_length=122,
     )
-    otp = forms.CharField(
-        label="One-Time Password",
-        required=False,
+    otp = make_otp_field(
+        autocomplete="off",
     )
 
     def __init__(self, *args, require_otp: bool = False, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["otp"].widget.attrs.setdefault("autocomplete", "off")
         if require_otp:
             self.fields["otp"].required = True
             self.fields["otp"].help_text = "Required for accounts with two-factor authentication enabled."
         else:
             self.fields["otp"].help_text = "Only required if your account has two-factor authentication enabled."
-
-    def clean(self):
-        cleaned = super().clean()
-        clean_password_confirm(cleaned, password_field="password", confirm_field="password_confirm")
-        return cleaned
 

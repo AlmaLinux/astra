@@ -7,6 +7,7 @@
   {{ block.super }}
   <link rel="stylesheet" href="{% static 'admin/css/vendor/select2/select2.css' %}">
   <link rel="stylesheet" href="{% static 'core/css/select2_overrides.css' %}">
+  {% include 'core/_templated_email_compose_assets_head.html' %}
   <style>
     #exclusion-groups-toggle .exclusion-groups-collapse-chevron {
       display: inline-block;
@@ -352,5 +353,6 @@
 {% block scripts %}
   {{ block.super }}
   <script src="{% static 'admin/js/vendor/select2/select2.full.js' %}"></script>
+  {% include 'core/_templated_email_compose_assets_scripts.html' %}
   <script src="{% static 'core/js/election_edit.js' %}"></script>
 {% endblock %}

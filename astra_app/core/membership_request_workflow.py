@@ -3,7 +3,6 @@ import datetime
 import logging
 from typing import Any
 
-import post_office.mail
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db.models import QuerySet
@@ -16,9 +15,16 @@ from core.email_context import (
     freeform_message_email_context,
     membership_committee_email_context,
     organization_sponsor_email_context,
+    system_email_context,
     user_email_context_from_user,
 )
-from core.membership import remove_user_from_group
+from core.membership import (
+    FreeIPACallerMode,
+    FreeIPAGroupRemovalOutcome,
+    FreeIPAMissingUserPolicy,
+    remove_organization_representative_from_group_if_present,
+    sync_organization_representative_groups,
+)
 from core.membership_notes import add_note
 from core.membership_notifications import organization_sponsor_notification_recipient_email
 from core.models import (
@@ -28,6 +34,7 @@ from core.models import (
     MembershipType,
     Organization,
 )
+from core.templated_email import queue_templated_email
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +169,35 @@ def _try_record_email_note(
         )
 
 
+def _send_membership_request_notification(
+    *,
+    target: MembershipTarget,
+    membership_type: MembershipType,
+    template_name: str,
+    extra_context: dict[str, object] | None = None,
+) -> object | None:
+    if not target.email:
+        return None
+
+    context: dict[str, object] = {
+        **system_email_context(),
+        **target.email_context,
+        **membership_committee_email_context(),
+        "membership_type": membership_type.name,
+        "membership_type_code": membership_type.code,
+    }
+    if extra_context:
+        context.update(extra_context)
+
+    return queue_templated_email(
+        recipients=[target.email],
+        sender=settings.DEFAULT_FROM_EMAIL,
+        template_name=template_name,
+        context=context,
+        reply_to=[settings.MEMBERSHIP_COMMITTEE_EMAIL],
+    )
+
+
 def _active_expires_at(queryset: QuerySet) -> datetime.datetime | None:
     """Return expires_at if the first matching record is still valid, else None."""
     current = queryset.first()
@@ -262,17 +298,18 @@ def record_membership_request_created(
             else:
                 if target is not None and target.email:
                     try:
-                        sent_email = post_office.mail.send(
+                        sent_email = queue_templated_email(
                             recipients=[target.email],
                             sender=settings.DEFAULT_FROM_EMAIL,
-                            template=settings.MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME,
+                            template_name=settings.MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME,
                             context={
+                                **system_email_context(),
                                 **user_email_context_from_user(user=target),
                                 **membership_committee_email_context(),
                                 "membership_type": membership_type.name,
                                 "membership_type_code": membership_type.code,
                             },
-                            headers={"Reply-To": settings.MEMBERSHIP_COMMITTEE_EMAIL},
+                            reply_to=[settings.MEMBERSHIP_COMMITTEE_EMAIL],
                         )
                     except Exception as e:
                         logger.exception(
@@ -332,18 +369,19 @@ def record_membership_request_created(
             )
         elif recipient_email:
             try:
-                sent_email = post_office.mail.send(
+                sent_email = queue_templated_email(
                     recipients=[recipient_email],
                     sender=settings.DEFAULT_FROM_EMAIL,
-                    template=settings.MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME,
+                    template_name=settings.MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME,
                     context={
+                        **system_email_context(),
                         **organization_sponsor_email_context(organization=organization),
                         **membership_committee_email_context(),
                         "organization_name": organization.name,
                         "membership_type": membership_type.name,
                         "membership_type_code": membership_type.code,
                     },
-                    headers={"Reply-To": settings.MEMBERSHIP_COMMITTEE_EMAIL},
+                    reply_to=[settings.MEMBERSHIP_COMMITTEE_EMAIL],
                 )
             except Exception as e:
                 logger.exception(
@@ -463,23 +501,25 @@ def approve_membership_request(
                     and old_membership.membership_type != membership_type
                     and old_membership.membership_type.group_cn
                 ):
-                    removed = remove_user_from_group(
-                        username=representative.username,
-                        group_cn=old_membership.membership_type.group_cn,
-                    )
-                    if not removed:
-                        logger.error(
-                            "%s: remove_from_group (old) failed request_id=%s org_id=%s representative=%r group_cn=%r",
-                            log_prefix,
-                            membership_request.pk,
-                            org.pk,
-                            representative.username,
-                            old_membership.membership_type.group_cn,
+                    old_group_cn = str(old_membership.membership_type.group_cn or "").strip()
+                    if old_group_cn:
+                        old_outcome = remove_organization_representative_from_group_if_present(
+                            representative_username=representative.username,
+                            group_cn=old_group_cn,
+                            caller_mode=FreeIPACallerMode.raise_on_error,
+                            missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
                         )
-                        raise Exception("Failed to remove user from old group")
+                        if old_outcome == FreeIPAGroupRemovalOutcome.failed:
+                            raise Exception("Failed to remove user from old group")
 
                 try:
-                    representative.add_to_group(group_name=membership_type.group_cn)
+                    sync_organization_representative_groups(
+                        old_representative="",
+                        new_representative=representative.username,
+                        group_cns=(membership_type.group_cn,),
+                        caller_mode=FreeIPACallerMode.raise_on_error,
+                        missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
+                    )
                 except Exception:
                     logger.exception(
                         "%s: add_to_group failed (org representative) request_id=%s org_id=%s representative=%r group_cn=%r",
@@ -493,6 +533,7 @@ def approve_membership_request(
 
         email_context: dict[str, object] = (
             {
+                **system_email_context(),
                 **organization_sponsor_email_context(organization=org),
                 **membership_committee_email_context(),
                 "organization_name": org.name,
@@ -559,6 +600,7 @@ def approve_membership_request(
 
         email_context = (
             {
+                **system_email_context(),
                 **user_email_context_from_user(user=user),
                 **membership_committee_email_context(),
                 "membership_type": membership_type.name,
@@ -578,12 +620,12 @@ def approve_membership_request(
     sent_email = None
     if template_name is not None:
         try:
-            sent_email = post_office.mail.send(
+            sent_email = queue_templated_email(
                 recipients=[email_recipient],
                 sender=settings.DEFAULT_FROM_EMAIL,
-                template=template_name,
+                template_name=template_name,
                 context=email_context,
-                headers={"Reply-To": settings.MEMBERSHIP_COMMITTEE_EMAIL},
+                reply_to=[settings.MEMBERSHIP_COMMITTEE_EMAIL],
             )
         except Exception:
             logger.exception(
@@ -658,18 +700,11 @@ def reject_membership_request(
     sent_email = None
     if send_rejected_email and target.email:
         try:
-            sent_email = post_office.mail.send(
-                recipients=[target.email],
-                sender=settings.DEFAULT_FROM_EMAIL,
-                template=settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME,
-                context={
-                    **target.email_context,
-                    **membership_committee_email_context(),
-                    **freeform_message_email_context(key="rejection_reason", value=reason),
-                    "membership_type": membership_type.name,
-                    "membership_type_code": membership_type.code,
-                },
-                headers={"Reply-To": settings.MEMBERSHIP_COMMITTEE_EMAIL},
+            sent_email = _send_membership_request_notification(
+                target=target,
+                membership_type=membership_type,
+                template_name=settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME,
+                extra_context=freeform_message_email_context(key="rejection_reason", value=reason),
             )
         except Exception as e:
             logger.exception(
@@ -772,19 +807,14 @@ def put_membership_request_on_hold(
     sent_email = None
     if send_rfi_email and target.email:
         try:
-            sent_email = post_office.mail.send(
-                recipients=[target.email],
-                sender=settings.DEFAULT_FROM_EMAIL,
-                template=settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME,
-                context={
-                    **target.email_context,
+            sent_email = _send_membership_request_notification(
+                target=target,
+                membership_type=membership_type,
+                template_name=settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME,
+                extra_context={
                     **freeform_message_email_context(key="rfi_message", value=message),
-                    **membership_committee_email_context(),
-                    "membership_type": membership_type.name,
-                    "membership_type_code": membership_type.code,
                     "application_url": application_url,
                 },
-                headers={"Reply-To": settings.MEMBERSHIP_COMMITTEE_EMAIL},
             )
         except Exception as e:
             logger.exception(

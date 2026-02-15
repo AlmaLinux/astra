@@ -11,7 +11,9 @@ from django.utils import timezone
 from post_office.models import EmailTemplate
 
 from core.backends import FreeIPAUser
+from core.membership import FreeIPAGroupRemovalOutcome
 from core.models import Membership, MembershipLog, MembershipType, MembershipTypeCategory, Organization
+from core.public_urls import normalize_public_base_url
 
 
 class MembershipExpiredCleanupCommandTests(TestCase):
@@ -215,7 +217,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
         from post_office.models import Email
 
         request_path = reverse("organization-membership-request", kwargs={"organization_id": org.pk})
-        base = str(settings.PUBLIC_BASE_URL or "").strip().rstrip("/")
+        base = normalize_public_base_url(settings.PUBLIC_BASE_URL)
         expected_extend_url = f"{base}{request_path}?membership_type=gold" if base else f"{request_path}?membership_type=gold"
 
         self.assertTrue(
@@ -401,8 +403,8 @@ class MembershipExpiredCleanupCommandTests(TestCase):
         with patch("django.utils.timezone.now", return_value=frozen_now):
             with patch("core.backends.FreeIPAUser.get", return_value=rep):
                 with patch(
-                    "core.management.commands.membership_expired_cleanup.remove_user_from_group",
-                    return_value=False,
+                    "core.management.commands.membership_expired_cleanup.remove_organization_representative_from_group_if_present",
+                    return_value=FreeIPAGroupRemovalOutcome.failed,
                     create=True,
                 ):
                     call_command("membership_expired_cleanup")

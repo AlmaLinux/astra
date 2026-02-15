@@ -8,9 +8,38 @@ from django.test import Client, TestCase, override_settings
 
 from core.backends import FreeIPAUser
 from core.models import AccountInvitation
+from core.tests.utils_test_data import ensure_email_templates
 
 
 class RegistrationFlowTests(TestCase):
+    @classmethod
+    def setUpTestData(cls) -> None:
+        super().setUpTestData()
+        ensure_email_templates()
+
+    @override_settings(REGISTRATION_OPEN=True)
+    def test_register_get_invite_prefill_uses_invitation_loader(self) -> None:
+        client = Client()
+
+        invitation = AccountInvitation.objects.create(
+            email="invitee@example.com",
+            full_name="Invitee",
+            note="",
+            invited_by_username="committee",
+        )
+        token = str(invitation.invitation_token)
+
+        with patch(
+            "core.views_registration.load_account_invitation_from_token",
+            create=True,
+            return_value=invitation,
+        ) as load_mock:
+            resp = client.get(f"/register/?invite={token}")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["form"].initial.get("invitation_token"), token)
+        load_mock.assert_called_once_with(token)
+
     def test_registration_email_template_exists(self):
         from post_office.models import EmailTemplate
 
@@ -38,7 +67,7 @@ class RegistrationFlowTests(TestCase):
         }
 
         with patch("core.views_registration.FreeIPAUser.get_client", autospec=True, return_value=ipa_client):
-            with patch("post_office.mail.send", autospec=True) as post_office_send_mock:
+            with patch("core.views_registration.queue_templated_email", autospec=True) as post_office_send_mock:
                 post_office_send_mock.return_value = None
 
                 resp = client.post(
@@ -57,7 +86,7 @@ class RegistrationFlowTests(TestCase):
         self.assertTrue(resp["Location"].startswith("/register/confirm"))
         # Registration email must use django-post-office's EmailTemplate feature
         self.assertEqual(post_office_send_mock.call_count, 1)
-        self.assertEqual(post_office_send_mock.call_args.kwargs.get("template"), "registration-email-validation")
+        self.assertEqual(post_office_send_mock.call_args.kwargs.get("template_name"), "registration-email-validation")
 
         ctx = post_office_send_mock.call_args.kwargs.get("context") or {}
         self.assertEqual(ctx.get("username"), "alice")
@@ -71,7 +100,7 @@ class RegistrationFlowTests(TestCase):
         client = Client()
 
         with patch("core.views_registration.FreeIPAUser.get_client", autospec=True) as get_client_mock:
-            with patch("post_office.mail.send", autospec=True) as post_office_send_mock:
+            with patch("core.views_registration.queue_templated_email", autospec=True) as post_office_send_mock:
                 resp = client.post(
                     "/register/",
                     data={
@@ -112,7 +141,7 @@ class RegistrationFlowTests(TestCase):
         }
 
         with patch("core.views_registration.FreeIPAUser.get_client", autospec=True, return_value=ipa_client):
-            with patch("post_office.mail.send", autospec=True) as post_office_send_mock:
+            with patch("core.views_registration.queue_templated_email", autospec=True) as post_office_send_mock:
                 resp = client.post(
                     f"/register/?invite={token}",
                     data={
@@ -193,7 +222,7 @@ class RegistrationFlowTests(TestCase):
         }
 
         with patch("core.views_registration.FreeIPAUser.get_client", autospec=True, return_value=ipa_client):
-            with patch("post_office.mail.send", autospec=True) as post_office_send_mock:
+            with patch("core.views_registration.queue_templated_email", autospec=True) as post_office_send_mock:
                 resp = client.post(
                     f"/register/?invite={token}",
                     data={
@@ -242,6 +271,61 @@ class RegistrationFlowTests(TestCase):
         self.assertIsNone(invitation.accepted_at)
         self.assertIn("alice", invitation.freeipa_matched_usernames)
 
+    @override_settings(REGISTRATION_OPEN=True)
+    def test_activate_invite_flow_uses_reconcile_helpers(self) -> None:
+        from core.tokens import make_signed_token
+
+        client = Client()
+
+        invitation = AccountInvitation.objects.create(
+            email="alice@example.com",
+            full_name="Invitee",
+            note="",
+            invited_by_username="committee",
+        )
+        activation_token = make_signed_token(
+            {
+                "u": "alice",
+                "e": "alice@example.com",
+                "i": str(invitation.invitation_token),
+            }
+        )
+
+        ipa_client = SimpleNamespace()
+        ipa_client.stageuser_show = lambda *args, **kwargs: {
+            "result": {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["alice@example.com"],
+            }
+        }
+        ipa_client.stageuser_activate = lambda *args, **kwargs: {"result": {"uid": ["alice"]}}
+        ipa_client.user_mod = lambda *args, **kwargs: {"result": {"uid": ["alice"]}}
+
+        with (
+            patch("core.views_registration.FreeIPAUser.get_client", autospec=True, return_value=ipa_client),
+            patch("core.views_registration._build_freeipa_client", autospec=True) as mocked_build,
+            patch(
+                "core.views_registration.load_account_invitation_from_token",
+                create=True,
+                return_value=invitation,
+            ) as load_mock,
+            patch("core.views_registration.reconcile_account_invitation_for_username", create=True) as reconcile_mock,
+        ):
+            mocked_build.return_value.change_password.return_value = None
+            activation_post = client.post(
+                f"/register/activate/?token={activation_token}",
+                data={"password": "S3curePassword!", "password_confirm": "S3curePassword!"},
+                follow=False,
+            )
+
+        self.assertEqual(activation_post.status_code, 302)
+        load_mock.assert_called_once_with(str(invitation.invitation_token))
+        self.assertEqual(reconcile_mock.call_count, 1)
+        self.assertEqual(reconcile_mock.call_args.kwargs["invitation"], invitation)
+        self.assertEqual(reconcile_mock.call_args.kwargs["username"], "alice")
+
     @override_settings(REGISTRATION_OPEN=True, DEFAULT_FROM_EMAIL="noreply@example.com")
     def test_activate_flow_happy_path(self):
         client = Client()
@@ -253,7 +337,7 @@ class RegistrationFlowTests(TestCase):
         }
 
         with patch("core.views_registration.FreeIPAUser.get_client", autospec=True, return_value=ipa_client):
-            with patch("post_office.mail.send", autospec=True) as post_office_send_mock:
+            with patch("core.views_registration.queue_templated_email", autospec=True) as post_office_send_mock:
                 post_office_send_mock.return_value = None
 
                 resp = client.post(

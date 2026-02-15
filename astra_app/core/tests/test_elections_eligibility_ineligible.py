@@ -179,3 +179,4 @@ class IneligibleVotersWithReasonsTests(TestCase):
         entry = result[0]
         required_keys = {"username", "reason", "term_start_date", "election_start_date", "days_at_start", "days_short"}
         self.assertEqual(set(entry.keys()), required_keys)
+

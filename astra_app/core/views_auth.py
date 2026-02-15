@@ -14,10 +14,13 @@ from django.urls import reverse
 from django.utils import timezone
 from python_freeipa import exceptions
 
+from core.account_invitation_reconcile import (
+    load_account_invitation_from_token,
+    reconcile_account_invitation_for_username,
+)
 from core.backends import FreeIPAUser, _build_freeipa_client
-from core.models import AccountInvitation
 from core.tokens import make_signed_token
-from core.views_utils import _normalize_str
+from core.views_utils import _normalize_str, get_username
 
 from .forms_auth import (
     ExpiredPasswordChangeForm,
@@ -51,15 +54,9 @@ class FreeIPALoginView(auth_views.LoginView):
 
     @override
     def get_success_url(self) -> str:
-        user = getattr(self.request, "user", None)
-        get_username = getattr(user, "get_username", None)
-        if callable(get_username):
-            try:
-                username = str(get_username()).strip()
-            except Exception:
-                username = ""
-            if username:
-                return reverse("user-profile", kwargs={"username": username})
+        username = get_username(self.request)
+        if username:
+            return reverse("user-profile", kwargs={"username": username})
 
         return super().get_success_url()
 
@@ -83,51 +80,19 @@ class FreeIPALoginView(auth_views.LoginView):
         if not invite_token:
             return response
 
-        try:
-            payload = signing.loads(invite_token, salt=settings.SECRET_KEY)
-        except signing.BadSignature:
-            return response
-
-        if not isinstance(payload, dict):
-            return response
-
-        invitation_id = payload.get("invitation_id")
-        try:
-            invitation_id = int(invitation_id)
-        except (TypeError, ValueError):
-            return response
-
-        invitation = AccountInvitation.objects.filter(
-            pk=invitation_id,
-            invitation_token=invite_token,
-            dismissed_at__isnull=True,
-        ).first()
+        invitation = load_account_invitation_from_token(invite_token)
         if invitation is None:
             return response
 
-        user = getattr(self.request, "user", None)
-        get_username = getattr(user, "get_username", None)
-        if not callable(get_username):
-            return response
-
-        try:
-            username = str(get_username()).strip()
-        except Exception:
-            return response
-
+        username = get_username(self.request)
         if not username:
             return response
 
-        now = timezone.now()
-        update_fields = ["freeipa_matched_usernames", "freeipa_last_checked_at"]
-        if invitation.organization_id is None:
-            invitation.accepted_at = invitation.accepted_at or now
-            update_fields.insert(0, "accepted_at")
-        usernames = set(invitation.freeipa_matched_usernames)
-        usernames.add(username)
-        invitation.freeipa_matched_usernames = sorted(usernames)
-        invitation.freeipa_last_checked_at = now
-        invitation.save(update_fields=update_fields)
+        reconcile_account_invitation_for_username(
+            invitation=invitation,
+            username=username,
+            now=timezone.now(),
+        )
 
         return response
 

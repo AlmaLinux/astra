@@ -11,11 +11,13 @@ from django.utils import timezone
 from core.backends import FreeIPAUser
 from core.models import FreeIPAPermissionGrant, MembershipLog, MembershipRequest, MembershipType
 from core.permissions import ASTRA_ADD_MEMBERSHIP
+from core.tests.utils_test_data import ensure_core_categories
 
 
 class MembershipRequestsOnHoldSplitTests(TestCase):
     def setUp(self) -> None:
         super().setUp()
+        ensure_core_categories()
         FreeIPAPermissionGrant.objects.get_or_create(
             permission=ASTRA_ADD_MEMBERSHIP,
             principal_type=FreeIPAPermissionGrant.PrincipalType.group,

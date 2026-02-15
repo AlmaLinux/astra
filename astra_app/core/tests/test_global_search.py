@@ -68,6 +68,29 @@ class GlobalSearchTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json(), {"users": [], "groups": []})
 
+    def test_search_without_directory_access_omits_users_payload(self) -> None:
+        self._login_as_freeipa("alice")
+        viewer = FreeIPAUser("alice", {"uid": ["alice"], "mail": ["alice@example.org"], "memberof_group": []})
+
+        users = [
+            SimpleNamespace(username="jim", full_name="Jim Jones"),
+        ]
+        groups = [
+            SimpleNamespace(cn="example-jin", description="", fas_group=True),
+        ]
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=viewer),
+            patch("core.backends.FreeIPAUser.all", return_value=users),
+            patch("core.backends.FreeIPAGroup.all", return_value=groups),
+        ):
+            resp = self.client.get("/search/?q=ji")
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertNotIn("users", data)
+        self.assertEqual([g["cn"] for g in data["groups"]], ["example-jin"])
+
     def test_search_does_not_match_private_user_by_full_name(self) -> None:
         self._login_as_freeipa("admin")
 

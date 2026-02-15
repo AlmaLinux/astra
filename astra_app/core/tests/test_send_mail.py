@@ -328,8 +328,9 @@ class SendMailTests(TestCase):
             patch("core.backends.FreeIPAUser.get", return_value=reviewer),
             patch("core.backends.FreeIPAGroup.all", return_value=[]),
             patch("core.backends.FreeIPAUser.all", return_value=[]),
-            patch("core.views_send_mail.EmailMultiAlternatives.send", return_value=1),
+            patch("core.views_send_mail.queue_composed_email") as queue_mock,
         ):
+            queue_mock.return_value = type("_QueuedEmail", (), {"id": 1})()
             resp = self.client.post(
                 reverse("send-mail"),
                 data={
@@ -569,7 +570,7 @@ class SendMailTests(TestCase):
             patch("core.backends.FreeIPAUser.get", return_value=reviewer),
             patch("core.backends.FreeIPAGroup.all", return_value=[]),
             patch("core.backends.FreeIPAUser.all", return_value=[]),
-            patch("core.views_send_mail.EmailMultiAlternatives.send") as send_mock,
+            patch("core.views_send_mail.queue_composed_email") as queue_mock,
         ):
             resp = self.client.post(
                 reverse("send-mail"),
@@ -586,7 +587,7 @@ class SendMailTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "cannot be used with CSV recipients")
-        send_mock.assert_not_called()
+        queue_mock.assert_not_called()
 
     def test_compose_shows_html_to_text_button_and_variables_card(self) -> None:
         self._login_as_freeipa_user("reviewer")
@@ -748,9 +749,9 @@ class SendMailTests(TestCase):
             patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
             patch("core.backends.FreeIPAGroup.get", return_value=_FakeGroup()),
             patch("core.backends.FreeIPAGroup.all", return_value=[_FakeGroup()]),
-            patch("core.views_send_mail.EmailMultiAlternatives", autospec=True) as email_cls,
+            patch("core.views_send_mail.queue_composed_email") as queue_mock,
         ):
-            email_cls.return_value.send.return_value = 1
+            queue_mock.return_value = type("_QueuedEmail", (), {"id": 1})()
             resp = self.client.post(
                 reverse("send-mail"),
                 data={
@@ -767,17 +768,17 @@ class SendMailTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 200)
-        email_cls.assert_called_once()
-        args, kwargs = email_cls.call_args
-        self.assertEqual(args[0], "Hello Alice")
-        self.assertEqual(args[1], "Hi Alice User")
-        self.assertEqual(args[2], settings.DEFAULT_FROM_EMAIL)
-        self.assertEqual(args[3], ["alice@example.com"])
+        queue_mock.assert_called_once()
+        kwargs = queue_mock.call_args.kwargs
+        self.assertEqual(kwargs["recipients"], ["alice@example.com"])
+        self.assertEqual(kwargs["sender"], settings.DEFAULT_FROM_EMAIL)
+        self.assertEqual(kwargs["subject_source"], "Hello {{ first_name }}")
+        self.assertEqual(kwargs["text_source"], "Hi {{ full_name }}")
+        self.assertEqual(kwargs["html_source"], "<p>Hi {{ full_name }}</p>")
+        self.assertEqual(kwargs["context"]["first_name"], "Alice")
+        self.assertEqual(kwargs["context"]["full_name"], "Alice User")
         self.assertEqual(kwargs["cc"], ["cc1@example.com", "cc2@example.com"])
         self.assertEqual(kwargs["bcc"], ["bcc1@example.com"])
-
-        email_cls.return_value.attach_alternative.assert_called_once_with("<p>Hi Alice User</p>", "text/html")
-        email_cls.return_value.send.assert_called_once()
 
     def test_send_emails_accepts_whitespace_separated_cc_bcc(self) -> None:
         from post_office.models import EmailTemplate
@@ -822,9 +823,9 @@ class SendMailTests(TestCase):
             patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
             patch("core.backends.FreeIPAGroup.get", return_value=_FakeGroup()),
             patch("core.backends.FreeIPAGroup.all", return_value=[_FakeGroup()]),
-            patch("core.views_send_mail.EmailMultiAlternatives", autospec=True) as email_cls,
+            patch("core.views_send_mail.queue_composed_email") as queue_mock,
         ):
-            email_cls.return_value.send.return_value = 1
+            queue_mock.return_value = type("_QueuedEmail", (), {"id": 1})()
             resp = self.client.post(
                 reverse("send-mail"),
                 data={
@@ -841,8 +842,8 @@ class SendMailTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 200)
-        email_cls.assert_called_once()
-        _args, kwargs = email_cls.call_args
+        queue_mock.assert_called_once()
+        kwargs = queue_mock.call_args.kwargs
         self.assertEqual(kwargs["cc"], ["cc1@example.com", "cc2@example.com", "cc3@example.com"])
         self.assertEqual(kwargs["bcc"], ["bcc1@example.com", "bcc2@example.com"])
 
@@ -889,9 +890,9 @@ class SendMailTests(TestCase):
             patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
             patch("core.backends.FreeIPAGroup.get", return_value=_FakeGroup()),
             patch("core.backends.FreeIPAGroup.all", return_value=[_FakeGroup()]),
-            patch("core.views_send_mail.EmailMultiAlternatives", autospec=True) as email_cls,
+            patch("core.views_send_mail.queue_composed_email") as queue_mock,
         ):
-            email_cls.return_value.send.return_value = 1
+            queue_mock.return_value = type("_QueuedEmail", (), {"id": 1})()
             resp = self.client.post(
                 reverse("send-mail"),
                 data={
@@ -907,8 +908,8 @@ class SendMailTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 200)
-        email_cls.assert_called_once()
-        _args, kwargs = email_cls.call_args
+        queue_mock.assert_called_once()
+        kwargs = queue_mock.call_args.kwargs
         self.assertEqual(kwargs["reply_to"], ["replies@example.com", "support@example.com"])
 
     def test_send_emails_renders_extra_context_vars(self) -> None:
@@ -918,9 +919,9 @@ class SendMailTests(TestCase):
         with (
             patch("core.backends.FreeIPAUser.get", return_value=reviewer),
             patch("core.backends.FreeIPAGroup.all", return_value=[]),
-            patch("core.views_send_mail.EmailMultiAlternatives", autospec=True) as email_cls,
+            patch("core.views_send_mail.queue_composed_email") as queue_mock,
         ):
-            email_cls.return_value.send.return_value = 1
+            queue_mock.return_value = type("_QueuedEmail", (), {"id": 1})()
             resp = self.client.post(
                 reverse("send-mail"),
                 data={
@@ -936,9 +937,9 @@ class SendMailTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 200)
-        email_cls.assert_called_once()
-        args, _kwargs = email_cls.call_args
-        self.assertEqual(args[0], "Hello Atomic")
+        queue_mock.assert_called_once()
+        kwargs = queue_mock.call_args.kwargs
+        self.assertEqual(kwargs["context"]["project"], "Atomic")
 
     @override_settings(PUBLIC_BASE_URL="https://astra.almalinux.org")
     def test_send_emails_renders_system_context_vars(self) -> None:
@@ -948,9 +949,9 @@ class SendMailTests(TestCase):
         with (
             patch("core.backends.FreeIPAUser.get", return_value=reviewer),
             patch("core.backends.FreeIPAGroup.all", return_value=[]),
-            patch("core.views_send_mail.EmailMultiAlternatives", autospec=True) as email_cls,
+            patch("core.views_send_mail.queue_composed_email") as queue_mock,
         ):
-            email_cls.return_value.send.return_value = 1
+            queue_mock.return_value = type("_QueuedEmail", (), {"id": 1})()
             resp = self.client.post(
                 reverse("send-mail"),
                 data={
@@ -965,44 +966,20 @@ class SendMailTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 200)
-        email_cls.assert_called_once()
-        args, _kwargs = email_cls.call_args
-        self.assertEqual(args[0], "Join https://astra.almalinux.org/register/")
+        queue_mock.assert_called_once()
+        kwargs = queue_mock.call_args.kwargs
+        self.assertEqual(kwargs["context"]["register_url"], "https://astra.almalinux.org/register/")
 
-    def test_send_mail_attaches_related_inline_images(self) -> None:
+    def test_send_mail_delegates_inline_image_semantics_to_ssot_helper(self) -> None:
         self._login_as_freeipa_user("reviewer")
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
-
-        class _FakeTemplate:
-            def __init__(self, rendered: str) -> None:
-                self._rendered = rendered
-                self.attach_related_calls: list[object] = []
-
-            def render(self, context: dict[str, str]) -> str:
-                return self._rendered
-
-            def attach_related(self, email_message: object) -> None:
-                self.attach_related_calls.append(email_message)
-
-        class _FakeEngine:
-            def __init__(self) -> None:
-                self._templates: list[_FakeTemplate] = []
-
-            def from_string(self, _raw: str) -> _FakeTemplate:
-                rendered = ["SUBJ", "TEXT", "<p>HTML</p>"][len(self._templates)]
-                tpl = _FakeTemplate(rendered)
-                self._templates.append(tpl)
-                return tpl
-
-        fake_engine = _FakeEngine()
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=reviewer),
             patch("core.backends.FreeIPAGroup.all", return_value=[]),
-            patch("core.views_send_mail.engines", {"post_office": fake_engine}),
-            patch("core.views_send_mail.EmailMultiAlternatives", autospec=True) as email_cls,
+            patch("core.views_send_mail.queue_composed_email") as queue_mock,
         ):
-            email_cls.return_value.send.return_value = 1
+            queue_mock.return_value = type("_QueuedEmail", (), {"id": 1})()
             resp = self.client.post(
                 reverse("send-mail"),
                 data={
@@ -1017,10 +994,8 @@ class SendMailTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 200)
-        # html template is the third from_string() call.
-        self.assertEqual(len(fake_engine._templates), 3)
-        html_template = fake_engine._templates[2]
-        self.assertEqual(len(html_template.attach_related_calls), 1)
+        queue_mock.assert_called_once()
+        self.assertIn("<p>HTML</p>", queue_mock.call_args.kwargs["html_source"])
 
     @override_settings(DEBUG=True)
     def test_send_mail_supports_inline_image_url_from_storage(self) -> None:
@@ -1043,9 +1018,10 @@ class SendMailTests(TestCase):
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.views_send_mail.EmailMultiAlternatives.send", return_value=1),
+            patch("core.views_send_mail.queue_composed_email") as queue_mock,
             patch("django.core.files.storage.default_storage.open", return_value=io.BytesIO(png_bytes)),
         ):
+            queue_mock.return_value = type("_QueuedEmail", (), {"id": 1})()
             resp = self.client.post(
                 reverse("send-mail"),
                 data={
@@ -1063,6 +1039,49 @@ class SendMailTests(TestCase):
         self.assertContains(resp, "Queued 1 email")
         self.assertNotContains(resp, "Failed to queue")
         self.assertNotContains(resp, "Template error")
+
+    def test_send_uses_ssot_queue_helper_with_best_effort_partial_failure(self) -> None:
+        from post_office.models import Email
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
+
+        first_error = ValueError("render failed")
+        queued_email = Email.objects.create(
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            to="bob@example.com",
+            cc="",
+            bcc="",
+            subject="Hello Bob",
+            message="Hi Bob",
+            html_message="<p>Hi Bob</p>",
+        )
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch(
+                "core.views_send_mail.queue_composed_email",
+                side_effect=[first_error, queued_email],
+            ) as queue_mock,
+        ):
+            resp = self.client.post(
+                reverse("send-mail"),
+                data={
+                    "recipient_mode": "manual",
+                    "manual_to": "alice@example.com, bob@example.com",
+                    "subject": "Hello {{ email }}",
+                    "text_content": "Hi {{ email }}",
+                    "html_content": "<p>Hi {{ email }}</p>",
+                    "action": "send",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(queue_mock.call_count, 2)
+        self.assertContains(resp, "Queued 1 email")
+        self.assertContains(resp, "Failed to queue 1 email")
 
 
 class UnifiedEmailPreviewSendMailTests(TestCase):

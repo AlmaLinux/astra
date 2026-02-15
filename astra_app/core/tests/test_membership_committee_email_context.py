@@ -31,7 +31,7 @@ class MembershipCommitteeEmailContextTests(TestCase):
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=alice),
-            patch("core.membership_request_workflow.post_office.mail.send") as send_mail,
+            patch("core.membership_request_workflow.queue_templated_email") as send_mail,
         ):
             record_membership_request_created(
                 membership_request=req,
@@ -46,7 +46,7 @@ class MembershipCommitteeEmailContextTests(TestCase):
             context.get("membership_committee_email"),
             settings.MEMBERSHIP_COMMITTEE_EMAIL,
         )
-        self.assertEqual(kwargs.get("headers"), {"Reply-To": settings.MEMBERSHIP_COMMITTEE_EMAIL})
+        self.assertEqual(kwargs.get("reply_to"), [settings.MEMBERSHIP_COMMITTEE_EMAIL])
 
     def test_membership_notifications_include_committee_context_and_reply_to(self) -> None:
         membership_type, _ = MembershipType.objects.update_or_create(

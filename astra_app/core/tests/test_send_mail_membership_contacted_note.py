@@ -44,9 +44,9 @@ class SendMailMembershipContactedNoteTests(TestCase):
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.views_send_mail.EmailMultiAlternatives", autospec=True) as email_cls,
+            patch("core.views_send_mail.queue_composed_email") as queue_mock,
         ):
-            email_cls.return_value.send.return_value = 1
+            queue_mock.return_value = type("_QueuedEmail", (), {"id": 4242})()
             resp = self.client.post(
                 reverse("send-mail"),
                 data={
@@ -64,12 +64,13 @@ class SendMailMembershipContactedNoteTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 200)
-        email_cls.assert_called()
+        queue_mock.assert_called()
         self.assertTrue(
             Note.objects.filter(
                 membership_request=req,
                 username="reviewer",
                 action__type="contacted",
                 action__kind="custom",
+                action__email_id=4242,
             ).exists()
         )

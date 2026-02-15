@@ -13,6 +13,7 @@ from post_office.models import Email
 from core.backends import FreeIPAUser
 from core.membership_notes import CUSTOS, note_action_icon, note_action_label, tally_last_votes
 from core.models import MembershipRequest, Note
+from core.views_utils import get_username
 
 register = template.Library()
 
@@ -187,12 +188,9 @@ def _email_modals_for_notes(notes: list[Note]) -> list[dict[str, Any]]:
 
 
 def _current_username_from_request(http_request: HttpRequest | None) -> str:
-    if http_request is None or getattr(http_request, "user", None) is None:
+    if http_request is None:
         return ""
-    try:
-        return str(http_request.user.get_username() or "").strip()
-    except Exception:
-        return ""
+    return get_username(http_request, allow_user_fallback=False)
 
 
 def _avatar_users_by_username(notes: list[Note]) -> dict[str, object]:

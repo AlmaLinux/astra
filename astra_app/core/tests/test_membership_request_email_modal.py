@@ -10,11 +10,13 @@ from core.backends import FreeIPAUser
 from core.membership_notes import add_note
 from core.models import FreeIPAPermissionGrant, MembershipRequest, MembershipType
 from core.permissions import ASTRA_VIEW_MEMBERSHIP
+from core.tests.utils_test_data import ensure_core_categories
 
 
 class MembershipRequestEmailModalTests(TestCase):
     def setUp(self) -> None:
         super().setUp()
+        ensure_core_categories()
         FreeIPAPermissionGrant.objects.get_or_create(
             permission=ASTRA_VIEW_MEMBERSHIP,
             principal_type=FreeIPAPermissionGrant.PrincipalType.group,

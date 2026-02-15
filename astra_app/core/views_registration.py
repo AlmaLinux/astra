@@ -3,7 +3,6 @@ import logging
 from smtplib import SMTPRecipientsRefused
 from urllib.parse import quote
 
-import post_office.mail
 from django.conf import settings
 from django.contrib import messages
 from django.core import signing
@@ -13,11 +12,16 @@ from django.urls import reverse
 from django.utils import timezone
 from python_freeipa import exceptions
 
+from core.account_invitation_reconcile import (
+    load_account_invitation_from_token,
+    reconcile_account_invitation_for_username,
+)
+from core.email_context import system_email_context
+from core.templated_email import queue_templated_email
 from core.views_utils import _normalize_str
 
 from .backends import FreeIPAUser, _build_freeipa_client
 from .forms_registration import PasswordSetForm, RegistrationForm, ResendRegistrationEmailForm
-from .models import AccountInvitation
 from .tokens import make_signed_token, read_signed_token
 
 logger = logging.getLogger(__name__)
@@ -68,11 +72,12 @@ def _send_registration_email(
 
     full_name = f"{first_name} {last_name}".strip() or username
 
-    post_office.mail.send(
+    queue_templated_email(
         recipients=[email],
         sender=settings.DEFAULT_FROM_EMAIL,
-        template=settings.REGISTRATION_EMAIL_TEMPLATE_NAME,
+        template_name=settings.REGISTRATION_EMAIL_TEMPLATE_NAME,
         context={
+            **system_email_context(),
             "username": username,
             "email": email,
             "first_name": first_name,
@@ -97,24 +102,9 @@ def register(request: HttpRequest) -> HttpResponse:
     invite_token = _normalize_str(request.GET.get("invite"))
     invitation_token = ""
     if invite_token:
-        try:
-            payload = signing.loads(invite_token, salt=settings.SECRET_KEY)
-        except signing.BadSignature:
-            payload = None
-        if isinstance(payload, dict):
-            invitation_id = payload.get("invitation_id")
-            try:
-                invitation_id = int(invitation_id)
-            except (TypeError, ValueError):
-                invitation_id = None
-            if invitation_id:
-                invitation = AccountInvitation.objects.filter(
-                    pk=invitation_id,
-                    invitation_token=invite_token,
-                    dismissed_at__isnull=True,
-                ).first()
-                if invitation is not None:
-                    invitation_token = invite_token
+        invitation = load_account_invitation_from_token(invite_token)
+        if invitation is not None:
+            invitation_token = invite_token
 
     form = RegistrationForm(request.POST or None, initial={"invitation_token": invitation_token})
 
@@ -333,33 +323,13 @@ def activate(request: HttpRequest) -> HttpResponse:
                 form.add_error(None, "Something went wrong while creating your account, please try again later.")
         else:
             if invitation_token:
-                try:
-                    payload = signing.loads(invitation_token, salt=settings.SECRET_KEY)
-                except signing.BadSignature:
-                    payload = None
-                if isinstance(payload, dict):
-                    invitation_id = payload.get("invitation_id")
-                    try:
-                        invitation_id = int(invitation_id)
-                    except (TypeError, ValueError):
-                        invitation_id = None
-                    if invitation_id:
-                        invitation = AccountInvitation.objects.filter(
-                            pk=invitation_id,
-                            invitation_token=invitation_token,
-                            dismissed_at__isnull=True,
-                        ).first()
-                        if invitation is not None:
-                            now = timezone.now()
-                            update_fields = ["freeipa_matched_usernames", "freeipa_last_checked_at"]
-                            if invitation.organization_id is None:
-                                invitation.accepted_at = invitation.accepted_at or now
-                                update_fields.insert(0, "accepted_at")
-                            usernames = set(invitation.freeipa_matched_usernames)
-                            usernames.add(username)
-                            invitation.freeipa_matched_usernames = sorted(usernames)
-                            invitation.freeipa_last_checked_at = now
-                            invitation.save(update_fields=update_fields)
+                invitation = load_account_invitation_from_token(invitation_token)
+                if invitation is not None:
+                    reconcile_account_invitation_for_username(
+                        invitation=invitation,
+                        username=username,
+                        now=timezone.now(),
+                    )
 
             messages.success(request, "Congratulations, your account has been created! Go ahead and sign in to proceed.")
             return redirect("login")

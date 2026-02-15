@@ -21,6 +21,7 @@ from core.backends import (
     set_current_viewer_username,
 )
 from core.ipa_user_attrs import _first
+from core.views_utils import get_username, try_get_username_from_user
 
 logger = logging.getLogger(__name__)
 
@@ -111,15 +112,9 @@ class FreeIPAAuthenticationMiddleware:
         # Important: do not force evaluation of `request.user` here when it's a
         # SimpleLazyObject; that evaluation may trigger FreeIPAUser.get() before
         # the viewer context is set.
-        viewer_username: str | None = None
-        try:
-            if upstream_is_authenticated and hasattr(upstream_user, "get_username"):
-                viewer_username = str(upstream_user.get_username()).strip() or None
-        except Exception:
-            viewer_username = None
-
-        if not viewer_username and session_username:
-            viewer_username = session_username
+        viewer_username = get_username(request, allow_user_fallback=False) or None
+        if not viewer_username and upstream_is_authenticated:
+            viewer_username = try_get_username_from_user(upstream_user) or None
         set_current_viewer_username(viewer_username)
 
         # Activate the user's timezone for this request so template tags/filters

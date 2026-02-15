@@ -121,9 +121,9 @@ class ElectionTier1OperationalTests(TestCase):
             status=Election.Status.open,
         )
 
-        # Simulate failure by patching Ballot.objects.filter to raise an exception
+        # Simulate failure by patching the chain-head helper used in close_election.
         with patch("core.elections_services.Ballot.objects") as mock_ballot:
-            mock_ballot.filter.side_effect = RuntimeError("Simulated database failure")
+            mock_ballot.latest_chain_head_hash_for_election.side_effect = RuntimeError("Simulated database failure")
 
             with self.assertRaisesRegex(Exception, r"Failed to close election.*Recovery"):
                 close_election(election=election, actor="failing_admin")
@@ -173,7 +173,7 @@ class ElectionTier1OperationalTests(TestCase):
         )
 
         with patch("core.elections_services.Ballot.objects") as mock_ballot:
-            mock_ballot.filter.side_effect = RuntimeError("DB connection lost")
+            mock_ballot.latest_chain_head_hash_for_election.side_effect = RuntimeError("DB connection lost")
 
             with self.assertRaisesRegex(Exception, r"Recovery:.*Verify database connectivity.*retry"):
                 close_election(election=election, actor="admin")

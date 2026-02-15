@@ -3,11 +3,12 @@ from typing import override
 from django import forms
 
 from core.backends import FreeIPAUser
+from core.forms_base import StyledModelForm
 from core.models import Organization
 from core.user_labels import user_choice_from_freeipa
 
 
-class OrganizationEditForm(forms.ModelForm):
+class OrganizationEditForm(StyledModelForm):
     representative = forms.ChoiceField(
         required=False,
         widget=forms.Select(
@@ -73,12 +74,6 @@ class OrganizationEditForm(forms.ModelForm):
         self.fields["name"].required = True
         self.fields["website_logo"].required = True
         self.fields["website"].required = True
-
-        for field in self.fields.values():
-            if isinstance(field.widget, forms.ClearableFileInput):
-                field.widget.attrs.setdefault("class", "form-control-file")
-            else:
-                field.widget.attrs.setdefault("class", "form-control")
 
         self.fields["website"].widget = forms.URLInput(attrs={"class": "form-control", "placeholder": "https://…"})
         self.fields["website_logo"].widget = forms.URLInput(attrs={"class": "form-control", "placeholder": "https://…"})

@@ -2,7 +2,6 @@ import csv
 import io
 import json
 import logging
-import os
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -11,14 +10,12 @@ from django import forms
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import permission_required
-from django.core.mail import EmailMultiAlternatives
 from django.core.validators import validate_email
 from django.http import HttpRequest, HttpResponse, JsonResponse, QueryDict
 from django.shortcuts import render
-from django.template import engines
 from django.urls import reverse_lazy
 from django.views.decorators.http import require_POST
-from post_office.models import STATUS, Email, EmailTemplate, Log
+from post_office.models import EmailTemplate
 
 from core.backends import FreeIPAGroup, FreeIPAUser
 from core.email_context import system_email_context, user_email_context_from_user
@@ -29,9 +26,9 @@ from core.templated_email import (
     create_email_template_unique,
     preview_drop_inline_image_tags,
     preview_rewrite_inline_image_tags_to_urls,
+    queue_composed_email,
     render_templated_email_preview,
     render_templated_email_preview_response,
-    stage_inline_images_for_sending,
     update_email_template,
 )
 from core.views_utils import get_username
@@ -719,13 +716,6 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                 if preview is None or not recipients:
                     messages.error(request, "No recipients to send to.")
                 else:
-                    try:
-                        staged_html_content, staged_files = stage_inline_images_for_sending(html_content)
-                    except ValueError as exc:
-                        messages.error(request, f"Template error: {exc}")
-                        staged_html_content = ""
-                        staged_files = []
-
                     raw_request_id = str(posted_extra_context.get("membership_request_id") or "").strip()
                     membership_request = None
                     if raw_request_id.isdigit():
@@ -741,89 +731,51 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                     elif membership_request is not None:
                         email_kind = "custom"
 
-                    template_engine = engines["post_office"]
-                    subject_template = template_engine.from_string(subject)
-                    # inline_image tags are HTML-only; avoid rendering them in text.
-                    text_template = template_engine.from_string(preview_drop_inline_image_tags(text_content))
-                    html_template = template_engine.from_string(staged_html_content)
-
                     sent = 0
                     failures = 0
-                    try:
-                        for recipient in recipients:
-                            to_email = str(recipient.get("email") or "").strip()
-                            if not to_email:
-                                continue
-                            try:
-                                rendered_subject = subject_template.render(recipient)
-                                rendered_text = text_template.render(recipient)
-                                rendered_html = html_template.render(recipient)
+                    first_template_error: Exception | None = None
+                    for recipient in recipients:
+                        to_email = str(recipient.get("email") or "").strip()
+                        if not to_email:
+                            continue
+                        try:
+                            queued_email = queue_composed_email(
+                                recipients=[to_email],
+                                sender=settings.DEFAULT_FROM_EMAIL,
+                                subject_source=subject,
+                                text_source=text_content,
+                                html_source=html_content,
+                                context=recipient,
+                                cc=cc,
+                                bcc=bcc,
+                                reply_to=reply_to,
+                            )
+                            sent += 1
 
-                                email_message = EmailMultiAlternatives(
-                                    rendered_subject,
-                                    rendered_text,
-                                    settings.DEFAULT_FROM_EMAIL,
-                                    [to_email],
-                                    cc=cc,
-                                    bcc=bcc,
-                                    reply_to=reply_to,
-                                )
-                                if rendered_html.strip():
-                                    email_message.attach_alternative(rendered_html, "text/html")
-                                    # Required for django-post-office inline images.
-                                    html_template.attach_related(email_message)
+                            if membership_request is not None:
+                                try:
+                                    add_note(
+                                        membership_request=membership_request,
+                                        username=get_username(request),
+                                        action={
+                                            "type": "contacted",
+                                            "kind": email_kind,
+                                            "email_id": queued_email.id,
+                                        },
+                                    )
+                                except Exception:
+                                    logger.exception(
+                                        "Send mail email-note failed membership_request_id=%s",
+                                        raw_request_id,
+                                    )
+                        except Exception as exc:
+                            if first_template_error is None:
+                                first_template_error = exc
+                            failures += 1
+                            logger.exception("Send mail failed email=%s", to_email)
 
-                                email_message.send()
-                                sent += 1
-
-                                if membership_request is not None:
-                                    try:
-                                        headers = None
-                                        if reply_to:
-                                            headers = {"Reply-To": ", ".join(reply_to)}
-
-                                        email = Email.objects.create(
-                                            from_email=settings.DEFAULT_FROM_EMAIL,
-                                            to=to_email,
-                                            cc=", ".join(cc),
-                                            bcc=", ".join(bcc),
-                                            subject=rendered_subject,
-                                            message=rendered_text,
-                                            html_message=rendered_html,
-                                            headers=headers,
-                                            status=STATUS.sent,
-                                        )
-                                        Log.objects.create(
-                                            email=email,
-                                            status=STATUS.sent,
-                                            message="Sent via mail tool",
-                                            exception_type="",
-                                        )
-                                        add_note(
-                                            membership_request=membership_request,
-                                            username=get_username(request),
-                                            action={
-                                                "type": "contacted",
-                                                "kind": email_kind,
-                                                "email_id": email.id,
-                                            },
-                                        )
-                                    except Exception:
-                                        logger.exception(
-                                            "Send mail email-note failed membership_request_id=%s",
-                                            raw_request_id,
-                                        )
-                            except Exception:
-                                failures += 1
-                                logger.exception("Send mail failed email=%s", to_email)
-                    finally:
-                        for path in staged_files:
-                            try:
-                                os.unlink(path)
-                            except FileNotFoundError:
-                                pass
-                            except Exception:
-                                logger.exception("Send mail failed to delete temp inline image path=%s", path)
+                    if first_template_error is not None and sent == 0:
+                        messages.error(request, f"Template error: {first_template_error}")
 
                     if sent:
                         messages.success(request, f"Queued {sent} email{'s' if sent != 1 else ''}.")

@@ -24,8 +24,24 @@ MEMBERSHIP_PERMISSIONS: frozenset[str] = frozenset(
     }
 )
 
+MEMBERSHIP_MANAGE_PERMISSIONS: frozenset[str] = frozenset(
+    {
+        ASTRA_ADD_MEMBERSHIP,
+        ASTRA_CHANGE_MEMBERSHIP,
+        ASTRA_DELETE_MEMBERSHIP,
+    }
+)
+
 
 SEND_MAIL_PERMISSIONS: frozenset[str] = frozenset({ASTRA_ADD_SEND_MAIL})
+
+MEMBERSHIP_REVIEW_PERMISSION_MAP: dict[str, str] = {
+    "membership_can_add": ASTRA_ADD_MEMBERSHIP,
+    "membership_can_change": ASTRA_CHANGE_MEMBERSHIP,
+    "membership_can_delete": ASTRA_DELETE_MEMBERSHIP,
+    "membership_can_view": ASTRA_VIEW_MEMBERSHIP,
+    "send_mail_can_add": ASTRA_ADD_SEND_MAIL,
+}
 
 
 P = ParamSpec("P")
@@ -78,13 +94,34 @@ def json_permission_required_any(permissions: Collection[str]) -> Callable[[Call
 
 
 def has_any_membership_permission(user: object) -> bool:
-    for perm in MEMBERSHIP_PERMISSIONS:
-        try:
-            if user.has_perm(perm):
-                return True
-        except Exception:
-            # Be defensive: template context processors may be invoked with
-            # partial stubs or AnonymousUser-like objects.
-            continue
+    return _has_any_permission(user=user, permissions=MEMBERSHIP_PERMISSIONS)
 
+
+def has_any_membership_manage_permission(user: object) -> bool:
+    return _has_any_permission(user=user, permissions=MEMBERSHIP_MANAGE_PERMISSIONS)
+
+
+def can_view_user_directory(user: object) -> bool:
+    return _has_permission(user=user, permission=ASTRA_VIEW_USER_DIRECTORY)
+
+
+def membership_review_permissions(user: object) -> dict[str, bool]:
+    return {
+        key: _has_permission(user=user, permission=perm)
+        for key, perm in MEMBERSHIP_REVIEW_PERMISSION_MAP.items()
+    }
+
+
+def _has_permission(*, user: object, permission: str) -> bool:
+    try:
+        return bool(user.has_perm(permission))
+    except Exception:
+        # Template context processors and tests may pass user-like stubs.
+        return False
+
+
+def _has_any_permission(*, user: object, permissions: Collection[str]) -> bool:
+    for perm in permissions:
+        if _has_permission(user=user, permission=perm):
+            return True
     return False

@@ -26,7 +26,7 @@ class ElectionCommitteeEmailContextTests(TestCase):
         )
 
     def test_voting_credential_email_includes_committee_context_and_reply_to(self) -> None:
-        with patch("core.elections_services.post_office.mail.send") as send_mail:
+        with patch("core.templated_email.post_office.mail.send") as send_mail:
             send_voting_credential_email(
                 request=None,
                 election=self.election,

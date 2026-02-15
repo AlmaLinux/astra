@@ -8,7 +8,7 @@ from django.contrib.auth.decorators import permission_required
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import UploadedFile
 from django.core.validators import validate_email
-from django.http import Http404, HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
@@ -26,9 +26,10 @@ from core.email_context import membership_committee_email_context, system_email_
 from core.models import AccountInvitation, AccountInvitationSend, Organization
 from core.organization_claim import build_organization_claim_url
 from core.permissions import ASTRA_ADD_MEMBERSHIP
+from core.public_urls import PublicBaseUrlConfigurationError, build_public_absolute_url
 from core.rate_limit import allow_request
 from core.templated_email import queue_templated_email
-from core.views_utils import get_username
+from core.views_utils import get_username, post_only_404
 
 logger = logging.getLogger(__name__)
 
@@ -36,10 +37,6 @@ _PREVIEW_SESSION_KEY = "account_invitation_preview_v1"
 _INVITATION_PUBLIC_BASE_URL_ERROR_MESSAGE = (
     "Invitation email configuration error: PUBLIC_BASE_URL must be configured to build invitation links."
 )
-
-
-class InvitationEmailConfigurationError(ValueError):
-    """Raised when invitation email link configuration is invalid."""
 
 
 def _invitation_template_names() -> list[str]:
@@ -52,13 +49,6 @@ def _bulk_invitation_template_names() -> list[str]:
         for name in _invitation_template_names()
         if name != settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME
     ]
-
-
-def _public_base_url() -> str:
-    base = str(settings.PUBLIC_BASE_URL or "").strip().rstrip("/")
-    if not base:
-        raise InvitationEmailConfigurationError("PUBLIC_BASE_URL must be configured to build absolute invitation links.")
-    return base
 
 
 def _select_invitation_template_name(
@@ -76,27 +66,23 @@ def _select_invitation_template_name(
 
 
 def _invitation_register_url(*, token: str) -> str:
-    base = _public_base_url()
     path = reverse("register")
     if not path:
-        raise InvitationEmailConfigurationError("Register URL path is unavailable.")
-    url = f"{base}{path}"
+        raise PublicBaseUrlConfigurationError("Register URL path is unavailable.")
     normalized_token = str(token or "").strip()
     if normalized_token:
-        url = f"{url}?{urlencode({'invite': normalized_token})}"
-    return url
+        path = f"{path}?{urlencode({'invite': normalized_token})}"
+    return build_public_absolute_url(path, on_missing="raise")
 
 
 def _invitation_login_url(*, token: str) -> str:
-    base = _public_base_url()
     path = reverse("login")
     if not path:
-        raise InvitationEmailConfigurationError("Login URL path is unavailable.")
-    url = f"{base}{path}"
+        raise PublicBaseUrlConfigurationError("Login URL path is unavailable.")
     normalized_token = str(token or "").strip()
     if normalized_token:
-        url = f"{url}?{urlencode({'invite': normalized_token})}"
-    return url
+        path = f"{path}?{urlencode({'invite': normalized_token})}"
+    return build_public_absolute_url(path, on_missing="raise")
 
 
 def _build_invitation_email_context(*, invitation: AccountInvitation, actor_username: str) -> dict[str, object]:
@@ -139,7 +125,7 @@ def _send_account_invitation_email(
             ),
             reply_to=[settings.MEMBERSHIP_COMMITTEE_EMAIL],
         )
-    except InvitationEmailConfigurationError as exc:
+    except PublicBaseUrlConfigurationError as exc:
         logger.warning("Account invitation email configuration error: %s", exc)
         AccountInvitationSend.objects.create(
             invitation=invitation,
@@ -440,10 +426,8 @@ def account_invitations_upload(request: HttpRequest) -> HttpResponse:
 
 
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
+@post_only_404
 def account_invitations_send(request: HttpRequest) -> HttpResponse:
-    if request.method != "POST":
-        raise Http404("Not found")
-
     if not allow_request(
         scope="account_invitation_bulk_send",
         key_parts=[get_username(request)],
@@ -612,10 +596,8 @@ def account_invitations_send(request: HttpRequest) -> HttpResponse:
 
 
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
+@post_only_404
 def account_invitations_bulk(request: HttpRequest) -> HttpResponse:
-    if request.method != "POST":
-        raise Http404("Not found")
-
     action = str(request.POST.get("bulk_action") or "").strip().lower()
     scope = str(request.POST.get("bulk_scope") or "pending").strip().lower()
     selected = [str(value).strip() for value in request.POST.getlist("selected") if str(value).strip()]
@@ -713,10 +695,8 @@ def account_invitations_bulk(request: HttpRequest) -> HttpResponse:
 
 
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
+@post_only_404
 def account_invitation_resend(request: HttpRequest, invitation_id: int) -> HttpResponse:
-    if request.method != "POST":
-        raise Http404("Not found")
-
     if not allow_request(
         scope="account_invitation_resend",
         key_parts=[get_username(request), invitation_id],
@@ -758,10 +738,8 @@ def account_invitation_resend(request: HttpRequest, invitation_id: int) -> HttpR
 
 
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
+@post_only_404
 def account_invitation_dismiss(request: HttpRequest, invitation_id: int) -> HttpResponse:
-    if request.method != "POST":
-        raise Http404("Not found")
-
     invitation = get_object_or_404(AccountInvitation, pk=invitation_id)
     now = timezone.now()
     invitation.dismissed_at = now

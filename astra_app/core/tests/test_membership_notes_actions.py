@@ -76,7 +76,7 @@ class MembershipNotesActionTests(TestCase):
 
         with (
             patch("core.membership_request_workflow.FreeIPAUser.get", return_value=_Target()),
-            patch("core.membership_request_workflow.post_office.mail.send", return_value=email),
+            patch("core.membership_request_workflow.queue_templated_email", return_value=email),
         ):
             record_membership_request_created(
                 membership_request=req,
@@ -114,7 +114,7 @@ class MembershipNotesActionTests(TestCase):
 
         with (
             patch("core.membership_request_workflow.FreeIPAUser.get", return_value=_Target()),
-            patch("core.membership_request_workflow.post_office.mail.send"),
+            patch("core.membership_request_workflow.queue_templated_email"),
         ):
             approve_membership_request(
                 membership_request=req,
@@ -154,7 +154,7 @@ class MembershipNotesActionTests(TestCase):
 
         with (
             patch("core.membership_request_workflow.FreeIPAUser.get", return_value=_Target()),
-            patch("core.membership_request_workflow.post_office.mail.send", return_value=email),
+            patch("core.membership_request_workflow.queue_templated_email", return_value=email),
         ):
             approve_membership_request(
                 membership_request=req,
@@ -177,7 +177,7 @@ class MembershipNotesActionTests(TestCase):
 
         with (
             patch("core.membership_request_workflow.FreeIPAUser.get", return_value=None),
-            patch("core.membership_request_workflow.post_office.mail.send"),
+            patch("core.membership_request_workflow.queue_templated_email"),
         ):
             reject_membership_request(
                 membership_request=req,
@@ -215,7 +215,7 @@ class MembershipNotesActionTests(TestCase):
 
         with (
             patch("core.membership_request_workflow.FreeIPAUser.get", return_value=_Target()),
-            patch("core.membership_request_workflow.post_office.mail.send", return_value=email),
+            patch("core.membership_request_workflow.queue_templated_email", return_value=email),
         ):
             reject_membership_request(
                 membership_request=req,
@@ -272,7 +272,7 @@ class MembershipNotesActionTests(TestCase):
 
         with (
             patch("core.membership_request_workflow.FreeIPAUser.get", return_value=rep),
-            patch("core.membership_request_workflow.post_office.mail.send") as send_mail,
+            patch("core.membership_request_workflow.queue_templated_email") as send_mail,
         ):
             record_membership_request_created(
                 membership_request=req,
@@ -283,7 +283,7 @@ class MembershipNotesActionTests(TestCase):
         send_mail.assert_called_once()
         _args, kwargs = send_mail.call_args
         self.assertEqual(kwargs.get("recipients"), ["rep@example.com"])
-        self.assertEqual(kwargs.get("template"), settings.MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME)
+        self.assertEqual(kwargs.get("template_name"), settings.MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME)
 
     def test_org_request_created_falls_back_to_primary_contact_when_representative_email_missing(self) -> None:
         organization = Organization.objects.create(
@@ -310,7 +310,7 @@ class MembershipNotesActionTests(TestCase):
 
         with (
             patch("core.membership_request_workflow.FreeIPAUser.get", return_value=rep),
-            patch("core.membership_request_workflow.post_office.mail.send") as send_mail,
+            patch("core.membership_request_workflow.queue_templated_email") as send_mail,
         ):
             record_membership_request_created(
                 membership_request=req,
@@ -321,7 +321,7 @@ class MembershipNotesActionTests(TestCase):
         send_mail.assert_called_once()
         _args, kwargs = send_mail.call_args
         self.assertEqual(kwargs.get("recipients"), ["fallback@example.com"])
-        self.assertEqual(kwargs.get("template"), settings.MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME)
+        self.assertEqual(kwargs.get("template_name"), settings.MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME)
 
     def test_org_request_created_falls_back_to_primary_contact_when_representative_lookup_fails(self) -> None:
         organization = Organization.objects.create(
@@ -336,7 +336,7 @@ class MembershipNotesActionTests(TestCase):
 
         with (
             patch("core.membership_request_workflow.FreeIPAUser.get", side_effect=RuntimeError("ipa down")),
-            patch("core.membership_request_workflow.post_office.mail.send") as send_mail,
+            patch("core.membership_request_workflow.queue_templated_email") as send_mail,
         ):
             record_membership_request_created(
                 membership_request=req,
@@ -347,4 +347,4 @@ class MembershipNotesActionTests(TestCase):
         send_mail.assert_called_once()
         _args, kwargs = send_mail.call_args
         self.assertEqual(kwargs.get("recipients"), ["fallback@example.com"])
-        self.assertEqual(kwargs.get("template"), settings.MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME)
+        self.assertEqual(kwargs.get("template_name"), settings.MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME)

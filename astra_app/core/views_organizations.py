@@ -15,15 +15,21 @@ from django.views.decorators.http import require_GET
 
 from core.backends import FreeIPAUser
 from core.forms_organizations import OrganizationEditForm
+from core.freeipa_directory import search_freeipa_users
 from core.membership import (
+    FreeIPACallerMode,
+    FreeIPAGroupRemovalOutcome,
+    FreeIPAMissingUserPolicy,
+    FreeIPARepresentativeSyncError,
     build_pending_request_context,
+    compute_membership_requestability_context,
     expiring_soon_cutoff,
     get_membership_request_eligibility,
     get_valid_memberships,
-    membership_request_can_request_any,
-    remove_user_from_group,
-    requestable_membership_types_for_target,
+    remove_organization_representative_from_group_if_present,
     resolve_request_ids_by_membership_type,
+    rollback_organization_representative_groups,
+    sync_organization_representative_groups,
 )
 from core.membership_notes import add_note
 from core.models import AccountInvitation, Membership, MembershipLog, MembershipRequest, Organization
@@ -37,11 +43,19 @@ from core.permissions import (
     ASTRA_CHANGE_MEMBERSHIP,
     ASTRA_DELETE_MEMBERSHIP,
     ASTRA_VIEW_MEMBERSHIP,
+    has_any_membership_manage_permission,
+    has_any_membership_permission,
     json_permission_required_any,
 )
 from core.rate_limit import allow_request
 from core.views_account_invitations import send_organization_claim_invitation
-from core.views_utils import _normalize_str, block_action_without_coc, block_action_without_country_code, get_username
+from core.views_utils import (
+    _normalize_str,
+    block_action_without_coc,
+    block_action_without_country_code,
+    get_username,
+    post_only_404,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -151,10 +165,7 @@ def _can_delete_organization(request: HttpRequest, organization: Organization) -
 
 
 def _can_edit_organization(request: HttpRequest, organization: Organization) -> bool:
-    if any(
-        request.user.has_perm(p)
-        for p in (ASTRA_ADD_MEMBERSHIP, ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP)
-    ):
+    if has_any_membership_manage_permission(request.user):
         return True
     return _is_representative(request, organization)
 
@@ -232,15 +243,7 @@ def organizations(request: HttpRequest) -> HttpResponse:
     if not username:
         raise Http404
 
-    can_manage_memberships = any(
-        request.user.has_perm(p)
-        for p in (
-            ASTRA_ADD_MEMBERSHIP,
-            ASTRA_CHANGE_MEMBERSHIP,
-            ASTRA_DELETE_MEMBERSHIP,
-            ASTRA_VIEW_MEMBERSHIP,
-        )
-    )
+    can_manage_memberships = has_any_membership_permission(request.user)
 
     if can_manage_memberships:
         orgs = Organization.objects.all().order_by("name", "id")
@@ -353,8 +356,6 @@ def organization_representatives_search(request: HttpRequest) -> HttpResponse:
     if not q:
         return JsonResponse({"results": []})
 
-    q_lower = q.lower()
-
     taken_representatives = set(
         Organization.objects.exclude(representative="").values_list("representative", flat=True)
     )
@@ -368,26 +369,20 @@ def organization_representatives_search(request: HttpRequest) -> HttpResponse:
                 taken_representatives.discard(current_rep)
 
     results: list[dict[str, str]] = []
-    for u in FreeIPAUser.all():
-        if not u.username:
-            continue
+    for user in search_freeipa_users(
+        query=q,
+        limit=20,
+        exclude_usernames=taken_representatives,
+    ):
+        username = str(user.username)
+        full_name = str(user.full_name)
 
-        if u.username in taken_representatives:
-            continue
+        text = username
+        if full_name and full_name != username:
+            text = f"{full_name} ({username})"
 
-        full_name = u.full_name
-        if q_lower not in u.username.lower() and q_lower not in full_name.lower():
-            continue
+        results.append({"id": username, "text": text})
 
-        text = u.username
-        if full_name and full_name != u.username:
-            text = f"{full_name} ({u.username})"
-
-        results.append({"id": u.username, "text": text})
-        if len(results) >= 20:
-            break
-
-    results.sort(key=lambda r: r["id"].lower())
     return JsonResponse({"results": results})
 
 
@@ -422,20 +417,12 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
     pending_request_entries = pending_request_context.entries
 
     eligibility = get_membership_request_eligibility(organization=organization)
-    requestable_membership_type_rows = list(
-        requestable_membership_types_for_target(
-            organization=organization,
-            eligibility=eligibility,
-        )
-        .values_list("category_id", "code")
+    requestability_context = compute_membership_requestability_context(
+        organization=organization,
+        eligibility=eligibility,
+        held_category_ids={sponsorship.category_id for sponsorship in sponsorships},
     )
-    requestable_codes_by_category: dict[str, set[str]] = {}
-    for category_id, code in requestable_membership_type_rows:
-        category_id_value = str(category_id or "")
-        code_value = str(code or "")
-        if not category_id_value or not code_value:
-            continue
-        requestable_codes_by_category.setdefault(category_id_value, set()).add(code_value)
+    requestable_codes_by_category = requestability_context.requestable_codes_by_category
 
     sponsorship_request_id_by_type = resolve_request_ids_by_membership_type(
         organization=organization,
@@ -470,16 +457,7 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
     can_delete_organization = _can_delete_organization(request, organization)
     membership_can_request_any = False
     if is_representative:
-        membership_can_request_any = membership_request_can_request_any(
-            organization=organization,
-            eligibility=eligibility,
-        )
-        if membership_can_request_any:
-            held_category_ids = {sponsorship.category_id for sponsorship in sponsorships}
-            membership_can_request_any = any(
-                category_id not in held_category_ids
-                for category_id, _code in requestable_membership_type_rows
-            )
+        membership_can_request_any = requestability_context.membership_can_request_any
 
 
 
@@ -545,10 +523,8 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
     )
 
 
+@post_only_404
 def organization_send_claim_invitation(request: HttpRequest, organization_id: int) -> HttpResponse:
-    if request.method != "POST":
-        raise Http404("Not found")
-
     organization = get_object_or_404(Organization, pk=organization_id)
     _require_organization_access(request, organization)
 
@@ -607,10 +583,8 @@ def organization_send_claim_invitation(request: HttpRequest, organization_id: in
     return redirect("organization-detail", organization_id=organization.pk)
 
 
+@post_only_404
 def organization_delete(request: HttpRequest, organization_id: int) -> HttpResponse:
-    if request.method != "POST":
-        raise Http404("Not found")
-
     organization = get_object_or_404(Organization, pk=organization_id)
     if not _can_delete_organization(request, organization):
         raise Http404
@@ -629,7 +603,18 @@ def organization_delete(request: HttpRequest, organization_id: int) -> HttpRespo
             for membership in active_memberships:
                 group_cn = str(membership.membership_type.group_cn or "").strip()
                 if group_cn and group_cn in rep.groups_list:
-                    if not remove_user_from_group(username=rep_username, group_cn=group_cn):
+                    outcome = remove_organization_representative_from_group_if_present(
+                        representative_username=rep_username,
+                        group_cn=group_cn,
+                        caller_mode=FreeIPACallerMode.best_effort,
+                        missing_user_policy=FreeIPAMissingUserPolicy.treat_as_noop,
+                    )
+                    if outcome not in {
+                        FreeIPAGroupRemovalOutcome.removed,
+                        FreeIPAGroupRemovalOutcome.already_not_member,
+                        FreeIPAGroupRemovalOutcome.noop_blank_input,
+                        FreeIPAGroupRemovalOutcome.user_not_found,
+                    }:
                         logger.error(
                             "organization_delete: failed to remove representative from group org_id=%s rep=%r group_cn=%r",
                             organization.pk,
@@ -652,10 +637,8 @@ def organization_delete(request: HttpRequest, organization_id: int) -> HttpRespo
     return redirect("organizations")
 
 
+@post_only_404
 def organization_sponsorship_extend(request: HttpRequest, organization_id: int) -> HttpResponse:
-    if request.method != "POST":
-        raise Http404("Not found")
-
     organization = get_object_or_404(Organization, pk=organization_id)
     _require_representative(request, organization)
 
@@ -695,7 +678,7 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
 
         old_representative = ""
         new_representative = ""
-        synced_group_cns: list[str] = []
+        representative_group_sync_journal = None
 
         if can_select_representatives and "representative" in form.fields:
             representative = form.cleaned_data.get("representative") or ""
@@ -718,40 +701,27 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
                 ]
 
                 if group_cns:
-                    old_rep = FreeIPAUser.get(old_representative)
-                    new_rep = FreeIPAUser.get(representative)
-                    if new_rep is None:
-                        form.add_error("representative", f"Unknown user: {representative}")
-                        return _render_org_form(request, form, organization=organization, is_create=False)
-
-                    # Direct FreeIPA calls are intentional here to support the rollback flow below.
                     try:
-                        for gcn in group_cns:
-                            if old_rep is not None and gcn in old_rep.groups_list:
-                                old_rep.remove_from_group(group_name=gcn)
-                            if gcn not in new_rep.groups_list:
-                                new_rep.add_to_group(group_name=gcn)
-                            synced_group_cns.append(gcn)
-                    except Exception:
+                        sync_result = sync_organization_representative_groups(
+                            old_representative=old_representative,
+                            new_representative=representative,
+                            group_cns=tuple(group_cns),
+                            caller_mode=FreeIPACallerMode.raise_on_error,
+                            missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
+                        )
+                        representative_group_sync_journal = sync_result.journal
+                    except FreeIPARepresentativeSyncError as exc:
                         logger.exception(
                             "organization_edit: failed to sync representative groups org_id=%s old=%r new=%r",
                             organization.pk,
                             old_representative,
                             representative,
                         )
-
-                        # Best-effort rollback for groups we already synced.
-                        for gcn in synced_group_cns:
-                            try:
-                                if old_rep is not None and gcn not in old_rep.groups_list:
-                                    old_rep.add_to_group(group_name=gcn)
-                            except Exception:
-                                logger.exception(
-                                    "organization_edit: failed to rollback representative group org_id=%s old=%r group_cn=%r",
-                                    organization.pk,
-                                    old_representative,
-                                    gcn,
-                                )
+                        rollback_organization_representative_groups(
+                            old_representative=old_representative,
+                            new_representative=representative,
+                            journal=exc.result.journal,
+                        )
 
                         form.add_error(None, "Failed to update FreeIPA group membership for the representative.")
                         return _render_org_form(request, form, organization=organization, is_create=False)
@@ -761,22 +731,17 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
         except IntegrityError:
             # Race-condition safety: DB is the source of truth.
             # Best-effort rollback if we already changed FreeIPA groups.
-            if synced_group_cns and old_representative and new_representative and old_representative != new_representative:
-                try:
-                    old_rep = FreeIPAUser.get(old_representative)
-                    new_rep = FreeIPAUser.get(new_representative)
-                    for gcn in synced_group_cns:
-                        if new_rep is not None and gcn in new_rep.groups_list:
-                            new_rep.remove_from_group(group_name=gcn)
-                        if old_rep is not None and gcn not in old_rep.groups_list:
-                            old_rep.add_to_group(group_name=gcn)
-                except Exception:
-                    logger.exception(
-                        "organization_edit: failed to rollback representative groups after IntegrityError org_id=%s old=%r new=%r",
-                        organization.pk,
-                        old_representative,
-                        new_representative,
-                    )
+            if (
+                representative_group_sync_journal is not None
+                and old_representative
+                and new_representative
+                and old_representative != new_representative
+            ):
+                rollback_organization_representative_groups(
+                    old_representative=old_representative,
+                    new_representative=new_representative,
+                    journal=representative_group_sync_journal,
+                )
 
             form.add_error(
                 "representative",

@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
-import post_office.mail
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.serializers.json import DjangoJSONEncoder
@@ -31,7 +30,8 @@ from core.models import (
     Election,
     VotingCredential,
 )
-from core.templated_email import queue_templated_email, render_template_string
+from core.public_urls import build_public_absolute_url
+from core.templated_email import queue_composed_email, queue_templated_email
 from core.tokens import election_chain_next_hash, election_genesis_chain_hash
 
 ELECTION_TALLY_ALGORITHM_NAME = "Meek STV (High-Precision Variant)"
@@ -311,7 +311,7 @@ def election_vote_url(*, request: HttpRequest | None, election: Election) -> str
     rel = reverse("election-vote", args=[election.id])
     if request is not None:
         return request.build_absolute_uri(rel)
-    return settings.PUBLIC_BASE_URL.rstrip("/") + rel
+    return build_public_absolute_url(rel, on_missing="relative")
 
 
 def election_vote_url_with_credential_fragment(
@@ -329,7 +329,7 @@ def ballot_verify_url(*, request: HttpRequest | None, ballot_hash: str) -> str:
     rel = reverse("ballot-verify") + f"?receipt={quote(ballot_hash)}"
     if request is not None:
         return request.build_absolute_uri(rel)
-    return settings.PUBLIC_BASE_URL.rstrip("/") + rel
+    return build_public_absolute_url(rel, on_missing="relative")
 
 
 def send_vote_receipt_email(
@@ -385,17 +385,14 @@ def send_voting_credential_email(
     )
 
     if subject_template is not None or html_template is not None or text_template is not None:
-        rendered_subject = render_template_string(subject_template or "", context)
-        rendered_html = render_template_string(html_template or "", context)
-        rendered_text = render_template_string(text_template or "", context)
-        post_office.mail.send(
+        queue_composed_email(
             recipients=[email],
             sender=settings.DEFAULT_FROM_EMAIL,
-            subject=rendered_subject,
-            html_message=rendered_html,
-            message=rendered_text,
-            headers={"Reply-To": settings.ELECTION_COMMITTEE_EMAIL},
-            commit=True,
+            subject_source=subject_template or "",
+            html_source=html_template or "",
+            text_source=text_template or "",
+            context=context,
+            reply_to=[settings.ELECTION_COMMITTEE_EMAIL],
         )
         return
 
@@ -462,7 +459,7 @@ def election_quorum_status(*, election: Election) -> dict[str, int | bool]:
         eligible_voter_count = len(eligible)
         eligible_vote_weight_total = sum(v.weight for v in eligible)
 
-    ballot_agg = Ballot.objects.filter(election=election, superseded_by__isnull=True).aggregate(
+    ballot_agg = Ballot.objects.for_election(election=election).final().aggregate(
         ballots=Count("id"),
         weight_total=Sum("weight"),
     )
@@ -532,23 +529,19 @@ def submit_ballot(*, election: Election, credential_public_id: str, ranking: lis
     # submissions can't both claim the same previous chain head.
     Election.objects.select_for_update().only("id").get(pk=election.pk)
 
-    last_ballot = (
+    last_chain_hash = (
         Ballot.objects.select_for_update()
-        .filter(election=election)
-        .order_by("-created_at", "-id")
-        .first()
+        .latest_chain_head_hash_for_election(election=election)
     )
     genesis_hash = election_genesis_chain_hash(election.id)
-    previous_chain_hash = str(last_ballot.chain_hash if last_ballot is not None else genesis_hash)
+    previous_chain_hash = str(last_chain_hash or genesis_hash)
     chain_hash = election_chain_next_hash(previous_chain_hash=previous_chain_hash, ballot_hash=ballot_hash)
 
     current = (
         Ballot.objects.select_for_update()
-        .filter(
-            election=election,
-            credential_public_id=credential_public_id,
-            superseded_by__isnull=True,
-        )
+        .for_election(election=election)
+        .final()
+        .filter(credential_public_id=credential_public_id)
         .order_by("-id")
         .first()
     )
@@ -766,12 +759,7 @@ def close_election(*, election: Election, actor: str | None = None) -> None:
     ended_at = timezone.now()
 
     try:
-        last_chain_hash = (
-            Ballot.objects.filter(election=election)
-            .order_by("-created_at", "-id")
-            .values_list("chain_hash", flat=True)
-            .first()
-        )
+        last_chain_hash = Ballot.objects.latest_chain_head_hash_for_election(election=election)
         genesis_hash = election_genesis_chain_hash(election.id)
         chain_head = str(last_chain_hash or genesis_hash)
 
@@ -824,7 +812,7 @@ def tally_election(*, election: Election, actor: str | None = None) -> dict[str,
             {"id": c.id, "name": c.freeipa_username, "tiebreak_uuid": c.tiebreak_uuid} for c in candidates_qs
         ]
 
-        ballots_qs = Ballot.objects.filter(election=election, superseded_by__isnull=True).only("weight", "ranking")
+        ballots_qs = Ballot.objects.for_election(election=election).final().only("weight", "ranking")
         ballots: list[dict[str, object]] = [{"weight": b.weight, "ranking": list(b.ranking)} for b in ballots_qs]
 
         group_rows = list(

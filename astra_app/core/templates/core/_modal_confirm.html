@@ -24,7 +24,9 @@ Alternative body rendering (use instead of `body` when you need one emphasized v
 
 {% block modal_body %}
         <div class="mb-3">
-          {% if body_prefix or body_suffix %}
+          {% if dynamic_body %}
+            <span class="js-body-prefix"></span> <strong class="js-body-emphasis"></strong><span class="js-body-suffix"></span>
+          {% elif body_prefix or body_suffix %}
             {{ body_prefix }} <strong>{{ body_emphasis }}</strong>{{ body_suffix }}
           {% else %}
             {{ body }}

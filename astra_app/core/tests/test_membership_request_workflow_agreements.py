@@ -6,6 +6,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from core.backends import FreeIPAUser
+from core.membership import FreeIPACallerMode, FreeIPAGroupRemovalOutcome, FreeIPAMissingUserPolicy
 from core.membership_request_workflow import approve_membership_request
 from core.models import Membership, MembershipRequest, MembershipType, MembershipTypeCategory, Organization
 
@@ -154,8 +155,10 @@ class MembershipRequestWorkflowAgreementTests(TestCase):
                 return_value=[],
             ),
             patch("core.membership_request_workflow.FreeIPAUser.get", return_value=bob),
-            patch("core.membership_request_workflow.remove_user_from_group", return_value=False) as remove_mock,
-            patch.object(FreeIPAUser, "remove_from_group", autospec=True, side_effect=Exception("boom")),
+            patch(
+                "core.membership_request_workflow.remove_organization_representative_from_group_if_present",
+                return_value=FreeIPAGroupRemovalOutcome.failed,
+            ) as remove_mock,
             patch.object(FreeIPAUser, "add_to_group", autospec=True) as add_mock,
         ):
             with self.assertRaisesRegex(Exception, "Failed to remove user from old group"):
@@ -166,8 +169,10 @@ class MembershipRequestWorkflowAgreementTests(TestCase):
                 )
 
         remove_mock.assert_called_once_with(
-            username="bob",
+            representative_username="bob",
             group_cn="almalinux-gold",
+            caller_mode=FreeIPACallerMode.raise_on_error,
+            missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
         )
         add_mock.assert_not_called()
         membership_request.refresh_from_db()

@@ -5,24 +5,9 @@ from django.template import Context, Library
 from core.backends import FreeIPAGroup, FreeIPAUser, _clean_str_list
 from core.templatetags._grid_tag_utils import paginate_grid_items, render_widget_grid, resolve_grid_request
 from core.templatetags._user_helpers import try_get_full_name
-from core.views_utils import _normalize_str
+from core.views_utils import _normalize_str, try_get_username_from_user
 
 register = Library()
-
-
-def _get_username_for_sort(user: object) -> str:
-    username = getattr(user, "username", None)
-    if isinstance(username, str) and username:
-        return username.strip().lower()
-
-    get_username = getattr(user, "get_username", None)
-    if callable(get_username):
-        try:
-            return str(get_username()).strip().lower()
-        except Exception:
-            return ""
-
-    return ""
 
 
 def _normalize_groups(groups_raw: object) -> list[str]:
@@ -113,7 +98,7 @@ def user_grid(context: Context, **kwargs: Any) -> str:
             q_lower = q.lower()
 
             def _matches(user: object) -> bool:
-                username = _get_username_for_sort(user)
+                username = try_get_username_from_user(user).lower()
                 if q_lower in username:
                     return True
                 full_name = try_get_full_name(user).lower()
@@ -121,7 +106,7 @@ def user_grid(context: Context, **kwargs: Any) -> str:
 
             users_list = [u for u in users_list if _matches(u)]
 
-        users_sorted = sorted(users_list, key=_get_username_for_sort)
+        users_sorted = sorted(users_list, key=lambda u: try_get_username_from_user(u).lower())
 
         paginator, page_obj, page_numbers, show_first, show_last = paginate_grid_items(
             users_sorted,
@@ -149,7 +134,7 @@ def user_grid(context: Context, **kwargs: Any) -> str:
     elif users_page is not None:
         for u in users_page:
             # user-like objects may be FreeIPAUser, SimpleNamespace, etc.
-            username = getattr(u, "username", "")
+            username = try_get_username_from_user(u)
             if not username:
                 continue
             is_muted = username in muted_usernames

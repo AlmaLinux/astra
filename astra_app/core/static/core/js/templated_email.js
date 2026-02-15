@@ -704,8 +704,9 @@
     return api;
   }
 
-  function initAll() {
-    var containers = document.querySelectorAll('[data-templated-email-compose]');
+  function initAll(root) {
+    var scope = root || document;
+    var containers = scope.querySelectorAll('[data-templated-email-compose]');
     if (!containers || !containers.length) return;
 
     for (var i = 0; i < containers.length; i++) {
@@ -721,10 +722,14 @@
     }
   }
 
+  window.TemplatedEmailComposeRegistry.initAll = initAll;
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initAll);
+    document.addEventListener('DOMContentLoaded', function () {
+      initAll(document);
+    });
   } else {
-    initAll();
+    initAll(document);
   }
 })(window, document);
 

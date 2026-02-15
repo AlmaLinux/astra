@@ -11,8 +11,14 @@ from django import forms
 
 from core.chatnicknames import normalize_chat_nicknames_text
 from core.country_codes import is_valid_country_alpha2, normalize_country_alpha2
-from core.form_validators import clean_password_confirm, validate_http_urls
+from core.form_validators import validate_http_urls
 from core.forms_base import StyledForm
+from core.forms_security import (
+    PasswordConfirmationMixin,
+    make_otp_field,
+    make_password_confirmation_field,
+    make_password_field,
+)
 from core.ipa_user_attrs import _split_list_field
 from core.profanity import validate_no_profanity_or_hate_speech
 from core.views_utils import _normalize_str
@@ -411,15 +417,11 @@ class OTPAddForm(StyledForm):
         required=False,
         help_text="Optional: helps you identify this token.",
     )
-    password = forms.CharField(
+    password = make_password_field(
         label="Enter your current password",
-        required=True,
-        widget=forms.PasswordInput,
         help_text="Please reauthenticate so we know it is you.",
     )
-    otp = forms.CharField(
-        label="One-Time Password",
-        required=False,
+    otp = make_otp_field(
         help_text="If your account already has OTP enabled, enter your current OTP.",
     )
 
@@ -454,17 +456,10 @@ class OTPTokenRenameForm(StyledForm):
     description = forms.CharField(required=False)
 
 
-class PasswordChangeFreeIPAForm(StyledForm):
-    current_password = forms.CharField(label="Current Password", widget=forms.PasswordInput)
-    otp = forms.CharField(
-        label="One-Time Password",
-        required=False,
+class PasswordChangeFreeIPAForm(PasswordConfirmationMixin, StyledForm):
+    current_password = make_password_field(label="Current Password")
+    otp = make_otp_field(
         help_text="If your account has OTP enabled, enter your current OTP.",
     )
-    new_password = forms.CharField(label="New Password", widget=forms.PasswordInput)
-    confirm_new_password = forms.CharField(label="Confirm New Password", widget=forms.PasswordInput)
-
-    def clean(self):
-        cleaned = super().clean()
-        clean_password_confirm(cleaned)
-        return cleaned
+    new_password = make_password_field(label="New Password")
+    confirm_new_password = make_password_confirmation_field(label="Confirm New Password")
