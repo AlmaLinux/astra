@@ -1577,3 +1577,12 @@ class MembershipCSVImportLink(MembershipType):
         proxy = True
         verbose_name = "Membership import (CSV)"
         verbose_name_plural = "Membership import (CSV)"
+
+
+class OrganizationCSVImportLink(Organization):
+    """Admin sidebar link for the organization CSV importer."""
+
+    class Meta:
+        proxy = True
+        verbose_name = "Organization import (CSV)"
+        verbose_name_plural = "Organization import (CSV)"

@@ -1,13 +1,10 @@
-import csv
 import datetime
-import io
 import logging
 import secrets
 from typing import Any, override
 
 from django import forms
 from django.core.cache import cache
-from django.core.files.uploadedfile import UploadedFile
 from django.urls import reverse
 from django.utils import timezone
 from import_export import fields, resources
@@ -16,6 +13,14 @@ from tablib import Dataset
 
 from core.agreements import missing_required_agreements_for_user_in_group
 from core.backends import FreeIPAUser
+from core.csv_import_utils import (
+    extract_csv_headers_from_uploaded_file,
+    norm_csv_header,
+    normalize_csv_email,
+    normalize_csv_name,
+    parse_csv_bool,
+    parse_csv_date,
+)
 from core.forms_membership import MembershipRequestForm
 from core.membership_notes import add_note
 from core.membership_request_workflow import approve_membership_request, record_membership_request_created
@@ -36,49 +41,6 @@ _COLUMN_FIELDS = (
     "committee_notes_column",
     "membership_type_column",
 )
-
-
-def _norm_header(value: str) -> str:
-    return "".join(ch for ch in value.strip().lower() if ch.isalnum())
-
-
-def _normalize_email(value: object) -> str:
-    return _normalize_str(value).lower()
-
-
-def _normalize_name(value: object) -> str:
-    raw = _normalize_str(value).lower()
-    return "".join(ch for ch in raw if ch.isalnum())
-
-
-def _parse_bool(value: object) -> bool:
-    normalized = _normalize_str(value).lower()
-    if not normalized:
-        return False
-    return normalized in {"1", "y", "yes", "true", "t", "active", "activemember", "active member"}
-
-
-def _parse_date(value: object) -> datetime.datetime | None:
-    raw = _normalize_str(value)
-    if not raw:
-        return None
-
-    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%m/%d/%Y", "%m/%d/%y"):
-        try:
-            day = datetime.datetime.strptime(raw, fmt).date()
-        except ValueError:
-            continue
-        else:
-            return datetime.datetime.combine(day, datetime.time(0, 0, 0), tzinfo=datetime.UTC)
-
-    try:
-        day = datetime.date.fromisoformat(raw)
-    except ValueError:
-        return None
-
-    return datetime.datetime.combine(day, datetime.time(0, 0, 0), tzinfo=datetime.UTC)
-
-
 def _membership_type_matches(value: str, membership_type: MembershipType) -> bool:
     candidate = str(value or "").strip().lower()
     if not candidate:
@@ -88,31 +50,6 @@ def _membership_type_matches(value: str, membership_type: MembershipType) -> boo
         return True
 
     return candidate == membership_type.name.strip().lower()
-
-
-def _extract_csv_headers_from_uploaded_file(uploaded: UploadedFile) -> list[str]:
-    uploaded.seek(0)
-    sample = uploaded.read(64 * 1024)
-    uploaded.seek(0)
-
-    try:
-        text = sample.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        text = sample.decode("utf-8", errors="replace")
-
-    if not text.strip():
-        return []
-
-    try:
-        dialect = csv.Sniffer().sniff(text, delimiters=",;\t|")
-    except Exception:
-        dialect = csv.excel
-
-    reader = csv.reader(io.StringIO(text), dialect)
-    headers = next(reader, [])
-    return [h.strip() for h in headers if str(h).strip()]
-
-
 class MembershipCSVImportForm(ImportForm):
     membership_type = forms.ModelChoiceField(
         queryset=MembershipType.objects.enabled().ordered_for_display(),
@@ -193,9 +130,9 @@ class MembershipCSVImportForm(ImportForm):
                 filter(
                     None,
                     (
-                        _norm_header(spec.name),
-                        _norm_header(spec.field_name),
-                        _norm_header(spec.field_name.removeprefix("q_")),
+                        norm_csv_header(spec.name),
+                        norm_csv_header(spec.field_name),
+                        norm_csv_header(spec.field_name.removeprefix("q_")),
                     ),
                 )
             )
@@ -205,7 +142,7 @@ class MembershipCSVImportForm(ImportForm):
             return
 
         try:
-            headers = _extract_csv_headers_from_uploaded_file(uploaded)
+            headers = extract_csv_headers_from_uploaded_file(uploaded)
         except Exception:
             logger.exception("Unable to read CSV headers for import form dropdowns")
             return
@@ -413,7 +350,7 @@ class MembershipCSVImportResource(resources.ModelResource):
             raise ValueError("CSV has no headers")
 
         self._headers = headers
-        header_by_norm = {_norm_header(h): h for h in headers if h}
+        header_by_norm = {norm_csv_header(h): h for h in headers if h}
 
         def _resolve_override(override: str) -> str | None:
             raw = (override or "").strip()
@@ -421,7 +358,7 @@ class MembershipCSVImportResource(resources.ModelResource):
                 return None
             if raw in headers:
                 return raw
-            norm = _norm_header(raw)
+            norm = norm_csv_header(raw)
             if norm in header_by_norm:
                 return header_by_norm[norm]
             raise ValueError(f"Column '{raw}' not found in CSV headers")
@@ -472,9 +409,9 @@ class MembershipCSVImportResource(resources.ModelResource):
             resolved = _resolve_override(override) if override else None
             if resolved is None:
                 resolved = (
-                    header_by_norm.get(_norm_header(spec.name))
-                    or header_by_norm.get(_norm_header(spec.field_name))
-                    or header_by_norm.get(_norm_header(spec.field_name.removeprefix("q_")))
+                    header_by_norm.get(norm_csv_header(spec.name))
+                    or header_by_norm.get(norm_csv_header(spec.field_name))
+                    or header_by_norm.get(norm_csv_header(spec.field_name.removeprefix("q_")))
                 )
             self._question_header_by_name[spec.name] = resolved
 
@@ -493,14 +430,14 @@ class MembershipCSVImportResource(resources.ModelResource):
                 "Membership CSV import: FreeIPAUser.all() returned 0 users; email matching will use per-email search"
             )
         for user in users:
-            email = _normalize_email(user.email)
+            email = normalize_csv_email(user.email)
             username = _normalize_str(user.username)
             if not email or not username:
                 continue
             self._email_to_usernames.setdefault(email, set()).add(username)
 
             if self._enable_name_matching:
-                key = _normalize_name(user.full_name)
+                key = normalize_csv_name(user.full_name)
                 if key:
                     self._name_to_usernames.setdefault(key, set()).add(username)
 
@@ -582,7 +519,7 @@ class MembershipCSVImportResource(resources.ModelResource):
         if not self._enable_name_matching:
             return set()
 
-        key = _normalize_name(name)
+        key = normalize_csv_name(name)
         if not key:
             return set()
         return set(self._name_to_usernames.get(key, set()))
@@ -625,7 +562,7 @@ class MembershipCSVImportResource(resources.ModelResource):
     def _row_email(self, row: Any) -> str:
         if self._email_header is None:
             return ""
-        return _normalize_email(self._row_value(row, self._email_header))
+        return normalize_csv_email(self._row_value(row, self._email_header))
 
     def _row_name(self, row: Any) -> str:
         return _normalize_str(self._row_value(row, self._name_header))
@@ -636,17 +573,17 @@ class MembershipCSVImportResource(resources.ModelResource):
         # eligible rather than skipping everything.
         if self._active_header is None:
             return True
-        return _parse_bool(self._row_value(row, self._active_header))
+        return parse_csv_bool(self._row_value(row, self._active_header))
 
     def _row_approved_at(self, row: Any) -> datetime.datetime | None:
         if self._start_header is None:
             return None
-        return _parse_date(self._row_value(row, self._start_header))
+        return parse_csv_date(self._row_value(row, self._start_header))
 
     def _row_expires_at(self, row: Any) -> datetime.datetime | None:
         if self._end_header is None:
             return None
-        return _parse_date(self._row_value(row, self._end_header))
+        return parse_csv_date(self._row_value(row, self._end_header))
 
     def _row_has_expiry_value(self, row: Any) -> bool:
         return bool(_normalize_str(self._row_value(row, self._end_header)))
@@ -804,26 +741,26 @@ class MembershipCSVImportResource(resources.ModelResource):
             header = self._question_header_by_name.get(spec.name)
             if not header:
                 continue
-            used_norms.add(_norm_header(header))
+            used_norms.add(norm_csv_header(header))
             value = _normalize_str(self._row_value(row, header))
             if value or spec.required:
                 question_responses.append({spec.name: value})
 
         reserved_norms = {
-            _norm_header(self._email_header) if self._email_header else "",
-            _norm_header(self._name_header) if self._name_header else "",
-            _norm_header(self._active_header) if self._active_header else "",
-            _norm_header(self._start_header) if self._start_header else "",
-            _norm_header(self._end_header) if self._end_header else "",
-            _norm_header(self._note_header) if self._note_header else "",
-            _norm_header(self._type_header) if self._type_header else "",
+            norm_csv_header(self._email_header) if self._email_header else "",
+            norm_csv_header(self._name_header) if self._name_header else "",
+            norm_csv_header(self._active_header) if self._active_header else "",
+            norm_csv_header(self._start_header) if self._start_header else "",
+            norm_csv_header(self._end_header) if self._end_header else "",
+            norm_csv_header(self._note_header) if self._note_header else "",
+            norm_csv_header(self._type_header) if self._type_header else "",
         }
 
         reserved_norms |= used_norms
 
         responses: list[dict[str, str]] = list(question_responses)
         for header in self._headers:
-            if not header or _norm_header(header) in reserved_norms:
+            if not header or norm_csv_header(header) in reserved_norms:
                 continue
             value = _normalize_str(self._row_value(row, header))
             if value:
@@ -1298,7 +1235,7 @@ class MembershipCSVImportResource(resources.ModelResource):
         out = Dataset()
         headers = [h for h in self._headers if h]
         reason_header = "reason"
-        if any(_norm_header(h) == "reason" for h in headers):
+        if any(norm_csv_header(h) == "reason" for h in headers):
             # Avoid clobbering an existing input column.
             reason_header = "unmatched_reason"
 

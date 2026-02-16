@@ -50,6 +50,15 @@ from core.membership_csv_import import (
     MembershipCSVImportResource,
 )
 from core.organization_claim import make_organization_claim_token
+from core.organization_csv_import import (
+    _ORG_COLUMN_FIELDS,
+    OrganizationCSVConfirmImportForm,
+    OrganizationCSVImportForm,
+    OrganizationCSVImportResource,
+    iter_representative_selection_items,
+    optional_organization_csv_columns,
+    required_organization_csv_columns,
+)
 from core.protected_resources import protected_freeipa_group_cns
 from core.user_labels import user_choice, user_choice_with_fallback, user_choices_from_users
 from core.views_utils import _normalize_str
@@ -81,6 +90,7 @@ from .models import (
     MembershipType,
     MembershipTypeCategory,
     Organization,
+    OrganizationCSVImportLink,
     VotingCredential,
 )
 
@@ -1829,6 +1839,137 @@ class MembershipCSVImportLinkAdmin(ImportMixin, admin.ModelAdmin):
     @override
     def changelist_view(self, request: HttpRequest, extra_context: dict[str, Any] | None = None) -> HttpResponse:
         return redirect("admin:core_membershipcsvimportlink_import")
+
+
+@admin.register(OrganizationCSVImportLink)
+class OrganizationCSVImportLinkAdmin(ImportMixin, admin.ModelAdmin):
+    """Admin entry for the organization CSV importer (django-import-export)."""
+
+    import_form_class = OrganizationCSVImportForm
+    confirm_form_class = OrganizationCSVConfirmImportForm
+    import_template_name = "admin/core/organization_csv_import.html"
+    resource_classes = [OrganizationCSVImportResource]
+
+    @override
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False
+
+    @override
+    def get_import_formats(self) -> list[type[base_formats.Format]]:
+        return [base_formats.CSV]
+
+    @override
+    def has_delete_permission(self, request: HttpRequest, obj: object | None = None) -> bool:
+        return False
+
+    @override
+    def has_change_permission(self, request: HttpRequest, obj: object | None = None) -> bool:
+        return False
+
+    @override
+    def has_view_permission(self, request: HttpRequest, obj: object | None = None) -> bool:
+        return bool(request.user.is_active and request.user.is_staff)
+
+    @override
+    def get_model_perms(self, request: HttpRequest) -> dict[str, bool]:
+        if not self.has_view_permission(request):
+            return {}
+        return {"view": True}
+
+    @override
+    def get_confirm_form_initial(self, request: HttpRequest, import_form: forms.Form) -> dict[str, Any]:
+        initial = super().get_confirm_form_initial(request, import_form)
+        if import_form is None:
+            return initial
+
+        for key in _ORG_COLUMN_FIELDS:
+            value = import_form.cleaned_data.get(key, "")
+            if value:
+                initial[key] = value
+        return initial
+
+    @override
+    def get_import_resource_kwargs(self, request: HttpRequest, **kwargs: Any) -> dict[str, Any]:
+        form = kwargs.get("form")
+        if form is None:
+            raise ValueError("Missing import form")
+
+        cleaned_data = getattr(form, "cleaned_data", None)
+        extra: dict[str, Any] = {}
+        if isinstance(cleaned_data, dict):
+            for key in _ORG_COLUMN_FIELDS:
+                value = cleaned_data.get(key, "")
+                if value:
+                    extra[key] = value
+
+        representative_selections = iter_representative_selection_items(request.POST.items())
+
+        return {
+            "actor_username": request.user.get_username(),
+            "representative_selections": representative_selections,
+            **extra,
+        }
+
+    @override
+    def import_action(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        response = super().import_action(request, *args, **kwargs)
+
+        if not isinstance(response, TemplateResponse) or response.context_data is None:
+            return response
+
+        response.context_data["required_csv_columns"] = required_organization_csv_columns()
+        response.context_data["optional_csv_columns"] = optional_organization_csv_columns()
+
+        result = response.context_data.get("result")
+        confirm_form = response.context_data.get("confirm_form")
+        if result is None or confirm_form is None:
+            return response
+
+        valid_rows_obj = getattr(result, "valid_rows", None)
+        if callable(valid_rows_obj):
+            valid_rows = list(valid_rows_obj() or [])
+        else:
+            valid_rows = list(valid_rows_obj or [])
+
+        matches: list[Any] = []
+        skipped: list[Any] = []
+
+        for idx, row_result in enumerate(valid_rows, start=1):
+            instance = row_result.instance if hasattr(row_result, "instance") else None
+            import_type = row_result.import_type if hasattr(row_result, "import_type") else ""
+            if import_type:
+                is_match = import_type != "skip"
+            elif instance is not None and hasattr(instance, "decision"):
+                is_match = instance.decision == "IMPORT"
+            else:
+                is_match = False
+
+            number = getattr(row_result, "number", None)
+            if number is None:
+                number = idx
+            try:
+                row_result.astra_row_number = int(number)
+            except (TypeError, ValueError):
+                row_result.astra_row_number = idx
+
+            if is_match:
+                matches.append(row_result)
+            else:
+                skipped.append(row_result)
+
+        response.context_data["preview_summary"] = {
+            "total": len(valid_rows),
+            "to_import": len(matches),
+            "skipped": len(skipped),
+        }
+        response.context_data["matches_page_obj"] = Paginator(matches, 50).get_page(request.GET.get("matches_page") or "1")
+        response.context_data["skipped_page_obj"] = Paginator(skipped, 50).get_page(request.GET.get("skipped_page") or "1")
+
+        return response
+
+    @override
+    def changelist_view(self, request: HttpRequest, extra_context: dict[str, Any] | None = None) -> HttpResponse:
+        return redirect("admin:core_organizationcsvimportlink_import")
 
 
 @admin.register(Organization)

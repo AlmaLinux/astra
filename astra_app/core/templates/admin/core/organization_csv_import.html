@@ -1,0 +1,417 @@
+{% extends "admin/import_export/import.html" %}
+
+{% load admin_urls %}
+{% load i18n %}
+{% load jazzmin %}
+{% load static %}
+{% get_jazzmin_ui_tweaks as jazzmin_ui %}
+
+{% block extrastyle %}
+  {{ block.super }}
+  <style>
+    table.organization-import-preview {
+      table-layout: fixed;
+      width: 100%;
+    }
+
+    table.organization-import-preview td,
+    table.organization-import-preview th {
+      vertical-align: middle;
+      word-break: break-word;
+    }
+
+    table.organization-import-preview .organization-import-representative {
+      width: 100%;
+      max-width: 100%;
+    }
+  </style>
+{% endblock %}
+
+{% block extrahead %}
+  <script src="{% static 'admin/js/vendor/jquery/jquery.js' %}"></script>
+  <script src="{% static 'admin/js/jquery.init.js' %}"></script>
+  {{ block.super }}
+  <script>
+    (function () {
+      function norm(value) {
+        return (value || "").toString().trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+      }
+
+      function pickHeader(headers, preferredNorms) {
+        const normalized = headers.map((h) => ({ raw: h, norm: norm(h) }));
+        for (const preferred of preferredNorms) {
+          const match = normalized.find((item) => item.norm === norm(preferred));
+          if (match) {
+            return match.raw;
+          }
+        }
+        return "";
+      }
+
+      function chooseDelimiter(line) {
+        const candidates = [",", "\t", ";", "|"];
+        let best = ",";
+        let bestCount = -1;
+        for (const delimiter of candidates) {
+          const count = line.split(delimiter).length - 1;
+          if (count > bestCount) {
+            bestCount = count;
+            best = delimiter;
+          }
+        }
+        return best;
+      }
+
+      function parseCsvRow(line, delimiter) {
+        const out = [];
+        let current = "";
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i += 1) {
+          const ch = line[i];
+          if (ch === '"') {
+            if (inQuotes && line[i + 1] === '"') {
+              current += '"';
+              i += 1;
+              continue;
+            }
+            inQuotes = !inQuotes;
+            continue;
+          }
+          if (ch === delimiter && !inQuotes) {
+            out.push(current.trim());
+            current = "";
+            continue;
+          }
+          current += ch;
+        }
+        if (current || line.endsWith(delimiter)) {
+          out.push(current.trim());
+        }
+        return out.filter(Boolean);
+      }
+
+      function init() {
+        const fileInput = document.getElementById("id_import_file");
+        const formatSelect = document.getElementById("id_format");
+        const headerPreview = document.getElementById("csv-header-preview");
+        const headerPreviewItems = document.getElementById("csv-header-preview-items");
+        const selects = Array.from(document.querySelectorAll("select"))
+          .filter((el) => el.id && el.id.endsWith("_column"));
+
+        if (!fileInput) {
+          return;
+        }
+
+        function ensureCsvFormatSelected() {
+          if (!formatSelect) {
+            return;
+          }
+          const options = Array.from(formatSelect.options || []);
+          const csvOption = options.find((opt) => {
+            const valueNorm = norm(opt.value);
+            const labelNorm = norm(opt.text || opt.label || "");
+            return valueNorm.includes("csv") || labelNorm.includes("csv");
+          });
+          if (csvOption) {
+            formatSelect.value = csvOption.value;
+          }
+        }
+
+        function applyHeaders(headers) {
+          for (const select of selects) {
+            const current = select.value;
+            select.options.length = 0;
+
+            const autoOption = document.createElement("option");
+            autoOption.value = "";
+            autoOption.textContent = "Auto-detect";
+            select.appendChild(autoOption);
+
+            for (const header of headers) {
+              const option = document.createElement("option");
+              option.value = header;
+              option.textContent = header;
+              select.appendChild(option);
+            }
+
+            if (current) {
+              select.value = current;
+              continue;
+            }
+
+            const logicalName = (select.id || "").replace(/^id_/, "").replace(/_column$/, "");
+            if (logicalName) {
+              const preferred = [logicalName, logicalName.replaceAll("_", "")];
+              const picked = pickHeader(headers, preferred);
+              if (picked) {
+                select.value = picked;
+              }
+            }
+          }
+
+          if (headerPreview && headerPreviewItems) {
+            headerPreviewItems.textContent = headers.join(", ");
+            headerPreview.style.display = headers.length ? "block" : "none";
+          }
+        }
+
+        fileInput.addEventListener("change", function () {
+          const file = fileInput.files && fileInput.files[0];
+          if (!file) {
+            return;
+          }
+
+          ensureCsvFormatSelected();
+          const reader = new FileReader();
+          reader.onload = function () {
+            const text = (reader.result || "").toString();
+            const lines = text.split(/\r\n|\n|\r/).filter(Boolean);
+            if (!lines.length) {
+              return;
+            }
+            const firstLine = lines[0].replace(/^\uFEFF/, "");
+            const delimiter = chooseDelimiter(firstLine);
+            const headers = parseCsvRow(firstLine, delimiter);
+            applyHeaders(headers);
+          };
+          reader.readAsText(file);
+        });
+      }
+
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", init);
+      } else {
+        init();
+      }
+    })();
+  </script>
+{% endblock %}
+
+{% block content %}
+  <div class="col-12">
+    {% if confirm_form %}
+      <form action="{% url opts|admin_urlname:"process_import" %}" method="POST">
+        {% csrf_token %}
+        <div class="row">
+          <div class="col-12 col-lg-9">
+            <div class="card">
+              <div class="card-header">
+                <div class="card-title">Preview Import</div>
+              </div>
+              <div class="card-body">
+                {{ confirm_form.as_p }}
+                <p>Review organizations before confirming import.</p>
+              </div>
+            </div>
+          </div>
+          <div class="col-12 col-lg-3">
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">
+                  <i class="fas fa-edit"></i>
+                  Actions
+                </h3>
+              </div>
+              <div class="card-body">
+                <div class="form-group">
+                  <input type="submit" class="btn {{ jazzmin_ui.button_classes.success }} form-control" name="confirm" value="Confirm import" title="Confirm and start import">
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {% if preview_summary %}
+          <div class="row mt-3">
+            <div class="col-12">
+              <div class="card">
+                <div class="card-header">
+                  <div class="card-title">Preview summary</div>
+                </div>
+                <div class="card-body">
+                  Total rows: <strong>{{ preview_summary.total }}</strong><br>
+                  Organizations to import: <strong>{{ preview_summary.to_import }}</strong><br>
+                  Rows skipped: <strong>{{ preview_summary.skipped }}</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+        {% endif %}
+
+        <div class="row mt-3">
+          <div class="col-12">
+            <div class="card">
+              <div class="card-header">
+                <div class="card-title">Organizations to Import</div>
+              </div>
+              <div class="card-body">
+                <table class="table table-striped table-sm organization-import-preview">
+                  <thead>
+                    <tr>
+                      <th>Row</th>
+                      <th>Name</th>
+                      <th>Country</th>
+                      <th>Business Email</th>
+                      <th>Representative</th>
+                      <th>Decision</th>
+                      <th>Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for row in matches_page_obj %}
+                      <tr>
+                        <td>{{ row.astra_row_number }}</td>
+                        <td>{{ row.instance.csv_name }}</td>
+                        <td>{{ row.instance.csv_country_code }}</td>
+                        <td>{{ row.instance.csv_business_contact_email }}</td>
+                        <td>
+                          <select class="form-control organization-import-representative" name="representative_for_{{ row.instance.row_key }}">
+                            {% for username in row.instance.representative_options %}
+                              <option value="{{ username }}" {% if row.instance.selected_representative == username %}selected{% endif %}>{{ username }}</option>
+                            {% endfor %}
+                            <option value="" {% if not row.instance.selected_representative %}selected{% endif %}>Unclaimed</option>
+                          </select>
+                        </td>
+                        <td>{{ row.instance.decision }}</td>
+                        <td>{{ row.instance.decision_reason }}</td>
+                      </tr>
+                    {% empty %}
+                      <tr>
+                        <td colspan="7">No rows ready for import.</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="row mt-3">
+          <div class="col-12">
+            <div class="card">
+              <div class="card-header">
+                <div class="card-title">Skipped</div>
+              </div>
+              <div class="card-body">
+                <table class="table table-striped table-sm organization-import-preview">
+                  <thead>
+                    <tr>
+                      <th>Row</th>
+                      <th>Name</th>
+                      <th>Country</th>
+                      <th>Decision</th>
+                      <th>Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for row in skipped_page_obj %}
+                      <tr>
+                        <td>{{ row.astra_row_number }}</td>
+                        <td>{{ row.instance.csv_name }}</td>
+                        <td>{{ row.instance.csv_country_code }}</td>
+                        <td>{{ row.instance.decision }}</td>
+                        <td>{{ row.instance.decision_reason }}</td>
+                      </tr>
+                    {% empty %}
+                      <tr>
+                        <td colspan="5">No skipped rows.</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </form>
+    {% else %}
+      <form action="" method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div class="row">
+          <div class="col-12 col-lg-9">
+            <div class="card">
+              <div class="card-header">
+                <div class="card-title">Upload Organization CSV</div>
+              </div>
+              <div class="card-body">
+                {% for field in form %}
+                  {% if field.is_hidden %}
+                    {{ field }}
+                  {% elif field.name == "import_file" %}
+                    <div class="form-group field-name">
+                      <div class="row">
+                        {{ field.errors }}
+                        <div class="col-sm-3 text-left">{{ field.label_tag }}</div>
+                        <div class="col-sm-9 text-left">
+                          {{ field }}
+                          <div id="csv-header-preview" class="help mt-1" style="display: none;">
+                            <strong>Detected CSV headers:</strong>
+                            <span id="csv-header-preview-items"></span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  {% else %}
+                    <div class="form-group field-name">
+                      <div class="row">
+                        {{ field.errors }}
+                        <div class="col-sm-3 text-left">{{ field.label_tag }}</div>
+                        <div class="col-sm-9 text-left">{{ field }}</div>
+                        {% if field.field.help_text %}
+                          <div class="help-block col-sm-12">{{ field.field.help_text }}</div>
+                        {% endif %}
+                      </div>
+                    </div>
+                  {% endif %}
+                {% endfor %}
+
+                <div class="card mt-3">
+                  <div class="card-header"><strong>CSV format</strong></div>
+                  <div class="card-body">
+                    <p class="mb-2">
+                      Required columns:
+                      {% if required_csv_columns %}
+                        {% for column_name in required_csv_columns %}
+                          <code>{{ column_name }}</code>{% if not forloop.last %}, {% endif %}
+                        {% endfor %}
+                      {% else %}
+                        <em>None</em>
+                      {% endif %}
+                    </p>
+                    <p class="mb-2">
+                      Optional:
+                      {% if optional_csv_columns %}
+                        {% for column_name in optional_csv_columns %}
+                          <code>{{ column_name }}</code>{% if not forloop.last %}, {% endif %}
+                        {% endfor %}
+                      {% else %}
+                        <em>None</em>
+                      {% endif %}
+                    </p>
+                    <p class="mb-0">This importer creates organizations only. Existing organizations are skipped.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="col-12 col-lg-3">
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">
+                  <i class="fas fa-edit"></i>
+                  Actions
+                </h3>
+              </div>
+              <div class="card-body">
+                <div class="form-group">
+                  <input type="submit" class="btn {{ jazzmin_ui.button_classes.success }} form-control" name="confirm" value="Upload and Preview" title="Upload CSV and preview results">
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </form>
+    {% endif %}
+  </div>
+{% endblock %}
