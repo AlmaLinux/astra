@@ -194,19 +194,53 @@
           {% endif %}
 
           <dl class="row mb-0">
-            <dt class="col-sm-5">Organization name</dt>
-            <dd class="col-sm-7">{{ organization.name }}</dd>
-
-            {% if organization.website %}
-              <dt class="col-sm-5">Website URL</dt>
-              <dd class="col-sm-7"><a href="{{ organization.website }}" rel="noopener noreferrer">{{ organization.website }}</a></dd>
-            {% endif %}
-
-            {% if organization.website_logo %}
-              <dt class="col-sm-5">Website logo (URL)</dt>
-              <dd class="col-sm-7"><a href="{{ organization.website_logo }}" rel="noopener noreferrer">{{ organization.website_logo }}</a></dd>
-            {% endif %}
+            <dt class="col-sm-5">Website logo (URL)</dt>
+            <dd class="col-sm-7">
+              {% if organization.website_logo %}
+                <a href="{{ organization.website_logo }}" rel="noopener noreferrer">{{ organization.website_logo }}</a></dd>
+              {% else %}
+                —
+              {% endif %}
+            </dd>
           </dl>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">Address</h3>
+        </div>
+        <div class="card-body">
+          {% if organization.street or organization.city or organization.state or organization.postal_code or organization.country_code %}
+            <dl class="row mb-0">
+              {% if organization.street %}
+                <dt class="col-sm-5">Street</dt>
+                <dd class="col-sm-7">{{ organization.street }}</dd>
+              {% endif %}
+
+              {% if organization.city %}
+                <dt class="col-sm-5">City</dt>
+                <dd class="col-sm-7">{{ organization.city }}</dd>
+              {% endif %}
+
+              {% if organization.state %}
+                <dt class="col-sm-5">State</dt>
+                <dd class="col-sm-7">{{ organization.state }}</dd>
+              {% endif %}
+
+              {% if organization.postal_code %}
+                <dt class="col-sm-5">Postal code</dt>
+                <dd class="col-sm-7">{{ organization.postal_code }}</dd>
+              {% endif %}
+
+              {% if organization.country_code %}
+                <dt class="col-sm-5">Country code</dt>
+                <dd class="col-sm-7">{{ organization.country_code }}</dd>
+              {% endif %}
+            </dl>
+          {% else %}
+            <span class="text-muted">No address provided.</span>
+          {% endif %}
         </div>
       </div>
     </div>
