@@ -3,6 +3,7 @@ from typing import override
 from django import forms
 
 from core.backends import FreeIPAUser
+from core.country_codes import is_valid_country_alpha2, normalize_country_alpha2
 from core.forms_base import StyledModelForm
 from core.models import Organization
 from core.user_labels import user_choice_from_freeipa
@@ -35,6 +36,11 @@ class OrganizationEditForm(StyledModelForm):
             "name",
             "website_logo",
             "website",
+            "street",
+            "city",
+            "state",
+            "postal_code",
+            "country_code",
             "logo",
         )
 
@@ -51,6 +57,11 @@ class OrganizationEditForm(StyledModelForm):
             "name": "Organization name",
             "website_logo": "Website logo (URL)",
             "website": "Website URL",
+            "street": "Street",
+            "city": "City",
+            "state": "State / Province / Region",
+            "postal_code": "Postal code",
+            "country_code": "Country code",
             "logo": "Accounts logo (upload)",
         }
 
@@ -58,10 +69,11 @@ class OrganizationEditForm(StyledModelForm):
             "name": "This is the name we will display publicly for sponsor recognition.",
             "website_logo": "Share a direct link to your logo file, or a link to your brand assets.",
             "website": "Enter the URL you want your logo to link to (homepage or a dedicated landing page).",
+            "country_code": "Use a 2-letter ISO country code, for example US, CA, or DE.",
         }
 
     @override
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         self.can_select_representatives: bool = bool(kwargs.pop("can_select_representatives", False))
         super().__init__(*args, **kwargs)
 
@@ -74,12 +86,29 @@ class OrganizationEditForm(StyledModelForm):
         self.fields["name"].required = True
         self.fields["website_logo"].required = True
         self.fields["website"].required = True
+        self.fields["street"].required = False
+        self.fields["city"].required = False
+        self.fields["state"].required = False
+        self.fields["postal_code"].required = False
+        self.fields["country_code"].required = True
 
         self.fields["website"].widget = forms.URLInput(attrs={"class": "form-control", "placeholder": "https://…"})
         self.fields["website_logo"].widget = forms.URLInput(attrs={"class": "form-control", "placeholder": "https://…"})
         self.fields["business_contact_email"].widget = forms.EmailInput(attrs={"class": "form-control"})
         self.fields["pr_marketing_contact_email"].widget = forms.EmailInput(attrs={"class": "form-control"})
         self.fields["technical_contact_email"].widget = forms.EmailInput(attrs={"class": "form-control"})
+        self.fields["street"].widget = forms.TextInput(attrs={"class": "form-control", "autocomplete": "address-line1"})
+        self.fields["city"].widget = forms.TextInput(attrs={"class": "form-control", "autocomplete": "address-level2"})
+        self.fields["state"].widget = forms.TextInput(attrs={"class": "form-control", "autocomplete": "address-level1"})
+        self.fields["postal_code"].widget = forms.TextInput(attrs={"class": "form-control", "autocomplete": "postal-code"})
+        self.fields["country_code"].widget = forms.TextInput(
+            attrs={
+                "class": "form-control",
+                "maxlength": "2",
+                "autocomplete": "country",
+                "placeholder": "US",
+            }
+        )
 
         if not self.can_select_representatives:
             # Representative is defaulted to the creator; only membership admins can change.
@@ -93,6 +122,16 @@ class OrganizationEditForm(StyledModelForm):
                 initial = self.initial.get("representative")
                 current = str(initial or "").strip()
             self.fields["representative"].choices = [user_choice_from_freeipa(current)] if current else []
+
+    def clean_country_code(self) -> str:
+        normalized = normalize_country_alpha2(self.cleaned_data.get("country_code"))
+        if not normalized:
+            raise forms.ValidationError("This field is required.")
+
+        if not is_valid_country_alpha2(normalized):
+            raise forms.ValidationError("Enter a valid 2-letter ISO country code.")
+
+        return normalized
 
     def clean_representative(self) -> str:
         if "representative" not in self.fields:

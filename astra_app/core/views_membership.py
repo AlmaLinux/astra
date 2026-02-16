@@ -17,6 +17,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from core.backends import FreeIPAUser
 from core.country_codes import (
     country_code_status_from_user_data,
+    embargoed_country_match_from_country_code,
     embargoed_country_match_from_user_data,
 )
 from core.email_context import (
@@ -633,6 +634,19 @@ def membership_request(request: HttpRequest, organization_id: int | None = None)
                                 ),
                             )
                     else:
+                        org_country_match = embargoed_country_match_from_country_code(
+                            organization.country_code if organization is not None else ""
+                        )
+                        if org_country_match is not None:
+                            add_note(
+                                membership_request=mr,
+                                username=CUSTOS,
+                                content=(
+                                    "This organization's declared country, "
+                                    f"{org_country_match.label}, is on the list of embargoed countries."
+                                ),
+                            )
+
                         if representative_user is not None:
                             embargoed_match = embargoed_country_match_from_user_data(
                                 user_data=representative_user._user_data,

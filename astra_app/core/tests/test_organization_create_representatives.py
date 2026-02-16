@@ -18,6 +18,7 @@ class OrganizationCreateRepresentativesTests(TestCase):
     def _valid_create_payload(self, *, name: str) -> dict[str, str]:
         return {
             "name": name,
+            "country_code": "US",
             "business_contact_name": "Biz",
             "business_contact_email": "biz@example.com",
             "business_contact_phone": "",

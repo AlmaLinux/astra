@@ -224,6 +224,11 @@ class Organization(models.Model):
     website_logo = models.URLField(blank=True, default="", max_length=2048)
 
     website = models.URLField(blank=True, default="")
+    street = models.CharField(max_length=255, blank=True, default="")
+    city = models.CharField(max_length=255, blank=True, default="")
+    state = models.CharField(max_length=255, blank=True, default="")
+    postal_code = models.CharField(max_length=40, blank=True, default="")
+    country_code = models.CharField(max_length=2, blank=True, default="")
     logo = models.ImageField(
         upload_to=organization_logo_upload_to,
         blank=True,

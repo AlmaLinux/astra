@@ -222,6 +222,7 @@ class MembershipGroupSyncLifecycleTests(TestCase):
                     reverse("organization-edit", args=[org.pk]),
                     data={
                         "name": org.name,
+                        "country_code": "US",
                         "business_contact_name": "Biz",
                         "business_contact_email": "biz@example.com",
                         "pr_marketing_contact_name": "PR",

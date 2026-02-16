@@ -240,6 +240,20 @@ class MembershipCountryRequirementsTests(TestCase):
         )
 
     @override_settings(MEMBERSHIP_EMBARGOED_COUNTRY_CODES=["RU", "IR"])
+    def test_embargoed_country_match_from_country_code(self) -> None:
+        from core.country_codes import embargoed_country_match_from_country_code
+
+        match = embargoed_country_match_from_country_code("ru")
+        self.assertIsNotNone(match)
+        assert match is not None
+        self.assertEqual(match.code, "RU")
+        self.assertEqual(match.label, f"{country_name_from_code('RU')} (RU)")
+
+        self.assertIsNone(embargoed_country_match_from_country_code("US"))
+        self.assertIsNone(embargoed_country_match_from_country_code(""))
+        self.assertIsNone(embargoed_country_match_from_country_code("ZZ"))
+
+    @override_settings(MEMBERSHIP_EMBARGOED_COUNTRY_CODES=["RU", "IR"])
     def test_org_membership_request_submits_and_persists_embargoed_country_note(self) -> None:
         membership_type = self._ensure_org_membership_type()
 
@@ -282,6 +296,136 @@ class MembershipCountryRequirementsTests(TestCase):
                 f"{country_name_from_code('RU')} (RU), is on the list of embargoed countries."
             ),
         )
+
+    @override_settings(MEMBERSHIP_EMBARGOED_COUNTRY_CODES=["RU", "IR"])
+    def test_org_membership_request_adds_embargo_note_for_org_declared_country(self) -> None:
+        membership_type = self._ensure_org_membership_type()
+
+        org = Organization.objects.create(
+            name="Embargo Org Country",
+            representative="bob",
+            country_code="IR",
+        )
+
+        request = self.factory.post(
+            f"/organization/{org.pk}/membership/request/",
+            data={
+                "membership_type": membership_type.code,
+                "q_sponsorship_details": "Please consider our sponsorship request.",
+            },
+        )
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("bob")
+
+        fake_user = self._fake_freeipa_user(username="bob", user_data={"fasstatusnote": ["US"]})
+
+        with patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_user):
+            with patch(
+                "core.views_membership.record_membership_request_created",
+                autospec=True,
+                return_value=None,
+            ):
+                response = views_membership.membership_request(request, organization_id=org.pk)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("organization-detail", kwargs={"organization_id": org.pk}))
+
+        mr = MembershipRequest.objects.get(requested_organization=org)
+        system_notes = list(mr.notes.filter(username=CUSTOS).order_by("timestamp", "pk"))
+        self.assertTrue(system_notes)
+        self.assertTrue(
+            any(
+                note.content
+                == (
+                    "This organization's declared country, "
+                    f"{country_name_from_code('IR')} (IR), is on the list of embargoed countries."
+                )
+                for note in system_notes
+            )
+        )
+
+    @override_settings(MEMBERSHIP_EMBARGOED_COUNTRY_CODES=["RU", "IR"])
+    def test_org_membership_request_adds_two_embargo_notes_when_rep_and_org_embargoed(self) -> None:
+        membership_type = self._ensure_org_membership_type()
+
+        org = Organization.objects.create(
+            name="Embargo Org Both",
+            representative="bob",
+            country_code="IR",
+        )
+
+        request = self.factory.post(
+            f"/organization/{org.pk}/membership/request/",
+            data={
+                "membership_type": membership_type.code,
+                "q_sponsorship_details": "Please consider our sponsorship request.",
+            },
+        )
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("bob")
+
+        fake_user = self._fake_freeipa_user(username="bob", user_data={"fasstatusnote": ["RU"]})
+
+        with patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_user):
+            with patch(
+                "core.views_membership.record_membership_request_created",
+                autospec=True,
+                return_value=None,
+            ):
+                response = views_membership.membership_request(request, organization_id=org.pk)
+
+        self.assertEqual(response.status_code, 302)
+
+        mr = MembershipRequest.objects.get(requested_organization=org)
+        system_notes = list(mr.notes.filter(username=CUSTOS).order_by("timestamp", "pk"))
+        self.assertTrue(system_notes)
+
+        rep_note = (
+            "This organization's representative's declared country, "
+            f"{country_name_from_code('RU')} (RU), is on the list of embargoed countries."
+        )
+        org_note = (
+            "This organization's declared country, "
+            f"{country_name_from_code('IR')} (IR), is on the list of embargoed countries."
+        )
+
+        self.assertEqual(sum(1 for note in system_notes if note.content == rep_note), 1)
+        self.assertEqual(sum(1 for note in system_notes if note.content == org_note), 1)
+
+    @override_settings(MEMBERSHIP_EMBARGOED_COUNTRY_CODES=["RU", "IR"])
+    def test_org_membership_request_does_not_add_embargo_notes_when_countries_not_embargoed(self) -> None:
+        membership_type = self._ensure_org_membership_type()
+
+        org = Organization.objects.create(
+            name="Non Embargo Org",
+            representative="bob",
+            country_code="US",
+        )
+
+        request = self.factory.post(
+            f"/organization/{org.pk}/membership/request/",
+            data={
+                "membership_type": membership_type.code,
+                "q_sponsorship_details": "Please consider our sponsorship request.",
+            },
+        )
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("bob")
+
+        fake_user = self._fake_freeipa_user(username="bob", user_data={"fasstatusnote": ["US"]})
+
+        with patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_user):
+            with patch(
+                "core.views_membership.record_membership_request_created",
+                autospec=True,
+                return_value=None,
+            ):
+                response = views_membership.membership_request(request, organization_id=org.pk)
+
+        self.assertEqual(response.status_code, 302)
+
+        mr = MembershipRequest.objects.get(requested_organization=org)
+        self.assertFalse(mr.notes.filter(username=CUSTOS).exists())
 
     @override_settings(MEMBERSHIP_EMBARGOED_COUNTRY_CODES=["RU", "IR"])
     def test_membership_committee_sees_embargoed_country_warning(self) -> None:

@@ -77,6 +77,19 @@
       </div>
     </div>
 
+      <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Address</h3>
+      </div>
+      <div class="card-body">
+        {% include 'core/_form_field.html' with field=form.street %}
+        {% include 'core/_form_field.html' with field=form.city %}
+        {% include 'core/_form_field.html' with field=form.state %}
+        {% include 'core/_form_field.html' with field=form.postal_code %}
+        {% include 'core/_form_field.html' with field=form.country_code %}
+      </div>
+    </div>
+
       <div class="card organization-form-footer">
         <div class="card-body">
           <div class="mb-0 text-muted">

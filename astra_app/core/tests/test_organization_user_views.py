@@ -62,6 +62,7 @@ class OrganizationUserViewsTests(TestCase):
     def _valid_org_payload(self, *, name: str) -> dict[str, str]:
         return {
             "name": name,
+            "country_code": "US",
             "business_contact_name": "Business",
             "business_contact_email": "business@example.com",
             "business_contact_phone": "",
@@ -74,6 +75,138 @@ class OrganizationUserViewsTests(TestCase):
             "website_logo": "https://example.com/logo-options",
             "website": "https://example.com/",
         }
+
+    def test_organization_create_requires_country_code(self) -> None:
+        from core.models import Organization
+
+        self._login_as_freeipa_user("alice")
+
+        alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
+        payload = self._valid_org_payload(name="Country Required Org")
+        payload.pop("country_code")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.views_utils.has_signed_coc", return_value=True),
+        ):
+            response = self.client.post(reverse("organization-create"), data=payload, follow=False)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "This field is required.")
+        self.assertFalse(Organization.objects.filter(name="Country Required Org").exists())
+
+    def test_organization_create_normalizes_country_code_to_uppercase(self) -> None:
+        from core.models import Organization
+
+        self._login_as_freeipa_user("alice")
+
+        alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
+        payload = self._valid_org_payload(name="Country Normalize Org")
+        payload["country_code"] = "ca"
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.views_utils.has_signed_coc", return_value=True),
+        ):
+            response = self.client.post(reverse("organization-create"), data=payload, follow=False)
+
+        self.assertEqual(response.status_code, 302)
+        organization = Organization.objects.get(name="Country Normalize Org")
+        self.assertEqual(organization.country_code, "CA")
+
+    def test_organization_create_rejects_invalid_country_code(self) -> None:
+        from core.models import Organization
+
+        self._login_as_freeipa_user("alice")
+
+        alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
+        payload = self._valid_org_payload(name="Invalid Country Org")
+        payload["country_code"] = "ZZ"
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.views_utils.has_signed_coc", return_value=True),
+        ):
+            response = self.client.post(reverse("organization-create"), data=payload, follow=False)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Enter a valid 2-letter ISO country code.")
+        self.assertFalse(Organization.objects.filter(name="Invalid Country Org").exists())
+
+    def test_organization_create_rejects_numeric_country_code(self) -> None:
+        from core.models import Organization
+
+        self._login_as_freeipa_user("alice")
+
+        alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
+        payload = self._valid_org_payload(name="Numeric Country Org")
+        payload["country_code"] = "1A"
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.views_utils.has_signed_coc", return_value=True),
+        ):
+            response = self.client.post(reverse("organization-create"), data=payload, follow=False)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Enter a valid 2-letter ISO country code.")
+        self.assertFalse(Organization.objects.filter(name="Numeric Country Org").exists())
+
+    def test_organization_create_form_renders_address_fields_and_no_embargo_ui(self) -> None:
+        self._login_as_freeipa_user("alice")
+
+        alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.views_utils.has_signed_coc", return_value=True),
+        ):
+            resp = self.client.get(reverse("organization-create"), follow=False)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'id="id_street"')
+        self.assertContains(resp, 'id="id_city"')
+        self.assertContains(resp, 'id="id_state"')
+        self.assertContains(resp, 'id="id_postal_code"')
+        self.assertContains(resp, 'id="id_country_code"')
+        self.assertNotContains(resp, "Compliance warning")
+        self.assertNotContains(resp, "embargo")
+
+    def test_organization_edit_updates_country_code(self) -> None:
+        from core.models import Organization
+
+        org = Organization.objects.create(
+            name="Edit Org",
+            representative="alice",
+        )
+
+        self._login_as_freeipa_user("alice")
+        alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.views_utils.has_signed_coc", return_value=True),
+        ):
+            resp_get = self.client.get(reverse("organization-edit", args=[org.pk]), follow=False)
+
+        self.assertEqual(resp_get.status_code, 200)
+        self.assertContains(resp_get, 'id="id_country_code"')
+        self.assertContains(resp_get, 'id="id_street"')
+        self.assertNotContains(resp_get, "Compliance warning")
+        self.assertNotContains(resp_get, "embargo")
+
+        payload = self._valid_org_payload(name="Edit Org Updated")
+        payload["country_code"] = "de"
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.views_utils.has_signed_coc", return_value=True),
+        ):
+            resp_post = self.client.post(reverse("organization-edit", args=[org.pk]), data=payload, follow=False)
+
+        self.assertEqual(resp_post.status_code, 302)
+        org.refresh_from_db()
+        self.assertEqual(org.country_code, "DE")
 
     def test_non_committee_representative_cannot_create_second_org(self) -> None:
         from core.models import Organization
@@ -891,6 +1024,7 @@ class OrganizationUserViewsTests(TestCase):
                     "name": "AlmaLinux Updated",
                     "website_logo": "https://example.com/logo-options-updated",
                     "website": "https://example.com/",
+                    "country_code": "US",
                 },
                 follow=False,
             )
@@ -1175,6 +1309,7 @@ class OrganizationUserViewsTests(TestCase):
                     "name": "AlmaLinux",
                     "website_logo": "https://example.com/logo-options",
                     "website": "https://almalinux.org/",
+                    "country_code": "US",
                     "logo": logo_upload,
                 },
                 follow=False,
@@ -3486,6 +3621,7 @@ class OrganizationUserViewsTests(TestCase):
                     "name": "AlmaLinux",
                     "website_logo": "https://example.com/logo-options",
                     "website": "https://almalinux.org/",
+                    "country_code": "US",
                     "representative": "carol",
                 },
                 follow=False,
@@ -3557,6 +3693,7 @@ class OrganizationUserViewsTests(TestCase):
                 reverse("organization-create"),
                 data={
                     "name": "AlmaLinux",
+                    "country_code": "US",
                     "business_contact_name": "Business Person",
                     "business_contact_email": "contact@almalinux.org",
                     "business_contact_phone": "",
@@ -3609,6 +3746,7 @@ class OrganizationUserViewsTests(TestCase):
                 reverse("organization-create"),
                 data={
                     "name": "AlmaLinux",
+                    "country_code": "US",
                     "business_contact_name": "Business Person",
                     "business_contact_email": "contact@almalinux.org",
                     "business_contact_phone": "",
@@ -3660,6 +3798,7 @@ class OrganizationUserViewsTests(TestCase):
                     "name": "Acme",
                     "website_logo": "https://example.com/logo",
                     "website": "https://example.com/",
+                    "country_code": "US",
                 },
                 follow=False,
             )
@@ -3706,6 +3845,7 @@ class OrganizationUserViewsTests(TestCase):
                 data={
                     "representative": "bob",
                     "name": "Acme",
+                    "country_code": "US",
                     "business_contact_name": "Business Person",
                     "business_contact_email": "contact@example.com",
                     "business_contact_phone": "",
@@ -3742,6 +3882,7 @@ class OrganizationUserViewsTests(TestCase):
                     "name": "AlmaLinux",
                     "website_logo": "https://example.com/logo-options",
                     "website": "https://almalinux.org/",
+                    "country_code": "US",
                 },
                 follow=False,
             )

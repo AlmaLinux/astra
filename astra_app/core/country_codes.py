@@ -96,7 +96,21 @@ def embargoed_country_match_from_user_data(
     if not status.is_valid or not status.code:
         return None
 
-    normalized_code = status.code.strip().upper()
+    return embargoed_country_match_from_country_code(
+        status.code,
+        embargoed_codes=embargoed_codes,
+    )
+
+
+def embargoed_country_match_from_country_code(
+    code: str,
+    *,
+    embargoed_codes: set[str] | None = None,
+) -> EmbargoedCountryMatch | None:
+    normalized_code = normalize_country_alpha2(code)
+    if not normalized_code or not is_valid_country_alpha2(normalized_code):
+        return None
+
     active_embargoed_codes = embargoed_codes if embargoed_codes is not None else embargoed_country_codes_from_settings()
     if normalized_code not in active_embargoed_codes:
         return None
