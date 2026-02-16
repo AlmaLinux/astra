@@ -84,7 +84,7 @@
     </div>
 
   <div class="row">
-    <div class="col-md-7">
+    <div class="col-12">
       <div class="card card-primary card-outline card-outline-tabs">
         <div class="card-header p-0 border-bottom-0">
           <ul class="nav nav-tabs" id="org-contacts-tabs" role="tablist">
@@ -176,71 +176,114 @@
           </div>
         </div>
       </div>
+    </div>
+  </div>
 
+  <div class="row">
+    <div class="col-md-7">
       {% url 'organization-membership-request' organization.pk as organization_membership_request_url %}
       {% include 'core/_membership_profile_section.html' with membership_target_kind='organization' membership_is_owner=is_representative membership_can_request_any=membership_can_request_any membership_entries=sponsorship_entries membership_pending_requests=pending_requests membership_request_url=organization_membership_request_url %}
     </div>
 
     <div class="col-md-5">
-      <div class="card">
+      <div class="card organization-info-card">
         <div class="card-header">
-          <h3 class="card-title">Branding</h3>
+          <h3 class="card-title mb-0">
+            <i class="fas fa-info-circle mr-1 text-muted"></i>
+            Organization information
+          </h3>
         </div>
+
         <div class="card-body">
-          {% if organization.logo %}
-            <div class="mb-3">
-              <img src="{{ organization.logo.url }}" alt="{{ organization.name }}" class="organization-branding-logo" />
+          <div class="row">
+            <div class="col-12 col-lg-6 mb-3 mb-lg-0">
+              <div class="p-3 bg-light rounded border h-100">
+                <div class="d-flex align-items-center mb-3">
+                  <i class="fas fa-palette text-muted mr-2"></i>
+                  <div class="h6 mb-0 font-weight-bold">Brand assets</div>
+                </div>
+
+                <div class="d-flex align-items-start mb-3">
+                  <div class="mr-3 flex-shrink-0">
+                    {% if organization.logo %}
+                      <img
+                        src="{{ organization.logo.url }}"
+                        alt="{{ organization.name }} logo"
+                        class="organization-info-logo"
+                      />
+                    {% else %}
+                      <div class="organization-info-logo-placeholder" aria-hidden="true">
+                        <i class="fas fa-image"></i>
+                      </div>
+                    {% endif %}
+                  </div>
+
+                  <div class="flex-grow-1">
+                    <div class="text-muted small">Uploaded logo</div>
+                    {% if organization.logo %}
+                      <a href="{{ organization.logo.url }}" rel="noopener noreferrer" class="small">
+                        View full size
+                      </a>
+                    {% else %}
+                      <div class="text-muted small">—</div>
+                    {% endif %}
+                  </div>
+                </div>
+
+                <div class="d-flex align-items-start">
+                  <div class="text-muted mr-2">
+                    <i class="fas fa-link"></i>
+                  </div>
+                  <div class="flex-grow-1">
+                    <div class="text-muted small">Website logo URL</div>
+                    {% if organization.website_logo %}
+                      <div class="organization-info-url small">
+                        <a href="{{ organization.website_logo }}" rel="noopener noreferrer">
+                          {{ organization.website_logo }}
+                        </a>
+                      </div>
+                    {% else %}
+                      <div class="text-muted">—</div>
+                    {% endif %}
+                  </div>
+                </div>
+              </div>
             </div>
-          {% endif %}
 
-          <dl class="row mb-0">
-            <dt class="col-sm-5">Website logo (URL)</dt>
-            <dd class="col-sm-7">
-              {% if organization.website_logo %}
-                <a href="{{ organization.website_logo }}" rel="noopener noreferrer">{{ organization.website_logo }}</a></dd>
-              {% else %}
-                —
-              {% endif %}
-            </dd>
-          </dl>
-        </div>
-      </div>
+            <div class="col-12 col-lg-6">
+              <div class="p-3 bg-light rounded border h-100">
+                <div class="d-flex align-items-center mb-3">
+                  <i class="fas fa-map-marker-alt text-muted mr-2"></i>
+                  <div class="h6 mb-0 font-weight-bold">Address</div>
+                </div>
 
-      <div class="card">
-        <div class="card-header">
-          <h3 class="card-title">Address</h3>
-        </div>
-        <div class="card-body">
-          {% if organization.street or organization.city or organization.state or organization.postal_code or organization.country_code %}
-            <dl class="row mb-0">
-              {% if organization.street %}
-                <dt class="col-sm-5">Street</dt>
-                <dd class="col-sm-7">{{ organization.street }}</dd>
-              {% endif %}
+                {% if organization.street or organization.city or organization.state or organization.postal_code or organization.country_code %}
+                  <address class="mb-0">
+                    {% if organization.street %}
+                      <div>{{ organization.street }}</div>
+                    {% endif %}
 
-              {% if organization.city %}
-                <dt class="col-sm-5">City</dt>
-                <dd class="col-sm-7">{{ organization.city }}</dd>
-              {% endif %}
+                    {% if organization.city or organization.state or organization.postal_code %}
+                      <div>
+                        {% if organization.city %}{{ organization.city }}{% endif %}
+                        {% if organization.city and organization.state %}, {% endif %}
+                        {% if organization.state %}{{ organization.state }}{% endif %}
+                        {% if organization.postal_code %}
+                          {% if organization.city or organization.state %} {{ organization.postal_code }}{% else %}{{ organization.postal_code }}{% endif %}
+                        {% endif %}
+                      </div>
+                    {% endif %}
 
-              {% if organization.state %}
-                <dt class="col-sm-5">State</dt>
-                <dd class="col-sm-7">{{ organization.state }}</dd>
-              {% endif %}
-
-              {% if organization.postal_code %}
-                <dt class="col-sm-5">Postal code</dt>
-                <dd class="col-sm-7">{{ organization.postal_code }}</dd>
-              {% endif %}
-
-              {% if organization.country_code %}
-                <dt class="col-sm-5">Country code</dt>
-                <dd class="col-sm-7">{{ organization.country_code }}</dd>
-              {% endif %}
-            </dl>
-          {% else %}
-            <span class="text-muted">No address provided.</span>
-          {% endif %}
+                    {% if organization.country_code %}
+                      <div>{{ organization.country_code }}</div>
+                    {% endif %}
+                  </address>
+                {% else %}
+                  <div class="text-muted">No address provided.</div>
+                {% endif %}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

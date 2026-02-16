@@ -434,6 +434,31 @@ a:hover {
   max-width: 100%;
 }
 
+.organization-info-logo {
+  width: 56px;
+  height: 56px;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: #fff;
+  object-fit: contain;
+}
+
+.organization-info-logo-placeholder {
+  width: 56px;
+  height: 56px;
+  border-radius: 0.5rem;
+  border: 1px dashed rgba(0, 0, 0, 0.18);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(0, 0, 0, 0.55);
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.organization-info-url a {
+  word-break: break-word;
+}
+
 .organization-page .nav-tabs .nav-link.alx-tab-error {
   color: #b02a37;
   font-weight: 600;
