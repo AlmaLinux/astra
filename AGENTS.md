@@ -82,6 +82,7 @@
 - Don't use javascript confirmations, there are modals defined in `_modal_*.html`
 - If you add new email templates listed in `settings.py`, make sure they're listed in `configured_email_template_names`
 - never use the character `’` (U+2019), use `'`.
+- Form validation standard: prefer `StyledForm`/`StyledModelForm`, render fields with `core/_form_field*.html`, and opt forms into shared Bootstrap validation via `core/_form_validation_attrs.html` + `core/js/form_validation_bootstrap44.js`.
 
 ## DRY + Single Source of Truth (required)
 

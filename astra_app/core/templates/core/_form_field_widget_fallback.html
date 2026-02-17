@@ -1,10 +1,11 @@
 <div class="form-group{% if wrapper_class %} {{ wrapper_class }}{% endif %}">
   {% if show_label|default:True %}
     {% if label_override %}
-      <label>{{ label_override }}</label>
+      <label for="{{ field.id_for_label }}">{{ label_override }}</label>
     {% else %}
       {{ field.label_tag }}
     {% endif %}
+    {% include 'core/_form_field_required_indicator.html' with field=field %}
   {% endif %}
 
   <div

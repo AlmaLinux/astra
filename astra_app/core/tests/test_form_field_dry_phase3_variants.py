@@ -25,7 +25,7 @@ class FormFieldDryPhase3VariantTests(SimpleTestCase):
         ).render(Context({"form": invalid_form}))
         self.assertIn('class="form-group form-check"', checkbox_html)
         self.assertIn('class="form-check-label"', checkbox_html)
-        self.assertIn('text-danger', checkbox_html)
+        self.assertIn('invalid-feedback', checkbox_html)
 
         input_group_html = Template(
             "{% include 'core/_form_field_input_group.html' with field=form.github prefix='@' %}"

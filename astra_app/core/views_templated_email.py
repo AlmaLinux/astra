@@ -10,6 +10,7 @@ from django.urls import reverse, reverse_lazy
 from django.views.decorators.http import require_GET, require_http_methods, require_POST, require_safe
 from post_office.models import EmailTemplate
 
+from core.forms_base import StyledForm
 from core.permissions import ASTRA_ADD_ELECTION, ASTRA_ADD_SEND_MAIL, json_permission_required_any
 from core.templated_email import (
     create_email_template_unique,
@@ -50,7 +51,7 @@ def _preview_and_variables(
 _MANAGE_TEMPLATE_PERMISSIONS: frozenset[str] = frozenset({ASTRA_ADD_ELECTION, ASTRA_ADD_SEND_MAIL})
 
 
-class EmailTemplateManageForm(forms.Form):
+class EmailTemplateManageForm(StyledForm):
     name = forms.CharField(required=True, widget=forms.TextInput(attrs={"class": "form-control"}))
     description = forms.CharField(
         required=False,

@@ -27,7 +27,7 @@ class FormFieldDryPhase2TemplateTests(SimpleTestCase):
 
         self.assertIn('class="form-group mb-0 col-md-6"', rendered)
         self.assertIn("<label", rendered)
-        self.assertIn("text-danger", rendered)
+        self.assertIn("invalid-feedback", rendered)
         self.assertNotIn("Original help", rendered)
         self.assertIn("Custom helper text", rendered)
 

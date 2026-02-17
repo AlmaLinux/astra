@@ -21,7 +21,7 @@
           <h3 class="card-title">Group info</h3>
         </div>
 
-        <form method="post">
+        <form method="post" {% include 'core/_form_validation_attrs.html' with form=form %}>
           {% csrf_token %}
           <div class="card-body">
             {% include 'core/_form_field.html' with field=form.description show_errors=0 %}

@@ -294,6 +294,9 @@ class ElectionDraftDeletionTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Number of seats")
         self.assertContains(resp, "Ensure this value is greater than or equal to 1")
+        self.assertContains(resp, 'id="election-edit-form"')
+        self.assertContains(resp, "was-validated")
+        self.assertContains(resp, "invalid-feedback")
 
     @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=1)
     def test_save_draft_rejects_self_nomination_and_does_not_save_candidate(self) -> None:
@@ -424,6 +427,10 @@ class ElectionDraftDeletionTests(TestCase):
         self.assertIn('data-ajax-url="/groups/search/"', html)
 
         self.assertIn('id="id_quorum"', html)
+        self.assertRegex(
+            html,
+            r'<label for="id_quorum">\s*Quorum \(%\)\s*<span data-required-indicator-for="id_quorum"',
+        )
         self.assertIn('min="0"', html)
         self.assertIn('max="100"', html)
         self.assertIn('step="1"', html)

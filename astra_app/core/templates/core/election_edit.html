@@ -25,7 +25,7 @@
 {% endblock %}
 
 {% block content %}
-  <form method="post" id="election-edit-form">
+  <form method="post" id="election-edit-form" {% include 'core/_form_validation_attrs.html' with form=details_form %}>
     {% csrf_token %}
     <input type="hidden" name="action" id="election-edit-action" value="" />
     <input type="hidden" name="email_save_mode" id="election-edit-email-save-mode" value="" />
@@ -57,8 +57,14 @@
             <div class="form-row">
               {% include 'core/_form_field.html' with field=details_form.number_of_seats wrapper_class='col-md-6' %}
               <div class="form-group col-md-6">
-                <label for="{{ details_form.quorum.id_for_label }}">Quorum (%)</label>
-                {% include 'core/_form_field_inner.html' with field=details_form.quorum show_label=0 show_help=0 %}
+                <label for="{{ details_form.quorum.id_for_label }}">
+                  Quorum (%)
+                  {% include 'core/_form_field_required_indicator.html' with field=details_form.quorum %}
+                </label>
+                {{ details_form.quorum }}
+                {% if details_form.quorum.errors %}
+                  <div class="invalid-feedback">{{ details_form.quorum.errors }}</div>
+                {% endif %}
                 <div class="text-muted small mt-1">
                   Minimum turnout percentage required by both voter count and vote weight; if not reached, the end date may be extended.
                 </div>

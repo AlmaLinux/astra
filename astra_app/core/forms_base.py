@@ -4,6 +4,7 @@ All forms that need Bootstrap form-control styling should inherit from
 StyledForm (for plain forms) or StyledModelForm (for model forms).
 """
 
+from typing import override
 
 from django import forms
 
@@ -28,6 +29,9 @@ class _StyledFormMixin:
             else:
                 field.widget.attrs.setdefault("class", "form-control")
 
+            if field.required and not isinstance(field.widget, forms.HiddenInput):
+                field.widget.attrs.setdefault("required", "required")
+
     def _append_css_class(self, class_name: str) -> None:
         for field in self.fields.values():
             current = str(field.widget.attrs.get("class", "")).strip()
@@ -45,15 +49,24 @@ class _StyledFormMixin:
             if "is-invalid" not in css:
                 widget.attrs["class"] = (css + " is-invalid").strip()
 
+    @property
+    def bootstrap_validation_css_classes(self) -> str:
+        classes: list[str] = ["needs-validation"]
+        if self.is_bound:
+            classes.append("was-validated")
+        return " ".join(classes)
+
 
 class StyledForm(_StyledFormMixin, forms.Form):
     """Form base that auto-applies Bootstrap CSS classes."""
 
-    def __init__(self, *args, **kwargs):
+    @override
+    def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)
         self._apply_css_classes()
 
-    def full_clean(self):
+    @override
+    def full_clean(self) -> None:
         super().full_clean()
         self._apply_invalid_classes()
 
@@ -61,10 +74,12 @@ class StyledForm(_StyledFormMixin, forms.Form):
 class StyledModelForm(_StyledFormMixin, forms.ModelForm):
     """ModelForm base that auto-applies Bootstrap CSS classes."""
 
-    def __init__(self, *args, **kwargs):
+    @override
+    def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)
         self._apply_css_classes()
 
-    def full_clean(self):
+    @override
+    def full_clean(self) -> None:
         super().full_clean()
         self._apply_invalid_classes()

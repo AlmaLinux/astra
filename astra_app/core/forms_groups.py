@@ -7,9 +7,10 @@ from core.form_validators import (
     clean_fas_mailing_list_value,
     clean_fas_url_value,
 )
+from core.forms_base import StyledForm
 
 
-class GroupEditForm(forms.Form):
+class GroupEditForm(StyledForm):
     description = forms.CharField(
         required=False,
         label="Description",

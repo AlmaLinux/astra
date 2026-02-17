@@ -21,7 +21,7 @@ class OrganizationCSVImportUtilitiesTests(TestCase):
     def test_extract_headers_supports_comma(self) -> None:
         uploaded = SimpleUploadedFile(
             "orgs.csv",
-            "Name,Country Code,Website\nAcme,US,https://example.com\n".encode(),
+            b"Name,Country Code,Website\nAcme,US,https://example.com\n",
             content_type="text/csv",
         )
 
@@ -43,7 +43,7 @@ class OrganizationCSVImportUtilitiesTests(TestCase):
     def test_extract_headers_supports_tab_delimiter(self) -> None:
         uploaded = SimpleUploadedFile(
             "orgs.tsv",
-            "Name\tCountry Code\tWebsite\nAcme\tUS\thttps://example.com\n".encode(),
+            b"Name\tCountry Code\tWebsite\nAcme\tUS\thttps://example.com\n",
             content_type="text/csv",
         )
 

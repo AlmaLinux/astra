@@ -70,7 +70,8 @@
       <form
         id="membership-request-form"
         method="{% if not req or req.status == 'on_hold' %}post{% else %}get{% endif %}"
-        {% if req %}novalidate data-membership-type="{{ req.membership_type.code }}" data-membership-category="{{ req.membership_type.category_id }}"{% endif %}
+        {% include 'core/_form_validation_attrs.html' with form=form validation_hook='membership-mirror' %}
+        {% if req %}data-membership-type="{{ req.membership_type.code }}" data-membership-category="{{ req.membership_type.category_id }}"{% endif %}
       >
         {% if not req or req.status == 'on_hold' %}
           {% csrf_token %}
@@ -161,8 +162,8 @@
 
   <script>
     (function () {
+      const form = document.getElementById('membership-request-form');
       const select = document.getElementById('id_membership_type');
-      const selectForm = (select && select.form) ? select.form : null;
       const individual = document.getElementById('questions-individual');
       const sponsorship = document.getElementById('questions-sponsorship');
       const mirror = document.getElementById('questions-mirror');
@@ -230,10 +231,6 @@
         if (category !== 'mirror') {
           if (domain) domain.setCustomValidity('');
           if (pullRequest) pullRequest.setCustomValidity('');
-          if (domain) domain.classList.remove('is-invalid');
-          if (pullRequest) pullRequest.classList.remove('is-invalid');
-          if (domain) domain.removeAttribute('title');
-          if (pullRequest) pullRequest.removeAttribute('title');
           return true;
         }
 
@@ -258,10 +255,6 @@
               ok = false;
             }
           }
-
-          domain.classList.toggle('is-invalid', !domain.validity.valid);
-          if (!domain.validity.valid) domain.title = domain.validationMessage || '';
-          else domain.removeAttribute('title');
         }
 
         if (pullRequest) {
@@ -274,10 +267,6 @@
             pullRequest.setCustomValidity('Enter a valid http(s) URL.');
             ok = false;
           }
-
-          pullRequest.classList.toggle('is-invalid', !pullRequest.validity.valid);
-          if (!pullRequest.validity.valid) pullRequest.title = pullRequest.validationMessage || '';
-          else pullRequest.removeAttribute('title');
         }
 
         return ok;
@@ -304,36 +293,10 @@
         validateMirrorFields();
       }
 
-      if (select) select.addEventListener('change', update);
-
-      if (domain) {
-        domain.addEventListener('input', validateMirrorFields);
-        domain.addEventListener('blur', validateMirrorFields);
-      }
-      if (pullRequest) {
-        pullRequest.addEventListener('input', validateMirrorFields);
-        pullRequest.addEventListener('blur', validateMirrorFields);
-      }
-
-      const submitForm = selectForm || ((sponsorshipDetails && sponsorshipDetails.form)
-        ? sponsorshipDetails.form
-        : ((domain && domain.form) ? domain.form : ((pullRequest && pullRequest.form) ? pullRequest.form : null)));
-      if (submitForm) {
-        submitForm.addEventListener('submit', function (evt) {
-          if (!validateMirrorFields()) {
-            evt.preventDefault();
-            if (domain && domain.validationMessage) domain.reportValidity();
-            else if (pullRequest && pullRequest.validationMessage) pullRequest.reportValidity();
-          }
+      if (form) {
+        form.addEventListener('astra:validate-form', function () {
+          update();
         });
-      }
-
-      // If the server rendered errors, ensure the fields get the Bootstrap invalid styling.
-      if (domain && domain.closest('.mb-3') && domain.closest('.mb-3').querySelector('.errorlist')) {
-        domain.classList.add('is-invalid');
-      }
-      if (pullRequest && pullRequest.closest('.mb-3') && pullRequest.closest('.mb-3').querySelector('.errorlist')) {
-        pullRequest.classList.add('is-invalid');
       }
       update();
     })();

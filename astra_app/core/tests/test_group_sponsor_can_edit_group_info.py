@@ -136,6 +136,47 @@ class GroupSponsorCanEditGroupInfoTests(TestCase):
         self.assertEqual(group.fas_discussion_url, "https://discussion.example.org/c/new")
         group.save.assert_called_once()
 
+    def test_sponsor_invalid_post_renders_bootstrap_validation_feedback(self) -> None:
+        self._login_as_freeipa("bob")
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+
+        group = SimpleNamespace(
+            cn="fas1",
+            description="FAS Group 1",
+            fas_group=True,
+            fas_url="https://example.org/group/fas1",
+            fas_mailing_list="fas1@example.org",
+            fas_irc_channels=["#fas1"],
+            fas_discussion_url="https://discussion.example.org/c/fas1",
+            members=[],
+            sponsors=["bob"],
+            sponsor_groups=[],
+            save=MagicMock(),
+        )
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.backends.FreeIPAGroup.get", return_value=group),
+        ):
+            resp = self.client.post(
+                "/group/fas1/edit/",
+                {
+                    "description": "Updated desc",
+                    "fas_url": "not-a-url",
+                    "fas_mailing_list": "new@example.org",
+                    "fas_irc_channels": "#new\n#new-dev",
+                    "fas_discussion_url": "https://discussion.example.org/c/new",
+                },
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Invalid URL")
+        self.assertContains(resp, "invalid-feedback")
+        self.assertContains(resp, "was-validated")
+        group.save.assert_not_called()
+
     def test_sponsor_can_post_mattermost_channel_with_tilde(self) -> None:
         self._login_as_freeipa("bob")
 

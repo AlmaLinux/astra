@@ -22,6 +22,7 @@ from post_office.models import EmailTemplate
 
 from core.backends import FreeIPAGroup, FreeIPAUser
 from core.email_context import system_email_context, user_email_context_from_user
+from core.forms_base import StyledForm
 from core.membership_notes import add_note
 from core.models import MembershipRequest, Organization
 from core.permissions import ASTRA_ADD_SEND_MAIL, json_permission_required
@@ -358,7 +359,7 @@ def _parse_email_list(raw: str) -> list[str]:
     return emails
 
 
-class SendMailForm(forms.Form):
+class SendMailForm(StyledForm):
     RECIPIENT_MODE_GROUP = "group"
     RECIPIENT_MODE_USERS = "users"
     RECIPIENT_MODE_CSV = "csv"

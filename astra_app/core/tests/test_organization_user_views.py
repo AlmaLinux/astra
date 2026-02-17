@@ -305,7 +305,7 @@ class OrganizationUserViewsTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "This field is required.")
-        self.assertContains(resp, "text-danger")
+        self.assertContains(resp, "invalid-feedback")
         self.assertNotContains(resp, "(required)")
 
     def test_committee_can_create_org_for_other_rep_even_if_already_rep(self) -> None:
@@ -1081,8 +1081,8 @@ class OrganizationUserViewsTests(TestCase):
         self.assertNotContains(resp, "badge-warning")
 
         body = resp.content.decode("utf-8")
-        self.assertLess(body.find('class="col-md-7"'), body.find('id="org-contacts-tabs"'))
-        self.assertLess(body.find('class="col-md-5"'), body.find("Branding"))
+        self.assertLess(body.find('id="org-contacts-tabs"'), body.find('class="col-md-7"'))
+        self.assertLess(body.find('class="col-md-5"'), body.find("Brand assets"))
 
     def test_org_detail_shows_dual_category_memberships(self) -> None:
         """An org with both sponsorship-category and mirror-category memberships

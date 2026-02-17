@@ -27,7 +27,7 @@
           <a class="btn btn-outline-primary" href="{% url 'login' %}" title="Return to login">Back to login</a>
         </div>
       {% else %}
-        <form method="post" novalidate>
+        <form method="post" {% include 'core/_form_validation_attrs.html' with form=form %}>
           {% csrf_token %}
           {{ form.invitation_token }}
           <div class="card-body">

@@ -1,0 +1,1 @@
+class="{% if form.bootstrap_validation_css_classes %}{{ form.bootstrap_validation_css_classes }}{% else %}needs-validation{% if form.is_bound %} was-validated{% endif %}{% endif %}{% if form_class %} {{ form_class }}{% endif %}" novalidate{% if validation_hook %} data-validation-hook="{{ validation_hook }}"{% endif %}

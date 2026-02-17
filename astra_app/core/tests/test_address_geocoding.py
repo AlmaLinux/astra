@@ -9,7 +9,7 @@ class _FakeResponse:
     def __init__(self, payload: str) -> None:
         self._payload = payload
 
-    def __enter__(self) -> "_FakeResponse":
+    def __enter__(self) -> _FakeResponse:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> bool:

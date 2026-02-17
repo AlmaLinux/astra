@@ -1,5 +1,6 @@
 <div class="form-group{% if wrapper_class %} {{ wrapper_class }}{% endif %}">
   {{ field.label_tag }}
+  {% include 'core/_form_field_required_indicator.html' with field=field %}
   <div class="input-group">
     {% if prefix %}
       <div class="input-group-prepend">
@@ -14,7 +15,7 @@
     {% endif %}
   </div>
   {% if field.errors %}
-    <div class="text-danger">{{ field.errors }}</div>
+    <div class="invalid-feedback">{{ field.errors }}</div>
   {% endif %}
   {% if help_text_override %}
     <small class="form-text text-muted">{{ help_text_override }}</small>

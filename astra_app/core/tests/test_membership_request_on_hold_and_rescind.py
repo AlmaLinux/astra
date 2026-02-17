@@ -295,6 +295,41 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
         self.assertEqual(req.status, MembershipRequest.Status.pending)
         self.assertEqual(req.responses, [{"Contributions": "Old"}])
 
+    def test_on_hold_request_page_uses_shared_bootstrap_validation_flow(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror",
+                "group_cn": "almalinux-mirror",
+                "category_id": "mirror",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="mirror",
+            status=MembershipRequest.Status.on_hold,
+            responses=[
+                {"Domain": "example.org"},
+                {"Pull request": "https://github.com/AlmaLinux/mirrors/pull/123"},
+            ],
+        )
+
+        self._add_freeipa_user(username="alice", email="alice@example.com")
+        self._login_as_freeipa_user("alice")
+
+        resp = self.client.get(reverse("membership-request-self", args=[req.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "core/js/form_validation_bootstrap44.js")
+        self.assertContains(resp, 'id="membership-request-form"')
+        self.assertContains(resp, "needs-validation")
+        self.assertContains(resp, "novalidate")
+        self.assertContains(resp, 'data-validation-hook="membership-mirror"')
+
     def test_reject_preserves_original_request_responses(self) -> None:
         from core.models import MembershipType
 

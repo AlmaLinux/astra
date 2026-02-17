@@ -23,6 +23,7 @@ from core.account_invitations import (
     parse_invitation_csv,
 )
 from core.email_context import membership_committee_email_context, system_email_context
+from core.forms_base import StyledForm
 from core.models import AccountInvitation, AccountInvitationSend, Organization
 from core.organization_claim import build_organization_claim_url
 from core.permissions import ASTRA_ADD_MEMBERSHIP
@@ -300,11 +301,8 @@ def _resend_invitation(
     )
 
 
-class AccountInvitationUploadForm(forms.Form):
+class AccountInvitationUploadForm(StyledForm):
     csv_file = forms.FileField(required=True)
-
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
 
 
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))

@@ -66,7 +66,7 @@ class RegistrationForm(StyledForm):
         return cleaned_data
 
 
-class ResendRegistrationEmailForm(forms.Form):
+class ResendRegistrationEmailForm(StyledForm):
     username = forms.CharField(widget=forms.HiddenInput, required=True)
 
 

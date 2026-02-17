@@ -7,6 +7,7 @@ from django.forms import modelformset_factory
 from django.utils import timezone
 
 from core import backends
+from core.forms_base import StyledForm, StyledModelForm
 from core.models import Candidate, Election, ExclusionGroup
 
 _DATETIME_LOCAL_INPUT_FORMATS: list[str] = [
@@ -25,7 +26,7 @@ def is_self_nomination(*, candidate_username: str, nominator_username: str) -> b
     return candidate == nominator
 
 
-class ElectionDetailsForm(forms.ModelForm):
+class ElectionDetailsForm(StyledModelForm):
     eligible_group_cn = forms.ChoiceField(
         required=False,
         choices=[("", "")],
@@ -139,7 +140,7 @@ class ElectionDetailsForm(forms.ModelForm):
         return cn
 
 
-class ElectionEndDateForm(forms.ModelForm):
+class ElectionEndDateForm(StyledModelForm):
     """Form for extending an election end datetime.
 
     When an election is open, the edit UI disables other fields; disabled inputs
@@ -164,7 +165,7 @@ class ElectionEndDateForm(forms.ModelForm):
         return end_dt
 
 
-class ElectionVotingEmailForm(forms.Form):
+class ElectionVotingEmailForm(StyledForm):
     email_template_id = forms.IntegerField(required=False)
 
     subject = forms.CharField(required=False, widget=forms.TextInput(attrs={"class": "form-control"}))
@@ -180,7 +181,7 @@ class ElectionVotingEmailForm(forms.Form):
     )
 
 
-class CandidateWizardForm(forms.ModelForm):
+class CandidateWizardForm(StyledModelForm):
     freeipa_username = forms.ChoiceField(required=True, choices=[], widget=forms.Select(attrs={"class": "form-control alx-select2"}))
     nominated_by = forms.ChoiceField(required=True, choices=[], widget=forms.Select(attrs={"class": "form-control alx-select2"}))
 
@@ -217,7 +218,7 @@ CandidateWizardFormSet = modelformset_factory(
 )
 
 
-class ExclusionGroupWizardForm(forms.ModelForm):
+class ExclusionGroupWizardForm(StyledModelForm):
     candidate_usernames = forms.MultipleChoiceField(
         required=False,
         choices=[],
