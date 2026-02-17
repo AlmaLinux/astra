@@ -1,4 +1,11 @@
 <div class="card card-body mb-4 px-2 py-3 card-widget widget-user position-relative">
+  {% if organization.status == 'unclaimed' %}
+    <div class="ribbon-wrapper organization-status-ribbon-widget">
+      <div class="ribbon bg-warning">
+        Unclaimed
+      </div>
+    </div>
+  {% endif %}
   <div class="d-flex align-items-center {{ extra_class }}"{% if extra_style %} style="{{ extra_style }}"{% endif %}>
     <div class="flex-shrink-0 ml-1 mr-3">
       {% if organization.logo %}
@@ -18,9 +25,6 @@
     <div class="flex-grow-1 ms-2">
       <div class="my-0 font-weight-bold">
         <a href="{% url 'organization-detail' organization.pk %}">{{ organization.name }}</a>
-        {% if organization.status == 'unclaimed' %}
-          <span class="badge badge-warning alx-status-badge ml-2">Unclaimed</span>
-        {% endif %}
       </div>
       <div class="mt-1">
         {% for membership in memberships %}

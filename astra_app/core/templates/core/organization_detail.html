@@ -9,9 +9,6 @@
   <div class="d-flex align-items-center justify-content-between">
     <h1 class="h3 mb-0">
       {{ organization.name }}
-      {% if organization.status == 'unclaimed' %}
-        <span class="badge badge-warning alx-status-badge ml-2">Unclaimed</span>
-      {% endif %}
     </h1>
     {% if can_edit_organization or is_representative or can_send_claim_invitation %}
       <div class="d-flex align-items-center" style="gap: .5rem;">
@@ -47,6 +44,13 @@
   {% endif %}
   <div class="organization-page">
     <div class="card organization-hero">
+      {% if organization.status == 'unclaimed' %}
+        <div class="ribbon-wrapper ribbon-lg">
+          <div class="ribbon bg-warning">
+            Unclaimed
+          </div>
+        </div>
+      {% endif %}
       <div class="card-body">
         <div class="d-flex align-items-start justify-content-between flex-wrap" style="gap: 1rem;">
           <div class="d-flex align-items-center" style="gap: 1rem;">

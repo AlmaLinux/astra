@@ -411,6 +411,17 @@ a:hover {
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
 }
 
+.organization-status-ribbon-widget {
+  transform: scale(0.86);
+  transform-origin: top right;
+}
+
+.organization-status-ribbon-widget .ribbon {
+  font-size: 0.74rem;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
 .organization-hero .card-body {
   padding: 1.25rem;
 }

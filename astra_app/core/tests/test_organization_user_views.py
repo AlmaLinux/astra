@@ -813,7 +813,7 @@ class OrganizationUserViewsTests(TestCase):
             self.assertContains(resp, "Bob Example")
             self.assertContains(resp, reverse("user-profile", args=["bob"]))
 
-    def test_unclaimed_organization_shows_badge_in_grid_and_detail(self) -> None:
+    def test_unclaimed_organization_shows_ribbon_in_grid_and_detail(self) -> None:
         from core.models import Organization
 
         organization = Organization.objects.create(
@@ -833,11 +833,23 @@ class OrganizationUserViewsTests(TestCase):
         with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
             organizations_response = self.client.get(reverse("organizations"))
             self.assertEqual(organizations_response.status_code, 200)
-            self.assertContains(organizations_response, "Unclaimed")
+            self.assertContains(organizations_response, 'class="ribbon-wrapper organization-status-ribbon-widget"')
+            self.assertNotContains(organizations_response, "ribbon-wrapper ribbon-lg")
+            self.assertContains(organizations_response, 'class="ribbon bg-warning"')
+            self.assertNotContains(
+                organizations_response,
+                "card-widget widget-user position-relative ribbon-wrapper ribbon-lg",
+            )
 
             detail_response = self.client.get(reverse("organization-detail", args=[organization.pk]))
             self.assertEqual(detail_response.status_code, 200)
-            self.assertContains(detail_response, "Unclaimed")
+            self.assertContains(detail_response, 'class="ribbon-wrapper organization-status-ribbon-hero"')
+            self.assertNotContains(detail_response, "ribbon-wrapper ribbon-lg")
+            self.assertContains(detail_response, 'class="ribbon bg-warning"')
+            self.assertNotContains(
+                detail_response,
+                'class="card organization-hero ribbon-wrapper ribbon-lg"',
+            )
 
     def test_unclaimed_org_detail_shows_send_claim_invitation_button_for_send_mail_permission(self) -> None:
         from core.models import Organization
