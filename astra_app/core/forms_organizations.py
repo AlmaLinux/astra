@@ -79,12 +79,12 @@ class OrganizationEditForm(StyledModelForm):
 
         self.fields["business_contact_name"].required = True
         self.fields["business_contact_email"].required = True
-        self.fields["pr_marketing_contact_name"].required = True
-        self.fields["pr_marketing_contact_email"].required = True
-        self.fields["technical_contact_name"].required = True
-        self.fields["technical_contact_email"].required = True
+        self.fields["pr_marketing_contact_name"].required = False
+        self.fields["pr_marketing_contact_email"].required = False
+        self.fields["technical_contact_name"].required = False
+        self.fields["technical_contact_email"].required = False
         self.fields["name"].required = True
-        self.fields["website_logo"].required = True
+        self.fields["website_logo"].required = False
         self.fields["website"].required = True
         self.fields["street"].required = False
         self.fields["city"].required = False

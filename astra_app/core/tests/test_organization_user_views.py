@@ -3631,6 +3631,39 @@ class OrganizationUserViewsTests(TestCase):
         org.refresh_from_db()
         self.assertEqual(org.representative, "carol")
 
+    def test_committee_can_edit_unclaimed_org_without_representative(self) -> None:
+        from core.models import Organization
+
+        organization = Organization.objects.create(
+            name="Unclaimed Editable",
+            business_contact_name="Business",
+            business_contact_email="business@example.com",
+            website_logo="https://example.com/logo-options",
+            website="https://example.com/",
+            representative="",
+        )
+
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_CHANGE_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]})
+        self._login_as_freeipa_user("reviewer")
+
+        payload = self._valid_org_payload(name="Unclaimed Editable Updated")
+        payload["representative"] = ""
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            response = self.client.post(reverse("organization-edit", args=[organization.pk]), data=payload, follow=False)
+
+        self.assertEqual(response.status_code, 302)
+        organization.refresh_from_db()
+        self.assertEqual(organization.name, "Unclaimed Editable Updated")
+        self.assertEqual(organization.representative, "")
+        self.assertEqual(organization.status, Organization.Status.unclaimed)
+
     def test_deleting_organization_does_not_delete_membership_requests_or_audit_logs(self) -> None:
         from core.models import MembershipLog, MembershipRequest, MembershipType, Organization
 
@@ -3794,11 +3827,14 @@ class OrganizationUserViewsTests(TestCase):
             resp = self.client.post(
                 reverse("organization-edit", args=[org.pk]),
                 data={
-                    # Intentionally omit required contact fields in non-active tabs.
+                    # Trigger errors across all contact tabs: required business
+                    # fields + invalid optional emails for marketing/technical.
                     "name": "Acme",
                     "website_logo": "https://example.com/logo",
                     "website": "https://example.com/",
                     "country_code": "US",
+                    "pr_marketing_contact_email": "not-an-email",
+                    "technical_contact_email": "not-an-email",
                 },
                 follow=False,
             )
@@ -3878,11 +3914,14 @@ class OrganizationUserViewsTests(TestCase):
             resp = self.client.post(
                 reverse("organization-create"),
                 data={
-                    # Intentionally omit required contact fields in non-active tabs.
+                    # Trigger errors across all contact tabs: required business
+                    # fields + invalid optional emails for marketing/technical.
                     "name": "AlmaLinux",
                     "website_logo": "https://example.com/logo-options",
                     "website": "https://almalinux.org/",
                     "country_code": "US",
+                    "pr_marketing_contact_email": "not-an-email",
+                    "technical_contact_email": "not-an-email",
                 },
                 follow=False,
             )

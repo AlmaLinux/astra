@@ -639,10 +639,6 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
 
         if can_select_representatives and "representative" in form.fields:
             representative = form.cleaned_data.get("representative") or ""
-            if not representative:
-                form.add_error("representative", "A representative is required.")
-                return _render_org_form(request, form, organization=organization, is_create=False)
-
             old_representative = organization.representative
             new_representative = representative
             updated_org.representative = representative
