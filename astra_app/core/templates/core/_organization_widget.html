@@ -8,6 +8,7 @@
   {% endif %}
   <div class="d-flex align-items-center {{ extra_class }}"{% if extra_style %} style="{{ extra_style }}"{% endif %}>
     <div class="flex-shrink-0 ml-1 mr-3">
+      <a href="{% url 'organization-detail' organization.pk %}">
       {% if organization.logo %}
         <img
           src="{{ organization.logo.url }}"
@@ -20,6 +21,7 @@
           <i class="fas fa-building"></i>
         </span>
       {% endif %}
+      </a>
     </div>
 
     <div class="flex-grow-1 ms-2">
