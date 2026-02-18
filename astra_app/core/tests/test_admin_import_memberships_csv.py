@@ -122,11 +122,66 @@ class AdminImportMembershipsCSVTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
 
+    def test_apply_row_runs_only_for_non_dry_run(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "enabled": True,
+                "sort_order": 0,
+            },
+        )
+
+        dataset = Dataset(headers=["Email", "Start date"])
+        dataset.append(["alice@example.org", "2024-01-02"])
+
+        admin_user = FreeIPAUser(
+            "alex",
+            {
+                "uid": ["alex"],
+                "mail": ["alex@example.org"],
+                "memberof_group": ["admins"],
+            },
+        )
+        alice_user = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.org"],
+                "memberof_group": [],
+            },
+        )
+
+        membership_type = MembershipType.objects.get(code="individual")
+        with (
+            patch("core.membership_csv_import.FreeIPAUser.all", return_value=[admin_user, alice_user]),
+            patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
+            patch.object(MembershipCSVImportResource, "_apply_row", autospec=True) as apply_row,
+        ):
+            live_resource = MembershipCSVImportResource(
+                membership_type=membership_type,
+                actor_username="alex",
+            )
+            live_resource.import_data(dataset, dry_run=False, raise_errors=True)
+            self.assertGreaterEqual(apply_row.call_count, 1)
+
+            apply_row.reset_mock()
+
+            preview_resource = MembershipCSVImportResource(
+                membership_type=membership_type,
+                actor_username="alex",
+            )
+            preview_resource.import_data(dataset, dry_run=True, raise_errors=True)
+            apply_row.assert_not_called()
+
     def test_import_form_membership_type_orders_by_category_then_sort(self) -> None:
         from core.models import MembershipTypeCategory
 
-        MembershipTypeCategory.objects.filter(pk="mirror").update(is_organization=True, sort_order=1)
-        MembershipTypeCategory.objects.filter(pk="sponsorship").update(is_organization=True, sort_order=2)
+        MembershipTypeCategory.objects.filter(pk="individual").update(is_individual=True, sort_order=0)
+        MembershipTypeCategory.objects.filter(pk="mirror").update(is_individual=True, sort_order=1)
+        MembershipTypeCategory.objects.filter(pk="sponsorship").update(is_individual=False, is_organization=True, sort_order=2)
 
         MembershipType.objects.update_or_create(
             code="mirror",
@@ -134,6 +189,15 @@ class AdminImportMembershipsCSVTests(TestCase):
                 "name": "Mirror",
                 "category_id": "mirror",
                 "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="mirror_plus",
+            defaults={
+                "name": "Mirror Plus",
+                "category_id": "mirror",
+                "sort_order": 1,
                 "enabled": True,
             },
         )
@@ -161,8 +225,51 @@ class AdminImportMembershipsCSVTests(TestCase):
             resources=[MembershipCSVImportResource],
         )
         codes = list(form.fields["membership_type"].queryset.values_list("code", flat=True))
-        self.assertLess(codes.index("mirror"), codes.index("silver"))
-        self.assertLess(codes.index("silver"), codes.index("gold"))
+        self.assertLess(codes.index("individual"), codes.index("mirror"))
+        self.assertLess(codes.index("mirror"), codes.index("mirror_plus"))
+        self.assertNotIn("silver", codes)
+        self.assertNotIn("gold", codes)
+
+    def test_admin_fallback_membership_type_is_individual_only(self) -> None:
+        from core.models import MembershipTypeCategory
+
+        MembershipTypeCategory.objects.filter(pk="individual").update(is_individual=True)
+        MembershipTypeCategory.objects.filter(pk="sponsorship").update(is_individual=False, is_organization=True)
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "enabled": True,
+                "sort_order": 0,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver",
+                "group_cn": "almalinux-sponsor-silver",
+                "category_id": "sponsorship",
+                "enabled": True,
+                "sort_order": 0,
+            },
+        )
+
+        site = AdminSite()
+        admin_instance = MembershipCSVImportLinkAdmin(MembershipCSVImportLink, site)
+        request = RequestFactory().post("/admin/core/membershipcsvimportlink/process_import/")
+        request.user = SimpleNamespace(get_username=lambda: "alex")
+
+        kwargs = admin_instance.get_import_resource_kwargs(
+            request,
+            form=SimpleNamespace(cleaned_data={}),
+        )
+
+        membership_type = kwargs["membership_type"]
+        self.assertIsNotNone(membership_type)
+        self.assertTrue(membership_type.category.is_individual)
 
     def test_import_formats_csv_only(self) -> None:
         site = AdminSite()
@@ -188,6 +295,25 @@ class AdminImportMembershipsCSVTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'name="format"')
+
+    def test_import_page_includes_shared_csv_header_js(self) -> None:
+        self._login_as_freeipa_admin("alex")
+
+        admin_user = FreeIPAUser(
+            "alex",
+            {
+                "uid": ["alex"],
+                "mail": ["alex@example.org"],
+                "memberof_group": ["admins"],
+            },
+        )
+
+        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+            url = reverse("admin:core_membershipcsvimportlink_import")
+            resp = self.client.get(url)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "core/js/csv_import_headers.js")
 
     def test_live_import_creates_membership_and_unmatched_export(self) -> None:
         MembershipType.objects.update_or_create(
@@ -258,6 +384,8 @@ class AdminImportMembershipsCSVTests(TestCase):
             self.assertEqual(preview_resp.status_code, 200)
             confirm_form = preview_resp.context.get("confirm_form")
             self.assertIsNotNone(confirm_form)
+            self.assertIsNotNone(preview_resp.context.get("matches_page_obj"))
+            self.assertIsNotNone(preview_resp.context.get("skipped_page_obj"))
 
             # Unmatched export should be available already during the preview step.
             download_url = preview_resp.context.get("unmatched_download_url")
@@ -472,6 +600,36 @@ class AdminImportMembershipsCSVTests(TestCase):
 
         self.assertEqual(download_resp.status_code, 200)
         self.assertIn("bob@example.org", download_resp.content.decode("utf-8"))
+
+    def test_membership_unmatched_export_sanitizes_formula_cells(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "enabled": True,
+                "sort_order": 0,
+            },
+        )
+
+        dataset = Dataset(headers=["Name", "Email", "Active Member"])
+        dataset.append(["=2+2", "nomatch@example.org", "Active Member"])
+
+        resource = MembershipCSVImportResource(
+            membership_type=MembershipType.objects.get(code="individual"),
+            actor_username="alex",
+        )
+
+        with patch("core.membership_csv_import.FreeIPAUser.all", return_value=[]):
+            result = resource.import_data(dataset, dry_run=True, raise_errors=True)
+
+        csv_content = str(getattr(result, "unmatched_csv_content", ""))
+        self.assertTrue(csv_content)
+
+        rows = list(csv.DictReader(io.StringIO(csv_content)))
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["Name"], "'=2+2")
 
     def test_import_can_select_subset_of_matches(self) -> None:
         MembershipType.objects.update_or_create(
@@ -699,8 +857,8 @@ class AdminImportMembershipsCSVTests(TestCase):
 
         def _populate_without_decision(resource: MembershipCSVImportResource, instance: MembershipRequest, row: Any) -> None:
             original_populate(resource, instance, row)
-            if hasattr(instance, "_decision"):
-                delattr(instance, "_decision")
+            if hasattr(instance, "decision"):
+                delattr(instance, "decision")
 
         with (
             patch("core.membership_csv_import.FreeIPAUser.all", return_value=[admin_user, alice_user]),
@@ -824,6 +982,188 @@ class AdminImportMembershipsCSVTests(TestCase):
 
         self.assertEqual(decision, "IMPORT")
         self.assertEqual(reason, "Active membership, updating start date")
+
+    def test_decision_for_row_returns_object_with_decision_attribute(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "enabled": True,
+                "sort_order": 0,
+            },
+        )
+
+        dataset = Dataset(headers=["Email", "Active Member"])
+        dataset.append(["alice@example.org", "Active Member"])
+
+        admin_user = FreeIPAUser(
+            "alex",
+            {
+                "uid": ["alex"],
+                "mail": ["alex@example.org"],
+                "memberof_group": ["admins"],
+            },
+        )
+        alice_user = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.org"],
+                "memberof_group": [],
+            },
+        )
+
+        with (
+            patch("core.membership_csv_import.FreeIPAUser.all", return_value=[admin_user, alice_user]),
+            patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
+        ):
+            resource = MembershipCSVImportResource(
+                membership_type=MembershipType.objects.get(code="individual"),
+                actor_username="alex",
+            )
+            resource.before_import(dataset)
+            decision = resource._decision_for_row(dataset.dict[0])
+
+        self.assertEqual(decision.decision, "IMPORT")
+        self.assertEqual(decision.reason, "New request will be created")
+
+    def test_before_import_stores_resolved_headers_dict_for_overrides(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "enabled": True,
+                "sort_order": 0,
+            },
+        )
+
+        dataset = Dataset(headers=["E-mail", "Active Flag"])
+        dataset.append(["alice@example.org", "yes"])
+
+        resource = MembershipCSVImportResource(
+            membership_type=MembershipType.objects.get(code="individual"),
+            actor_username="alex",
+            email_column="E-mail",
+        )
+
+        with patch("core.membership_csv_import.FreeIPAUser.all", return_value=[]):
+            resource.before_import(dataset)
+
+        self.assertEqual(resource._resolved_headers["email"], "E-mail")
+        self.assertEqual(resource._row_email(dataset.dict[0]), "alice@example.org")
+
+    def test_row_value_uses_logical_name_lookup(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "enabled": True,
+                "sort_order": 0,
+            },
+        )
+
+        dataset = Dataset(headers=["E-mail"])
+        dataset.append(["alice@example.org"])
+
+        resource = MembershipCSVImportResource(
+            membership_type=MembershipType.objects.get(code="individual"),
+            actor_username="alex",
+            email_column="E-mail",
+        )
+
+        with patch("core.membership_csv_import.FreeIPAUser.all", return_value=[]):
+            resource.before_import(dataset)
+
+        self.assertEqual(resource._row_value(dataset.dict[0], "email"), "alice@example.org")
+
+    def test_skip_row_populates_preview_fields_for_skipped_rows(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "enabled": True,
+                "sort_order": 0,
+            },
+        )
+
+        dataset = Dataset(headers=["Email", "Active Member"])
+        dataset.append(["", "Inactive"])
+
+        resource = MembershipCSVImportResource(
+            membership_type=MembershipType.objects.get(code="individual"),
+            actor_username="alex",
+        )
+
+        with patch("core.membership_csv_import.FreeIPAUser.all", return_value=[]):
+            resource.before_import(dataset)
+
+        instance = MembershipRequest()
+        resource.skip_row(instance=instance, original=None, row=dataset.dict[0])
+
+        self.assertEqual(getattr(instance, "decision", ""), "SKIP")
+        self.assertTrue(getattr(instance, "decision_reason", ""))
+
+    def test_dry_run_preview_populates_instance_decision_attribute(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "enabled": True,
+                "sort_order": 0,
+            },
+        )
+
+        dataset = Dataset(headers=["Email", "Active Member"])
+        dataset.append(["alice@example.org", "Active Member"])
+        dataset.append(["", "Active Member"])
+
+        admin_user = FreeIPAUser(
+            "alex",
+            {
+                "uid": ["alex"],
+                "mail": ["alex@example.org"],
+                "memberof_group": ["admins"],
+            },
+        )
+        alice_user = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.org"],
+                "memberof_group": [],
+            },
+        )
+
+        resource = MembershipCSVImportResource(
+            membership_type=MembershipType.objects.get(code="individual"),
+            actor_username="alex",
+        )
+
+        with (
+            patch("core.membership_csv_import.FreeIPAUser.all", return_value=[admin_user, alice_user]),
+            patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
+        ):
+            result = resource.import_data(dataset, dry_run=True, raise_errors=True)
+
+        decisions = [
+            instance.decision
+            for row in result.rows
+            for instance in [getattr(row, "instance", None)]
+            if instance is not None and hasattr(instance, "decision")
+        ]
+
+        self.assertTrue(decisions)
+        self.assertTrue(any(decision in {"IMPORT", "SKIP"} for decision in decisions))
 
     def test_preview_reason_pending_request_will_be_accepted(self) -> None:
         MembershipType.objects.update_or_create(

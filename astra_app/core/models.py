@@ -543,12 +543,18 @@ class AccountInvitationSend(models.Model):
 
 
 class Note(models.Model):
-    """Membership committee notes and actions tied to a specific membership request."""
+    """Membership committee notes and actions.
+
+    Most notes are attached to a `MembershipRequest`, but operational notes
+    created by admin CSV importers may be request-less.
+    """
 
     membership_request = models.ForeignKey(
         MembershipRequest,
         on_delete=models.CASCADE,
         related_name="notes",
+        blank=True,
+        null=True,
     )
     username = models.CharField(max_length=255)
     timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
@@ -1575,8 +1581,8 @@ class MembershipCSVImportLink(MembershipType):
 
     class Meta:
         proxy = True
-        verbose_name = "Membership import (CSV)"
-        verbose_name_plural = "Membership import (CSV)"
+        verbose_name = "User membership import (CSV)"
+        verbose_name_plural = "User membership import (CSV)"
 
 
 class OrganizationCSVImportLink(Organization):
@@ -1586,3 +1592,12 @@ class OrganizationCSVImportLink(Organization):
         proxy = True
         verbose_name = "Organization import (CSV)"
         verbose_name_plural = "Organization import (CSV)"
+
+
+class OrganizationMembershipCSVImportLink(Organization):
+    """Admin sidebar link for organization membership CSV import."""
+
+    class Meta:
+        proxy = True
+        verbose_name = "Organization membership import (CSV)"
+        verbose_name_plural = "Organization membership import (CSV)"

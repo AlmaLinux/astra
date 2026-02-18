@@ -16,6 +16,7 @@ django-avatar
 pyotp
 qrcode
 pycountry
+python-dateutil
 scikit-learn>=1.3.0
 valx
 sentry-sdk[django]

@@ -1,6 +1,7 @@
 import csv
 import hashlib
 import io
+import json
 from unittest.mock import patch
 
 from django.contrib.admin.sites import AdminSite
@@ -766,6 +767,56 @@ class OrganizationCSVImportAdminFlowTests(TestCase):
         organization = Organization.objects.get(name="Acme")
         self.assertEqual(organization.representative, "alice")
         self.assertEqual(organization.status, Organization.Status.active)
+
+    def test_org_import_page_context_includes_column_fallback_norms(self) -> None:
+        self._login_as_freeipa_admin("alex")
+
+        admin_user = FreeIPAUser("alex", {"uid": ["alex"], "mail": ["alex@example.com"], "memberof_group": ["admins"]})
+        uploaded = self._csv_upload(
+            [
+                [
+                    "Acme",
+                    "Biz",
+                    "biz@example.com",
+                    "+1 555 111",
+                    "PR",
+                    "pr@example.com",
+                    "+1 555 112",
+                    "Tech",
+                    "tech@example.com",
+                    "+1 555 113",
+                    "https://example.com",
+                    "https://example.com/logo.png",
+                    "US",
+                    "",
+                    "",
+                ]
+            ]
+        )
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=admin_user),
+            patch("core.organization_csv_import.FreeIPAUser.all", return_value=[admin_user]),
+            patch("core.organization_csv_import.FreeIPAUser.get", return_value=admin_user),
+            patch("core.organization_csv_import.FreeIPAUser.find_usernames_by_email", return_value=[]),
+            patch("core.organization_csv_import.FreeIPAUser.find_by_email", return_value=None),
+        ):
+            preview = self.client.post(
+                reverse("admin:core_organizationcsvimportlink_import"),
+                data={
+                    "resource": "0",
+                    "format": "0",
+                    "import_file": uploaded,
+                },
+                follow=False,
+            )
+
+        self.assertEqual(preview.status_code, 200)
+        self.assertIn("csv_column_fallback_norms_json", preview.context)
+
+        fallback_norms = json.loads(preview.context["csv_column_fallback_norms_json"])
+        self.assertIn("name", fallback_norms)
+        self.assertIn("organizationname", fallback_norms["name"])
 
     def test_confirm_applies_selected_representative(self) -> None:
         self._login_as_freeipa_admin("alex")

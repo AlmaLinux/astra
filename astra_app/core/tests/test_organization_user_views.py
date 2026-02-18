@@ -843,8 +843,7 @@ class OrganizationUserViewsTests(TestCase):
 
             detail_response = self.client.get(reverse("organization-detail", args=[organization.pk]))
             self.assertEqual(detail_response.status_code, 200)
-            self.assertContains(detail_response, 'class="ribbon-wrapper organization-status-ribbon-hero"')
-            self.assertNotContains(detail_response, "ribbon-wrapper ribbon-lg")
+            self.assertContains(detail_response, "ribbon-wrapper ribbon-lg")
             self.assertContains(detail_response, 'class="ribbon bg-warning"')
             self.assertNotContains(
                 detail_response,

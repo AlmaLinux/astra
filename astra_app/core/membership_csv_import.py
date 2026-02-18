@@ -1,11 +1,9 @@
 import datetime
 import logging
-import secrets
+from dataclasses import dataclass
 from typing import Any, override
 
 from django import forms
-from django.core.cache import cache
-from django.urls import reverse
 from django.utils import timezone
 from import_export import fields, resources
 from import_export.forms import ConfirmImportForm, ImportForm
@@ -14,12 +12,16 @@ from tablib import Dataset
 from core.agreements import missing_required_agreements_for_user_in_group
 from core.backends import FreeIPAUser
 from core.csv_import_utils import (
+    attach_unmatched_csv_to_result,
     extract_csv_headers_from_uploaded_file,
     norm_csv_header,
     normalize_csv_email,
     normalize_csv_name,
     parse_csv_bool,
     parse_csv_date,
+    resolve_column_header,
+    sanitize_csv_cell,
+    set_form_column_field_choices,
 )
 from core.forms_membership import MembershipRequestForm
 from core.membership_notes import add_note
@@ -28,6 +30,24 @@ from core.models import Membership, MembershipLog, MembershipRequest, Membership
 from core.views_utils import _normalize_str
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _RowDecision:
+    decision: str
+    reason: str
+    username: str
+    match_method: str
+    start_at: datetime.datetime | None
+    end_at: datetime.datetime | None
+    row_note: str
+    responses: list[dict[str, str]]
+
+    def __iter__(self):
+        # Backward-compatible tuple unpacking in tests while callers migrate
+        # to attribute-based access.
+        yield self.decision
+        yield self.reason
 
 # Column-mapping field names shared between MembershipCSVImportForm,
 # MembershipCSVConfirmImportForm, and the admin's get_confirm_form_initial /
@@ -41,6 +61,14 @@ _COLUMN_FIELDS = (
     "committee_notes_column",
     "membership_type_column",
 )
+
+_USER_IMPORT_MEMBERSHIP_TYPES = (
+    MembershipType.objects.enabled()
+    .filter(category__is_individual=True)
+    .ordered_for_display()
+)
+
+
 def _membership_type_matches(value: str, membership_type: MembershipType) -> bool:
     candidate = str(value or "").strip().lower()
     if not candidate:
@@ -52,7 +80,7 @@ def _membership_type_matches(value: str, membership_type: MembershipType) -> boo
     return candidate == membership_type.name.strip().lower()
 class MembershipCSVImportForm(ImportForm):
     membership_type = forms.ModelChoiceField(
-        queryset=MembershipType.objects.enabled().ordered_for_display(),
+        queryset=_USER_IMPORT_MEMBERSHIP_TYPES,
         required=True,
         help_text="Membership type to grant for all Active Member rows.",
     )
@@ -150,18 +178,17 @@ class MembershipCSVImportForm(ImportForm):
         if not headers:
             return
 
-        choices: list[tuple[str, str]] = [("", "Auto-detect")] + [(h, h) for h in headers]
-        for field_name in _COLUMN_FIELDS:
-            self.fields[field_name].choices = choices
+        set_form_column_field_choices(form=self, field_names=_COLUMN_FIELDS, headers=headers)
 
-        for spec in MembershipRequestForm.all_question_specs():
-            field_name = f"{spec.field_name}_column"
-            self.fields[field_name].choices = choices
+        question_field_names = tuple(
+            f"{spec.field_name}_column" for spec in MembershipRequestForm.all_question_specs()
+        )
+        set_form_column_field_choices(form=self, field_names=question_field_names, headers=headers)
 
 
 class MembershipCSVConfirmImportForm(ConfirmImportForm):
     membership_type = forms.ModelChoiceField(
-        queryset=MembershipType.objects.enabled().ordered_for_display(),
+        queryset=_USER_IMPORT_MEMBERSHIP_TYPES,
         required=True,
         widget=forms.HiddenInput,
     )
@@ -212,8 +239,8 @@ class MembershipCSVImportResource(resources.ModelResource):
     )
     committee_notes = fields.Field(attribute="_csv_committee_notes", column_name="Committee Notes", readonly=True)
     matched_username = fields.Field(attribute="_matched_username", column_name="Matched Username", readonly=True)
-    decision = fields.Field(attribute="_decision", column_name="Decision", readonly=True)
-    decision_reason = fields.Field(attribute="_decision_reason", column_name="Decision Reason", readonly=True)
+    decision = fields.Field(attribute="decision", column_name="Decision", readonly=True)
+    decision_reason = fields.Field(attribute="decision_reason", column_name="Decision Reason", readonly=True)
 
     def __init__(
         self,
@@ -236,23 +263,19 @@ class MembershipCSVImportResource(resources.ModelResource):
 
         self._enable_name_matching = bool(enable_name_matching)
 
-        self._email_column_override = email_column
-        self._name_column_override = name_column
-        self._active_member_column_override = active_member_column
-        self._membership_start_date_column_override = membership_start_date_column
-        self._membership_end_date_column_override = membership_end_date_column
-        self._committee_notes_column_override = committee_notes_column
-        self._membership_type_column_override = membership_type_column
+        self._column_overrides: dict[str, str] = {
+            "email": email_column,
+            "name": name_column,
+            "active_member": active_member_column,
+            "membership_start_date": membership_start_date_column,
+            "membership_end_date": membership_end_date_column,
+            "committee_notes": committee_notes_column,
+            "membership_type": membership_type_column,
+        }
         self._question_column_overrides = question_column_overrides or {}
 
         self._headers: list[str] = []
-        self._email_header: str | None = None
-        self._name_header: str | None = None
-        self._active_header: str | None = None
-        self._start_header: str | None = None
-        self._end_header: str | None = None
-        self._note_header: str | None = None
-        self._type_header: str | None = None
+        self._resolved_headers: dict[str, str | None] = {}
 
         self._question_header_by_name: dict[str, str | None] = {}
 
@@ -302,7 +325,22 @@ class MembershipCSVImportResource(resources.ModelResource):
     @override
     def import_row(self, row: Any, instance_loader: Any, **kwargs: Any) -> Any:
         try:
-            return super().import_row(row, instance_loader, **kwargs)
+            row_result = super().import_row(row, instance_loader, **kwargs)
+
+            instance: MembershipRequest | None = None
+            try:
+                maybe_instance = row_result.instance
+            except AttributeError:
+                maybe_instance = None
+            if isinstance(maybe_instance, MembershipRequest):
+                instance = maybe_instance
+
+            if instance is None:
+                instance = MembershipRequest()
+                row_result.instance = instance
+
+            self._populate_preview_fields(instance, row)
+            return row_result
         except Exception:
             # import-export can swallow exceptions into RowResult without
             # calling after_import_row()/after_save_instance(). Log here so the
@@ -315,7 +353,9 @@ class MembershipCSVImportResource(resources.ModelResource):
             try:
                 email = self._row_email(row)
                 matched_username = self._row_username(row)
-                decision, reason = self._decision_for_row(row)
+                row_decision = self._decision_for_row(row)
+                decision = row_decision.decision
+                reason = row_decision.reason
             except Exception as exc:
                 reason = f"diagnostics failed: {exc!r}"
 
@@ -352,51 +392,73 @@ class MembershipCSVImportResource(resources.ModelResource):
         self._headers = headers
         header_by_norm = {norm_csv_header(h): h for h in headers if h}
 
-        def _resolve_override(override: str) -> str | None:
-            raw = (override or "").strip()
-            if not raw:
-                return None
-            if raw in headers:
-                return raw
-            norm = norm_csv_header(raw)
-            if norm in header_by_norm:
-                return header_by_norm[norm]
-            raise ValueError(f"Column '{raw}' not found in CSV headers")
-
-        self._email_header = _resolve_override(self._email_column_override) or (
-            header_by_norm.get("email")
-            or header_by_norm.get("emailaddress")
-            or header_by_norm.get("mail")
-        )
-        self._name_header = _resolve_override(self._name_column_override) or (
-            header_by_norm.get("name") or header_by_norm.get("fullname")
-        )
-        self._active_header = _resolve_override(self._active_member_column_override) or (
-            header_by_norm.get("activemember")
-            or header_by_norm.get("active")
-            or header_by_norm.get("status")
-        )
-        self._start_header = _resolve_override(self._membership_start_date_column_override) or (
-            header_by_norm.get("membershipstartdate") or header_by_norm.get("startdate")
-        )
-        self._end_header = _resolve_override(self._membership_end_date_column_override) or (
-            header_by_norm.get("membershipenddate")
-            or header_by_norm.get("enddate")
-            or header_by_norm.get("membershipexpirydate")
-            or header_by_norm.get("membershipexpirationdate")
-            or header_by_norm.get("expirydate")
-            or header_by_norm.get("expirationdate")
-        )
-        self._note_header = _resolve_override(self._committee_notes_column_override) or (
-            header_by_norm.get("committeenotes")
-            or header_by_norm.get("committeenote")
-            or header_by_norm.get("fasstatusnote")
-            or header_by_norm.get("note")
-            or header_by_norm.get("notes")
-        )
-        self._type_header = _resolve_override(self._membership_type_column_override) or (
-            header_by_norm.get("membershiptype") or header_by_norm.get("type")
-        )
+        self._resolved_headers = {
+            "email": resolve_column_header(
+                "email",
+                headers,
+                header_by_norm,
+                self._column_overrides,
+                "email",
+                "emailaddress",
+                "mail",
+            ),
+            "name": resolve_column_header(
+                "name",
+                headers,
+                header_by_norm,
+                self._column_overrides,
+                "name",
+                "fullname",
+            ),
+            "active_member": resolve_column_header(
+                "active_member",
+                headers,
+                header_by_norm,
+                self._column_overrides,
+                "activemember",
+                "active",
+                "status",
+            ),
+            "membership_start_date": resolve_column_header(
+                "membership_start_date",
+                headers,
+                header_by_norm,
+                self._column_overrides,
+                "membershipstartdate",
+                "startdate",
+            ),
+            "membership_end_date": resolve_column_header(
+                "membership_end_date",
+                headers,
+                header_by_norm,
+                self._column_overrides,
+                "membershipenddate",
+                "enddate",
+                "membershipexpirydate",
+                "membershipexpirationdate",
+                "expirydate",
+                "expirationdate",
+            ),
+            "committee_notes": resolve_column_header(
+                "committee_notes",
+                headers,
+                header_by_norm,
+                self._column_overrides,
+                "committeenotes",
+                "committeenote",
+                "fasstatusnote",
+                "note",
+                "notes",
+            ),
+            "membership_type": resolve_column_header(
+                "membership_type",
+                headers,
+                header_by_norm,
+                self._column_overrides,
+                "membershiptype",
+                "type",
+            ),
+        }
 
         membership_type = self._membership_type
         if membership_type is None:
@@ -405,17 +467,18 @@ class MembershipCSVImportResource(resources.ModelResource):
         self._question_header_by_name = {}
         for spec in MembershipRequestForm.question_specs_for_membership_type(membership_type):
             key = f"{spec.field_name}_column"
-            override = self._question_column_overrides.get(key, "")
-            resolved = _resolve_override(override) if override else None
-            if resolved is None:
-                resolved = (
-                    header_by_norm.get(norm_csv_header(spec.name))
-                    or header_by_norm.get(norm_csv_header(spec.field_name))
-                    or header_by_norm.get(norm_csv_header(spec.field_name.removeprefix("q_")))
-                )
+            resolved = resolve_column_header(
+                key,
+                headers,
+                header_by_norm,
+                self._question_column_overrides,
+                spec.name,
+                spec.field_name,
+                spec.field_name.removeprefix("q_"),
+            )
             self._question_header_by_name[spec.name] = resolved
 
-        if self._email_header is None:
+        if self._resolved_headers.get("email") is None:
             raise ValueError("CSV must include an Email column")
 
         self._email_lookup_cache = {}
@@ -444,13 +507,13 @@ class MembershipCSVImportResource(resources.ModelResource):
         logger.info(
             "Membership CSV import: headers=%d email_header=%r name_header=%r active_header=%r start_header=%r end_header=%r note_header=%r type_header=%r freeipa_users=%d unique_emails=%d",
             len(headers),
-            self._email_header,
-            self._name_header,
-            self._active_header,
-            self._start_header,
-            self._end_header,
-            self._note_header,
-            self._type_header,
+            self._resolved_headers.get("email"),
+            self._resolved_headers.get("name"),
+            self._resolved_headers.get("active_member"),
+            self._resolved_headers.get("membership_start_date"),
+            self._resolved_headers.get("membership_end_date"),
+            self._resolved_headers.get("committee_notes"),
+            self._resolved_headers.get("membership_type"),
             len(users),
             len(self._email_to_usernames),
         )
@@ -462,7 +525,7 @@ class MembershipCSVImportResource(resources.ModelResource):
                 question_columns,
             )
 
-        if self._active_header is None:
+        if self._resolved_headers.get("active_member") is None:
             logger.warning(
                 "Membership CSV import: no Active/Status column detected; all rows are treated as active"
             )
@@ -551,93 +614,128 @@ class MembershipCSVImportResource(resources.ModelResource):
             return ("", "name", f"Ambiguous name (matches {len(usernames)} users)")
         return (next(iter(usernames)), "name", "")
 
-    def _row_value(self, row: Any, header: str | None) -> object:
-        if header is None:
+    def _row_value(self, row: Any, logical_name: str) -> str:
+        header = self._resolved_headers.get(logical_name)
+        if not header:
             return ""
         try:
-            return row.get(header, "")
+            return _normalize_str(row.get(header, ""))
         except AttributeError:
             return ""
 
     def _row_email(self, row: Any) -> str:
-        if self._email_header is None:
-            return ""
-        return normalize_csv_email(self._row_value(row, self._email_header))
+        return normalize_csv_email(self._row_value(row, "email"))
 
     def _row_name(self, row: Any) -> str:
-        return _normalize_str(self._row_value(row, self._name_header))
+        return self._row_value(row, "name")
 
     def _row_is_active(self, row: Any) -> bool:
         # Some membership exports omit an explicit active/status column and
         # implicitly represent only active members. In that case, treat rows as
         # eligible rather than skipping everything.
-        if self._active_header is None:
+        if self._resolved_headers.get("active_member") is None:
             return True
-        return parse_csv_bool(self._row_value(row, self._active_header))
+        return parse_csv_bool(self._row_value(row, "active_member"))
 
     def _row_approved_at(self, row: Any) -> datetime.datetime | None:
-        if self._start_header is None:
+        if self._resolved_headers.get("membership_start_date") is None:
             return None
-        return parse_csv_date(self._row_value(row, self._start_header))
+        start_date = parse_csv_date(self._row_value(row, "membership_start_date"))
+        if start_date is None:
+            return None
+        return datetime.datetime.combine(start_date, datetime.time(0, 0, 0), tzinfo=datetime.UTC)
 
     def _row_expires_at(self, row: Any) -> datetime.datetime | None:
-        if self._end_header is None:
+        if self._resolved_headers.get("membership_end_date") is None:
             return None
-        return parse_csv_date(self._row_value(row, self._end_header))
+        end_date = parse_csv_date(self._row_value(row, "membership_end_date"))
+        if end_date is None:
+            return None
+        return datetime.datetime.combine(end_date, datetime.time(0, 0, 0), tzinfo=datetime.UTC)
 
     def _row_has_expiry_value(self, row: Any) -> bool:
-        return bool(_normalize_str(self._row_value(row, self._end_header)))
+        return bool(self._row_value(row, "membership_end_date"))
 
     def _row_note(self, row: Any) -> str:
-        return _normalize_str(self._row_value(row, self._note_header))
+        return self._row_value(row, "committee_notes")
 
     def _row_csv_membership_type(self, row: Any) -> str:
-        if self._type_header is None:
-            return ""
-        return _normalize_str(self._row_value(row, self._type_header))
+        return self._row_value(row, "membership_type")
 
-    def _decision_for_row(self, row: Any) -> tuple[str, str]:
+    def _decision_for_row(self, row: Any) -> _RowDecision:
         membership_type = self._membership_type
         if membership_type is None:
             raise ValueError("membership_type is required")
 
+        start_at = self._row_approved_at(row)
+        end_at = self._row_expires_at(row)
+        row_note = self._row_note(row)
+        responses = self._row_responses(row)
+
+        def row_decision(*, decision: str, reason: str, username: str = "", match_method: str = "") -> _RowDecision:
+            return _RowDecision(
+                decision=decision,
+                reason=reason,
+                username=username,
+                match_method=match_method,
+                start_at=start_at,
+                end_at=end_at,
+                row_note=row_note,
+                responses=responses,
+            )
+
         email = self._row_email(row)
         if not email:
-            return ("SKIP", "Missing Email")
+            return row_decision(decision="SKIP", reason="Missing Email")
 
-        username, _method, reason = self._match_username_for_row(row)
+        username, match_method, reason = self._match_username_for_row(row)
         if not username:
-            return ("SKIP", reason or "No match")
+            return row_decision(decision="SKIP", reason=reason or "No match", match_method=match_method)
 
         if not self._row_is_active(row):
-            return ("SKIP", "Not an Active Member")
+            return row_decision(
+                decision="SKIP",
+                reason="Not an Active Member",
+                username=username,
+                match_method=match_method,
+            )
 
         raw_type = self._row_csv_membership_type(row)
         if raw_type and not _membership_type_matches(raw_type, membership_type):
-            return (
-                "SKIP",
-                f"CSV type '{raw_type}' does not match selected '{membership_type.code}'",
+            return row_decision(
+                decision="SKIP",
+                reason=f"CSV type '{raw_type}' does not match selected '{membership_type.code}'",
+                username=username,
+                match_method=match_method,
             )
 
         missing = missing_required_agreements_for_user_in_group(username, membership_type.group_cn)
         if missing:
-            return (
-                "SKIP",
-                f"Missing required agreements for '{membership_type.group_cn}': {', '.join(missing)}",
+            return row_decision(
+                decision="SKIP",
+                reason=f"Missing required agreements for '{membership_type.group_cn}': {', '.join(missing)}",
+                username=username,
+                match_method=match_method,
             )
 
-        start_at = self._row_approved_at(row)
-        expires_at = self._row_expires_at(row)
-        if self._row_has_expiry_value(row) and expires_at is None:
-            return ("SKIP", "Invalid membership end date")
+        if self._row_has_expiry_value(row) and end_at is None:
+            return row_decision(
+                decision="SKIP",
+                reason="Invalid membership end date",
+                username=username,
+                match_method=match_method,
+            )
 
-        if expires_at is not None:
+        if end_at is not None:
             effective_start_at = start_at or timezone.now().astimezone(datetime.UTC)
-            if expires_at <= effective_start_at:
-                return ("SKIP", "Membership end date must be after start date")
+            if end_at <= effective_start_at:
+                return row_decision(
+                    decision="SKIP",
+                    reason="Membership end date must be after start date",
+                    username=username,
+                    match_method=match_method,
+                )
 
-        csv_note = self._row_note(row)
-        responses = self._row_responses(row)
         existing_request = (
             MembershipRequest.objects.filter(
                 requested_username=username,
@@ -648,11 +746,11 @@ class MembershipCSVImportResource(resources.ModelResource):
             .first()
         )
         note_exists = False
-        if csv_note:
+        if row_note:
             note_exists = Note.objects.filter(
                 membership_request__requested_username=username,
                 membership_request__membership_type=membership_type,
-                content=f"[Import] {csv_note}",
+                content=f"[Import] {row_note}",
             ).exists()
 
         responses_have_new = False
@@ -662,7 +760,7 @@ class MembershipCSVImportResource(resources.ModelResource):
                 existing_responses = existing_request.responses
             responses_have_new = any(item not in existing_responses for item in responses)
 
-        has_updates = (bool(csv_note) and not note_exists) or responses_have_new
+        has_updates = (bool(row_note) and not note_exists) or responses_have_new
 
         open_request = (
             MembershipRequest.objects.filter(
@@ -679,11 +777,26 @@ class MembershipCSVImportResource(resources.ModelResource):
 
         if open_request is not None and open_request.status == MembershipRequest.Status.on_hold:
             if has_updates:
-                return ("IMPORT", "Request on hold, will ignore")
-            return ("SKIP", "Request on hold, will ignore")
+                return row_decision(
+                    decision="IMPORT",
+                    reason="Request on hold, will ignore",
+                    username=username,
+                    match_method=match_method,
+                )
+            return row_decision(
+                decision="SKIP",
+                reason="Request on hold, will ignore",
+                username=username,
+                match_method=match_method,
+            )
 
         if open_request is not None and open_request.status == MembershipRequest.Status.pending:
-            return ("IMPORT", "Active request, will be accepted")
+            return row_decision(
+                decision="IMPORT",
+                reason="Active request, will be accepted",
+                username=username,
+                match_method=match_method,
+            )
 
         existing_membership = (
             Membership.objects.active()
@@ -696,36 +809,70 @@ class MembershipCSVImportResource(resources.ModelResource):
         )
         if existing_membership is not None and start_at is not None:
             if existing_membership.created_at == start_at and not has_updates:
-                return ("SKIP", "Already up-to-date")
+                return row_decision(
+                    decision="SKIP",
+                    reason="Already up-to-date",
+                    username=username,
+                    match_method=match_method,
+                )
             if existing_membership.created_at != start_at:
-                return ("IMPORT", "Active membership, updating start date")
+                return row_decision(
+                    decision="IMPORT",
+                    reason="Active membership, updating start date",
+                    username=username,
+                    match_method=match_method,
+                )
 
         if existing_membership is not None and start_at is None:
             if not has_updates:
-                return ("SKIP", "Already up-to-date")
-            return ("IMPORT", "Active membership, importing updates")
+                return row_decision(
+                    decision="SKIP",
+                    reason="Already up-to-date",
+                    username=username,
+                    match_method=match_method,
+                )
+            return row_decision(
+                decision="IMPORT",
+                reason="Active membership, importing updates",
+                username=username,
+                match_method=match_method,
+            )
 
         if existing_membership is not None and has_updates:
-            return ("IMPORT", "Active membership, importing updates")
+            return row_decision(
+                decision="IMPORT",
+                reason="Active membership, importing updates",
+                username=username,
+                match_method=match_method,
+            )
 
         if existing_membership is not None:
-            return ("IMPORT", "Active membership, updating start date")
+            return row_decision(
+                decision="IMPORT",
+                reason="Active membership, updating start date",
+                username=username,
+                match_method=match_method,
+            )
 
-        return ("IMPORT", "New request will be created")
+        return row_decision(
+            decision="IMPORT",
+            reason="New request will be created",
+            username=username,
+            match_method=match_method,
+        )
 
     def _populate_preview_fields(self, instance: MembershipRequest, row: Any) -> None:
         instance._csv_name = self._row_name(row)
         instance._csv_email = self._row_email(row)
-        instance._csv_active_member = _normalize_str(self._row_value(row, self._active_header))
-        instance._csv_membership_start_date = _normalize_str(self._row_value(row, self._start_header))
+        instance._csv_active_member = self._row_value(row, "active_member")
+        instance._csv_membership_start_date = self._row_value(row, "membership_start_date")
         instance._csv_membership_type = self._row_csv_membership_type(row)
         instance._csv_committee_notes = self._row_note(row)
 
-        instance._matched_username = self._row_username(row)
-
-        decision, reason = self._decision_for_row(row)
-        instance._decision = decision
-        instance._decision_reason = reason
+        row_decision = self._decision_for_row(row)
+        instance._matched_username = row_decision.username
+        instance.decision = row_decision.decision
+        instance.decision_reason = row_decision.reason
 
     def _row_responses(self, row: Any) -> list[dict[str, str]]:
         if not self._headers:
@@ -742,18 +889,29 @@ class MembershipCSVImportResource(resources.ModelResource):
             if not header:
                 continue
             used_norms.add(norm_csv_header(header))
-            value = _normalize_str(self._row_value(row, header))
+            try:
+                value = _normalize_str(row.get(header, ""))
+            except AttributeError:
+                value = ""
             if value or spec.required:
                 question_responses.append({spec.name: value})
 
         reserved_norms = {
-            norm_csv_header(self._email_header) if self._email_header else "",
-            norm_csv_header(self._name_header) if self._name_header else "",
-            norm_csv_header(self._active_header) if self._active_header else "",
-            norm_csv_header(self._start_header) if self._start_header else "",
-            norm_csv_header(self._end_header) if self._end_header else "",
-            norm_csv_header(self._note_header) if self._note_header else "",
-            norm_csv_header(self._type_header) if self._type_header else "",
+            norm_csv_header(self._resolved_headers["email"]) if self._resolved_headers.get("email") else "",
+            norm_csv_header(self._resolved_headers["name"]) if self._resolved_headers.get("name") else "",
+            norm_csv_header(self._resolved_headers["active_member"]) if self._resolved_headers.get("active_member") else "",
+            norm_csv_header(self._resolved_headers["membership_start_date"])
+            if self._resolved_headers.get("membership_start_date")
+            else "",
+            norm_csv_header(self._resolved_headers["membership_end_date"])
+            if self._resolved_headers.get("membership_end_date")
+            else "",
+            norm_csv_header(self._resolved_headers["committee_notes"])
+            if self._resolved_headers.get("committee_notes")
+            else "",
+            norm_csv_header(self._resolved_headers["membership_type"])
+            if self._resolved_headers.get("membership_type")
+            else "",
         }
 
         reserved_norms |= used_norms
@@ -762,7 +920,10 @@ class MembershipCSVImportResource(resources.ModelResource):
         for header in self._headers:
             if not header or norm_csv_header(header) in reserved_norms:
                 continue
-            value = _normalize_str(self._row_value(row, header))
+            try:
+                value = _normalize_str(row.get(header, ""))
+            except AttributeError:
+                value = ""
             if value:
                 responses.append({header: value})
         return responses
@@ -776,7 +937,10 @@ class MembershipCSVImportResource(resources.ModelResource):
         for header in self._headers:
             if not header:
                 continue
-            item[header] = _normalize_str(self._row_value(row, header))
+            try:
+                item[header] = _normalize_str(row.get(header, ""))
+            except AttributeError:
+                item[header] = ""
         item["reason"] = reason
         self._unmatched.append(item)
 
@@ -788,8 +952,8 @@ class MembershipCSVImportResource(resources.ModelResource):
             # Treat blank/empty lines as no-ops.
             return
 
-        username, method, reason = self._match_username_for_row(row)
-        usernames = {username} if username else set()
+        row_decision = self._decision_for_row(row)
+        usernames = {row_decision.username} if row_decision.username else set()
         if isinstance(row_number, int) and row_number <= 50:
             # Email is PII; keep this at DEBUG level.
             logger.debug(
@@ -799,13 +963,13 @@ class MembershipCSVImportResource(resources.ModelResource):
                 sorted(usernames),
             )
 
-        if username and method == "email":
+        if row_decision.username and row_decision.match_method == "email":
             self._matched_by_email += 1
-        elif username and method == "name":
+        elif row_decision.username and row_decision.match_method == "name":
             self._matched_by_name += 1
 
-        if not username:
-            self._record_unmatched(row=row, reason=reason or "No match")
+        if not row_decision.username:
+            self._record_unmatched(row=row, reason=row_decision.reason or "No match")
             return
 
         # Don't block the import preview/confirm flow for per-row business rules.
@@ -813,10 +977,13 @@ class MembershipCSVImportResource(resources.ModelResource):
 
     @override
     def skip_row(self, instance: Any, original: Any, row: Any, import_validation_errors: Any = None) -> bool:
-        decision, reason = self._decision_for_row(row)
-        self._decision_counts[decision] = self._decision_counts.get(decision, 0) + 1
-        if decision != "IMPORT" and reason:
-            self._skip_reason_counts[reason] = self._skip_reason_counts.get(reason, 0) + 1
+        preview_instance = instance if isinstance(instance, MembershipRequest) else MembershipRequest()
+        self._populate_preview_fields(preview_instance, row)
+
+        row_decision = self._decision_for_row(row)
+        self._decision_counts[row_decision.decision] = self._decision_counts.get(row_decision.decision, 0) + 1
+        if row_decision.decision != "IMPORT" and row_decision.reason:
+            self._skip_reason_counts[row_decision.reason] = self._skip_reason_counts.get(row_decision.reason, 0) + 1
 
         row_number = getattr(row, "number", None)
         # Email is PII; keep row-level decisions at DEBUG level.
@@ -824,11 +991,11 @@ class MembershipCSVImportResource(resources.ModelResource):
             logger.debug(
                 "Membership CSV import: decision row=%d decision=%s reason=%r",
                 row_number,
-                decision,
-                reason,
+                row_decision.decision,
+                row_decision.reason,
             )
 
-        return decision != "IMPORT"
+        return row_decision.decision != "IMPORT"
 
     @override
     def save_instance(self, instance: Any, is_create: bool, row: Any, **kwargs: Any) -> None:
@@ -843,23 +1010,21 @@ class MembershipCSVImportResource(resources.ModelResource):
     def import_instance(self, instance: MembershipRequest, row: Any, **kwargs: Any) -> None:
         super().import_instance(instance, row, **kwargs)
 
-        self._populate_preview_fields(instance, row)
-
         # import_instance is called even for rows that will later be skipped.
         # Only set required fields for rows we intend to validate/save.
-        decision, _reason = self._decision_for_row(row)
-        if decision != "IMPORT":
+        row_decision = self._decision_for_row(row)
+        if row_decision.decision != "IMPORT":
             return
 
         membership_type = self._membership_type
         if membership_type is None:
             raise ValueError("membership_type is required")
 
-        username, _method, _reason = self._match_username_for_row(row)
+        username = row_decision.username
         if not username:
             return
 
-        responses = self._row_responses(row)
+        responses = row_decision.responses
 
         existing_open = (
             MembershipRequest.objects.filter(
@@ -903,17 +1068,45 @@ class MembershipCSVImportResource(resources.ModelResource):
             instance.status = MembershipRequest.Status.pending
         instance.responses = merged_responses
 
-    @override
-    def after_save_instance(self, instance: MembershipRequest, row: Any, **kwargs: Any) -> None:
-        super().after_save_instance(instance, row, **kwargs)
+    def _previous_expires_at(
+        self,
+        *,
+        username: str,
+        approved_at: datetime.datetime,
+    ) -> datetime.datetime | None:
+        membership_type = self._membership_type
+        if membership_type is None:
+            raise ValueError("membership_type is required")
 
-        if bool(kwargs.get("dry_run")):
-            return
+        existing_membership = (
+            Membership.objects.filter(
+                target_username=username,
+                membership_type=membership_type,
+            )
+            .only("expires_at")
+            .first()
+        )
+        if (
+            existing_membership is None
+            or existing_membership.expires_at is None
+            or existing_membership.expires_at <= approved_at
+        ):
+            return None
+        return existing_membership.expires_at
 
-        row_number = kwargs.get("row_number")
-        email = self._row_email(row)
-        username = instance.requested_username
-
+    def _apply_row(
+        self,
+        *,
+        instance: MembershipRequest,
+        row_number: int | None,
+        email: str,
+        username: str,
+        start_at: datetime.datetime,
+        end_at: datetime.datetime | None,
+        decided_at: datetime.datetime,
+        row_decision: _RowDecision,
+        previous_expires_at: datetime.datetime | None,
+    ) -> None:
         # This runs only during the confirm step (dry_run=False). Keep a clear,
         # INFO-level breadcrumb per row so production logs show that approvals
         # are being attempted even when DEBUG is disabled.
@@ -925,44 +1118,18 @@ class MembershipCSVImportResource(resources.ModelResource):
             instance.membership_type_id,
         )
 
-        start_at = self._row_approved_at(row)
-        expires_at = self._row_expires_at(row)
-        now = timezone.now().astimezone(datetime.UTC)
-        if start_at is None:
-            start_at = now
-
-        existing_membership = (
-            Membership.objects.filter(
-                target_username=instance.requested_username,
-                membership_type=instance.membership_type,
-            )
-            .only("expires_at")
-            .first()
-        )
-        preserved_expires_at: datetime.datetime | None = None
-        if (
-            existing_membership is not None
-            and existing_membership.expires_at is not None
-            and existing_membership.expires_at > now
-        ):
-            preserved_expires_at = existing_membership.expires_at
-
-        # The CSV start date is the membership's "effective since" time.
-        # However, if the start date is in the past (e.g. a "member since"
-        # field), treating it as the approval timestamp would immediately
-        # expire memberships (because expiry is derived from approval time).
-        #
-        # Use "now" for approval/expiry when the start date is in the past,
-        # while still backfilling created/request times from the CSV.
-        decided_at = max(start_at, now)
+        # `import_instance()` should have precomputed merged responses before
+        # save hooks run. Keep this defensive fallback in case a future
+        # import-export version changes call ordering.
+        if row_decision.responses and not instance.responses:
+            instance.responses = row_decision.responses
 
         if instance._csv_on_hold_request:
-            csv_note = self._row_note(row)
-            if csv_note:
+            if row_decision.row_note:
                 add_note(
                     membership_request=instance,
                     username=self._actor_username,
-                    content=f"[Import] {csv_note}",
+                    content=f"[Import] {row_decision.row_note}",
                 )
             logger.info(
                 "Membership CSV import: apply ignored (on-hold) row=%s email=%r username=%r membership_type=%s",
@@ -1005,32 +1172,26 @@ class MembershipCSVImportResource(resources.ModelResource):
             # (or now if none was provided).
             MembershipRequest.objects.filter(pk=instance.pk).update(requested_at=start_at)
 
-            # `created_at` is auto_now_add; backfill the membership start date from the CSV.
-            Membership.objects.filter(
+            membership_qs = Membership.objects.filter(
                 target_username=instance.requested_username,
                 membership_type=instance.membership_type,
-            ).update(created_at=start_at)
+            )
+            # `created_at` is auto_now_add; backfill the membership start date from the CSV.
+            membership_qs.update(created_at=start_at)
 
-            if expires_at is not None and expires_at > start_at:
-                Membership.objects.filter(
-                    target_username=instance.requested_username,
-                    membership_type=instance.membership_type,
-                ).update(expires_at=expires_at)
-            elif preserved_expires_at is not None:
-                Membership.objects.filter(
-                    target_username=instance.requested_username,
-                    membership_type=instance.membership_type,
-                ).update(expires_at=preserved_expires_at)
+            if end_at is not None and end_at > start_at:
+                membership_qs.update(expires_at=end_at)
+            elif previous_expires_at is not None:
+                membership_qs.update(expires_at=previous_expires_at)
 
             # Only record the import note after a fully successful apply. This
             # avoids leaving misleading "[Import]" notes behind when approval
             # fails (e.g. FreeIPA group add failure).
-            csv_note = self._row_note(row)
-            if csv_note:
+            if row_decision.row_note:
                 add_note(
                     membership_request=instance,
                     username=self._actor_username,
-                    content=f"[Import] {csv_note}",
+                    content=f"[Import] {row_decision.row_note}",
                 )
         except Exception:
             logger.exception(
@@ -1051,6 +1212,48 @@ class MembershipCSVImportResource(resources.ModelResource):
         )
 
     @override
+    def after_save_instance(self, instance: MembershipRequest, row: Any, **kwargs: Any) -> None:
+        super().after_save_instance(instance, row, **kwargs)
+
+        if bool(kwargs.get("dry_run")):
+            return
+
+        row_number = kwargs.get("row_number")
+        email = self._row_email(row)
+        row_decision = self._decision_for_row(row)
+        if row_decision.decision != "IMPORT":
+            return
+
+        username = row_decision.username or instance.requested_username
+        start_at = row_decision.start_at
+        end_at = row_decision.end_at
+        now = timezone.now().astimezone(datetime.UTC)
+        if start_at is None:
+            start_at = now
+
+        # The CSV start date is the membership's "effective since" time.
+        # However, if the start date is in the past (e.g. a "member since"
+        # field), treating it as the approval timestamp would immediately
+        # expire memberships (because expiry is derived from approval time).
+        #
+        # Use "now" for approval/expiry when the start date is in the past,
+        # while still backfilling created/request times from the CSV.
+        decided_at = max(start_at, now)
+        previous_expires_at = self._previous_expires_at(username=username, approved_at=now)
+
+        self._apply_row(
+            instance=instance,
+            row_number=row_number if isinstance(row_number, int) else None,
+            email=email,
+            username=username,
+            start_at=start_at,
+            end_at=end_at,
+            decided_at=decided_at,
+            row_decision=row_decision,
+            previous_expires_at=previous_expires_at,
+        )
+
+    @override
     def after_import_row(self, row: Any, row_result: Any, **kwargs: Any) -> None:
         super().after_import_row(row, row_result, **kwargs)
 
@@ -1064,7 +1267,9 @@ class MembershipCSVImportResource(resources.ModelResource):
         email = self._row_email(row)
         matched_username = self._row_username(row)
         try:
-            decision, reason = self._decision_for_row(row)
+            row_decision = self._decision_for_row(row)
+            decision = row_decision.decision
+            reason = row_decision.reason
         except Exception as exc:
             # Don't let diagnostics crash the import; this hook is best-effort.
             logger.exception(
@@ -1232,25 +1437,30 @@ class MembershipCSVImportResource(resources.ModelResource):
         if not self._unmatched:
             return
 
-        out = Dataset()
         headers = [h for h in self._headers if h]
         reason_header = "reason"
         if any(norm_csv_header(h) == "reason" for h in headers):
             # Avoid clobbering an existing input column.
             reason_header = "unmatched_reason"
 
-        out.headers = [*headers, reason_header]
+        export_rows: list[dict[str, str]] = []
+        export_headers = [*headers, reason_header]
         for item in self._unmatched:
-            out.append([*(item.get(h, "") for h in headers), item.get("reason", "")])
+            export_item = {
+                header: sanitize_csv_cell(item.get(header, ""))
+                for header in headers
+            }
+            export_item[reason_header] = item.get("reason", "")
+            export_rows.append(export_item)
 
-        token = secrets.token_urlsafe(16)
-        cache_key = f"membership-import-unmatched:{token}"
-        csv_content = out.export("csv")
-        cache.set(cache_key, csv_content, timeout=60 * 60)
+        unmatched_dataset = Dataset()
+        unmatched_dataset.headers = export_headers
+        for row in export_rows:
+            unmatched_dataset.append([row.get(header, "") for header in export_headers])
 
-        download_url = reverse(
+        attach_unmatched_csv_to_result(
+            result,
+            unmatched_dataset,
+            "membership-import-unmatched",
             "admin:core_membershipcsvimportlink_download_unmatched",
-            kwargs={"token": token},
         )
-        setattr(result, "unmatched_csv_content", csv_content)
-        setattr(result, "unmatched_download_url", download_url)

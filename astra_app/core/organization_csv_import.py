@@ -15,6 +15,7 @@ from core.csv_import_utils import (
     extract_csv_headers_from_uploaded_file,
     norm_csv_header,
     normalize_csv_email,
+    set_form_column_field_choices,
 )
 from core.models import Organization
 from core.views_utils import _normalize_str
@@ -51,6 +52,29 @@ _REQUIRED_ROW_FIELDS = (
 )
 
 _ALL_ROW_FIELDS = tuple(field_name.removesuffix("_column") for field_name in _ORG_COLUMN_FIELDS)
+
+_COLUMN_FALLBACK_NORMS: dict[str, tuple[str, ...]] = {
+    "name": ("name", "organizationname"),
+    "business_contact_name": ("businesscontactname",),
+    "business_contact_email": ("businesscontactemail",),
+    "business_contact_phone": ("businesscontactphone",),
+    "pr_marketing_contact_name": ("prmarketingcontactname",),
+    "pr_marketing_contact_email": ("prmarketingcontactemail",),
+    "pr_marketing_contact_phone": ("prmarketingcontactphone",),
+    "technical_contact_name": ("technicalcontactname",),
+    "technical_contact_email": ("technicalcontactemail",),
+    "technical_contact_phone": ("technicalcontactphone",),
+    "website": ("website", "url"),
+    "website_logo": ("websitelogo", "logo", "logourl"),
+    "country_code": ("countrycode", "country"),
+    "full_address": ("fulladdress", "address"),
+    "street": ("street",),
+    "city": ("city",),
+    "state": ("state", "province"),
+    "postal_code": ("postalcode", "zip", "zipcode"),
+    "representative_username": ("representativeusername", "representative"),
+    "representative_email": ("representativeemail",),
+}
 
 
 def required_organization_csv_columns() -> tuple[str, ...]:
@@ -122,9 +146,7 @@ class OrganizationCSVImportForm(ImportForm):
         if not headers:
             return
 
-        choices: list[tuple[str, str]] = [("", "Auto-detect")] + [(h, h) for h in headers]
-        for field_name in _ORG_COLUMN_FIELDS:
-            self.fields[field_name].choices = choices
+        set_form_column_field_choices(form=self, field_names=_ORG_COLUMN_FIELDS, headers=headers)
 
 
 class OrganizationCSVConfirmImportForm(ConfirmImportForm):
@@ -251,36 +273,8 @@ class OrganizationCSVImportResource(resources.ModelResource):
             return None
 
         self._resolved_headers = {
-            "name": resolve_header("name_column", "name", "organizationname"),
-            "business_contact_name": resolve_header("business_contact_name_column", "businesscontactname"),
-            "business_contact_email": resolve_header("business_contact_email_column", "businesscontactemail"),
-            "business_contact_phone": resolve_header("business_contact_phone_column", "businesscontactphone"),
-            "pr_marketing_contact_name": resolve_header("pr_marketing_contact_name_column", "prmarketingcontactname"),
-            "pr_marketing_contact_email": resolve_header(
-                "pr_marketing_contact_email_column",
-                "prmarketingcontactemail",
-            ),
-            "pr_marketing_contact_phone": resolve_header(
-                "pr_marketing_contact_phone_column",
-                "prmarketingcontactphone",
-            ),
-            "technical_contact_name": resolve_header("technical_contact_name_column", "technicalcontactname"),
-            "technical_contact_email": resolve_header("technical_contact_email_column", "technicalcontactemail"),
-            "technical_contact_phone": resolve_header("technical_contact_phone_column", "technicalcontactphone"),
-            "website": resolve_header("website_column", "website", "url"),
-            "website_logo": resolve_header("website_logo_column", "websitelogo", "logo", "logourl"),
-            "country_code": resolve_header("country_code_column", "countrycode", "country"),
-            "full_address": resolve_header("full_address_column", "fulladdress", "address"),
-            "street": resolve_header("street_column", "street"),
-            "city": resolve_header("city_column", "city"),
-            "state": resolve_header("state_column", "state", "province"),
-            "postal_code": resolve_header("postal_code_column", "postalcode", "zip", "zipcode"),
-            "representative_username": resolve_header(
-                "representative_username_column",
-                "representativeusername",
-                "representative",
-            ),
-            "representative_email": resolve_header("representative_email_column", "representativeemail"),
+            logical_name: resolve_header(f"{logical_name}_column", *fallbacks)
+            for logical_name, fallbacks in _COLUMN_FALLBACK_NORMS.items()
         }
 
         users = FreeIPAUser.all()
