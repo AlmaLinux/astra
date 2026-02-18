@@ -677,6 +677,25 @@ class OrganizationMembershipCSVImportAdminFlowTests(TestCase):
         self.assertIn("Missing Org", decoded)
         self.assertIn("Organization not found", decoded)
 
+    def test_import_page_hides_column_selectors_until_file_selected(self) -> None:
+        self._login_as_freeipa_admin("alex")
+        admin_user = FreeIPAUser(
+            "alex",
+            {
+                "uid": ["alex"],
+                "mail": ["alex@example.org"],
+                "memberof_group": ["admins"],
+            },
+        )
+
+        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+            response = self.client.get(reverse("admin:core_organizationmembershipcsvimportlink_import"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "js-column-selector-row")
+        self.assertContains(response, 'style="display: none;"')
+        self.assertContains(response, "window.csvImportHeaders || {}")
+
     def test_live_import_persists_membership_request_question_responses(self) -> None:
         membership_type = self._membership_type(code="questionresponses")
         org = Organization.objects.create(

@@ -184,9 +184,20 @@ class AdminImportMembershipsCSVTests(TestCase):
         MembershipTypeCategory.objects.filter(pk="sponsorship").update(is_individual=False, is_organization=True, sort_order=2)
 
         MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
             code="mirror",
             defaults={
                 "name": "Mirror",
+                "group_cn": "almalinux-mirror",
                 "category_id": "mirror",
                 "sort_order": 0,
                 "enabled": True,
@@ -196,6 +207,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             code="mirror_plus",
             defaults={
                 "name": "Mirror Plus",
+                "group_cn": "almalinux-mirror-plus",
                 "category_id": "mirror",
                 "sort_order": 1,
                 "enabled": True,
@@ -314,6 +326,27 @@ class AdminImportMembershipsCSVTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "core/js/csv_import_headers.js")
+
+    def test_import_page_hides_column_selectors_until_file_selected(self) -> None:
+        self._login_as_freeipa_admin("alex")
+
+        admin_user = FreeIPAUser(
+            "alex",
+            {
+                "uid": ["alex"],
+                "mail": ["alex@example.org"],
+                "memberof_group": ["admins"],
+            },
+        )
+
+        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+            url = reverse("admin:core_membershipcsvimportlink_import")
+            resp = self.client.get(url)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "js-column-selector-row")
+        self.assertContains(resp, 'style="display: none;"')
+        self.assertContains(resp, "window.csvImportHeaders || {}")
 
     def test_live_import_creates_membership_and_unmatched_export(self) -> None:
         MembershipType.objects.update_or_create(

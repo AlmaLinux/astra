@@ -11,19 +11,67 @@
   <script src="{% static 'core/js/csv_import_headers.js' %}"></script>
   <script>
     (function () {
-      if (!window.csvImportHeaders) {
-        return;
-      }
-      const norm = window.csvImportHeaders.norm;
-      const chooseDelimiter = window.csvImportHeaders.chooseDelimiter;
-      const parseCsvRow = window.csvImportHeaders.parseCsvRow;
-      const pickHeader = window.csvImportHeaders.pickHeader;
+      const csvImportHeaders = window.csvImportHeaders || {};
+      const norm = csvImportHeaders.norm || function (value) {
+        return (value || "").toString().trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+      };
+      const chooseDelimiter = csvImportHeaders.chooseDelimiter || function (line) {
+        const candidates = [",", "\t", ";", "|"];
+        let best = ",";
+        let bestCount = -1;
+        for (const delimiter of candidates) {
+          const count = line.split(delimiter).length - 1;
+          if (count > bestCount) {
+            bestCount = count;
+            best = delimiter;
+          }
+        }
+        return best;
+      };
+      const parseCsvRow = csvImportHeaders.parseCsvRow || function (line, delimiter) {
+        const out = [];
+        let current = "";
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i += 1) {
+          const ch = line[i];
+          if (ch === '"') {
+            if (inQuotes && line[i + 1] === '"') {
+              current += '"';
+              i += 1;
+              continue;
+            }
+            inQuotes = !inQuotes;
+            continue;
+          }
+          if (ch === delimiter && !inQuotes) {
+            out.push(current.trim());
+            current = "";
+            continue;
+          }
+          current += ch;
+        }
+        if (current || line.endsWith(delimiter)) {
+          out.push(current.trim());
+        }
+        return out.filter(Boolean);
+      };
+      const pickHeader = csvImportHeaders.pickHeader || function (headers, preferredNorms) {
+        const normalized = headers.map((header) => ({ raw: header, norm: norm(header) }));
+        for (const preferred of preferredNorms) {
+          const match = normalized.find((item) => item.norm === norm(preferred));
+          if (match) {
+            return match.raw;
+          }
+        }
+        return "";
+      };
 
       function init() {
         const fileInput = document.getElementById("id_import_file");
         const formatSelect = document.getElementById("id_format");
         const headerPreview = document.getElementById("csv-header-preview");
         const headerPreviewItems = document.getElementById("csv-header-preview-items");
+        const columnSelectorRows = Array.from(document.querySelectorAll(".js-column-selector-row"));
         const selects = Array.from(document.querySelectorAll("select")).filter((el) => el.id && el.id.endsWith("_column"));
 
         if (!fileInput) {
@@ -42,6 +90,12 @@
           });
           if (csvOption) {
             formatSelect.value = csvOption.value;
+          }
+        }
+
+        function setColumnSelectorRowsVisible(visible) {
+          for (const row of columnSelectorRows) {
+            row.style.display = visible ? "" : "none";
           }
         }
 
@@ -90,10 +144,12 @@
         fileInput.addEventListener("change", function () {
           const file = fileInput.files && fileInput.files[0];
           if (!file) {
+            setColumnSelectorRowsVisible(false);
             return;
           }
 
           ensureCsvFormatSelected();
+          setColumnSelectorRowsVisible(true);
           const reader = new FileReader();
           reader.onload = function () {
             const text = (reader.result || "").toString();
@@ -108,6 +164,8 @@
           };
           reader.readAsText(file);
         });
+
+        setColumnSelectorRowsVisible(!!(fileInput.files && fileInput.files.length));
       }
 
       if (document.readyState === "loading") {
@@ -433,7 +491,7 @@
                       </div>
                     </div>
                   {% else %}
-                    <div class="form-group field-name">
+                    <div class="form-group field-name{% if field.name|slice:'-7:' == '_column' %} js-column-selector-row{% endif %}"{% if field.name|slice:'-7:' == '_column' %} style="display: none;"{% endif %}>
                       <div class="row">
                         {{ field.errors }}
                         <div class="col-sm-3 text-left">{{ field.label_tag }}</div>

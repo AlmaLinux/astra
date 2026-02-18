@@ -33,6 +33,8 @@
   {{ block.super }}
   <script>
     (function () {
+      const csvImportHeaders = window.csvImportHeaders || {};
+
       function norm(value) {
         return (value || "").toString().trim().toLowerCase().replace(/[^a-z0-9]/g, "");
       }
@@ -90,15 +92,16 @@
         return out.filter(Boolean);
       }
 
-      const columnFallbackNorms = JSON.parse(
-        document.getElementById("csv-column-fallback-norms").textContent || "{}"
-      );
-
       function init() {
+        const fallbackNormsElement = document.getElementById("csv-column-fallback-norms");
+        const columnFallbackNorms = fallbackNormsElement
+          ? JSON.parse(fallbackNormsElement.textContent || "{}")
+          : {};
         const fileInput = document.getElementById("id_import_file");
         const formatSelect = document.getElementById("id_format");
         const headerPreview = document.getElementById("csv-header-preview");
         const headerPreviewItems = document.getElementById("csv-header-preview-items");
+        const columnSelectorRows = Array.from(document.querySelectorAll(".js-column-selector-row"));
         const selects = Array.from(document.querySelectorAll("select"))
           .filter((el) => el.id && el.id.endsWith("_column"));
 
@@ -118,6 +121,12 @@
           });
           if (csvOption) {
             formatSelect.value = csvOption.value;
+          }
+        }
+
+        function setColumnSelectorRowsVisible(visible) {
+          for (const row of columnSelectorRows) {
+            row.style.display = visible ? "" : "none";
           }
         }
 
@@ -163,10 +172,12 @@
         fileInput.addEventListener("change", function () {
           const file = fileInput.files && fileInput.files[0];
           if (!file) {
+            setColumnSelectorRowsVisible(false);
             return;
           }
 
           ensureCsvFormatSelected();
+          setColumnSelectorRowsVisible(true);
           const reader = new FileReader();
           reader.onload = function () {
             const text = (reader.result || "").toString();
@@ -181,6 +192,8 @@
           };
           reader.readAsText(file);
         });
+
+        setColumnSelectorRowsVisible(!!(fileInput.files && fileInput.files.length));
       }
 
       if (document.readyState === "loading") {
@@ -197,7 +210,7 @@
     {% if confirm_form %}
       <form action="{% url opts|admin_urlname:"process_import" %}" method="POST">
         {% csrf_token %}
-        <script id="csv-column-fallback-norms" type="application/json">{{ csv_column_fallback_norms_json }}</script>
+        <script id="csv-column-fallback-norms" type="application/json">{{ csv_column_fallback_norms_json|safe }}</script>
         <div class="row">
           <div class="col-12 col-lg-9">
             <div class="card">
@@ -334,7 +347,7 @@
     {% else %}
       <form action="" method="post" enctype="multipart/form-data">
         {% csrf_token %}
-        <script id="csv-column-fallback-norms" type="application/json">{{ csv_column_fallback_norms_json }}</script>
+        <script id="csv-column-fallback-norms" type="application/json">{{ csv_column_fallback_norms_json|safe }}</script>
         <div class="row">
           <div class="col-12 col-lg-9">
             <div class="card">
@@ -360,7 +373,7 @@
                       </div>
                     </div>
                   {% else %}
-                    <div class="form-group field-name">
+                    <div class="form-group field-name{% if field.name|slice:'-7:' == '_column' %} js-column-selector-row{% endif %}"{% if field.name|slice:'-7:' == '_column' %} style="display: none;"{% endif %}>
                       <div class="row">
                         {{ field.errors }}
                         <div class="col-sm-3 text-left">{{ field.label_tag }}</div>

@@ -818,6 +818,43 @@ class OrganizationCSVImportAdminFlowTests(TestCase):
         self.assertIn("name", fallback_norms)
         self.assertIn("organizationname", fallback_norms["name"])
 
+    def test_org_import_page_hides_column_selectors_until_file_selected(self) -> None:
+        self._login_as_freeipa_admin("alex")
+
+        admin_user = FreeIPAUser("alex", {"uid": ["alex"], "mail": ["alex@example.com"], "memberof_group": ["admins"]})
+
+        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+            response = self.client.get(reverse("admin:core_organizationcsvimportlink_import"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "js-column-selector-row")
+        self.assertContains(response, 'style="display: none;"')
+        self.assertContains(response, "window.csvImportHeaders || {}")
+
+    def test_org_import_page_uses_null_safe_fallback_norms_lookup(self) -> None:
+        self._login_as_freeipa_admin("alex")
+
+        admin_user = FreeIPAUser("alex", {"uid": ["alex"], "mail": ["alex@example.com"], "memberof_group": ["admins"]})
+
+        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+            response = self.client.get(reverse("admin:core_organizationcsvimportlink_import"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "const fallbackNormsElement = document.getElementById(\"csv-column-fallback-norms\")")
+        self.assertNotContains(response, "document.getElementById(\"csv-column-fallback-norms\").textContent")
+
+    def test_org_import_page_renders_fallback_norms_as_raw_json(self) -> None:
+        self._login_as_freeipa_admin("alex")
+
+        admin_user = FreeIPAUser("alex", {"uid": ["alex"], "mail": ["alex@example.com"], "memberof_group": ["admins"]})
+
+        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+            response = self.client.get(reverse("admin:core_organizationcsvimportlink_import"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="csv-column-fallback-norms"')
+        self.assertNotContains(response, "{&quot;")
+
     def test_confirm_applies_selected_representative(self) -> None:
         self._login_as_freeipa_admin("alex")
 
