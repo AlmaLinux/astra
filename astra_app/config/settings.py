@@ -392,7 +392,7 @@ PUBLIC_BASE_URL = _env_str("PUBLIC_BASE_URL", default="http://localhost:8000")
 # Elections
 ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS = _env_int(
     "ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS",
-    default=0 if DEBUG else 90,
+    default=0 if DEBUG else 60,
 )
 
 ELECTION_FREEIPA_CIRCUIT_BREAKER_SECONDS = _env_int(
