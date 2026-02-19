@@ -16,6 +16,7 @@ from django.contrib.auth.models import User as DjangoUser
 from django.contrib.contenttypes.models import ContentType
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied
+from django.core.files.uploadedfile import InMemoryUploadedFile
 from django.http import Http404, HttpRequest, HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import redirect
 from django.template.response import TemplateResponse
@@ -1629,6 +1630,31 @@ class BaseCsvImportAdmin(ImportMixin, admin.ModelAdmin):
                 continue
 
         return super().process_dataset(filtered, confirm_form, request, **kwargs)
+
+    @override
+    def write_to_tmp_storage(self, import_file: Any, input_format: Any) -> Any:
+        # Normalize non-binary CSV uploads to UTF-8 so that files with accented
+        # characters encoded as latin-1 or windows-1252 don't fail when
+        # write_to_tmp_storage later reads back with from_encoding='utf-8-sig'.
+        if not input_format.is_binary():
+            import_file.seek(0)
+            raw: bytes = import_file.read()
+            for encoding in ("utf-8-sig", "utf-8", "latin-1"):
+                try:
+                    text = raw.decode(encoding)
+                    break
+                except UnicodeDecodeError:
+                    continue
+            normalized: bytes = text.encode("utf-8")
+            import_file = InMemoryUploadedFile(
+                file=io.BytesIO(normalized),
+                field_name=None,
+                name=getattr(import_file, "name", "import.csv"),
+                content_type="text/csv",
+                size=len(normalized),
+                charset="utf-8",
+            )
+        return super().write_to_tmp_storage(import_file, input_format)
 
     @override
     def process_result(self, result: Any, request: HttpRequest) -> HttpResponse:
