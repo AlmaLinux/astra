@@ -1,4 +1,5 @@
 from unittest.mock import patch
+from urllib.error import HTTPError
 
 from django.test import TestCase
 
@@ -73,3 +74,21 @@ class AddressGeocodingTests(TestCase):
             result = decompose_full_address_with_photon("123 Main St, Austin, TX 3")
 
         self.assertEqual(result.get("country_code"), "US")
+
+    def test_decompose_full_address_with_photon_does_not_retry_403(self) -> None:
+        # 403 is a permanent rejection; retrying wastes time and logs.
+        error = HTTPError(url=None, code=403, msg="Forbidden", hdrs=None, fp=None)  # type: ignore[arg-type]
+        with patch("core.address_geocoding.urlopen", side_effect=error) as mock_urlopen:
+            result = decompose_full_address_with_photon("https://www.example.com")
+
+        self.assertEqual(result, {})
+        self.assertEqual(mock_urlopen.call_count, 1)
+
+    def test_decompose_full_address_with_photon_retries_on_other_errors(self) -> None:
+        # Non-listed codes (e.g. 429) are still retried.
+        rate_limit = HTTPError(url=None, code=429, msg="Too Many Requests", hdrs=None, fp=None)  # type: ignore[arg-type]
+        with patch("core.address_geocoding.urlopen", side_effect=rate_limit) as mock_urlopen:
+            result = decompose_full_address_with_photon("https://www.example.com 429")
+
+        self.assertEqual(result, {})
+        self.assertEqual(mock_urlopen.call_count, 3)

@@ -2,6 +2,7 @@ import hashlib
 import json
 import logging
 from typing import Any
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -83,6 +84,9 @@ def decompose_full_address_with_photon(full_address: str, *, timeout_seconds: in
                 _PHOTON_MAX_ATTEMPTS,
                 exc,
             )
+            # Specific codes that are permanent rejections; retrying won't help.
+            if isinstance(exc, HTTPError) and exc.code in {403}:
+                break
 
     if payload is None:
         if last_error is not None:
