@@ -63,10 +63,6 @@
                 {% endif %}
               </td>
             </tr>
-          {% empty %}
-            <tr>
-              <td colspan="4" class="text-center">No active sponsors found.</td>
-            </tr>
           {% endfor %}
         </tbody>
       </table>
@@ -89,6 +85,7 @@
       buttons: ['copy', 'csv', 'excel', 'pdf', 'print', 'colvis'],
       order: [[3, 'asc']],
       pageLength: 25,
+      language: { emptyTable: 'No active sponsors found.' },
     });
   });
 </script>
