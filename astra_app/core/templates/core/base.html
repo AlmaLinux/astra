@@ -261,6 +261,13 @@
                   {% endif %}
 
                   <li class="nav-item">
+                    <a href="{% url 'membership-sponsors' %}" class="nav-link {% if current_url_name == 'membership-sponsors' %}active{% endif %}">
+                      <i class="nav-icon fas fa-building"></i>
+                      <p>Sponsors</p>
+                    </a>
+                  </li>
+
+                  <li class="nav-item">
                     <a href="{% url 'membership-stats' %}" class="nav-link {% if current_url_name == 'membership-stats' %}active{% endif %}">
                       <i class="nav-icon fas fa-chart-pie"></i>
                       <p>Statistics</p>

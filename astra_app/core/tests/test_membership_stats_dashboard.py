@@ -1,12 +1,13 @@
-
+import datetime
 from unittest.mock import patch
 
 from django.conf import settings
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from core.backends import FreeIPAUser
-from core.models import FreeIPAPermissionGrant
+from core.models import FreeIPAPermissionGrant, Membership, MembershipType, MembershipTypeCategory, Organization
 from core.permissions import ASTRA_VIEW_MEMBERSHIP
 
 
@@ -57,6 +58,129 @@ class MembershipStatsDashboardTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Membership Management")
         self.assertContains(resp, f'href="{reverse("membership-stats")}"')
+        self.assertContains(resp, f'href="{reverse("membership-sponsors")}"')
+
+    def test_membership_sponsors_page_requires_membership_management_permission(self) -> None:
+        self._login_as_freeipa_user("viewer")
+
+        viewer = FreeIPAUser(
+            "viewer",
+            {
+                "uid": ["viewer"],
+                "displayname": ["Viewer User"],
+                "memberof_group": [],
+            },
+        )
+
+        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+            resp = self.client.get(reverse("membership-sponsors"))
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn(reverse("users"), resp["Location"])
+
+    def test_membership_sponsors_page_renders_sponsorship_rows_and_freeipa_fallback(self) -> None:
+        MembershipTypeCategory.objects.update_or_create(
+            name="sponsorship",
+            defaults={
+                "is_individual": False,
+                "is_organization": True,
+                "sort_order": 0,
+            },
+        )
+        MembershipTypeCategory.objects.update_or_create(
+            name="individual",
+            defaults={
+                "is_individual": True,
+                "is_organization": False,
+                "sort_order": 1,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="sponsor-standard",
+            defaults={
+                "name": "Sponsor Standard",
+                "group_cn": "sponsor-standard",
+                "category_id": "sponsorship",
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="individual-standard",
+            defaults={
+                "name": "Individual Standard",
+                "group_cn": "individual-standard",
+                "category_id": "individual",
+                "enabled": True,
+            },
+        )
+
+        sponsor_org = Organization.objects.create(name="Sponsor Org", representative="repuser")
+        fallback_org = Organization.objects.create(name="Fallback Org", representative="repfallback")
+
+        Membership.objects.create(
+            target_organization=sponsor_org,
+            membership_type_id="sponsor-standard",
+            expires_at=timezone.now() + datetime.timedelta(days=5, minutes=1),
+        )
+        Membership.objects.create(
+            target_organization=fallback_org,
+            membership_type_id="sponsor-standard",
+            expires_at=None,
+        )
+        Membership.objects.create(
+            target_username="alice",
+            membership_type_id="individual-standard",
+            expires_at=timezone.now() + datetime.timedelta(days=30),
+        )
+
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.group,
+            principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
+        )
+
+        self._login_as_freeipa_user("reviewer")
+
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "displayname": ["Reviewer User"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+            },
+        )
+        sponsor_rep = FreeIPAUser(
+            "repuser",
+            {
+                "uid": ["repuser"],
+                "displayname": ["Representative User"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "repuser":
+                return sponsor_rep
+            if username == "repfallback":
+                raise RuntimeError("FreeIPA unavailable")
+            return None
+
+        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+            resp = self.client.get(reverse("membership-sponsors"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Sponsor Org")
+        self.assertContains(resp, "Fallback Org")
+        self.assertContains(resp, "Representative User (repuser)")
+        self.assertContains(resp, "repfallback")
+        self.assertContains(resp, f'href="{reverse("organization-detail", kwargs={"organization_id": sponsor_org.pk})}"')
+        self.assertContains(resp, f'href="{reverse("user-profile", kwargs={"username": "repuser"})}"')
+        self.assertContains(resp, 'id="sponsors-table"')
+        self.assertContains(resp, "(5 days left)")
+        self.assertContains(resp, "data-order=\"9999-12-31\"")
+        self.assertNotContains(resp, "alice")
 
     def test_membership_stats_data_requires_permission(self) -> None:
         self._login_as_freeipa_user("viewer")
@@ -151,14 +275,18 @@ class MembershipStatsDashboardTests(TestCase):
         self.assertIn("charts", payload)
 
     def test_membership_stats_data_includes_nationality_distributions(self) -> None:
-        import datetime
-
         from django.core.cache import cache
-        from django.utils import timezone
-
-        from core.models import Membership, MembershipType
 
         cache.clear()
+
+        MembershipTypeCategory.objects.update_or_create(
+            name="individual",
+            defaults={
+                "is_individual": True,
+                "is_organization": False,
+                "sort_order": 0,
+            },
+        )
 
         MembershipType.objects.update_or_create(
             code="individual",

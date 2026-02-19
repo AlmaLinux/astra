@@ -1816,6 +1816,76 @@ def membership_stats(request: HttpRequest) -> HttpResponse:
     )
 
 
+@user_passes_test(has_any_membership_permission, login_url=reverse_lazy("users"))
+def membership_sponsors_list(request: HttpRequest) -> HttpResponse:
+    active_sponsorships = list(
+        Membership.objects.active()
+        .filter(category_id="sponsorship")
+        .select_related("target_organization", "membership_type")
+        .order_by("expires_at")
+    )
+
+    representative_usernames = {
+        str(membership.target_organization.representative or "").strip()
+        for membership in active_sponsorships
+        if membership.target_organization is not None and str(membership.target_organization.representative or "").strip()
+    }
+
+    representative_full_names: dict[str, str] = {}
+    for username in sorted(representative_usernames):
+        try:
+            representative = FreeIPAUser.get(username)
+        except Exception:
+            logger.exception(
+                "membership_sponsors_list: failed to fetch representative from FreeIPA username=%s",
+                username,
+            )
+            continue
+
+        if representative is None:
+            continue
+
+        full_name = str(representative.full_name or "").strip()
+        if full_name:
+            representative_full_names[username] = full_name
+
+    now = timezone.now()
+    warning_days = settings.MEMBERSHIP_EXPIRING_SOON_DAYS
+    memberships: list[dict[str, object]] = []
+    for membership in active_sponsorships:
+        organization = membership.target_organization
+        if organization is None:
+            continue
+
+        rep_username = str(organization.representative or "").strip()
+        rep_fullname = representative_full_names.get(rep_username, "")
+
+        days_left: int | None = None
+        is_expiring_soon = False
+        if membership.expires_at is not None:
+            days_left = (membership.expires_at - now).days
+            is_expiring_soon = days_left <= warning_days
+
+        memberships.append(
+            {
+                "organization": organization,
+                "membership": membership,
+                "rep_username": rep_username,
+                "rep_fullname": rep_fullname,
+                "days_left": days_left,
+                "is_expiring_soon": is_expiring_soon,
+            }
+        )
+
+    return render(
+        request,
+        "core/sponsorship_list.html",
+        {
+            "memberships": memberships,
+        },
+    )
+
+
 @json_permission_required_any(MEMBERSHIP_PERMISSIONS)
 def membership_stats_data(_request: HttpRequest) -> HttpResponse:
     now = timezone.now()

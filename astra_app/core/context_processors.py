@@ -54,7 +54,7 @@ def build_info(_request) -> dict[str, object]:
 _MEMBERSHIP_NAV_URLS = frozenset({
     "membership-requests", "account-invitations", "account-invitations-upload",
     "account-invitations-send", "membership-audit-log", "membership-audit-log-user",
-    "membership-stats",
+    "membership-stats", "membership-sponsors",
 })
 
 _MAIL_NAV_URLS = frozenset({

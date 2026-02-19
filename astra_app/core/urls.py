@@ -274,6 +274,7 @@ urlpatterns = [
         views_membership.membership_stats_data,
         name="membership-stats-data",
     ),
+    path("membership/sponsors/", views_membership.membership_sponsors_list, name="membership-sponsors"),
 
     path(
         "membership/manage/<str:username>/<str:membership_type_code>/expiry/",
