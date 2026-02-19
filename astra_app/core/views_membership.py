@@ -1912,20 +1912,8 @@ def membership_stats_data(_request: HttpRequest) -> HttpResponse:
             "on_hold_requests": MembershipRequest.objects.filter(
                 status=MembershipRequest.Status.on_hold
             ).count(),
-            "expiring_soon_30_days": active_memberships.filter(expires_at__lte=now + datetime.timedelta(days=30))
-            .exclude(expires_at__isnull=True)
-            .values("target_username")
-            .distinct()
-            .count(),
-            "expiring_soon_60_days": active_memberships.filter(expires_at__lte=now + datetime.timedelta(days=60))
-            .exclude(expires_at__isnull=True)
-            .values("target_username")
-            .distinct()
-            .count(),
             "expiring_soon_90_days": active_memberships.filter(expires_at__lte=now + datetime.timedelta(days=90))
             .exclude(expires_at__isnull=True)
-            .values("target_username")
-            .distinct()
             .count(),
             "active_org_sponsorships": Membership.objects.active()
             .filter(target_organization__isnull=False)
@@ -1935,7 +1923,7 @@ def membership_stats_data(_request: HttpRequest) -> HttpResponse:
         # Membership type distribution (active memberships; distinct users per type).
         membership_type_rows = (
             active_memberships.values("membership_type_id", "membership_type__name")
-            .annotate(count=Count("target_username", distinct=True))
+            .annotate(count=Count("id"))
             .order_by("membership_type__name")
         )
         membership_type_labels: list[str] = [r["membership_type__name"] for r in membership_type_rows]
@@ -1985,7 +1973,7 @@ def membership_stats_data(_request: HttpRequest) -> HttpResponse:
             Membership.objects.filter(expires_at__isnull=False, expires_at__gte=now, expires_at__lte=now + datetime.timedelta(days=365))
             .annotate(period=TruncMonth("expires_at"))
             .values("period")
-            .annotate(count=Count("target_username", distinct=True))
+            .annotate(count=Count("id"))
             .order_by("period")
         )
 
