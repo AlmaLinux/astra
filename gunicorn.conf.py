@@ -2,6 +2,7 @@ from __future__ import annotations
 
 accesslog = "-"
 errorlog = "-"
+timeout = 120  # 2 minutes; during imports
 capture_output = True
 loglevel = "info"
 forwarded_allow_ips = "*"
