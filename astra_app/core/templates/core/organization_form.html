@@ -153,4 +153,108 @@
       })();
     </script>
   {% endif %}
+  <script>
+    (function () {
+      'use strict';
+      var tabsEl = document.getElementById('contacts-tabs');
+      if (!tabsEl) return;
+      var formEl = tabsEl.closest('form');
+      if (!formEl) return;
+
+      function refreshTabErrors() {
+        var tabContent = document.getElementById('contacts-tab-content');
+        if (!tabContent) {
+          return { firstErrorLink: null, firstErrorField: null };
+        }
+        var panes = tabContent.querySelectorAll('.tab-pane');
+        var firstErrorLink = null;
+        var firstErrorField = null;
+        for (var i = 0; i < panes.length; i++) {
+          var invalidField = panes[i].querySelector(':invalid');
+          var hasError = !!invalidField;
+          var link = tabsEl.querySelector('[href="#' + panes[i].id + '"]');
+          if (hasError && !firstErrorField) {
+            firstErrorField = invalidField;
+          }
+          if (link) {
+            link.classList.toggle('alx-tab-error', hasError);
+            if (hasError && !firstErrorLink) {
+              firstErrorLink = link;
+            }
+          }
+        }
+        return { firstErrorLink: firstErrorLink, firstErrorField: firstErrorField };
+      }
+
+      function focusInvalidField(field) {
+        if (!field) return;
+
+        if (field.classList && field.classList.contains('select2-hidden-accessible')) {
+          var adjacentContainer = field.nextElementSibling;
+          var selection = null;
+          if (adjacentContainer) {
+            if (adjacentContainer.classList.contains('select2-selection')) {
+              selection = adjacentContainer;
+            } else {
+              selection = adjacentContainer.querySelector('.select2-selection');
+            }
+          }
+          if (!selection && field.parentElement) {
+            selection = field.parentElement.querySelector('.select2-selection');
+          }
+
+          var scrollTarget = selection || adjacentContainer || field;
+          if (scrollTarget && typeof scrollTarget.scrollIntoView === 'function') {
+            scrollTarget.scrollIntoView({ block: 'center' });
+          }
+
+          var jq = window.jQuery;
+          if (jq && jq.fn && jq.fn.select2) {
+            jq(field).select2('open');
+            return;
+          }
+          if (selection && typeof selection.focus === 'function') {
+            selection.focus();
+            return;
+          }
+        }
+
+        if (typeof field.scrollIntoView === 'function') {
+          field.scrollIntoView({ block: 'center' });
+        }
+
+        if (typeof field.focus === 'function') {
+          field.focus();
+        }
+      }
+
+      // The shared validator uses stopPropagation(), which only stops bubbling.
+      // It does not call stopImmediatePropagation(), so this submit listener on
+      // the same form still runs after was-validated is applied.
+      formEl.addEventListener('submit', function () {
+        var tabErrors = refreshTabErrors();
+        var firstErrorLink = tabErrors.firstErrorLink;
+        var firstErrorField = tabErrors.firstErrorField;
+        if (firstErrorLink) {
+          var jq = window.jQuery;
+          if (firstErrorLink.classList.contains('active')) {
+            focusInvalidField(firstErrorField);
+            return;
+          }
+
+          if (jq && jq.fn && jq.fn.tab) {
+            jq(firstErrorLink).one('shown.bs.tab', function () {
+              focusInvalidField(firstErrorField);
+            });
+            jq(firstErrorLink).tab('show');
+          } else {
+            firstErrorLink.click();
+            setTimeout(function () {
+              focusInvalidField(firstErrorField);
+            }, 0);
+          }
+        }
+      }, false);
+    })();
+  </script>
 {% endblock %}

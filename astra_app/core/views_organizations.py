@@ -227,6 +227,19 @@ def _render_org_form(
             "phone_field": form["technical_contact_phone"],
         },
     ]
+
+    # When re-rendering after a failed POST, jump to the first tab that has
+    # errors so the user sees the invalid fields immediately.
+    selected_contact: str | None = None
+    if form.errors:
+        if "representative" in form.fields and form["representative"].errors:
+            selected_contact = "representative"
+        else:
+            for _group in contact_groups:
+                if _group["name_field"].errors or _group["email_field"].errors or _group["phone_field"].errors:
+                    selected_contact = _group["key"]
+                    break
+
     return render(
         request,
         "core/organization_form.html",
@@ -237,6 +250,7 @@ def _render_org_form(
             "organization": organization,
             "show_representatives": "representative" in form.fields,
             "contact_groups": contact_groups,
+            "selected_contact": selected_contact,
         },
     )
 
