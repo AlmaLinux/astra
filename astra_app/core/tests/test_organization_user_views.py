@@ -1177,6 +1177,81 @@ class OrganizationUserViewsTests(TestCase):
         MembershipType.objects.update(enabled=False)
 
         MembershipType.objects.update_or_create(
+            code="platinum",
+            defaults={
+                "name": "Platinum Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 10,
+                "enabled": True,
+                "group_cn": "almalinux-platinum",
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 20,
+                "enabled": True,
+                "group_cn": "almalinux-gold",
+            },
+        )
+
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 30,
+                "enabled": True,
+                "group_cn": "almalinux-silver",
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="ruby",
+            defaults={
+                "name": "Ruby Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 40,
+                "enabled": True,
+                "group_cn": "almalinux-ruby",
+            },
+        )
+
+        org = Organization.objects.create(name="Tiered Org", representative="bob")
+        Membership.objects.create(target_organization=org, membership_type_id="silver")
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
+        self._login_as_freeipa_user("bob")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Change tier")
+        tier_change_url = reverse("organization-membership-request", args=[org.pk]) + "?membership_type=gold"
+        self.assertContains(resp, tier_change_url)
+        self.assertNotContains(
+            resp,
+            reverse("organization-membership-request", args=[org.pk]) + "?membership_type=ruby",
+        )
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.views_membership.block_action_without_coc", return_value=None),
+        ):
+            tier_change_resp = self.client.get(tier_change_url)
+
+        self.assertEqual(tier_change_resp.status_code, 200)
+        self.assertEqual(tier_change_resp.context["form"].initial.get("membership_type"), "gold")
+        self.assertNotContains(resp, "Request membership")
+
+    def test_org_detail_change_tier_uses_previous_tier_when_current_is_highest(self) -> None:
+        from core.models import MembershipType, Organization
+
+        MembershipType.objects.update(enabled=False)
+
+        MembershipType.objects.update_or_create(
             code="silver",
             defaults={
                 "name": "Silver Sponsor Member",
@@ -1197,8 +1272,8 @@ class OrganizationUserViewsTests(TestCase):
             },
         )
 
-        org = Organization.objects.create(name="Tiered Org", representative="bob")
-        Membership.objects.create(target_organization=org, membership_type_id="silver")
+        org = Organization.objects.create(name="Top Tier Org", representative="bob")
+        Membership.objects.create(target_organization=org, membership_type_id="gold")
 
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
@@ -1212,7 +1287,114 @@ class OrganizationUserViewsTests(TestCase):
             resp,
             reverse("organization-membership-request", args=[org.pk]) + "?membership_type=silver",
         )
-        self.assertNotContains(resp, "Request membership")
+
+    def test_org_detail_change_tier_prefers_higher_ranked_tier_for_gold(self) -> None:
+        from core.models import MembershipType, Organization
+
+        MembershipType.objects.update(enabled=False)
+
+        MembershipType.objects.update_or_create(
+            code="platinum",
+            defaults={
+                "name": "Platinum Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 10,
+                "enabled": True,
+                "group_cn": "almalinux-platinum",
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 20,
+                "enabled": True,
+                "group_cn": "almalinux-gold",
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 30,
+                "enabled": True,
+                "group_cn": "almalinux-silver",
+            },
+        )
+
+        org = Organization.objects.create(name="Gold Tier Org", representative="bob")
+        Membership.objects.create(target_organization=org, membership_type_id="gold")
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
+        self._login_as_freeipa_user("bob")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Change tier")
+        self.assertContains(
+            resp,
+            reverse("organization-membership-request", args=[org.pk]) + "?membership_type=platinum",
+        )
+        self.assertNotContains(
+            resp,
+            reverse("organization-membership-request", args=[org.pk]) + "?membership_type=silver",
+        )
+
+    def test_org_detail_change_tier_for_ruby_suggests_silver(self) -> None:
+        from core.models import MembershipType, Organization
+
+        MembershipType.objects.update(enabled=False)
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 20,
+                "enabled": True,
+                "group_cn": "almalinux-gold",
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 30,
+                "enabled": True,
+                "group_cn": "almalinux-silver",
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="ruby",
+            defaults={
+                "name": "Ruby Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 40,
+                "enabled": True,
+                "group_cn": "almalinux-ruby",
+            },
+        )
+
+        org = Organization.objects.create(name="Ruby Tier Org", representative="bob")
+        Membership.objects.create(target_organization=org, membership_type_id="ruby")
+
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
+        self._login_as_freeipa_user("bob")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Change tier")
+        self.assertContains(
+            resp,
+            reverse("organization-membership-request", args=[org.pk]) + "?membership_type=silver",
+        )
 
     def test_org_detail_hides_request_membership_button_when_no_more_categories_available(self) -> None:
         from core.models import MembershipType, Organization
@@ -1573,6 +1755,107 @@ class OrganizationUserViewsTests(TestCase):
         ):
             resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
         self.assertEqual(resp.status_code, 200)
+
+    def test_org_membership_request_country_check_uses_committee_requester_profile(self) -> None:
+        from core.models import FreeIPAPermissionGrant, MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="Committee Country Check Org", representative="bob")
+
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_ADD_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]})
+        representative = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["DE"]})
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "bob":
+                return representative
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.views_membership.block_action_without_coc", return_value=None),
+            patch("core.views_membership.block_action_without_country_code", return_value=None) as country_mock,
+        ):
+            resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(country_mock.call_count, 1)
+        self.assertIs(country_mock.call_args.kwargs["user_data"], reviewer._user_data)
+
+    def test_org_membership_request_country_check_uses_representative_profile(self) -> None:
+        from core.models import MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="Representative Country Check Org", representative="bob")
+
+        representative = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["DE"]})
+        self._login_as_freeipa_user("bob")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=representative),
+            patch("core.views_membership.block_action_without_coc", return_value=None),
+            patch("core.views_membership.block_action_without_country_code", return_value=None) as country_mock,
+        ):
+            resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(country_mock.call_count, 1)
+        self.assertIs(country_mock.call_args.kwargs["user_data"], representative._user_data)
+
+    def test_user_membership_request_country_check_uses_requester_profile(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
+        self._login_as_freeipa_user("alice")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.views_membership.block_action_without_coc", return_value=None),
+            patch("core.views_membership.block_action_without_country_code", return_value=None) as country_mock,
+        ):
+            resp = self.client.get(reverse("membership-request"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(country_mock.call_count, 1)
+        self.assertIs(country_mock.call_args.kwargs["user_data"], alice._user_data)
 
     def test_org_detail_renewal_cta_uses_canonical_membership_request_link(self) -> None:
         from core.models import Membership, MembershipType, Organization

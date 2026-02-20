@@ -573,9 +573,17 @@ def membership_request(request: HttpRequest, organization_id: int | None = None)
         return blocked
 
     representative_user_data = representative_user._user_data if representative_user is not None else None
+    requester_user_data = fu._user_data
+    user_data_for_country_check = requester_user_data
+    if is_org_request:
+        is_requester_representative = organization is not None and username == organization.representative
+        # Committee users can request on behalf of an organization; in that case,
+        # validate the actor's own country code because they are initiating the action.
+        user_data_for_country_check = representative_user_data if is_requester_representative else requester_user_data
+
     blocked = block_action_without_country_code(
         request,
-        user_data=representative_user_data,
+        user_data=user_data_for_country_check,
         action_label=action_label,
     )
     if blocked is not None:

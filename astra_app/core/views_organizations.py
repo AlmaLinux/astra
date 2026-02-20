@@ -33,7 +33,7 @@ from core.membership import (
     sync_organization_representative_groups,
 )
 from core.membership_notes import add_note
-from core.models import AccountInvitation, Membership, MembershipLog, MembershipRequest, Organization
+from core.models import AccountInvitation, Membership, MembershipLog, MembershipRequest, MembershipType, Organization
 from core.organization_claim import (
     build_organization_claim_url,
     read_organization_claim_token,
@@ -442,6 +442,10 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
     sponsorship_entries: list[dict[str, object]] = []
     for s in sponsorships:
         has_pending_request_in_category = s.category_id in pending_request_context.category_ids
+        suggested_tier_code = _suggest_tier_change_membership_type_code(
+            current_membership_type=s.membership_type,
+            requestable_codes=requestable_codes_by_category.get(s.category_id, set()),
+        )
         sponsorship_entries.append({
             "sponsorship": s,
             "badge_text": str(s.membership_type_id).replace("_", " ").title(),
@@ -457,7 +461,7 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
             "tier_change_url": (
                 reverse("organization-membership-request", kwargs={"organization_id": organization.pk})
                 + "?"
-                + urlencode({"membership_type": s.membership_type.code})
+                + urlencode({"membership_type": suggested_tier_code})
             ),
             "request_id": sponsorship_request_id_by_type.get(s.membership_type_id),
         })
@@ -541,6 +545,46 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
             "send_claim_invitation_url": send_claim_invitation_url,
         },
     )
+
+
+def _suggest_tier_change_membership_type_code(
+    *,
+    current_membership_type: MembershipType,
+    requestable_codes: set[str],
+) -> str:
+    if not requestable_codes:
+        return current_membership_type.code
+
+    requestable_tiers = list(
+        MembershipType.objects.filter(category=current_membership_type.category)
+        .filter(code__in=requestable_codes)
+        .order_by("sort_order", "code")
+        .values_list("code", "sort_order")
+    )
+    if not requestable_tiers:
+        return current_membership_type.code
+
+    current_sort_order = current_membership_type.sort_order
+
+    # Sponsorship tiers are ranked by ascending `sort_order` in this codebase,
+    # so the next higher tier has a lower sort_order value.
+    higher_ranked_tiers = [
+        (code, sort_order)
+        for code, sort_order in requestable_tiers
+        if sort_order < current_sort_order
+    ]
+    if higher_ranked_tiers:
+        return max(higher_ranked_tiers, key=lambda tier: (tier[1], tier[0]))[0]
+
+    lower_ranked_tiers = [
+        (code, sort_order)
+        for code, sort_order in requestable_tiers
+        if sort_order > current_sort_order
+    ]
+    if lower_ranked_tiers:
+        return min(lower_ranked_tiers, key=lambda tier: (tier[1], tier[0]))[0]
+
+    return requestable_tiers[0][0]
 
 @post_only_404
 def organization_delete(request: HttpRequest, organization_id: int) -> HttpResponse:
