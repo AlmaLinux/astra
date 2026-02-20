@@ -150,3 +150,64 @@ class ElectionsDetailCandidateCardsTests(TestCase):
         self.assertContains(resp, "Nominated by")
         self.assertContains(resp, reverse("user-profile", args=["nominator"]))
         self.assertContains(resp, "Nominator Person")
+
+    def test_candidate_card_divider_clears_avatar_when_description_missing(self) -> None:
+        self._login_as_freeipa_user("viewer")
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Board election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=2,
+            status=Election.Status.open,
+        )
+
+        Candidate.objects.create(
+            election=election,
+            freeipa_username="adamnelson",
+            nominated_by="benjamingarcia",
+            description="",
+            url="",
+        )
+
+        viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "memberof_group": []})
+        candidate_user = FreeIPAUser(
+            "adamnelson",
+            {
+                "uid": ["adamnelson"],
+                "givenname": ["Adam"],
+                "sn": ["Nelson"],
+                "displayname": ["Adam Nelson"],
+                "memberof_group": [],
+            },
+        )
+        nominator_user = FreeIPAUser(
+            "benjamingarcia",
+            {
+                "uid": ["benjamingarcia"],
+                "givenname": ["Benjamin"],
+                "sn": ["Garcia"],
+                "displayname": ["Benjamin Garcia"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str):
+            if username == "viewer":
+                return viewer
+            if username == "adamnelson":
+                return candidate_user
+            if username == "benjamingarcia":
+                return nominator_user
+            return None
+
+        self.assertIsNotNone(election.pk)
+        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+            resp = self.client.get(reverse("election-detail", args=[election.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "class=\"candidate-card-divider\"")
+        self.assertContains(resp, ".candidate-card-divider")
+        self.assertContains(resp, "clear: both;")

@@ -69,6 +69,8 @@ class Plan093RealtimeValidationTests(SimpleTestCase):
         self.assertIn('field.classList.toggle("is-invalid", !field.checkValidity())', script)
         self.assertIn('field.dataset.astraTouched === "1" || field.classList.contains("is-invalid")', script)
         self.assertNotIn('classList.add("is-valid")', script)
+        self.assertIn('event.submitter && event.submitter.dataset.allowInvalidSubmit === "true"', script)
+        self.assertIn("if (!isValid && !allowInvalidSubmit)", script)
 
     def test_base_css_displays_invalid_feedback_when_field_is_invalid_without_form_was_validated(self) -> None:
         css = self._read_core_static("css", "base.css")

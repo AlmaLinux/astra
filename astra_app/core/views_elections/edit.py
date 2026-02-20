@@ -1,5 +1,6 @@
 """Election creation and editing views."""
 
+import datetime
 
 from django.conf import settings
 from django.contrib import messages
@@ -272,6 +273,20 @@ def _save_candidates_and_groups(
             if c is None:
                 continue
             ExclusionGroupCandidate.objects.create(exclusion_group=group, candidate=c)
+
+
+def _parse_optional_local_datetime(raw_value: str) -> datetime.datetime | None:
+    """Parse an HTML datetime-local value into an aware datetime."""
+    raw = str(raw_value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if timezone.is_naive(parsed):
+        return timezone.make_aware(parsed)
+    return parsed
 
 
 def _issue_and_email_credentials(
@@ -584,8 +599,62 @@ def election_edit(request, election_id: int):
 
         email_save_mode = str(request.POST.get("email_save_mode") or "").strip()
 
-        if action == "save_draft" and details_form.is_valid() and email_form.is_valid() and formsets_ok:
-            election = details_form.save(commit=False)
+        details_form_valid = details_form.is_valid() if action == "save_draft" else False
+        email_form_valid = email_form.is_valid() if action == "save_draft" else False
+
+        if action == "save_draft" and email_form_valid and formsets_ok:
+            draft_name = str(request.POST.get("name") or "").strip()
+            if not draft_name:
+                details_form.add_error("name", "This field is required.")
+                formsets_ok = False
+
+            if details_form_valid:
+                election = details_form.save(commit=False)
+            else:
+                election = election if election is not None else Election(status=Election.Status.draft)
+
+                election.name = draft_name
+                election.description = str(request.POST.get("description") or "")
+                election.url = str(request.POST.get("url") or "")
+
+                if "eligible_group_cn" in request.POST:
+                    election.eligible_group_cn = str(request.POST.get("eligible_group_cn") or "").strip()
+
+                parsed_start = _parse_optional_local_datetime(str(request.POST.get("start_datetime") or ""))
+                parsed_end = _parse_optional_local_datetime(str(request.POST.get("end_datetime") or ""))
+
+                fallback_start = election.start_datetime if election.start_datetime else timezone.now()
+                election.start_datetime = parsed_start if parsed_start is not None else fallback_start
+
+                if parsed_end is not None:
+                    election.end_datetime = parsed_end
+                else:
+                    # Keep drafts startable only after explicit date completion.
+                    election.end_datetime = election.start_datetime
+
+                number_of_seats_raw = str(request.POST.get("number_of_seats") or "").strip()
+                if number_of_seats_raw:
+                    try:
+                        number_of_seats = int(number_of_seats_raw)
+                    except ValueError:
+                        number_of_seats = None
+                    if number_of_seats is not None and number_of_seats >= 1:
+                        election.number_of_seats = number_of_seats
+
+                if election.number_of_seats is None:
+                    election.number_of_seats = 1
+
+                quorum_raw = str(request.POST.get("quorum") or "").strip()
+                if quorum_raw:
+                    try:
+                        quorum = int(quorum_raw)
+                    except ValueError:
+                        quorum = None
+                    if quorum is not None and 0 <= quorum <= 100:
+                        election.quorum = quorum
+
+                if election.quorum is None:
+                    election.quorum = 10
 
             try:
                 validation = elections_eligibility.validate_candidates_for_election(
@@ -640,8 +709,8 @@ def election_edit(request, election_id: int):
             result = _handle_start_election(request, election, details_form, email_form)
             if result is not None:
                 return result
-
-        messages.error(request, "Please correct the errors below.")
+        else:
+            messages.error(request, "Please correct the errors below.")
     else:
         details_form = ElectionDetailsForm(instance=election)
         _disable_details_form_for_started(election, details_form)

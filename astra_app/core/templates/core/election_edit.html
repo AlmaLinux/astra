@@ -87,7 +87,7 @@
       <div class="col-lg-3">
         <div class="card card-outline card-secondary">
           <div class="card-body">
-            <button type="submit" class="btn btn-primary btn-block" onclick="document.getElementById('election-edit-action').value='save_draft'" title="Save changes as a draft">
+            <button type="submit" data-allow-invalid-submit="true" class="btn btn-primary btn-block" onclick="document.getElementById('election-edit-action').value='save_draft'" title="Save changes as a draft">
               Save Draft
             </button>
 
@@ -143,7 +143,7 @@
             </div>
             <div class="modal-footer">
               <button type="button" class="btn btn-outline-secondary" data-dismiss="modal" title="Close dialog without starting">Cancel</button>
-              <button type="submit" class="btn btn-success" onclick="document.getElementById('election-edit-action').value='start_election'" title="Start the election and send credentials">Start election &amp; send credentials</button>
+              <button type="submit" data-allow-invalid-submit="true" class="btn btn-success" onclick="document.getElementById('election-edit-action').value='start_election'" title="Start the election and send credentials">Start election &amp; send credentials</button>
             </div>
           </div>
         </div>

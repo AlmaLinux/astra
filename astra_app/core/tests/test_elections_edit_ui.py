@@ -161,6 +161,27 @@ class ElectionEditPermissionTests(TestCase):
         self.assertNotContains(resp, 'data-target="#start-election-modal"')
         self.assertNotContains(resp, 'id="start-election-modal"')
 
+    def test_new_election_save_draft_button_allows_invalid_submit_without_formnovalidate(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        resp = self.client.get(reverse("election-edit", args=[0]))
+        self.assertEqual(resp.status_code, 200)
+
+        html = resp.content.decode("utf-8")
+        self.assertRegex(
+            html,
+            r"<button[^>]*data-allow-invalid-submit=\"true\"[^>]*title=\"Save changes as a draft\"[^>]*>",
+        )
+        self.assertNotRegex(
+            html,
+            r"<button[^>]*formnovalidate[^>]*title=\"Save changes as a draft\"[^>]*>",
+        )
+
 
 class ElectionDraftDeletionTests(TestCase):
     def _login_as_freeipa_user(self, username: str) -> None:
@@ -249,7 +270,7 @@ class ElectionDraftDeletionTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(Election.objects.filter(name="New draft", status=Election.Status.draft).count(), 1)
 
-    def test_new_election_post_rejects_zero_seats(self) -> None:
+    def test_start_election_submit_button_allows_invalid_submit_for_server_validation(self) -> None:
         self._login_as_freeipa_user("admin")
         FreeIPAPermissionGrant.objects.create(
             principal_type=FreeIPAPermissionGrant.PrincipalType.user,
@@ -258,17 +279,91 @@ class ElectionDraftDeletionTests(TestCase):
         )
 
         now = timezone.now()
+        election = Election.objects.create(
+            name="Draft election",
+            description="",
+            url="",
+            start_datetime=now + datetime.timedelta(days=10),
+            end_datetime=now + datetime.timedelta(days=11),
+            number_of_seats=1,
+            status=Election.Status.draft,
+        )
+
+        resp = self.client.get(reverse("election-edit", args=[election.id]))
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+        self.assertRegex(
+            html,
+            r"<button(?=[^>]*title=\"Start the election and send credentials\")(?=[^>]*data-allow-invalid-submit=\"true\")[^>]*>",
+        )
+        self.assertNotRegex(
+            html,
+            r"<button[^>]*title=\"Start the election and send credentials\"[^>]*formnovalidate[^>]*>",
+        )
+
+    def test_start_election_without_candidates_shows_specific_error_without_generic_duplicate(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Draft election",
+            description="",
+            url="",
+            start_datetime=now + datetime.timedelta(days=10),
+            end_datetime=now + datetime.timedelta(days=11),
+            number_of_seats=1,
+            quorum=10,
+            status=Election.Status.draft,
+        )
+
+        resp = self.client.post(
+            reverse("election-edit", args=[election.id]),
+            data={
+                "action": "start_election",
+                "name": election.name,
+                "description": election.description,
+                "url": election.url,
+                "start_datetime": election.start_datetime.strftime("%Y-%m-%dT%H:%M"),
+                "end_datetime": election.end_datetime.strftime("%Y-%m-%dT%H:%M"),
+                "number_of_seats": str(election.number_of_seats),
+                "quorum": str(election.quorum),
+                "email_template_id": "",
+                "subject": "",
+                "html_content": "",
+                "text_content": "",
+            },
+            follow=False,
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Add at least one candidate before starting the election.")
+        self.assertNotContains(resp, "Please correct the errors below.")
+
+    def test_new_election_post_save_draft_with_only_name_creates_partial_election(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
         resp = self.client.post(
             reverse("election-edit", args=[0]),
             data={
                 "action": "save_draft",
-                "name": "Invalid draft",
+                "name": "Partial draft",
                 "description": "",
                 "url": "",
-                "start_datetime": (now + datetime.timedelta(days=10)).strftime("%Y-%m-%dT%H:%M"),
-                "end_datetime": (now + datetime.timedelta(days=11)).strftime("%Y-%m-%dT%H:%M"),
-                "number_of_seats": "0",
-                "quorum": "50",
+                "start_datetime": "",
+                "end_datetime": "",
+                "number_of_seats": "",
+                "quorum": "",
+                "eligible_group_cn": "",
                 "email_template_id": "",
                 "subject": "",
                 "html_content": "",
@@ -291,12 +386,78 @@ class ElectionDraftDeletionTests(TestCase):
             follow=False,
         )
 
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Number of seats")
-        self.assertContains(resp, "Ensure this value is greater than or equal to 1")
-        self.assertContains(resp, 'id="election-edit-form"')
-        self.assertContains(resp, "was-validated")
-        self.assertContains(resp, "invalid-feedback")
+        self.assertEqual(resp.status_code, 302)
+        election = Election.objects.get(name="Partial draft")
+        self.assertEqual(election.status, Election.Status.draft)
+        self.assertEqual(election.start_datetime, election.end_datetime)
+
+    def test_start_election_still_requires_required_fields_after_partial_draft_save(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        save_resp = self.client.post(
+            reverse("election-edit", args=[0]),
+            data={
+                "action": "save_draft",
+                "name": "Draft requiring completion",
+                "description": "",
+                "url": "",
+                "start_datetime": "",
+                "end_datetime": "",
+                "number_of_seats": "",
+                "quorum": "",
+                "eligible_group_cn": "",
+                "email_template_id": "",
+                "subject": "",
+                "html_content": "",
+                "text_content": "",
+                "candidates-TOTAL_FORMS": "1",
+                "candidates-INITIAL_FORMS": "0",
+                "candidates-MIN_NUM_FORMS": "0",
+                "candidates-MAX_NUM_FORMS": "1000",
+                "candidates-0-id": "",
+                "candidates-0-freeipa_username": "",
+                "candidates-0-nominated_by": "",
+                "candidates-0-description": "",
+                "candidates-0-url": "",
+                "candidates-0-DELETE": "",
+                "groups-TOTAL_FORMS": "0",
+                "groups-INITIAL_FORMS": "0",
+                "groups-MIN_NUM_FORMS": "0",
+                "groups-MAX_NUM_FORMS": "1000",
+            },
+            follow=False,
+        )
+        self.assertEqual(save_resp.status_code, 302)
+        election = Election.objects.get(name="Draft requiring completion")
+
+        start_resp = self.client.post(
+            reverse("election-edit", args=[election.id]),
+            data={
+                "action": "start_election",
+                "name": election.name,
+                "description": election.description,
+                "url": election.url,
+                "start_datetime": "",
+                "end_datetime": "",
+                "number_of_seats": "",
+                "quorum": "",
+                "email_template_id": "",
+                "subject": "",
+                "html_content": "",
+                "text_content": "",
+            },
+            follow=False,
+        )
+
+        self.assertEqual(start_resp.status_code, 200)
+        self.assertContains(start_resp, "Please correct the errors below.")
+        election.refresh_from_db()
+        self.assertEqual(election.status, Election.Status.draft)
 
     @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=1)
     def test_save_draft_rejects_self_nomination_and_does_not_save_candidate(self) -> None:

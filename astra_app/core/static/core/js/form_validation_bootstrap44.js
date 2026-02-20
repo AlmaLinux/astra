@@ -76,12 +76,10 @@
     form.addEventListener(
       "submit",
       function (event) {
-        if (event.submitter && event.submitter.formNoValidate) {
-          return;
-        }
-
+        const allowInvalidSubmit =
+          event.submitter && event.submitter.dataset.allowInvalidSubmit === "true";
         const isValid = validateForm(form, "submit", event.target);
-        if (!isValid) {
+        if (!isValid && !allowInvalidSubmit) {
           event.preventDefault();
           event.stopPropagation();
         }
