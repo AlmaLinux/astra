@@ -1257,6 +1257,39 @@ class OrganizationUserViewsTests(TestCase):
         self.assertNotContains(resp, "Request membership")
         self.assertNotContains(resp, reverse("organization-membership-request", args=[org.pk]))
 
+    def test_org_detail_shows_request_membership_button_for_committee_user(self) -> None:
+        from core.models import FreeIPAPermissionGrant, MembershipType, Organization
+
+        MembershipType.objects.update(enabled=False)
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 1,
+                "enabled": True,
+                "group_cn": "almalinux-gold",
+            },
+        )
+
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_ADD_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        org = Organization.objects.create(name="Committee Request Org", representative="bob")
+
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]})
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Request membership")
+        self.assertContains(resp, reverse("organization-membership-request", args=[org.pk]))
+
     @override_settings(
         STORAGES={
             "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
@@ -1507,7 +1540,7 @@ class OrganizationUserViewsTests(TestCase):
 
     def test_org_membership_request_requires_representative(self) -> None:
         from core.models import FreeIPAPermissionGrant, MembershipType, Organization
-        from core.permissions import ASTRA_VIEW_MEMBERSHIP
+        from core.permissions import ASTRA_ADD_MEMBERSHIP
 
         MembershipType.objects.update_or_create(
             code="gold",
@@ -1528,7 +1561,7 @@ class OrganizationUserViewsTests(TestCase):
         self.assertEqual(resp.status_code, 404)
 
         FreeIPAPermissionGrant.objects.create(
-            permission=ASTRA_VIEW_MEMBERSHIP,
+            permission=ASTRA_ADD_MEMBERSHIP,
             principal_type=FreeIPAPermissionGrant.PrincipalType.user,
             principal_name="reviewer",
         )
@@ -1539,7 +1572,7 @@ class OrganizationUserViewsTests(TestCase):
             patch("core.views_membership.block_action_without_coc", return_value=None),
         ):
             resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
-        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.status_code, 200)
 
     def test_org_detail_renewal_cta_uses_canonical_membership_request_link(self) -> None:
         from core.models import Membership, MembershipType, Organization

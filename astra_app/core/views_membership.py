@@ -540,9 +540,10 @@ def membership_request(request: HttpRequest, organization_id: int | None = None)
         raise Http404("User not found")
 
     organization = None
+    can_request_for_organization = request.user.has_perm(ASTRA_ADD_MEMBERSHIP)
     if organization_id is not None:
         organization = get_object_or_404(Organization, pk=organization_id)
-        if get_username(request) != organization.representative:
+        if username != organization.representative and not can_request_for_organization:
             raise Http404("Not found")
 
     is_org_request = organization is not None

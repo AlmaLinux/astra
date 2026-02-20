@@ -464,8 +464,9 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
 
     can_edit_organization = _can_edit_organization(request, organization)
     can_delete_organization = _can_delete_organization(request, organization)
+    can_request_membership = is_representative or request.user.has_perm(ASTRA_ADD_MEMBERSHIP)
     membership_can_request_any = False
-    if is_representative:
+    if can_request_membership:
         membership_can_request_any = requestability_context.membership_can_request_any
 
 
@@ -530,6 +531,7 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
             "sponsorship_entries": sponsorship_entries,
             "sponsorships": sponsorships,
             "is_representative": is_representative,
+            "can_request_membership": can_request_membership,
             "membership_can_request_any": membership_can_request_any,
             "can_edit_organization": can_edit_organization,
             "can_delete_organization": can_delete_organization,
