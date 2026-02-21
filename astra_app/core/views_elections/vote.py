@@ -1,5 +1,6 @@
 """Election voting: ballot parsing, vote submission, and vote page."""
 
+import hmac
 import json
 import random
 
@@ -80,16 +81,16 @@ def _parse_vote_payload(request, *, election: Election) -> tuple[str, list[int]]
 
 @require_POST
 def election_vote_submit(request, election_id: int):
+    username = get_username(request)
+    if not username:
+        return JsonResponse({"ok": False, "error": "Authentication required."}, status=403)
+
     election = _get_active_election(election_id, fields=["id", "status"])
 
     try:
         credential_public_id, ranking = _parse_vote_payload(request, election=election)
     except (ValueError, json.JSONDecodeError) as exc:
         return JsonResponse({"ok": False, "error": str(exc)}, status=400)
-
-    username = get_username(request)
-    if not username:
-        return JsonResponse({"ok": False, "error": "Authentication required."}, status=403)
 
     if not has_signed_coc(username):
         return JsonResponse(
@@ -124,15 +125,8 @@ def election_vote_submit(request, election_id: int):
     if int(user_credential.weight or 0) <= 0:
         return JsonResponse({"ok": False, "error": "Not eligible to vote in this election."}, status=403)
 
-    if str(user_credential.public_id) != credential_public_id:
-        other_credential = (
-            VotingCredential.objects.filter(election_id=election.id, public_id=credential_public_id)
-            .only("freeipa_username")
-            .first()
-        )
-        if other_credential is None:
-            return JsonResponse({"ok": False, "error": "Invalid credential."}, status=400)
-        return JsonResponse({"ok": False, "error": "Credential does not belong to the current user."}, status=403)
+    if not hmac.compare_digest(str(user_credential.public_id), str(credential_public_id)):
+        return JsonResponse({"ok": False, "error": "Invalid credential."}, status=400)
 
     try:
         receipt = submit_ballot(

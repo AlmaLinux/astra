@@ -13,11 +13,16 @@ from django.utils import timezone
 from core.backends import FreeIPAUser
 from core.elections_services import (
     BallotReceipt,
+    ElectionError,
+    ElectionNotOpenError,
+    InvalidBallotError,
     InvalidCredentialError,
     anonymize_election,
+    build_public_audit_export,
     close_election,
     issue_voting_credential,
     issue_voting_credentials_from_memberships,
+    scrub_election_emails,
     send_vote_receipt_email,
     send_voting_credential_email,
     submit_ballot,
@@ -130,6 +135,27 @@ class ElectionCredentialAndBallotTests(TestCase):
                 ranking=[self.c1.id],
             )
 
+    def test_submit_ballot_ranking_too_long_raises_invalid_ballot_error(self) -> None:
+        ranking = [self.c1.id] * 501
+
+        with self.assertRaisesRegex(InvalidBallotError, r"Ranking too long"):
+            submit_ballot(
+                election=self.election,
+                credential_public_id=self.cred.public_id,
+                ranking=ranking,
+            )
+
+    def test_submit_ballot_status_check_uses_locked_row(self) -> None:
+        stale_election = self.election
+        Election.objects.filter(pk=stale_election.pk).update(status=Election.Status.closed)
+
+        with self.assertRaises(ElectionNotOpenError):
+            submit_ballot(
+                election=stale_election,
+                credential_public_id=self.cred.public_id,
+                ranking=[self.c1.id],
+            )
+
     def test_ballot_hash_unique_per_credential(self) -> None:
         cred2 = VotingCredential.objects.create(
             election=self.election,
@@ -155,6 +181,13 @@ class ElectionCredentialAndBallotTests(TestCase):
 
         self.assertNotEqual(ballot2.credential_public_id, ballot1.credential_public_id)
         self.assertNotEqual(ballot2.ballot_hash, ballot1.ballot_hash)
+
+    def test_voting_credential_str_does_not_expose_public_id(self) -> None:
+        rendered = str(self.cred)
+
+        self.assertNotIn(self.cred.public_id, rendered)
+        self.assertIn(f"election_id={self.cred.election_id}", rendered)
+        self.assertIn(f"pk={self.cred.pk}", rendered)
 
     def test_submit_ballot_same_ranking_produces_distinct_receipts(self) -> None:
         receipt1 = submit_ballot(
@@ -267,6 +300,24 @@ class ElectionCredentialIssuanceAndAnonymizationTests(TestCase):
         cred.refresh_from_db()
         self.assertIsNone(cred.freeipa_username)
 
+    def test_anonymize_election_audit_entry_is_not_public(self) -> None:
+        issue_voting_credential(
+            election=self.election,
+            freeipa_username="voter1",
+            weight=1,
+        )
+
+        self.election.status = Election.Status.closed
+        self.election.save(update_fields=["status"])
+
+        anonymize_election(election=self.election)
+
+        audit = AuditLogEntry.objects.filter(
+            election=self.election,
+            event_type="election_anonymized",
+        ).latest("id")
+        self.assertEqual(audit.is_public, False)
+
     def test_send_voting_credential_email_composed_persists_election_context(self) -> None:
         from post_office.models import Email
 
@@ -322,6 +373,57 @@ class ElectionCredentialIssuanceAndAnonymizationTests(TestCase):
 
         self.assertGreaterEqual(result["emails_scrubbed"], 1)
         self.assertFalse(Email.objects.filter(pk=queued.pk).exists())
+
+    def test_scrub_election_emails_fallback_catches_receipt_email_without_context(self) -> None:
+        from post_office.models import Email
+
+        verify_path = reverse("ballot-verify")
+        queued = Email.objects.create(
+            from_email="noreply@example.com",
+            to="voter1@example.com",
+            subject="Vote receipt",
+            message=f"Verify your ballot: {verify_path}?receipt=abc123",
+            html_message=f"<a href=\"{verify_path}?receipt=abc123\">Verify</a>",
+            context={},
+        )
+
+        deleted = scrub_election_emails(election=self.election)
+
+        self.assertEqual(deleted, 1)
+        self.assertFalse(Email.objects.filter(pk=queued.pk).exists())
+
+    def test_anonymize_election_scrub_anomaly_logged_and_flagged(self) -> None:
+        issue_voting_credential(
+            election=self.election,
+            freeipa_username="voter1",
+            weight=1,
+        )
+        issue_voting_credential(
+            election=self.election,
+            freeipa_username="voter2",
+            weight=1,
+        )
+
+        self.election.status = Election.Status.closed
+        self.election.save(update_fields=["status"])
+
+        with (
+            self.assertLogs("core.elections_services", level="WARNING") as log_capture,
+            patch("core.elections_services.scrub_election_emails", return_value=1),
+        ):
+            result = anonymize_election(election=self.election)
+
+        self.assertEqual(result["credentials_affected"], 2)
+        self.assertEqual(result["emails_scrubbed"], 1)
+        self.assertTrue(any("emails_scrubbed=1 < credentials_affected=2" in entry for entry in log_capture.output))
+
+        audit = AuditLogEntry.objects.filter(
+            election=self.election,
+            event_type="election_anonymized",
+            is_public=False,
+        ).latest("id")
+        self.assertIsInstance(audit.payload, dict)
+        self.assertEqual(audit.payload.get("scrub_anomaly"), True)
 
 
 @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=90)
@@ -579,9 +681,150 @@ class ElectionPublicExportTests(TestCase):
         self.assertIsInstance(ts, str)
         self.assertTrue(re.fullmatch(r"\d{4}-\d{2}-\d{2}", ts))
 
+    def test_public_audit_export_strips_actor_from_payload(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Audit export actor election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=10),
+            end_datetime=now - datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.tallied,
+        )
+
+        AuditLogEntry.objects.create(
+            election=election,
+            event_type="tally_completed",
+            payload={"actor": "admin_user", "some_field": "value"},
+            is_public=True,
+        )
+
+        export = build_public_audit_export(election=election)
+        audit_log = export.get("audit_log")
+        self.assertIsInstance(audit_log, list)
+        self.assertEqual(len(audit_log), 1)
+        payload = audit_log[0].get("payload") if isinstance(audit_log[0], dict) else {}
+
+        self.assertIsInstance(payload, dict)
+        self.assertNotIn("actor", payload)
+        self.assertEqual(payload.get("some_field"), "value")
+
+    def test_public_audit_export_excludes_election_anonymized(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Audit export anonymized exclusion election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=10),
+            end_datetime=now - datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.tallied,
+        )
+
+        AuditLogEntry.objects.create(
+            election=election,
+            event_type="tally_round",
+            payload={"round": 1},
+            is_public=True,
+        )
+        AuditLogEntry.objects.create(
+            election=election,
+            event_type="election_anonymized",
+            payload={"credentials_affected": 10, "emails_scrubbed": 10},
+            is_public=False,
+        )
+
+        export = build_public_audit_export(election=election)
+        audit_log = export.get("audit_log")
+        self.assertIsInstance(audit_log, list)
+
+        event_types = [entry.get("event_type") for entry in audit_log if isinstance(entry, dict)]
+        self.assertIn("tally_round", event_types)
+        self.assertNotIn("election_anonymized", event_types)
+
 
 class ElectionCloseAndTallyTests(TestCase):
-    def test_close_election_anonymizes_credentials_and_writes_public_audit(self) -> None:
+    def test_close_election_failure_audit_persists_outside_transaction(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Close failure election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+        VotingCredential.objects.create(
+            election=election,
+            public_id="cred-close-fail",
+            freeipa_username="alice",
+            weight=1,
+        )
+
+        with patch("core.elections_services.anonymize_election", side_effect=RuntimeError("scrub failed")):
+            with self.assertRaises(ElectionError):
+                close_election(election=election, actor="admin")
+
+        self.assertTrue(
+            AuditLogEntry.objects.filter(
+                election=election,
+                event_type="election_close_failed",
+                is_public=False,
+            ).exists()
+        )
+
+    def test_tally_failure_audit_persists_outside_transaction(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Tally failure election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=10),
+            end_datetime=now - datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.closed,
+        )
+        Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
+
+        with patch("core.elections_meek.tally_meek", side_effect=RuntimeError("meek failed")):
+            with self.assertRaises(ElectionError):
+                tally_election(election=election, actor="admin")
+
+        self.assertTrue(
+            AuditLogEntry.objects.filter(
+                election=election,
+                event_type="tally_failed",
+                is_public=False,
+            ).exists()
+        )
+
+    def test_close_election_concurrent_double_close_safe(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Close twice election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+        VotingCredential.objects.create(
+            election=election,
+            public_id="cred-close-twice",
+            freeipa_username="alice",
+            weight=1,
+        )
+
+        close_election(election=election)
+
+        with self.assertRaises(ElectionError):
+            close_election(election=election)
+
+        self.assertEqual(
+            AuditLogEntry.objects.filter(election=election, event_type="election_closed").count(),
+            1,
+        )
+        self.assertIsNone(VotingCredential.objects.get(election=election).freeipa_username)
+
+    def test_close_election_anonymizes_credentials_and_writes_public_and_private_audit(self) -> None:
         now = timezone.now()
         election = Election.objects.create(
             name="Close election",
@@ -607,8 +850,12 @@ class ElectionCloseAndTallyTests(TestCase):
         public_events = list(
             AuditLogEntry.objects.filter(election=election, is_public=True).values_list("event_type", flat=True)
         )
-        self.assertIn("election_anonymized", public_events)
         self.assertIn("election_closed", public_events)
+
+        private_events = list(
+            AuditLogEntry.objects.filter(election=election, is_public=False).values_list("event_type", flat=True)
+        )
+        self.assertIn("election_anonymized", private_events)
 
     def test_close_election_sets_end_datetime_to_close_time(self) -> None:
         now = timezone.now()
@@ -1073,6 +1320,18 @@ class ElectionVoteEndpointTests(TestCase):
     def test_vote_submit_rejects_credential_belonging_to_different_user(self) -> None:
         self._login_as_freeipa_user("voter2")
 
+        Membership.objects.create(
+            target_username="voter2",
+            membership_type=MembershipType.objects.get(code="voter"),
+            expires_at=None,
+        )
+        VotingCredential.objects.create(
+            election=self.election,
+            public_id="cred-vote-2",
+            freeipa_username="voter2",
+            weight=1,
+        )
+
         url = reverse("election-vote-submit", args=[self.election.id])
 
         voter2 = FreeIPAUser("voter2", {"uid": ["voter2"], "memberof_group": []})
@@ -1085,8 +1344,65 @@ class ElectionVoteEndpointTests(TestCase):
                 },
                 content_type="application/json",
             )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json().get("error"), "Invalid credential.")
+
+    def test_vote_submit_unauthenticated_returns_403_without_db_queries(self) -> None:
+        from django.test import RequestFactory
+
+        from core.views_elections.vote import election_vote_submit
+
+        request = RequestFactory().post(
+            reverse("election-vote-submit", args=[self.election.id]),
+            data=json.dumps(
+                {
+                    "credential_public_id": self.cred.public_id,
+                    "ranking": [self.c1.id],
+                }
+            ),
+            content_type="application/json",
+        )
+
+        with (
+            patch("core.views_elections.vote.get_username", return_value=None),
+            patch("core.views_elections.vote._get_active_election", return_value=self.election) as get_election_mock,
+        ):
+            response = election_vote_submit(request, self.election.id)
+
         self.assertEqual(response.status_code, 403)
-        self.assertIn("error", response.json())
+        self.assertEqual(json.loads(response.content), {"ok": False, "error": "Authentication required."})
+        get_election_mock.assert_not_called()
+
+    def test_vote_submit_credential_check_is_timing_safe(self) -> None:
+        self._login_as_freeipa_user("voter2")
+
+        Membership.objects.create(
+            target_username="voter2",
+            membership_type=MembershipType.objects.get(code="voter"),
+            expires_at=None,
+        )
+        VotingCredential.objects.create(
+            election=self.election,
+            public_id="cred-vote-2",
+            freeipa_username="voter2",
+            weight=1,
+        )
+
+        url = reverse("election-vote-submit", args=[self.election.id])
+
+        voter2 = FreeIPAUser("voter2", {"uid": ["voter2"], "memberof_group": []})
+        with patch("core.backends.FreeIPAUser.get", return_value=voter2):
+            response = self.client.post(
+                url,
+                data={
+                    "credential_public_id": self.cred.public_id,
+                    "ranking": [self.c1.id],
+                },
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json().get("error"), "Invalid credential.")
 
     def test_vote_submit_json_creates_or_updates_ballot(self) -> None:
         self._login_as_freeipa_user("voter1")
@@ -1234,6 +1550,43 @@ class ElectionVoteEndpointTests(TestCase):
             )
         self.assertEqual(response.status_code, 400)
         self.assertIn("error", response.json())
+
+    def test_vote_submit_wrong_credential_returns_400_regardless_of_existence(self) -> None:
+        self._login_as_freeipa_user("voter1")
+
+        VotingCredential.objects.create(
+            election=self.election,
+            public_id="cred-vote-2",
+            freeipa_username="voter2",
+            weight=1,
+        )
+
+        url = reverse("election-vote-submit", args=[self.election.id])
+
+        voter1 = FreeIPAUser("voter1", {"uid": ["voter1"], "memberof_group": []})
+        with patch("core.backends.FreeIPAUser.get", return_value=voter1):
+            missing_resp = self.client.post(
+                url,
+                data={
+                    "credential_public_id": "cred-does-not-exist",
+                    "ranking": [self.c1.id],
+                },
+                content_type="application/json",
+            )
+
+        with patch("core.backends.FreeIPAUser.get", return_value=voter1):
+            other_user_resp = self.client.post(
+                url,
+                data={
+                    "credential_public_id": "cred-vote-2",
+                    "ranking": [self.c1.id],
+                },
+                content_type="application/json",
+            )
+
+        self.assertEqual(missing_resp.status_code, 400)
+        self.assertEqual(other_user_resp.status_code, 400)
+        self.assertEqual(missing_resp.json(), other_user_resp.json())
 
     def test_vote_submit_rejects_when_election_not_open(self) -> None:
         self._login_as_freeipa_user("voter1")

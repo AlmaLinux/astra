@@ -839,6 +839,15 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                                 bcc=bcc,
                                 reply_to=reply_to,
                             )
+
+                            raw_election_id = recipient.get("election_id")
+                            if raw_election_id is not None:
+                                try:
+                                    queued_email.context = {"election_id": int(raw_election_id)}
+                                    queued_email.save(update_fields=["context"])
+                                except (TypeError, ValueError):
+                                    pass
+
                             sent += 1
 
                             if membership_request is not None:

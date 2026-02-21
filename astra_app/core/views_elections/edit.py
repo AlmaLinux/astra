@@ -5,6 +5,7 @@ import datetime
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import permission_required
+from django.db import transaction
 from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest
 from django.shortcuts import redirect, render
 from django.urls import reverse, reverse_lazy
@@ -35,6 +36,7 @@ from core.views_elections._helpers import (
     _extend_election_end_from_post,
     _get_active_election,
 )
+from core.views_utils import get_username
 
 # ---------------------------------------------------------------------------
 # election_edit helpers
@@ -446,30 +448,47 @@ def _handle_start_election(
         return None
 
     # All validations passed — commit the election start.
-    election = details_form.save(commit=False)
+    started_at = timezone.now()
 
-    # Align the published start timestamp with when the election actually opens.
-    election.start_datetime = timezone.now()
+    with transaction.atomic():
+        locked = Election.objects.select_for_update().get(pk=election.pk)
+        if locked.status != Election.Status.draft:
+            messages.error(request, "This election has already been started.")
+            return None
 
-    _apply_email_template_from_form(election, email_form)
+        # Re-bind details to the locked row so concurrent updates cannot race this write.
+        locked_form = ElectionDetailsForm(details_form.data, instance=locked)
+        if not locked_form.is_valid():
+            messages.error(request, "Please correct the errors below.")
+            return None
+        locked = locked_form.save(commit=False)
 
-    election.status = Election.Status.open
-    election.save()
+        # Align the published start timestamp with when the election actually opens.
+        locked.start_datetime = started_at
+        _apply_email_template_from_form(locked, email_form)
 
-    total_credentials, emailed, skipped, failures = _issue_and_email_credentials(request, election)
+        locked.status = Election.Status.open
+        locked.save()
 
-    AuditLogEntry.objects.create(
-        election=election,
-        event_type="election_started",
-        payload={
+        total_credentials, emailed, skipped, failures = _issue_and_email_credentials(request, locked)
+
+        username = get_username(request)
+        payload: dict[str, object] = {
             "eligible_voters": total_credentials,
             "emailed": emailed,
             "skipped": skipped,
             "failures": failures,
-            "genesis_chain_hash": election_genesis_chain_hash(election.id),
-        },
-        is_public=True,
-    )
+            "genesis_chain_hash": election_genesis_chain_hash(locked.id),
+        }
+        if username:
+            payload["actor"] = username
+
+        AuditLogEntry.objects.create(
+            election=locked,
+            event_type="election_started",
+            payload=payload,
+            is_public=True,
+        )
 
     if emailed:
         messages.success(request, f"Election started; emailed {emailed} voter(s).")
@@ -477,7 +496,7 @@ def _handle_start_election(
         messages.warning(request, f"Skipped {skipped} voter(s) (missing user/email).")
     if failures:
         messages.error(request, f"Failed to email {failures} voter(s).")
-    return redirect("election-detail", election_id=election.id)
+    return redirect("election-detail", election_id=locked.id)
 
 
 @permission_required(ASTRA_ADD_ELECTION, raise_exception=True, login_url=reverse_lazy("users"))

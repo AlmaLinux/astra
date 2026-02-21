@@ -668,6 +668,69 @@ class SendMailTests(TestCase):
         self.assertNotIn(_CSV_SESSION_KEY, updated_session)
         self.assertNotIn(_PREVIEW_CONTEXT_SESSION_KEY, updated_session)
 
+    def test_send_mail_election_credential_resend_tags_email_context(self) -> None:
+        from post_office.models import Email
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
+
+        session = self.client.session
+        session[_CSV_SESSION_KEY] = json.dumps(
+            {
+                "header_to_var": {
+                    "Email": "email",
+                    "Election ID": "election_id",
+                },
+                "recipients": [
+                    {
+                        "email": "alice@example.com",
+                        "election_id": "5",
+                    }
+                ],
+            }
+        )
+        session.save()
+
+        def _queue_email(**kwargs):
+            return Email.objects.create(
+                from_email=kwargs["sender"],
+                to=kwargs["recipients"][0],
+                cc="",
+                bcc="",
+                subject=str(kwargs["subject_source"]),
+                message=str(kwargs["text_source"]),
+                html_message=str(kwargs["html_source"]),
+            )
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.backends.FreeIPAUser.all", return_value=[]),
+            patch("core.views_send_mail.queue_composed_email", side_effect=_queue_email),
+        ):
+            response = self.client.post(
+                reverse("send-mail"),
+                data={
+                    "recipient_mode": "csv",
+                    "subject": "Credential notice",
+                    "text_content": "Credential text",
+                    "html_content": "<p>Credential html</p>",
+                    "action": "send",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        queued = Email.objects.order_by("-id").first()
+        assert queued is not None
+
+        ctx = queued.context or {}
+        if isinstance(ctx, str):
+            ctx = json.loads(ctx)
+
+        self.assertEqual(ctx.get("election_id"), 5)
+        self.assertIsInstance(ctx.get("election_id"), int)
+
     def test_compose_shows_html_to_text_button_and_variables_card(self) -> None:
         self._login_as_freeipa_user("reviewer")
 

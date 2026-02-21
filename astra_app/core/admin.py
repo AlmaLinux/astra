@@ -1409,6 +1409,7 @@ class ElectionAdmin(admin.ModelAdmin):
         "close_elections_action",
         "tally_elections_action",
     )
+    readonly_fields = ("status",)
 
     def issue_credentials_from_memberships_action(self, request: HttpRequest, queryset) -> None:
         for election in queryset:
@@ -1490,9 +1491,10 @@ class ElectionAdmin(admin.ModelAdmin):
 
     def _run_election_action(self, request: HttpRequest, queryset, *, action_fn: Callable, success_verb: str) -> None:
         """Shared boilerplate for election admin actions that apply a function per election."""
+        actor_username = str(request.user.username or "").strip()
         for election in queryset:
             try:
-                action_fn(election=election)
+                action_fn(election=election, actor=actor_username)
             except ElectionError as exc:
                 self.message_user(request, f"{election}: {exc}", level=messages.ERROR)
                 continue
@@ -1533,7 +1535,7 @@ class ExclusionGroupAdmin(admin.ModelAdmin):
 
 
 @admin.register(VotingCredential)
-class VotingCredentialAdmin(admin.ModelAdmin):
+class VotingCredentialAdmin(ReadOnlyModelAdmin):
     list_display = ("election", "public_id", "freeipa_username", "weight", "created_at")
     list_filter = ("election",)
     search_fields = ("public_id", "freeipa_username")

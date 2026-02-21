@@ -1420,7 +1420,7 @@ class VotingCredential(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.election_id}:{self.public_id}"
+        return f"VotingCredential(election_id={self.election_id}, pk={self.pk})"
 
     @classmethod
     def generate_public_id(cls) -> str:

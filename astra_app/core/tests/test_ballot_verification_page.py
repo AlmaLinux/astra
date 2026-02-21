@@ -216,7 +216,7 @@ class BallotVerificationPageTests(TestCase):
         # Must not leak the replacement receipt.
         self.assertNotContains(resp, ballot2.ballot_hash)
 
-    def test_verify_page_found_includes_script_link_and_copy_paste_constants(self) -> None:
+    def test_ballot_verify_does_not_expose_credential_to_unauthenticated(self) -> None:
         now = timezone.now()
         election = Election.objects.create(
             name="Open election",
@@ -245,9 +245,43 @@ class BallotVerificationPageTests(TestCase):
         self.assertContains(resp, "verify-ballot-hash.py")
         self.assertContains(resp, "Copy/paste")
         self.assertContains(resp, f"election_id = {election.id}")
-        self.assertContains(resp, "credential_public_id = &quot;cred-1&quot;")
+        self.assertNotContains(resp, "credential_public_id =")
+        self.assertNotContains(resp, "cred-1")
         self.assertContains(resp, f"&quot;alice&quot;: {c1.id}")
         self.assertContains(resp, f"&quot;bob&quot;: {c2.id}")
+
+    def test_ballot_verify_does_not_expose_credential_to_authenticated_non_owner(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Open election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+        c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="n")
+        Candidate.objects.create(election=election, freeipa_username="bob", nominated_by="n")
+
+        created_at = timezone.make_aware(datetime.datetime(2026, 1, 2, 12, 34, 56))
+        ballot = self._create_ballot(
+            election=election,
+            credential_public_id="cred-owner-1",
+            ranking=[c1.id],
+            weight=1,
+            previous_chain_hash=election_genesis_chain_hash(election.id),
+            created_at=created_at,
+        )
+
+        session = self.client.session
+        session["_freeipa_username"] = "other-user"
+        session.save()
+
+        url = reverse("ballot-verify")
+        resp = self.client.get(url, data={"receipt": ballot.ballot_hash})
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "credential_public_id =")
+        self.assertNotContains(resp, "cred-owner-1")
 
     @override_settings(
         ELECTION_RATE_LIMIT_BALLOT_VERIFY_LIMIT=1,

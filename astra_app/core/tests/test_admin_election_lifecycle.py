@@ -58,6 +58,45 @@ class AdminElectionLifecycleActionTests(TestCase):
             AuditLogEntry.objects.filter(election=election, event_type="election_closed", is_public=True).exists()
         )
 
+    def test_admin_close_election_action_records_actor(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Admin close election actor",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+        VotingCredential.objects.create(
+            election=election,
+            public_id="cred-actor-1",
+            freeipa_username="voter1",
+            weight=1,
+        )
+
+        self._login_as_freeipa_admin("alice")
+        admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})
+
+        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+            url = reverse("admin:core_election_changelist")
+            response = self.client.post(
+                url,
+                data={
+                    "action": "close_elections_action",
+                    "_selected_action": [str(election.id)],
+                },
+                follow=False,
+            )
+
+        self.assertEqual(response.status_code, 302)
+        closed_entry = AuditLogEntry.objects.filter(
+            election=election,
+            event_type="election_closed",
+            is_public=True,
+        ).latest("id")
+        self.assertEqual(closed_entry.payload.get("actor"), "alice")
+
     def test_admin_action_tally_election_tallies_and_logs_public_rounds(self) -> None:
         now = timezone.now()
         election = Election.objects.create(
@@ -189,4 +228,63 @@ class AdminElectionLifecycleActionTests(TestCase):
         self.assertTrue(VotingCredential.objects.filter(election=election, freeipa_username="voter1").exists())
         self.assertEqual(post_office_send_mock.call_count, 1)
         self.assertEqual(post_office_send_mock.call_args.kwargs.get("recipients"), ["voter1@example.com"])
+
+    def test_election_admin_status_is_readonly(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Readonly status election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.draft,
+        )
+
+        self._login_as_freeipa_admin("alice")
+        admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})
+
+        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+            url = reverse("admin:core_election_change", args=[election.id])
+            response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'name="status"')
+
+    def test_voting_credential_admin_is_readonly(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Voting credential readonly election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+        credential = VotingCredential.objects.create(
+            election=election,
+            public_id="cred-original",
+            freeipa_username="voter1",
+            weight=1,
+        )
+
+        self._login_as_freeipa_admin("alice")
+        admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})
+
+        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+            url = reverse("admin:core_votingcredential_change", args=[credential.id])
+            response = self.client.post(
+                url,
+                data={
+                    "election": str(election.id),
+                    "public_id": "cred-tampered",
+                    "freeipa_username": "voter1",
+                    "weight": "1",
+                    "_save": "Save",
+                },
+                follow=False,
+            )
+
+        self.assertIn(response.status_code, {302, 403})
+        credential.refresh_from_db()
+        self.assertEqual(credential.public_id, "cred-original")
 
