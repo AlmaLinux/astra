@@ -6,7 +6,7 @@ from unittest.mock import patch
 from django.test import TestCase
 
 from core.backends import FreeIPAUser, clear_current_viewer_username, set_current_viewer_username
-from core.models import FreeIPAPermissionGrant
+from core.models import FreeIPAPermissionGrant, Organization
 from core.permissions import ASTRA_VIEW_USER_DIRECTORY
 
 
@@ -89,7 +89,68 @@ class GlobalSearchTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertNotIn("users", data)
+        self.assertNotIn("orgs", data)
         self.assertEqual([g["cn"] for g in data["groups"]], ["example-jin"])
+
+    def test_search_returns_orgs_with_directory_access(self) -> None:
+        self._login_as_freeipa("admin")
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_VIEW_USER_DIRECTORY,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+        )
+
+        Organization.objects.create(name="AlmaLinux Foundation")
+        Organization.objects.create(name="Other Corp")
+
+        with (
+            patch("core.backends.FreeIPAUser.all", return_value=[]),
+            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+        ):
+            resp = self.client.get("/search/?q=Alma")
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertIn("orgs", data)
+        self.assertEqual([o["name"] for o in data["orgs"]], ["AlmaLinux Foundation"])
+        self.assertNotIn("Other Corp", {o["name"] for o in data["orgs"]})
+
+    def test_search_orgs_result_includes_id_and_name(self) -> None:
+        self._login_as_freeipa("admin")
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_VIEW_USER_DIRECTORY,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+        )
+
+        org = Organization.objects.create(name="AlmaLinux Foundation")
+
+        with (
+            patch("core.backends.FreeIPAUser.all", return_value=[]),
+            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+        ):
+            resp = self.client.get("/search/?q=Alma")
+
+        data = resp.json()
+        self.assertEqual(data["orgs"][0]["id"], org.id)
+        self.assertEqual(data["orgs"][0]["name"], "AlmaLinux Foundation")
+
+    def test_search_without_directory_access_omits_orgs(self) -> None:
+        self._login_as_freeipa("alice")
+        viewer = FreeIPAUser("alice", {"uid": ["alice"], "mail": ["alice@example.org"], "memberof_group": []})
+
+        Organization.objects.create(name="AlmaLinux Foundation")
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=viewer),
+            patch("core.backends.FreeIPAUser.all", return_value=[]),
+            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+        ):
+            resp = self.client.get("/search/?q=Alma")
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertNotIn("orgs", data)
 
     def test_search_does_not_match_private_user_by_full_name(self) -> None:
         self._login_as_freeipa("admin")
@@ -177,7 +238,7 @@ class GlobalSearchTemplateCopyTests(TestCase):
         self.assertRegex(
             html,
             re.compile(
-                r"id=\"global-search-input\".*?placeholder=\"Search users and groups\.\.\.\".*?aria-label=\"Search users and groups\"",
+                r"id=\"global-search-input\".*?placeholder=\"Search users, groups and orgs\.\.\.\".*?aria-label=\"Search users, groups and orgs\"",
                 re.S,
             ),
         )

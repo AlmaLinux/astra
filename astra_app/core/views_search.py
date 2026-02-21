@@ -2,6 +2,7 @@ from django.http import HttpRequest, JsonResponse
 
 from core.backends import FreeIPAGroup
 from core.freeipa_directory import search_freeipa_users
+from core.models import Organization
 from core.permissions import can_view_user_directory
 from core.views_utils import _normalize_str
 
@@ -28,7 +29,7 @@ def global_search(request: HttpRequest) -> JsonResponse:
         if len(groups_out) >= 7:
             break
 
-    response_payload: dict[str, list[dict[str, str]]] = {
+    response_payload: dict[str, list[dict]] = {
         "groups": groups_out,
     }
 
@@ -38,6 +39,11 @@ def global_search(request: HttpRequest) -> JsonResponse:
             for user in search_freeipa_users(query=q, limit=7)
         ]
         response_payload["users"] = users_out
+
+        orgs_out = list(
+            Organization.objects.filter(name__icontains=q).values("id", "name").order_by("name")[:7]
+        )
+        response_payload["orgs"] = orgs_out
 
     # Keep output deterministic for tests/UI.
     groups_out.sort(key=lambda x: x["cn"].lower())

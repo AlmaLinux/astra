@@ -39,6 +39,9 @@
     menu.classList.add('show');
   }
 
+  // Applied to every text-bearing div in the results so nothing overflows the box.
+  var TRUNC = 'style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"';
+
   function escapeHtml(s) {
     return String(s)
       .replaceAll('&', '&amp;')
@@ -57,6 +60,11 @@
     }
     html += '<h6 class="dropdown-header">Groups</h6>' +
             '<div class="dropdown-item text-muted"><i class="fas fa-circle-notch fa-spin mr-2"></i>Searching\u2026</div>';
+    if (hasDirectoryAccess) {
+      html += '<div class="dropdown-divider"></div>' +
+              '<h6 class="dropdown-header">Organizations</h6>' +
+              '<div class="dropdown-item text-muted"><i class="fas fa-circle-notch fa-spin mr-2"></i>Searching\u2026</div>';
+    }
     menu.innerHTML = html;
     showMenu();
   }
@@ -76,8 +84,8 @@
           var username = escapeHtml(u.username || '');
           var fullName = escapeHtml(u.full_name || '');
           html += '<a class="dropdown-item" href="/user/' + encodeURIComponent(u.username) + '/">' +
-                  '<div class="font-weight-bold">' + username + '</div>' +
-                  (fullName ? '<div class="text-muted text-sm">' + fullName + '</div>' : '') +
+                  '<div class="font-weight-bold" ' + TRUNC + '>' + username + '</div>' +
+                  (fullName ? '<div class="text-muted text-sm" ' + TRUNC + '>' + fullName + '</div>' : '') +
                   '</a>';
         }
       }
@@ -93,9 +101,26 @@
         var cn = escapeHtml(g.cn || '');
         var desc = escapeHtml(g.description || '');
         html += '<a class="dropdown-item" href="/group/' + encodeURIComponent(g.cn) + '/">' +
-                '<div class="font-weight-bold">' + cn + '</div>' +
-                (desc ? '<div class="text-muted text-sm">' + desc + '</div>' : '') +
+                '<div class="font-weight-bold" ' + TRUNC + '>' + cn + '</div>' +
+                (desc ? '<div class="text-muted text-sm" ' + TRUNC + '>' + desc + '</div>' : '') +
                 '</a>';
+      }
+    }
+
+    if (hasDirectoryAccess) {
+      var orgs = Array.isArray(data.orgs) ? data.orgs : [];
+      html += '<div class="dropdown-divider"></div>';
+      html += '<h6 class="dropdown-header">Organizations</h6>';
+      if (orgs.length === 0) {
+        html += '<div class="dropdown-item text-muted">No organizations found</div>';
+      } else {
+        for (var k = 0; k < orgs.length; k++) {
+          var o = orgs[k];
+          var orgName = escapeHtml(o.name || '');
+          html += '<a class="dropdown-item" href="/organization/' + encodeURIComponent(o.id) + '/">' +
+                  '<div class="font-weight-bold" ' + TRUNC + '>' + orgName + '</div>' +
+                  '</a>';
+        }
       }
     }
 
