@@ -10,7 +10,7 @@ from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Sum
+from django.db.models import Count, Q, Sum
 from django.http import HttpRequest
 from django.urls import reverse
 from django.utils import timezone
@@ -385,7 +385,7 @@ def send_voting_credential_email(
     )
 
     if subject_template is not None or html_template is not None or text_template is not None:
-        queue_composed_email(
+        queued_email = queue_composed_email(
             recipients=[email],
             sender=settings.DEFAULT_FROM_EMAIL,
             subject_source=subject_template or "",
@@ -394,6 +394,8 @@ def send_voting_credential_email(
             context=context,
             reply_to=[settings.ELECTION_COMMITTEE_EMAIL],
         )
+        queued_email.context = _post_office_json_context({"election_id": election.id})
+        queued_email.save(update_fields=["context"])
         return
 
     context = _post_office_json_context(context)
@@ -710,9 +712,17 @@ def issue_voting_credentials_from_memberships(*, election: Election) -> list[Vot
 @transaction.atomic
 def scrub_election_emails(*, election: Election) -> int:
     """Delete sensitive emails (credentials, receipts) associated with the election."""
-    # We identify emails by the election_id in their context.
-    # post_office stores context as a JSON field.
-    count, _ = Email.objects.filter(context__contains={"election_id": election.id}).delete()
+    vote_path = reverse("election-vote", args=[election.id])
+    credential_fragment = "#credential="
+
+    legacy_composed_credential_match = (
+        (Q(message__contains=vote_path) | Q(html_message__contains=vote_path))
+        & (Q(message__contains=credential_fragment) | Q(html_message__contains=credential_fragment))
+    )
+
+    count, _ = Email.objects.filter(
+        Q(context__contains={"election_id": election.id}) | legacy_composed_credential_match
+    ).delete()
     return count
 
 

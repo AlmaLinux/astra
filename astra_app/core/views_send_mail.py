@@ -867,6 +867,8 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                         messages.error(request, f"Template error: {first_template_error}")
 
                     if sent:
+                        request.session.pop(_CSV_SESSION_KEY, None)
+                        request.session.pop(_PREVIEW_CONTEXT_SESSION_KEY, None)
                         messages.success(request, f"Queued {sent} email{'s' if sent != 1 else ''}.")
                     if failures:
                         messages.error(request, f"Failed to queue {failures} email{'s' if failures != 1 else ''}.")

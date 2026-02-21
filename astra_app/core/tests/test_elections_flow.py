@@ -267,6 +267,62 @@ class ElectionCredentialIssuanceAndAnonymizationTests(TestCase):
         cred.refresh_from_db()
         self.assertIsNone(cred.freeipa_username)
 
+    def test_send_voting_credential_email_composed_persists_election_context(self) -> None:
+        from post_office.models import Email
+
+        send_voting_credential_email(
+            request=None,
+            election=self.election,
+            username="voter1",
+            email="voter1@example.com",
+            credential_public_id="cred-composed-1",
+            subject_template="Election credential",
+            text_template="Vote here: {{ vote_url_with_credential_fragment }}",
+        )
+
+        self.assertEqual(Email.objects.count(), 1)
+        queued = Email.objects.first()
+        assert queued is not None
+
+        ctx = queued.context or {}
+        if isinstance(ctx, str):
+            ctx = json.loads(ctx)
+
+        self.assertEqual(ctx.get("election_id"), self.election.id)
+
+    def test_anonymize_election_scrubs_composed_credential_email_without_context(self) -> None:
+        from post_office.models import Email
+
+        send_voting_credential_email(
+            request=None,
+            election=self.election,
+            username="voter1",
+            email="voter1@example.com",
+            credential_public_id="cred-composed-legacy",
+            subject_template="Election credential",
+            html_template='<a href="{{ vote_url_with_credential_fragment }}">Vote</a>',
+            text_template="Vote here: {{ vote_url_with_credential_fragment }}",
+        )
+
+        queued = Email.objects.first()
+        assert queued is not None
+        queued.context = {}
+        queued.save(update_fields=["context"])
+
+        ctx = queued.context or {}
+        if isinstance(ctx, str):
+            ctx = json.loads(ctx)
+
+        self.assertNotIn("election_id", ctx)
+        self.assertIn("#credential=", str(queued.message or ""))
+
+        self.election.status = Election.Status.closed
+        self.election.save(update_fields=["status"])
+        result = anonymize_election(election=self.election)
+
+        self.assertGreaterEqual(result["emails_scrubbed"], 1)
+        self.assertFalse(Email.objects.filter(pk=queued.pk).exists())
+
 
 @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=90)
 class ElectionBulkCredentialIssuanceTests(TestCase):

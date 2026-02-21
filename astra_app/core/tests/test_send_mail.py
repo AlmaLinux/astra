@@ -11,7 +11,7 @@ from django.urls import reverse
 from core.backends import FreeIPAUser
 from core.models import AccountInvitation, AccountInvitationSend, FreeIPAPermissionGrant, Organization
 from core.permissions import ASTRA_ADD_SEND_MAIL
-from core.views_send_mail import SendMailForm
+from core.views_send_mail import _CSV_SESSION_KEY, _PREVIEW_CONTEXT_SESSION_KEY, SendMailForm
 
 
 class SendMailUrlHelperTests(SimpleTestCase):
@@ -617,6 +617,56 @@ class SendMailTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "cannot be used with CSV recipients")
         queue_mock.assert_not_called()
+
+    def test_send_clears_csv_and_preview_session_data_after_success(self) -> None:
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
+
+        session = self.client.session
+        session[_CSV_SESSION_KEY] = json.dumps(
+            {
+                "header_to_var": {"Email": "email"},
+                "recipients": [
+                    {
+                        "email": "alice@example.com",
+                        "credential_public_id": "CRED-123",
+                    }
+                ],
+            }
+        )
+        session[_PREVIEW_CONTEXT_SESSION_KEY] = json.dumps(
+            {
+                "email": "alice@example.com",
+                "credential_public_id": "CRED-123",
+            }
+        )
+        session.save()
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.backends.FreeIPAUser.all", return_value=[]),
+            patch("core.views_send_mail.queue_composed_email") as queue_mock,
+        ):
+            queue_mock.return_value = type("_QueuedEmail", (), {"id": 1})()
+            response = self.client.post(
+                reverse("send-mail"),
+                data={
+                    "recipient_mode": "csv",
+                    "subject": "Credential notice {{ credential_public_id }}",
+                    "text_content": "Credential {{ credential_public_id }}",
+                    "html_content": "<p>Credential {{ credential_public_id }}</p>",
+                    "action": "send",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Queued 1 email")
+
+        updated_session = self.client.session
+        self.assertNotIn(_CSV_SESSION_KEY, updated_session)
+        self.assertNotIn(_PREVIEW_CONTEXT_SESSION_KEY, updated_session)
 
     def test_compose_shows_html_to_text_button_and_variables_card(self) -> None:
         self._login_as_freeipa_user("reviewer")
