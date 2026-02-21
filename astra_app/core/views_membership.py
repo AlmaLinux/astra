@@ -3,7 +3,7 @@ import logging
 
 from django.conf import settings
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required, permission_required, user_passes_test
+from django.contrib.auth.decorators import permission_required, user_passes_test
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Count, Prefetch, Q
@@ -49,11 +49,6 @@ from core.membership_request_workflow import (
     reject_membership_request,
     rescind_membership_request,
     resubmit_membership_request,
-)
-from core.mirror_badge import (
-    mirror_badge_tooltip,
-    probe_mirror_time_status,
-    render_mirror_badge_svg,
 )
 from core.models import (
     Membership,
@@ -876,30 +871,6 @@ def membership_request_rescind(request: HttpRequest, pk: int) -> HttpResponse:
     if org is not None:
         return redirect("organization-detail", organization_id=org.pk)
     return redirect("user-profile", username=username)
-
-
-@login_required(login_url=reverse_lazy("users"))
-def mirror_badge_svg(request: HttpRequest) -> HttpResponse:
-    mirror_url = _normalize_str(request.GET.get("url"))
-    status = probe_mirror_time_status(mirror_url)
-    svg = render_mirror_badge_svg(status)
-    response = HttpResponse(svg, content_type="image/svg+xml")
-    response["Cache-Control"] = "no-store"
-    response["X-Content-Type-Options"] = "nosniff"
-    return response
-
-
-@login_required(login_url=reverse_lazy("users"))
-def mirror_badge_status(request: HttpRequest) -> JsonResponse:
-    mirror_url = _normalize_str(request.GET.get("url"))
-    status = probe_mirror_time_status(mirror_url)
-    return JsonResponse(
-        {
-            "key": status.key,
-            "label": status.label,
-            "tooltip": mirror_badge_tooltip(status),
-        }
-    )
 
 
 @permission_required(ASTRA_VIEW_MEMBERSHIP, login_url=reverse_lazy("users"))

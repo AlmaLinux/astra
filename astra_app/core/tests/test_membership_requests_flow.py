@@ -376,51 +376,6 @@ class MembershipRequestsFlowTests(TestCase):
         self.assertContains(resp, 'value="individual"')
         self.assertContains(resp, 'value="mirror"')
 
-    def test_membership_request_mirror_domain_renders_badge_preview_and_explanation(self) -> None:
-        from core.models import MembershipType
-
-        MembershipType.objects.update_or_create(
-            code="mirror",
-            defaults={
-                "name": "Mirror",
-                "group_cn": "almalinux-mirror",
-                "category_id": "mirror",
-                "sort_order": 0,
-                "enabled": True,
-            },
-        )
-
-        alice = FreeIPAUser(
-            "alice",
-            {
-                "uid": ["alice"],
-                "givenname": ["Alice"],
-                "sn": ["User"],
-                "mail": ["alice@example.com"],
-                "fasstatusnote": ["US"],
-                "memberof_group": [],
-            },
-        )
-        self._login_as_freeipa_user("alice")
-
-        with (
-            patch("core.backends.FreeIPAUser.get", return_value=alice),
-            patch("core.views_membership.block_action_without_coc", return_value=None),
-            patch("core.views_membership.block_action_without_country_code", return_value=None),
-        ):
-            resp = self.client.get(reverse("membership-request"))
-
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(
-            resp,
-            "We check <code>&lt;domain&gt;/TIME</code> and verify the timestamp is within the last 24 hours."
-            " Missing or outdated timestamps suggest the mirror is unreachable or behind.",
-            html=True,
-        )
-        self.assertContains(resp, 'data-mirror-badge-form-container')
-        self.assertContains(resp, f'data-mirror-badge-endpoint-url="{reverse("mirror-badge-svg")}"')
-        self.assertContains(resp, 'loading="eager"')
-
     def test_membership_request_post_blocks_when_eligibility_marks_category_under_review(self) -> None:
         from core.models import MembershipRequest, MembershipType
 
