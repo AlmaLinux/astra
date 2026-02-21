@@ -174,6 +174,8 @@ urlpatterns = [
     path("email-tools/images/", views_mail_images.email_images, name="email-images"),
 
     path("membership/request/", views_membership.membership_request, name="membership-request"),
+    path("membership/mirror-badge.svg", views_membership.mirror_badge_svg, name="mirror-badge-svg"),
+    path("membership/mirror-badge.json", views_membership.mirror_badge_status, name="mirror-badge-status"),
     path(
         "membership/request/<int:pk>/",
         views_membership.membership_request_self,
