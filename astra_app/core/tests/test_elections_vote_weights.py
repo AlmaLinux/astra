@@ -9,7 +9,12 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.backends import FreeIPAUser
-from core.elections_eligibility import eligible_voters_from_memberships
+from core.elections_eligibility import (
+    VoteWeightLine,
+    eligible_vote_weight_for_username,
+    eligible_voters_from_memberships,
+    vote_weight_breakdown_for_username,
+)
 from core.elections_services import (
     close_election,
     issue_voting_credentials_from_memberships,
@@ -352,3 +357,163 @@ class ElectionVoteWeightsTests(TestCase):
         self.assertContains(resp, "You have")
         self.assertContains(resp, f"<strong>{expected}</strong>")
         self.assertContains(resp, "votes for this election")
+
+    def test_vote_weight_breakdown_returns_per_membership_lines(self) -> None:
+        """vote_weight_breakdown_for_username returns one line per contributing membership."""
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Breakdown test",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+        self._make_weighted_voter(election=election, username="voter1")
+
+        breakdown = vote_weight_breakdown_for_username(election=election, username="voter1")
+
+        # Should have 3 lines: two individual + one org
+        self.assertEqual(len(breakdown), 3)
+        total = sum(line.votes for line in breakdown)
+        # total should match the weight from _make_weighted_voter (2 + 3 + 5 = 10)
+        self.assertEqual(total, 10)
+
+        # Individual lines should have no org_name
+        individual_lines = [line for line in breakdown if not line.org_name]
+        self.assertEqual(len(individual_lines), 2)
+
+        # Org line should have an org_name
+        org_lines = [line for line in breakdown if line.org_name]
+        self.assertEqual(len(org_lines), 1)
+        self.assertEqual(org_lines[0].votes, 5)
+        self.assertEqual(org_lines[0].org_name, "ACME")
+
+    @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=14)
+    def test_breakdown_uses_election_start_reference_for_membership_age(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Breakdown reference datetime election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=10),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+
+        too_new_type = MembershipType.objects.create(
+            code="recent_weight",
+            name="Recent weight",
+            votes=2,
+            category_id="individual",
+            enabled=True,
+        )
+        old_enough_type = MembershipType.objects.create(
+            code="old_weight",
+            name="Old weight",
+            votes=3,
+            category_id="individual",
+            enabled=True,
+        )
+
+        too_new_membership = Membership.objects.create(
+            target_username="alice",
+            membership_type=too_new_type,
+            expires_at=now + datetime.timedelta(days=365),
+        )
+        old_enough_membership = Membership.objects.create(
+            target_username="alice",
+            membership_type=old_enough_type,
+            expires_at=now + datetime.timedelta(days=365),
+        )
+
+        # Age at vote time is not authoritative; age at election start is.
+        Membership.objects.filter(pk=too_new_membership.pk).update(created_at=now - datetime.timedelta(days=20))
+        Membership.objects.filter(pk=old_enough_membership.pk).update(created_at=now - datetime.timedelta(days=30))
+
+        breakdown = vote_weight_breakdown_for_username(election=election, username="alice")
+
+        self.assertEqual([line.label for line in breakdown], ["Old weight"])
+        self.assertEqual(sum(line.votes for line in breakdown), 3)
+
+    def test_eligible_vote_weight_for_username_delegates_to_breakdown_sum(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Delegation vote weight election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+
+        with patch(
+            "core.elections_eligibility.vote_weight_breakdown_for_username",
+            return_value=[
+                VoteWeightLine(label="A", org_name="", votes=2),
+                VoteWeightLine(label="B", org_name="Org", votes=3),
+            ],
+        ) as breakdown_mock, patch(
+            "core.elections_eligibility._eligible_voters_from_memberships",
+            side_effect=AssertionError("_eligible_voters_from_memberships should not be called"),
+        ):
+            weight = eligible_vote_weight_for_username(election=election, username="alice")
+
+        self.assertEqual(weight, 5)
+        breakdown_mock.assert_called_once_with(election=election, username="alice")
+
+    def test_eligible_vote_weight_matches_breakdown_sum_for_real_memberships(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Real membership sum election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=10),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+
+        membership_type = MembershipType.objects.create(
+            code="real_sum_weight",
+            name="Real sum weight",
+            votes=4,
+            category_id="individual",
+            enabled=True,
+        )
+        membership = Membership.objects.create(
+            target_username="alice",
+            membership_type=membership_type,
+            expires_at=now + datetime.timedelta(days=365),
+        )
+        Membership.objects.filter(pk=membership.pk).update(created_at=now - datetime.timedelta(days=30))
+
+        breakdown = vote_weight_breakdown_for_username(election=election, username="alice")
+        weight = eligible_vote_weight_for_username(election=election, username="alice")
+
+        self.assertEqual(weight, sum(line.votes for line in breakdown))
+        self.assertEqual(weight, 4)
+
+    def test_vote_page_shows_breakdown_tooltip_icon(self) -> None:
+        """Vote page renders the info icon with breakdown tooltip when voter has memberships."""
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Tooltip test election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+        self._make_weighted_voter(election=election, username="voter1")
+        issue_voting_credentials_from_memberships(election=election)
+
+        self._login_as_freeipa_user("voter1")
+        voter1_ipa = FreeIPAUser("voter1", {"uid": ["voter1"], "memberof_group": []})
+        with patch("core.backends.FreeIPAUser.get", return_value=voter1_ipa):
+            resp = self.client.get(reverse("election-vote", args=[election.id]))
+
+        self.assertEqual(resp.status_code, 200)
+        # Info icon should be present
+        self.assertContains(resp, "fa-info-circle")
+        # Tooltip should reference individual membership names or "ACME"
+        self.assertContains(resp, "ACME")

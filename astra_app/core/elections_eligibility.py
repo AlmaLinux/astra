@@ -49,11 +49,32 @@ class EligibilityFacts:
     has_active_vote_eligible_at_reference: bool
 
 
+@dataclass(frozen=True)
+class VoteWeightLine:
+    """A single membership contributing to a voter's weight."""
+
+    label: str
+    org_name: str
+    votes: int
+
+
 def _election_reference_datetime(*, election: Election) -> datetime.datetime:
     reference_datetime = election.start_datetime
     if election.status == Election.Status.draft:
         reference_datetime = max(election.start_datetime, timezone.now())
     return reference_datetime
+
+
+def _membership_is_active_at_reference(
+    *,
+    expires_at: datetime.datetime | None,
+    reference_datetime: datetime.datetime,
+) -> bool:
+    return expires_at is None or expires_at >= reference_datetime
+
+
+def _membership_is_old_enough(*, created_at: datetime.datetime | None, cutoff: datetime.datetime) -> bool:
+    return created_at is not None and created_at <= cutoff
 
 
 def _eligibility_facts_by_username(*, election: Election) -> dict[str, EligibilityFacts]:
@@ -87,13 +108,17 @@ def _eligibility_facts_by_username(*, election: Election) -> dict[str, Eligibili
                 term_start_by_username[username] = start_at
 
         expires_at = row.get("expires_at")
-        is_active_at_reference = expires_at is None or (
-            isinstance(expires_at, datetime.datetime) and expires_at >= reference_datetime
-        )
+        is_active_at_reference = False
+        if expires_at is None or isinstance(expires_at, datetime.datetime):
+            is_active_at_reference = _membership_is_active_at_reference(
+                expires_at=expires_at,
+                reference_datetime=reference_datetime,
+            )
         if is_active_at_reference:
             has_active_vote_eligible_at_reference.add(username)
 
-        if is_active_at_reference and isinstance(start_at, datetime.datetime) and start_at <= cutoff:
+        created_at = start_at if isinstance(start_at, datetime.datetime) else None
+        if is_active_at_reference and _membership_is_old_enough(created_at=created_at, cutoff=cutoff):
             weights_by_username[username] = weights_by_username.get(username, 0) + votes
 
     org_memberships = (
@@ -126,12 +151,14 @@ def _eligibility_facts_by_username(*, election: Election) -> dict[str, Eligibili
             if username not in term_start_by_username or start_at < term_start_by_username[username]:
                 term_start_by_username[username] = start_at
 
-        expires_at = membership.expires_at
-        is_active_at_reference = expires_at is None or expires_at >= reference_datetime
+        is_active_at_reference = _membership_is_active_at_reference(
+            expires_at=membership.expires_at,
+            reference_datetime=reference_datetime,
+        )
         if is_active_at_reference:
             has_active_vote_eligible_at_reference.add(username)
 
-        if is_active_at_reference and start_at <= cutoff:
+        if is_active_at_reference and _membership_is_old_enough(created_at=start_at, cutoff=cutoff):
             weights_by_username[username] = weights_by_username.get(username, 0) + votes
 
     usernames = set(weights_by_username) | set(term_start_by_username) | has_any_vote_eligible | has_active_vote_eligible_at_reference
@@ -255,12 +282,116 @@ def eligible_vote_weight_for_username(*, election: Election, username: str) -> i
         if not eligible_usernames or username.lower() not in eligible_usernames:
             return 0
 
-    # Reuse the canonical eligibility computation and extract the single user's weight.
-    voters = _eligible_voters_from_memberships(election=election)
-    for voter in voters:
-        if voter.username.lower() == username.lower():
-            return voter.weight
-    return 0
+    return sum(
+        line.votes
+        for line in vote_weight_breakdown_for_username(
+            election=election,
+            username=username,
+        )
+    )
+
+
+def vote_weight_breakdown_for_username(*, election: Election, username: str) -> list[VoteWeightLine]:
+    """Return per-membership vote weight breakdown for the given username.
+
+    Applies the same eligibility criteria as canonical vote weight computation:
+    membership must be active at the election reference datetime and at least
+    ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS old.
+
+    Returns individual memberships before organization memberships and includes
+    only memberships that contribute votes.
+    """
+    username_lower = str(username or "").strip().lower()
+    if not username_lower:
+        return []
+
+    reference_datetime = _election_reference_datetime(election=election)
+    cutoff = reference_datetime - datetime.timedelta(days=settings.ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS)
+
+    lines: list[VoteWeightLine] = []
+
+    individual_memberships = (
+        Membership.objects.select_related("membership_type")
+        .filter(
+            target_username__iexact=username_lower,
+            membership_type__category__is_individual=True,
+            membership_type__enabled=True,
+            membership_type__votes__gt=0,
+        )
+        .order_by(
+            "membership_type__category__sort_order",
+            "membership_type__sort_order",
+            "membership_type__code",
+            "pk",
+        )
+        .only(
+            "created_at",
+            "expires_at",
+            "membership_type__name",
+            "membership_type__votes",
+        )
+    )
+    for membership in individual_memberships:
+        votes = int(membership.membership_type.votes or 0)
+        if votes <= 0:
+            continue
+
+        is_active = _membership_is_active_at_reference(
+            expires_at=membership.expires_at,
+            reference_datetime=reference_datetime,
+        )
+        if not is_active:
+            continue
+
+        if not _membership_is_old_enough(created_at=membership.created_at, cutoff=cutoff):
+            continue
+
+        lines.append(VoteWeightLine(label=membership.membership_type.name, org_name="", votes=votes))
+
+    org_memberships = (
+        Membership.objects.select_related("target_organization", "membership_type")
+        .filter(
+            target_organization__isnull=False,
+            target_organization__representative__iexact=username_lower,
+            membership_type__enabled=True,
+            membership_type__votes__gt=0,
+        )
+        .order_by(
+            "membership_type__category__sort_order",
+            "membership_type__sort_order",
+            "membership_type__code",
+            "pk",
+        )
+        .only(
+            "target_organization__name",
+            "created_at",
+            "expires_at",
+            "membership_type__name",
+            "membership_type__votes",
+        )
+    )
+    for membership in org_memberships:
+        if membership.target_organization is None:
+            continue
+
+        votes = int(membership.membership_type.votes or 0)
+        if votes <= 0:
+            continue
+
+        is_active = _membership_is_active_at_reference(
+            expires_at=membership.expires_at,
+            reference_datetime=reference_datetime,
+        )
+        if not is_active:
+            continue
+
+        if not _membership_is_old_enough(created_at=membership.created_at, cutoff=cutoff):
+            continue
+
+        org_name = str(membership.target_organization.name or "").strip()
+        lines.append(VoteWeightLine(label=membership.membership_type.name, org_name=org_name, votes=votes))
+
+    return lines
 
 
 def election_committee_disqualification(

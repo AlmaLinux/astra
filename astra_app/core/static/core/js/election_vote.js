@@ -388,4 +388,20 @@
 
     setSubmitLabel('Submit vote');
   });
+
+  // Initialize vote breakdown tooltip with html:true.
+  // We don't use data-toggle="tooltip" on this element to prevent AdminLTE's
+  // global init (which uses html:false) from capturing it first.
+  var breakdownBtn = document.getElementById('vote-breakdown-tooltip');
+  if (breakdownBtn) {
+    var breakdownContent = document.getElementById('vote-breakdown-tooltip-content');
+    window.jQuery(breakdownBtn).tooltip({
+      html: true,
+      placement: breakdownBtn.getAttribute('data-placement') || 'right',
+      title: function () {
+        return breakdownContent ? breakdownContent.innerHTML : '';
+      },
+      template: '<div class="tooltip vote-breakdown-tooltip" role="tooltip"><div class="arrow"></div><div class="tooltip-inner text-left"></div></div>'
+    });
+  }
 })(window, document);

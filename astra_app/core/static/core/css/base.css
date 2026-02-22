@@ -166,6 +166,30 @@ a:hover {
   border-color: var(--alx-blue);
 }
 
+/* Bootstrap tooltips default to ~200px max-width.
+   The vote weight breakdown needs more room to avoid awkward wrapping. */
+.vote-breakdown-tooltip .tooltip-inner {
+  max-width: 42rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.vote-breakdown-tooltip .vote-breakdown-line,
+.vote-breakdown-tooltip .vote-breakdown-total {
+  display: grid;
+  grid-template-columns: 5ch 1ch 1fr;
+  column-gap: 0.35rem;
+  align-items: baseline;
+}
+
+.vote-breakdown-tooltip .vote-breakdown-votes {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.vote-breakdown-tooltip .vote-breakdown-sep {
+  text-align: center;
+}
+
 
 .auth-nav-search {
   flex: 1 1 auto;

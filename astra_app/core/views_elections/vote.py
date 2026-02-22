@@ -12,6 +12,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from core import elections_services
 from core.backends import FreeIPAUser
+from core.elections_eligibility import vote_weight_breakdown_for_username
 from core.elections_services import (
     ElectionNotOpenError,
     InvalidBallotError,
@@ -198,6 +199,13 @@ def election_vote(request, election_id: int):
         )
         voter_votes = int(credential.weight or 0) if credential is not None else 0
 
+    voter_vote_breakdown = []
+    if username and voter_votes is not None and voter_votes > 0:
+        voter_vote_breakdown = vote_weight_breakdown_for_username(
+            election=election,
+            username=username,
+        )
+
     can_submit_vote = voter_votes is not None and voter_votes > 0
 
     candidates = list(Candidate.objects.filter(election=election))
@@ -219,6 +227,7 @@ def election_vote(request, election_id: int):
             "election": election,
             "candidates": candidate_display,
             "voter_votes": voter_votes,
+            "voter_vote_breakdown": voter_vote_breakdown,
             "can_submit_vote": can_submit_vote,
         },
     )

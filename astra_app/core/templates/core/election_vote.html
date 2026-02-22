@@ -36,7 +36,40 @@
                 {% if voter_votes > 0 %}
                   <p class="form-text mb-0">
                     You have <strong>{{ voter_votes }}</strong> vote{{ voter_votes|pluralize }} for this election.
+                    {% if voter_votes > 1 and voter_vote_breakdown %}
+                      <button
+                        type="button"
+                        id="vote-breakdown-tooltip"
+                        class="btn btn-link p-0 align-baseline border-0"
+                        style="font-size: inherit; vertical-align: baseline;"
+                        data-placement="right"
+                        aria-label="How your vote count is computed"
+                      >
+                        <i class="fas fa-info-circle text-muted" aria-hidden="true"></i>
+                      </button>
+                    {% endif %}
                   </p>
+                  {% if voter_votes > 1 and voter_vote_breakdown %}
+                    <div id="vote-breakdown-tooltip-content" class="d-none">
+                      <div class="vote-breakdown-lines">
+                        {% for row in voter_vote_breakdown %}
+                          <div class="vote-breakdown-line">
+                            <span class="vote-breakdown-votes">{% if not forloop.first %}+ {% endif %}{{ row.votes }}</span>
+                            <span class="vote-breakdown-sep">:</span>
+                            <span class="vote-breakdown-text">{% if row.org_name %}Representative of {% endif %}{{ row.label }} member{% if row.org_name %} ({{ row.org_name }}){% endif %}</span>
+                          </div>
+                        {% endfor %}
+
+                        <div class="border-top my-1"></div>
+
+                        <div class="vote-breakdown-total">
+                          <span class="vote-breakdown-votes">{{ voter_votes }}</span>
+                          <span class="vote-breakdown-sep">:</span>
+                          <span class="vote-breakdown-text">Total Vote{{ voter_votes|pluralize }}</span>
+                        </div>
+                      </div>
+                    </div>
+                  {% endif %}
                   {% if voter_votes > 1 %}
                     <small class="text-muted">
                       These votes are applied as extra weight to your single ranked ballot.
