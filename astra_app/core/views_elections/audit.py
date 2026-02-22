@@ -288,7 +288,7 @@ def election_audit_log(request, election_id: int):
             case "tally_round":
                 round_number = payload.get("round")
                 iteration = payload.get("iteration")
-                if isinstance(round_number, int) and isinstance(iteration, int):
+                if isinstance(round_number, int) and isinstance(iteration, int) and round_number != iteration:
                     return f"Tally round {round_number} (iteration {iteration})"
                 if isinstance(round_number, int):
                     return f"Tally round {round_number}"
