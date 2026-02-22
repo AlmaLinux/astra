@@ -343,6 +343,16 @@
                           <i class="fas fa-copy" aria-hidden="true"></i>
                         </button>
                       </p>
+                      {% if ev.payload.credentials_affected %}
+                        <p class="mb-2">
+                          <strong>Credentials anonymized:</strong> {{ ev.payload.credentials_affected }}
+                        </p>
+                      {% endif %}
+                      {% if ev.payload.emails_scrubbed %}
+                        <p class="mb-2">
+                          <strong>Emails scrubbed:</strong> {{ ev.payload.emails_scrubbed }}
+                        </p>
+                      {% endif %}
 
                     {% elif ev.event_type == 'election_anonymized' %}
                       <p class="mb-2">Voter credentials anonymized and sensitive emails scrubbed.</p>
@@ -354,6 +364,10 @@
                         {% if ev.payload.emails_scrubbed %}
                           <dt class="col-sm-6">Emails scrubbed</dt>
                           <dd class="col-sm-6">{{ ev.payload.emails_scrubbed }}</dd>
+                        {% endif %}
+                        {% if ev.payload.scrub_anomaly == True %}
+                          <dt class="col-sm-6">Scrub anomaly detected</dt>
+                          <dd class="col-sm-6">{{ ev.payload.scrub_anomaly }}</dd>
                         {% endif %}
                       </dl>
 
