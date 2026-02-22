@@ -85,6 +85,32 @@ def election_audit_log(request, election_id: int):
         .only("id", "timestamp", "event_type", "payload", "is_public")
         .order_by("timestamp", "id")
     )
+
+    cumulative_elected_by_entry_id: dict[int, set[int]] = {}
+
+    def _round_order_key(entry: AuditLogEntry) -> tuple[int, int, datetime.datetime, int]:
+        payload = entry.payload if isinstance(entry.payload, dict) else {}
+        round_obj = payload.get("round")
+        iteration_obj = payload.get("iteration")
+        if isinstance(round_obj, int):
+            return (0, round_obj, entry.timestamp, entry.id)
+        if isinstance(iteration_obj, int):
+            return (1, iteration_obj, entry.timestamp, entry.id)
+        return (2, 0, entry.timestamp, entry.id)
+
+    cumulative_elected_ids: set[int] = set()
+    tally_round_entries = [entry for entry in non_ballot_entries if entry.event_type == "tally_round"]
+    for tally_entry in sorted(tally_round_entries, key=_round_order_key):
+        payload = tally_entry.payload if isinstance(tally_entry.payload, dict) else {}
+        elected_obj = payload.get("elected")
+        if isinstance(elected_obj, list):
+            for elected_id_obj in elected_obj:
+                try:
+                    cumulative_elected_ids.add(int(elected_id_obj))
+                except (TypeError, ValueError):
+                    continue
+        cumulative_elected_by_entry_id[tally_entry.id] = set(cumulative_elected_ids)
+
     timeline_items.extend(non_ballot_entries)
 
     if can_manage_elections:
@@ -374,7 +400,15 @@ def election_audit_log(request, election_id: int):
                     retention_factors[cid] = str(v)
 
             elected_ids_obj = payload.get("elected")
-            elected_ids = {int(x) for x in elected_ids_obj} if isinstance(elected_ids_obj, list) else set()
+            per_round_elected_ids: set[int] = set()
+            if isinstance(elected_ids_obj, list):
+                for elected_id_obj in elected_ids_obj:
+                    try:
+                        per_round_elected_ids.add(int(elected_id_obj))
+                    except (TypeError, ValueError):
+                        continue
+
+            elected_ids = cumulative_elected_by_entry_id.get(entry.id, set())
             eliminated_obj = payload.get("eliminated")
             eliminated_id = int(eliminated_obj) if isinstance(eliminated_obj, int) else None
 

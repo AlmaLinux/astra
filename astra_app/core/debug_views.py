@@ -135,6 +135,7 @@ def sankey_debug_view(request: HttpRequest) -> HttpResponse:
     )
 
     round_rows: list[dict[str, object]] = []
+    cumulative_elected_ids: set[int] = set()
     rounds_obj = tally_result.get("rounds")
     if isinstance(rounds_obj, list):
         for idx, round_data in enumerate(rounds_obj, start=1):
@@ -150,7 +151,13 @@ def sankey_debug_view(request: HttpRequest) -> HttpResponse:
             retention_factors = retention_factors_obj if isinstance(retention_factors_obj, dict) else {}
 
             elected_obj = round_data.get("elected")
-            elected_ids = {int(x) for x in elected_obj} if isinstance(elected_obj, list) else set()
+            if isinstance(elected_obj, list):
+                for elected_id_obj in elected_obj:
+                    try:
+                        cumulative_elected_ids.add(int(elected_id_obj))
+                    except (TypeError, ValueError):
+                        continue
+
             eliminated_obj = round_data.get("eliminated")
             eliminated_id = eliminated_obj if isinstance(eliminated_obj, int) else None
 
@@ -166,7 +173,7 @@ def sankey_debug_view(request: HttpRequest) -> HttpResponse:
                         "candidate_label": label,
                         "retained_total": retained,
                         "retention_factor": retention_factors.get(str(cid), retention_factors.get(cid, "")),
-                        "is_elected": cid in elected_ids,
+                        "is_elected": cid in cumulative_elected_ids,
                         "is_eliminated": eliminated_id is not None and cid == eliminated_id,
                     }
                 )

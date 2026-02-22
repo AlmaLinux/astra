@@ -122,6 +122,71 @@ class ElectionAuditLogPageTests(TestCase):
         # Quota is floor(total/(seats+1)) + 1 = floor(1/2) + 1 = 1.
         self.assertContains(resp, "1.0000")
 
+    def test_tally_round_keeps_previous_round_elected_candidate_marked_elected(self) -> None:
+        self._login_as_freeipa_user("viewer")
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Audit log cumulative elected",
+            description="",
+            start_datetime=now - datetime.timedelta(days=2),
+            end_datetime=now - datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.tallied,
+            tally_result={"quota": "1", "elected": [], "eliminated": [], "forced_excluded": [], "rounds": []},
+        )
+        candidate = Candidate.objects.create(
+            election=election,
+            freeipa_username="alice",
+            nominated_by="nominator",
+        )
+
+        round_one = AuditLogEntry.objects.create(
+            election=election,
+            event_type="tally_round",
+            payload={
+                "round": 1,
+                "iteration": 1,
+                "retained_totals": {str(candidate.id): "1.0000"},
+                "retention_factors": {str(candidate.id): "1.0000"},
+                "elected": [candidate.id],
+                "eliminated": None,
+            },
+            is_public=True,
+        )
+        round_two = AuditLogEntry.objects.create(
+            election=election,
+            event_type="tally_round",
+            payload={
+                "round": 2,
+                "iteration": 2,
+                "retained_totals": {str(candidate.id): "1.0000"},
+                "retention_factors": {str(candidate.id): "1.0000"},
+                "elected": [],
+                "eliminated": None,
+            },
+            is_public=True,
+        )
+        AuditLogEntry.objects.filter(id=round_one.id).update(timestamp=now - datetime.timedelta(minutes=2))
+        AuditLogEntry.objects.filter(id=round_two.id).update(timestamp=now - datetime.timedelta(minutes=1))
+
+        viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "memberof_group": []})
+        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+            resp = self.client.get(reverse("election-audit-log", args=[election.id]))
+
+        self.assertEqual(resp.status_code, 200)
+
+        events = resp.context["events"]
+        round_two_event = next(
+            event
+            for event in events
+            if event.get("event_type") == "tally_round" and event.get("payload", {}).get("round") == 2
+        )
+        candidate_row = next(row for row in round_two_event["round_rows"] if row["candidate_id"] == candidate.id)
+
+        self.assertTrue(candidate_row["is_elected"])
+        self.assertFalse(candidate_row["is_eliminated"])
+
     def test_audit_log_page_renders_tally_sankey_chart(self) -> None:
         self._login_as_freeipa_user("viewer")
 
