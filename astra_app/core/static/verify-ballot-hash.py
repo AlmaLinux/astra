@@ -2,7 +2,7 @@
 """
 Verify your ballot hash (local check)
 
-Copy the values from your voting receipt into the variables below. This script
+Copy the values from your vote receipt email into the variables below. This script
 re-computes the ballot hash and compares it to the hash shown on your receipt.
 A match means the receipt details you entered produce the same hash the system recorded.
 
@@ -40,10 +40,10 @@ def compute_ballot_hash(
     return hashlib.sha256(data).hexdigest()
 
 # ===== YOUR BALLOT DETAILS =====
-# Copy/paste these values from your voting receipt and the "Verify ballot receipt" page.
+# Copy/paste these values from your vote receipt and the "Verify ballot receipt" page.
 
 election_id = 1
-credential_public_id = "your-credential-id-here"
+voting_credential = "your-credential-id-here"
 
 # Candidate IDs are what the system hashes, but voters usually think in usernames.
 # The verify page provides a complete username -> ID mapping for the election.
@@ -53,26 +53,31 @@ candidate_ids_by_username = {
     "carol": 3,
 }
 
-# Your vote choices are secret. You must fill your own ranking locally.
+# Your vote choices are secret. You must fill your own ranking locally
+# as a comma-separated list of candidate usernames in your preferred order.
 # Example: if you ranked alice then bob, use:
-# ranking = [candidate_ids_by_username["alice"], candidate_ids_by_username["bob"]]
-ranking = [candidate_ids_by_username["alice"]]
+# ranking = "alice,bob"
+ranking = "alice"
 
-weight = 1  # Usually 1 (check your receipt if different)
-nonce = "your-nonce-from-receipt-email"
+weight = 1  # The weight value from your vote receipt email
+submission_nonce = "your-nonce-from-receipt-email"
 expected_ballot_hash = "your-ballot-hash-from-receipt-email"
+
+# ===== END OF USER INPUT =====
+
+ranking = [candidate_ids_by_username[x.strip()] for x in ranking.split(',')]
 
 if __name__ == "__main__":
     if not isinstance(election_id, int) or election_id <= 0:
         raise SystemExit("election_id must be a positive integer")
-    if not str(credential_public_id or "").strip():
-        raise SystemExit("credential_public_id must be set")
+    if not str(voting_credential or "").strip():
+        raise SystemExit("voting_credential must be set")
     if not isinstance(ranking, list) or not all(isinstance(cid, int) for cid in ranking):
         raise SystemExit("ranking must be a list of candidate IDs (integers)")
     if not isinstance(weight, int) or weight <= 0:
         raise SystemExit("weight must be a positive integer")
-    if not str(nonce or "").strip():
-        raise SystemExit("nonce must be set")
+    if not str(submission_nonce or "").strip():
+        raise SystemExit("submission_nonce must be set")
 
     expected = str(expected_ballot_hash or "")
     if len(expected) != 64:
@@ -86,10 +91,10 @@ if __name__ == "__main__":
 
     computed_hash = compute_ballot_hash(
         election_id=election_id,
-        credential_public_id=credential_public_id,
+        credential_public_id=voting_credential,
         ranking=ranking,
         weight=weight,
-        nonce=nonce,
+        nonce=submission_nonce,
     )
 
     print("Ballot Hash Verification")
@@ -97,7 +102,7 @@ if __name__ == "__main__":
     print(f"Election ID:     {election_id}")
     print(f"Your ranking:    {ranking}")
     print(f"Weight:          {weight}")
-    print(f"Nonce:           {nonce}")
+    print(f"Nonce:           {submission_nonce}")
     print()
     print(f"Computed hash:   {computed_hash}")
     print(f"Expected hash:   {expected_ballot_hash}")

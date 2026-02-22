@@ -98,7 +98,7 @@ def ballot_verify(request):
         lines: list[str] = [
             "# Copy/paste these values into verify-ballot-hash.py",
             f"election_id = {election.id}",
-            "# Locate your credential_public_id in the voting credential email you received.",
+            f"# Locate your voting credential in the first email you received, titled 'Your voting credential for {election.name}'.",
             "candidate_ids_by_username = {",
         ]
         for username in sorted(candidate_ids_by_username.keys(), key=str.lower):

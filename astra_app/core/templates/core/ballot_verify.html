@@ -40,7 +40,7 @@
 
         <form method="get" action="{% url 'ballot-verify' %}" class="mb-4" novalidate>
           <div class="form-group">
-            <label for="id_receipt">Receipt</label>
+            <label for="id_receipt">Ballot receipt code</label>
             <input
               type="text"
               class="form-control"
@@ -128,7 +128,7 @@
                   <h5>Copy/paste constants for local verification</h5>
                   <p class="text-muted">
                     Copy/paste the block below into <strong><a href="{% static 'verify-ballot-hash.py' %}">verify-ballot-hash.py</a></strong>. It includes the election ID,
-                    candidate username-to-ID mapping, and where to find your credential public ID. You still need to enter your own vote choices
+                    candidate username-to-ID mapping, and where to find your voting credential. You still need to enter your own vote choices
                     in the script (vote choices are secret and are not shown on this page).
                   </p>
                   <pre class="bg-light p-3"><code>{{ verification_snippet }}</code></pre>
