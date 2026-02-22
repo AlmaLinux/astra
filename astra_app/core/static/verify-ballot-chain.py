@@ -16,6 +16,18 @@ Source-of-truth (stable permalinks):
 - election_chain_next_hash:   https://github.com/AlmaLinux/astra/blob/8806e7916ec58df46a7d9f333a2e50baac31bdb7/astra_app/core/tokens.py
 """
 
+# ===== YOUR BALLOT DETAILS =====
+# Copy/paste these values from your voting receipt and the election page.
+
+election_id = 1
+your_ballot_hash = "your-ballot-hash-from-receipt"
+your_previous_chain_hash = "previous-chain-hash-from-receipt"  # Optional
+final_chain_hash = "final-chain-hash-from-election-page"  # After election closed
+
+# Download public-ballots.json from the election page and keep it next to this script.
+ballots_file = "public-ballots.json"
+# ===== END OF USER INPUT =====
+
 
 import hashlib
 import json
@@ -88,17 +100,6 @@ def reconstruct_chain_order(*, ballots: list[dict[str, object]], genesis_hash: s
 
     return ordered
 
-
-# ===== YOUR BALLOT DETAILS =====
-# Copy/paste these values from your voting receipt and the election page.
-
-election_id = 1
-your_ballot_hash = "your-ballot-hash-from-receipt"
-your_previous_chain_hash = "previous-chain-hash-from-receipt"  # Optional
-final_chain_hash = "final-chain-hash-from-election-page"  # After election closed
-
-# Download public-ballots.json from the election page and keep it next to this script.
-ballots_file = "public-ballots.json"
 if __name__ == "__main__":
     with open(ballots_file, encoding="utf-8") as f:
         export = json.load(f)

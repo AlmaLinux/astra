@@ -15,30 +15,6 @@ Source-of-truth (stable permalink):
 - Ballot.compute_hash: https://github.com/AlmaLinux/astra/blob/8806e7916ec58df46a7d9f333a2e50baac31bdb7/astra_app/core/models.py
 """
 
-
-import hashlib
-import json
-
-
-def compute_ballot_hash(
-    *,
-    election_id: int,
-    credential_public_id: str,
-    ranking: list[int],
-    weight: int,
-    nonce: str,
-) -> str:
-    payload: dict[str, object] = {
-        "election_id": election_id,
-        "credential_public_id": credential_public_id,
-        "ranking": ranking,
-        "weight": weight,
-        "nonce": nonce,
-    }
-
-    data = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    return hashlib.sha256(data).hexdigest()
-
 # ===== YOUR BALLOT DETAILS =====
 # Copy/paste these values from your vote receipt and the "Verify ballot receipt" page.
 
@@ -64,6 +40,29 @@ submission_nonce = "your-nonce-from-receipt-email"
 expected_ballot_hash = "your-ballot-hash-from-receipt-email"
 
 # ===== END OF USER INPUT =====
+
+
+import hashlib
+import json
+
+def compute_ballot_hash(
+    *,
+    election_id: int,
+    credential_public_id: str,
+    ranking: list[int],
+    weight: int,
+    nonce: str,
+) -> str:
+    payload: dict[str, object] = {
+        "election_id": election_id,
+        "credential_public_id": credential_public_id,
+        "ranking": ranking,
+        "weight": weight,
+        "nonce": nonce,
+    }
+
+    data = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(data).hexdigest()
 
 ranking = [candidate_ids_by_username[x.strip()] for x in ranking.split(',')]
 
