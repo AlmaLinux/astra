@@ -18,6 +18,7 @@ from core.account_invitation_reconcile import (
 )
 from core.email_context import system_email_context
 from core.templated_email import queue_templated_email
+from core.views_auth import PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY
 from core.views_utils import _normalize_str
 
 from .backends import FreeIPAUser, _build_freeipa_client
@@ -104,7 +105,12 @@ def register(request: HttpRequest) -> HttpResponse:
     if invite_token:
         invitation = load_account_invitation_from_token(invite_token)
         if invitation is not None:
+            request.session[PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY] = invite_token
             invitation_token = invite_token
+    if not invitation_token:
+        session_invite_token = _normalize_str(request.session.get(PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY))
+        if session_invite_token and load_account_invitation_from_token(session_invite_token) is not None:
+            invitation_token = session_invite_token
 
     form = RegistrationForm(request.POST or None, initial={"invitation_token": invitation_token})
 
@@ -207,6 +213,10 @@ def confirm(request: HttpRequest) -> HttpResponse:
 
     form = ResendRegistrationEmailForm(request.POST or None, initial={"username": username})
     if request.method == "POST" and form.is_valid():
+        invitation_token = None
+        pending_invitation_token = _normalize_str(request.session.get(PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY))
+        if pending_invitation_token and load_account_invitation_from_token(pending_invitation_token) is not None:
+            invitation_token = pending_invitation_token
         try:
             _send_registration_email(
                 request,
@@ -214,6 +224,7 @@ def confirm(request: HttpRequest) -> HttpResponse:
                 email=(email or ""),
                 first_name=(first_name or ""),
                 last_name=(last_name or ""),
+                invitation_token=invitation_token,
             )
         except Exception:
             logger.exception("Resend registration email failed username=%s", username)
@@ -331,6 +342,7 @@ def activate(request: HttpRequest) -> HttpResponse:
                         now=timezone.now(),
                     )
 
+            request.session.pop(PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY, None)
             messages.success(request, "Congratulations, your account has been created! Go ahead and sign in to proceed.")
             return redirect("login")
 

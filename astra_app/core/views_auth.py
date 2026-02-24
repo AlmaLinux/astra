@@ -38,6 +38,7 @@ from .password_reset import (
 )
 
 logger = logging.getLogger(__name__)
+PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY = "pending_account_invitation_token"
 
 
 class FreeIPALoginView(auth_views.LoginView):
@@ -50,6 +51,12 @@ class FreeIPALoginView(auth_views.LoginView):
     def dispatch(self, request: HttpRequest, *args, **kwargs) -> HttpResponse:
         if request.user.is_authenticated:
             return redirect("home")
+
+        invite_token = ""
+        if request.method == "GET":
+            invite_token = _normalize_str(request.GET.get("invite"))
+        if invite_token and load_account_invitation_from_token(invite_token) is not None:
+            request.session[PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY] = invite_token
         return super().dispatch(request, *args, **kwargs)
 
     @override
@@ -76,7 +83,11 @@ class FreeIPALoginView(auth_views.LoginView):
     def form_valid(self, form) -> HttpResponse:
         response = super().form_valid(form)
 
-        invite_token = _normalize_str(self.request.POST.get("invite") or self.request.GET.get("invite"))
+        invite_token = _normalize_str(
+            self.request.POST.get("invite")
+            or self.request.GET.get("invite")
+            or self.request.session.get(PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY)
+        )
         if not invite_token:
             return response
 
@@ -93,6 +104,7 @@ class FreeIPALoginView(auth_views.LoginView):
             username=username,
             now=timezone.now(),
         )
+        self.request.session.pop(PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY, None)
 
         return response
 
@@ -109,6 +121,11 @@ def password_reset_request(request: HttpRequest) -> HttpResponse:
             username = _normalize_str(user.username)
             email = _normalize_str(user.email)
             last_password_change = _normalize_str(user.last_password_change)
+            pending_invitation_token = _normalize_str(
+                request.session.get(PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY)
+            )
+            if pending_invitation_token and load_account_invitation_from_token(pending_invitation_token) is None:
+                pending_invitation_token = ""
             if username and email:
                 try:
                     send_password_reset_email(
@@ -116,7 +133,10 @@ def password_reset_request(request: HttpRequest) -> HttpResponse:
                         username=username,
                         email=email,
                         last_password_change=last_password_change,
+                        invitation_token=pending_invitation_token or None,
                     )
+                    if pending_invitation_token:
+                        request.session.pop(PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY, None)
                 except Exception:
                     logger.exception("Password reset email send failed username=%s", username)
 
@@ -227,14 +247,17 @@ def password_reset_confirm(request: HttpRequest) -> HttpResponse:
             # which invalidates the token; regenerate so the user can retry.
             refreshed = find_user_for_password_reset(username)
             refreshed_lpc = _normalize_str(refreshed.last_password_change) if refreshed else ""
-            next_token = make_signed_token(
-                {
-                    "p": PASSWORD_RESET_TOKEN_PURPOSE,
-                    "u": username,
-                    "e": user_email,
-                    "lpc": refreshed_lpc,
-                }
-            )
+            next_token_payload = {
+                "p": PASSWORD_RESET_TOKEN_PURPOSE,
+                "u": username,
+                "e": user_email,
+                "lpc": refreshed_lpc,
+            }
+            invitation_token = _normalize_str(token.get("i"))
+            if invitation_token:
+                next_token_payload["i"] = invitation_token
+
+            next_token = make_signed_token(next_token_payload)
             form.add_error("otp" if has_otp else None, "Incorrect value.")
             return render(
                 request,
@@ -251,6 +274,18 @@ def password_reset_confirm(request: HttpRequest) -> HttpResponse:
             else:
                 form.add_error(None, "Unable to reset password due to an internal error.")
         else:
+            invitation_token = _normalize_str(token.get("i"))
+            if invitation_token:
+                invitation = load_account_invitation_from_token(invitation_token)
+                if invitation is not None:
+                    reconcile_account_invitation_for_username(
+                        invitation=invitation,
+                        username=username,
+                        now=timezone.now(),
+                    )
+
+            request.session.pop(PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY, None)
+
             try:
                 send_password_reset_success_email(request=request, username=username, email=user_email)
             except Exception:

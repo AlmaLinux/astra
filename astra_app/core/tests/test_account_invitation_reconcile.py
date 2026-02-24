@@ -1,4 +1,5 @@
 import datetime
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.test import TestCase
@@ -56,8 +57,45 @@ class AccountInvitationReconcileTests(TestCase):
 
         invitation.refresh_from_db()
         self.assertEqual(invitation.accepted_at, first_now)
+        self.assertEqual(invitation.accepted_username, "alice")
         self.assertEqual(invitation.freeipa_last_checked_at, second_now)
         self.assertEqual(invitation.freeipa_matched_usernames, ["alice", "zara"])
+
+    def test_reconcile_account_invitation_for_username_does_not_overwrite_existing_accepted_username(self) -> None:
+        invitation = AccountInvitation.objects.create(
+            email="invitee@example.com",
+            full_name="Invitee",
+            invited_by_username="committee",
+            accepted_username="zara",
+        )
+        now = timezone.make_aware(datetime.datetime(2026, 2, 15, 10, 0, 0), datetime.UTC)
+
+        reconcile_account_invitation_for_username(invitation=invitation, username="alice", now=now)
+
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.accepted_username, "zara")
+        self.assertEqual(invitation.accepted_at, now)
+        self.assertEqual(invitation.freeipa_matched_usernames, ["alice"])
+
+    def test_reconcile_account_invitation_for_username_normalizes_username_to_lowercase(self) -> None:
+        now = timezone.make_aware(datetime.datetime(2026, 2, 15, 10, 0, 0), datetime.UTC)
+        invitation = SimpleNamespace(
+            organization_id=None,
+            accepted_at=None,
+            accepted_username="",
+            freeipa_matched_usernames=[],
+            freeipa_last_checked_at=None,
+        )
+
+        def _save(*, update_fields: list[str]) -> None:
+            _ = update_fields
+
+        invitation.save = _save
+
+        reconcile_account_invitation_for_username(invitation=invitation, username="Alice", now=now)
+
+        self.assertEqual(invitation.accepted_username, "alice")
+        self.assertIn("alice", invitation.freeipa_matched_usernames)
 
     def test_reconcile_account_invitation_for_username_keeps_org_invitation_pending(self) -> None:
         organization = Organization.objects.create(
@@ -76,5 +114,6 @@ class AccountInvitationReconcileTests(TestCase):
 
         invitation.refresh_from_db()
         self.assertIsNone(invitation.accepted_at)
+        self.assertEqual(invitation.accepted_username, "")
         self.assertEqual(invitation.freeipa_last_checked_at, now)
         self.assertEqual(invitation.freeipa_matched_usernames, ["alice"])

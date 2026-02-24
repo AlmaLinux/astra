@@ -33,15 +33,25 @@ def password_reset_login_url(*, request: HttpRequest) -> str:
     return request.build_absolute_uri(reverse("login"))
 
 
-def send_password_reset_email(*, request: HttpRequest, username: str, email: str, last_password_change: str) -> None:
-    token = make_signed_token(
-        {
-            "p": PASSWORD_RESET_TOKEN_PURPOSE,
-            "u": username,
-            "e": email,
-            "lpc": last_password_change,
-        }
-    )
+def send_password_reset_email(
+    *,
+    request: HttpRequest,
+    username: str,
+    email: str,
+    last_password_change: str,
+    invitation_token: str | None = None,
+) -> None:
+    token_payload: dict[str, str] = {
+        "p": PASSWORD_RESET_TOKEN_PURPOSE,
+        "u": username,
+        "e": email,
+        "lpc": last_password_change,
+    }
+    normalized_invitation_token = _normalize_str(invitation_token)
+    if normalized_invitation_token:
+        token_payload["i"] = normalized_invitation_token
+
+    token = make_signed_token(token_payload)
     reset_url = password_reset_confirm_url(request=request, token=token)
 
     ttl_seconds = settings.PASSWORD_RESET_TOKEN_TTL_SECONDS

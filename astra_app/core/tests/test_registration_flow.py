@@ -2,13 +2,16 @@
 import re
 from types import SimpleNamespace
 from unittest.mock import patch
+from urllib.parse import unquote
 
 from django.contrib.messages import get_messages
 from django.test import Client, TestCase, override_settings
 
 from core.backends import FreeIPAUser
 from core.models import AccountInvitation
+from core.tokens import read_signed_token
 from core.tests.utils_test_data import ensure_email_templates
+from core.views_auth import PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY
 
 
 class RegistrationFlowTests(TestCase):
@@ -31,7 +34,6 @@ class RegistrationFlowTests(TestCase):
 
         with patch(
             "core.views_registration.load_account_invitation_from_token",
-            create=True,
             return_value=invitation,
         ) as load_mock:
             resp = client.get(f"/register/?invite={token}")
@@ -39,6 +41,107 @@ class RegistrationFlowTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.context["form"].initial.get("invitation_token"), token)
         load_mock.assert_called_once_with(token)
+
+    @override_settings(REGISTRATION_OPEN=True)
+    def test_register_get_invite_stashes_pending_token_in_session(self) -> None:
+        client = Client()
+
+        invitation = AccountInvitation.objects.create(
+            email="invitee@example.com",
+            full_name="Invitee",
+            note="",
+            invited_by_username="committee",
+        )
+        token = str(invitation.invitation_token)
+
+        response = client.get(f"/register/?invite={token}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(client.session.get(PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY), token)
+
+    @override_settings(REGISTRATION_OPEN=True)
+    def test_register_get_uses_session_pending_invite_when_query_absent(self) -> None:
+        client = Client()
+
+        invitation = AccountInvitation.objects.create(
+            email="invitee@example.com",
+            full_name="Invitee",
+            note="",
+            invited_by_username="committee",
+        )
+        token = str(invitation.invitation_token)
+
+        first_response = client.get(f"/register/?invite={token}")
+        self.assertEqual(first_response.status_code, 200)
+
+        second_response = client.get("/register/")
+
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(second_response.context["form"].initial.get("invitation_token"), token)
+
+    @override_settings(REGISTRATION_OPEN=True)
+    def test_register_get_invalid_invite_token_is_not_stashed_or_used(self) -> None:
+        client = Client()
+
+        invalid_query_response = client.get("/register/?invite=invalid-token")
+
+        self.assertEqual(invalid_query_response.status_code, 200)
+        self.assertNotIn(PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY, client.session)
+        self.assertEqual(invalid_query_response.context["form"].initial.get("invitation_token"), "")
+
+        session = client.session
+        session[PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY] = "invalid-token"
+        session.save()
+
+        fallback_response = client.get("/register/")
+
+        self.assertEqual(fallback_response.status_code, 200)
+        self.assertEqual(fallback_response.context["form"].initial.get("invitation_token"), "")
+
+    @override_settings(REGISTRATION_OPEN=True, DEFAULT_FROM_EMAIL="noreply@example.com")
+    def test_confirm_resend_preserves_session_invitation_token_in_activation_payload(self) -> None:
+        client = Client()
+
+        invitation = AccountInvitation.objects.create(
+            email="invitee@example.com",
+            full_name="Invitee",
+            note="",
+            invited_by_username="committee",
+        )
+        invitation_token = str(invitation.invitation_token)
+
+        session = client.session
+        session[PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY] = invitation_token
+        session.save()
+
+        ipa_client = SimpleNamespace()
+        ipa_client.stageuser_show = lambda *args, **kwargs: {
+            "result": {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["alice@example.com"],
+            }
+        }
+
+        with (
+            patch("core.views_registration.FreeIPAUser.get_client", autospec=True, return_value=ipa_client),
+            patch("core.views_registration.queue_templated_email", autospec=True) as queue_email_mock,
+        ):
+            response = client.post(
+                "/register/confirm/?username=alice",
+                data={"username": "alice"},
+                follow=False,
+            )
+
+        self.assertEqual(response.status_code, 302)
+
+        activate_url = queue_email_mock.call_args.kwargs.get("context", {}).get("activate_url", "")
+        token_match = re.search(r"token=([^\s&]+)", activate_url)
+        self.assertIsNotNone(token_match)
+        assert token_match is not None
+        activation_payload = read_signed_token(unquote(token_match.group(1)))
+        self.assertEqual(activation_payload.get("i"), invitation_token)
 
     def test_registration_email_template_exists(self):
         from post_office.models import EmailTemplate
@@ -291,6 +394,10 @@ class RegistrationFlowTests(TestCase):
             }
         )
 
+        session = client.session
+        session[PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY] = str(invitation.invitation_token)
+        session.save()
+
         ipa_client = SimpleNamespace()
         ipa_client.stageuser_show = lambda *args, **kwargs: {
             "result": {
@@ -308,10 +415,9 @@ class RegistrationFlowTests(TestCase):
             patch("core.views_registration._build_freeipa_client", autospec=True) as mocked_build,
             patch(
                 "core.views_registration.load_account_invitation_from_token",
-                create=True,
                 return_value=invitation,
             ) as load_mock,
-            patch("core.views_registration.reconcile_account_invitation_for_username", create=True) as reconcile_mock,
+            patch("core.views_registration.reconcile_account_invitation_for_username") as reconcile_mock,
         ):
             mocked_build.return_value.change_password.return_value = None
             activation_post = client.post(
@@ -325,6 +431,7 @@ class RegistrationFlowTests(TestCase):
         self.assertEqual(reconcile_mock.call_count, 1)
         self.assertEqual(reconcile_mock.call_args.kwargs["invitation"], invitation)
         self.assertEqual(reconcile_mock.call_args.kwargs["username"], "alice")
+        self.assertNotIn(PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY, client.session)
 
     @override_settings(REGISTRATION_OPEN=True, DEFAULT_FROM_EMAIL="noreply@example.com")
     def test_activate_flow_happy_path(self):

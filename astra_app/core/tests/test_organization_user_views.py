@@ -917,7 +917,7 @@ class OrganizationUserViewsTests(TestCase):
         token = make_organization_claim_token(organization)
 
         claimant = FreeIPAUser("claimant", {"uid": ["claimant"], "memberof_group": [], "c": ["US"]})
-        self._login_as_freeipa_user("claimant")
+        self._login_as_freeipa_user("ClaImAnt")
 
         with (
             patch("core.backends.FreeIPAUser.get", return_value=claimant),
@@ -929,6 +929,7 @@ class OrganizationUserViewsTests(TestCase):
         self.assertEqual(response.status_code, 302)
         invitation.refresh_from_db()
         self.assertIsNotNone(invitation.accepted_at)
+        self.assertEqual(invitation.accepted_username, "claimant")
 
     def test_active_org_detail_hides_send_claim_invitation_link(self) -> None:
         from core.models import Organization

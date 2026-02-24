@@ -777,6 +777,71 @@ class AccountInvitationViewsTests(TestCase):
         self.assertContains(response, "Visibility Org")
         self.assertContains(response, reverse("organization-detail", args=[organization.pk]))
 
+    def test_account_invitations_list_shows_accepted_username_link_for_accepted_invitation(self) -> None:
+        self._login_as_freeipa_user("committee")
+
+        invitation = AccountInvitation.objects.create(
+            email="accepted@example.com",
+            full_name="Accepted User",
+            note="",
+            invited_by_username="committee",
+            accepted_at=timezone.now(),
+            accepted_username="accepteduser",
+            freeipa_matched_usernames=["accepteduser"],
+        )
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=self._committee_user()),
+            patch(
+                "core.views_account_invitations.confirm_existing_usernames",
+                return_value=(invitation.freeipa_matched_usernames, True),
+            ),
+        ):
+            response = self.client.get(reverse("account-invitations"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Accepted")
+        accepted_user_url = reverse("user-profile", kwargs={"username": "accepteduser"})
+        self.assertContains(
+            response,
+            f'<div class="text-muted small">as <a href="{accepted_user_url}">accepteduser</a></div>',
+            html=True,
+        )
+
+    def test_account_invitations_list_shows_accepted_username_link_for_multiple_matches(self) -> None:
+        self._login_as_freeipa_user("committee")
+
+        invitation = AccountInvitation.objects.create(
+            email="multi@example.com",
+            full_name="Matched User",
+            note="",
+            invited_by_username="committee",
+            accepted_at=timezone.now(),
+            accepted_username="accepteduser",
+            freeipa_matched_usernames=["alphauser", "accepteduser"],
+        )
+
+        with (
+            patch("core.backends.FreeIPAUser.get", return_value=self._committee_user()),
+            patch(
+                "core.views_account_invitations.confirm_existing_usernames",
+                return_value=(invitation.freeipa_matched_usernames, True),
+            ),
+        ):
+            response = self.client.get(reverse("account-invitations"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Accepted (multiple matches)")
+        self.assertContains(response, "alphauser")
+        self.assertContains(response, "accepteduser")
+        self.assertContains(response, reverse("user-profile", kwargs={"username": "alphauser"}))
+        accepted_user_url = reverse("user-profile", kwargs={"username": "accepteduser"})
+        self.assertContains(
+            response,
+            f'<div class="text-muted small">as <a href="{accepted_user_url}">accepteduser</a></div>',
+            html=True,
+        )
+
     @override_settings(PUBLIC_BASE_URL="")
     def test_build_invitation_email_context_raises_when_public_base_url_missing(self) -> None:
         invitation = AccountInvitation.objects.create(

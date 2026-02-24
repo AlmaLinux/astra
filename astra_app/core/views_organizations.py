@@ -122,6 +122,7 @@ def organization_claim(request: HttpRequest, token: str) -> HttpResponse:
 
     try:
         claim_completed_at = timezone.now()
+        normalized_username = _normalize_str(username).lower()
         with transaction.atomic():
             locked_organization = Organization.objects.select_for_update().get(pk=refreshed_payload.organization_id)
 
@@ -143,7 +144,10 @@ def organization_claim(request: HttpRequest, token: str) -> HttpResponse:
                 organization=locked_organization,
                 dismissed_at__isnull=True,
                 accepted_at__isnull=True,
-            ).update(accepted_at=claim_completed_at)
+            ).update(
+                accepted_at=claim_completed_at,
+                accepted_username=normalized_username,
+            )
     except IntegrityError:
         messages.error(
             request,

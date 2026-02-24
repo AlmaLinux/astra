@@ -89,8 +89,14 @@
                       <a href="{% url 'user-profile' username %}">{{ username }}</a>{% if not forloop.last %}, {% endif %}
                     {% endfor %}
                   </div>
+                  {% if invitation.accepted_username %}
+                    <div class="text-muted small">as <a href="{% url 'user-profile' invitation.accepted_username %}">{{ invitation.accepted_username }}</a></div>
+                  {% endif %}
                 {% else %}
                   Accepted
+                  {% if invitation.accepted_username %}
+                    <div class="text-muted small">as <a href="{% url 'user-profile' invitation.accepted_username %}">{{ invitation.accepted_username }}</a></div>
+                  {% endif %}
                 {% endif %}
               </td>
               <td>{{ invitation.accepted_at }}</td>

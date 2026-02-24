@@ -1,12 +1,18 @@
 
 import re
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from urllib.parse import unquote
 
 from django.contrib.messages import get_messages
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
+from python_freeipa import exceptions
+
+from core.models import AccountInvitation
+from core.password_reset import PASSWORD_RESET_TOKEN_PURPOSE, read_password_reset_token
+from core.tokens import make_signed_token
+from core.views_auth import PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY
 
 
 class PasswordResetFlowTests(TestCase):
@@ -79,6 +85,84 @@ class PasswordResetFlowTests(TestCase):
         self.assertEqual(resp["Location"], "/login/")
         queue_email_mock.assert_not_called()
 
+    @override_settings(DEFAULT_FROM_EMAIL="noreply@example.com")
+    def test_password_reset_request_embeds_pending_invitation_token_in_reset_token(self) -> None:
+        client = Client()
+        invitation = AccountInvitation.objects.create(
+            email="invitee@example.com",
+            full_name="Invitee",
+            invited_by_username="committee",
+        )
+
+        session = client.session
+        session[PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY] = str(invitation.invitation_token)
+        session.save()
+
+        user = SimpleNamespace(
+            username="alice",
+            email="alice@example.com",
+            last_password_change="",
+            first_name="Alice",
+            last_name="User",
+            full_name="Alice User",
+        )
+
+        with (
+            patch("core.password_reset.FreeIPAUser.get", autospec=True, return_value=user),
+            patch("core.password_reset.queue_templated_email", autospec=True) as queue_email_mock,
+        ):
+            resp = client.post(
+                reverse("password-reset"),
+                data={"username_or_email": "alice"},
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 302)
+        reset_url = queue_email_mock.call_args.kwargs.get("context", {}).get("reset_url", "")
+        token_match = re.search(r"token=([^\s&]+)", reset_url)
+        self.assertIsNotNone(token_match)
+        assert token_match is not None
+        token = unquote(token_match.group(1))
+        payload = read_password_reset_token(token)
+        self.assertEqual(payload.get("i"), str(invitation.invitation_token))
+        self.assertNotIn(PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY, client.session)
+
+    @override_settings(DEFAULT_FROM_EMAIL="noreply@example.com")
+    def test_password_reset_request_omits_invalid_pending_invitation_token_from_reset_token(self) -> None:
+        client = Client()
+
+        session = client.session
+        session[PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY] = "invalid-token"
+        session.save()
+
+        user = SimpleNamespace(
+            username="alice",
+            email="alice@example.com",
+            last_password_change="",
+            first_name="Alice",
+            last_name="User",
+            full_name="Alice User",
+        )
+
+        with (
+            patch("core.password_reset.FreeIPAUser.get", autospec=True, return_value=user),
+            patch("core.password_reset.queue_templated_email", autospec=True) as queue_email_mock,
+        ):
+            resp = client.post(
+                reverse("password-reset"),
+                data={"username_or_email": "alice"},
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 302)
+        reset_url = queue_email_mock.call_args.kwargs.get("context", {}).get("reset_url", "")
+        token_match = re.search(r"token=([^\s&]+)", reset_url)
+        self.assertIsNotNone(token_match)
+        assert token_match is not None
+        token = unquote(token_match.group(1))
+        payload = read_password_reset_token(token)
+        self.assertNotIn("i", payload)
+
     @override_settings(PASSWORD_RESET_TOKEN_TTL_SECONDS=60 * 60)
     def test_password_reset_confirm_sets_new_password(self):
         client = Client()
@@ -139,6 +223,156 @@ class PasswordResetFlowTests(TestCase):
 
         # Success email should be queued.
         self.assertGreaterEqual(queue_email_mock.call_count, 1)
+
+    @override_settings(PASSWORD_RESET_TOKEN_TTL_SECONDS=60 * 60)
+    def test_password_reset_confirm_reconciles_invitation_from_token_context(self) -> None:
+        client = Client()
+        invitation = AccountInvitation.objects.create(
+            email="invitee@example.com",
+            full_name="Invitee",
+            invited_by_username="committee",
+        )
+
+        token = make_signed_token(
+            {
+                "p": PASSWORD_RESET_TOKEN_PURPOSE,
+                "u": "alice",
+                "e": "alice@example.com",
+                "lpc": "",
+                "i": str(invitation.invitation_token),
+            }
+        )
+
+        session = client.session
+        session[PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY] = str(invitation.invitation_token)
+        session.save()
+
+        user = SimpleNamespace(
+            username="alice",
+            email="alice@example.com",
+            last_password_change="",
+            first_name="Alice",
+            last_name="User",
+            full_name="Alice User",
+        )
+
+        svc_client = SimpleNamespace(
+            user_mod=lambda *_args, **_kwargs: {"result": {"uid": ["alice"]}},
+            otptoken_find=lambda **_kwargs: {"result": []},
+        )
+        pw_client = SimpleNamespace(change_password=lambda *_args, **_kwargs: True)
+
+        with (
+            patch("core.views_auth.find_user_for_password_reset", autospec=True, return_value=user),
+            patch("core.views_auth.FreeIPAUser.get_client", autospec=True, return_value=svc_client),
+            patch("core.views_auth._build_freeipa_client", autospec=True, return_value=pw_client),
+            patch("core.password_reset.queue_templated_email", autospec=True),
+        ):
+            post_resp = client.post(
+                reverse("password-reset-confirm"),
+                data={"token": token, "password": "S3curePassword!", "password_confirm": "S3curePassword!", "otp": ""},
+                follow=False,
+            )
+
+        self.assertEqual(post_resp.status_code, 302)
+        self.assertEqual(post_resp["Location"], "/login/")
+        invitation.refresh_from_db()
+        self.assertIsNotNone(invitation.accepted_at)
+        self.assertEqual(invitation.accepted_username, "alice")
+        self.assertNotIn(PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY, client.session)
+
+    @override_settings(PASSWORD_RESET_TOKEN_TTL_SECONDS=60 * 60)
+    def test_password_reset_confirm_invalid_password_retry_preserves_invitation_context(self) -> None:
+        client = Client()
+        invitation = AccountInvitation.objects.create(
+            email="invitee@example.com",
+            full_name="Invitee",
+            invited_by_username="committee",
+        )
+
+        token = make_signed_token(
+            {
+                "p": PASSWORD_RESET_TOKEN_PURPOSE,
+                "u": "alice",
+                "e": "alice@example.com",
+                "lpc": "",
+                "i": str(invitation.invitation_token),
+            }
+        )
+
+        session = client.session
+        session[PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY] = str(invitation.invitation_token)
+        session.save()
+
+        user = SimpleNamespace(
+            username="alice",
+            email="alice@example.com",
+            last_password_change="",
+            first_name="Alice",
+            last_name="User",
+            full_name="Alice User",
+        )
+        refreshed_user = SimpleNamespace(
+            username="alice",
+            email="alice@example.com",
+            last_password_change="2026-02-24T00:00:00Z",
+            first_name="Alice",
+            last_name="User",
+            full_name="Alice User",
+        )
+
+        svc_client = SimpleNamespace(
+            user_mod=Mock(return_value={"result": {"uid": ["alice"]}}),
+            otptoken_find=Mock(return_value={"result": [{"ipatokenuniqueid": ["token-1"]}]}),
+        )
+        pw_client = SimpleNamespace(
+            change_password=Mock(side_effect=[exceptions.PWChangeInvalidPassword, True]),
+        )
+
+        with (
+            patch(
+                "core.views_auth.find_user_for_password_reset",
+                autospec=True,
+                side_effect=[user, refreshed_user, refreshed_user],
+            ),
+            patch("core.views_auth.FreeIPAUser.get_client", autospec=True, return_value=svc_client),
+            patch("core.views_auth._build_freeipa_client", autospec=True, return_value=pw_client),
+            patch("core.views_auth.send_password_reset_success_email", autospec=True),
+        ):
+            first_post = client.post(
+                reverse("password-reset-confirm"),
+                data={
+                    "token": token,
+                    "password": "S3curePassword!",
+                    "password_confirm": "S3curePassword!",
+                    "otp": "000000",
+                },
+                follow=False,
+            )
+
+            self.assertEqual(first_post.status_code, 200)
+            retry_token = first_post.context["token"]
+            self.assertNotEqual(retry_token, token)
+            retry_payload = read_password_reset_token(retry_token)
+            self.assertEqual(retry_payload.get("i"), str(invitation.invitation_token))
+            self.assertEqual(retry_payload.get("lpc"), refreshed_user.last_password_change)
+
+            second_post = client.post(
+                reverse("password-reset-confirm"),
+                data={
+                    "token": retry_token,
+                    "password": "S3curePassword!",
+                    "password_confirm": "S3curePassword!",
+                    "otp": "000000",
+                },
+                follow=False,
+            )
+
+        self.assertEqual(second_post.status_code, 302)
+        self.assertEqual(second_post["Location"], "/login/")
+        invitation.refresh_from_db()
+        self.assertIsNotNone(invitation.accepted_at)
+        self.assertEqual(invitation.accepted_username, "alice")
 
 
 class AdminPasswordResetEmailTests(TestCase):

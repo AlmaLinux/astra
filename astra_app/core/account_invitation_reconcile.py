@@ -37,7 +37,7 @@ def reconcile_account_invitation_for_username(
     username: str,
     now: datetime,
 ) -> None:
-    normalized_username = str(username or "").strip()
+    normalized_username = str(username or "").strip().lower()
     if not normalized_username:
         return
 
@@ -45,6 +45,9 @@ def reconcile_account_invitation_for_username(
     if invitation.organization_id is None:
         invitation.accepted_at = invitation.accepted_at or now
         update_fields.insert(0, "accepted_at")
+        if not invitation.accepted_username:
+            invitation.accepted_username = normalized_username
+            update_fields.insert(1, "accepted_username")
 
     usernames = set(invitation.freeipa_matched_usernames)
     usernames.add(normalized_username)

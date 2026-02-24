@@ -4,9 +4,26 @@ from django.test import Client, TestCase
 
 from core.backends import FreeIPAUser
 from core.models import AccountInvitation, Organization
+from core.views_auth import PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY
 
 
 class LoginInviteTokenSemanticsTests(TestCase):
+    def test_login_page_with_invite_stores_pending_token_in_session(self) -> None:
+        client = Client()
+
+        invitation = AccountInvitation.objects.create(
+            email="invitee@example.com",
+            full_name="Invitee",
+            note="",
+            invited_by_username="committee",
+        )
+        token = str(invitation.invitation_token)
+
+        resp = client.get(f"/login/?invite={token}", follow=False)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(client.session.get(PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY), token)
+
     def test_login_invite_flow_uses_reconcile_helpers(self) -> None:
         client = Client()
 
@@ -30,8 +47,8 @@ class LoginInviteTokenSemanticsTests(TestCase):
 
         with (
             patch("django.contrib.auth.forms.authenticate", return_value=user),
-            patch("core.views_auth.load_account_invitation_from_token", create=True, return_value=invitation) as load_mock,
-            patch("core.views_auth.reconcile_account_invitation_for_username", create=True) as reconcile_mock,
+            patch("core.views_auth.load_account_invitation_from_token", return_value=invitation) as load_mock,
+            patch("core.views_auth.reconcile_account_invitation_for_username") as reconcile_mock,
         ):
             resp = client.post(
                 f"/login/?invite={token}",

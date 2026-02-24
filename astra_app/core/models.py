@@ -472,6 +472,7 @@ class AccountInvitation(models.Model):
     dismissed_at = models.DateTimeField(blank=True, null=True)
     dismissed_by_username = models.CharField(max_length=255, blank=True, default="")
     accepted_at = models.DateTimeField(blank=True, null=True)
+    accepted_username = models.CharField(max_length=255, blank=True, default="")
     freeipa_matched_usernames = models.JSONField(blank=True, default=list)
     freeipa_last_checked_at = models.DateTimeField(blank=True, null=True)
 
@@ -490,6 +491,7 @@ class AccountInvitation(models.Model):
         self.invited_by_username = str(self.invited_by_username or "").strip()
         self.email_template_name = str(self.email_template_name or "").strip()
         self.dismissed_by_username = str(self.dismissed_by_username or "").strip()
+        self.accepted_username = str(self.accepted_username or "").strip().lower()
         if not isinstance(self.freeipa_matched_usernames, list):
             self.freeipa_matched_usernames = []
         else:
