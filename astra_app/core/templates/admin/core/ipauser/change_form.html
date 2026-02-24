@@ -1,5 +1,38 @@
 {% extends "admin/change_form.html" %}
 
+{% block content %}
+  {{ block.super }}
+  {% if change and freeipa_attribute_rows %}
+    <div id="freeipa-attributes-row" class="row mt-3">
+      <div class="col-12">
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title mb-0">FreeIPA Attributes</h3>
+          </div>
+          <div class="card-body p-0">
+            <table class="table table-sm mb-0">
+              <thead>
+                <tr>
+                  <th scope="col">Attribute</th>
+                  <th scope="col">Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for attr_name, attr_value in freeipa_attribute_rows %}
+                  <tr>
+                    <th scope="row">{{ attr_name }}</th>
+                    <td>{{ attr_value }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+{% endblock %}
+
 {% block object-tools-items %}
   {% if change and has_change_permission %}
     {% url 'admin:auth_ipauser_send_password_reset' original.pk as admin_password_reset_url %}

@@ -599,6 +599,33 @@ def _freeipa_group_names(*, fas_only: bool = False) -> list[str]:
     return sorted({getattr(g, "cn", "") for g in groups if getattr(g, "cn", "")})
 
 
+def _freeipa_attr_value_to_text(value: object) -> str:
+    if isinstance(value, list):
+        parts = [str(v).strip() for v in value if str(v).strip()]
+        return ", ".join(parts)
+    text = str(value).strip()
+    return text
+
+
+def _freeipa_user_attribute_rows(user: FreeIPAUser) -> list[tuple[str, str]]:
+    # The admin detail view intentionally iterates FreeIPA's raw payload so operators
+    # can inspect attributes that are not mapped onto explicit model properties.
+    # In this admin context, `_user_data` is expected on FreeIPA-backed objects.
+    # If unavailable, we gracefully skip the attribute table.
+    try:
+        user_data = user._user_data
+    except AttributeError:
+        return []
+
+    rows: list[tuple[str, str]] = []
+    for key in sorted(user_data, key=str.lower):
+        value_text = _freeipa_attr_value_to_text(user_data[key])
+        if not value_text:
+            continue
+        rows.append((key, value_text))
+    return rows
+
+
 class IPAUserBaseForm(FreeIPAFormMixin, forms.ModelForm):
     groups = forms.MultipleChoiceField(
         required=False,
@@ -828,7 +855,8 @@ class IPAUserAdmin(FreeIPAModelAdmin):
     list_display = ("username", "displayname", "email", "is_active", "is_staff")
     ordering = ("username",)
     search_fields = ("username", "displayname", "first_name", "last_name", "email")
-    readonly_fields = ()
+    # `is_staff` is derived from FreeIPA state and should remain display-only in admin.
+    readonly_fields = ("displayname", "fasstatusnote", "is_staff")
     change_form_template = "admin/core/ipauser/change_form.html"
     change_list_template = "admin/core/ipauser/change_list.html"
 
@@ -848,12 +876,25 @@ class IPAUserAdmin(FreeIPAModelAdmin):
 
         has_otp_tokens = False
         has_email = False
+        freeipa_attribute_rows: list[tuple[str, str]] = []
         if object_id is not None:
             obj = self.get_object(request, object_id)
             if obj is not None:
                 username = _normalize_str(obj.username)
                 has_email = bool(_normalize_str(obj.email))
                 if username:
+                    freeipa = obj
+                    try:
+                        fetched_user = FreeIPAUser.get(username)
+                    except exceptions.NotFound:
+                        pass
+                    except Exception:
+                        logger.debug("Admin FreeIPA user lookup failed username=%s", username, exc_info=True)
+                    else:
+                        if fetched_user is not None:
+                            freeipa = fetched_user
+                    if freeipa is not None:
+                        freeipa_attribute_rows = _freeipa_user_attribute_rows(freeipa)
                     try:
                         client = FreeIPAUser.get_client()
                         res = client.otptoken_find(o_ipatokenowner=username, o_all=True)
@@ -870,6 +911,7 @@ class IPAUserAdmin(FreeIPAModelAdmin):
 
         extra_context["has_otp_tokens"] = has_otp_tokens
         extra_context["has_email"] = has_email
+        extra_context["freeipa_attribute_rows"] = freeipa_attribute_rows
         return super().changeform_view(request, object_id, form_url, extra_context)
 
     @override

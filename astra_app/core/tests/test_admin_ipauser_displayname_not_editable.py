@@ -13,7 +13,7 @@ class AdminIPAUserDisplayNameNotEditableTests(TestCase):
         session["_freeipa_username"] = username
         session.save()
 
-    def test_change_form_does_not_render_displayname_field(self) -> None:
+    def test_change_form_shows_displayname_note_and_staff_readonly(self) -> None:
         self._login_as_freeipa_admin("alice")
 
         admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})
@@ -21,10 +21,12 @@ class AdminIPAUserDisplayNameNotEditableTests(TestCase):
             "bob",
             {
                 "uid": ["bob"],
+                "displayname": ["Bob User"],
                 "givenname": ["Bob"],
                 "sn": ["User"],
                 "mail": ["bob@example.com"],
-                "memberof_group": [],
+                "fasstatusnote": ["Prefers asynchronous communication"],
+                "memberof_group": ["admins"],
             },
         )
 
@@ -44,4 +46,11 @@ class AdminIPAUserDisplayNameNotEditableTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode("utf-8")
-        self.assertNotIn("Display name", html)
+        self.assertIn("Display name", html)
+        self.assertIn("Bob User", html)
+        self.assertIn("Note", html)
+        self.assertIn("Prefers asynchronous communication", html)
+        self.assertIn("Is staff", html)
+        self.assertNotIn('name="displayname"', html)
+        self.assertNotIn('name="fasstatusnote"', html)
+        self.assertNotIn('name="is_staff"', html)
