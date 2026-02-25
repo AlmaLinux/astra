@@ -88,7 +88,6 @@ from .backends import (
 from .listbacked_queryset import _ListBackedQuerySet
 from .models import (
     AuditLogEntry,
-    Ballot,
     Candidate,
     Election,
     ExclusionGroup,
@@ -104,7 +103,6 @@ from .models import (
     Organization,
     OrganizationCSVImportLink,
     OrganizationMembershipCSVImportLink,
-    VotingCredential,
 )
 
 logger = logging.getLogger(__name__)
@@ -1574,23 +1572,6 @@ class ExclusionGroupAdmin(admin.ModelAdmin):
     search_fields = ("name", "election__name")
     ordering = ("election", "name", "id")
     inlines = (ExclusionGroupCandidateInline,)
-
-
-@admin.register(VotingCredential)
-class VotingCredentialAdmin(ReadOnlyModelAdmin):
-    list_display = ("election", "public_id", "freeipa_username", "weight", "created_at")
-    list_filter = ("election",)
-    search_fields = ("public_id", "freeipa_username")
-    ordering = ("-created_at", "id")
-
-
-@admin.register(Ballot)
-class BallotAdmin(ReadOnlyModelAdmin):
-    list_display = ("election", "credential_public_id", "weight", "ballot_hash", "created_at")
-    list_filter = ("election",)
-    search_fields = ("credential_public_id", "ballot_hash")
-    ordering = ("-created_at", "id")
-    readonly_fields = ("election", "credential_public_id", "ranking", "weight", "ballot_hash", "created_at", "chain_hash", "previous_chain_hash")
 
 
 @admin.register(AuditLogEntry)

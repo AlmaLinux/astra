@@ -3,7 +3,7 @@ import datetime
 from unittest.mock import patch
 
 from django.test import TestCase
-from django.urls import reverse
+from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
 
 from core import elections_services
@@ -250,41 +250,10 @@ class AdminElectionLifecycleActionTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, 'name="status"')
 
-    def test_voting_credential_admin_is_readonly(self) -> None:
-        now = timezone.now()
-        election = Election.objects.create(
-            name="Voting credential readonly election",
-            description="",
-            start_datetime=now - datetime.timedelta(days=1),
-            end_datetime=now + datetime.timedelta(days=1),
-            number_of_seats=1,
-            status=Election.Status.open,
-        )
-        credential = VotingCredential.objects.create(
-            election=election,
-            public_id="cred-original",
-            freeipa_username="voter1",
-            weight=1,
-        )
+    def test_ballots_and_voting_credentials_are_not_registered_in_admin(self) -> None:
+        with self.assertRaises(NoReverseMatch):
+            reverse("admin:core_votingcredential_changelist")
 
-        self._login_as_freeipa_admin("alice")
-        admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})
-
-        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
-            url = reverse("admin:core_votingcredential_change", args=[credential.id])
-            response = self.client.post(
-                url,
-                data={
-                    "election": str(election.id),
-                    "public_id": "cred-tampered",
-                    "freeipa_username": "voter1",
-                    "weight": "1",
-                    "_save": "Save",
-                },
-                follow=False,
-            )
-
-        self.assertIn(response.status_code, {302, 403})
-        credential.refresh_from_db()
-        self.assertEqual(credential.public_id, "cred-original")
+        with self.assertRaises(NoReverseMatch):
+            reverse("admin:core_ballot_changelist")
 
