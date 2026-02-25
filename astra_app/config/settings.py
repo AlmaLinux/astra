@@ -374,6 +374,47 @@ DATABASES = {
 JAZZMIN_SETTINGS = {
     "site_title": "AlmaLinux Astra",
     "custom_css": "core/css/admin.css",
+    "model_groups": [
+        {
+            "name": "Users & Groups",
+            "models": [
+                "auth.ipauser",
+                "auth.ipagroup",
+                "core.organization",
+            ],
+        },
+        {
+            "name": "Elections",
+            "models": [
+                "core.election",
+                "core.candidate",
+                "core.exclusiongroup",
+                "core.auditlogentry",
+            ],
+        },
+        {
+            "name": "Importers",
+            "models": [
+                "core.membershipcsvimportlink",
+                "core.organizationcsvimportlink",
+                "core.organizationmembershipcsvimportlink",
+            ],
+        },
+        {
+            "name": "Membership Config",
+            "models": [
+                "core.membershiptypecategory",
+                "core.membershiptype",
+            ],
+        },
+        {
+            "name": "Settings",
+            "models": [
+                "auth.ipafasagreement",
+                "core.freeipapermissiongrant",
+            ],
+        },
+    ],
 }
 
 # Email
