@@ -500,7 +500,7 @@ def approve_membership_request(
             Membership.objects.select_related("membership_type")
             .filter(
                 target_organization=org,
-                category=membership_type.category,
+                membership_type__category=membership_type.category,
             )
             .first()
         )

@@ -620,7 +620,7 @@ class OrganizationMembershipCSVImportResource(resources.ModelResource):
         existing = (
             Membership.objects.filter(
                 target_organization=organization,
-                category=membership_type.category,
+                membership_type__category=membership_type.category,
             )
             .only("expires_at")
             .first()

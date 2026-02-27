@@ -368,6 +368,41 @@ class OrganizationMembershipCSVImportResourceTests(TestCase):
             ).exists()
         )
 
+    def test_previous_expires_at_uses_effective_category_when_denorm_drifts(self) -> None:
+        membership_type = self._membership_type(code="gold", category_id="sponsorship")
+
+        org = Organization.objects.create(
+            name="Effective Category Org",
+            country_code="US",
+            business_contact_name="Biz",
+            business_contact_email="biz@example.com",
+            pr_marketing_contact_name="PR",
+            pr_marketing_contact_email="pr@example.com",
+            technical_contact_name="Tech",
+            technical_contact_email="tech@example.com",
+            website="https://example.com",
+            website_logo="https://example.com/logo.png",
+        )
+
+        expires_at = timezone.now().astimezone(datetime.UTC) + datetime.timedelta(days=30)
+        Membership.objects.create(
+            target_organization=org,
+            membership_type=membership_type,
+            expires_at=expires_at,
+        )
+
+        resource = OrganizationMembershipCSVImportResource(
+            membership_type=membership_type,
+            actor_username="alex",
+        )
+
+        resolved = resource._previous_expires_at(
+            organization=org,
+            approved_at=timezone.now().astimezone(datetime.UTC),
+        )
+
+        self.assertEqual(resolved, expires_at)
+
     def test_confirm_creates_committee_note_on_created_membership_request_and_sends_no_email(self) -> None:
         membership_type = self._membership_type(code="platinum", category_id="sponsorship")
 

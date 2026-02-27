@@ -13,7 +13,7 @@ from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import UploadedFile
 from django.core.validators import MaxValueValidator, MinValueValidator
-from django.db import models, transaction
+from django.db import IntegrityError, models, transaction
 from django.db.models import Q
 from django.utils import timezone
 from PIL import Image
@@ -603,9 +603,6 @@ class Membership(models.Model):
     """Active membership row for a user OR an organization.
 
     Exactly one of (target_username, target_organization) must be set.
-    The ``category`` FK is denormalized from ``membership_type.category`` on
-    save, enabling the DB-level UniqueConstraint that enforces the
-    one-membership-per-category invariant for organizations.
     """
 
     target_username = models.CharField(max_length=255, blank=True, default="")
@@ -619,12 +616,6 @@ class Membership(models.Model):
     target_organization_code = models.CharField(max_length=64, blank=True, default="")
     target_organization_name = models.CharField(max_length=255, blank=True, default="")
     membership_type = models.ForeignKey(MembershipType, on_delete=models.PROTECT)
-    category = models.ForeignKey(
-        MembershipTypeCategory,
-        on_delete=models.PROTECT,
-        related_name="+",
-        help_text="Denormalized from membership_type.category for UniqueConstraint.",
-    )
     expires_at = models.DateTimeField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -642,13 +633,6 @@ class Membership(models.Model):
                 fields=["target_organization", "membership_type"],
                 condition=models.Q(target_organization__isnull=False),
                 name="uniq_membership_org_type",
-            ),
-            # One-per-category for orgs: an org can hold at most one
-            # membership type from each category (DD-01).
-            models.UniqueConstraint(
-                fields=["target_organization", "category"],
-                condition=models.Q(target_organization__isnull=False),
-                name="uniq_membership_org_category",
             ),
             # Exactly one target must be set, never both, never neither.
             models.CheckConstraint(
@@ -675,15 +659,28 @@ class Membership(models.Model):
 
     @override
     def save(self, *args, **kwargs) -> None:
-        # Denormalize category from membership_type so the DB constraint works.
-        self.category_id = self.membership_type.category_id
-
-        # Denormalize org identifiers for display after FK deletion.
         if self.target_organization_id is not None:
-            if not self.target_organization_code:
-                self.target_organization_code = str(self.target_organization_id)
-            if not self.target_organization_name and self.target_organization is not None:
-                self.target_organization_name = self.target_organization.name
+            with transaction.atomic():
+                Organization.objects.select_for_update().only("pk").get(pk=self.target_organization_id)
+                same_category_qs = self.__class__.objects.filter(
+                    target_organization_id=self.target_organization_id,
+                    membership_type__category_id=self.membership_type.category_id,
+                )
+                if self.pk is not None:
+                    same_category_qs = same_category_qs.exclude(pk=self.pk)
+                if same_category_qs.exists():
+                    raise IntegrityError(
+                        "One membership per category is allowed for each organization."
+                    )
+
+                # Denormalize org identifiers for display after FK deletion.
+                if not self.target_organization_code:
+                    self.target_organization_code = str(self.target_organization_id)
+                if not self.target_organization_name and self.target_organization is not None:
+                    self.target_organization_name = self.target_organization.name
+
+                super().save(*args, **kwargs)
+            return
 
         super().save(*args, **kwargs)
 
@@ -725,15 +722,15 @@ class Membership(models.Model):
         """Atomically replace an org's membership within the same category (DD-02).
 
         Returns (new_membership, old_membership_or_None).
-        The old membership is deleted first so the UniqueConstraint on
-        (target_organization, category) is satisfied.
+        The old membership is deleted first to preserve one-per-category.
         """
         with transaction.atomic():
+            Organization.objects.select_for_update().only("pk").get(pk=organization.pk)
             category_id = new_membership_type.category_id
             old = (
                 cls.objects.filter(
                     target_organization=organization,
-                    category_id=category_id,
+                    membership_type__category_id=category_id,
                 )
                 .select_for_update()
                 .first()
@@ -745,7 +742,6 @@ class Membership(models.Model):
                     target_organization_code=old.target_organization_code,
                     target_organization_name=old.target_organization_name,
                     membership_type_id=old.membership_type_id,
-                    category_id=old.category_id,
                     expires_at=old.expires_at,
                 )
                 # Manually copy created_at since auto_now_add would overwrite on

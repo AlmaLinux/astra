@@ -153,7 +153,7 @@ def apply_user_side_effects(*, log: MembershipLog) -> None:
     category_id = log.membership_type.category_id
     membership_qs = Membership.objects.filter(
         target_username=log.target_username,
-        category_id=category_id,
+        membership_type__category_id=category_id,
     )
 
     if log.action == MembershipLog.Action.terminated:
@@ -175,7 +175,6 @@ def apply_user_side_effects(*, log: MembershipLog) -> None:
             target_username=log.target_username,
             membership_type=log.membership_type,
             defaults={
-                "category": log.membership_type.category,
                 "expires_at": log.expires_at,
             },
         )

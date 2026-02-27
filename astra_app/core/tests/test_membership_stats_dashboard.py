@@ -182,6 +182,77 @@ class MembershipStatsDashboardTests(TestCase):
         self.assertContains(resp, "data-order=\"9999-12-31\"")
         self.assertNotContains(resp, "alice")
 
+    def test_membership_sponsors_page_uses_effective_category_when_denorm_drifts(self) -> None:
+        MembershipTypeCategory.objects.update_or_create(
+            name="sponsorship",
+            defaults={
+                "is_individual": False,
+                "is_organization": True,
+                "sort_order": 0,
+            },
+        )
+        MembershipTypeCategory.objects.update_or_create(
+            name="individual",
+            defaults={
+                "is_individual": True,
+                "is_organization": False,
+                "sort_order": 1,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="sponsor-standard",
+            defaults={
+                "name": "Sponsor Standard",
+                "group_cn": "sponsor-standard",
+                "category_id": "sponsorship",
+                "enabled": True,
+            },
+        )
+
+        sponsor_org = Organization.objects.create(name="Drifted Sponsor Org", representative="repuser")
+        Membership.objects.create(
+            target_organization=sponsor_org,
+            membership_type_id="sponsor-standard",
+            expires_at=timezone.now() + datetime.timedelta(days=7),
+        )
+
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.group,
+            principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
+        )
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "displayname": ["Reviewer User"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+            },
+        )
+        sponsor_rep = FreeIPAUser(
+            "repuser",
+            {
+                "uid": ["repuser"],
+                "displayname": ["Representative User"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "repuser":
+                return sponsor_rep
+            return None
+
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
+            resp = self.client.get(reverse("membership-sponsors"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Drifted Sponsor Org")
+
     def test_membership_stats_data_requires_permission(self) -> None:
         self._login_as_freeipa_user("viewer")
 

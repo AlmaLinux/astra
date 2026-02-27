@@ -1,7 +1,9 @@
 from typing import Any, cast
 
 from django.test import TestCase
+from django.utils import timezone
 
+from core.membership_log_side_effects import apply_membership_log_side_effects
 from core.membership_targets import MembershipTargetIdentity, MembershipTargetKind
 from core.models import (
     Membership,
@@ -23,6 +25,10 @@ class MembershipTargetIdentitySSOTTests(TestCase):
             name="sponsorship",
             defaults={"is_individual": False, "is_organization": True},
         )
+        MembershipTypeCategory.objects.update_or_create(
+            name="mirror",
+            defaults={"is_individual": True, "is_organization": True},
+        )
         MembershipType.objects.update_or_create(
             code="individual",
             defaults={
@@ -41,6 +47,16 @@ class MembershipTargetIdentitySSOTTests(TestCase):
                 "sort_order": 2,
                 "enabled": True,
                 "group_cn": "sponsor-group",
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="platinum",
+            defaults={
+                "name": "Platinum",
+                "category_id": "sponsorship",
+                "sort_order": 3,
+                "enabled": True,
+                "group_cn": "sponsor-platinum",
             },
         )
 
@@ -163,3 +179,41 @@ class MembershipTargetIdentitySSOTTests(TestCase):
         logs_manager = cast(Any, MembershipLog.objects)
         ids = set(logs_manager.for_organization_identifier(424242).values_list("pk", flat=True))
         self.assertEqual(ids, {snapshot_only.pk})
+
+    def test_replace_within_category_uses_effective_category_when_denorm_drifts(self) -> None:
+        organization = Organization.objects.create(name="Acme", representative="rep")
+        Membership.objects.create(
+            target_organization=organization,
+            membership_type_id="gold",
+        )
+
+        new, old_copy = Membership.replace_within_category(
+            organization=organization,
+            new_membership_type=MembershipType.objects.get(code="platinum"),
+            expires_at=None,
+        )
+
+        self.assertIsNotNone(old_copy)
+        assert old_copy is not None
+        self.assertEqual(old_copy.membership_type_id, "gold")
+        self.assertEqual(new.membership_type_id, "platinum")
+        self.assertEqual(Membership.objects.filter(target_organization=organization).count(), 1)
+
+    def test_apply_user_side_effects_updates_existing_membership(self) -> None:
+        membership = Membership.objects.create(
+            target_username="alice",
+            membership_type_id="individual",
+        )
+
+        log = MembershipLog.objects.create(
+            actor_username="reviewer",
+            target_username="alice",
+            membership_type_id="individual",
+            action=MembershipLog.Action.expiry_changed,
+            expires_at=timezone.now(),
+        )
+
+        apply_membership_log_side_effects(log=log)
+
+        membership.refresh_from_db()
+        self.assertEqual(membership.expires_at, log.expires_at)

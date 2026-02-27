@@ -5,7 +5,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from core.freeipa.user import FreeIPAUser
-from core.models import MembershipRequest, MembershipType, MembershipTypeCategory
+from core.models import Membership, MembershipRequest, MembershipType, MembershipTypeCategory
 
 
 class UserProfileMembershipCanRequestAnyTests(TestCase):
@@ -133,6 +133,48 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
             any(a.get("id") == "membership-request-recommended-alert" for a in recommended),
             "Did not expect a membership request recommendation after a rejected request.",
         )
+
+    def test_membership_can_request_any_uses_effective_category_when_denorm_drifts(self) -> None:
+        MembershipType.objects.update(enabled=False)
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        Membership.objects.create(
+            target_username="alex",
+            membership_type_id="individual",
+        )
+
+        alex = FreeIPAUser(
+            "alex",
+            {
+                "uid": ["alex"],
+                "mail": ["alex@example.com"],
+                "memberof_group": [],
+                "givenname": ["Alex"],
+                "sn": ["User"],
+                "c": ["US"],
+            },
+        )
+
+        self._login_as_freeipa_user("alex")
+        with (
+            patch("core.views_users.has_enabled_agreements", return_value=False),
+            patch("core.views_users.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alex),
+        ):
+            resp = self.client.get(reverse("user-profile", kwargs={"username": "alex"}))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(bool(resp.context["membership_can_request_any"]))
 
     def test_user_profile_required_actions_use_context_aware_settings_links(self) -> None:
         MembershipType.objects.update(enabled=False)

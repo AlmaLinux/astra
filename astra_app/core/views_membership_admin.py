@@ -188,7 +188,7 @@ def membership_stats(request: HttpRequest) -> HttpResponse:
 def membership_sponsors_list(request: HttpRequest) -> HttpResponse:
     active_sponsorships = list(
         Membership.objects.active()
-        .filter(category_id=MembershipCategoryCode.sponsorship)
+        .filter(membership_type__category_id=MembershipCategoryCode.sponsorship)
         .select_related("target_organization", "membership_type")
         .order_by("expires_at")
     )

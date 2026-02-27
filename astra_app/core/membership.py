@@ -152,7 +152,10 @@ def compute_membership_requestability_context(
     resolved_held_category_ids = (
         held_category_ids
         if held_category_ids is not None
-        else {membership.category_id for membership in get_valid_memberships(username=username, organization=organization)}
+        else {
+            membership.membership_type.category_id
+            for membership in get_valid_memberships(username=username, organization=organization)
+        }
     )
 
     membership_can_request_any = membership_request_can_request_any(

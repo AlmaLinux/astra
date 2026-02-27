@@ -1166,7 +1166,7 @@ class OrganizationUserViewsTests(TestCase):
         self.assertContains(resp, "Gold Sponsor Member")
         self.assertContains(resp, "Mirror Member")
 
-        # A same-category duplicate is rejected by the DB constraint
+        # A same-category duplicate is rejected by membership invariant checks.
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
                 Membership.objects.create(

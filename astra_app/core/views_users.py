@@ -174,15 +174,16 @@ def _profile_context_for_user(
     requestability_context = compute_membership_requestability_context(
         username=fu.username,
         eligibility=membership_eligibility,
-        held_category_ids={membership.category_id for membership in valid_memberships},
+        held_category_ids={membership.membership_type.category_id for membership in valid_memberships},
     )
     requestable_codes_by_category = requestability_context.requestable_codes_by_category
 
     memberships: list[dict[str, object]] = []
     for membership in valid_memberships:
+        membership_category_id = membership.membership_type.category_id
         expires_at = membership.expires_at
         is_expiring_soon = bool(expires_at and expires_at <= expiring_soon_by)
-        has_pending_request_in_category = membership.category_id in pending_request_category_ids
+        has_pending_request_in_category = membership_category_id in pending_request_category_ids
         memberships.append(
             {
                 "membership_type": membership.membership_type,
@@ -197,7 +198,7 @@ def _profile_context_for_user(
                 "can_request_tier_change": (
                     any(
                         code != membership.membership_type.code
-                        for code in requestable_codes_by_category.get(membership.category_id, set())
+                        for code in requestable_codes_by_category.get(membership_category_id, set())
                     )
                     and not has_pending_request_in_category
                 ),

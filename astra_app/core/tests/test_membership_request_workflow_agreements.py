@@ -143,7 +143,6 @@ class MembershipRequestWorkflowAgreementTests(TestCase):
         Membership.objects.create(
             target_organization=org,
             membership_type=membership_type_old,
-            category=membership_type_old.category,
             expires_at=timezone.now() + datetime.timedelta(days=60),
         )
 
@@ -279,7 +278,6 @@ class MembershipRequestWorkflowAgreementTests(TestCase):
         Membership.objects.create(
             target_organization=org,
             membership_type=membership_type_old,
-            category=membership_type_old.category,
             expires_at=timezone.now() + datetime.timedelta(days=60),
         )
 
@@ -315,6 +313,91 @@ class MembershipRequestWorkflowAgreementTests(TestCase):
 
         membership_request.refresh_from_db()
         self.assertEqual(membership_request.status, MembershipRequest.Status.approved)
+
+    def test_org_approval_uses_effective_category_when_denorm_drifts(self) -> None:
+        MembershipTypeCategory.objects.update_or_create(
+            pk="sponsorship",
+            defaults={
+                "is_organization": True,
+                "sort_order": 1,
+            },
+        )
+        MembershipTypeCategory.objects.update_or_create(
+            pk="mirror",
+            defaults={
+                "is_individual": True,
+                "is_organization": True,
+                "sort_order": 2,
+            },
+        )
+        membership_type_old, _ = MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold",
+                "group_cn": "almalinux-gold",
+                "category_id": "sponsorship",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        membership_type_new, _ = MembershipType.objects.update_or_create(
+            code="platinum",
+            defaults={
+                "name": "Platinum",
+                "group_cn": "almalinux-platinum",
+                "category_id": "sponsorship",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="Acme", representative="bob")
+        membership_request = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type=membership_type_new,
+            status=MembershipRequest.Status.pending,
+        )
+
+        Membership.objects.create(
+            target_organization=org,
+            membership_type=membership_type_old,
+            expires_at=timezone.now() + datetime.timedelta(days=60),
+        )
+
+        bob = FreeIPAUser(
+            "bob",
+            {
+                "uid": ["bob"],
+                "mail": ["bob@example.com"],
+                "memberof_group": ["almalinux-gold"],
+            },
+        )
+
+        with (
+            patch(
+                "core.membership_request_workflow.missing_required_agreements_for_user_in_group",
+                return_value=[],
+            ),
+            patch("core.membership_request_workflow.FreeIPAUser.get", return_value=bob),
+            patch(
+                "core.membership_request_workflow.remove_organization_representative_from_group_if_present",
+                return_value=FreeIPAGroupRemovalOutcome.removed,
+            ) as remove_mock,
+            patch("core.membership_request_workflow.sync_organization_representative_groups", return_value=None),
+        ):
+            approve_membership_request(
+                membership_request=membership_request,
+                actor_username="reviewer",
+                send_approved_email=False,
+            )
+
+        remove_mock.assert_called_once_with(
+            representative_username="bob",
+            group_cn="almalinux-gold",
+            caller_mode=FreeIPACallerMode.raise_on_error,
+            missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
+        )
 
     def test_user_approval_creates_membership_row_and_mutates_freeipa_group(self) -> None:
         MembershipTypeCategory.objects.update_or_create(
@@ -406,7 +489,6 @@ class MembershipRequestWorkflowAgreementTests(TestCase):
         Membership.objects.create(
             target_organization=org,
             membership_type=membership_type_old,
-            category=membership_type_old.category,
             expires_at=timezone.now() + datetime.timedelta(days=60),
         )
         membership_request = MembershipRequest.objects.create(

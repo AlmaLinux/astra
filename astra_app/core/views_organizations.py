@@ -463,7 +463,7 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
     requestability_context = compute_membership_requestability_context(
         organization=organization,
         eligibility=eligibility,
-        held_category_ids={sponsorship.category_id for sponsorship in sponsorships},
+        held_category_ids={sponsorship.membership_type.category_id for sponsorship in sponsorships},
     )
     requestable_codes_by_category = requestability_context.requestable_codes_by_category
 
@@ -475,20 +475,21 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
     # Build per-sponsorship display entries for the template.
     sponsorship_entries: list[dict[str, object]] = []
     for s in sponsorships:
-        has_pending_request_in_category = s.category_id in pending_request_context.category_ids
+        sponsorship_category_id = s.membership_type.category_id
+        has_pending_request_in_category = sponsorship_category_id in pending_request_context.category_ids
         suggested_tier_code = _suggest_tier_change_membership_type_code(
             current_membership_type=s.membership_type,
-            requestable_codes=requestable_codes_by_category.get(s.category_id, set()),
+            requestable_codes=requestable_codes_by_category.get(sponsorship_category_id, set()),
         )
         sponsorship_entries.append({
             "sponsorship": s,
             "badge_text": str(s.membership_type_id).replace("_", " ").title(),
             "is_expiring_soon": bool(s.expires_at and s.expires_at <= expiring_soon_by),
-            "pending_request": pending_request_context.by_category.get(s.category_id),
+            "pending_request": pending_request_context.by_category.get(sponsorship_category_id),
             "can_request_tier_change": (
                 any(
                     code != s.membership_type.code
-                    for code in requestable_codes_by_category.get(s.category_id, set())
+                    for code in requestable_codes_by_category.get(sponsorship_category_id, set())
                 )
                 and not has_pending_request_in_category
             ),

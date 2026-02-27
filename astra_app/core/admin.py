@@ -2362,8 +2362,8 @@ class OrganizationAdmin(admin.ModelAdmin):
     class MembershipInline(admin.TabularInline):
         model = Membership
         fk_name = "target_organization"
-        fields = ("membership_type", "category", "expires_at", "created_at")
-        readonly_fields = ("category", "created_at")
+        fields = ("membership_type", "expires_at", "created_at")
+        readonly_fields = ("created_at",)
         extra = 0
 
     inlines = [MembershipInline]

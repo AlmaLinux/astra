@@ -35,6 +35,21 @@ from core.models import (
 
 
 class MembershipHelperTests(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        MembershipTypeCategory.objects.update_or_create(
+            pk="individual",
+            defaults={"is_individual": True, "is_organization": False, "sort_order": 0},
+        )
+        MembershipTypeCategory.objects.update_or_create(
+            pk="sponsorship",
+            defaults={"is_individual": False, "is_organization": True, "sort_order": 1},
+        )
+        MembershipTypeCategory.objects.update_or_create(
+            pk="mirror",
+            defaults={"is_individual": True, "is_organization": True, "sort_order": 2},
+        )
+
     def test_membership_target_filter_enforces_exactly_one_target(self) -> None:
         org = Organization.objects.create(name="Acme", representative="bob")
 
@@ -106,6 +121,47 @@ class MembershipHelperTests(TestCase):
                 "mirror": {"mirror"},
             },
         )
+
+    def test_compute_membership_requestability_context_uses_effective_category_when_denorm_drifts(self) -> None:
+        MembershipTypeCategory.objects.update_or_create(
+            pk="sponsorship",
+            defaults={"is_individual": False, "is_organization": True, "sort_order": 0},
+        )
+        MembershipTypeCategory.objects.update_or_create(
+            pk="mirror",
+            defaults={"is_individual": True, "is_organization": True, "sort_order": 1},
+        )
+
+        MembershipType.objects.update(enabled=False)
+
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver",
+                "category_id": "sponsorship",
+                "sort_order": 1,
+                "enabled": True,
+                "group_cn": "almalinux-silver",
+            },
+        )
+
+        org = Organization.objects.create(name="Drift Org", representative="bob")
+        Membership.objects.create(
+            target_organization=org,
+            membership_type_id="silver",
+        )
+
+        context = compute_membership_requestability_context(
+            organization=org,
+            eligibility=SimpleNamespace(
+                valid_membership_type_codes=set(),
+                extendable_membership_type_codes=set(),
+                blocked_membership_type_codes=set(),
+                pending_membership_category_ids=set(),
+            ),
+        )
+
+        self.assertFalse(context.membership_can_request_any)
 
     def test_sync_representative_groups_raise_mode_exposes_partial_journal(self) -> None:
         old_user = FreeIPAUser("old", {"uid": ["old"], "memberof_group": ["g1", "g2"]})
