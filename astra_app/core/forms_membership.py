@@ -1,3 +1,4 @@
+import datetime
 import json
 from dataclasses import dataclass
 from enum import StrEnum
@@ -6,6 +7,7 @@ from typing import override
 from django import forms
 from django.core.exceptions import ValidationError
 from django.core.validators import URLValidator
+from django.utils import timezone
 
 from core.forms_base import StyledForm
 from core.membership import (
@@ -315,3 +317,12 @@ class MembershipRequestUpdateResponsesForm(StyledForm):
 
 class MembershipUpdateExpiryForm(forms.Form):
     expires_on = forms.DateField(required=True, widget=forms.DateInput(attrs={"type": "date"}))
+
+    def clean_expires_on(self) -> datetime.date:
+        expires_on = self.cleaned_data["expires_on"]
+        today_utc = timezone.now().astimezone(datetime.UTC).date()
+        if expires_on < today_utc:
+            raise ValidationError(
+                "Expiration date cannot be earlier than today (UTC). To end the membership now, use Terminate membership."
+            )
+        return expires_on

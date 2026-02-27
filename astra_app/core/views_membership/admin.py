@@ -6,7 +6,6 @@ from django.contrib.auth.decorators import permission_required
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse, reverse_lazy
-from django.utils import timezone
 
 from core.forms_membership import MembershipUpdateExpiryForm
 from core.freeipa.user import FreeIPAUser
@@ -126,7 +125,11 @@ def _parse_expiry_datetime_or_redirect(
 ) -> datetime.datetime | HttpResponse:
     form = MembershipUpdateExpiryForm(request.POST)
     if not form.is_valid():
-        messages.error(request, "Invalid expiration date.")
+        if "expires_on" in form.errors:
+            for error in form.errors["expires_on"]:
+                messages.error(request, str(error))
+        else:
+            messages.error(request, "Invalid expiration date.")
         return redirect(redirect_to)
 
     expires_on = form.cleaned_data["expires_on"]
@@ -253,32 +256,12 @@ def membership_set_expiry(
         if isinstance(expires_at, HttpResponse):
             return expires_at
 
-        should_terminate_now = expires_at.date() <= timezone.localdate()
-        if should_terminate_now:
-            error_redirect = _remove_organization_representative_group_membership_if_present(
-                request=request,
-                organization=organization,
-                membership_type=membership_type,
-                redirect_to=redirect_to,
-                error_message="Failed to remove the representative from the FreeIPA group.",
-                log_message=(
-                    "organization_sponsorship_set_expiry: failed to remove representative from group "
-                    "org_id=%s rep=%r group_cn=%r"
-                ),
-            )
-            if error_redirect is not None:
-                return error_redirect
-
         MembershipLog.create_for_expiry_change(
             actor_username=get_username(request),
             membership_type=membership_type,
             expires_at=expires_at,
             target_organization=organization,
         )
-
-        if should_terminate_now:
-            messages.success(request, "Sponsorship expiration updated.")
-            return redirect(redirect_to)
 
         messages.success(request, "Sponsorship expiration updated.")
         return redirect(redirect_to)
@@ -293,34 +276,12 @@ def membership_set_expiry(
     if isinstance(expires_at, HttpResponse):
         return expires_at
 
-    should_terminate_now = expires_at.date() <= timezone.localdate()
-    if should_terminate_now:
-        group_cn = _membership_group_cn(membership_type)
-        error_redirect = _remove_group_membership_if_present(
-            request=request,
-            user=_target,
-            group_cn=group_cn,
-            redirect_to=redirect_to,
-            error_message="Failed to remove the user from the FreeIPA group.",
-            log_message=(
-                "membership_set_expiry: failed to remove user from group username=%s "
-                "membership_type=%s group_cn=%s"
-            ),
-            log_args=(username, membership_type.code, group_cn),
-        )
-        if error_redirect is not None:
-            return error_redirect
-
     MembershipLog.create_for_expiry_change(
         actor_username=get_username(request),
         membership_type=membership_type,
         expires_at=expires_at,
         target_username=username,
     )
-
-    if should_terminate_now:
-        messages.success(request, "Membership expiration updated.")
-        return redirect(redirect_to)
 
     messages.success(request, "Membership expiration updated.")
     return redirect(redirect_to)

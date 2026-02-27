@@ -131,7 +131,7 @@ class Plan060WorkstreamBContractTests(TestCase):
         )
         remove_from_group.assert_called_once_with(representative, group_name="sponsor-group")
 
-    def test_user_expiry_lte_now_logs_only_expiry_changed_and_marks_membership_inactive(self) -> None:
+    def test_user_expiry_before_today_utc_is_rejected_and_membership_remains_active(self) -> None:
         membership_type = self._create_membership_type(
             code="individual",
             category_id="individual",
@@ -167,13 +167,20 @@ class Plan060WorkstreamBContractTests(TestCase):
                 return alice
             return None
 
+        original_expiry = Membership.objects.get(
+            target_username="alice", membership_type_id="individual"
+        ).expires_at
+        self.assertIsNotNone(original_expiry)
+
+        yesterday_utc = timezone.now().astimezone(datetime.UTC).date() - datetime.timedelta(days=1)
+
         with (
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
             patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_from_group,
         ):
             response = self.client.post(
                 reverse("membership-set-expiry", args=["alice", "individual"]),
-                data={"expires_on": (timezone.localdate() - datetime.timedelta(days=1)).isoformat()},
+                data={"expires_on": yesterday_utc.isoformat()},
                 follow=False,
             )
 
@@ -182,9 +189,8 @@ class Plan060WorkstreamBContractTests(TestCase):
         membership = Membership.objects.filter(target_username="alice", membership_type_id="individual").first()
         self.assertIsNotNone(membership)
         self.assertIsNotNone(membership.expires_at)
-        self.assertFalse(
-            Membership.objects.active().filter(target_username="alice", membership_type_id="individual").exists()
-        )
+        self.assertEqual(membership.expires_at, original_expiry)
+        self.assertTrue(Membership.objects.active().filter(target_username="alice", membership_type_id="individual").exists())
 
         actions = list(
             MembershipLog.objects.filter(target_username="alice", membership_type_id="individual")
@@ -193,11 +199,11 @@ class Plan060WorkstreamBContractTests(TestCase):
         )
         self.assertEqual(
             actions,
-            [MembershipLog.Action.expiry_changed],
+            [],
         )
-        remove_from_group.assert_called_once_with(alice, group_name="almalinux-individual")
+        remove_from_group.assert_not_called()
 
-    def test_org_expiry_lte_now_logs_only_expiry_changed_and_marks_membership_inactive(self) -> None:
+    def test_org_expiry_before_today_utc_is_rejected_and_membership_remains_active(self) -> None:
         gold = self._create_membership_type(code="gold", category_id="sponsorship", group_cn="sponsor-group")
         org = Organization.objects.create(name="Acme", representative="bob")
         Membership.objects.create(
@@ -226,13 +232,20 @@ class Plan060WorkstreamBContractTests(TestCase):
                 return bob
             return None
 
+        original_expiry = Membership.objects.get(
+            target_organization=org, membership_type_id="gold"
+        ).expires_at
+        self.assertIsNotNone(original_expiry)
+
+        yesterday_utc = timezone.now().astimezone(datetime.UTC).date() - datetime.timedelta(days=1)
+
         with (
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
             patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_from_group,
         ):
             response = self.client.post(
                 reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"]),
-                data={"expires_on": (timezone.localdate() - datetime.timedelta(days=1)).isoformat()},
+                data={"expires_on": yesterday_utc.isoformat()},
                 follow=False,
             )
 
@@ -240,9 +253,8 @@ class Plan060WorkstreamBContractTests(TestCase):
         membership = Membership.objects.filter(target_organization=org, membership_type_id="gold").first()
         self.assertIsNotNone(membership)
         self.assertIsNotNone(membership.expires_at)
-        self.assertFalse(
-            Membership.objects.active().filter(target_organization=org, membership_type_id="gold").exists()
-        )
+        self.assertEqual(membership.expires_at, original_expiry)
+        self.assertTrue(Membership.objects.active().filter(target_organization=org, membership_type_id="gold").exists())
 
         actions = list(
             MembershipLog.objects.filter(target_organization=org, membership_type_id="gold")
@@ -251,11 +263,11 @@ class Plan060WorkstreamBContractTests(TestCase):
         )
         self.assertEqual(
             actions,
-            [MembershipLog.Action.expiry_changed],
+            [],
         )
-        remove_from_group.assert_called_once_with(bob, group_name="sponsor-group")
+        remove_from_group.assert_not_called()
 
-    def test_user_expiry_lte_now_then_retries_are_idempotent_for_logs_and_freeipa_calls(self) -> None:
+    def test_user_expiry_today_utc_is_accepted_and_does_not_force_termination(self) -> None:
         membership_type = self._create_membership_type(
             code="individual",
             category_id="individual",
@@ -291,18 +303,148 @@ class Plan060WorkstreamBContractTests(TestCase):
                 return alice
             return None
 
+        today_utc = timezone.now().astimezone(datetime.UTC).date()
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_from_group,
+        ):
+            response = self.client.post(
+                reverse("membership-set-expiry", args=["alice", "individual"]),
+                data={"expires_on": today_utc.isoformat()},
+                follow=False,
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("user-profile", kwargs={"username": "alice"}))
+
+        membership = Membership.objects.filter(target_username="alice", membership_type_id="individual").first()
+        self.assertIsNotNone(membership)
+        if membership is None:
+            self.fail("Expected membership row for alice/individual")
+        self.assertEqual(
+            membership.expires_at,
+            datetime.datetime.combine(today_utc, datetime.time(23, 59, 59), tzinfo=datetime.UTC),
+        )
+
+        actions = list(
+            MembershipLog.objects.filter(target_username="alice", membership_type_id="individual")
+            .order_by("id")
+            .values_list("action", flat=True)
+        )
+        self.assertEqual(actions, [MembershipLog.Action.expiry_changed])
+        remove_from_group.assert_not_called()
+
+    def test_org_expiry_today_utc_is_accepted_and_does_not_force_termination(self) -> None:
+        gold = self._create_membership_type(code="gold", category_id="sponsorship", group_cn="sponsor-group")
+        org = Organization.objects.create(name="Acme", representative="bob")
+        Membership.objects.create(
+            target_organization=org,
+            membership_type=gold,
+            expires_at=timezone.now() + datetime.timedelta(days=30),
+        )
+
+        self._grant_user_permission("reviewer", ASTRA_CHANGE_MEMBERSHIP)
+        self._grant_user_permission("reviewer", ASTRA_DELETE_MEMBERSHIP)
+        self._login_as_freeipa_user("reviewer")
+
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": []},
+        )
+        bob = FreeIPAUser(
+            "bob",
+            {"uid": ["bob"], "mail": ["bob@example.com"], "memberof_group": ["sponsor-group"]},
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "bob":
+                return bob
+            return None
+
+        today_utc = timezone.now().astimezone(datetime.UTC).date()
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_from_group,
+        ):
+            response = self.client.post(
+                reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"]),
+                data={"expires_on": today_utc.isoformat()},
+                follow=False,
+            )
+
+        self.assertEqual(response.status_code, 302)
+
+        membership = Membership.objects.filter(target_organization=org, membership_type_id="gold").first()
+        self.assertIsNotNone(membership)
+        if membership is None:
+            self.fail("Expected membership row for org/gold")
+        self.assertEqual(
+            membership.expires_at,
+            datetime.datetime.combine(today_utc, datetime.time(23, 59, 59), tzinfo=datetime.UTC),
+        )
+
+        actions = list(
+            MembershipLog.objects.filter(target_organization=org, membership_type_id="gold")
+            .order_by("id")
+            .values_list("action", flat=True)
+        )
+        self.assertEqual(actions, [MembershipLog.Action.expiry_changed])
+        remove_from_group.assert_not_called()
+
+    def test_user_rejected_past_expiry_then_terminate_is_idempotent_for_logs_and_freeipa_calls(self) -> None:
+        membership_type = self._create_membership_type(
+            code="individual",
+            category_id="individual",
+            group_cn="almalinux-individual",
+        )
+        Membership.objects.create(
+            target_username="alice",
+            membership_type=membership_type,
+            expires_at=timezone.now() + datetime.timedelta(days=30),
+        )
+
+        self._grant_user_permission("reviewer", ASTRA_CHANGE_MEMBERSHIP)
+        self._grant_user_permission("reviewer", ASTRA_DELETE_MEMBERSHIP)
+        self._login_as_freeipa_user("reviewer")
+
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": []},
+        )
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.com"],
+                "memberof_group": ["almalinux-individual"],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "alice":
+                return alice
+            return None
+
+        yesterday_utc = timezone.now().astimezone(datetime.UTC).date() - datetime.timedelta(days=1)
+
         with (
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
             patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_from_group,
         ):
             first_expiry = self.client.post(
                 reverse("membership-set-expiry", args=["alice", "individual"]),
-                data={"expires_on": (timezone.localdate() - datetime.timedelta(days=1)).isoformat()},
+                data={"expires_on": yesterday_utc.isoformat()},
                 follow=False,
             )
             second_expiry = self.client.post(
                 reverse("membership-set-expiry", args=["alice", "individual"]),
-                data={"expires_on": (timezone.localdate() - datetime.timedelta(days=1)).isoformat()},
+                data={"expires_on": yesterday_utc.isoformat()},
                 follow=False,
             )
             retry_terminate = self.client.post(
@@ -321,11 +463,11 @@ class Plan060WorkstreamBContractTests(TestCase):
         )
         self.assertEqual(
             actions,
-            [MembershipLog.Action.expiry_changed],
+            [MembershipLog.Action.terminated],
         )
         remove_from_group.assert_called_once_with(alice, group_name="almalinux-individual")
 
-    def test_org_expiry_lte_now_then_retries_are_idempotent_for_logs_and_freeipa_calls(self) -> None:
+    def test_org_rejected_past_expiry_then_terminate_is_idempotent_for_logs_and_freeipa_calls(self) -> None:
         gold = self._create_membership_type(code="gold", category_id="sponsorship", group_cn="sponsor-group")
         org = Organization.objects.create(name="Acme", representative="bob")
         Membership.objects.create(
@@ -354,18 +496,20 @@ class Plan060WorkstreamBContractTests(TestCase):
                 return bob
             return None
 
+        yesterday_utc = timezone.now().astimezone(datetime.UTC).date() - datetime.timedelta(days=1)
+
         with (
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
             patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_from_group,
         ):
             first_expiry = self.client.post(
                 reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"]),
-                data={"expires_on": (timezone.localdate() - datetime.timedelta(days=1)).isoformat()},
+                data={"expires_on": yesterday_utc.isoformat()},
                 follow=False,
             )
             second_expiry = self.client.post(
                 reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"]),
-                data={"expires_on": (timezone.localdate() - datetime.timedelta(days=1)).isoformat()},
+                data={"expires_on": yesterday_utc.isoformat()},
                 follow=False,
             )
             retry_terminate = self.client.post(
@@ -384,7 +528,7 @@ class Plan060WorkstreamBContractTests(TestCase):
         )
         self.assertEqual(
             actions,
-            [MembershipLog.Action.expiry_changed],
+            [MembershipLog.Action.terminated],
         )
         remove_from_group.assert_called_once_with(bob, group_name="sponsor-group")
 

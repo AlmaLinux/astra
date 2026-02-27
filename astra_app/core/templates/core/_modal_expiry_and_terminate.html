@@ -13,6 +13,7 @@ Optional context:
 - next_url: str
 - label: str
 - initial_value: str (YYYY-MM-DD)
+- min_value: str (YYYY-MM-DD)
 - current_text: str
 - help_text: str
 {% endcomment %}
@@ -53,6 +54,7 @@ Optional context:
               type="date"
               class="form-control"
               value="{{ initial_value|default:'' }}"
+              min="{{ min_value|default:'' }}"
               required
             />
           </div>

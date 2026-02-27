@@ -2425,7 +2425,7 @@ class OrganizationUserViewsTests(TestCase):
             datetime.datetime(2030, 1, 31, 23, 59, 59, tzinfo=datetime.UTC),
         )
 
-    def test_membership_admin_setting_expiry_in_past_logs_expiry_changed_and_marks_membership_inactive(self) -> None:
+    def test_membership_admin_setting_expiry_before_today_utc_is_rejected(self) -> None:
         import datetime
 
         from core.models import FreeIPAPermissionGrant, Membership, MembershipLog, MembershipType, Organization
@@ -2456,7 +2456,6 @@ class OrganizationUserViewsTests(TestCase):
             principal_name="reviewer",
         )
 
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("reviewer")
 
         reviewer = FreeIPAUser(
@@ -2467,7 +2466,13 @@ class OrganizationUserViewsTests(TestCase):
             "bob",
             {"uid": ["bob"], "mail": ["bob@example.com"], "memberof_group": ["sponsor-group"], "c": ["US"]},
         )
-        past_date = datetime.date(2000, 1, 1)
+        original_expiry = Membership.objects.get(
+            target_organization=org,
+            membership_type_id="gold",
+        ).expires_at
+        self.assertIsNotNone(original_expiry)
+
+        past_date = timezone.now().astimezone(datetime.UTC).date() - datetime.timedelta(days=1)
 
         def fake_get(username: str) -> FreeIPAUser | None:
             if username == "bob":
@@ -2484,18 +2489,26 @@ class OrganizationUserViewsTests(TestCase):
                     "expires_on": past_date.isoformat(),
                     "next": reverse("organization-detail", args=[org.pk]),
                 },
-                follow=False,
+                follow=True,
             )
 
-        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.status_code, 200)
         membership = Membership.objects.filter(target_organization=org, membership_type_id="gold").first()
         self.assertIsNotNone(membership)
         self.assertIsNotNone(membership.expires_at)
-        self.assertFalse(
+        self.assertEqual(membership.expires_at, original_expiry)
+        self.assertTrue(
             Membership.objects.active().filter(target_organization=org, membership_type_id="gold").exists()
         )
-        remove_from_group.assert_called_once_with(rep, group_name="sponsor-group")
-        self.assertTrue(
+
+        messages = [m.message for m in get_messages(resp.wsgi_request)]
+        self.assertIn(
+            "Expiration date cannot be earlier than today (UTC). To end the membership now, use Terminate membership.",
+            messages,
+        )
+
+        remove_from_group.assert_not_called()
+        self.assertFalse(
             MembershipLog.objects.filter(
                 action=MembershipLog.Action.expiry_changed,
                 target_organization=org,
@@ -3533,6 +3546,8 @@ class OrganizationUserViewsTests(TestCase):
         self.assertNotContains(resp, "Target:")
         self.assertContains(resp, "Expiration date")
         self.assertContains(resp, "Expiration is an end-of-day date in UTC.")
+        self.assertContains(resp, 'name="expires_on"')
+        self.assertContains(resp, 'min="')
         self.assertContains(resp, "Save expiration")
         self.assertContains(resp, "Danger zone")
         self.assertContains(resp, "Ends this membership early.")

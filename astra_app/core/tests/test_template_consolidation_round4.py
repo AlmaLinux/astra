@@ -42,6 +42,15 @@ class Round4TemplateConsolidationTests(SimpleTestCase):
         self.assertNotIn("function setupBulk", invitations)
         self.assertNotIn("function setupBulk", requests)
 
+    def test_expiry_modal_uses_utc_today_min_date_contract(self) -> None:
+        shared_source = self._template_source("_expiry_and_termination_actions_shared.html")
+        modal_source = self._template_source("_modal_expiry_and_terminate.html")
+
+        self.assertIn("{% timezone 'UTC' %}", shared_source)
+        self.assertIn('{% now "Y-m-d" as min_expiration_on_utc %}', shared_source)
+        self.assertIn("min_value=min_expiration_on_utc", shared_source)
+        self.assertIn('min="{{ min_value|default:\'\' }}"', modal_source)
+
     def test_phase9_membership_shared_modals_compose_canonical_modal_includes(self) -> None:
         source = self._template_source("_membership_request_shared_modals.html")
 
