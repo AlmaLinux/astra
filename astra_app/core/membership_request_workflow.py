@@ -872,6 +872,66 @@ def ignore_membership_request(
     return log
 
 
+def reopen_ignored_membership_request(
+    *,
+    membership_request: MembershipRequest,
+    actor_username: str,
+) -> MembershipLog:
+    """Reopen an ignored membership request, returning it to pending.
+
+    Transition: ignored -> pending.
+    Raises ValidationError if the request is not ignored, or if another
+    open request already exists for the same target + membership type.
+    """
+    if membership_request.status != MembershipRequest.Status.ignored:
+        raise ValidationError("Only ignored requests can be reopened")
+
+    membership_type = membership_request.membership_type
+    log_prefix = "reopen_ignored_membership_request"
+
+    # Check uniqueness: no conflicting open request for same target + type.
+    open_statuses = {MembershipRequest.Status.pending, MembershipRequest.Status.on_hold}
+    if membership_request.target_kind == MembershipRequest.TargetKind.user:
+        conflict = MembershipRequest.objects.filter(
+            requested_username=membership_request.requested_username,
+            membership_type=membership_type,
+            status__in=open_statuses,
+        ).exclude(pk=membership_request.pk)
+    else:
+        conflict = MembershipRequest.objects.filter(
+            requested_organization=membership_request.requested_organization,
+            membership_type=membership_type,
+            status__in=open_statuses,
+        ).exclude(pk=membership_request.pk)
+
+    if conflict.exists():
+        raise ValidationError(
+            "Cannot reopen: an open request already exists for this target and membership type."
+        )
+
+    membership_request.status = MembershipRequest.Status.pending
+    membership_request.decided_at = None
+    membership_request.decided_by_username = ""
+    membership_request.on_hold_at = None
+    membership_request.save(update_fields=["status", "decided_at", "decided_by_username", "on_hold_at"])
+
+    log = _create_status_change_log(
+        membership_request=membership_request,
+        actor_username=actor_username,
+        membership_type=membership_type,
+        action=MembershipLog.Action.reopened,
+    )
+
+    _try_add_note(
+        membership_request=membership_request,
+        username=actor_username,
+        action={"type": "request_reopened"},
+        log_prefix=log_prefix,
+    )
+
+    return log
+
+
 def put_membership_request_on_hold(
     *,
     membership_request: MembershipRequest,

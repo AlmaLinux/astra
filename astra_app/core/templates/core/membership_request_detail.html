@@ -87,6 +87,14 @@
           {% include 'core/_membership_request_actions.html' with request=req show_on_hold_approve=show_on_hold_approve %}
         </div>
       {% endif %}
+
+      {% if req.status == 'ignored' and membership_can_add %}
+        <hr>
+        <form method="post" action="{% url 'membership-request-reopen' req.pk %}">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-sm btn-outline-secondary">Reopen</button>
+        </form>
+      {% endif %}
     </div>
   </div>
 

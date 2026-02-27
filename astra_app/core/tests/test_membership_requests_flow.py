@@ -12,7 +12,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.freeipa.user import FreeIPAUser
-from core.models import FreeIPAPermissionGrant
+from core.models import FreeIPAPermissionGrant, MembershipRequest, Organization
 from core.permissions import (
     ASTRA_ADD_MEMBERSHIP,
     ASTRA_CHANGE_MEMBERSHIP,
@@ -2515,3 +2515,226 @@ class OrgApprovalTransactionTests(TransactionTestCase):
                 send_approved_email=False,
                 approved_email_template_name=None,
             )
+
+
+class MembershipRequestReopenFlowTests(TestCase):
+    """Tests for the FEAT-05 committee reopen action on ignored requests."""
+
+    @classmethod
+    def setUpTestData(cls) -> None:
+        super().setUpTestData()
+        ensure_core_categories()
+        ensure_email_templates()
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "acceptance_template": None,
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+    def setUp(self) -> None:
+        super().setUp()
+        for perm in (ASTRA_ADD_MEMBERSHIP, ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP):
+            FreeIPAPermissionGrant.objects.get_or_create(
+                permission=perm,
+                principal_type=FreeIPAPermissionGrant.PrincipalType.group,
+                principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
+            )
+
+    def _login_as_freeipa_user(self, username: str) -> None:
+        session = self.client.session
+        session["_freeipa_username"] = username
+        session.save()
+
+    def _make_ignored_request(
+        self,
+        username: str = "alice",
+        on_hold_at: datetime.datetime | None = None,
+    ) -> MembershipRequest:
+        req = MembershipRequest.objects.create(
+            requested_username=username,
+            membership_type_id="individual",
+            status=MembershipRequest.Status.ignored,
+        )
+        req.decided_at = timezone.now()
+        req.decided_by_username = "old_reviewer"
+        update_fields = ["decided_at", "decided_by_username"]
+        if on_hold_at is not None:
+            req.on_hold_at = on_hold_at
+            update_fields.append("on_hold_at")
+        req.save(update_fields=update_fields)
+        return req
+
+    def _committee_user(self, username: str = "reviewer") -> FreeIPAUser:
+        return FreeIPAUser(
+            username,
+            {
+                "uid": [username],
+                "mail": [f"{username}@example.com"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+            },
+        )
+
+    def test_committee_can_reopen_ignored_request(self) -> None:
+        from core.models import MembershipLog, MembershipRequest
+
+        req = self._make_ignored_request()
+        reviewer = self._committee_user()
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.post(reverse("membership-request-reopen", args=[req.pk]), follow=False)
+
+        self.assertEqual(resp.status_code, 302)
+        req.refresh_from_db()
+        self.assertEqual(req.status, MembershipRequest.Status.pending)
+        self.assertIsNone(req.decided_at)
+        self.assertEqual(req.decided_by_username, "")
+        self.assertIsNone(req.on_hold_at)
+        self.assertTrue(
+            MembershipLog.objects.filter(
+                actor_username="reviewer",
+                target_username="alice",
+                membership_type_id="individual",
+                action=MembershipLog.Action.reopened,
+            ).exists()
+        )
+
+    def test_committee_reopen_creates_audit_note(self) -> None:
+        from core.models import Note
+
+        req = self._make_ignored_request()
+        reviewer = self._committee_user()
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            self.client.post(reverse("membership-request-reopen", args=[req.pk]), follow=False)
+
+        self.assertTrue(
+            Note.objects.filter(
+                membership_request=req,
+                username="reviewer",
+                action={"type": "request_reopened"},
+            ).exists()
+        )
+
+    def test_non_committee_user_cannot_reopen_request(self) -> None:
+        from core.models import MembershipRequest
+
+        req = self._make_ignored_request()
+        anonymous_user = FreeIPAUser(
+            "interloper",
+            {
+                "uid": ["interloper"],
+                "mail": ["interloper@example.com"],
+                "memberof_group": [],
+            },
+        )
+        self._login_as_freeipa_user("interloper")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=anonymous_user):
+            resp = self.client.post(reverse("membership-request-reopen", args=[req.pk]), follow=False)
+
+        # Should redirect away (permission denied -> login)
+        self.assertNotEqual(resp.status_code, 200)
+        self.assertIn(resp.status_code, (302, 403))
+        req.refresh_from_db()
+        self.assertEqual(req.status, MembershipRequest.Status.ignored)
+
+    def test_cannot_reopen_when_conflicting_open_request_exists(self) -> None:
+        ignored_req = self._make_ignored_request(username="alice")
+        # Create a conflicting pending request for the same user + type
+        MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.pending,
+        )
+
+        reviewer = self._committee_user()
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.post(
+                reverse("membership-request-reopen", args=[ignored_req.pk]),
+                follow=True,
+            )
+
+        ignored_req.refresh_from_db()
+        self.assertEqual(ignored_req.status, MembershipRequest.Status.ignored)
+        msgs = [str(m) for m in resp.context["messages"]]
+        self.assertTrue(any("open" in m.lower() or "conflict" in m.lower() or "already" in m.lower() for m in msgs))
+
+    def test_reopen_clears_non_null_on_hold_at(self) -> None:
+        req = self._make_ignored_request(on_hold_at=timezone.now())
+        reviewer = self._committee_user()
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.post(reverse("membership-request-reopen", args=[req.pk]), follow=False)
+
+        self.assertEqual(resp.status_code, 302)
+        req.refresh_from_db()
+        self.assertEqual(req.status, MembershipRequest.Status.pending)
+        self.assertIsNone(req.on_hold_at)
+
+    def test_cannot_reopen_org_request_when_conflicting_open_request_exists(self) -> None:
+        org = Organization.objects.create(
+            name="CERN",
+            business_contact_email="cern@example.com",
+            representative="org-rep",
+        )
+        ignored_req = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="individual",
+            status=MembershipRequest.Status.ignored,
+            decided_at=timezone.now(),
+            decided_by_username="old_reviewer",
+        )
+        MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="individual",
+            status=MembershipRequest.Status.pending,
+        )
+
+        reviewer = self._committee_user()
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.post(reverse("membership-request-reopen", args=[ignored_req.pk]), follow=True)
+
+        ignored_req.refresh_from_db()
+        self.assertEqual(ignored_req.status, MembershipRequest.Status.ignored)
+        msgs = [str(m) for m in resp.context["messages"]]
+        self.assertTrue(any("open" in m.lower() or "conflict" in m.lower() or "already" in m.lower() for m in msgs))
+
+    def test_reopen_non_ignored_request_is_blocked(self) -> None:
+        from core.models import MembershipRequest
+
+        # A pending request should not be reopenable
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.pending,
+        )
+        reviewer = self._committee_user()
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.post(
+                reverse("membership-request-reopen", args=[req.pk]),
+                follow=True,
+            )
+
+        req.refresh_from_db()
+        self.assertEqual(req.status, MembershipRequest.Status.pending)
+        msgs = [str(m) for m in resp.context["messages"]]
+        self.assertTrue(any(m for m in msgs))

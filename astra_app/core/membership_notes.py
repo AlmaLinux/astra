@@ -80,6 +80,7 @@ _ACTION_DISPLAY: dict[str, tuple[str, str]] = {
     "request_approved": ("Request approved", "fa-circle-check"),
     "request_rejected": ("Request rejected", "fa-circle-xmark"),
     "request_ignored": ("Request ignored", "fa-ghost"),
+    "request_reopened": ("Request reopened", "fa-rotate-left"),
     "request_on_hold": ("Request on hold", "fa-circle-pause"),
     "request_resubmitted": ("Request resubmitted", "fa-rotate-right"),
     "request_rescinded": ("Request rescinded", "fa-ban"),

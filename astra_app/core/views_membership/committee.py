@@ -24,6 +24,7 @@ from core.membership_request_workflow import (
     ignore_membership_request,
     put_membership_request_on_hold,
     reject_membership_request,
+    reopen_ignored_membership_request,
 )
 from core.models import MembershipLog, MembershipRequest
 from core.permissions import (
@@ -882,6 +883,35 @@ def membership_request_rfi(request: HttpRequest, pk: int) -> HttpResponse:
 def membership_request_ignore(request: HttpRequest, pk: int) -> HttpResponse:
     return run_membership_request_action(request, pk, action="ignore")
 
+
+@permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
+@post_only_404
+def membership_request_reopen(request: HttpRequest, pk: int) -> HttpResponse:
+    req = get_object_or_404(
+        MembershipRequest.objects.select_related("membership_type", "requested_organization"),
+        pk=pk,
+    )
+    redirect_to = _resolve_post_redirect(request, default=reverse("membership-requests"), use_referer=True)
+
+    try:
+        reopen_ignored_membership_request(
+            membership_request=req,
+            actor_username=get_username(request),
+        )
+    except ValidationError as exc:
+        message = exc.messages[0] if exc.messages else str(exc)
+        messages.error(request, message)
+        return redirect(redirect_to)
+    except Exception:
+        logger.exception("Failed to reopen membership request pk=%s", req.pk)
+        messages.error(request, "Failed to reopen the request.")
+        return redirect(redirect_to)
+
+    target_label = req.requested_username if req.is_user_target else (req.organization_display_name or "organization")
+    messages.success(request, f"Reopened request for {target_label}.")
+    return redirect(redirect_to)
+
+
 __all__ = [
     "membership_notes_aggregate_note_add",
     "membership_request_approve",
@@ -890,6 +920,7 @@ __all__ = [
     "membership_request_ignore",
     "membership_request_note_add",
     "membership_request_reject",
+    "membership_request_reopen",
     "membership_request_rfi",
     "membership_requests",
     "membership_requests_bulk",

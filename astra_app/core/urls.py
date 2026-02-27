@@ -231,6 +231,11 @@ urlpatterns = [
         name="membership-request-ignore",
     ),
     path(
+        "membership/requests/<int:pk>/reopen/",
+        views_membership.membership_request_reopen,
+        name="membership-request-reopen",
+    ),
+    path(
         "membership/account-invitations/",
         views_account_invitations.account_invitations,
         name="account-invitations",

@@ -790,6 +790,7 @@ class MembershipLog(models.Model):
         approved = "approved", "Approved"
         rejected = "rejected", "Rejected"
         ignored = "ignored", "Ignored"
+        reopened = "reopened", "Reopened"
         rescinded = "rescinded", "Rescinded"
         representative_changed = "representative_changed", "Representative changed"
         expiry_changed = "expiry_changed", "Expiry changed"

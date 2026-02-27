@@ -348,3 +348,57 @@ class MembershipNotesActionTests(TestCase):
         _args, kwargs = send_mail.call_args
         self.assertEqual(kwargs.get("recipients"), ["fallback@example.com"])
         self.assertEqual(kwargs.get("template_name"), settings.MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME)
+
+
+class MembershipReopenNoteTests(TestCase):
+    """Tests for the reopen audit note creation and rendering."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        ensure_email_templates()
+        MembershipTypeCategory.objects.update_or_create(
+            pk="individual",
+            defaults={
+                "is_individual": True,
+                "is_organization": False,
+                "sort_order": 0,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+    def test_reopen_ignored_request_records_action_note(self) -> None:
+        from core.membership_request_workflow import reopen_ignored_membership_request
+
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.ignored,
+        )
+
+        reopen_ignored_membership_request(membership_request=req, actor_username="reviewer")
+
+        self.assertTrue(
+            Note.objects.filter(
+                membership_request=req,
+                username="reviewer",
+                action={"type": "request_reopened"},
+            ).exists()
+        )
+
+    def test_request_reopened_action_type_has_display_label(self) -> None:
+        from core.membership_notes import note_action_icon, note_action_label
+
+        action = {"type": "request_reopened"}
+        label = note_action_label(action)
+        icon = note_action_icon(action)
+        self.assertIn("reopen", label.lower())
+        self.assertNotEqual(icon, "fa-bolt")  # should be a specific icon, not the fallback
