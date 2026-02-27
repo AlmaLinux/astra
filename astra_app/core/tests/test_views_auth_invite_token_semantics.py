@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 from django.test import Client, TestCase
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import AccountInvitation, Organization
 from core.views_auth import PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY
 

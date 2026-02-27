@@ -6,7 +6,7 @@ from django.conf import settings
 from django.test import TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import FreeIPAPermissionGrant, MembershipRequest, MembershipType, Note
 from core.permissions import ASTRA_ADD_SEND_MAIL
 
@@ -43,7 +43,7 @@ class SendMailMembershipContactedNoteTests(TestCase):
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
             patch("core.views_send_mail.queue_composed_email") as queue_mock,
         ):
             queue_mock.return_value = type("_QueuedEmail", (), {"id": 4242})()

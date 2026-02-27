@@ -7,11 +7,16 @@ from django.test import TestCase, override_settings
 
 from core.elections_eligibility import ineligible_voters_with_reasons
 from core.models import Election, Membership, MembershipType, Organization
+from core.tests.utils_test_data import ensure_core_categories
 
 
 @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=30)
 class IneligibleVotersWithReasonsTests(TestCase):
     """Verify that ineligible_voters_with_reasons produces correct reason data."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        ensure_core_categories()
 
     def _make_election(self, *, status: str = Election.Status.open, start_offset_days: int = 10) -> Election:
         """Create a test election with predictable dates."""

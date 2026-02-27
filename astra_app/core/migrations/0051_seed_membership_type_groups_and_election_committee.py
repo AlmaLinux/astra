@@ -61,7 +61,7 @@ def _ensure_freeipa_groups_exist(apps, schema_editor) -> None:
         return
     # Import lazily so migrations can be imported without pulling in the FreeIPA
     # client unless the migration actually executes.
-    from core.backends import FreeIPAGroup  # noqa: PLC0415
+    from core.freeipa.group import FreeIPAGroup  # noqa: PLC0415
 
     for cn in _NON_FASGROUP_CNS:
         group = FreeIPAGroup.get(cn)

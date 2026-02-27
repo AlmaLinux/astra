@@ -7,7 +7,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import FreeIPAPermissionGrant
 from core.permissions import ASTRA_ADD_SEND_MAIL
 
@@ -30,7 +30,7 @@ class MailImagesUiTests(TestCase):
         self._login_as_freeipa_user("alice")
         alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": []})
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             resp = self.client.get(reverse("email-images"))
 
         self.assertEqual(resp.status_code, 302)
@@ -52,7 +52,7 @@ class MailImagesUiTests(TestCase):
             return f"https://cdn.example/{key}"
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
             patch("core.views_mail_images.default_storage.listdir", side_effect=_listdir),
             patch("core.views_mail_images.default_storage.url", side_effect=_url),
             patch("core.views_mail_images.default_storage.size", return_value=123),
@@ -75,7 +75,7 @@ class MailImagesUiTests(TestCase):
         upload = SimpleUploadedFile("logo.png", b"pngbytes", content_type="image/png")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
             patch("core.views_mail_images.default_storage.exists", return_value=False),
             patch("core.views_mail_images.default_storage.save", return_value="mail-images/logo.png") as save,
             patch("core.views_mail_images.default_storage.delete") as delete,

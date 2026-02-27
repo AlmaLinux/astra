@@ -4,10 +4,12 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from django.conf import settings
+from django.core.cache import cache
 from django.utils import timezone
 
-from core import backends
-from core.backends import FreeIPAGroup, FreeIPAMisconfiguredError, FreeIPAUnavailableError, FreeIPAUser
+from core.freeipa.exceptions import FreeIPAMisconfiguredError, FreeIPAUnavailableError
+from core.freeipa.group import FreeIPAGroup, get_freeipa_group_for_elections
+from core.freeipa.user import FreeIPAUser
 from core.models import Election, Membership
 
 FREEIPA_UNAVAILABLE_MESSAGE = "FreeIPA is currently unavailable. Try again later."
@@ -17,6 +19,12 @@ COMMITTEE_GROUP_MISSING_MESSAGE = (
 ELIGIBLE_GROUP_MISSING_MESSAGE = "Eligible voters group is not available in FreeIPA. Contact an administrator."
 
 logger = logging.getLogger(__name__)
+
+_ELIGIBILITY_FACTS_CACHE_TTL_SECONDS = 30
+# Marker and facts keys are written via separate cache.set calls. Under cache
+# eviction pressure, one may outlive the other, so stale facts can persist for
+# at most one additional TTL window after a state transition.
+_ELIGIBILITY_FACTS_CACHEABLE_STATES = {Election.Status.draft, Election.Status.open}
 
 
 class ElectionEligibilityError(RuntimeError):
@@ -77,7 +85,15 @@ def _membership_is_old_enough(*, created_at: datetime.datetime | None, cutoff: d
     return created_at is not None and created_at <= cutoff
 
 
-def _eligibility_facts_by_username(*, election: Election) -> dict[str, EligibilityFacts]:
+def _eligibility_facts_cache_key(*, election_id: int, election_state: str) -> str:
+    return f"election_eligibility_facts:v1:election:{election_id}:state:{election_state}"
+
+
+def _eligibility_facts_state_cache_key(*, election_id: int) -> str:
+    return f"election_eligibility_facts:v1:election:{election_id}:state_marker"
+
+
+def _compute_eligibility_facts_by_username(*, election: Election) -> dict[str, EligibilityFacts]:
     reference_datetime = _election_reference_datetime(election=election)
     cutoff = reference_datetime - datetime.timedelta(days=settings.ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS)
 
@@ -173,6 +189,46 @@ def _eligibility_facts_by_username(*, election: Election) -> dict[str, Eligibili
     }
 
 
+def _eligibility_facts_by_username(
+    *,
+    election: Election,
+    require_fresh: bool = False,
+) -> dict[str, EligibilityFacts]:
+    election_state = str(election.status)
+    state_marker_key = _eligibility_facts_state_cache_key(election_id=election.id)
+    previous_state = cache.get(state_marker_key)
+    if isinstance(previous_state, str) and previous_state and previous_state != election_state:
+        cache.delete(
+            _eligibility_facts_cache_key(
+                election_id=election.id,
+                election_state=previous_state,
+            )
+        )
+
+    if election_state not in _ELIGIBILITY_FACTS_CACHEABLE_STATES:
+        cache.delete(state_marker_key)
+        return _compute_eligibility_facts_by_username(election=election)
+
+    cache_key = _eligibility_facts_cache_key(
+        election_id=election.id,
+        election_state=election_state,
+    )
+    if require_fresh:
+        facts = _compute_eligibility_facts_by_username(election=election)
+        cache.set(cache_key, facts, timeout=_ELIGIBILITY_FACTS_CACHE_TTL_SECONDS)
+        cache.set(state_marker_key, election_state, timeout=_ELIGIBILITY_FACTS_CACHE_TTL_SECONDS)
+        return facts
+
+    cached = cache.get(cache_key)
+    if isinstance(cached, dict):
+        return cached
+
+    facts = _compute_eligibility_facts_by_username(election=election)
+    cache.set(cache_key, facts, timeout=_ELIGIBILITY_FACTS_CACHE_TTL_SECONDS)
+    cache.set(state_marker_key, election_state, timeout=_ELIGIBILITY_FACTS_CACHE_TTL_SECONDS)
+    return facts
+
+
 def _raise_unavailable(exc: Exception) -> None:
     raise ElectionEligibilityError(FREEIPA_UNAVAILABLE_MESSAGE, status_code=503) from exc
 
@@ -185,15 +241,18 @@ def _raise_misconfigured(message: str, exc: Exception | None = None) -> None:
 
 def _get_required_group(*, group_cn: str, require_fresh: bool, missing_message: str) -> FreeIPAGroup:
     try:
-        return backends.get_freeipa_group_for_elections(cn=group_cn, require_fresh=require_fresh)
+        return get_freeipa_group_for_elections(cn=group_cn, require_fresh=require_fresh)
     except FreeIPAUnavailableError as exc:
         _raise_unavailable(exc)
     except FreeIPAMisconfiguredError as exc:
         _raise_misconfigured(missing_message, exc)
 
 
-def _eligible_voters_from_memberships(*, election: Election) -> list[EligibleVoter]:
-    facts_by_username = _eligibility_facts_by_username(election=election)
+def _eligible_voters_from_memberships(*, election: Election, require_fresh: bool = False) -> list[EligibleVoter]:
+    facts_by_username = _eligibility_facts_by_username(
+        election=election,
+        require_fresh=require_fresh,
+    )
 
     return [
         EligibleVoter(username=username, weight=weight)
@@ -248,7 +307,10 @@ def eligible_voters_from_memberships(
     eligible_group_cn: str | None = None,
     require_fresh: bool = False,
 ) -> list[EligibleVoter]:
-    eligible = _eligible_voters_from_memberships(election=election)
+    eligible = _eligible_voters_from_memberships(
+        election=election,
+        require_fresh=require_fresh,
+    )
 
     group_cn = str(eligible_group_cn) if eligible_group_cn is not None else str(election.eligible_group_cn or "")
     group_cn = group_cn.strip()

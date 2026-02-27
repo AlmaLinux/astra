@@ -1,11 +1,9 @@
 import hashlib
-import json
 import logging
 from typing import Any
-from urllib.error import HTTPError
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
 
+import requests
+from django.conf import settings
 from django.core.cache import cache
 
 from core.views_utils import _normalize_str
@@ -50,7 +48,11 @@ def _photon_address_parts_from_feature(feature: dict[str, Any]) -> dict[str, str
     return {key: value for key, value in result.items() if value}
 
 
-def decompose_full_address_with_photon(full_address: str, *, timeout_seconds: int = 5) -> dict[str, str]:
+def decompose_full_address_with_photon(
+    full_address: str,
+    *,
+    timeout_seconds: int | None = None,
+) -> dict[str, str]:
     query = _normalize_str(full_address)
     if not query:
         return {}
@@ -62,19 +64,25 @@ def decompose_full_address_with_photon(full_address: str, *, timeout_seconds: in
     if isinstance(cached, dict):
         return cached
 
-    url = f"https://photon.komoot.io/api/?{urlencode({'q': query, 'limit': 1})}"
-    request = Request(url, headers={"User-Agent": "astra-address-import/1.0"})
+    endpoint = settings.GEOCODING_ENDPOINT
+    timeout = timeout_seconds if timeout_seconds is not None else settings.GEOCODING_TIMEOUT
     payload: dict[str, Any] | None = None
     last_error: Exception | None = None
     for attempt in range(1, _PHOTON_MAX_ATTEMPTS + 1):
         try:
-            with urlopen(request, timeout=timeout_seconds) as response:
-                parsed = json.loads(response.read().decode("utf-8"))
-                if isinstance(parsed, dict):
-                    payload = parsed
-                else:
-                    payload = {}
-                break
+            response = requests.get(
+                endpoint,
+                params={"q": query, "limit": 1},
+                headers={"User-Agent": "astra-address-import/1.0"},
+                timeout=timeout,
+            )
+            response.raise_for_status()
+            parsed = response.json()
+            if isinstance(parsed, dict):
+                payload = parsed
+            else:
+                payload = {}
+            break
         except Exception as exc:
             last_error = exc
             logger.warning(
@@ -85,8 +93,10 @@ def decompose_full_address_with_photon(full_address: str, *, timeout_seconds: in
                 exc,
             )
             # Specific codes that are permanent rejections; retrying won't help.
-            if isinstance(exc, HTTPError) and exc.code in {403}:
-                break
+            if isinstance(exc, requests.HTTPError):
+                response = exc.response
+                if response is not None and response.status_code == 403:
+                    break
 
     if payload is None:
         if last_error is not None:

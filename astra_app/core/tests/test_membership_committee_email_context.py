@@ -4,7 +4,7 @@ from unittest.mock import patch
 from django.conf import settings
 from django.test import TestCase
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.membership_notifications import send_membership_notification
 from core.membership_request_workflow import record_membership_request_created
 from core.models import MembershipRequest, MembershipType
@@ -30,7 +30,7 @@ class MembershipCommitteeEmailContextTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
             patch("core.membership_request_workflow.queue_templated_email") as send_mail,
         ):
             record_membership_request_created(

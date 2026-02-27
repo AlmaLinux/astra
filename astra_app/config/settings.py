@@ -180,6 +180,22 @@ if _sentry_dsn:
 
         return event
 
+    _sentry_traces_sample_rate_raw = _env_str("SENTRY_TRACES_SAMPLE_RATE", default="1.0")
+    _sentry_profiles_sample_rate_raw = _env_str("SENTRY_PROFILES_SAMPLE_RATE", default="1.0")
+    try:
+        _sentry_traces_sample_rate = float(_sentry_traces_sample_rate_raw)
+    except (TypeError, ValueError) as e:
+        raise ImproperlyConfigured(
+            f"SENTRY_TRACES_SAMPLE_RATE must be a float env var, got {_sentry_traces_sample_rate_raw!r}."
+        ) from e
+
+    try:
+        _sentry_profiles_sample_rate = float(_sentry_profiles_sample_rate_raw)
+    except (TypeError, ValueError) as e:
+        raise ImproperlyConfigured(
+            f"SENTRY_PROFILES_SAMPLE_RATE must be a float env var, got {_sentry_profiles_sample_rate_raw!r}."
+        ) from e
+
     sentry_sdk.init(
         dsn=_sentry_dsn,
         integrations=[
@@ -203,8 +219,8 @@ if _sentry_dsn:
         ),
         max_request_body_size="always",
         enable_logs=True,
-        traces_sample_rate=1.0,
-        profile_session_sample_rate=1.0,
+        traces_sample_rate=_sentry_traces_sample_rate,
+        profile_session_sample_rate=_sentry_profiles_sample_rate,
         profile_lifecycle="trace",
     )
 
@@ -452,6 +468,37 @@ FREEIPA_CIRCUIT_BREAKER_COOLDOWN_SECONDS = _env_int(
 )
 
 FREEIPA_REQUEST_TIMEOUT_SECONDS = _env_int("FREEIPA_REQUEST_TIMEOUT_SECONDS", default=10)
+
+# Geocoding configuration
+GEOCODING_ENDPOINT = _env_str("GEOCODING_ENDPOINT", default="https://photon.komoot.io/api/")
+GEOCODING_TIMEOUT = _env_int("GEOCODING_TIMEOUT", default=10)  # seconds
+
+AUTH_RATE_LIMIT_LOGIN_LIMIT = _env_int(
+    "AUTH_RATE_LIMIT_LOGIN_LIMIT",
+    default=10,
+)
+AUTH_RATE_LIMIT_LOGIN_WINDOW_SECONDS = _env_int(
+    "AUTH_RATE_LIMIT_LOGIN_WINDOW_SECONDS",
+    default=5 * 60,
+)
+
+AUTH_RATE_LIMIT_PASSWORD_RESET_LIMIT = _env_int(
+    "AUTH_RATE_LIMIT_PASSWORD_RESET_LIMIT",
+    default=5,
+)
+AUTH_RATE_LIMIT_PASSWORD_RESET_WINDOW_SECONDS = _env_int(
+    "AUTH_RATE_LIMIT_PASSWORD_RESET_WINDOW_SECONDS",
+    default=5 * 60,
+)
+
+AUTH_RATE_LIMIT_REGISTRATION_LIMIT = _env_int(
+    "AUTH_RATE_LIMIT_REGISTRATION_LIMIT",
+    default=5,
+)
+AUTH_RATE_LIMIT_REGISTRATION_WINDOW_SECONDS = _env_int(
+    "AUTH_RATE_LIMIT_REGISTRATION_WINDOW_SECONDS",
+    default=15 * 60,
+)
 
 ELECTION_RATE_LIMIT_BALLOT_VERIFY_LIMIT = _env_int(
     "ELECTION_RATE_LIMIT_BALLOT_VERIFY_LIMIT",
@@ -749,6 +796,7 @@ CHAT_MATRIX_TO_ARGS = _env_str(
 LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/'
 LOGOUT_REDIRECT_URL = '/login/'
+SESSION_COOKIE_AGE = _env_int("SESSION_COOKIE_AGE", default=24 * 60 * 60)
 
 # django-avatar configuration
 # Prefer a local, non-DB-backed provider. If no local avatar exists, fall back
@@ -768,7 +816,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Authentication Backends
 AUTHENTICATION_BACKENDS = [
-    'core.backends.FreeIPAAuthBackend',
+    'core.freeipa.auth_backend.FreeIPAAuthBackend',
 ]
 
 # FreeIPA Configuration

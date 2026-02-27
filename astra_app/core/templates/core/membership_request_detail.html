@@ -84,7 +84,7 @@
       {% if req.status == 'pending' or req.status == 'on_hold' %}
         <hr>
         <div class="membership-request-actions membership-request-actions--detail">
-          {% include 'core/_membership_request_actions.html' with request=req %}
+          {% include 'core/_membership_request_actions.html' with request=req show_on_hold_approve=show_on_hold_approve %}
         </div>
       {% endif %}
     </div>

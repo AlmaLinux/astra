@@ -7,7 +7,9 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from core.backends import FreeIPAGroup, FreeIPAMisconfiguredError, FreeIPAUser
+from core.freeipa.exceptions import FreeIPAMisconfiguredError
+from core.freeipa.group import FreeIPAGroup
+from core.freeipa.user import FreeIPAUser
 from core.models import (
     AuditLogEntry,
     Candidate,
@@ -18,9 +20,14 @@ from core.models import (
     VotingCredential,
 )
 from core.permissions import ASTRA_ADD_ELECTION
+from core.tests.utils_test_data import ensure_core_categories
 
 
 class ElectionEditLifecycleTests(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        ensure_core_categories()
+
     def _login_as_freeipa_user(self, username: str) -> None:
         session = self.client.session
         session["_freeipa_username"] = username
@@ -92,7 +99,7 @@ class ElectionEditLifecycleTests(TestCase):
         end_str = (now + datetime.timedelta(days=2)).strftime("%Y-%m-%dT%H:%M")
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=get_user),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=get_user),
             patch("core.views_elections.edit.timezone.now", return_value=started_at),
             patch("post_office.mail.send", autospec=True) as post_office_send_mock,
         ):
@@ -172,7 +179,7 @@ class ElectionEditLifecycleTests(TestCase):
 
         admin_user = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=admin_user),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
             patch(
                 "core.views_elections.edit.issue_voting_credentials_from_memberships",
                 side_effect=RuntimeError("credential issue failed"),
@@ -267,7 +274,7 @@ class ElectionEditLifecycleTests(TestCase):
         }
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=admin_user),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
             patch("core.views_elections.edit._get_active_election", side_effect=[first_stale, second_stale]),
             patch(
                 "core.views_elections.edit._issue_and_email_credentials",
@@ -338,7 +345,7 @@ class ElectionEditLifecycleTests(TestCase):
         admin_user = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=admin_user),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
             patch(
                 "core.views_elections.edit._issue_and_email_credentials",
                 return_value=(1, 1, 0, 0),
@@ -424,7 +431,7 @@ class ElectionEditLifecycleTests(TestCase):
         start_str = (now + datetime.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
         end_str = (now + datetime.timedelta(days=2)).strftime("%Y-%m-%dT%H:%M")
 
-        with patch("core.backends.get_freeipa_group_for_elections", side_effect=_get_group):
+        with patch("core.elections_eligibility.get_freeipa_group_for_elections", side_effect=_get_group):
             resp = self.client.post(
                 reverse("election-edit", args=[election.id]),
                 data={
@@ -474,7 +481,7 @@ class ElectionEditLifecycleTests(TestCase):
 
         admin_user = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
 
-        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
             resp = self.client.post(
                 reverse("election-edit", args=[election.id]),
                 data={
@@ -530,8 +537,8 @@ class ElectionEditLifecycleTests(TestCase):
         admin_user = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
 
         with (
-            patch("core.backends.get_freeipa_group_for_elections", side_effect=_get_group),
-            patch("core.backends.FreeIPAUser.get", return_value=admin_user),
+            patch("core.elections_eligibility.get_freeipa_group_for_elections", side_effect=_get_group),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
         ):
             resp = self.client.post(
                 reverse("election-edit", args=[election.id]),
@@ -601,8 +608,8 @@ class ElectionEditLifecycleTests(TestCase):
         admin_user = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
 
         with (
-            patch("core.backends.get_freeipa_group_for_elections", side_effect=_get_group),
-            patch("core.backends.FreeIPAUser.get", return_value=admin_user),
+            patch("core.elections_eligibility.get_freeipa_group_for_elections", side_effect=_get_group),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
         ):
             resp = self.client.post(
                 reverse("election-edit", args=[election.id]),
@@ -660,8 +667,8 @@ class ElectionEditLifecycleTests(TestCase):
         admin_user = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
 
         with (
-            patch("core.backends.get_freeipa_group_for_elections", side_effect=_get_group),
-            patch("core.backends.FreeIPAUser.get", return_value=admin_user),
+            patch("core.elections_eligibility.get_freeipa_group_for_elections", side_effect=_get_group),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
         ):
             resp = self.client.post(
                 reverse("election-edit", args=[election.id]),
@@ -731,8 +738,8 @@ class ElectionEditLifecycleTests(TestCase):
         admin_user = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
 
         with (
-            patch("core.backends.get_freeipa_group_for_elections", side_effect=_get_group),
-            patch("core.backends.FreeIPAUser.get", return_value=admin_user),
+            patch("core.elections_eligibility.get_freeipa_group_for_elections", side_effect=_get_group),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
         ):
             resp = self.client.post(
                 reverse("election-edit", args=[election.id]),

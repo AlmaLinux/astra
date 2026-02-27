@@ -8,7 +8,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import FreeIPAPermissionGrant, MembershipLog, MembershipRequest, MembershipType
 from core.permissions import ASTRA_ADD_MEMBERSHIP
 from core.tests.utils_test_data import ensure_core_categories
@@ -75,7 +75,7 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(reverse("membership-requests"))
 
         self.assertEqual(resp.status_code, 200)
@@ -121,7 +121,7 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(reverse("membership-requests"))
 
         self.assertEqual(resp.status_code, 200)
@@ -185,7 +185,7 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(reverse("membership-requests"))
 
         self.assertEqual(resp.status_code, 200)
@@ -275,7 +275,7 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(reverse("membership-requests"))
 
         self.assertEqual(resp.status_code, 200)

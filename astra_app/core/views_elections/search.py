@@ -7,9 +7,9 @@ from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 
 from core import elections_eligibility
-from core.backends import FreeIPAUser
 from core.elections_eligibility import ElectionEligibilityError
 from core.email_context import election_committee_email_context
+from core.freeipa.user import FreeIPAUser
 from core.models import Election
 from core.permissions import ASTRA_ADD_ELECTION, json_permission_required
 from core.templated_email import render_templated_email_preview_response

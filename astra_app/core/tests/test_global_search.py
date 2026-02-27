@@ -5,7 +5,8 @@ from unittest.mock import patch
 
 from django.test import TestCase
 
-from core.backends import FreeIPAUser, clear_current_viewer_username, set_current_viewer_username
+from core.freeipa.client import clear_current_viewer_username, set_current_viewer_username
+from core.freeipa.user import FreeIPAUser
 from core.models import FreeIPAPermissionGrant, Organization
 from core.permissions import ASTRA_VIEW_USER_DIRECTORY
 
@@ -33,7 +34,6 @@ class GlobalSearchTests(TestCase):
         users = [
             SimpleNamespace(username="jim", full_name="Jim Jones"),
             SimpleNamespace(username="jimbo", full_name="Jimbo Jones"),
-            SimpleNamespace(username="bob", full_name="Bob User"),
         ]
 
         groups = [
@@ -43,8 +43,8 @@ class GlobalSearchTests(TestCase):
         ]
 
         with (
-            patch("core.backends.FreeIPAUser.all", return_value=users),
-            patch("core.backends.FreeIPAGroup.all", return_value=groups),
+            patch("core.views_search.search_freeipa_users", return_value=users),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=groups),
         ):
             resp = self.client.get("/search/?q=ji")
 
@@ -60,8 +60,8 @@ class GlobalSearchTests(TestCase):
         self._login_as_freeipa("admin")
 
         with (
-            patch("core.backends.FreeIPAUser.all", return_value=[SimpleNamespace(username="alice", full_name="")]),
-            patch("core.backends.FreeIPAGroup.all", return_value=[SimpleNamespace(cn="fas1", description="", fas_group=True)]),
+            patch("core.freeipa.user.FreeIPAUser.all", return_value=[SimpleNamespace(username="alice", full_name="")]),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[SimpleNamespace(cn="fas1", description="", fas_group=True)]),
         ):
             resp = self.client.get("/search/?q=")
 
@@ -80,9 +80,9 @@ class GlobalSearchTests(TestCase):
         ]
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=viewer),
-            patch("core.backends.FreeIPAUser.all", return_value=users),
-            patch("core.backends.FreeIPAGroup.all", return_value=groups),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer),
+            patch("core.freeipa.user.FreeIPAUser.all", return_value=users),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=groups),
         ):
             resp = self.client.get("/search/?q=ji")
 
@@ -104,8 +104,8 @@ class GlobalSearchTests(TestCase):
         Organization.objects.create(name="Other Corp")
 
         with (
-            patch("core.backends.FreeIPAUser.all", return_value=[]),
-            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.views_search.search_freeipa_users", return_value=[]),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
         ):
             resp = self.client.get("/search/?q=Alma")
 
@@ -126,8 +126,8 @@ class GlobalSearchTests(TestCase):
         org = Organization.objects.create(name="AlmaLinux Foundation")
 
         with (
-            patch("core.backends.FreeIPAUser.all", return_value=[]),
-            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.views_search.search_freeipa_users", return_value=[]),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
         ):
             resp = self.client.get("/search/?q=Alma")
 
@@ -142,9 +142,9 @@ class GlobalSearchTests(TestCase):
         Organization.objects.create(name="AlmaLinux Foundation")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=viewer),
-            patch("core.backends.FreeIPAUser.all", return_value=[]),
-            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer),
+            patch("core.freeipa.user.FreeIPAUser.all", return_value=[]),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
         ):
             resp = self.client.get("/search/?q=Alma")
 
@@ -187,8 +187,8 @@ class GlobalSearchTests(TestCase):
             clear_current_viewer_username()
 
         with (
-            patch("core.backends.FreeIPAUser.all", return_value=[alice, bob_private]),
-            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.views_search.search_freeipa_users", return_value=[alice]),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
         ):
             resp = self.client.get("/search/?q=User")
 
@@ -208,7 +208,7 @@ class GlobalSearchTemplateCopyTests(TestCase):
         self._login_as_freeipa("alice")
 
         alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": []})
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             resp = self.client.get("/groups/")
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode("utf-8")
@@ -230,7 +230,7 @@ class GlobalSearchTemplateCopyTests(TestCase):
         )
 
         admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
-        with patch("core.backends.FreeIPAUser.get", return_value=admin):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin):
             resp = self.client.get("/groups/")
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode("utf-8")
@@ -238,7 +238,7 @@ class GlobalSearchTemplateCopyTests(TestCase):
         self.assertRegex(
             html,
             re.compile(
-                r"id=\"global-search-input\".*?placeholder=\"Search users, groups and orgs\.\.\.\".*?aria-label=\"Search users, groups and orgs\"",
+                r"id=\"global-search-input\".*?placeholder=\"Search users, groups and organizations\.\.\.\".*?aria-label=\"Search users, groups and organizations\"",
                 re.S,
             ),
         )

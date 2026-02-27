@@ -4,7 +4,8 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAGroup, FreeIPAUser
+from core.freeipa.group import FreeIPAGroup
+from core.freeipa.user import FreeIPAUser
 
 
 class AdminPermissionGrantPrincipalsEndpointTests(TestCase):
@@ -21,7 +22,7 @@ class AdminPermissionGrantPrincipalsEndpointTests(TestCase):
 
         url = reverse("admin:core_freeipapermissiongrant_principals")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=freeipa_admin):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=freeipa_admin):
             with patch(
                 "core.admin.FreeIPAUser.all",
                 return_value=[
@@ -50,7 +51,7 @@ class AdminPermissionGrantPrincipalsEndpointTests(TestCase):
 
         url = reverse("admin:core_freeipapermissiongrant_principals")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=freeipa_admin):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=freeipa_admin):
             with patch(
                 "core.admin.FreeIPAGroup.all",
                 return_value=[

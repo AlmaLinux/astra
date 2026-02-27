@@ -1,6 +1,6 @@
 import logging
 
-from .backends import FreeIPAGroup
+from core.freeipa.group import FreeIPAGroup
 
 logger = logging.getLogger(__name__)
 

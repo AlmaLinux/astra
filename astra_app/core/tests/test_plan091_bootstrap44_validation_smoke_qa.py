@@ -3,11 +3,26 @@ from unittest.mock import patch
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import MembershipType
+from core.tests.utils_test_data import ensure_core_categories
 
 
 class Plan091Bootstrap44ValidationSmokeQaTests(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        ensure_core_categories()
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror Members",
+                "group_cn": "mirror-members",
+                "category_id": "mirror",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
     @override_settings(REGISTRATION_OPEN=True)
     def test_registration_required_fields_render_and_invalid_post_shows_bootstrap_feedback(self) -> None:
         resp = self.client.get(reverse("register"))
@@ -58,8 +73,8 @@ class Plan091Bootstrap44ValidationSmokeQaTests(TestCase):
 
         with (
             patch("core.views_membership.FreeIPAUser.get", return_value=alice),
-            patch("core.views_membership.block_action_without_coc", return_value=None),
-            patch("core.views_membership.block_action_without_country_code", return_value=None),
+            patch("core.views_membership.user.block_action_without_coc", return_value=None),
+            patch("core.views_membership.user.block_action_without_country_code", return_value=None),
         ):
             resp = self.client.get(reverse("membership-request"))
             self.assertEqual(resp.status_code, 200)

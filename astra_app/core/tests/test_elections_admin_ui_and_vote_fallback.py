@@ -9,12 +9,19 @@ from django.urls import reverse
 from django.utils import timezone
 from post_office.models import EmailTemplate
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import Candidate, Election, FreeIPAPermissionGrant, Membership, MembershipType, VotingCredential
 from core.permissions import ASTRA_ADD_ELECTION
+from core.tests.utils_test_data import ensure_core_categories
 
 
-class ElectionDetailAdminControlsTests(TestCase):
+class _CoreCategoriesTestCase(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        ensure_core_categories()
+
+
+class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
     def _login_as_freeipa_user(self, username: str) -> None:
         session = self.client.session
         session["_freeipa_username"] = username
@@ -64,7 +71,7 @@ class ElectionDetailAdminControlsTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)
@@ -130,7 +137,7 @@ class ElectionDetailAdminControlsTests(TestCase):
                 return FreeIPAUser("nominator", {"uid": ["nominator"], "displayname": ["Nom"], "memberof_group": []})
             return None
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)
@@ -188,7 +195,7 @@ class ElectionDetailAdminControlsTests(TestCase):
                 )
             return FreeIPAUser(username, {"uid": [username], "mail": [f"{username}@example.com"], "memberof_group": []})
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.post(reverse("election-send-mail-credentials", args=[election.id]))
 
         self.assertEqual(resp.status_code, 302)
@@ -250,7 +257,7 @@ class ElectionDetailAdminControlsTests(TestCase):
         def _get_user(username: str):
             return FreeIPAUser(username, {"uid": [username], "mail": [f"{username}@example.com"], "memberof_group": []})
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.post(
                 reverse("election-send-mail-credentials", args=[election.id]),
                 data={"username": "alice"},
@@ -287,13 +294,13 @@ class ElectionDetailAdminControlsTests(TestCase):
         url = reverse("election-conclude", args=[election.id])
 
         viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "mail": ["viewer@example.com"], "memberof_group": []})
-        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             resp1 = self.client.post(url, data={"skip_tally": "1"})
         self.assertEqual(resp1.status_code, 400)
         election.refresh_from_db()
         self.assertEqual(election.status, Election.Status.open)
 
-        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             resp2 = self.client.post(url, data={"skip_tally": "1", "confirm": election.name})
         self.assertEqual(resp2.status_code, 302)
         election.refresh_from_db()
@@ -324,13 +331,13 @@ class ElectionDetailAdminControlsTests(TestCase):
         new_end_local = new_end.strftime("%Y-%m-%dT%H:%M")
 
         viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "mail": ["viewer@example.com"], "memberof_group": []})
-        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             resp1 = self.client.post(url, data={"end_datetime": new_end_local})
         self.assertEqual(resp1.status_code, 400)
         election.refresh_from_db()
         self.assertEqual(election.end_datetime, original_end)
 
-        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             resp2 = self.client.post(url, data={"end_datetime": new_end_local, "confirm": election.name})
         self.assertEqual(resp2.status_code, 302)
         election.refresh_from_db()
@@ -369,7 +376,7 @@ class ElectionDetailAdminControlsTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)
@@ -445,7 +452,7 @@ class ElectionDetailAdminControlsTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
             patch(
                 "core.views_elections.lifecycle.issue_voting_credentials_from_memberships",
                 side_effect=AssertionError("should not bulk issue"),
@@ -461,7 +468,7 @@ class ElectionDetailAdminControlsTests(TestCase):
         self.assertEqual(payload["recipients"][0]["credential_public_id"], "cred-alice-existing")
 
 
-class ElectionVoteNoJsFallbackTests(TestCase):
+class ElectionVoteNoJsFallbackTests(_CoreCategoriesTestCase):
     def test_vote_submit_accepts_username_ranking(self) -> None:
         now = timezone.now()
         election = Election.objects.create(
@@ -507,7 +514,7 @@ class ElectionVoteNoJsFallbackTests(TestCase):
         voter1 = FreeIPAUser("voter1", {"uid": ["voter1"], "memberof_group": []})
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=voter1),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=voter1),
             patch("core.views_elections.vote.has_signed_coc", return_value=True),
         ):
             resp = self.client.post(
@@ -521,7 +528,7 @@ class ElectionVoteNoJsFallbackTests(TestCase):
         self.assertTrue(resp.json().get("ok"))
 
 
-class ElectionEditEmailTemplateActionsTests(TestCase):
+class ElectionEditEmailTemplateActionsTests(_CoreCategoriesTestCase):
     def _login_as_freeipa_user(self, username: str) -> None:
         session = self.client.session
         session["_freeipa_username"] = username
@@ -553,7 +560,7 @@ class ElectionEditEmailTemplateActionsTests(TestCase):
             content="Old text",
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             json_resp = self.client.get(
                 reverse(
                     "email-template-json",
@@ -564,7 +571,7 @@ class ElectionEditEmailTemplateActionsTests(TestCase):
         self.assertEqual(json_resp.json().get("id"), tpl.pk)
         self.assertEqual(json_resp.json().get("subject"), "Old subject")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             save_resp = self.client.post(
                 reverse(
                     "email-template-save",
@@ -583,7 +590,7 @@ class ElectionEditEmailTemplateActionsTests(TestCase):
         self.assertEqual(tpl.html_content, "<p>New</p>")
         self.assertEqual(tpl.content, "New text")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             save_as_resp = self.client.post(
                 reverse(
                     "email-template-save-as",
@@ -600,7 +607,7 @@ class ElectionEditEmailTemplateActionsTests(TestCase):
         self.assertTrue(EmailTemplate.objects.filter(pk=new_id, name="New Election Template").exists())
 
 
-class UnifiedEmailPreviewTests(TestCase):
+class UnifiedEmailPreviewTests(_CoreCategoriesTestCase):
     def _login_as_freeipa_user(self, username: str) -> None:
         session = self.client.session
         session["_freeipa_username"] = username
@@ -633,7 +640,7 @@ class UnifiedEmailPreviewTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=editor):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=editor):
             resp = self.client.post(
                 reverse("election-email-render-preview", args=[election.id]),
                 data={

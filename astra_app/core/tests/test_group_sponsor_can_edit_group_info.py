@@ -6,7 +6,8 @@ import requests
 from django.contrib.messages import get_messages
 from django.test import TestCase
 
-from core.backends import FreeIPAGroup, FreeIPAUser
+from core.freeipa.group import FreeIPAGroup
+from core.freeipa.user import FreeIPAUser
 
 
 class GroupSponsorCanEditGroupInfoTests(TestCase):
@@ -38,8 +39,8 @@ class GroupSponsorCanEditGroupInfoTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
-            patch("core.backends.FreeIPAGroup.get", return_value=group),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
         ):
             resp = self.client.get("/group/fas1/")
 
@@ -67,8 +68,8 @@ class GroupSponsorCanEditGroupInfoTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
-            patch("core.backends.FreeIPAGroup.get", return_value=group),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
         ):
             resp = self.client.get("/group/fas1/edit/")
 
@@ -111,8 +112,8 @@ class GroupSponsorCanEditGroupInfoTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
-            patch("core.backends.FreeIPAGroup.get", return_value=group),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
         ):
             resp = self.client.post(
                 "/group/fas1/edit/",
@@ -156,8 +157,8 @@ class GroupSponsorCanEditGroupInfoTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
-            patch("core.backends.FreeIPAGroup.get", return_value=group),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
         ):
             resp = self.client.post(
                 "/group/fas1/edit/",
@@ -197,8 +198,8 @@ class GroupSponsorCanEditGroupInfoTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
-            patch("core.backends.FreeIPAGroup.get", return_value=group),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
         ):
             resp = self.client.post(
                 "/group/fas1/edit/",
@@ -234,8 +235,8 @@ class GroupSponsorCanEditGroupInfoTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
-            patch("core.backends.FreeIPAGroup.get", return_value=group),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
         ):
             resp = self.client.post(
                 "/group/fas1/edit/",
@@ -276,8 +277,8 @@ class GroupSponsorCanEditGroupInfoTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=alice),
-            patch("core.backends.FreeIPAGroup.get", return_value=group),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
         ):
             resp = self.client.get("/group/fas1/edit/")
 

@@ -1,5 +1,6 @@
 import datetime
 import logging
+import uuid
 from dataclasses import dataclass
 from typing import Any, override
 
@@ -10,7 +11,6 @@ from import_export.forms import ConfirmImportForm, ImportForm
 from tablib import Dataset
 
 from core.agreements import missing_required_agreements_for_user_in_group
-from core.backends import FreeIPAUser
 from core.csv_import_utils import (
     attach_unmatched_csv_to_result,
     extract_csv_headers_from_uploaded_file,
@@ -24,6 +24,7 @@ from core.csv_import_utils import (
     set_form_column_field_choices,
 )
 from core.forms_membership import MembershipRequestForm
+from core.freeipa.user import FreeIPAUser
 from core.membership_notes import add_note
 from core.membership_request_workflow import approve_membership_request, record_membership_request_created
 from core.models import Membership, MembershipLog, MembershipRequest, MembershipType, Note
@@ -42,12 +43,6 @@ class _RowDecision:
     end_at: datetime.datetime | None
     row_note: str
     responses: list[dict[str, str]]
-
-    def __iter__(self):
-        # Backward-compatible tuple unpacking in tests while callers migrate
-        # to attribute-based access.
-        yield self.decision
-        yield self.reason
 
 # Column-mapping field names shared between MembershipCSVImportForm,
 # MembershipCSVConfirmImportForm, and the admin's get_confirm_form_initial /
@@ -292,6 +287,64 @@ class MembershipCSVImportResource(resources.ModelResource):
         # Operator visibility: keep counts so we can summarize why rows are skipped.
         self._decision_counts: dict[str, int] = {}
         self._skip_reason_counts: dict[str, int] = {}
+
+        self._import_batch_id: uuid.UUID | None = None
+
+    @override
+    def import_data(self, dataset: Dataset, dry_run: bool = False, raise_errors: bool = False, **kwargs: Any) -> Any:
+        if not dry_run:
+            self._import_batch_id = uuid.uuid4()
+        try:
+            rows_total = len(dataset)
+        except Exception:
+            rows_total = 0
+
+        result: Any | None = None
+        outcome = "applied"
+        try:
+            result = super().import_data(dataset, dry_run=dry_run, raise_errors=raise_errors, **kwargs)
+            return result
+        except Exception:
+            outcome = "failed"
+            raise
+        finally:
+            if not dry_run:
+                rows_applied = 0
+                rows_failed = rows_total if outcome == "failed" else 0
+
+                if result is not None:
+                    try:
+                        totals = dict(getattr(result, "totals", {}) or {})
+                    except Exception:
+                        totals = {}
+
+                    rows_applied = (
+                        int(totals.get("new", 0))
+                        + int(totals.get("update", 0))
+                        + int(totals.get("delete", 0))
+                    )
+                    rows_failed = int(totals.get("error", 0)) + int(totals.get("invalid", 0))
+
+                correlation_id = str(self._import_batch_id)
+                logger.info(
+                    (
+                        "event=astra.membership.csv_import.batch_applied "
+                        f"component=membership outcome={outcome} "
+                        f"correlation_id={correlation_id} batch_id={self._import_batch_id} "
+                        f"rows_total={rows_total} rows_applied={rows_applied} rows_failed={rows_failed}"
+                    ),
+                    extra={
+                        "event": "astra.membership.csv_import.batch_applied",
+                        "component": "membership",
+                        "outcome": outcome,
+                        "correlation_id": correlation_id,
+                        "batch_id": self._import_batch_id,
+                        "rows_total": rows_total,
+                        "rows_applied": rows_applied,
+                        "rows_failed": rows_failed,
+                    },
+                )
+            self._import_batch_id = None
 
     class Meta:
         model = MembershipRequest
@@ -1118,6 +1171,12 @@ class MembershipCSVImportResource(resources.ModelResource):
             instance.membership_type_id,
         )
 
+        existing_log_ids: set[int] = set()
+        if self._import_batch_id is not None:
+            existing_log_ids = set(
+                MembershipLog.objects.filter(membership_request=instance).values_list("pk", flat=True)
+            )
+
         # `import_instance()` should have precomputed merged responses before
         # save hooks run. Keep this defensive fallback in case a future
         # import-export version changes call ordering.
@@ -1183,6 +1242,12 @@ class MembershipCSVImportResource(resources.ModelResource):
                 membership_qs.update(expires_at=end_at)
             elif previous_expires_at is not None:
                 membership_qs.update(expires_at=previous_expires_at)
+
+            if self._import_batch_id is not None:
+                imported_logs = MembershipLog.objects.filter(membership_request=instance)
+                if existing_log_ids:
+                    imported_logs = imported_logs.exclude(pk__in=existing_log_ids)
+                imported_logs.update(import_batch_id=self._import_batch_id)
 
             # Only record the import note after a fully successful apply. This
             # avoids leaving misleading "[Import]" notes behind when approval

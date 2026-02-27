@@ -2,9 +2,9 @@ from typing import override
 
 from django import forms
 
-from core.backends import FreeIPAUser
 from core.country_codes import is_valid_country_alpha2, normalize_country_alpha2
 from core.forms_base import StyledModelForm
+from core.freeipa.user import FreeIPAUser
 from core.models import Organization
 from core.user_labels import user_choice_from_freeipa
 

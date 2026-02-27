@@ -8,7 +8,6 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from core.backends import FreeIPAUser
 from core.elections_eligibility import (
     VoteWeightLine,
     eligible_vote_weight_for_username,
@@ -21,6 +20,7 @@ from core.elections_services import (
     submit_ballot,
     tally_election,
 )
+from core.freeipa.user import FreeIPAUser
 from core.models import (
     Ballot,
     Candidate,
@@ -192,7 +192,7 @@ class ElectionVoteWeightsTests(TestCase):
                 "memberof_group": [],
             },
         )
-        with patch("core.backends.FreeIPAUser.get", return_value=voter1):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=voter1):
             resp = self.client.post(
                 reverse("election-vote-submit", args=[election.id]),
                 data=json.dumps({"credential_public_id": str(cred.public_id), "ranking": [c1.id, c2.id]}),
@@ -240,7 +240,7 @@ class ElectionVoteWeightsTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=voter1):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=voter1):
             resp = self.client.post(
                 reverse("election-vote-submit", args=[election.id]),
                 data=json.dumps({"credential_public_id": str(cred.public_id), "ranking": [c1.id, c2.id]}),
@@ -350,7 +350,7 @@ class ElectionVoteWeightsTests(TestCase):
                 return alice
             return None
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(reverse("election-vote", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)
@@ -509,7 +509,7 @@ class ElectionVoteWeightsTests(TestCase):
 
         self._login_as_freeipa_user("voter1")
         voter1_ipa = FreeIPAUser("voter1", {"uid": ["voter1"], "memberof_group": []})
-        with patch("core.backends.FreeIPAUser.get", return_value=voter1_ipa):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=voter1_ipa):
             resp = self.client.get(reverse("election-vote", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)

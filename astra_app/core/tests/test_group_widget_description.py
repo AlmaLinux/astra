@@ -18,7 +18,7 @@ class GroupWidgetDescriptionTests(TestCase):
             sponsor_groups=[],
         )
 
-        with patch("core.backends.FreeIPAGroup.get", return_value=group):
+        with patch("core.freeipa.group.FreeIPAGroup.get", return_value=group):
             tpl = Template("{% load core_group_widget %}{% group 'demo' %}")
             html = tpl.render(Context({"request": None}))
 

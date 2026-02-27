@@ -6,7 +6,7 @@ from django.conf import settings
 from django.test import TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import FreeIPAPermissionGrant, MembershipRequest, MembershipType, Organization
 from core.permissions import ASTRA_ADD_MEMBERSHIP, ASTRA_ADD_SEND_MAIL, ASTRA_VIEW_MEMBERSHIP
 
@@ -56,7 +56,7 @@ class MembershipRequestRfiButtonTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(reverse("membership-request-detail", args=[req.pk]))
 
         self.assertEqual(resp.status_code, 200)
@@ -98,7 +98,7 @@ class MembershipRequestRfiButtonTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(reverse("membership-request-detail", args=[req.pk]))
 
         self.assertEqual(resp.status_code, 200)
@@ -136,7 +136,7 @@ class MembershipRequestRfiButtonTests(TestCase):
             return None
 
         self._login_as_freeipa_user("reviewer")
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(reverse("membership-request-detail", args=[req.pk]))
 
         self.assertEqual(resp.status_code, 200)
@@ -167,7 +167,7 @@ class MembershipRequestRfiButtonTests(TestCase):
         )
 
         self._login_as_freeipa_user("reviewer")
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("membership-request-detail", args=[req.pk]))
 
         self.assertEqual(resp.status_code, 200)
@@ -209,7 +209,7 @@ class MembershipRequestRfiButtonTests(TestCase):
             return None
 
         self._login_as_freeipa_user("reviewer")
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(reverse("membership-request-detail", args=[req.pk]))
 
         self.assertEqual(resp.status_code, 200)

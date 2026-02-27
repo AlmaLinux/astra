@@ -9,7 +9,7 @@ from django.http import HttpResponse
 from django.test import RequestFactory, TestCase
 
 from core import views_users
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 
 
 class ProfileTimezoneDisplayTests(TestCase):

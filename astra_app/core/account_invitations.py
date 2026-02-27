@@ -6,7 +6,7 @@ from collections.abc import Callable
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 
 logger = logging.getLogger(__name__)
 

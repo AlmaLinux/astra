@@ -4,11 +4,17 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAGroup, FreeIPAUser
+from core.freeipa.group import FreeIPAGroup
+from core.freeipa.user import FreeIPAUser
 from core.models import MembershipType
+from core.tests.utils_test_data import ensure_core_categories
 
 
 class AdminProtectedIPAGroupTests(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        ensure_core_categories()
+
     def _login_as_freeipa_admin(self, username: str = "alice") -> None:
         session = self.client.session
         session["_freeipa_username"] = username
@@ -21,9 +27,9 @@ class AdminProtectedIPAGroupTests(TestCase):
         protected_group = FreeIPAGroup("admins", {"cn": ["admins"], "description": ["d"], "member": []})
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=admin_user),
-            patch("core.backends.FreeIPAGroup.all", return_value=[protected_group]),
-            patch("core.backends.FreeIPAGroup.get", return_value=protected_group),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[protected_group]),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=protected_group),
             patch.object(protected_group, "delete") as delete_mock,
         ):
             url = reverse("admin:auth_ipagroup_changelist")
@@ -64,9 +70,9 @@ class AdminProtectedIPAGroupTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=admin_user),
-            patch("core.backends.FreeIPAGroup.all", return_value=[protected_group]),
-            patch("core.backends.FreeIPAGroup.get", return_value=protected_group),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[protected_group]),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=protected_group),
             patch.object(protected_group, "delete") as delete_mock,
         ):
             url = reverse("admin:auth_ipagroup_changelist")

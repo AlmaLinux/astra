@@ -3,7 +3,8 @@ from unittest.mock import patch
 
 from django.test import TestCase
 
-from core.backends import FreeIPAGroup, FreeIPAUser
+from core.freeipa.group import FreeIPAGroup
+from core.freeipa.user import FreeIPAUser
 
 
 class GroupDetailModalConfirmTests(TestCase):
@@ -38,8 +39,8 @@ class GroupDetailModalConfirmTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAGroup.get", return_value=group),
-            patch("core.backends.FreeIPAUser.get", return_value=admin_user),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
         ):
             resp = self.client.get("/group/parent/")
 

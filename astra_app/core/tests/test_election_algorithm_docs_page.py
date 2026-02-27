@@ -4,7 +4,7 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 
 
 class ElectionAlgorithmDocsPageTests(TestCase):
@@ -17,7 +17,7 @@ class ElectionAlgorithmDocsPageTests(TestCase):
         self._login_as_freeipa("alice")
 
         user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": []})
-        with patch("core.backends.FreeIPAUser.get", return_value=user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=user):
             resp = self.client.get(reverse("election-algorithm"))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Meek STV (High-Precision Variant)")

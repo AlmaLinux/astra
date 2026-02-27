@@ -9,7 +9,8 @@ from django.test import TestCase
 from django.utils import timezone
 from post_office.models import EmailTemplate
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
+from core.membership_log_side_effects import apply_membership_log_side_effects
 from core.models import (
     Membership,
     MembershipLog,
@@ -56,6 +57,11 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
             html_content="<p>Sponsorship expires soon</p>",
         )
 
+    def _create_membership_log_with_side_effects(self, **kwargs) -> MembershipLog:
+        log = MembershipLog.objects.create(**kwargs)
+        apply_membership_log_side_effects(log=log)
+        return log
+
     def test_command_sends_expiring_soon_email_on_schedule(self) -> None:
         MembershipType.objects.update_or_create(
             code="individual",
@@ -88,7 +94,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 expires_on_utc, datetime.time(23, 59, 59), tzinfo=datetime.UTC
             )
 
-            MembershipLog.objects.create(
+            self._create_membership_log_with_side_effects(
                 actor_username="reviewer",
                 target_username="alice",
                 membership_type_id="individual",
@@ -97,7 +103,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 expires_at=expires_at_utc,
             )
 
-            with patch("core.backends.FreeIPAUser.get", return_value=alice):
+            with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
                 call_command("membership_expiration_notifications")
 
         from post_office.models import Email
@@ -152,7 +158,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 expires_on_utc, datetime.time(23, 59, 59), tzinfo=datetime.UTC
             )
 
-            MembershipLog.objects.create(
+            self._create_membership_log_with_side_effects(
                 actor_username="reviewer",
                 target_username="alice",
                 membership_type_id="individual",
@@ -161,7 +167,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 expires_at=expires_at_utc,
             )
 
-            with patch("core.backends.FreeIPAUser.get", return_value=alice):
+            with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
                 call_command("membership_expiration_notifications", "--dry-run")
 
         from post_office.models import Email
@@ -203,7 +209,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 expires_on_utc, datetime.time(23, 59, 59), tzinfo=datetime.UTC
             )
 
-            MembershipLog.objects.create(
+            self._create_membership_log_with_side_effects(
                 actor_username="reviewer",
                 target_username="alice",
                 membership_type_id="individual",
@@ -212,7 +218,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 expires_at=expires_at_utc,
             )
 
-            with patch("core.backends.FreeIPAUser.get", return_value=alice):
+            with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
                 call_command("membership_expiration_notifications")
 
         from post_office.models import Email
@@ -260,7 +266,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 expires_on_utc, datetime.time(23, 59, 59), tzinfo=datetime.UTC
             )
 
-            MembershipLog.objects.create(
+            self._create_membership_log_with_side_effects(
                 actor_username="reviewer",
                 target_username="alice",
                 membership_type_id="individual",
@@ -269,7 +275,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 expires_at=expires_at_utc,
             )
 
-            with patch("core.backends.FreeIPAUser.get", return_value=alice):
+            with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
                 call_command("membership_expiration_notifications")
                 first_count = Email.objects.count()
                 call_command("membership_expiration_notifications")
@@ -309,7 +315,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 expires_on_utc, datetime.time(23, 59, 59), tzinfo=datetime.UTC
             )
 
-            MembershipLog.objects.create(
+            self._create_membership_log_with_side_effects(
                 actor_username="reviewer",
                 target_username="alice",
                 membership_type_id="individual",
@@ -318,7 +324,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 expires_at=expires_at_utc,
             )
 
-            with patch("core.backends.FreeIPAUser.get", return_value=alice):
+            with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
                 call_command("membership_expiration_notifications")
                 first_count = Email.objects.count()
                 call_command("membership_expiration_notifications", "--force")
@@ -370,7 +376,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 expires_at=expires_at_utc,
             )
 
-            with patch("core.backends.FreeIPAUser.get", return_value=rep_user):
+            with patch("core.freeipa.user.FreeIPAUser.get", return_value=rep_user):
                 call_command("membership_expiration_notifications")
 
         from post_office.models import Email
@@ -431,7 +437,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 expires_at=expires_at_utc,
             )
 
-            with patch("core.backends.FreeIPAUser.get", return_value=rep_user):
+            with patch("core.freeipa.user.FreeIPAUser.get", return_value=rep_user):
                 call_command("membership_expiration_notifications")
                 first_count = Email.objects.count()
                 call_command("membership_expiration_notifications")
@@ -482,7 +488,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 expires_at=expires_at_utc,
             )
 
-            with patch("core.backends.FreeIPAUser.get", return_value=rep_user):
+            with patch("core.freeipa.user.FreeIPAUser.get", return_value=rep_user):
                 call_command("membership_expiration_notifications")
                 first_count = Email.objects.count()
                 call_command("membership_expiration_notifications", "--force")
@@ -533,7 +539,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
             )
 
             stderr = StringIO()
-            with patch("core.backends.FreeIPAUser.get", return_value=rep_user):
+            with patch("core.freeipa.user.FreeIPAUser.get", return_value=rep_user):
                 call_command("membership_expiration_notifications", stderr=stderr)
 
         from post_office.models import Email
@@ -584,7 +590,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
             )
 
             stderr = StringIO()
-            with patch("core.backends.FreeIPAUser.get", side_effect=RuntimeError("ipa down")):
+            with patch("core.freeipa.user.FreeIPAUser.get", side_effect=RuntimeError("ipa down")):
                 call_command("membership_expiration_notifications", stderr=stderr)
 
         from post_office.models import Email

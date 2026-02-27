@@ -10,16 +10,14 @@ from django.utils import timezone
 from django.utils.deprecation import MiddlewareMixin
 from django.utils.functional import SimpleLazyObject
 
-from core.backends import (
-    DegradedFreeIPAUser,
-    FreeIPAUnavailableError,
-    FreeIPAUser,
-    _freeipa_circuit_open,
-    _is_freeipa_availability_error,
+from core.freeipa.circuit_breaker import _freeipa_circuit_open, _is_freeipa_availability_error
+from core.freeipa.client import (
     clear_current_viewer_username,
     clear_freeipa_service_client_cache,
     set_current_viewer_username,
 )
+from core.freeipa.exceptions import FreeIPAUnavailableError
+from core.freeipa.user import DegradedFreeIPAUser, FreeIPAUser
 from core.ipa_user_attrs import _first
 from core.views_utils import get_username, try_get_username_from_user
 

@@ -7,13 +7,22 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from core.backends import FreeIPAGroup, FreeIPAMisconfiguredError, FreeIPAUnavailableError, FreeIPAUser
 from core.elections_eligibility import ElectionEligibilityError, election_committee_disqualification
+from core.freeipa.exceptions import FreeIPAMisconfiguredError, FreeIPAUnavailableError
+from core.freeipa.group import FreeIPAGroup
+from core.freeipa.user import FreeIPAUser
 from core.models import Election, FreeIPAPermissionGrant, Membership, MembershipType
 from core.permissions import ASTRA_ADD_ELECTION
+from core.tests.utils_test_data import ensure_core_categories
 
 
-class ElectionCommitteeDisqualificationUnitTests(TestCase):
+class _CoreCategoriesTestCase(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        ensure_core_categories()
+
+
+class ElectionCommitteeDisqualificationUnitTests(_CoreCategoriesTestCase):
     def test_disqualification_detects_committee_candidates_and_nominators(self) -> None:
         committee_group = FreeIPAGroup(
             settings.FREEIPA_ELECTION_COMMITTEE_GROUP,
@@ -24,7 +33,7 @@ class ElectionCommitteeDisqualificationUnitTests(TestCase):
                 raise FreeIPAMisconfiguredError("Unknown group")
             return committee_group
 
-        with patch("core.backends.get_freeipa_group_for_elections", side_effect=_get_group):
+        with patch("core.elections_eligibility.get_freeipa_group_for_elections", side_effect=_get_group):
             candidates = ["alice", "bob"]
             nominators = ["nina", "sara"]
             candidate_conflicts, nominator_conflicts = election_committee_disqualification(
@@ -37,7 +46,7 @@ class ElectionCommitteeDisqualificationUnitTests(TestCase):
 
     def test_disqualification_blocks_when_committee_group_missing(self) -> None:
         with patch(
-            "core.backends.get_freeipa_group_for_elections",
+            "core.elections_eligibility.get_freeipa_group_for_elections",
             side_effect=FreeIPAMisconfiguredError("missing"),
         ):
             with self.assertRaises(ElectionEligibilityError) as exc:
@@ -58,7 +67,7 @@ class ElectionCommitteeDisqualificationUnitTests(TestCase):
                 raise FreeIPAMisconfiguredError("Unknown group")
             return committee_group
 
-        with patch("core.backends.get_freeipa_group_for_elections", side_effect=_get_group):
+        with patch("core.elections_eligibility.get_freeipa_group_for_elections", side_effect=_get_group):
             candidate_conflicts, nominator_conflicts = election_committee_disqualification(
                 candidate_usernames=["alice"],
                 nominator_usernames=["bob"],
@@ -77,7 +86,7 @@ class ElectionCommitteeDisqualificationUnitTests(TestCase):
                 raise FreeIPAMisconfiguredError("Unknown group")
             return committee_group
 
-        with patch("core.backends.get_freeipa_group_for_elections", side_effect=_get_group):
+        with patch("core.elections_eligibility.get_freeipa_group_for_elections", side_effect=_get_group):
             candidate_conflicts, nominator_conflicts = election_committee_disqualification(
                 candidate_usernames=["alice"],
                 nominator_usernames=["aLiCe"],
@@ -88,7 +97,7 @@ class ElectionCommitteeDisqualificationUnitTests(TestCase):
 
 
 @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=1)
-class ElectionCommitteeDisqualificationSearchTests(TestCase):
+class ElectionCommitteeDisqualificationSearchTests(_CoreCategoriesTestCase):
     def _login_as_freeipa_user(self, username: str) -> None:
         session = self.client.session
         session["_freeipa_username"] = username
@@ -150,8 +159,8 @@ class ElectionCommitteeDisqualificationSearchTests(TestCase):
             return FreeIPAUser(username, {"uid": [username], "memberof_group": []})
 
         with (
-            patch("core.backends.get_freeipa_group_for_elections", side_effect=_get_group),
-            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.elections_eligibility.get_freeipa_group_for_elections", side_effect=_get_group),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
         ):
             resp = self.client.get(reverse("election-eligible-users-search", args=[election.id]))
 
@@ -193,8 +202,8 @@ class ElectionCommitteeDisqualificationSearchTests(TestCase):
             return FreeIPAUser(username, {"uid": [username], "memberof_group": []})
 
         with (
-            patch("core.backends.get_freeipa_group_for_elections", side_effect=_get_group),
-            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.elections_eligibility.get_freeipa_group_for_elections", side_effect=_get_group),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
         ):
             self.client.get(reverse("election-nomination-users-search", args=[election.id]))
 
@@ -220,10 +229,10 @@ class ElectionCommitteeDisqualificationSearchTests(TestCase):
 
         with (
             patch(
-                "core.backends.get_freeipa_group_for_elections",
+                "core.elections_eligibility.get_freeipa_group_for_elections",
                 side_effect=FreeIPAUnavailableError("unavailable"),
             ),
-            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
         ):
             resp = self.client.get(reverse("election-eligible-users-search", args=[election.id]))
 

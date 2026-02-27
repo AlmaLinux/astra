@@ -6,7 +6,7 @@ from django.test import TestCase
 from django.urls import reverse
 from python_freeipa.exceptions import BadRequest
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 
 
 class AdminIPAUserNoOpSaveTests(TestCase):
@@ -45,8 +45,8 @@ class AdminIPAUserNoOpSaveTests(TestCase):
 
         with (
             patch("core.admin.FreeIPAGroup.all", return_value=[SimpleNamespace(cn="admins")]),
-            patch("core.backends.FreeIPAUser.get", return_value=freeipa_user),
-            patch("core.backends._with_freeipa_service_client_retry", side_effect=fake_retry),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=freeipa_user),
+            patch("core.freeipa.user._with_freeipa_service_client_retry", side_effect=fake_retry),
         ):
             url = reverse("admin:auth_ipauser_change", args=[username])
             resp = self.client.post(

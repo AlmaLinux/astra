@@ -18,7 +18,7 @@ from core.models import MembershipRequest, MembershipType, MembershipTypeCategor
 class MembershipCountryRequirementsTests(TestCase):
     def setUp(self) -> None:
         self.factory = RequestFactory()
-        self._coc_patcher = patch("core.views_membership.block_action_without_coc", return_value=None)
+        self._coc_patcher = patch("core.views_membership.user.block_action_without_coc", return_value=None)
         self._coc_patcher.start()
         self.addCleanup(self._coc_patcher.stop)
 
@@ -181,7 +181,7 @@ class MembershipCountryRequirementsTests(TestCase):
             return HttpResponse("ok")
 
         with patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_user):
-            with patch("core.views_membership.render", autospec=True, side_effect=fake_render):
+            with patch("core.views_membership.user.render", autospec=True, side_effect=fake_render):
                 response = views_membership.membership_request(request)
 
         self.assertEqual(response.status_code, 200)
@@ -215,7 +215,7 @@ class MembershipCountryRequirementsTests(TestCase):
         ):
             with patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_user):
                 with patch(
-                    "core.views_membership.record_membership_request_created",
+                    "core.views_membership.user.record_membership_request_created",
                     autospec=True,
                     return_value=None,
                 ):
@@ -276,7 +276,7 @@ class MembershipCountryRequirementsTests(TestCase):
 
         with patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_user):
             with patch(
-                "core.views_membership.record_membership_request_created",
+                "core.views_membership.user.record_membership_request_created",
                 autospec=True,
                 return_value=None,
             ):
@@ -321,7 +321,7 @@ class MembershipCountryRequirementsTests(TestCase):
 
         with patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_user):
             with patch(
-                "core.views_membership.record_membership_request_created",
+                "core.views_membership.user.record_membership_request_created",
                 autospec=True,
                 return_value=None,
             ):
@@ -368,7 +368,7 @@ class MembershipCountryRequirementsTests(TestCase):
 
         with patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_user):
             with patch(
-                "core.views_membership.record_membership_request_created",
+                "core.views_membership.user.record_membership_request_created",
                 autospec=True,
                 return_value=None,
             ):
@@ -416,7 +416,7 @@ class MembershipCountryRequirementsTests(TestCase):
 
         with patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_user):
             with patch(
-                "core.views_membership.record_membership_request_created",
+                "core.views_membership.user.record_membership_request_created",
                 autospec=True,
                 return_value=None,
             ):
@@ -456,7 +456,7 @@ class MembershipCountryRequirementsTests(TestCase):
             return HttpResponse("ok")
 
         with patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_target):
-            with patch("core.views_membership.render", autospec=True, side_effect=fake_render):
+            with patch("core.views_membership.committee.render", autospec=True, side_effect=fake_render):
                 response = views_membership.membership_request_detail(request, pk=mr.pk)
 
         self.assertEqual(response.status_code, 200)
@@ -500,7 +500,7 @@ class MembershipCountryRequirementsTests(TestCase):
             return HttpResponse("ok")
 
         with patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_rep):
-            with patch("core.views_membership.render", autospec=True, side_effect=fake_render):
+            with patch("core.views_membership.committee.render", autospec=True, side_effect=fake_render):
                 response = views_membership.membership_request_detail(request, pk=mr.pk)
 
         self.assertEqual(response.status_code, 200)

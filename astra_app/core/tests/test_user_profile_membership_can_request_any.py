@@ -4,7 +4,7 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import MembershipRequest, MembershipType, MembershipTypeCategory
 
 
@@ -76,7 +76,7 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
         with (
             patch("core.views_users.has_enabled_agreements", return_value=False),
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
-            patch("core.backends.FreeIPAUser.get", return_value=alex),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alex),
         ):
             resp = self.client.get(reverse("user-profile", kwargs={"username": "alex"}))
 
@@ -123,7 +123,7 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
         with (
             patch("core.views_users.has_enabled_agreements", return_value=False),
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
-            patch("core.backends.FreeIPAUser.get", return_value=alex),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alex),
         ):
             resp = self.client.get(reverse("user-profile", kwargs={"username": "alex"}))
 
@@ -155,7 +155,7 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
             patch("core.views_users.has_enabled_agreements", return_value=True),
             patch("core.views_users.list_agreements_for_user", return_value=[agreement]),
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
-            patch("core.backends.FreeIPAUser.get", return_value=alex),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alex),
         ):
             resp = self.client.get(reverse("user-profile", kwargs={"username": "alex"}))
 

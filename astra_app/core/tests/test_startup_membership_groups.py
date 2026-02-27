@@ -5,7 +5,7 @@ import requests
 from django.test import TestCase
 
 import core.startup
-from core.backends import FreeIPAUnavailableError
+from core.freeipa.exceptions import FreeIPAUnavailableError
 from core.models import MembershipType
 from core.startup import ensure_membership_type_groups_exist
 

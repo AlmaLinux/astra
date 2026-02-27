@@ -10,8 +10,8 @@ from django.urls import reverse_lazy
 from django.views.decorators.http import require_POST
 
 from core import elections_services
-from core.backends import FreeIPAUser
 from core.elections_services import ElectionError, issue_voting_credentials_from_memberships
+from core.freeipa.user import FreeIPAUser
 from core.ipa_user_attrs import _get_freeipa_timezone_name
 from core.models import Election, VotingCredential
 from core.permissions import ASTRA_ADD_ELECTION

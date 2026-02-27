@@ -5,7 +5,7 @@ from unittest.mock import patch
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.membership import (
     FreeIPACallerMode,
     FreeIPAGroupRemovalOutcome,

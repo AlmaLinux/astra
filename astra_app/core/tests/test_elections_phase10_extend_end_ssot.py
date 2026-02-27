@@ -6,7 +6,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import Election, FreeIPAPermissionGrant
 from core.permissions import ASTRA_ADD_ELECTION
 
@@ -36,7 +36,7 @@ class ElectionsPhase10ExtendEndSSOTTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAUser.get") as get_user,
+            patch("core.freeipa.user.FreeIPAUser.get") as get_user,
             patch("core.views_elections.lifecycle._extend_election_end_from_post") as lifecycle_helper,
         ):
             get_user.return_value = FreeIPAUser(
@@ -58,7 +58,7 @@ class ElectionsPhase10ExtendEndSSOTTests(TestCase):
         lifecycle_helper.assert_called_once()
 
         with (
-            patch("core.backends.FreeIPAUser.get") as get_user,
+            patch("core.freeipa.user.FreeIPAUser.get") as get_user,
             patch("core.views_elections.edit._extend_election_end_from_post") as edit_helper,
         ):
             get_user.return_value = FreeIPAUser(

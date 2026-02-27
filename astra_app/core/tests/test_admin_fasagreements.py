@@ -7,7 +7,7 @@ from django.urls import reverse
 from python_freeipa.exceptions import Denied
 
 from core.admin import IPAFASAgreementAdmin
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import IPAFASAgreement
 
 
@@ -27,7 +27,7 @@ class AdminFASAgreementTests(TestCase):
         agreement.description = "Fedora Project Contributor Agreement"
         agreement.enabled = True
 
-        with patch("core.backends.FreeIPAUser.get", return_value=freeipa_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=freeipa_user):
             with patch("core.admin.FreeIPAFASAgreement.all", return_value=[agreement]):
                 url = reverse("admin:auth_ipafasagreement_changelist")
                 resp = self.client.get(url)
@@ -51,7 +51,7 @@ class AdminFASAgreementTests(TestCase):
         created.enabled = True
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=freeipa_user),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=freeipa_user),
             patch("core.admin.FreeIPAGroup.all", return_value=[group]),
             patch("core.admin.FreeIPAUser.all", return_value=[user]),
             patch("core.admin.FreeIPAFASAgreement.create", return_value=created) as create,
@@ -120,7 +120,7 @@ class AdminFASAgreementTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=freeipa_user),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=freeipa_user),
             patch("core.admin.FreeIPAFASAgreement.all", return_value=[listed]),
             patch("core.admin.FreeIPAFASAgreement.get", return_value=freeipa),
         ):
@@ -164,7 +164,7 @@ class AdminFASAgreementTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=freeipa_user),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=freeipa_user),
             patch("core.admin.FreeIPAFASAgreement.all", return_value=[MagicMock(cn="test_agreement", description="", enabled=True)]),
             patch("core.admin.FreeIPAFASAgreement.get", return_value=freeipa),
         ):
@@ -194,7 +194,7 @@ class AdminFASAgreementTests(TestCase):
             return {"test1": f1, "test2": f2, "test3": f3}.get(cn)
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=freeipa_user),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=freeipa_user),
             patch("core.admin.FreeIPAFASAgreement.all", return_value=[listed1, listed2, listed3]),
             patch("core.admin.FreeIPAFASAgreement.get", side_effect=_fake_get),
         ):

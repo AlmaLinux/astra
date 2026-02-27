@@ -7,13 +7,14 @@ from django.conf import settings
 from django.urls import reverse
 from django.utils import timezone
 
-from core.backends import FreeIPAGroup, FreeIPAUser
 from core.email_context import (
     membership_committee_email_context,
     organization_sponsor_email_context,
     system_email_context,
     user_email_context,
 )
+from core.freeipa.group import FreeIPAGroup
+from core.freeipa.user import FreeIPAUser
 from core.models import FreeIPAPermissionGrant, MembershipType, Organization
 from core.public_urls import build_public_absolute_url
 from core.templated_email import queue_templated_email

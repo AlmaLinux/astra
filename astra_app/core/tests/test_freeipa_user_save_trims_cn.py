@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from django.test import TestCase
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 
 
 class FreeIPAUserSaveTrimsCnTests(TestCase):
@@ -23,7 +23,7 @@ class FreeIPAUserSaveTrimsCnTests(TestCase):
         def _fake_retry(_get_client, fn):
             return fn(_FakeClient())
 
-        with patch("core.backends._with_freeipa_service_client_retry", side_effect=_fake_retry):
+        with patch("core.freeipa.user._with_freeipa_service_client_retry", side_effect=_fake_retry):
             user.save()
 
         self.assertEqual(captured.get("o_cn"), "Sej")

@@ -4,7 +4,7 @@ from unittest.mock import patch
 from django.test import Client, TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 
 
 class AuthPagesRedirectLoggedInUsersTests(TestCase):
@@ -30,7 +30,7 @@ class AuthPagesRedirectLoggedInUsersTests(TestCase):
         freeipa_user = self._make_freeipa_user("alice")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=freeipa_user),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=freeipa_user),
             patch("core.views_users._get_full_user", return_value=freeipa_user),
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
             patch("core.views_users.has_enabled_agreements", return_value=False),
@@ -46,7 +46,7 @@ class AuthPagesRedirectLoggedInUsersTests(TestCase):
         self._login_as_freeipa(client, "alice")
         freeipa_user = self._make_freeipa_user("alice")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=freeipa_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=freeipa_user):
             resp = client.get("/password-expired/", follow=False)
 
         self.assertEqual(resp.status_code, 302)
@@ -58,7 +58,7 @@ class AuthPagesRedirectLoggedInUsersTests(TestCase):
         self._login_as_freeipa(client, "alice")
         freeipa_user = self._make_freeipa_user("alice")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=freeipa_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=freeipa_user):
             resp = client.get("/otp/sync/", follow=False)
 
         self.assertEqual(resp.status_code, 302)

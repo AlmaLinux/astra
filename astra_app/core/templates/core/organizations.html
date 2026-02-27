@@ -1,7 +1,5 @@
 {% extends 'core/base.html' %}
 
-{% load core_organization_grid %}
-
 {% block title %}Organizations{% endblock %}
 
 {% block header %}
@@ -21,7 +19,7 @@
       <div class="alert alert-info">
         Create an organization profile only if you are an employee or authorized representative of the organization applying to sponsor AlmaLinux.
       </div>
-      {% organization_grid organizations=organizations empty_label=empty_label %}
+      {% include "core/_widget_grid.html" with grid_items=grid_items paginator=paginator page_obj=page_obj is_paginated=is_paginated page_numbers=page_numbers show_first=show_first show_last=show_last page_url_prefix=page_url_prefix empty_label=empty_label %}
     </div>
   </div>
 {% endblock %}

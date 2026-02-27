@@ -1,7 +1,7 @@
 
 from django.test import TestCase
 
-from core.backends import DegradedFreeIPAUser
+from core.freeipa.user import DegradedFreeIPAUser
 
 
 class DegradedFreeIPAUserTests(TestCase):

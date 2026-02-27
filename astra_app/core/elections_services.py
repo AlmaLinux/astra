@@ -17,13 +17,13 @@ from django.urls import reverse
 from django.utils import timezone
 from post_office.models import Email
 
-from core.backends import FreeIPAUser
 from core.elections_eligibility import eligible_voters_from_memberships
 from core.email_context import (
     election_committee_email_context,
     user_email_context,
     user_email_context_from_user,
 )
+from core.freeipa.user import DegradedFreeIPAUser, FreeIPAUser
 from core.models import (
     AuditLogEntry,
     Ballot,
@@ -348,9 +348,25 @@ def send_vote_receipt_email(
     email: str,
     receipt: BallotReceipt,
     tz_name: str | None = None,
+    user: FreeIPAUser | DegradedFreeIPAUser | None = None,
 ) -> None:
+    # election_vote_submit passes user=receipt_user for this path, so this
+    # fallback is a defensive guard for other callers that only provide username.
+    if user is None:
+        recipient_context = user_email_context(username=username)
+    else:
+        normalized_username = str(user.username or "").strip()
+        full_name = str(user.get_full_name() or "").strip()
+        recipient_context = {
+            "username": normalized_username,
+            "first_name": str(user.first_name or ""),
+            "last_name": str(user.last_name or ""),
+            "full_name": full_name or normalized_username,
+            "email": str(user.email or ""),
+        }
+
     context: dict[str, object] = {
-        **user_email_context(username=username),
+        **recipient_context,
         **election_committee_email_context(),
         **_election_email_context(election=election, tz_name=tz_name),
         "ballot_hash": receipt.ballot.ballot_hash,
@@ -604,19 +620,32 @@ def submit_ballot(*, election: Election, credential_public_id: str, ranking: lis
         is_public=False,
     )
 
-    status = election_quorum_status(election=election)
-    required_participating_voter_count = int(status.get("required_participating_voter_count") or 0)
-    required_participating_vote_weight_total = int(status.get("required_participating_vote_weight_total") or 0)
-    quorum_met = bool(status.get("quorum_met"))
-    if required_participating_voter_count and required_participating_vote_weight_total and quorum_met:
-        already_logged = AuditLogEntry.objects.filter(election=election, event_type="quorum_reached").exists()
-        if not already_logged:
-            AuditLogEntry.objects.create(
-                election=election,
-                event_type="quorum_reached",
-                payload=status,
-                is_public=True,
+    def _evaluate_quorum_after_commit() -> None:
+        try:
+            committed_election = Election.objects.only("id", "status", "quorum").get(pk=election.id)
+            status = election_quorum_status(election=committed_election)
+            required_participating_voter_count = int(status["required_participating_voter_count"])
+            required_participating_vote_weight_total = int(status["required_participating_vote_weight_total"])
+            quorum_met = bool(status["quorum_met"])
+            if required_participating_voter_count and required_participating_vote_weight_total and quorum_met:
+                already_logged = AuditLogEntry.objects.filter(
+                    election=committed_election,
+                    event_type="quorum_reached",
+                ).exists()
+                if not already_logged:
+                    AuditLogEntry.objects.create(
+                        election=committed_election,
+                        event_type="quorum_reached",
+                        payload=status,
+                        is_public=True,
+                    )
+        except Exception:
+            logger.exception(
+                "Deferred quorum evaluation failed for election_id=%s",
+                election.id,
             )
+
+    transaction.on_commit(_evaluate_quorum_after_commit)
 
     return BallotReceipt(
         ballot=ballot,
@@ -716,7 +745,10 @@ def issue_voting_credentials_from_memberships(*, election: Election) -> list[Vot
     if election.status in {Election.Status.closed, Election.Status.tallied}:
         raise ElectionError("cannot issue credentials for a closed election")
 
-    eligible = eligible_voters_from_memberships(election=election)
+    eligible = eligible_voters_from_memberships(
+        election=election,
+        require_fresh=True,
+    )
     issued: list[VotingCredential] = []
     for voter in eligible:
         credential = issue_voting_credential(election=election, freeipa_username=voter.username, weight=voter.weight)

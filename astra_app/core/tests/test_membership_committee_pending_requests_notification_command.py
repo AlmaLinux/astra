@@ -6,7 +6,8 @@ from django.conf import settings
 from django.core.management import call_command
 from django.test import TestCase
 
-from core.backends import FreeIPAGroup, FreeIPAUser
+from core.freeipa.group import FreeIPAGroup
+from core.freeipa.user import FreeIPAUser
 from core.models import FreeIPAPermissionGrant, MembershipRequest, MembershipType
 from core.permissions import ASTRA_ADD_MEMBERSHIP
 from core.tests.utils_test_data import ensure_core_categories, ensure_email_templates
@@ -60,8 +61,8 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
             return {"alice": alice, "bob": bob}.get(username)
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
-            with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
-                with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+            with patch("core.freeipa.group.FreeIPAGroup.get", return_value=committee_group):
+                with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
                     call_command("membership_pending_requests")
 
         from post_office.models import Email
@@ -88,8 +89,8 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
         )
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
-            with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
-                with patch("core.backends.FreeIPAUser.get", return_value=alice):
+            with patch("core.freeipa.group.FreeIPAGroup.get", return_value=committee_group):
+                with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
                     call_command("membership_pending_requests")
 
         from post_office.models import Email
@@ -113,8 +114,8 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
         )
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
-            with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
-                with patch("core.backends.FreeIPAUser.get", return_value=alice):
+            with patch("core.freeipa.group.FreeIPAGroup.get", return_value=committee_group):
+                with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
                     call_command("membership_pending_requests", "--dry-run")
 
         from post_office.models import Email
@@ -140,8 +141,8 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
         from post_office.models import Email
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
-            with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
-                with patch("core.backends.FreeIPAUser.get", return_value=alice):
+            with patch("core.freeipa.group.FreeIPAGroup.get", return_value=committee_group):
+                with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
                     call_command("membership_pending_requests")
                     first = Email.objects.count()
                     call_command("membership_pending_requests")
@@ -164,8 +165,8 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
         from post_office.models import Email
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
-            with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
-                with patch("core.backends.FreeIPAUser.get", return_value=alice):
+            with patch("core.freeipa.group.FreeIPAGroup.get", return_value=committee_group):
+                with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
                     call_command("membership_pending_requests")
                     first = Email.objects.count()
                     call_command("membership_pending_requests", "--force")
@@ -189,8 +190,8 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
 
         from post_office.models import Email
 
-        with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
-            with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.group.FreeIPAGroup.get", return_value=committee_group):
+            with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
                 with patch("django.utils.timezone.now", return_value=frozen_monday):
                     call_command("membership_pending_requests")
                 first = Email.objects.count()
@@ -215,8 +216,8 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
 
         from post_office.models import Email
 
-        with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
-            with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.group.FreeIPAGroup.get", return_value=committee_group):
+            with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
                 with patch("django.utils.timezone.now", return_value=frozen_monday):
                     call_command("membership_pending_requests")
                     self.assertEqual(Email.objects.count(), 0)

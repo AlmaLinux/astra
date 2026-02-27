@@ -8,9 +8,14 @@ from post_office.models import EmailTemplate
 
 from core.models import Candidate, Election, FreeIPAPermissionGrant, Membership, MembershipType
 from core.permissions import ASTRA_ADD_ELECTION
+from core.tests.utils_test_data import ensure_core_categories
 
 
 class ElectionEditEmailSaveModeTests(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        ensure_core_categories()
+
     def _login_as_freeipa_user(self, username: str) -> None:
         session = self.client.session
         session["_freeipa_username"] = username

@@ -5,7 +5,7 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 
 
 class AgreementsHiddenWhenNoneTests(TestCase):
@@ -20,9 +20,9 @@ class AgreementsHiddenWhenNoneTests(TestCase):
 
         fu = FreeIPAUser(username, {"uid": [username], "givenname": ["A"], "sn": ["Dmin"], "mail": [""]})
 
-        with patch("core.backends.FreeIPAUser.get", return_value=fu):
-            with patch("core.backends.FreeIPAGroup.all", return_value=[]):
-                with patch("core.backends.FreeIPAFASAgreement.all", return_value=[]):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=fu):
+            with patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]):
+                with patch("core.freeipa.agreement.FreeIPAFASAgreement.all", return_value=[]):
                     resp = self.client.get(reverse("user-profile", args=[username]))
 
         self.assertEqual(resp.status_code, 200)
@@ -49,9 +49,9 @@ class AgreementsHiddenWhenNoneTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=middleware_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=middleware_user):
             with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
-                with patch("core.backends.FreeIPAFASAgreement.all", return_value=[]):
+                with patch("core.freeipa.agreement.FreeIPAFASAgreement.all", return_value=[]):
                     resp = self.client.get(reverse("settings"))
 
         self.assertEqual(resp.status_code, 200)

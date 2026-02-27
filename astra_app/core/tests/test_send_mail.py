@@ -8,7 +8,7 @@ from django.conf import settings
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import AccountInvitation, AccountInvitationSend, FreeIPAPermissionGrant, Organization
 from core.permissions import ASTRA_ADD_SEND_MAIL
 from core.views_send_mail import _CSV_SESSION_KEY, _PREVIEW_CONTEXT_SESSION_KEY, SendMailForm
@@ -61,7 +61,7 @@ class SendMailTests(TestCase):
         self._login_as_freeipa_user("alice")
 
         alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": []})
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             resp = self.client.get(reverse("send-mail"))
 
         self.assertEqual(resp.status_code, 302)
@@ -111,9 +111,9 @@ class SendMailTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.backends.FreeIPAGroup.get", return_value=_FakeGroup()),
-            patch("core.backends.FreeIPAGroup.all", return_value=[_FakeGroup()]),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=_FakeGroup()),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[_FakeGroup()]),
         ):
             resp = self.client.post(
                 reverse("send-mail"),
@@ -139,7 +139,7 @@ class SendMailTests(TestCase):
         csv_file = io.BytesIO(csv_bytes)
         csv_file.name = "recipients.csv"
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
                 reverse("send-mail"),
                 data={
@@ -160,8 +160,8 @@ class SendMailTests(TestCase):
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
         ):
             resp = self.client.post(
                 reverse("send-mail"),
@@ -222,9 +222,9 @@ class SendMailTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.backends.FreeIPAGroup.get", return_value=_FakeGroup()),
-            patch("core.backends.FreeIPAGroup.all", return_value=[_FakeGroup()]),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=_FakeGroup()),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[_FakeGroup()]),
         ):
             resp = self.client.get(reverse("send-mail") + "?type=group&to=example-group")
 
@@ -244,9 +244,9 @@ class SendMailTests(TestCase):
         url = reverse("send-mail") + f"?cc={quote(cc_raw)}"
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.backends.FreeIPAGroup.all", return_value=[]),
-            patch("core.backends.FreeIPAUser.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.all", return_value=[]),
         ):
             resp = self.client.get(url)
 
@@ -267,9 +267,9 @@ class SendMailTests(TestCase):
         url = reverse("send-mail") + f"?reply_to={quote(reply_to_raw)}"
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.backends.FreeIPAGroup.all", return_value=[]),
-            patch("core.backends.FreeIPAUser.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.all", return_value=[]),
         ):
             resp = self.client.get(url)
 
@@ -293,9 +293,9 @@ class SendMailTests(TestCase):
                 return set()
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.backends.FreeIPAGroup.get", return_value=_EmptyGroup()),
-            patch("core.backends.FreeIPAGroup.all", return_value=[_EmptyGroup()]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=_EmptyGroup()),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[_EmptyGroup()]),
         ):
             resp = self.client.get(reverse("send-mail") + "?type=group&to=empty-group")
 
@@ -320,8 +320,8 @@ class SendMailTests(TestCase):
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
         ):
             resp = self.client.get(reverse("send-mail") + "?type=manual&to=jim@example.com")
 
@@ -339,8 +339,8 @@ class SendMailTests(TestCase):
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
         ):
             resp = self.client.get(reverse("send-mail") + "?type=manual&to=alice@example.com&action_status=approved")
 
@@ -354,9 +354,9 @@ class SendMailTests(TestCase):
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.backends.FreeIPAGroup.all", return_value=[]),
-            patch("core.backends.FreeIPAUser.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.all", return_value=[]),
             patch("core.views_send_mail.queue_composed_email") as queue_mock,
         ):
             queue_mock.return_value = type("_QueuedEmail", (), {"id": 1})()
@@ -384,8 +384,8 @@ class SendMailTests(TestCase):
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
         ):
             resp = self.client.get(
                 reverse("send-mail") + "?type=manual&to=jim@example.com&foo=bar&project-name=Atomic+SIG"
@@ -440,9 +440,9 @@ class SendMailTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.backends.FreeIPAUser.all", return_value=[alice, bob]),
-            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.freeipa.user.FreeIPAUser.all", return_value=[alice, bob]),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
         ):
             resp = self.client.get(reverse("send-mail") + "?type=users&to=alice,bob")
 
@@ -499,9 +499,9 @@ class SendMailTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.backends.FreeIPAGroup.get", return_value=_FakeGroup()),
-            patch("core.backends.FreeIPAGroup.all", return_value=[_FakeGroup()]),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=_FakeGroup()),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[_FakeGroup()]),
         ):
             resp = self.client.get(reverse("send-mail") + "?type=group&to=example-group")
 
@@ -527,8 +527,8 @@ class SendMailTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
         ):
             resp = self.client.get(reverse("send-mail") + "?type=manual&to=jim@example.com&template=send-mail-prefill")
 
@@ -563,9 +563,9 @@ class SendMailTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.backends.FreeIPAGroup.all", return_value=[]),
-            patch("core.backends.FreeIPAUser.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.all", return_value=[]),
         ):
             resp = self.client.get(reverse("send-mail") + "?type=csv")
 
@@ -596,9 +596,9 @@ class SendMailTests(TestCase):
         session.save()
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.backends.FreeIPAGroup.all", return_value=[]),
-            patch("core.backends.FreeIPAUser.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.all", return_value=[]),
             patch("core.views_send_mail.queue_composed_email") as queue_mock,
         ):
             resp = self.client.post(
@@ -643,9 +643,9 @@ class SendMailTests(TestCase):
         session.save()
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.backends.FreeIPAGroup.all", return_value=[]),
-            patch("core.backends.FreeIPAUser.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.all", return_value=[]),
             patch("core.views_send_mail.queue_composed_email") as queue_mock,
         ):
             queue_mock.return_value = type("_QueuedEmail", (), {"id": 1})()
@@ -703,9 +703,9 @@ class SendMailTests(TestCase):
             )
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.backends.FreeIPAGroup.all", return_value=[]),
-            patch("core.backends.FreeIPAUser.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.all", return_value=[]),
             patch("core.views_send_mail.queue_composed_email", side_effect=_queue_email),
         ):
             response = self.client.post(
@@ -763,9 +763,9 @@ class SendMailTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.backends.FreeIPAGroup.get", return_value=_FakeGroup()),
-            patch("core.backends.FreeIPAGroup.all", return_value=[_FakeGroup()]),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=_FakeGroup()),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[_FakeGroup()]),
         ):
             resp = self.client.post(
                 reverse("send-mail"),
@@ -821,9 +821,9 @@ class SendMailTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.backends.FreeIPAGroup.get", return_value=_FakeGroup()),
-            patch("core.backends.FreeIPAGroup.all", return_value=[_FakeGroup()]),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=_FakeGroup()),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[_FakeGroup()]),
         ):
             resp = self.client.post(
                 reverse("send-mail"),
@@ -888,9 +888,9 @@ class SendMailTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.backends.FreeIPAGroup.get", return_value=_FakeGroup()),
-            patch("core.backends.FreeIPAGroup.all", return_value=[_FakeGroup()]),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=_FakeGroup()),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[_FakeGroup()]),
             patch("core.views_send_mail.queue_composed_email") as queue_mock,
         ):
             queue_mock.return_value = type("_QueuedEmail", (), {"id": 1})()
@@ -962,9 +962,9 @@ class SendMailTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.backends.FreeIPAGroup.get", return_value=_FakeGroup()),
-            patch("core.backends.FreeIPAGroup.all", return_value=[_FakeGroup()]),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=_FakeGroup()),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[_FakeGroup()]),
             patch("core.views_send_mail.queue_composed_email") as queue_mock,
         ):
             queue_mock.return_value = type("_QueuedEmail", (), {"id": 1})()
@@ -1029,9 +1029,9 @@ class SendMailTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.backends.FreeIPAGroup.get", return_value=_FakeGroup()),
-            patch("core.backends.FreeIPAGroup.all", return_value=[_FakeGroup()]),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=_FakeGroup()),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[_FakeGroup()]),
             patch("core.views_send_mail.queue_composed_email") as queue_mock,
         ):
             queue_mock.return_value = type("_QueuedEmail", (), {"id": 1})()
@@ -1059,8 +1059,8 @@ class SendMailTests(TestCase):
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
             patch("core.views_send_mail.queue_composed_email") as queue_mock,
         ):
             queue_mock.return_value = type("_QueuedEmail", (), {"id": 1})()
@@ -1089,8 +1089,8 @@ class SendMailTests(TestCase):
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
             patch("core.views_send_mail.queue_composed_email") as queue_mock,
         ):
             queue_mock.return_value = type("_QueuedEmail", (), {"id": 1})()
@@ -1117,8 +1117,8 @@ class SendMailTests(TestCase):
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
             patch("core.views_send_mail.queue_composed_email") as queue_mock,
         ):
             queue_mock.return_value = type("_QueuedEmail", (), {"id": 1})()
@@ -1159,7 +1159,7 @@ class SendMailTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
             patch("core.views_send_mail.queue_composed_email") as queue_mock,
             patch("django.core.files.storage.default_storage.open", return_value=io.BytesIO(png_bytes)),
         ):
@@ -1200,8 +1200,8 @@ class SendMailTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
             patch(
                 "core.views_send_mail.queue_composed_email",
                 side_effect=[first_error, queued_email],
@@ -1233,8 +1233,8 @@ class SendMailTests(TestCase):
         organization = Organization.objects.create(name="Org Claim", business_contact_email="contact@example.com")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
             patch("core.views_send_mail.queue_composed_email") as queue_composed_mock,
             patch("core.views_account_invitations.queue_templated_email", return_value=SimpleNamespace(id=777)),
         ):
@@ -1276,8 +1276,8 @@ class SendMailTests(TestCase):
         organization = Organization.objects.create(name="Rate Limited Org", business_contact_email="contact@example.com")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
             patch("core.views_send_mail.allow_request", return_value=False),
             patch("core.views_send_mail.queue_composed_email") as queue_composed_mock,
             patch("core.views_account_invitations.queue_templated_email") as queue_templated_mock,
@@ -1316,8 +1316,8 @@ class SendMailTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
             patch("core.views_send_mail.queue_composed_email") as queue_composed_mock,
             patch("core.views_account_invitations.queue_templated_email") as queue_templated_mock,
         ):
@@ -1351,8 +1351,8 @@ class SendMailTests(TestCase):
         organization = Organization.objects.create(name="Invalid Email Org", business_contact_email="contact@example.com")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
             patch("core.views_send_mail.queue_composed_email") as queue_composed_mock,
             patch("core.views_account_invitations.queue_templated_email") as queue_templated_mock,
         ):
@@ -1389,9 +1389,9 @@ class SendMailTests(TestCase):
         csv_file.name = "recipients.csv"
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.backends.FreeIPAGroup.all", return_value=[]),
-            patch("core.backends.FreeIPAUser.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.all", return_value=[]),
             patch("core.views_send_mail.queue_composed_email") as queue_composed_mock,
             patch("core.views_account_invitations.queue_templated_email") as queue_templated_mock,
         ):
@@ -1425,9 +1425,9 @@ class SendMailTests(TestCase):
             + "?type=manual&to=contact@example.com&invitation_action=org_claim&invitation_org_id=123"
         )
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.backends.FreeIPAGroup.all", return_value=[]),
-            patch("core.backends.FreeIPAUser.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.all", return_value=[]),
         ):
             response = self.client.get(url)
 
@@ -1456,7 +1456,7 @@ class UnifiedEmailPreviewSendMailTests(TestCase):
         self._login_as_freeipa_user("reviewer")
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
                 reverse("send-mail-render-preview"),
                 data={
@@ -1480,7 +1480,7 @@ class UnifiedEmailPreviewSendMailTests(TestCase):
         image_url = "http://localhost:9000/astra-media/mail-images/logo.png"
         html = f'<p>Hello</p><img src="{{% inline_image \'{image_url}\' %}}" />'
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
                 reverse("send-mail-render-preview"),
                 data={
@@ -1506,7 +1506,7 @@ class UnifiedEmailPreviewSendMailTests(TestCase):
         image_url = "http://localhost:9000/astra-media/mail-images/logo.png"
         html = f'<p>Hello</p><img src="{{% inline_image {image_url} %}}" />'
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
                 reverse("send-mail-render-preview"),
                 data={
@@ -1536,7 +1536,7 @@ class UnifiedEmailPreviewSendMailTests(TestCase):
             f"<img src=\"{{% inline_image '{image_url}' %}}\" />\n"
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
                 reverse("send-mail-render-preview"),
                 data={

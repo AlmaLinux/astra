@@ -5,7 +5,8 @@ from django.test import TestCase
 from django.urls import reverse
 from python_freeipa.exceptions import Denied
 
-from core.backends import FreeIPAGroup, FreeIPAUser
+from core.freeipa.group import FreeIPAGroup
+from core.freeipa.user import FreeIPAUser
 
 
 class AdminDeleteSelectedIPAGroupTests(TestCase):
@@ -21,9 +22,9 @@ class AdminDeleteSelectedIPAGroupTests(TestCase):
         target_group = FreeIPAGroup("testgroup", {"cn": ["testgroup"], "description": ["d"], "member": []})
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=admin_user),
-            patch("core.backends.FreeIPAGroup.all", return_value=[target_group]),
-            patch("core.backends.FreeIPAGroup.get", return_value=target_group),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[target_group]),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=target_group),
             patch.object(target_group, "delete", side_effect=Denied("Insufficient access", 0)),
         ):
             url = reverse("admin:auth_ipagroup_changelist")
@@ -60,8 +61,8 @@ class AdminDeleteSelectedIPAGroupTests(TestCase):
         target_group = FreeIPAGroup("testgroup", {"cn": ["testgroup"], "description": ["d"], "member": []})
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=admin_user),
-            patch("core.backends.FreeIPAGroup.get", return_value=target_group),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=target_group),
             patch.object(target_group, "delete", side_effect=Denied("Insufficient access", 0)),
         ):
             url = reverse("admin:auth_ipagroup_delete", args=["testgroup"])

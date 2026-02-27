@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from django.test import TestCase
 
-from core.backends import FreeIPAGroup
+from core.freeipa.group import FreeIPAGroup
 
 
 class GroupDetailInfoRowsHiddenTests(TestCase):
@@ -28,7 +28,7 @@ class GroupDetailInfoRowsHiddenTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAGroup.get", return_value=group):
+        with patch("core.freeipa.group.FreeIPAGroup.get", return_value=group):
             resp = self.client.get("/group/parent/")
 
         self.assertEqual(resp.status_code, 200)

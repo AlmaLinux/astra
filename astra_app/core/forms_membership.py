@@ -11,6 +11,7 @@ from core.forms_base import StyledForm
 from core.membership import (
     get_membership_request_eligibility,
 )
+from core.membership_constants import MembershipCategoryCode
 from core.models import MembershipRequest, MembershipType, MembershipTypeCategory, Organization
 
 
@@ -132,9 +133,9 @@ class MembershipRequestForm(StyledForm):
     @classmethod
     def question_specs_for_membership_type(cls, membership_type: MembershipType) -> tuple[_QuestionSpec, ...]:
         category_id = membership_type.category_id
-        if category_id == "mirror":
+        if category_id == MembershipCategoryCode.mirror:
             return cls._MIRROR_QUESTIONS
-        if category_id == "sponsorship":
+        if category_id == MembershipCategoryCode.sponsorship:
             return cls._SPONSORSHIP_QUESTIONS
         return cls._INDIVIDUAL_QUESTIONS
 

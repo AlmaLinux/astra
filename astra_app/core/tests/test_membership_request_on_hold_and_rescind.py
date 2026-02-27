@@ -3,12 +3,13 @@ from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
 from django.conf import settings
+from django.contrib.messages import get_messages
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 from post_office.models import Email
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import FreeIPAPermissionGrant, MembershipRequest
 from core.permissions import (
     ASTRA_ADD_MEMBERSHIP,
@@ -27,7 +28,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
         ensure_email_templates()
 
         self._freeipa_users: dict[str, FreeIPAUser] = {}
-        patcher = patch("core.backends.FreeIPAUser.get", side_effect=self._get_freeipa_user)
+        patcher = patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_freeipa_user)
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -420,7 +421,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.views_membership.approve_membership_request", autospec=True) as approve_mock:
+        with patch("core.views_membership.committee.approve_membership_request", autospec=True) as approve_mock:
             resp = self.client.post(
                 reverse("membership-request-approve", args=[req.pk]),
                 data={},
@@ -429,6 +430,312 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
 
         self.assertEqual(resp.status_code, 302)
         approve_mock.assert_not_called()
+
+    def test_committee_can_approve_on_hold_request_and_records_override_note(self) -> None:
+        from core.models import MembershipLog, MembershipType, Note
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.on_hold,
+            on_hold_at=timezone.now(),
+        )
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        self._add_freeipa_user(
+            username="reviewer",
+            email="reviewer@example.com",
+            groups=[committee_cn],
+            first_name="Reviewer",
+            last_name="User",
+        )
+        self._add_freeipa_user(
+            username="alice",
+            email="alice@example.com",
+            groups=[],
+            first_name="Alice",
+            last_name="User",
+        )
+
+        self._login_as_freeipa_user("reviewer")
+
+        with (
+            patch(
+                "core.membership_request_workflow.missing_required_agreements_for_user_in_group",
+                return_value=[],
+            ),
+            patch.object(FreeIPAUser, "add_to_group", autospec=True),
+            patch("core.membership_request_workflow.queue_templated_email", autospec=True),
+        ):
+            resp = self.client.post(
+                reverse("membership-request-approve-on-hold", args=[req.pk]),
+                data={"justification": "Agreement evidence verified by committee."},
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 302)
+
+        req.refresh_from_db()
+        self.assertEqual(req.status, MembershipRequest.Status.approved)
+        self.assertTrue(
+            MembershipLog.objects.filter(
+                membership_request=req,
+                action=MembershipLog.Action.approved,
+                actor_username="reviewer",
+            ).exists()
+        )
+        self.assertTrue(
+            Note.objects.filter(
+                membership_request=req,
+                username="reviewer",
+                action__type="on_hold_override_approved",
+                action__by="reviewer",
+                action__actors_note="Agreement evidence verified by committee.",
+            ).exists()
+        )
+
+    def test_non_committee_cannot_approve_on_hold_request(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.on_hold,
+            on_hold_at=timezone.now(),
+        )
+
+        self._add_freeipa_user(
+            username="outsider",
+            email="outsider@example.com",
+            groups=[],
+            first_name="Out",
+            last_name="Sider",
+        )
+
+        self._login_as_freeipa_user("outsider")
+        resp = self.client.post(
+            reverse("membership-request-approve-on-hold", args=[req.pk]),
+            data={"justification": "Not allowed"},
+            follow=False,
+        )
+
+        self.assertEqual(resp.status_code, 302)
+        req.refresh_from_db()
+        self.assertEqual(req.status, MembershipRequest.Status.on_hold)
+
+    def test_approve_on_hold_requires_nonempty_justification(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.on_hold,
+            on_hold_at=timezone.now(),
+        )
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        self._add_freeipa_user(
+            username="reviewer",
+            email="reviewer@example.com",
+            groups=[committee_cn],
+            first_name="Reviewer",
+            last_name="User",
+        )
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.views_membership.committee.approve_on_hold_membership_request", autospec=True) as approve_mock:
+            resp = self.client.post(
+                reverse("membership-request-approve-on-hold", args=[req.pk]),
+                data={},
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(
+            "Override justification is required.",
+            [str(message.message) for message in get_messages(resp.wsgi_request)],
+        )
+
+        req.refresh_from_db()
+        self.assertEqual(req.status, MembershipRequest.Status.on_hold)
+        approve_mock.assert_not_called()
+
+    def test_approve_on_hold_is_idempotent_for_already_approved_request(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.approved,
+            decided_at=timezone.now(),
+            decided_by_username="reviewer",
+        )
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        self._add_freeipa_user(
+            username="reviewer",
+            email="reviewer@example.com",
+            groups=[committee_cn],
+            first_name="Reviewer",
+            last_name="User",
+        )
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.views_membership.committee.approve_on_hold_membership_request", autospec=True) as approve_mock:
+            resp = self.client.post(
+                reverse("membership-request-approve-on-hold", args=[req.pk]),
+                data={"justification": "Already approved guard should short-circuit."},
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(
+            "Request for alice is already approved.",
+            [str(message.message) for message in get_messages(resp.wsgi_request)],
+        )
+
+        req.refresh_from_db()
+        self.assertEqual(req.status, MembershipRequest.Status.approved)
+        approve_mock.assert_not_called()
+
+    def test_on_hold_detail_shows_approve_button_for_committee(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.on_hold,
+            on_hold_at=timezone.now(),
+        )
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        self._add_freeipa_user(
+            username="reviewer",
+            email="reviewer@example.com",
+            groups=[committee_cn],
+            first_name="Reviewer",
+            last_name="User",
+        )
+        self._add_freeipa_user(
+            username="alice",
+            email="alice@example.com",
+            groups=[],
+            first_name="Alice",
+            last_name="User",
+        )
+
+        self._login_as_freeipa_user("reviewer")
+
+        resp = self.client.get(reverse("membership-request-detail", args=[req.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        approve_url = reverse("membership-request-approve-on-hold", args=[req.pk])
+        self.assertContains(resp, f'data-action-url="{approve_url}"')
+
+    def test_committee_cannot_use_on_hold_override_for_pending_request(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.pending,
+        )
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        self._add_freeipa_user(
+            username="reviewer",
+            email="reviewer@example.com",
+            groups=[committee_cn],
+            first_name="Reviewer",
+            last_name="User",
+        )
+        self._add_freeipa_user(
+            username="alice",
+            email="alice@example.com",
+            groups=[],
+            first_name="Alice",
+            last_name="User",
+        )
+
+        self._login_as_freeipa_user("reviewer")
+
+        resp = self.client.post(
+            reverse("membership-request-approve-on-hold", args=[req.pk]),
+            data={"justification": "Should fail for non-on-hold requests."},
+            follow=False,
+        )
+
+        self.assertEqual(resp.status_code, 302)
+        req.refresh_from_db()
+        self.assertEqual(req.status, MembershipRequest.Status.pending)
 
     def test_committee_reject_is_idempotent_for_rejected(self) -> None:
         from core.models import MembershipType
@@ -463,7 +770,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.views_membership.reject_membership_request", autospec=True) as reject_mock:
+        with patch("core.views_membership.committee.reject_membership_request", autospec=True) as reject_mock:
             resp = self.client.post(
                 reverse("membership-request-reject", args=[req.pk]),
                 data={"reason": "No."},
@@ -506,7 +813,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.views_membership.ignore_membership_request", autospec=True) as ignore_mock:
+        with patch("core.views_membership.committee.ignore_membership_request", autospec=True) as ignore_mock:
             resp = self.client.post(
                 reverse("membership-request-ignore", args=[req.pk]),
                 data={},

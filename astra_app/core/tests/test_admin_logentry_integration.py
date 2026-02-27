@@ -5,7 +5,7 @@ from django.contrib.admin.models import LogEntry
 from django.test import TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 
 
 class AdminLogEntryIntegrationTests(TestCase):
@@ -25,7 +25,7 @@ class AdminLogEntryIntegrationTests(TestCase):
 
         self._login_as_freeipa_admin(username)
 
-        with patch("core.backends.FreeIPAUser.get", return_value=freeipa_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=freeipa_user):
             url = reverse("admin:django_ses_blacklistedemail_change", args=[obj.pk])
             resp = self.client.post(
                 url,

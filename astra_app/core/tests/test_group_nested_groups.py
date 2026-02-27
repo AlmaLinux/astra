@@ -3,7 +3,8 @@ from unittest.mock import patch
 
 from django.test import TestCase
 
-from core.backends import FreeIPAGroup, FreeIPAUser
+from core.freeipa.group import FreeIPAGroup
+from core.freeipa.user import FreeIPAUser
 
 
 class GroupNestedGroupsDisplayTests(TestCase):
@@ -77,7 +78,7 @@ class GroupNestedGroupsDisplayTests(TestCase):
             )
 
         with (
-            patch("core.backends.FreeIPAGroup.get", side_effect=_fake_group_get),
+            patch("core.freeipa.group.FreeIPAGroup.get", side_effect=_fake_group_get),
             patch("core.templatetags.core_user_widget.FreeIPAUser.get", side_effect=_fake_user_get),
         ):
             resp = self.client.get("/group/parent/")
@@ -158,7 +159,7 @@ class GroupNestedGroupsDisplayTests(TestCase):
             )
 
         with (
-            patch("core.backends.FreeIPAGroup.get", side_effect=_fake_group_get),
+            patch("core.freeipa.group.FreeIPAGroup.get", side_effect=_fake_group_get),
             patch("core.templatetags.core_user_widget.FreeIPAUser.get", side_effect=_fake_user_get),
         ):
             resp = self.client.get("/group/parent/")

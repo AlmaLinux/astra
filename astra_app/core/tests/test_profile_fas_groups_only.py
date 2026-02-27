@@ -9,7 +9,7 @@ from django.http import HttpResponse
 from django.test import RequestFactory, TestCase
 
 from core import views_users
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 
 
 class ProfileFasGroupsOnlyTests(TestCase):
@@ -60,7 +60,7 @@ class ProfileFasGroupsOnlyTests(TestCase):
 
         with (
             patch("core.views_users._get_full_user", autospec=True, return_value=fake_user),
-            patch("core.backends.FreeIPAGroup.all", return_value=groups),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=groups),
         ):
             response = views_users.user_profile(request, "alice")
 

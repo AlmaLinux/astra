@@ -6,7 +6,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.test import TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import IPAUser
 
 
@@ -41,7 +41,7 @@ class AdminIPAUserPasswordFieldTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=fake_user_get),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=fake_user_get),
             patch(
                 "core.admin.FreeIPAGroup.all",
                 return_value=[SimpleNamespace(cn="admins"), SimpleNamespace(cn="ambassadors")],
@@ -59,7 +59,7 @@ class AdminIPAUserPasswordFieldTests(TestCase):
         admin_user = FreeIPAUser("alex", {"uid": ["alex"], "memberof_group": ["admins"]})
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=admin_user),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
             patch(
                 "core.admin.FreeIPAGroup.all",
                 return_value=[SimpleNamespace(cn="admins"), SimpleNamespace(cn="ambassadors")],

@@ -13,7 +13,6 @@ from django.utils import timezone
 from post_office.models import EmailTemplate
 
 from core import elections_eligibility, elections_services
-from core.backends import FreeIPAUser
 from core.elections_eligibility import ElectionEligibilityError
 from core.elections_services import (
     election_genesis_chain_hash,
@@ -26,6 +25,7 @@ from core.forms_elections import (
     ExclusionGroupWizardFormSet,
     is_self_nomination,
 )
+from core.freeipa.user import FreeIPAUser
 from core.ipa_user_attrs import _get_freeipa_timezone_name
 from core.models import AuditLogEntry, Candidate, Election, ExclusionGroup, ExclusionGroupCandidate
 from core.permissions import ASTRA_ADD_ELECTION

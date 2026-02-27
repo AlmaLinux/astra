@@ -2,7 +2,7 @@
 
 Higher-level helpers for reading, comparing, and persisting FreeIPA user
 attributes.  Unlike ``ipa_utils.py`` (zero internal imports by design),
-this module imports from ``core.backends`` to interact with cached user
+this module imports from ``core.freeipa`` to interact with cached user
 data and FreeIPA's ``user_mod`` endpoint.
 """
 
@@ -10,7 +10,8 @@ import logging
 import re
 from typing import Any
 
-from core.backends import FreeIPAUser, _invalidate_user_cache, _invalidate_users_list_cache
+from core.freeipa.user import FreeIPAUser
+from core.freeipa.utils import _invalidate_user_cache, _invalidate_users_list_cache
 from core.views_utils import _normalize_str
 
 logger = logging.getLogger(__name__)

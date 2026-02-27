@@ -6,9 +6,9 @@ from django.template import Context, Template
 from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAUser
 from core.forms_base import StyledForm
 from core.forms_registration import ResendRegistrationEmailForm
+from core.freeipa.user import FreeIPAUser
 from core.models import FreeIPAPermissionGrant
 from core.permissions import ASTRA_ADD_SEND_MAIL
 from core.views_account_invitations import AccountInvitationUploadForm
@@ -82,8 +82,8 @@ class Plan092SendMailValidationIntegrationTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.backends.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
         ):
             response = self.client.post(
                 reverse("send-mail"),

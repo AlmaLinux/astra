@@ -5,7 +5,7 @@ from unittest.mock import patch
 from django.conf import settings
 from django.test import TestCase
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 
 
 class PostOfficeEmailAdminSMTPDisconnectTests(TestCase):
@@ -37,7 +37,7 @@ class PostOfficeEmailAdminSMTPDisconnectTests(TestCase):
 
         self._login_as_freeipa_user("admin")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
             with patch(
                 "django.core.mail.backends.smtp.EmailBackend.open",
                 side_effect=smtplib.SMTPServerDisconnected("Connection unexpectedly closed"),

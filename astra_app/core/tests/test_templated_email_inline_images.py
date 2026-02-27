@@ -19,7 +19,7 @@ class TemplatedEmailInlineImagesTests(TestCase):
         self.assertEqual(key, "mail-images/logo.svg")
 
     @override_settings(AWS_STORAGE_BUCKET_NAME="astra-media")
-    def test_queue_templated_email_drops_missing_inline_image_in_storage(self):
+    def test_queue_templated_email_drops_missing_inline_image_in_storage(self) -> None:
         """Missing inline images must not block email queuing.
 
         This catches regressions where `{% inline_image 'http(s)://...' %}`
@@ -42,6 +42,7 @@ class TemplatedEmailInlineImagesTests(TestCase):
 
         with (
             patch("core.templated_email.default_storage.open", side_effect=FileNotFoundError),
+            patch("core.templated_email.logger.warning") as warning_mock,
             patch("post_office.mail.send", autospec=True) as send_mock,
         ):
             queue_templated_email(
@@ -57,6 +58,20 @@ class TemplatedEmailInlineImagesTests(TestCase):
         self.assertIn("message", kwargs)
         self.assertIn("html_message", kwargs)
         self.assertIn("http://example.test/reset", kwargs.get("html_message") or "")
+
+        warning_mock.assert_called_once()
+        _warning_args, warning_kwargs = warning_mock.call_args
+        extra = warning_kwargs.get("extra") or {}
+
+        self.assertEqual(extra.get("event"), "astra.email.inline_image.missing")
+        self.assertEqual(extra.get("component"), "email")
+        self.assertEqual(extra.get("outcome"), "warning")
+        self.assertEqual(extra.get("template_name"), "inline-image-missing-test")
+        self.assertEqual(
+            extra.get("image_ref"),
+            "http://localhost:9000/astra-media/mail-images/logo.png",
+        )
+        self.assertEqual(extra.get("correlation_id"), "email.templated.queue")
 
     @override_settings(AWS_STORAGE_BUCKET_NAME="astra-media")
     def test_queue_composed_email_preserves_inline_image_attachment_content_id(self) -> None:

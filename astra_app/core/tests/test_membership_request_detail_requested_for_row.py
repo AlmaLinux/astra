@@ -5,7 +5,7 @@ from django.conf import settings
 from django.test import TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import FreeIPAPermissionGrant, MembershipLog, MembershipRequest, MembershipType, MembershipTypeCategory
 from core.permissions import ASTRA_VIEW_MEMBERSHIP
 
@@ -75,7 +75,7 @@ class MembershipRequestDetailRequestedForRowTests(TestCase):
             return {"reviewer": reviewer, "alice": alice}.get(username)
 
         self._login_as_freeipa_user("reviewer")
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(reverse("membership-request-detail", args=[req.pk]))
 
         self.assertEqual(resp.status_code, 200)
@@ -139,7 +139,7 @@ class MembershipRequestDetailRequestedForRowTests(TestCase):
             return {"reviewer": reviewer, "alice": alice, "bob": bob}.get(username)
 
         self._login_as_freeipa_user("reviewer")
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(reverse("membership-request-detail", args=[req.pk]))
 
         self.assertEqual(resp.status_code, 200)

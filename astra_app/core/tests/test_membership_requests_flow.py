@@ -11,7 +11,7 @@ from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import FreeIPAPermissionGrant
 from core.permissions import (
     ASTRA_ADD_MEMBERSHIP,
@@ -87,9 +87,9 @@ class MembershipRequestsFlowTests(TestCase):
         for route_name, action in endpoints.items():
             with self.subTest(route_name=route_name):
                 with (
-                    patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+                    patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
                     patch(
-                        "core.views_membership.run_membership_request_action",
+                        "core.views_membership.committee.run_membership_request_action",
                         create=True,
                         return_value=HttpResponse(status=204),
                     ) as runner_mock,
@@ -131,8 +131,8 @@ class MembershipRequestsFlowTests(TestCase):
         self._login_as_freeipa_user("alice")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=alice),
-            patch("core.views_membership.block_action_without_coc", return_value=None),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
+            patch("core.views_membership.user.block_action_without_coc", return_value=None),
         ):
             with patch("core.membership_request_workflow.queue_templated_email", autospec=True) as send_mock:
                 resp = self.client.post(
@@ -196,8 +196,8 @@ class MembershipRequestsFlowTests(TestCase):
         self._login_as_freeipa_user("alice")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=alice),
-            patch("core.views_membership.block_action_without_coc", return_value=None),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
+            patch("core.views_membership.user.block_action_without_coc", return_value=None),
             patch("post_office.mail.send", autospec=True),
         ):
             resp = self.client.post(
@@ -247,9 +247,9 @@ class MembershipRequestsFlowTests(TestCase):
         self._login_as_freeipa_user("alice")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=alice),
-            patch("core.views_membership.block_action_without_coc", return_value=None),
-            patch("core.views_membership.block_action_without_country_code", return_value=None),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
+            patch("core.views_membership.user.block_action_without_coc", return_value=None),
+            patch("core.views_membership.user.block_action_without_country_code", return_value=None),
         ):
             resp = self.client.post(
                 reverse("membership-request"),
@@ -265,7 +265,7 @@ class MembershipRequestsFlowTests(TestCase):
         self.assertIn("A membership request is already pending for that category.", messages)
 
     def test_membership_request_requires_signed_coc(self) -> None:
-        from core.backends import FreeIPAFASAgreement
+        from core.freeipa.agreement import FreeIPAFASAgreement
         from core.models import MembershipRequest, MembershipType
 
         MembershipType.objects.update_or_create(
@@ -302,7 +302,7 @@ class MembershipRequestsFlowTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             with patch("core.views_utils.FreeIPAFASAgreement.get", autospec=True, return_value=coc):
                 resp = self.client.post(
                     reverse("membership-request"),
@@ -360,7 +360,7 @@ class MembershipRequestsFlowTests(TestCase):
         self._login_as_freeipa_user("alice")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
             patch(
                 "core.forms_membership.get_membership_request_eligibility",
                 return_value=SimpleNamespace(
@@ -404,11 +404,11 @@ class MembershipRequestsFlowTests(TestCase):
         self._login_as_freeipa_user("alice")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=alice),
-            patch("core.views_membership.block_action_without_coc", return_value=None),
-            patch("core.views_membership.block_action_without_country_code", return_value=None),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
+            patch("core.views_membership.user.block_action_without_coc", return_value=None),
+            patch("core.views_membership.user.block_action_without_country_code", return_value=None),
             patch(
-                "core.views_membership.get_membership_request_eligibility",
+                "core.views_membership.user.get_membership_request_eligibility",
                 create=True,
                 return_value=SimpleNamespace(
                     blocked_membership_type_codes=set(),
@@ -492,9 +492,9 @@ class MembershipRequestsFlowTests(TestCase):
         self._login_as_freeipa_user("alice")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=alice),
-            patch("core.views_membership.block_action_without_coc", return_value=None),
-            patch("core.views_membership.block_action_without_country_code", return_value=None),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
+            patch("core.views_membership.user.block_action_without_coc", return_value=None),
+            patch("core.views_membership.user.block_action_without_country_code", return_value=None),
         ):
             resp = self.client.get(f"{reverse('membership-request')}?membership_type=individual")
 
@@ -549,9 +549,9 @@ class MembershipRequestsFlowTests(TestCase):
         self._login_as_freeipa_user("alice")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=alice),
-            patch("core.views_membership.block_action_without_coc", return_value=None),
-            patch("core.views_membership.block_action_without_country_code", return_value=None),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
+            patch("core.views_membership.user.block_action_without_coc", return_value=None),
+            patch("core.views_membership.user.block_action_without_country_code", return_value=None),
         ):
             resp = self.client.get(f"{reverse('membership-request')}?membership_type=individual")
 
@@ -595,9 +595,9 @@ class MembershipRequestsFlowTests(TestCase):
         self._login_as_freeipa_user("alice")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=alice),
-            patch("core.views_membership.block_action_without_coc", return_value=None),
-            patch("core.views_membership.block_action_without_country_code", return_value=None),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
+            patch("core.views_membership.user.block_action_without_coc", return_value=None),
+            patch("core.views_membership.user.block_action_without_country_code", return_value=None),
         ):
             resp = self.client.get(reverse("membership-request"))
 
@@ -647,9 +647,9 @@ class MembershipRequestsFlowTests(TestCase):
         self._login_as_freeipa_user("alice")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=alice),
-            patch("core.views_membership.block_action_without_coc", return_value=None),
-            patch("core.views_membership.block_action_without_country_code", return_value=None),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
+            patch("core.views_membership.user.block_action_without_coc", return_value=None),
+            patch("core.views_membership.user.block_action_without_country_code", return_value=None),
         ):
             resp = self.client.get(f"{reverse('membership-request')}?membership_type=individual")
 
@@ -700,7 +700,7 @@ class MembershipRequestsFlowTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch.object(FreeIPAUser, "add_to_group", autospec=True) as add_mock:
                 with patch("core.membership_request_workflow.queue_templated_email", autospec=True) as send_mock:
                     resp = self.client.post(
@@ -785,7 +785,7 @@ class MembershipRequestsFlowTests(TestCase):
 
         with override_settings(MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME=missing_name):
             self.assertEqual(settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME, missing_name)
-            with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+            with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
                 with patch.object(FreeIPAUser, "add_to_group", autospec=True) as add_mock:
                     resp = self.client.post(reverse("membership-request-approve", args=[req.pk]), follow=True)
 
@@ -847,7 +847,7 @@ class MembershipRequestsFlowTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch.object(FreeIPAUser, "add_to_group", autospec=True):
                 with patch("post_office.mail.send", autospec=True) as send_mock:
                     resp = self.client.post(
@@ -944,7 +944,7 @@ class MembershipRequestsFlowTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch.object(FreeIPAUser, "add_to_group", autospec=True) as add_mock:
                 with patch("core.membership_request_workflow.queue_templated_email", autospec=True) as send_mock:
                     resp = self.client.post(
@@ -1028,7 +1028,7 @@ class MembershipRequestsFlowTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch.object(FreeIPAUser, "add_to_group", autospec=True):
                 with patch("post_office.mail.send", autospec=True) as send_mock:
                     resp = self.client.post(
@@ -1107,7 +1107,7 @@ class MembershipRequestsFlowTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch.object(FreeIPAUser, "add_to_group", autospec=True):
                 with patch("core.membership_request_workflow.queue_templated_email", autospec=True) as send_mock:
                     resp = self.client.post(
@@ -1276,7 +1276,7 @@ class MembershipRequestsFlowTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch("core.membership_request_workflow.queue_templated_email", autospec=True) as send_mock:
                 resp = self.client.post(
                     reverse("membership-request-reject", args=[req.pk]),
@@ -1358,7 +1358,7 @@ class MembershipRequestsFlowTests(TestCase):
                 return bob
             return None
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch("post_office.mail.send", autospec=True) as send_mock:
                 resp = self.client.post(
                     reverse("membership-request-reject", args=[req.pk]),
@@ -1435,7 +1435,7 @@ class MembershipRequestsFlowTests(TestCase):
                 return bob
             return None
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch("core.membership_request_workflow.queue_templated_email", autospec=True) as send_mock:
                 resp = self.client.post(
                     reverse("membership-requests-bulk"),
@@ -1515,7 +1515,7 @@ class MembershipRequestsFlowTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch.object(FreeIPAUser, "add_to_group", autospec=True) as add_mock:
                 with patch("core.membership_request_workflow.queue_templated_email", autospec=True) as send_mock:
                     resp = self.client.post(
@@ -1579,7 +1579,7 @@ class MembershipRequestsFlowTests(TestCase):
         self._login_as_freeipa_user("reviewer")
 
         reason = "Missing required info"
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch("post_office.mail.send", autospec=True) as send_mock:
                 resp = self.client.post(
                     reverse("membership-request-reject", args=[req.pk]),
@@ -1670,7 +1670,7 @@ class MembershipRequestsFlowTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch("core.membership_request_workflow.queue_templated_email", autospec=True) as send_mock:
                 resp = self.client.post(
                     reverse("membership-request-reject", args=[req.pk]),
@@ -1724,7 +1724,7 @@ class MembershipRequestsFlowTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("membership-request-reject", args=[req.pk]))
 
         self.assertEqual(resp.status_code, 404)
@@ -1796,7 +1796,7 @@ class MembershipRequestsFlowTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch.object(FreeIPAUser, "add_to_group", autospec=True):
                 with patch("post_office.mail.send", autospec=True) as send_mock:
                     resp = self.client.post(
@@ -1870,7 +1870,7 @@ class MembershipRequestsFlowTests(TestCase):
         self._login_as_freeipa_user("reviewer")
 
         reason = "Missing paperwork"
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch("post_office.mail.send", autospec=True) as send_mock:
                 resp = self.client.post(
                     reverse("membership-request-reject", args=[req.pk]),
@@ -1927,7 +1927,7 @@ class MembershipRequestsFlowTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             with patch("post_office.mail.send", autospec=True) as send_mock:
                 resp = self.client.post(
                     reverse("membership-request-ignore", args=[req.pk]),
@@ -1952,7 +1952,7 @@ class MembershipRequestsFlowTests(TestCase):
 
         from django.utils import timezone
 
-        from core.models import MembershipLog, MembershipRequest, MembershipType
+        from core.models import Membership, MembershipLog, MembershipRequest, MembershipType
 
         MembershipType.objects.update_or_create(
             code="individual",
@@ -1967,12 +1967,10 @@ class MembershipRequestsFlowTests(TestCase):
 
         now = timezone.now()
         current_expires = now + datetime.timedelta(days=100)
-        MembershipLog.objects.create(
-            actor_username="reviewer",
+        Membership.objects.create(
             target_username="alice",
             membership_type_id="individual",
-            requested_group_cn="almalinux-individual",
-            action=MembershipLog.Action.approved,
+            category_id="individual",
             expires_at=current_expires,
         )
 
@@ -2006,7 +2004,7 @@ class MembershipRequestsFlowTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch.object(FreeIPAUser, "add_to_group", autospec=True):
                 with patch("post_office.mail.send", autospec=True):
                     resp = self.client.post(reverse("membership-request-approve", args=[req.pk]), follow=False)
@@ -2059,7 +2057,7 @@ class MembershipRequestsFlowTests(TestCase):
         )
 
         self._login_as_freeipa_user("reviewer")
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             with patch("core.views_users.FreeIPAUser.all", autospec=True, return_value=[]):
                 resp = self.client.get(reverse("users"))
 
@@ -2157,7 +2155,7 @@ class MembershipRequestsFlowTests(TestCase):
             return None
 
         self._login_as_freeipa_user("reviewer")
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch.object(FreeIPAUser, "add_to_group", autospec=True) as add_mock:
                 with patch("post_office.mail.send", autospec=True) as send_mock:
                     resp = self.client.post(
@@ -2223,7 +2221,7 @@ class MembershipRequestsFlowTests(TestCase):
         )
 
         self._login_as_freeipa_user("reviewer")
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             with patch("post_office.mail.send", autospec=True) as send_mock:
                 resp = self.client.post(
                     reverse("membership-requests-bulk"),
@@ -2296,7 +2294,7 @@ class MembershipRequestsFlowTests(TestCase):
             return None
 
         self._login_as_freeipa_user("reviewer")
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch("post_office.mail.send", autospec=True) as send_mock:
                 resp = self.client.post(
                     reverse("membership-requests-bulk"),
@@ -2348,8 +2346,8 @@ class MembershipRequestsFlowTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.views_membership.approve_membership_request", autospec=True) as approve_mock,
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.views_membership.committee.approve_membership_request", autospec=True) as approve_mock,
         ):
             resp = self.client.post(
                 reverse("membership-requests-bulk"),
@@ -2397,8 +2395,8 @@ class MembershipRequestsFlowTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.views_membership.reject_membership_request", autospec=True) as reject_mock,
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.views_membership.committee.reject_membership_request", autospec=True) as reject_mock,
         ):
             resp = self.client.post(
                 reverse("membership-requests-bulk"),
@@ -2446,8 +2444,8 @@ class MembershipRequestsFlowTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.views_membership.ignore_membership_request", autospec=True) as ignore_mock,
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.views_membership.committee.ignore_membership_request", autospec=True) as ignore_mock,
         ):
             resp = self.client.post(
                 reverse("membership-requests-bulk"),
@@ -2508,7 +2506,7 @@ class OrgApprovalTransactionTests(TransactionTestCase):
                 "core.membership_request_workflow.missing_required_agreements_for_user_in_group",
                 return_value=[],
             ),
-            patch("core.backends.FreeIPAUser.get", return_value=rep),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=rep),
             patch.object(FreeIPAUser, "add_to_group", autospec=True),
         ):
             approve_membership_request(

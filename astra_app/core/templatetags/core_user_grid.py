@@ -2,7 +2,9 @@ from typing import Any, cast
 
 from django.template import Context, Library
 
-from core.backends import FreeIPAGroup, FreeIPAUser, _clean_str_list
+from core.freeipa.group import FreeIPAGroup
+from core.freeipa.user import FreeIPAUser
+from core.freeipa.utils import _clean_str_list
 from core.templatetags._grid_tag_utils import paginate_grid_items, render_widget_grid, resolve_grid_request
 from core.templatetags._user_helpers import try_get_full_name
 from core.views_utils import _normalize_str, try_get_username_from_user

@@ -6,7 +6,8 @@ from django.conf import settings
 from django.core.management import call_command
 from django.test import TestCase, override_settings
 
-from core.backends import FreeIPAGroup, FreeIPAUser
+from core.freeipa.group import FreeIPAGroup
+from core.freeipa.user import FreeIPAUser
 from core.models import FreeIPAPermissionGrant, Membership, MembershipType
 from core.permissions import ASTRA_ADD_MEMBERSHIP
 
@@ -75,8 +76,8 @@ class MembershipEmbargoedMembersNotificationCommandTests(TestCase):
             return {"member1": member1, "alice": alice, "bob": bob}.get(username)
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
-            with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
-                with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+            with patch("core.freeipa.group.FreeIPAGroup.get", return_value=committee_group):
+                with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
                     call_command("membership_embargoed_members")
 
         from post_office.models import Email
@@ -141,8 +142,8 @@ class MembershipEmbargoedMembersNotificationCommandTests(TestCase):
             return {"member1": member1, "member2": member2, "alice": alice}.get(username)
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
-            with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
-                with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+            with patch("core.freeipa.group.FreeIPAGroup.get", return_value=committee_group):
+                with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
                     call_command("membership_embargoed_members")
 
         from post_office.models import Email
@@ -191,8 +192,8 @@ class MembershipEmbargoedMembersNotificationCommandTests(TestCase):
             return {"member1": member1, "alice": alice}.get(username)
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
-            with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
-                with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+            with patch("core.freeipa.group.FreeIPAGroup.get", return_value=committee_group):
+                with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
                     call_command("membership_embargoed_members")
 
         from post_office.models import Email
@@ -237,8 +238,8 @@ class MembershipEmbargoedMembersNotificationCommandTests(TestCase):
             return {"member1": member1, "alice": alice}.get(username)
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
-            with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
-                with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+            with patch("core.freeipa.group.FreeIPAGroup.get", return_value=committee_group):
+                with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
                     call_command("membership_embargoed_members", "--dry-run")
 
         from post_office.models import Email
@@ -285,8 +286,8 @@ class MembershipEmbargoedMembersNotificationCommandTests(TestCase):
         from post_office.models import Email
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
-            with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
-                with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+            with patch("core.freeipa.group.FreeIPAGroup.get", return_value=committee_group):
+                with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
                     call_command("membership_embargoed_members")
                     first_count = Email.objects.count()
                     call_command("membership_embargoed_members")
@@ -330,8 +331,8 @@ class MembershipEmbargoedMembersNotificationCommandTests(TestCase):
         from post_office.models import Email
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
-            with patch("core.backends.FreeIPAGroup.get", return_value=committee_group):
-                with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+            with patch("core.freeipa.group.FreeIPAGroup.get", return_value=committee_group):
+                with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
                     call_command("membership_embargoed_members")
                     first_count = Email.objects.count()
                     call_command("membership_embargoed_members", "--force")

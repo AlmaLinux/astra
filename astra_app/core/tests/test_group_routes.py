@@ -4,7 +4,8 @@ from unittest.mock import patch
 
 from django.test import TestCase
 
-from core.backends import FreeIPAGroup, FreeIPAUser
+from core.freeipa.group import FreeIPAGroup
+from core.freeipa.user import FreeIPAUser
 
 
 class GroupRoutesTests(TestCase):
@@ -22,7 +23,7 @@ class GroupRoutesTests(TestCase):
             SimpleNamespace(cn="fas2", description="FAS Group 2", fas_group=True, member_count_recursive=lambda: 0),
         ]
 
-        with patch("core.backends.FreeIPAGroup.all", return_value=groups):
+        with patch("core.freeipa.group.FreeIPAGroup.all", return_value=groups):
             resp = self.client.get("/groups/")
 
         self.assertEqual(resp.status_code, 200)
@@ -38,7 +39,7 @@ class GroupRoutesTests(TestCase):
             for i in range(65)
         ]
 
-        with patch("core.backends.FreeIPAGroup.all", return_value=groups):
+        with patch("core.freeipa.group.FreeIPAGroup.all", return_value=groups):
             resp_page_1 = self.client.get("/groups/")
             resp_page_2 = self.client.get("/groups/?page=2")
 
@@ -58,7 +59,7 @@ class GroupRoutesTests(TestCase):
             SimpleNamespace(cn="docs", description="Documentation", fas_group=True, member_count_recursive=lambda: 0),
         ]
 
-        with patch("core.backends.FreeIPAGroup.all", return_value=groups):
+        with patch("core.freeipa.group.FreeIPAGroup.all", return_value=groups):
             resp = self.client.get("/groups/?q=inf")
 
         self.assertEqual(resp.status_code, 200)
@@ -73,7 +74,7 @@ class GroupRoutesTests(TestCase):
             SimpleNamespace(cn="fas2", description="", fas_group=True, member_count_recursive=lambda: 0),
         ]
 
-        with patch("core.backends.FreeIPAGroup.all", return_value=groups):
+        with patch("core.freeipa.group.FreeIPAGroup.all", return_value=groups):
             resp = self.client.get("/groups/")
 
         self.assertEqual(resp.status_code, 200)
@@ -121,7 +122,7 @@ class GroupDetailRouteTests(TestCase):
             )
 
         with (
-            patch("core.backends.FreeIPAGroup.get", return_value=group),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
             patch("core.templatetags.core_user_widget.FreeIPAUser.get", side_effect=_fake_user_get),
         ):
             resp = self.client.get("/group/fas1/")
@@ -150,7 +151,7 @@ class GroupDetailRouteTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAGroup.get", return_value=group):
+        with patch("core.freeipa.group.FreeIPAGroup.get", return_value=group):
             resp = self.client.get("/group/ipa_only/")
 
         self.assertEqual(resp.status_code, 404)
@@ -176,7 +177,7 @@ class GroupDetailRouteTests(TestCase):
             return FreeIPAUser(username, {"uid": [username], "givenname": [""], "sn": [""], "mail": [""]})
 
         with (
-            patch("core.backends.FreeIPAGroup.get", return_value=group),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
             patch("core.templatetags.core_user_widget.FreeIPAUser.get", side_effect=_fake_user_get),
         ):
             resp_page_1 = self.client.get("/group/fas1/")
@@ -210,7 +211,7 @@ class GroupDetailRouteTests(TestCase):
             return FreeIPAUser(username, {"uid": [username], "givenname": [""], "sn": [""], "mail": [""]})
 
         with (
-            patch("core.backends.FreeIPAGroup.get", return_value=group),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
             patch("core.templatetags.core_user_widget.FreeIPAUser.get", side_effect=_fake_user_get),
         ):
             resp = self.client.get("/group/fas1/?q=ali")

@@ -6,7 +6,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.membership_request_workflow import approve_membership_request
 from core.models import (
     FreeIPAPermissionGrant,
@@ -102,14 +102,14 @@ class Plan060WorkstreamBContractTests(TestCase):
         )
         self.assertEqual(legacy_terminate_args, legacy_terminate_kwargs)
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             get_expiry = self.client.get(legacy_set_expiry_args)
             get_terminate = self.client.get(legacy_terminate_args)
         self.assertEqual(get_expiry.status_code, 404)
         self.assertEqual(get_terminate.status_code, 404)
 
         referer_target = "/organizations/?from=contract"
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             set_expiry_response = self.client.post(
                 legacy_set_expiry_args,
                 data={"expires_on": (timezone.now() + datetime.timedelta(days=45)).date().isoformat()},
@@ -120,7 +120,7 @@ class Plan060WorkstreamBContractTests(TestCase):
         self.assertEqual(set_expiry_response["Location"], referer_target)
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
             patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_from_group,
         ):
             terminate_response = self.client.post(legacy_terminate_args, follow=False)
@@ -168,7 +168,7 @@ class Plan060WorkstreamBContractTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
             patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_from_group,
         ):
             response = self.client.post(
@@ -227,7 +227,7 @@ class Plan060WorkstreamBContractTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
             patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_from_group,
         ):
             response = self.client.post(
@@ -292,7 +292,7 @@ class Plan060WorkstreamBContractTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
             patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_from_group,
         ):
             first_expiry = self.client.post(
@@ -355,7 +355,7 @@ class Plan060WorkstreamBContractTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
             patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_from_group,
         ):
             first_expiry = self.client.post(
@@ -437,8 +437,8 @@ class Plan060WorkstreamBContractTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.backends.FreeIPAUser.all", return_value=[reviewer]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.user.FreeIPAUser.all", return_value=[reviewer]),
         ):
             denied = self.client.get(reverse("users"))
         self.assertEqual(denied.status_code, 404)
@@ -446,8 +446,8 @@ class Plan060WorkstreamBContractTests(TestCase):
         self._grant_user_permission("reviewer", ASTRA_VIEW_USER_DIRECTORY)
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.backends.FreeIPAUser.all", return_value=[reviewer]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.user.FreeIPAUser.all", return_value=[reviewer]),
         ):
             allowed = self.client.get(reverse("users"))
         self.assertEqual(allowed.status_code, 200)

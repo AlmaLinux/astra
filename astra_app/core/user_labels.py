@@ -1,6 +1,6 @@
 from collections.abc import Mapping
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 
 
 def user_label(username: str, *, user: FreeIPAUser | None = None) -> str:

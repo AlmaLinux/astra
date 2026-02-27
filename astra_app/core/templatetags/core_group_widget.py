@@ -4,7 +4,8 @@ from django.template import Context, Library
 from django.template.loader import render_to_string
 from django.utils.safestring import mark_safe
 
-from core.backends import FreeIPAGroup, _clean_str_list
+from core.freeipa.group import FreeIPAGroup
+from core.freeipa.utils import _clean_str_list
 from core.views_utils import _normalize_str
 
 register = Library()

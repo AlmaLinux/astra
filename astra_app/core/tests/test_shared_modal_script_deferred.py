@@ -14,7 +14,7 @@ from django.conf import settings
 from django.test import TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import FreeIPAPermissionGrant, MembershipRequest, MembershipType
 from core.permissions import ASTRA_ADD_MEMBERSHIP
 from core.tests.utils_test_data import ensure_core_categories
@@ -65,7 +65,7 @@ class SharedModalScriptDeferredTests(TestCase):
 
         self._login_as_committee()
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("membership-requests"))
 
         self.assertEqual(resp.status_code, 200)
@@ -88,7 +88,7 @@ class GroupDetailModalScriptDeferredTests(TestCase):
         session.save()
 
     def test_group_detail_modal_script_uses_domcontentloaded(self) -> None:
-        from core.backends import FreeIPAGroup
+        from core.freeipa.group import FreeIPAGroup
 
         self._login_as_freeipa("admin")
 
@@ -114,8 +114,8 @@ class GroupDetailModalScriptDeferredTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAGroup.get", return_value=group),
-            patch("core.backends.FreeIPAUser.get", return_value=admin_user),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
         ):
             resp = self.client.get("/group/testgrp/")
 

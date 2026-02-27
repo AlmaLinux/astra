@@ -14,8 +14,8 @@ from django.utils import timezone
 from django.utils.html import format_html
 from django.views.decorators.http import require_GET
 
-from core.backends import FreeIPAUser
 from core.forms_organizations import OrganizationEditForm
+from core.freeipa.user import FreeIPAUser
 from core.freeipa_directory import search_freeipa_users
 from core.membership import (
     FreeIPACallerMode,
@@ -52,7 +52,9 @@ from core.views_utils import (
     _normalize_str,
     block_action_without_coc,
     block_action_without_country_code,
+    build_page_url_prefix,
     get_username,
+    paginate_and_build_context,
     post_only_404,
     send_mail_url,
 )
@@ -277,12 +279,26 @@ def organizations(request: HttpRequest) -> HttpResponse:
         empty_label = "You don't represent any organizations yet."
 
     q = _normalize_str(request.GET.get("q"))
+    page_number = _normalize_str(request.GET.get("page")) or None
+
+    if q:
+        orgs = orgs.filter(name__icontains=q)
+
+    _, page_url_prefix = build_page_url_prefix(request.GET, page_param="page")
+    page_ctx = paginate_and_build_context(orgs, page_number, 25, page_url_prefix=page_url_prefix)
+
+    grid_items = [
+        {"kind": "organization", "organization": organization}
+        for organization in page_ctx["page_obj"].object_list
+    ]
 
     return render(
         request,
         "core/organizations.html",
         {
-            "organizations": orgs,
+            "organizations": page_ctx["page_obj"].object_list,
+            **page_ctx,
+            "grid_items": grid_items,
             "create_url": reverse("organization-create"),
             "q": q,
             "empty_label": empty_label,

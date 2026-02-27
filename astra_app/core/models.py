@@ -18,6 +18,7 @@ from django.db.models import Q
 from django.utils import timezone
 from PIL import Image
 
+from core.membership_log_side_effects import apply_membership_log_side_effects
 from core.membership_targets import MembershipTargetIdentity, MembershipTargetKind
 from core.tokens import make_signed_token
 
@@ -818,6 +819,7 @@ class MembershipLog(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     rejection_reason = models.TextField(blank=True, default="")
     expires_at = models.DateTimeField(blank=True, null=True)
+    import_batch_id = models.UUIDField(blank=True, null=True, db_index=True)
 
     objects = MembershipLogQuerySet.as_manager()
 
@@ -882,170 +884,6 @@ class MembershipLog(models.Model):
             self.target_organization_name = self.target_organization.name
         super().save(*args, **kwargs)
 
-        if self.target_organization_id is not None:
-            self._apply_org_side_effects()
-            return
-
-        if self.target_organization_code:
-            self._cleanup_orphaned_organization_memberships()
-            return
-
-        self._apply_user_side_effects()
-
-    def _cleanup_orphaned_organization_memberships(self) -> None:
-        if self.action not in {self.Action.approved, self.Action.expiry_changed, self.Action.terminated}:
-            return
-
-        try:
-            organization_id = int(self.target_organization_code)
-        except ValueError:
-            return
-
-        deleted_count, _ = Membership.objects.filter(target_organization_id=organization_id).delete()
-        if deleted_count > 0:
-            logger.info(
-                "_cleanup_orphaned_organization_memberships: removed memberships for orphan org_code=%s",
-                self.target_organization_code,
-            )
-
-    def _resolve_term_start_at(
-        self,
-        *,
-        existing: Membership | None,
-        log_filter: dict[str, object],
-    ) -> datetime.datetime:
-        """Compute the start of the current uninterrupted term from membership logs."""
-        if existing is not None and existing.expires_at is not None and existing.expires_at > self.created_at:
-            return existing.created_at
-
-        start_at = self.created_at
-
-        last_approved = (
-            MembershipLog.objects.filter(
-                **log_filter,
-                action=self.Action.approved,
-                created_at__lt=self.created_at,
-            )
-            .only("created_at", "expires_at")
-            .order_by("-created_at")
-            .first()
-        )
-
-        if last_approved is not None and last_approved.expires_at is not None and last_approved.expires_at > self.created_at:
-            last_terminated = (
-                MembershipLog.objects.filter(
-                    **log_filter,
-                    action=self.Action.terminated,
-                    created_at__lt=self.created_at,
-                )
-                .only("created_at")
-                .order_by("-created_at")
-                .first()
-            )
-
-            approved_qs = MembershipLog.objects.filter(**log_filter, action=self.Action.approved)
-            if last_terminated is not None:
-                approved_qs = approved_qs.filter(created_at__gt=last_terminated.created_at)
-
-            first_term_approved = approved_qs.only("created_at").order_by("created_at").first()
-            if first_term_approved is not None:
-                start_at = first_term_approved.created_at
-
-        return start_at
-
-    def _apply_org_side_effects(self) -> None:
-        """Side-effects for organization membership changes."""
-        if self.action not in {self.Action.approved, self.Action.expiry_changed, self.Action.terminated}:
-            return
-
-        if self.action == self.Action.terminated:
-            Membership.objects.filter(
-                target_organization_id=self.target_organization_id,
-                membership_type=self.membership_type,
-            ).delete()
-            return
-
-        existing = (
-            Membership.objects.filter(
-                target_organization_id=self.target_organization_id,
-                membership_type=self.membership_type,
-            )
-            .only("created_at", "expires_at")
-            .first()
-        )
-
-        log_filter = self.target_identity.for_membership_log_filter()
-        log_filter["membership_type"] = self.membership_type
-
-        start_at = self._resolve_term_start_at(existing=existing, log_filter=log_filter)
-
-        org = Organization.objects.filter(pk=self.target_organization_id).first()
-        if org is None:
-            logger.warning(
-                "_apply_org_side_effects: organization not found org_id=%s",
-                self.target_organization_id,
-            )
-            return
-
-        new_membership, old = Membership.replace_within_category(
-            organization=org,
-            new_membership_type=self.membership_type,
-            expires_at=self.expires_at,
-            created_at=start_at,
-        )
-        if old is not None and old.membership_type_id != self.membership_type_id:
-            logger.info(
-                "_apply_org_side_effects: replaced %s with %s for org_id=%s",
-                old.membership_type_id,
-                self.membership_type_id,
-                self.target_organization_id,
-            )
-
-    def _apply_user_side_effects(self) -> None:
-        if self.action not in {self.Action.approved, self.Action.expiry_changed, self.Action.terminated}:
-            return
-
-        category_id = self.membership_type.category_id
-        membership_qs = Membership.objects.filter(
-            target_username=self.target_username,
-            category_id=category_id,
-        )
-
-        if self.action == self.Action.terminated:
-            membership_qs.filter(membership_type=self.membership_type).delete()
-            return
-
-        existing_same_type = (
-            membership_qs.filter(membership_type=self.membership_type)
-            .only("created_at", "expires_at")
-            .first()
-        )
-        log_filter = self.target_identity.for_membership_log_filter()
-        log_filter["membership_type"] = self.membership_type
-        start_at = self._resolve_term_start_at(existing=existing_same_type, log_filter=log_filter)
-
-        with transaction.atomic():
-            removed_count, _ = membership_qs.exclude(membership_type=self.membership_type).delete()
-            row, _created = Membership.objects.update_or_create(
-                target_username=self.target_username,
-                membership_type=self.membership_type,
-                defaults={
-                    "category": self.membership_type.category,
-                    "expires_at": self.expires_at,
-                },
-            )
-
-            if row.created_at != start_at:
-                Membership.objects.filter(pk=row.pk).update(created_at=start_at)
-
-        if removed_count > 0:
-            logger.info(
-                "_apply_user_side_effects: enforced one-per-category target=%s category=%s removed=%s",
-                self.target_username,
-                category_id,
-                removed_count,
-            )
-
     def __str__(self) -> str:
         if self.target_kind == MembershipTargetKind.organization:
             code = self.organization_identifier
@@ -1090,6 +928,7 @@ class MembershipLog(models.Model):
         membership_request: MembershipRequest | None = None,
         expires_at: datetime.datetime | None = None,
         rejection_reason: str = "",
+        import_batch_id: uuid.UUID | None = None,
     ) -> MembershipLog:
         """Internal factory: all public create_for_* methods delegate here."""
         kwargs: dict[str, object] = {
@@ -1112,6 +951,8 @@ class MembershipLog(models.Model):
             kwargs["expires_at"] = expires_at
         if rejection_reason:
             kwargs["rejection_reason"] = rejection_reason
+        if import_batch_id is not None:
+            kwargs["import_batch_id"] = import_batch_id
         return cls.objects.create(**kwargs)
 
     # --- Factory methods (unified: pass target_username OR target_organization) ---
@@ -1125,12 +966,14 @@ class MembershipLog(models.Model):
         target_username: str = "",
         target_organization: Organization | None = None,
         membership_request: MembershipRequest | None = None,
+        import_batch_id: uuid.UUID | None = None,
     ) -> MembershipLog:
         return cls._create_log(
             actor_username=actor_username, target_username=target_username,
             target_organization=target_organization,
             membership_type=membership_type, membership_request=membership_request,
             action=cls.Action.requested,
+            import_batch_id=import_batch_id,
         )
 
     @classmethod
@@ -1144,8 +987,9 @@ class MembershipLog(models.Model):
         target_organization: Organization | None = None,
         previous_expires_at: datetime.datetime | None = None,
         membership_request: MembershipRequest | None = None,
+        import_batch_id: uuid.UUID | None = None,
     ) -> MembershipLog:
-        return cls._create_log(
+        log = cls._create_log(
             actor_username=actor_username, target_username=target_username,
             target_organization=target_organization,
             membership_type=membership_type, membership_request=membership_request,
@@ -1153,7 +997,10 @@ class MembershipLog(models.Model):
             expires_at=cls.expiry_for_approval_at(
                 approved_at=approved_at, previous_expires_at=previous_expires_at,
             ),
+            import_batch_id=import_batch_id,
         )
+        apply_membership_log_side_effects(log=log)
+        return log
 
     @classmethod
     def create_for_approval(
@@ -1183,13 +1030,17 @@ class MembershipLog(models.Model):
         target_username: str = "",
         target_organization: Organization | None = None,
         membership_request: MembershipRequest | None = None,
+        import_batch_id: uuid.UUID | None = None,
     ) -> MembershipLog:
-        return cls._create_log(
+        log = cls._create_log(
             actor_username=actor_username, target_username=target_username,
             target_organization=target_organization,
             membership_type=membership_type, membership_request=membership_request,
             action=cls.Action.expiry_changed, expires_at=expires_at,
+            import_batch_id=import_batch_id,
         )
+        apply_membership_log_side_effects(log=log)
+        return log
 
     @classmethod
     def create_for_termination(
@@ -1201,12 +1052,14 @@ class MembershipLog(models.Model):
         target_organization: Organization | None = None,
         membership_request: MembershipRequest | None = None,
     ) -> MembershipLog:
-        return cls._create_log(
+        log = cls._create_log(
             actor_username=actor_username, target_username=target_username,
             target_organization=target_organization,
             membership_type=membership_type, membership_request=membership_request,
             action=cls.Action.terminated, expires_at=timezone.now(),
         )
+        apply_membership_log_side_effects(log=log)
+        return log
 
     @classmethod
     def create_for_rejection(
@@ -1423,6 +1276,63 @@ class VotingCredential(models.Model):
 
     def __str__(self) -> str:
         return f"VotingCredential(election_id={self.election_id}, pk={self.pk})"
+
+    def _has_username_binding(self) -> bool:
+        return str(self.freeipa_username or "").strip() != ""
+
+    def _was_anonymized_before_save(self) -> bool:
+        if self.pk is None:
+            return False
+        previous_freeipa_username = (
+            VotingCredential.objects.filter(pk=self.pk)
+            .values_list("freeipa_username", flat=True)
+            .first()
+        )
+        return previous_freeipa_username is None
+
+    def _election_has_anonymized_credentials(self) -> bool:
+        if self.election_id is None:
+            return False
+        anonymized_credentials = VotingCredential.objects.filter(
+            election_id=self.election_id,
+            freeipa_username__isnull=True,
+        )
+        if self.pk is not None:
+            anonymized_credentials = anonymized_credentials.exclude(pk=self.pk)
+        return anonymized_credentials.exists()
+
+    def _election_was_anonymized(self) -> bool:
+        if self.election_id is None:
+            return False
+
+        cached_election = dict(self._state.fields_cache).get("election")
+        if cached_election is not None and cached_election.status in {
+            Election.Status.draft,
+            Election.Status.open,
+        }:
+            # Anonymization is only allowed after close/tally. During the common
+            # open-election issuance path, skip the audit lookup entirely.
+            return False
+
+        return AuditLogEntry.objects.filter(
+            election_id=self.election_id,
+            event_type="election_anonymized",
+        ).exists()
+
+    def _validate_not_issued_after_anonymization(self) -> None:
+        if not self._has_username_binding():
+            return
+        if (
+            self._was_anonymized_before_save()
+            or self._election_has_anonymized_credentials()
+            or self._election_was_anonymized()
+        ):
+            raise ValidationError("cannot issue voting credentials after election anonymization")
+
+    @override
+    def save(self, *args, **kwargs) -> None:
+        self._validate_not_issued_after_anonymization()
+        super().save(*args, **kwargs)
 
     @classmethod
     def generate_public_id(cls) -> str:

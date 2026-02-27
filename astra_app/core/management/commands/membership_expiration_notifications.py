@@ -8,8 +8,8 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
-from core.backends import FreeIPAUser
 from core.email_context import user_email_context_from_user
+from core.freeipa.user import FreeIPAUser
 from core.ipa_user_attrs import _first
 from core.membership import get_expiring_memberships
 from core.membership_notifications import (

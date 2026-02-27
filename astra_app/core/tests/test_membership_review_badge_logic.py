@@ -6,8 +6,8 @@ from django.test import TestCase
 from django.test.client import RequestFactory
 from django.utils import timezone
 
-from core.backends import FreeIPAUser
 from core.context_processors import membership_review
+from core.freeipa.user import FreeIPAUser
 from core.models import AccountInvitation, FreeIPAPermissionGrant, MembershipRequest, MembershipType
 from core.permissions import ASTRA_ADD_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP
 
@@ -62,7 +62,7 @@ class MembershipReviewBadgeLogicTests(TestCase):
         rf = RequestFactory()
         request = rf.get("/")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             request.user = reviewer
             ctx = membership_review(request)
 
@@ -102,7 +102,7 @@ class MembershipReviewBadgeLogicTests(TestCase):
         rf = RequestFactory()
         request = rf.get("/")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             request.user = viewer
             ctx = membership_review(request)
 

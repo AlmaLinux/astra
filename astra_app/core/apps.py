@@ -1,5 +1,5 @@
 from copy import deepcopy
-from typing import Any
+from typing import Any, override
 
 from django.apps import AppConfig
 
@@ -236,7 +236,10 @@ class CoreConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
     name = 'core'
 
-    def ready(self):
+    @override
+    def ready(self) -> None:
         _patch_jazzmin_format_html()
         _patch_jazzmin_side_menu_model_groups()
         _patch_django_avatar_get_user()
+        __import__("core.checks_membership")
+        __import__("core.ses_signals")

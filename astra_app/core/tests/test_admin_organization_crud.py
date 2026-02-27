@@ -6,7 +6,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.test import TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.tests.utils_test_data import ensure_core_categories
 
 
@@ -38,7 +38,7 @@ class AdminOrganizationCRUDTests(TestCase):
         rep_user = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=admin_user),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
             patch("core.admin.FreeIPAUser.all", return_value=[admin_user, rep_user]),
         ):
             url = reverse("admin:core_organization_add")
@@ -90,7 +90,7 @@ class AdminOrganizationCRUDTests(TestCase):
 
         admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=admin_user),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
             patch("core.admin.FreeIPAUser.all", return_value=[admin_user]),
         ):
             response = self.client.post(
@@ -128,7 +128,7 @@ class AdminOrganizationCRUDTests(TestCase):
         self._login_as_freeipa_admin("alice")
 
         admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})
-        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
             resp = self.client.get(reverse("admin:core_organization_add"))
 
         self.assertEqual(resp.status_code, 200)
@@ -140,7 +140,7 @@ class AdminOrganizationCRUDTests(TestCase):
         self._login_as_freeipa_admin("alice")
 
         admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})
-        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
             organization = Organization.objects.create(name="Unclaimed Org")
 
             response = self.client.post(

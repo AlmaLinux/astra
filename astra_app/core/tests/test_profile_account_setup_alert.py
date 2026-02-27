@@ -5,7 +5,8 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAFASAgreement, FreeIPAUser
+from core.freeipa.agreement import FreeIPAFASAgreement
+from core.freeipa.user import FreeIPAUser
 from core.models import MembershipRequest, MembershipType, MembershipTypeCategory
 
 
@@ -47,9 +48,9 @@ class ProfileAccountSetupAlertTests(TestCase):
 
         self._login_as_freeipa("bob")
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
-            patch("core.backends.FreeIPAFASAgreement.all", return_value=[agreement]),
-            patch("core.backends.FreeIPAFASAgreement.get", return_value=agreement),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
+            patch("core.freeipa.agreement.FreeIPAFASAgreement.all", return_value=[agreement]),
+            patch("core.freeipa.agreement.FreeIPAFASAgreement.get", return_value=agreement),
             patch(
                 "core.views_users.country_code_status_from_user_data",
                 return_value=SimpleNamespace(code="US", is_valid=True),
@@ -89,8 +90,8 @@ class ProfileAccountSetupAlertTests(TestCase):
 
         self._login_as_freeipa("bob")
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
-            patch("core.backends.FreeIPAFASAgreement.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
+            patch("core.freeipa.agreement.FreeIPAFASAgreement.all", return_value=[]),
             patch(
                 "core.views_users.country_code_status_from_user_data",
                 return_value=SimpleNamespace(code="US", is_valid=True),
@@ -132,8 +133,8 @@ class ProfileAccountSetupAlertTests(TestCase):
 
         self._login_as_freeipa("bob")
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
-            patch("core.backends.FreeIPAFASAgreement.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
+            patch("core.freeipa.agreement.FreeIPAFASAgreement.all", return_value=[]),
             patch(
                 "core.views_users.country_code_status_from_user_data",
                 return_value=SimpleNamespace(code="US", is_valid=True),

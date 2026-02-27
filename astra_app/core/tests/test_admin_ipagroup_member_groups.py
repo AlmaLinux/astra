@@ -4,7 +4,8 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAGroup, FreeIPAUser
+from core.freeipa.group import FreeIPAGroup
+from core.freeipa.user import FreeIPAUser
 
 
 class AdminIPAGroupMemberGroupsTests(TestCase):
@@ -39,10 +40,10 @@ class AdminIPAGroupMemberGroupsTests(TestCase):
         ]
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=admin_user),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
             patch("core.admin.FreeIPAUser.all", return_value=all_users),
             patch("core.admin.FreeIPAGroup.all", return_value=all_groups),
-            patch("core.backends.FreeIPAGroup.get", return_value=existing_group),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=existing_group),
         ):
             url = reverse("admin:auth_ipagroup_change", args=["parent"])
 

@@ -7,7 +7,7 @@ from django.contrib.messages import get_messages
 from django.test import TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import IPAUser
 
 
@@ -63,9 +63,9 @@ class AdminIPAUserGroupMembershipFailureTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=fake_user_get),
-            patch("core.backends._with_freeipa_service_client_retry", side_effect=fake_retry),
-            patch("core.backends.FreeIPAGroup.get", return_value=None),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=fake_user_get),
+            patch("core.freeipa.user._with_freeipa_service_client_retry", side_effect=fake_retry),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=None),
             patch("core.admin.FreeIPAGroup.all", return_value=[SimpleNamespace(cn="admins"), SimpleNamespace(cn="ambassadors")]),
         ):
             url = reverse("admin:auth_ipauser_change", args=[username])
@@ -127,9 +127,9 @@ class AdminIPAUserGroupMembershipFailureTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=fake_user_get),
-            patch("core.backends._with_freeipa_service_client_retry", side_effect=fake_retry),
-            patch("core.backends.FreeIPAGroup.get", return_value=None),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=fake_user_get),
+            patch("core.freeipa.user._with_freeipa_service_client_retry", side_effect=fake_retry),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=None),
             patch(
                 "core.admin.FreeIPAGroup.all",
                 return_value=[SimpleNamespace(cn="admins"), SimpleNamespace(cn="board")],
@@ -193,9 +193,9 @@ class AdminIPAUserGroupMembershipFailureTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=fake_user_get),
-            patch("core.backends._with_freeipa_service_client_retry", side_effect=fake_retry),
-            patch("core.backends.FreeIPAGroup.get", return_value=None),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=fake_user_get),
+            patch("core.freeipa.user._with_freeipa_service_client_retry", side_effect=fake_retry),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=None),
             patch(
                 "core.admin.FreeIPAGroup.all",
                 return_value=[SimpleNamespace(cn="admins"), SimpleNamespace(cn="ambassadors")],
@@ -283,9 +283,9 @@ class AdminIPAUserGroupMembershipFailureTests(TestCase):
             return after if state["removed"] else before
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=fake_user_get),
-            patch("core.backends._with_freeipa_service_client_retry", side_effect=fake_retry),
-            patch("core.backends.FreeIPAGroup.get", return_value=None),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=fake_user_get),
+            patch("core.freeipa.user._with_freeipa_service_client_retry", side_effect=fake_retry),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=None),
             patch("core.admin.FreeIPAUser.all", return_value=[after]),
             patch("core.admin.IPAUserAdmin.log_change"),
             patch(

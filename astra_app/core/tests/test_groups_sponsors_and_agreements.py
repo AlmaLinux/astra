@@ -11,7 +11,9 @@ from django.test import RequestFactory, TestCase
 from django.urls import reverse
 
 from core import views_groups, views_settings, views_users
-from core.backends import DegradedFreeIPAUser, FreeIPAGroup, FreeIPAOperationFailed
+from core.freeipa.exceptions import FreeIPAOperationFailed
+from core.freeipa.group import FreeIPAGroup
+from core.freeipa.user import DegradedFreeIPAUser
 
 
 class GroupsSponsorsAndAgreementsTests(TestCase):
@@ -84,7 +86,13 @@ class GroupsSponsorsAndAgreementsTests(TestCase):
         fas_group = SimpleNamespace(cn="packagers", fas_group=True, sponsors=[])
 
         # Required for group, unsigned for alice.
-        agreement_summary = SimpleNamespace(cn="cla", enabled=True, groups=["packagers"], users=[])
+        agreement_summary = SimpleNamespace(
+            cn="cla",
+            enabled=True,
+            groups=["packagers"],
+            users=[],
+            description="CLA",
+        )
         agreement_full = SimpleNamespace(cn="cla", enabled=True, groups=["packagers"], users=[], description="CLA")
 
         with patch("core.views_users._get_full_user", autospec=True, return_value=fu):

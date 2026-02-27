@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from django.test import TestCase
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 
 
 class ProfileRenderingWithoutEmailTests(TestCase):
@@ -23,7 +23,7 @@ class ProfileRenderingWithoutEmailTests(TestCase):
         # Missing mail should not crash avatar providers.
         self.assertEqual(fu.email, "")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=fu):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=fu):
             resp = self.client.get(f"/user/{username}/")
 
         # Desired behavior: profile page should render even without an email.

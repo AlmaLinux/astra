@@ -33,6 +33,24 @@ Expected context:
   {% endwith %}
 {% endif %}
 
+{% if membership_request.status == 'on_hold' and show_on_hold_approve %}
+  {% url 'membership-request-approve-on-hold' membership_request.pk as approve_on_hold_url %}
+  {% with approve_title="Approve (Override) "|add:membership_type_name|add:" request" %}
+  <button
+    type="button"
+    class="btn btn-sm btn-success"
+    data-toggle="modal"
+    data-target="#shared-approve-on-hold-modal"
+    data-action-url="{{ approve_on_hold_url }}"
+    data-modal-title="{{ approve_title }}"
+    data-request-id="{{ pk_str }}"
+    data-request-target="{{ requester }}"
+    data-membership-type="{{ membership_type_name }}"
+    title="Approve this on-hold request with committee override"
+  >Approve (Override)</button>
+  {% endwith %}
+{% endif %}
+
 {% if membership_request.status == 'pending' or membership_request.status == 'on_hold' %}
   {% url 'membership-request-reject' membership_request.pk as reject_url %}
   {% with reject_title="Reject "|add:membership_type_name|add:" request" %}

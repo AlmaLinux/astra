@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from django.test import RequestFactory, TestCase
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.views_auth import FreeIPALoginView
 
 
@@ -21,7 +21,7 @@ class UserRoutesTests(TestCase):
 
         fu = FreeIPAUser(username, {"uid": [username], "givenname": ["A"], "sn": ["Dmin"], "mail": ["a@example.org"]})
 
-        with patch("core.backends.FreeIPAUser.get", return_value=fu):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=fu):
             resp = self.client.get(f"/user/{username}/")
 
         self.assertEqual(resp.status_code, 200)
@@ -35,7 +35,7 @@ class UserRoutesTests(TestCase):
             SimpleNamespace(username="bob", get_full_name=lambda: "Bob User"),
         ]
 
-        with patch("core.backends.FreeIPAUser.all", return_value=users):
+        with patch("core.freeipa.user.FreeIPAUser.all", return_value=users):
             resp = self.client.get("/users/")
 
         self.assertEqual(resp.status_code, 200)
@@ -51,7 +51,7 @@ class UserRoutesTests(TestCase):
             for i in range(65)
         ]
 
-        with patch("core.backends.FreeIPAUser.all", return_value=users):
+        with patch("core.freeipa.user.FreeIPAUser.all", return_value=users):
             resp_page_1 = self.client.get("/users/")
             resp_page_2 = self.client.get("/users/?page=2")
 
@@ -71,7 +71,7 @@ class UserRoutesTests(TestCase):
             SimpleNamespace(username="bob", get_full_name=lambda: "Bob User"),
         ]
 
-        with patch("core.backends.FreeIPAUser.all", return_value=users):
+        with patch("core.freeipa.user.FreeIPAUser.all", return_value=users):
             resp = self.client.get("/users/?q=ali")
 
         self.assertEqual(resp.status_code, 200)

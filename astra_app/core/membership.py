@@ -7,7 +7,7 @@ from enum import StrEnum
 from django.conf import settings
 from django.utils import timezone
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import Membership, MembershipLog, MembershipRequest, MembershipType, Organization
 
 logger = logging.getLogger(__name__)

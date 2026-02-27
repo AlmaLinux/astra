@@ -9,7 +9,6 @@ from import_export.forms import ConfirmImportForm, ImportForm
 from tablib import Dataset
 
 from core.address_geocoding import decompose_full_address_with_photon
-from core.backends import FreeIPAUser
 from core.country_codes import is_valid_country_alpha2, normalize_country_alpha2
 from core.csv_import_utils import (
     extract_csv_headers_from_uploaded_file,
@@ -17,6 +16,7 @@ from core.csv_import_utils import (
     normalize_csv_email,
     set_form_column_field_choices,
 )
+from core.freeipa.user import FreeIPAUser
 from core.models import Organization
 from core.views_utils import _normalize_str
 

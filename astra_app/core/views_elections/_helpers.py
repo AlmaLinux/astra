@@ -7,10 +7,10 @@ from django.http import Http404
 from django.urls import reverse
 
 from core import elections_services
-from core.backends import FreeIPAUser
 from core.elections_services import ElectionError
 from core.email_context import user_email_context
 from core.forms_elections import ElectionEndDateForm
+from core.freeipa.user import FreeIPAUser
 from core.models import Election
 from core.views_utils import get_username
 

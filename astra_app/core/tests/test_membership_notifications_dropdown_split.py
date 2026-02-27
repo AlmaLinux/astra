@@ -5,17 +5,24 @@ from django.conf import settings
 from django.test import TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import FreeIPAPermissionGrant, MembershipRequest, MembershipType
-from core.permissions import ASTRA_ADD_MEMBERSHIP
+from core.permissions import ASTRA_ADD_MEMBERSHIP, ASTRA_VIEW_USER_DIRECTORY
+from core.tests.utils_test_data import ensure_core_categories
 
 
 class MembershipNotificationsDropdownSplitTests(TestCase):
     def setUp(self) -> None:
         super().setUp()
+        ensure_core_categories()
 
         FreeIPAPermissionGrant.objects.get_or_create(
             permission=ASTRA_ADD_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.group,
+            principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
+        )
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_VIEW_USER_DIRECTORY,
             principal_type=FreeIPAPermissionGrant.PrincipalType.group,
             principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
         )
@@ -59,7 +66,7 @@ class MembershipNotificationsDropdownSplitTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
             patch("core.views_users.FreeIPAUser.all", autospec=True, return_value=[]),
         ):
             resp = self.client.get(reverse("users"))

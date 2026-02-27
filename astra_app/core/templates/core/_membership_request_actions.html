@@ -10,6 +10,6 @@ support safe redirects using Referer when `next` isn't provided.
 
 {% with membership_request=request %}
   {% with pk_str=membership_request.pk|stringformat:"s" membership_type_name=membership_request.membership_type.name requester_display=membership_request.requested_username|default:membership_request.organization_display_name %}
-    {% include 'core/_membership_request_actions_inner.html' with membership_request=membership_request pk_str=pk_str membership_type_name=membership_type_name requester_display=requester_display %}
+    {% include 'core/_membership_request_actions_inner.html' with membership_request=membership_request pk_str=pk_str membership_type_name=membership_type_name requester_display=requester_display show_on_hold_approve=show_on_hold_approve %}
   {% endwith %}
 {% endwith %}

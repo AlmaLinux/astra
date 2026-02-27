@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from django.test import TestCase
 
-from core.backends import FreeIPAFASAgreement
+from core.freeipa.agreement import FreeIPAFASAgreement
 
 
 @dataclass(slots=True)

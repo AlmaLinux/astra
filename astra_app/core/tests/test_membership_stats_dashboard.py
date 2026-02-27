@@ -6,7 +6,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import FreeIPAPermissionGrant, Membership, MembershipType, MembershipTypeCategory, Organization
 from core.permissions import ASTRA_VIEW_MEMBERSHIP
 
@@ -29,7 +29,7 @@ class MembershipStatsDashboardTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             resp = self.client.get(reverse("membership-stats"))
 
         self.assertEqual(resp.status_code, 302)
@@ -52,7 +52,7 @@ class MembershipStatsDashboardTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("elections"))
 
         self.assertEqual(resp.status_code, 200)
@@ -72,7 +72,7 @@ class MembershipStatsDashboardTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             resp = self.client.get(reverse("membership-sponsors"))
 
         self.assertEqual(resp.status_code, 302)
@@ -167,7 +167,7 @@ class MembershipStatsDashboardTests(TestCase):
                 raise RuntimeError("FreeIPA unavailable")
             return None
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(reverse("membership-sponsors"))
 
         self.assertEqual(resp.status_code, 200)
@@ -194,7 +194,7 @@ class MembershipStatsDashboardTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             resp = self.client.get(reverse("membership-stats-data"))
 
         self.assertEqual(resp.status_code, 403)
@@ -217,7 +217,7 @@ class MembershipStatsDashboardTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("membership-stats"))
 
         self.assertEqual(resp.status_code, 200)
@@ -242,7 +242,7 @@ class MembershipStatsDashboardTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("membership-stats"))
 
         self.assertEqual(resp.status_code, 200)
@@ -265,8 +265,8 @@ class MembershipStatsDashboardTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
-            with patch("core.backends.FreeIPAUser.all", return_value=[]):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
                 resp = self.client.get(reverse("membership-stats-data"))
 
         self.assertEqual(resp.status_code, 200)
@@ -345,8 +345,8 @@ class MembershipStatsDashboardTests(TestCase):
                 return carol
             return None
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
-            with patch("core.backends.FreeIPAUser.all", return_value=[alice, bob, carol]):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
+            with patch("core.freeipa.user.FreeIPAUser.all", return_value=[alice, bob, carol]):
                 resp = self.client.get(reverse("membership-stats-data"))
 
         self.assertEqual(resp.status_code, 200)

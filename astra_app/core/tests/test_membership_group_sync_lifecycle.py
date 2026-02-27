@@ -9,20 +9,22 @@ from django.urls import reverse
 from django.utils import timezone
 from post_office.models import EmailTemplate
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import (
     FreeIPAPermissionGrant,
     Membership,
-    MembershipLog,
     MembershipType,
     Organization,
 )
 from core.permissions import ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP
+from core.tests.utils_test_data import ensure_core_categories, ensure_email_templates
 
 
 class MembershipGroupSyncLifecycleTests(TestCase):
     def setUp(self) -> None:
         super().setUp()
+        ensure_core_categories()
+        ensure_email_templates()
 
         for perm in (ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP):
             FreeIPAPermissionGrant.objects.get_or_create(
@@ -48,13 +50,10 @@ class MembershipGroupSyncLifecycleTests(TestCase):
             },
         )
 
-        # Create an active membership via the same current-state path used by the UI.
-        MembershipLog.objects.create(
-            actor_username="reviewer",
+        Membership.objects.create(
             target_username="alice",
             membership_type_id="individual",
-            requested_group_cn="almalinux-individual",
-            action=MembershipLog.Action.approved,
+            category_id="individual",
             expires_at=timezone.now() + datetime.timedelta(days=30),
         )
 
@@ -86,7 +85,7 @@ class MembershipGroupSyncLifecycleTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_mock:
                 resp = self.client.post(
                     reverse("membership-terminate", args=["alice", "individual"]),
@@ -145,7 +144,7 @@ class MembershipGroupSyncLifecycleTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_mock:
                 resp = self.client.post(
                     reverse("organization-sponsorship-terminate", args=[org.pk, "gold"]),
@@ -213,7 +212,7 @@ class MembershipGroupSyncLifecycleTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with (
                 patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_mock,
                 patch.object(FreeIPAUser, "add_to_group", autospec=True) as add_mock,
@@ -284,7 +283,7 @@ class MembershipGroupSyncLifecycleTests(TestCase):
         )
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
-            with patch("core.backends.FreeIPAUser.get", return_value=bob):
+            with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
                 with patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_mock:
                     call_command("membership_expired_cleanup")
 
@@ -313,7 +312,7 @@ class MembershipGroupSyncLifecycleTests(TestCase):
         )
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
-            with patch("core.backends.FreeIPAUser.get", return_value=None):
+            with patch("core.freeipa.user.FreeIPAUser.get", return_value=None):
                 call_command("membership_expired_cleanup")
 
         org.refresh_from_db()

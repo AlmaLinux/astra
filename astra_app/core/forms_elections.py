@@ -6,8 +6,9 @@ from django.conf import settings
 from django.forms import modelformset_factory
 from django.utils import timezone
 
-from core import backends
 from core.forms_base import StyledForm, StyledModelForm
+from core.freeipa.exceptions import FreeIPAMisconfiguredError, FreeIPAUnavailableError
+from core.freeipa.group import get_freeipa_group_for_elections
 from core.models import Candidate, Election, ExclusionGroup
 
 _DATETIME_LOCAL_INPUT_FORMATS: list[str] = [
@@ -128,13 +129,13 @@ class ElectionDetailsForm(StyledModelForm):
             return ""
 
         try:
-            backends.get_freeipa_group_for_elections(cn=cn, require_fresh=False)
-        except backends.FreeIPAUnavailableError as exc:
+            get_freeipa_group_for_elections(cn=cn, require_fresh=False)
+        except FreeIPAUnavailableError as exc:
             raise forms.ValidationError(
                 "FreeIPA is currently unavailable. Try again later.",
                 code="freeipa_unavailable",
             ) from exc
-        except backends.FreeIPAMisconfiguredError as exc:
+        except FreeIPAMisconfiguredError as exc:
             raise forms.ValidationError("Unknown group.", code="unknown_group") from exc
 
         return cn

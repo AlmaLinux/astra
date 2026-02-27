@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from django.test import TestCase
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 
 
 class FreeIPAUserInitialsSyncTests(TestCase):
@@ -19,9 +19,9 @@ class FreeIPAUserInitialsSyncTests(TestCase):
             return fn(DummyClient())
 
         with (
-            patch("core.backends._with_freeipa_service_client_retry", side_effect=fake_retry),
-            patch("core.backends.FreeIPAUser.get", return_value=None),
-            patch("core.backends._invalidate_users_list_cache"),
+            patch("core.freeipa.user._with_freeipa_service_client_retry", side_effect=fake_retry),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=None),
+            patch("core.freeipa.user._invalidate_users_list_cache"),
         ):
             FreeIPAUser.create("alice", first_name="Alice", last_name="User", email="a@example.com")
 
@@ -48,10 +48,10 @@ class FreeIPAUserInitialsSyncTests(TestCase):
         user.last_name = "Lovelace"
 
         with (
-            patch("core.backends._with_freeipa_service_client_retry", side_effect=fake_retry),
-            patch("core.backends._invalidate_user_cache"),
-            patch("core.backends._invalidate_users_list_cache"),
-            patch("core.backends.FreeIPAUser.get", return_value=user),
+            patch("core.freeipa.user._with_freeipa_service_client_retry", side_effect=fake_retry),
+            patch("core.freeipa.user._invalidate_user_cache"),
+            patch("core.freeipa.user._invalidate_users_list_cache"),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=user),
         ):
             user.save()
 

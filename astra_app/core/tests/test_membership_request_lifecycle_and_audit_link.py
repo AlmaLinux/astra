@@ -6,7 +6,7 @@ from django.db import IntegrityError
 from django.test import TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import FreeIPAPermissionGrant
 from core.permissions import (
     ASTRA_ADD_MEMBERSHIP,
@@ -14,11 +14,13 @@ from core.permissions import (
     ASTRA_DELETE_MEMBERSHIP,
     ASTRA_VIEW_MEMBERSHIP,
 )
+from core.tests.utils_test_data import ensure_core_categories
 
 
 class MembershipRequestLifecycleAndAuditLinkTests(TestCase):
     def setUp(self) -> None:
         super().setUp()
+        ensure_core_categories()
 
         for perm in (ASTRA_ADD_MEMBERSHIP, ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP):
             FreeIPAPermissionGrant.objects.get_or_create(
@@ -111,9 +113,19 @@ class MembershipRequestLifecycleAndAuditLinkTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
-            with patch.object(FreeIPAUser, "add_to_group", autospec=True):
-                resp = self.client.post(reverse("membership-request-approve", args=[req.pk]), follow=False)
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch.object(FreeIPAUser, "add_to_group", autospec=True),
+            patch(
+                "core.membership_request_workflow.missing_required_agreements_for_user_in_group",
+                return_value=[],
+            ),
+        ):
+            resp = self.client.post(
+                reverse("membership-request-approve", args=[req.pk]),
+                data={"custom_email": "1"},
+                follow=False,
+            )
 
         self.assertEqual(resp.status_code, 302)
 

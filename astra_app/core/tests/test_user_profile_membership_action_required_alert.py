@@ -4,7 +4,7 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import MembershipRequest, MembershipType, Organization
 
 
@@ -44,7 +44,7 @@ class UserProfileMembershipActionRequiredAlertTests(TestCase):
         )
 
         self._login_as_freeipa_user("alice")
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
 
         self.assertEqual(resp.status_code, 200)
@@ -89,7 +89,7 @@ class UserProfileMembershipActionRequiredAlertTests(TestCase):
         )
 
         self._login_as_freeipa_user("alice")
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
 
         self.assertEqual(resp.status_code, 200)
@@ -146,7 +146,7 @@ class UserProfileMembershipActionRequiredAlertTests(TestCase):
             return {"alice": alice, "bob": bob}.get(username)
 
         self._login_as_freeipa_user("bob")
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
 
         self.assertEqual(resp.status_code, 200)

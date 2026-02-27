@@ -1,6 +1,7 @@
 import csv
 import datetime
 import io
+import uuid
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import patch
@@ -18,8 +19,8 @@ from tablib import Dataset
 
 import core.organization_membership_csv_import as organization_membership_csv_import
 from core.admin import OrganizationMembershipCSVImportLinkAdmin
-from core.backends import FreeIPAUser
 from core.csv_import_utils import resolve_column_header
+from core.freeipa.user import FreeIPAUser
 from core.models import (
     Membership,
     MembershipLog,
@@ -471,6 +472,118 @@ class OrganizationMembershipCSVImportResourceTests(TestCase):
 
         self.assertTrue(logger_info.called)
 
+    def test_import_data_generates_per_run_batch_id_and_emits_ops07_batch_event(self) -> None:
+        membership_type = self._membership_type(code="batchaudit", category_id="sponsorship")
+
+        first_org = Organization.objects.create(
+            name="Batch Org One",
+            country_code="US",
+            business_contact_name="Biz One",
+            business_contact_email="biz1@example.com",
+            pr_marketing_contact_name="PR One",
+            pr_marketing_contact_email="pr1@example.com",
+            technical_contact_name="Tech One",
+            technical_contact_email="tech1@example.com",
+            website="https://batch-one.example.com",
+            website_logo="https://batch-one.example.com/logo.png",
+        )
+        second_org = Organization.objects.create(
+            name="Batch Org Two",
+            country_code="US",
+            business_contact_name="Biz Two",
+            business_contact_email="biz2@example.com",
+            pr_marketing_contact_name="PR Two",
+            pr_marketing_contact_email="pr2@example.com",
+            technical_contact_name="Tech Two",
+            technical_contact_email="tech2@example.com",
+            website="https://batch-two.example.com",
+            website_logo="https://batch-two.example.com/logo.png",
+        )
+
+        first_dataset = Dataset(headers=["organization_id", "organization_name"])
+        first_dataset.append([str(first_org.pk), first_org.name])
+
+        second_dataset = Dataset(headers=["organization_id", "organization_name"])
+        second_dataset.append([str(second_org.pk), second_org.name])
+
+        with patch("core.organization_membership_csv_import.logger.info") as logger_info:
+            first_preview_resource = OrganizationMembershipCSVImportResource(
+                membership_type=membership_type,
+                actor_username="alex",
+            )
+            first_preview_result = first_preview_resource.import_data(first_dataset, dry_run=True, raise_errors=True)
+
+            first_resource = OrganizationMembershipCSVImportResource(
+                membership_type=membership_type,
+                actor_username="alex",
+            )
+            first_result = first_resource.import_data(first_dataset, dry_run=False, raise_errors=True)
+
+            second_preview_resource = OrganizationMembershipCSVImportResource(
+                membership_type=membership_type,
+                actor_username="alex",
+            )
+            second_preview_result = second_preview_resource.import_data(second_dataset, dry_run=True, raise_errors=True)
+
+            second_resource = OrganizationMembershipCSVImportResource(
+                membership_type=membership_type,
+                actor_username="alex",
+            )
+            second_result = second_resource.import_data(second_dataset, dry_run=False, raise_errors=True)
+
+        self.assertEqual(first_preview_result.totals["error"], 0)
+        self.assertEqual(second_preview_result.totals["error"], 0)
+        self.assertEqual(first_result.totals["error"], 0)
+        self.assertEqual(second_result.totals["error"], 0)
+
+        batch_calls = [
+            call
+            for call in logger_info.call_args_list
+            if call.args and "event=astra.membership.csv_import.batch_applied" in str(call.args[0])
+        ]
+
+        self.assertEqual(len(batch_calls), 2)
+        batch_messages = [str(call.args[0]) for call in batch_calls]
+        first_batch = uuid.UUID(batch_messages[0].split("batch_id=", 1)[1].split(" ", 1)[0])
+        second_batch = uuid.UUID(batch_messages[1].split("batch_id=", 1)[1].split(" ", 1)[0])
+        self.assertNotEqual(first_batch, second_batch)
+
+        for message in batch_messages:
+            self.assertIn("component=membership", message)
+            self.assertIn("outcome=applied", message)
+            self.assertIn("correlation_id=", message)
+            self.assertIn("rows_total=1", message)
+            self.assertIn("rows_applied=1", message)
+            self.assertIn("rows_failed=0", message)
+
+        required_extra_keys = {
+            "event",
+            "component",
+            "outcome",
+            "batch_id",
+            "rows_total",
+            "rows_applied",
+            "rows_failed",
+            "correlation_id",
+        }
+        for batch_call in batch_calls:
+            extra = batch_call.kwargs["extra"]
+            self.assertEqual(set(extra.keys()), required_extra_keys)
+            self.assertEqual(extra["event"], "astra.membership.csv_import.batch_applied")
+            self.assertEqual(extra["component"], "membership")
+            self.assertEqual(extra["outcome"], "applied")
+            self.assertEqual(extra["rows_total"], 1)
+            self.assertEqual(extra["rows_applied"], 1)
+            self.assertEqual(extra["rows_failed"], 0)
+            self.assertEqual(str(extra["batch_id"]), str(extra["correlation_id"]))
+
+        first_logs = MembershipLog.objects.filter(target_organization=first_org)
+        second_logs = MembershipLog.objects.filter(target_organization=second_org)
+        self.assertTrue(first_logs.exists())
+        self.assertTrue(second_logs.exists())
+        self.assertEqual(set(first_logs.values_list("import_batch_id", flat=True)), {first_batch})
+        self.assertEqual(set(second_logs.values_list("import_batch_id", flat=True)), {second_batch})
+
     def test_required_optional_columns_are_derived_from_column_specs(self) -> None:
         specs = (
             organization_membership_csv_import._ColumnSpec(
@@ -632,7 +745,7 @@ class OrganizationMembershipCSVImportAdminFlowTests(TestCase):
             content_type="text/csv",
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
             preview = self.client.post(
                 reverse("admin:core_organizationmembershipcsvimportlink_import"),
                 data={
@@ -658,7 +771,7 @@ class OrganizationMembershipCSVImportAdminFlowTests(TestCase):
         self.assertTrue(unmatched_download_url)
         assert isinstance(unmatched_download_url, str)
 
-        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
             confirm = self.client.post(
                 reverse("admin:core_organizationmembershipcsvimportlink_process_import"),
                 data=dict(confirm_form.initial),
@@ -670,7 +783,7 @@ class OrganizationMembershipCSVImportAdminFlowTests(TestCase):
         self.assertEqual(imported_membership.membership_type, membership_type)
         self.assertEqual(Email.objects.count(), 0)
 
-        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
             unmatched_download = self.client.get(unmatched_download_url)
         self.assertEqual(unmatched_download.status_code, 200)
         decoded = unmatched_download.content.decode("utf-8")
@@ -688,7 +801,7 @@ class OrganizationMembershipCSVImportAdminFlowTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
             response = self.client.get(reverse("admin:core_organizationmembershipcsvimportlink_import"))
 
         self.assertEqual(response.status_code, 200)
@@ -730,7 +843,7 @@ class OrganizationMembershipCSVImportAdminFlowTests(TestCase):
             content_type="text/csv",
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
             preview = self.client.post(
                 reverse("admin:core_organizationmembershipcsvimportlink_import"),
                 data={
@@ -748,7 +861,7 @@ class OrganizationMembershipCSVImportAdminFlowTests(TestCase):
         self.assertIsNotNone(confirm_form)
         assert confirm_form is not None
 
-        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
             confirm = self.client.post(
                 reverse("admin:core_organizationmembershipcsvimportlink_process_import"),
                 data=dict(confirm_form.initial),
@@ -801,7 +914,7 @@ class OrganizationMembershipCSVImportAdminFlowTests(TestCase):
             content_type="text/csv",
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
             preview = self.client.post(
                 reverse("admin:core_organizationmembershipcsvimportlink_import"),
                 data={
@@ -818,7 +931,7 @@ class OrganizationMembershipCSVImportAdminFlowTests(TestCase):
         self.assertIsNotNone(confirm_form)
         assert confirm_form is not None
 
-        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
             confirm = self.client.post(
                 reverse("admin:core_organizationmembershipcsvimportlink_process_import"),
                 data=dict(confirm_form.initial),
@@ -872,7 +985,7 @@ class OrganizationMembershipCSVImportAdminFlowTests(TestCase):
             content_type="text/csv",
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
             preview = self.client.post(
                 reverse("admin:core_organizationmembershipcsvimportlink_import"),
                 data={
@@ -934,7 +1047,7 @@ class OrganizationMembershipCSVImportAdminFlowTests(TestCase):
             content_type="text/csv",
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
             preview = self.client.post(
                 reverse("admin:core_organizationmembershipcsvimportlink_import"),
                 data={
@@ -951,7 +1064,7 @@ class OrganizationMembershipCSVImportAdminFlowTests(TestCase):
         self.assertIsNotNone(confirm_form)
         assert confirm_form is not None
 
-        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
             confirm = self.client.post(
                 reverse("admin:core_organizationmembershipcsvimportlink_process_import"),
                 data=dict(confirm_form.initial),
@@ -1008,7 +1121,7 @@ class OrganizationMembershipCSVImportAdminFlowTests(TestCase):
             content_type="text/csv",
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
             preview = self.client.post(
                 reverse("admin:core_organizationmembershipcsvimportlink_import"),
                 data={
@@ -1033,7 +1146,7 @@ class OrganizationMembershipCSVImportAdminFlowTests(TestCase):
         confirm_data = dict(confirm_form.initial)
         confirm_data["selected_row_numbers"] = selected_parts[0]
 
-        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
             confirm = self.client.post(
                 reverse("admin:core_organizationmembershipcsvimportlink_process_import"),
                 data=confirm_data,
@@ -1078,7 +1191,7 @@ class OrganizationMembershipCSVImportAdminFlowTests(TestCase):
             content_type="text/csv",
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
             preview = self.client.post(
                 reverse("admin:core_organizationmembershipcsvimportlink_import"),
                 data={

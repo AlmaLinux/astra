@@ -7,10 +7,10 @@ from urllib.parse import unquote
 from django.contrib.messages import get_messages
 from django.test import Client, TestCase, override_settings
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import AccountInvitation
-from core.tokens import read_signed_token
 from core.tests.utils_test_data import ensure_email_templates
+from core.tokens import read_signed_token
 from core.views_auth import PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY
 
 

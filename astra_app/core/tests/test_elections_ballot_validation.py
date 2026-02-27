@@ -8,7 +8,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import Ballot, Candidate, Election, VotingCredential
 
 
@@ -40,7 +40,7 @@ class ElectionBallotValidationTests(TestCase):
 
         self._login_as_freeipa_user("voter1")
         with (
-            patch("core.backends.FreeIPAUser.get") as mocked_get,
+            patch("core.freeipa.user.FreeIPAUser.get") as mocked_get,
             patch("core.views_elections.vote.has_signed_coc", return_value=True),
         ):
             mocked_get.return_value = FreeIPAUser(
@@ -98,7 +98,7 @@ class ElectionBallotValidationTests(TestCase):
 
         self._login_as_freeipa_user("voter1")
         with (
-            patch("core.backends.FreeIPAUser.get") as mocked_get,
+            patch("core.freeipa.user.FreeIPAUser.get") as mocked_get,
             patch("core.views_elections.vote.has_signed_coc", return_value=True),
         ):
             mocked_get.return_value = FreeIPAUser(
@@ -141,7 +141,7 @@ class ElectionBallotValidationTests(TestCase):
 
         self._login_as_freeipa_user("voter1")
         with (
-            patch("core.backends.FreeIPAUser.get") as mocked_get,
+            patch("core.freeipa.user.FreeIPAUser.get") as mocked_get,
             patch("core.views_elections.vote.has_signed_coc", return_value=True),
         ):
             mocked_get.return_value = FreeIPAUser(
@@ -162,7 +162,7 @@ class ElectionBallotValidationTests(TestCase):
         self.assertEqual(Ballot.objects.filter(election=election).count(), 0)
 
     def test_vote_submit_requires_signed_coc(self) -> None:
-        from core.backends import FreeIPAFASAgreement
+        from core.freeipa.agreement import FreeIPAFASAgreement
 
         now = timezone.now()
         election = Election.objects.create(
@@ -202,7 +202,7 @@ class ElectionBallotValidationTests(TestCase):
                 "memberofindirect_group": [],
             },
         )
-        with patch("core.backends.FreeIPAUser.get", autospec=True, return_value=voter):
+        with patch("core.freeipa.user.FreeIPAUser.get", autospec=True, return_value=voter):
             with patch("core.views_utils.FreeIPAFASAgreement.get", autospec=True, return_value=coc):
                 resp = self.client.post(
                     reverse("election-vote-submit", args=[election.id]),

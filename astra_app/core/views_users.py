@@ -13,8 +13,9 @@ from core.agreements import (
     list_agreements_for_user,
     missing_required_agreements_for_user_in_group,
 )
-from core.backends import FreeIPAGroup, FreeIPAUser
 from core.country_codes import country_code_status_from_user_data
+from core.freeipa.group import FreeIPAGroup
+from core.freeipa.user import FreeIPAUser
 from core.ipa_user_attrs import _data_get, _first, _get_full_user, _value_to_text
 from core.membership import (
     build_pending_request_context,

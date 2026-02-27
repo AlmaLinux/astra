@@ -45,6 +45,7 @@ expected_ballot_hash = "your-ballot-hash-from-receipt-email"
 import hashlib
 import json
 
+
 def compute_ballot_hash(
     *,
     election_id: int,

@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import logging
 import secrets
 from typing import override
@@ -18,7 +20,9 @@ from core.account_invitation_reconcile import (
     load_account_invitation_from_token,
     reconcile_account_invitation_for_username,
 )
-from core.backends import FreeIPAUser, _build_freeipa_client
+from core.freeipa.client import _build_freeipa_client
+from core.freeipa.user import FreeIPAUser
+from core.rate_limit import allow_request
 from core.tokens import make_signed_token
 from core.views_utils import _normalize_str, get_username
 
@@ -41,6 +45,56 @@ logger = logging.getLogger(__name__)
 PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY = "pending_account_invitation_token"
 
 
+def _rate_limit_client_ip(request: HttpRequest) -> str:
+    return _normalize_str(request.META.get("REMOTE_ADDR"))
+
+
+def _emit_rate_limit_denial_log(
+    request: HttpRequest,
+    *,
+    endpoint: str,
+    limit: int,
+    window_seconds: int,
+    subject: str,
+) -> None:
+    client_ip = _rate_limit_client_ip(request)
+
+    log_payload: dict[str, str | int | bool] = {
+        "event": "astra.security.rate_limit.denied",
+        "component": "auth",
+        "outcome": "denied",
+        "endpoint": endpoint,
+        "http_method": "POST",
+        "limit": limit,
+        "window_seconds": window_seconds,
+    }
+
+    request_id = _normalize_str(request.META.get("HTTP_X_REQUEST_ID"))
+    if not request_id:
+        request_id = _normalize_str(request.headers.get("X-Request-ID"))
+    if request_id:
+        log_payload["request_id"] = request_id
+
+    secret = str(settings.SECRET_KEY).encode("utf-8")
+    if client_ip:
+        log_payload["ip_hash"] = hmac.new(
+            key=secret,
+            msg=client_ip.lower().encode("utf-8"),
+            digestmod=hashlib.sha256,
+        ).hexdigest()
+    else:
+        log_payload["ip_present"] = False
+
+    if subject:
+        log_payload["subject_hash"] = hmac.new(
+            key=secret,
+            msg=subject.encode("utf-8"),
+            digestmod=hashlib.sha256,
+        ).hexdigest()
+
+    logger.warning("Rate limit denied", extra=log_payload)
+
+
 class FreeIPALoginView(auth_views.LoginView):
     """LoginView that can redirect / message based on FreeIPA backend signals."""
 
@@ -58,6 +112,37 @@ class FreeIPALoginView(auth_views.LoginView):
         if invite_token and load_account_invitation_from_token(invite_token) is not None:
             request.session[PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY] = invite_token
         return super().dispatch(request, *args, **kwargs)
+
+    @override
+    def post(self, request: HttpRequest, *args, **kwargs) -> HttpResponse:
+        client_ip = _rate_limit_client_ip(request)
+        submitted_username = _normalize_str(request.POST.get("username")).lower()
+
+        limit = settings.AUTH_RATE_LIMIT_LOGIN_LIMIT
+        window_seconds = settings.AUTH_RATE_LIMIT_LOGIN_WINDOW_SECONDS
+        if not allow_request(
+            scope="auth.login",
+            key_parts=[client_ip, submitted_username],
+            limit=limit,
+            window_seconds=window_seconds,
+        ):
+            form = self.get_form()
+            form.add_error(None, "Too many login attempts. Please try again later.")
+
+            endpoint = request.resolver_match.view_name if request.resolver_match is not None else "login"
+            _emit_rate_limit_denial_log(
+                request,
+                endpoint=endpoint,
+                limit=limit,
+                window_seconds=window_seconds,
+                subject=submitted_username,
+            )
+
+            response = self.form_invalid(form)
+            response.status_code = 429
+            return response
+
+        return super().post(request, *args, **kwargs)
 
     @override
     def get_success_url(self) -> str:
@@ -114,6 +199,31 @@ def password_reset_request(request: HttpRequest) -> HttpResponse:
         return redirect("home")
 
     form = PasswordResetRequestForm(request.POST or None)
+    if request.method == "POST":
+        client_ip = _rate_limit_client_ip(request)
+        submitted_identifier = _normalize_str(request.POST.get("username_or_email")).lower()
+
+        limit = settings.AUTH_RATE_LIMIT_PASSWORD_RESET_LIMIT
+        window_seconds = settings.AUTH_RATE_LIMIT_PASSWORD_RESET_WINDOW_SECONDS
+        if not allow_request(
+            scope="auth.password_reset_request",
+            key_parts=[client_ip, submitted_identifier],
+            limit=limit,
+            window_seconds=window_seconds,
+        ):
+            form.add_error(None, "Too many password reset attempts. Please try again later.")
+
+            endpoint = request.resolver_match.view_name if request.resolver_match is not None else "password-reset"
+            _emit_rate_limit_denial_log(
+                request,
+                endpoint=endpoint,
+                limit=limit,
+                window_seconds=window_seconds,
+                subject=submitted_identifier,
+            )
+
+            return render(request, "core/password_reset_request.html", {"form": form}, status=429)
+
     if request.method == "POST" and form.is_valid():
         identifier = form.cleaned_data["username_or_email"]
         user = find_user_for_password_reset(identifier)

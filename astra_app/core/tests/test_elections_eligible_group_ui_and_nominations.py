@@ -8,7 +8,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from core.backends import FreeIPAMisconfiguredError
+from core.freeipa.exceptions import FreeIPAMisconfiguredError
 from core.models import Candidate, Election, FreeIPAPermissionGrant, Membership, MembershipType
 from core.permissions import ASTRA_ADD_ELECTION
 
@@ -90,7 +90,7 @@ class ElectionEligibleGroupUiAndNominationTests(TestCase):
         )
 
         with patch(
-            "core.backends.get_freeipa_group_for_elections",
+            "core.elections_eligibility.get_freeipa_group_for_elections",
             side_effect=_group_lookup_by_cn(restricted_group, committee_group),
         ):
             url = reverse("election-eligible-users-search", args=[election.id])
@@ -134,7 +134,7 @@ class ElectionEligibleGroupUiAndNominationTests(TestCase):
         )
 
         with patch(
-            "core.backends.get_freeipa_group_for_elections",
+            "core.elections_eligibility.get_freeipa_group_for_elections",
             side_effect=_group_lookup_by_cn(restricted_group, committee_group),
         ):
             url = reverse("election-eligible-users-search", args=[election.id])
@@ -210,7 +210,7 @@ class ElectionEligibleGroupUiAndNominationTests(TestCase):
         }
 
         with patch(
-            "core.backends.get_freeipa_group_for_elections",
+            "core.elections_eligibility.get_freeipa_group_for_elections",
             side_effect=_group_lookup_by_cn(restricted_group, committee_group),
         ):
             resp = self.client.post(reverse("election-edit", args=[election.id]), data=post_data)

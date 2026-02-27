@@ -7,7 +7,7 @@ from django.urls import reverse
 from django.utils import timezone
 from post_office.models import EmailTemplate
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import AccountInvitation, Election, FreeIPAPermissionGrant, MembershipRequest, MembershipType
 from core.permissions import ASTRA_ADD_ELECTION, ASTRA_ADD_MEMBERSHIP, ASTRA_ADD_SEND_MAIL
 from core.tests.utils_test_data import ensure_core_categories
@@ -89,7 +89,7 @@ class Phase9ServerRenderedContractsTests(TestCase):
             accepted_at=timezone.now(),
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=self._reviewer()):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer()):
             requests_resp = self.client.get(reverse("membership-requests"))
             invitations_resp = self.client.get(reverse("account-invitations"))
 
@@ -138,7 +138,7 @@ class Phase9ServerRenderedContractsTests(TestCase):
             status=MembershipRequest.Status.pending,
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=self._reviewer()):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer()):
             resp = self.client.get(reverse("membership-requests"))
 
         self.assertEqual(resp.status_code, 200)
@@ -191,7 +191,7 @@ class Phase9ServerRenderedContractsTests(TestCase):
             html_content="<p>HTML</p>",
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=self._reviewer()):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer()):
             send_mail_resp = self.client.get(reverse("send-mail"))
             election_edit_resp = self.client.get(reverse("election-edit", args=[election.pk]))
             template_edit_resp = self.client.get(reverse("email-template-edit", kwargs={"template_id": template.pk}))

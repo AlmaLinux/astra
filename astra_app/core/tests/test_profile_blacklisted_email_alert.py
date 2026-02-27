@@ -4,7 +4,7 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 
 
 class ProfileBlacklistedEmailAlertTests(TestCase):
@@ -47,7 +47,7 @@ class ProfileBlacklistedEmailAlertTests(TestCase):
 
         # Self view: should see the alert + link.
         self._login_as_freeipa("bob")
-        with patch("core.backends.FreeIPAUser.get", side_effect=fake_get):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=fake_get):
             resp = self.client.get(reverse("user-profile", kwargs={"username": "bob"}))
 
         self.assertEqual(resp.status_code, 200)
@@ -58,7 +58,7 @@ class ProfileBlacklistedEmailAlertTests(TestCase):
 
         # Other user view: should not see the alert.
         self._login_as_freeipa("viewer")
-        with patch("core.backends.FreeIPAUser.get", side_effect=fake_get):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=fake_get):
             resp = self.client.get(reverse("user-profile", kwargs={"username": "bob"}))
 
         self.assertEqual(resp.status_code, 200)

@@ -4,12 +4,12 @@ from django.core.cache import cache
 from django.test import TestCase
 from python_freeipa import exceptions
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 
 
 def _clear_service_client_cache() -> None:
     # Import lazily so the tests remain robust if internals move.
-    from core.backends import clear_freeipa_service_client_cache
+    from core.freeipa.client import clear_freeipa_service_client_cache
 
     clear_freeipa_service_client_cache()
 
@@ -28,7 +28,7 @@ class FreeIPAServiceClientRetryTests(TestCase):
         second_client.user_find.return_value = {"result": [{"uid": ["alice"]}]}
 
         with patch(
-            "core.backends.FreeIPAUser.get_client",
+            "core.freeipa.user.FreeIPAUser.get_client",
             autospec=True,
             side_effect=[first_client, second_client],
         ) as get_client:
@@ -45,7 +45,7 @@ class FreeIPAServiceClientRetryTests(TestCase):
         second_client.user_show.return_value = {"result": {"uid": ["alice"], "mail": ["a@example.com"]}}
 
         with patch(
-            "core.backends.FreeIPAUser.get_client",
+            "core.freeipa.user.FreeIPAUser.get_client",
             autospec=True,
             side_effect=[first_client, second_client],
         ) as get_client:
@@ -58,7 +58,7 @@ class FreeIPAServiceClientRetryTests(TestCase):
 
     def test_get_raises_on_password_expired(self) -> None:
         with patch(
-            "core.backends._get_freeipa_client",
+            "core.freeipa.client._get_freeipa_client",
             autospec=True,
             side_effect=exceptions.PasswordExpired(),
         ):

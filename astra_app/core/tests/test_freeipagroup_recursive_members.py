@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from django.test import TestCase
 
-from core.backends import FreeIPAGroup
+from core.freeipa.group import FreeIPAGroup
 
 
 class FreeIPAGroupRecursiveMembersTests(TestCase):
@@ -39,7 +39,7 @@ class FreeIPAGroupRecursiveMembersTests(TestCase):
         def _fake_get(cn: str):
             return {"parent": parent, "child": child, "grand": grand}.get(cn)
 
-        with patch("core.backends.FreeIPAGroup.get", side_effect=_fake_get):
+        with patch("core.freeipa.group.FreeIPAGroup.get", side_effect=_fake_get):
             usernames = parent.member_usernames_recursive()
 
         self.assertEqual(usernames, {"alice", "bob", "carol"})
@@ -77,7 +77,7 @@ class FreeIPAGroupRecursiveMembersTests(TestCase):
         def _fake_get(cn: str):
             return {"child": child, "legacy": legacy}.get(cn)
 
-        with patch("core.backends.FreeIPAGroup.get", side_effect=_fake_get):
+        with patch("core.freeipa.group.FreeIPAGroup.get", side_effect=_fake_get):
             usernames = parent.member_usernames_recursive(fas_only=True)
 
         self.assertEqual(usernames, {"alice", "bob"})

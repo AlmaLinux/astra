@@ -8,7 +8,9 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from core.backends import FreeIPAGroup, FreeIPAMisconfiguredError, FreeIPAUser
+from core.freeipa.exceptions import FreeIPAMisconfiguredError
+from core.freeipa.group import FreeIPAGroup
+from core.freeipa.user import FreeIPAUser
 from core.models import (
     Candidate,
     Election,
@@ -19,9 +21,16 @@ from core.models import (
     MembershipType,
 )
 from core.permissions import ASTRA_ADD_ELECTION
+from core.tests.utils_test_data import ensure_core_categories
 
 
-class ElectionsListNewElectionButtonTests(TestCase):
+class _CoreCategoriesTestCase(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        ensure_core_categories()
+
+
+class ElectionsListNewElectionButtonTests(_CoreCategoriesTestCase):
     def _login_as_freeipa_user(self, username: str) -> None:
         session = self.client.session
         session["_freeipa_username"] = username
@@ -42,7 +51,7 @@ class ElectionsListNewElectionButtonTests(TestCase):
             status=Election.Status.open,
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             resp = self.client.get(reverse("elections"))
         self.assertEqual(resp.status_code, 200)
         self.assertNotContains(resp, reverse("election-edit", args=[0]))
@@ -71,7 +80,7 @@ class ElectionsListNewElectionButtonTests(TestCase):
         self.assertContains(resp, reverse("election-edit", args=[0]))
 
 
-class ElectionEditPermissionTests(TestCase):
+class ElectionEditPermissionTests(_CoreCategoriesTestCase):
     def _login_as_freeipa_user(self, username: str) -> None:
         session = self.client.session
         session["_freeipa_username"] = username
@@ -87,7 +96,7 @@ class ElectionEditPermissionTests(TestCase):
         self._login_as_freeipa_user("viewer")
 
         viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "memberof_group": []})
-        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             resp = self.client.get(
                 reverse("election-eligible-users-search", args=[0]),
                 data={"q": "al"},
@@ -183,7 +192,7 @@ class ElectionEditPermissionTests(TestCase):
         )
 
 
-class ElectionDraftDeletionTests(TestCase):
+class ElectionDraftDeletionTests(_CoreCategoriesTestCase):
     def _login_as_freeipa_user(self, username: str) -> None:
         session = self.client.session
         session["_freeipa_username"] = username
@@ -493,7 +502,7 @@ class ElectionDraftDeletionTests(TestCase):
                 raise FreeIPAMisconfiguredError("Unknown group")
             return committee_group
 
-        with patch("core.backends.get_freeipa_group_for_elections", side_effect=_get_group):
+        with patch("core.elections_eligibility.get_freeipa_group_for_elections", side_effect=_get_group):
             resp = self.client.post(
                 reverse("election-edit", args=[0]),
                 data={
@@ -687,7 +696,7 @@ class ElectionDraftDeletionTests(TestCase):
 
 
 
-class ElectionEditCandidateSelect2LabelTests(TestCase):
+class ElectionEditCandidateSelect2LabelTests(_CoreCategoriesTestCase):
     def _login_as_freeipa_user(self, username: str) -> None:
         session = self.client.session
         session["_freeipa_username"] = username
@@ -729,7 +738,7 @@ class ElectionEditCandidateSelect2LabelTests(TestCase):
                 return FreeIPAUser("bob", {"uid": ["bob"], "displayname": ["Bob Example"], "memberof_group": []})
             return None
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_fake_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_fake_user):
             resp = self.client.get(reverse("election-edit", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)
@@ -740,7 +749,7 @@ class ElectionEditCandidateSelect2LabelTests(TestCase):
 
         self.assertIn('value="bob"', html)
         self.assertIn(">Bob Example (bob)<", html)
-class ElectionEditExclusionGroupsSelectTests(TestCase):
+class ElectionEditExclusionGroupsSelectTests(_CoreCategoriesTestCase):
     def _login_as_freeipa_user(self, username: str) -> None:
         session = self.client.session
         session["_freeipa_username"] = username
@@ -828,7 +837,7 @@ class ElectionEditExclusionGroupsSelectTests(TestCase):
                 return FreeIPAUser("alice", {"uid": ["alice"], "displayname": ["Alice Example"], "memberof_group": []})
             return None
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_fake_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_fake_user):
             resp = self.client.get(reverse("election-edit", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)
@@ -887,7 +896,7 @@ class ElectionEditExclusionGroupsSelectTests(TestCase):
 
 
 @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=1)
-class ElectionEditCreateModeGroupSelectionTests(TestCase):
+class ElectionEditCreateModeGroupSelectionTests(_CoreCategoriesTestCase):
     def _login_as_freeipa_user(self, username: str) -> None:
         session = self.client.session
         session["_freeipa_username"] = username
@@ -933,7 +942,7 @@ class ElectionEditCreateModeGroupSelectionTests(TestCase):
                 raise FreeIPAMisconfiguredError("Unknown group")
             return committee_group
 
-        with patch("core.backends.get_freeipa_group_for_elections", side_effect=_get_group):
+        with patch("core.elections_eligibility.get_freeipa_group_for_elections", side_effect=_get_group):
             resp = self.client.post(
                 reverse("election-edit", args=[0]),
                 data={
@@ -986,7 +995,7 @@ class ElectionEditCreateModeGroupSelectionTests(TestCase):
 
 
 @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=1)
-class ElectionCommitteeDisqualificationDraftTests(TestCase):
+class ElectionCommitteeDisqualificationDraftTests(_CoreCategoriesTestCase):
     def _login_as_freeipa_user(self, username: str) -> None:
         session = self.client.session
         session["_freeipa_username"] = username
@@ -1035,8 +1044,8 @@ class ElectionCommitteeDisqualificationDraftTests(TestCase):
             return FreeIPAUser(username, {"uid": [username], "memberof_group": []})
 
         with (
-            patch("core.backends.get_freeipa_group_for_elections", side_effect=_get_group),
-            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.elections_eligibility.get_freeipa_group_for_elections", side_effect=_get_group),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
         ):
             resp = self.client.post(
                 reverse("election-edit", args=[0]),
@@ -1103,8 +1112,8 @@ class ElectionCommitteeDisqualificationDraftTests(TestCase):
             return FreeIPAUser(username, {"uid": [username], "memberof_group": []})
 
         with (
-            patch("core.backends.get_freeipa_group_for_elections", side_effect=_get_group),
-            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.elections_eligibility.get_freeipa_group_for_elections", side_effect=_get_group),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
         ):
             resp = self.client.post(
                 reverse("election-edit", args=[0]),

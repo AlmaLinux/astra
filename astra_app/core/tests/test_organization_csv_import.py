@@ -12,8 +12,8 @@ from import_export.formats import base_formats
 from tablib import Dataset
 
 from core.admin import OrganizationCSVImportLinkAdmin
-from core.backends import FreeIPAUser
 from core.csv_import_utils import extract_csv_headers_from_uploaded_file
+from core.freeipa.user import FreeIPAUser
 from core.models import Organization, OrganizationCSVImportLink
 from core.organization_csv_import import OrganizationCSVImportResource
 
@@ -723,7 +723,7 @@ class OrganizationCSVImportAdminFlowTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=get_user),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=get_user),
             patch("core.organization_csv_import.FreeIPAUser.all", return_value=[admin_user, representative]),
             patch("core.organization_csv_import.FreeIPAUser.get", side_effect=get_user),
             patch("core.organization_csv_import.FreeIPAUser.find_usernames_by_email", return_value=[]),
@@ -795,7 +795,7 @@ class OrganizationCSVImportAdminFlowTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=admin_user),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
             patch("core.organization_csv_import.FreeIPAUser.all", return_value=[admin_user]),
             patch("core.organization_csv_import.FreeIPAUser.get", return_value=admin_user),
             patch("core.organization_csv_import.FreeIPAUser.find_usernames_by_email", return_value=[]),
@@ -823,7 +823,7 @@ class OrganizationCSVImportAdminFlowTests(TestCase):
 
         admin_user = FreeIPAUser("alex", {"uid": ["alex"], "mail": ["alex@example.com"], "memberof_group": ["admins"]})
 
-        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
             response = self.client.get(reverse("admin:core_organizationcsvimportlink_import"))
 
         self.assertEqual(response.status_code, 200)
@@ -836,7 +836,7 @@ class OrganizationCSVImportAdminFlowTests(TestCase):
 
         admin_user = FreeIPAUser("alex", {"uid": ["alex"], "mail": ["alex@example.com"], "memberof_group": ["admins"]})
 
-        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
             response = self.client.get(reverse("admin:core_organizationcsvimportlink_import"))
 
         self.assertEqual(response.status_code, 200)
@@ -848,7 +848,7 @@ class OrganizationCSVImportAdminFlowTests(TestCase):
 
         admin_user = FreeIPAUser("alex", {"uid": ["alex"], "mail": ["alex@example.com"], "memberof_group": ["admins"]})
 
-        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
             response = self.client.get(reverse("admin:core_organizationcsvimportlink_import"))
 
         self.assertEqual(response.status_code, 200)
@@ -891,7 +891,7 @@ class OrganizationCSVImportAdminFlowTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=get_user),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=get_user),
             patch("core.organization_csv_import.FreeIPAUser.all", return_value=[admin_user, representative]),
             patch("core.organization_csv_import.FreeIPAUser.get", side_effect=get_user),
             patch("core.organization_csv_import.FreeIPAUser.find_usernames_by_email", return_value=[]),
@@ -967,7 +967,7 @@ class OrganizationCSVImportAdminFlowTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=get_user),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=get_user),
             patch("core.organization_csv_import.FreeIPAUser.all", return_value=[admin_user, representative]),
             patch("core.organization_csv_import.FreeIPAUser.get", side_effect=get_user),
             patch("core.organization_csv_import.FreeIPAUser.find_usernames_by_email", return_value=["alice", "bob"]),
@@ -1027,7 +1027,7 @@ class OrganizationCSVImportAdminFlowTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=get_user),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=get_user),
             patch("core.organization_csv_import.FreeIPAUser.all", return_value=[admin_user, representative]),
             patch("core.organization_csv_import.FreeIPAUser.get", side_effect=get_user),
             patch("core.organization_csv_import.FreeIPAUser.find_usernames_by_email", return_value=[]),

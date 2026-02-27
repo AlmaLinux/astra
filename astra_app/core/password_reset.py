@@ -8,8 +8,8 @@ from django.http import HttpRequest
 from django.urls import reverse
 from django.utils import timezone
 
-from core.backends import FreeIPAUser
 from core.email_context import user_email_context
+from core.freeipa.user import FreeIPAUser
 from core.templated_email import queue_templated_email
 from core.tokens import make_signed_token, read_signed_token
 from core.views_utils import _normalize_str

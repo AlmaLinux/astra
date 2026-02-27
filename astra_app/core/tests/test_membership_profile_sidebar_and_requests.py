@@ -10,30 +10,39 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
+from core.membership_log_side_effects import apply_membership_log_side_effects
 from core.models import FreeIPAPermissionGrant
 from core.permissions import (
     ASTRA_ADD_MEMBERSHIP,
     ASTRA_CHANGE_MEMBERSHIP,
     ASTRA_DELETE_MEMBERSHIP,
     ASTRA_VIEW_MEMBERSHIP,
+    ASTRA_VIEW_USER_DIRECTORY,
 )
-from core.tests.utils_test_data import ensure_core_categories
+from core.tests.utils_test_data import ensure_core_categories, ensure_email_templates
 
 
 class MembershipProfileSidebarAndRequestsTests(TestCase):
     def setUp(self) -> None:
         super().setUp()
         ensure_core_categories()
+        ensure_email_templates()
 
-        self._coc_patcher = patch("core.views_membership.block_action_without_coc", return_value=None)
+        self._coc_patcher = patch("core.views_membership.user.block_action_without_coc", return_value=None)
         self._coc_patcher.start()
         self.addCleanup(self._coc_patcher.stop)
-        self._country_patcher = patch("core.views_membership.block_action_without_country_code", return_value=None)
+        self._country_patcher = patch("core.views_membership.user.block_action_without_country_code", return_value=None)
         self._country_patcher.start()
         self.addCleanup(self._country_patcher.stop)
 
-        for perm in (ASTRA_ADD_MEMBERSHIP, ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP):
+        for perm in (
+            ASTRA_ADD_MEMBERSHIP,
+            ASTRA_CHANGE_MEMBERSHIP,
+            ASTRA_DELETE_MEMBERSHIP,
+            ASTRA_VIEW_MEMBERSHIP,
+            ASTRA_VIEW_USER_DIRECTORY,
+        ):
             FreeIPAPermissionGrant.objects.get_or_create(
                 permission=perm,
                 principal_type=FreeIPAPermissionGrant.PrincipalType.group,
@@ -68,6 +77,13 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             },
         )
 
+    def _create_membership_log_with_side_effects(self, **kwargs):
+        from core.models import MembershipLog
+
+        log = MembershipLog.objects.create(**kwargs)
+        apply_membership_log_side_effects(log=log)
+        return log
+
     def test_profile_shows_request_link_when_no_membership(self) -> None:
         from core.models import MembershipType
 
@@ -85,7 +101,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         alice = self._make_user("alice", full_name="Alice User")
         self._login_as_freeipa_user("alice")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             with patch("core.views_users._get_full_user", return_value=alice):
                 with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
                     with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
@@ -113,7 +129,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         alice = self._make_user("alice", full_name="Alice User")
         self._login_as_freeipa_user("alice")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             with patch("core.views_users._get_full_user", return_value=alice):
                 with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
                     with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
@@ -151,7 +167,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch("core.views_users._get_full_user", return_value=alice):
                 with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
                     with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
@@ -183,7 +199,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             decided_by_username="reviewer",
         )
 
-        MembershipLog.objects.create(
+        self._create_membership_log_with_side_effects(
             actor_username="reviewer",
             target_username="alice",
             membership_type_id=mt.code,
@@ -206,7 +222,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch("core.views_users._get_full_user", return_value=alice):
                 with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
                     with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
@@ -267,7 +283,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             },
         )
 
-        MembershipLog.objects.create(
+        self._create_membership_log_with_side_effects(
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
@@ -288,7 +304,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch("core.views_users._get_full_user", return_value=alice):
                 with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
                     with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
@@ -383,7 +399,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         alice = self._make_user("alice", full_name="Alice User")
         self._login_as_freeipa_user("alice")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             with patch("core.views_users._get_full_user", return_value=alice):
                 with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
                     with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
@@ -409,7 +425,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         )
 
         now = timezone.now()
-        MembershipLog.objects.create(
+        self._create_membership_log_with_side_effects(
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
@@ -421,7 +437,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         alice = self._make_user("alice", full_name="Alice User")
         self._login_as_freeipa_user("alice")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             with patch("core.views_users._get_full_user", return_value=alice):
                 with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
                     with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
@@ -432,7 +448,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertContains(resp, reverse("membership-request") + "?membership_type=individual")
 
         # Verify prefill: visiting with ?membership_type=individual should select that option.
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             resp_request = self.client.get(
                 reverse("membership-request") + "?membership_type=individual"
             )
@@ -466,7 +482,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             },
         )
 
-        MembershipLog.objects.create(
+        self._create_membership_log_with_side_effects(
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
@@ -478,7 +494,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         alice = self._make_user("alice", full_name="Alice User")
         self._login_as_freeipa_user("alice")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             with patch("core.views_users._get_full_user", return_value=alice):
                 with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
                     with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
@@ -517,7 +533,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         alice = self._make_user("alice", full_name="Alice User")
         self._login_as_freeipa_user("alice")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             resp = self.client.get(
                 reverse("membership-request") + "?membership_type=mirror"
             )
@@ -546,7 +562,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         )
 
         now = timezone.now()
-        MembershipLog.objects.create(
+        self._create_membership_log_with_side_effects(
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
@@ -554,7 +570,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             action=MembershipLog.Action.approved,
             expires_at=now + datetime.timedelta(days=200),
         )
-        MembershipLog.objects.create(
+        self._create_membership_log_with_side_effects(
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
@@ -584,7 +600,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             },
         )
 
-        MembershipLog.objects.create(
+        self._create_membership_log_with_side_effects(
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
@@ -596,12 +612,12 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         alice = self._make_user("alice", full_name="Alice User")
         self._login_as_freeipa_user("alice")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             resp_get = self.client.get(reverse("membership-request"))
         self.assertEqual(resp_get.status_code, 200)
         self.assertNotContains(resp_get, 'value="individual"')
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             resp_post = self.client.post(
                 reverse("membership-request"),
                 data={"membership_type": "individual"},
@@ -633,7 +649,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             },
         )
 
-        MembershipLog.objects.create(
+        self._create_membership_log_with_side_effects(
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
@@ -645,7 +661,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         alice = self._make_user("alice", full_name="Alice User")
         self._login_as_freeipa_user("alice")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             with patch("core.views_users._get_full_user", return_value=alice):
                 with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
                     with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
@@ -668,7 +684,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             },
         )
 
-        MembershipLog.objects.create(
+        self._create_membership_log_with_side_effects(
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
@@ -690,7 +706,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_mock:
                 with patch("post_office.mail.send", autospec=True) as send_mock:
                     resp = self.client.post(
@@ -728,7 +744,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             },
         )
 
-        MembershipLog.objects.create(
+        self._create_membership_log_with_side_effects(
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
@@ -750,7 +766,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.post(
                 reverse(
                     "membership-set-expiry",
@@ -796,7 +812,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             with patch("core.views_users.FreeIPAUser.all", autospec=True, return_value=[]):
                 resp0 = self.client.get(reverse("users"))
 
@@ -806,7 +822,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             with patch("core.views_users.FreeIPAUser.all", autospec=True, return_value=[]):
                 resp1 = self.client.get(reverse("users"))
 
@@ -819,7 +835,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             with patch("core.views_users.FreeIPAUser.all", autospec=True, return_value=[]):
                 resp = self.client.get(reverse("users"))
 
@@ -831,7 +847,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             with patch("core.views_users.FreeIPAUser.all", autospec=True, return_value=[]):
                 resp = self.client.get(reverse("users"))
 
@@ -866,7 +882,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(reverse("membership-requests"))
 
         self.assertEqual(resp.status_code, 200)
@@ -899,7 +915,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(reverse("membership-requests"))
 
         self.assertEqual(resp.status_code, 200)
@@ -939,7 +955,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(reverse("membership-requests"))
 
         self.assertEqual(resp.status_code, 200)
@@ -972,7 +988,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(reverse("membership-request-detail", args=[req.pk]))
 
         self.assertEqual(resp.status_code, 200)
@@ -1016,7 +1032,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
             patch("core.views_users._get_full_user", return_value=alice),
             patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]),
             patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
@@ -1061,7 +1077,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self._login_as_freeipa_user("viewer")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=viewer),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer),
             patch("core.views_users._get_full_user", return_value=alice),
             patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]),
             patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
@@ -1123,7 +1139,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
             patch("core.views_users._get_full_user", return_value=alice),
             patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]),
             patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
@@ -1136,7 +1152,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertNotContains(resp, 'data-note-action="vote_approve"')
         self.assertNotContains(resp, 'data-note-action="vote_disapprove"')
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.post(
                 reverse("membership-notes-aggregate-note-add"),
                 data={
@@ -1202,7 +1218,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(reverse("membership-requests"))
 
         self.assertEqual(resp.status_code, 200)
@@ -1241,7 +1257,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(reverse("membership-requests"))
 
         self.assertEqual(resp.status_code, 200)
@@ -1268,7 +1284,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
                 reverse("membership-request-note-add", args=[req.pk]),
                 data={
@@ -1306,7 +1322,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
                 reverse("membership-request-note-add", args=[req.pk]),
                 data={
@@ -1345,7 +1361,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self._login_as_freeipa_user("reviewer")
 
         next_url = reverse("membership-requests")
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
                 reverse("membership-request-note-add", args=[req.pk]),
                 data={
@@ -1386,14 +1402,14 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         alice = self._make_user("alice", full_name="Alice User")
         self._login_as_freeipa_user("alice")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             resp_get = self.client.get(reverse("membership-request"))
 
         self.assertEqual(resp_get.status_code, 200)
         self.assertContains(resp_get, 'value="individual"')
         self.assertContains(resp_get, 'value="mirror"')
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             resp_post_invalid = self.client.post(
                 reverse("membership-request"),
                 data={"membership_type": "mirror"},
@@ -1407,7 +1423,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             ).exists()
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             resp_post_valid = self.client.post(
                 reverse("membership-request"),
                 data={
@@ -1472,7 +1488,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         alice = self._make_user("alice", full_name="Alice User")
         self._login_as_freeipa_user("alice")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             resp = self.client.get(reverse("membership-request"))
 
         self.assertEqual(resp.status_code, 200)
@@ -1518,7 +1534,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         alice = self._make_user("alice", full_name="Alice User")
         self._login_as_freeipa_user("alice")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             resp = self.client.get(reverse("membership-request"))
 
         self.assertEqual(resp.status_code, 200)
@@ -1555,7 +1571,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             },
         )
 
-        MembershipLog.objects.create(
+        self._create_membership_log_with_side_effects(
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
@@ -1567,7 +1583,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         alice = self._make_user("alice", full_name="Alice User")
         self._login_as_freeipa_user("alice")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             resp = self.client.get(reverse("membership-request"))
 
         self.assertEqual(resp.status_code, 200)
@@ -1594,7 +1610,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             },
         )
 
-        MembershipLog.objects.create(
+        self._create_membership_log_with_side_effects(
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
@@ -1606,7 +1622,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         alice = self._make_user("alice", full_name="Alice User")
         self._login_as_freeipa_user("alice")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             resp = self.client.get(reverse("membership-request"))
 
         self.assertEqual(resp.status_code, 200)
@@ -1635,7 +1651,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         alice = self._make_user("alice", full_name="Alice User")
         self._login_as_freeipa_user("alice")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             resp = self.client.get(reverse("membership-request"))
 
         self.assertEqual(resp.status_code, 200)
@@ -1660,7 +1676,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         alice = self._make_user("alice", full_name="Alice User")
         self._login_as_freeipa_user("alice")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             resp_post_invalid = self.client.post(
                 reverse("membership-request"),
                 data={
@@ -1717,7 +1733,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("membership-request-detail", args=[req.pk]))
 
         self.assertEqual(resp.status_code, 200)
@@ -1743,7 +1759,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         base_time = timezone.now()
         for i in range(51):
-            MembershipLog.objects.create(
+            self._create_membership_log_with_side_effects(
                 actor_username="reviewer",
                 target_username=f"user{i}",
                 membership_type=mt,
@@ -1756,13 +1772,13 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp_page_1 = self.client.get(reverse("membership-audit-log"))
         self.assertEqual(resp_page_1.status_code, 200)
         self.assertContains(resp_page_1, "user50")
         self.assertNotContains(resp_page_1, "user0")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp_page_2 = self.client.get(reverse("membership-audit-log") + "?page=2")
         self.assertEqual(resp_page_2.status_code, 200)
         self.assertContains(resp_page_2, "user0")
@@ -1781,7 +1797,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             },
         )
 
-        MembershipLog.objects.create(
+        self._create_membership_log_with_side_effects(
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
@@ -1794,14 +1810,14 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp_all = self.client.get(reverse("membership-audit-log"))
 
         self.assertEqual(resp_all.status_code, 200)
         self.assertContains(resp_all, "Membership Audit Log")
         self.assertContains(resp_all, "alice")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp_user = self.client.get(reverse("membership-audit-log-user", kwargs={"username": "alice"}))
 
         self.assertEqual(resp_user.status_code, 200)
@@ -1826,7 +1842,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             membership_type_id="individual",
             responses=[{"Contributions": "Patch submissions"}],
         )
-        MembershipLog.objects.create(
+        self._create_membership_log_with_side_effects(
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
@@ -1839,7 +1855,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("membership-audit-log"))
 
         self.assertEqual(resp.status_code, 200)
@@ -1854,7 +1870,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("membership-audit-log"))
 
         self.assertEqual(resp.status_code, 200)
@@ -1887,7 +1903,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             return None
 
         self._login_as_freeipa_user("reviewer")
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch("core.views_users._get_full_user", return_value=alice):
                 with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
                     with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
@@ -1914,7 +1930,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         now = timezone.now()
         # Membership expires in 50 days — within the "expiring soon" window.
-        MembershipLog.objects.create(
+        self._create_membership_log_with_side_effects(
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
@@ -1933,7 +1949,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         alice = self._make_user("alice", full_name="Alice User")
         self._login_as_freeipa_user("alice")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             with patch("core.views_users._get_full_user", return_value=alice):
                 with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
                     with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
@@ -1961,7 +1977,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         )
 
         now = timezone.now()
-        MembershipLog.objects.create(
+        self._create_membership_log_with_side_effects(
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
@@ -1979,7 +1995,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         alice = self._make_user("alice", full_name="Alice User")
         self._login_as_freeipa_user("alice")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             with patch("core.views_users._get_full_user", return_value=alice):
                 with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
                     with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
@@ -2015,7 +2031,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         )
 
         now = timezone.now()
-        MembershipLog.objects.create(
+        self._create_membership_log_with_side_effects(
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
@@ -2034,7 +2050,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         alice = self._make_user("alice", full_name="Alice User")
         self._login_as_freeipa_user("alice")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             with patch("core.views_users._get_full_user", return_value=alice):
                 with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
                     with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
@@ -2060,7 +2076,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         )
 
         expires_at_utc = timezone.now() + datetime.timedelta(days=2)
-        MembershipLog.objects.create(
+        self._create_membership_log_with_side_effects(
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
@@ -2089,7 +2105,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             return None
 
         self._login_as_freeipa_user("alice")
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch("core.views_users._get_full_user", return_value=alice):
                 with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
                     with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):

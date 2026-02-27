@@ -4,7 +4,7 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 
 
 class AdminDeleteSelectedIPAUserTests(TestCase):
@@ -38,8 +38,8 @@ class AdminDeleteSelectedIPAUserTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_fake_get),
-            patch("core.backends.FreeIPAUser.all", return_value=[target_user]),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_fake_get),
+            patch("core.freeipa.user.FreeIPAUser.all", return_value=[target_user]),
             patch.object(target_user, "delete", return_value=None),
         ):
             url = reverse("admin:auth_ipauser_changelist")

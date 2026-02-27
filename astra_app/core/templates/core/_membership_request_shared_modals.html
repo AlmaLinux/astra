@@ -10,6 +10,8 @@ attributes; the shared JS binding copies values into each modal before opening.
 
 {% include 'core/_modal_confirm.html' with modal_id='shared-approve-modal' title='' action_url='' submit_label='Approve' submit_class='btn-success' show_custom_email_button=True custom_submit_label='Approve with Custom Email' custom_submit_class='btn-outline-success' dynamic_body=True show_request_context=True dialog_style='text-align: left;' %}
 
+{% include 'core/_modal_preset_textarea.html' with modal_id='shared-approve-on-hold-modal' title='' action_url='' field_id='shared-approve-on-hold-justification' field_name='justification' field_label='Override justification:' field_required=True help_text='Required. This note is stored in the membership request audit trail.' submit_label='Approve (Override)' submit_class='btn-success' show_request_context=True dialog_style='text-align: left;' %}
+
 {% make_presets "RFI unanswered" "We were unable to complete the approval process because we did not receive the additional information requested during our review." "Embargoed country" "This decision is due to legal requirements that currently prevent the AlmaLinux OS Foundation from approving applications from certain countries." as reject_presets %}
 {% include 'core/_modal_preset_textarea.html' with modal_id='shared-reject-modal' title='' action_url='' field_id='shared-reject-reason' field_name='reason' field_label='Rejection reason (optional):' help_text='If filled in, this text will be included in the rejection email.' presets=reject_presets submit_label='Reject' submit_class='btn-danger' show_custom_email_button=True custom_submit_label='Reject with Custom Email' custom_submit_class='btn-outline-danger' show_request_context=True dialog_style='text-align: left;' %}
 

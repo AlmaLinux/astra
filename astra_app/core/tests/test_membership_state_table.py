@@ -4,8 +4,22 @@ import datetime
 from django.test import TestCase
 from django.utils import timezone
 
+from core.membership_log_side_effects import apply_membership_log_side_effects
+from core.tests.utils_test_data import ensure_core_categories
+
 
 class MembershipStateTableTests(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        ensure_core_categories()
+
+    def _create_membership_log_with_side_effects(self, **kwargs):
+        from core.models import MembershipLog
+
+        log = MembershipLog.objects.create(**kwargs)
+        apply_membership_log_side_effects(log=log)
+        return log
+
     def test_membership_log_write_updates_membership_state(self) -> None:
         from core.membership import get_valid_memberships
         from core.models import Membership, MembershipLog, MembershipType
@@ -22,7 +36,7 @@ class MembershipStateTableTests(TestCase):
         )
 
         expires_at = timezone.now() + datetime.timedelta(days=30)
-        MembershipLog.objects.create(
+        self._create_membership_log_with_side_effects(
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
@@ -54,7 +68,7 @@ class MembershipStateTableTests(TestCase):
         )
 
         now = timezone.now()
-        MembershipLog.objects.create(
+        self._create_membership_log_with_side_effects(
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
@@ -62,7 +76,7 @@ class MembershipStateTableTests(TestCase):
             action=MembershipLog.Action.approved,
             expires_at=now + datetime.timedelta(days=30),
         )
-        MembershipLog.objects.create(
+        self._create_membership_log_with_side_effects(
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",

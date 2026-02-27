@@ -4,7 +4,8 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAGroup, FreeIPAUser
+from core.freeipa.group import FreeIPAGroup
+from core.freeipa.user import FreeIPAUser
 
 
 class AdminPermissionGrantFormMediaTests(TestCase):
@@ -20,7 +21,7 @@ class AdminPermissionGrantFormMediaTests(TestCase):
         self._login_as_freeipa_admin(admin_username)
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=freeipa_admin),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=freeipa_admin),
             patch(
                 "core.admin.FreeIPAUser.all",
                 return_value=[

@@ -5,8 +5,10 @@ import requests
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.test import Client, RequestFactory, TestCase
 
-from core import backends
-from core.backends import FreeIPAAuthBackend, FreeIPAUser
+from core.freeipa.auth_backend import FreeIPAAuthBackend
+from core.freeipa.client import _build_freeipa_client, _FreeIPATimeoutSession
+from core.freeipa.group import FreeIPAGroup
+from core.freeipa.user import FreeIPAUser
 
 
 class FreeIPABackendBehaviorTests(TestCase):
@@ -23,11 +25,11 @@ class FreeIPABackendBehaviorTests(TestCase):
 
         backend = FreeIPAAuthBackend()
 
-        with patch("core.backends.ClientMeta", autospec=True) as mocked_client_cls:
+        with patch("core.freeipa.client.ClientMeta", autospec=True) as mocked_client_cls:
             mocked_client = mocked_client_cls.return_value
             mocked_client.login.return_value = None
 
-            with patch("core.backends.FreeIPAUser._fetch_full_user", autospec=True) as mocked_fetch:
+            with patch("core.freeipa.user.FreeIPAUser._fetch_full_user", autospec=True) as mocked_fetch:
                 mocked_fetch.return_value = {"uid": ["alice"], "givenname": ["Alice"], "sn": ["User"]}
 
                 user = backend.authenticate(request, username="alice", password="pw")
@@ -42,12 +44,12 @@ class FreeIPABackendBehaviorTests(TestCase):
 
         backend = FreeIPAAuthBackend()
 
-        with patch("core.backends.cache.set", autospec=True) as mocked_cache_set:
-            with patch("core.backends.ClientMeta", autospec=True) as mocked_client_cls:
+        with patch("django.core.cache.cache.set", autospec=True) as mocked_cache_set:
+            with patch("core.freeipa.client.ClientMeta", autospec=True) as mocked_client_cls:
                 mocked_client = mocked_client_cls.return_value
                 mocked_client.login.return_value = None
 
-                with patch("core.backends.FreeIPAUser._fetch_full_user", autospec=True) as mocked_fetch:
+                with patch("core.freeipa.user.FreeIPAUser._fetch_full_user", autospec=True) as mocked_fetch:
                     mocked_fetch.return_value = {"uid": ["alice"]}
                     backend.authenticate(request, username="alice", password="pw")
 
@@ -70,7 +72,7 @@ class FreeIPABackendBehaviorTests(TestCase):
         backend = FreeIPAAuthBackend()
 
         with patch(
-            "core.backends._get_freeipa_client",
+            "core.freeipa.auth_backend._get_freeipa_client",
             autospec=True,
             side_effect=requests.exceptions.ConnectionError(),
         ):
@@ -87,7 +89,7 @@ class FreeIPABackendBehaviorTests(TestCase):
         client = Client()
 
         with patch(
-            "core.backends._get_freeipa_client",
+            "core.freeipa.auth_backend._get_freeipa_client",
             autospec=True,
             side_effect=requests.exceptions.ConnectionError(),
         ):
@@ -134,15 +136,15 @@ class FreeIPABackendBehaviorTests(TestCase):
 
         with (
             patch(
-                "core.backends._with_freeipa_service_client_retry",
+                "core.freeipa.user._with_freeipa_service_client_retry",
                 autospec=True,
                 return_value=freeipa_duplicate_member_response,
             ),
-            patch("core.backends._invalidate_user_cache", autospec=True),
-            patch("core.backends._invalidate_group_cache", autospec=True),
-            patch("core.backends._invalidate_groups_list_cache", autospec=True),
-            patch("core.backends.FreeIPAGroup.get", autospec=True),
-            patch("core.backends.FreeIPAUser.get", autospec=True, return_value=alice),
+            patch("core.freeipa.user._invalidate_user_cache", autospec=True),
+            patch("core.freeipa.group._invalidate_group_cache", autospec=True),
+            patch("core.freeipa.group._invalidate_groups_list_cache", autospec=True),
+            patch("core.freeipa.group.FreeIPAGroup.get", autospec=True),
+            patch("core.freeipa.user.FreeIPAUser.get", autospec=True, return_value=alice),
         ):
             alice.add_to_group("almalinux-individual")
 
@@ -153,8 +155,35 @@ class FreeIPABackendBehaviorTests(TestCase):
                 self.verify_ssl = verify_ssl
                 self._session = None
 
-        with patch("core.backends.ClientMeta", new=FakeClient):
-            client = backends._build_freeipa_client()
+        with patch("core.freeipa.client.ClientMeta", new=FakeClient):
+            client = _build_freeipa_client()
 
-        self.assertIsInstance(client._session, backends._FreeIPATimeoutSession)
+        self.assertIsInstance(client._session, _FreeIPATimeoutSession)
         self.assertEqual(client._session.default_timeout, 10)
+
+    def test_fetch_full_user_does_not_swallow_typeerror(self) -> None:
+        class _Client:
+            def user_show(self, *_args, **_kwargs):
+                raise TypeError("signature mismatch")
+
+            def user_find(self, *_args, **_kwargs):
+                return {"count": 1, "result": [{"uid": ["alice"]}]}
+
+        with self.assertRaises(TypeError):
+            FreeIPAUser._fetch_full_user(_Client(), "alice")
+
+    def test_add_member_group_does_not_fallback_on_typeerror(self) -> None:
+        class _Client:
+            def group_add_member(self, *_args, **_kwargs):
+                raise TypeError("signature mismatch")
+
+        group = FreeIPAGroup("parent", {"cn": ["parent"]})
+
+        with (
+            patch("core.freeipa.group._with_freeipa_service_client_retry", side_effect=lambda _get_client, fn: fn(_Client())),
+            patch("core.freeipa.group.FreeIPAGroup.get", autospec=True, return_value=group),
+            patch("core.freeipa.group._invalidate_group_cache", autospec=True),
+            patch("core.freeipa.group._invalidate_groups_list_cache", autospec=True),
+        ):
+            with self.assertRaises(TypeError):
+                group.add_member_group("child")

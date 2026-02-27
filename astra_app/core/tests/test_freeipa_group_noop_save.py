@@ -4,7 +4,7 @@ from unittest.mock import patch
 from django.test import TestCase
 from python_freeipa import exceptions
 
-from core.backends import FreeIPAGroup
+from core.freeipa.group import FreeIPAGroup
 
 
 class FreeIPAGroupNoOpSaveTests(TestCase):
@@ -19,9 +19,9 @@ class FreeIPAGroupNoOpSaveTests(TestCase):
             return fn(DummyClient())
 
         with (
-            patch("core.backends._with_freeipa_service_client_retry", side_effect=fake_retry),
-            patch("core.backends._invalidate_group_cache"),
-            patch("core.backends._invalidate_groups_list_cache"),
-            patch("core.backends.FreeIPAGroup.get", return_value=group),
+            patch("core.freeipa.group._with_freeipa_service_client_retry", side_effect=fake_retry),
+            patch("core.freeipa.group._invalidate_group_cache"),
+            patch("core.freeipa.group._invalidate_groups_list_cache"),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
         ):
             group.save()

@@ -6,10 +6,16 @@ from django.contrib.contenttypes.models import ContentType
 from django.test import TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAGroup, FreeIPAUser
+from core.freeipa.group import FreeIPAGroup
+from core.freeipa.user import FreeIPAUser
+from core.tests.utils_test_data import ensure_core_categories
 
 
 class AdminMembershipTypeCRUDTests(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        ensure_core_categories()
+
     def _login_as_freeipa_admin(self, username: str = "alice") -> None:
         session = self.client.session
         session["_freeipa_username"] = username
@@ -21,7 +27,7 @@ class AdminMembershipTypeCRUDTests(TestCase):
         self._login_as_freeipa_admin("alice")
         admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})
 
-        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
             url = reverse("admin:core_membershiptype_add")
             resp = self.client.post(
                 url,
@@ -65,7 +71,7 @@ class AdminMembershipTypeCRUDTests(TestCase):
         self._login_as_freeipa_admin("alice")
         admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})
 
-        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
             url = reverse("admin:core_membershiptype_change", args=["partner"])
             resp = self.client.get(url)
 
@@ -85,7 +91,7 @@ class AdminMembershipTypeCRUDTests(TestCase):
         ]
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=admin_user),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
             patch("core.admin.FreeIPAGroup.all", return_value=groups),
         ):
             url = reverse("admin:core_membershiptype_add")

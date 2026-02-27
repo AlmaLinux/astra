@@ -11,7 +11,7 @@ from django.test import RequestFactory, TestCase
 from django.urls import reverse
 
 from core import views_settings, views_users
-from core.backends import FreeIPAFASAgreement
+from core.freeipa.agreement import FreeIPAFASAgreement
 
 
 class AgreementsSelfServiceTests(TestCase):
@@ -38,7 +38,17 @@ class AgreementsSelfServiceTests(TestCase):
             _user_data={"uid": ["alice"], "givenname": ["Alice"], "sn": ["User"]},
         )
 
-        agreements = [FreeIPAFASAgreement("cla", {"cn": ["cla"], "ipaenabledflag": ["TRUE"]})]
+        agreements = [
+            FreeIPAFASAgreement(
+                "cla",
+                {
+                    "cn": ["cla"],
+                    "ipaenabledflag": ["TRUE"],
+                    "memberuser_user": ["alice"],
+                    "description": ["CLA text"],
+                },
+            )
+        ]
         agreement_detail = FreeIPAFASAgreement(
             "cla",
             {
@@ -58,9 +68,9 @@ class AgreementsSelfServiceTests(TestCase):
 
         with patch("core.views_users._get_full_user", autospec=True, return_value=fu):
             with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
-                with patch("core.backends.FreeIPAFASAgreement.all", autospec=True, return_value=agreements):
+                with patch("core.freeipa.agreement.FreeIPAFASAgreement.all", autospec=True, return_value=agreements):
                     with patch(
-                        "core.backends.FreeIPAFASAgreement.get",
+                        "core.freeipa.agreement.FreeIPAFASAgreement.get",
                         autospec=True,
                         return_value=agreement_detail,
                     ):
@@ -88,7 +98,13 @@ class AgreementsSelfServiceTests(TestCase):
         )
 
         # This agreement gates the 'packagers' group and the user has not signed it.
-        agreement_summary = SimpleNamespace(cn="cla", enabled=True, groups=["packagers"], users=[])
+        agreement_summary = SimpleNamespace(
+            cn="cla",
+            enabled=True,
+            groups=["packagers"],
+            users=[],
+            description="CLA text",
+        )
         agreement_full = SimpleNamespace(
             cn="cla",
             enabled=True,
@@ -141,7 +157,18 @@ class AgreementsSelfServiceTests(TestCase):
             _user_data={"uid": ["alice"]},
         )
 
-        agreements = [FreeIPAFASAgreement("cla", {"cn": ["cla"], "ipaenabledflag": ["TRUE"]})]
+        agreements = [
+            FreeIPAFASAgreement(
+                "cla",
+                {
+                    "cn": ["cla"],
+                    "ipaenabledflag": ["TRUE"],
+                    "member_group": ["packagers"],
+                    "memberuser_user": [],
+                    "description": ["CLA text"],
+                },
+            )
+        ]
         agreement_detail = FreeIPAFASAgreement(
             "cla",
             {
@@ -163,9 +190,9 @@ class AgreementsSelfServiceTests(TestCase):
             return HttpResponse("ok")
 
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
-            with patch("core.backends.FreeIPAFASAgreement.all", autospec=True, return_value=agreements):
+            with patch("core.freeipa.agreement.FreeIPAFASAgreement.all", autospec=True, return_value=agreements):
                 with patch(
-                    "core.backends.FreeIPAFASAgreement.get",
+                    "core.freeipa.agreement.FreeIPAFASAgreement.get",
                     autospec=True,
                     return_value=agreement_detail,
                 ):
@@ -190,7 +217,18 @@ class AgreementsSelfServiceTests(TestCase):
             _user_data={"uid": ["alice"]},
         )
 
-        agreements = [FreeIPAFASAgreement("cla", {"cn": ["cla"], "ipaenabledflag": ["TRUE"]})]
+        agreements = [
+            FreeIPAFASAgreement(
+                "cla",
+                {
+                    "cn": ["cla"],
+                    "ipaenabledflag": ["TRUE"],
+                    "member_group": ["packagers"],
+                    "memberuser_user": [],
+                    "description": ["CLA text"],
+                },
+            )
+        ]
         agreement_detail = FreeIPAFASAgreement(
             "cla",
             {
@@ -204,9 +242,9 @@ class AgreementsSelfServiceTests(TestCase):
 
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
             with patch("core.views_settings.has_enabled_agreements", autospec=True, return_value=True):
-                with patch("core.backends.FreeIPAFASAgreement.all", autospec=True, return_value=agreements):
+                with patch("core.freeipa.agreement.FreeIPAFASAgreement.all", autospec=True, return_value=agreements):
                     with patch(
-                        "core.backends.FreeIPAFASAgreement.get",
+                        "core.freeipa.agreement.FreeIPAFASAgreement.get",
                         autospec=True,
                         return_value=agreement_detail,
                     ):
@@ -253,7 +291,7 @@ class AgreementsSelfServiceTests(TestCase):
             with patch("core.views_settings.has_enabled_agreements", autospec=True, return_value=True):
                 with patch("core.views_settings.list_agreements_for_user", autospec=True, return_value=[]):
                     with patch(
-                        "core.backends.FreeIPAFASAgreement.get",
+                        "core.freeipa.agreement.FreeIPAFASAgreement.get",
                         autospec=True,
                         return_value=agreement_detail,
                     ):
@@ -302,7 +340,7 @@ class AgreementsSelfServiceTests(TestCase):
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
             with patch("core.views_settings.has_enabled_agreements", autospec=True, return_value=True):
                 with patch("core.views_settings.list_agreements_for_user", autospec=True, return_value=[]):
-                    with patch("core.backends.FreeIPAFASAgreement.get", autospec=True, return_value=agreement):
+                    with patch("core.freeipa.agreement.FreeIPAFASAgreement.get", autospec=True, return_value=agreement):
                         with patch.object(agreement, "add_user", autospec=True) as mocked_add:
                             resp = views_settings.settings_root(request)
 
@@ -327,7 +365,7 @@ class AgreementsSelfServiceTests(TestCase):
         )
 
         with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
-            with patch("core.backends.FreeIPAFASAgreement.all", autospec=True, return_value=[]):
+            with patch("core.freeipa.agreement.FreeIPAFASAgreement.all", autospec=True, return_value=[]):
                 resp = views_settings.settings_root(request)
 
         self.assertEqual(resp.status_code, 302)

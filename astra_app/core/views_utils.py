@@ -15,10 +15,11 @@ from django.core.paginator import Paginator
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect
 from django.urls import reverse
+from django.utils.http import url_has_allowed_host_and_scheme
 
 from core.agreements import has_enabled_agreements
-from core.backends import FreeIPAFASAgreement
 from core.country_codes import country_code_status_from_user_data
+from core.freeipa.agreement import FreeIPAFASAgreement
 
 logger = logging.getLogger(__name__)
 
@@ -368,3 +369,29 @@ def build_url_for_page(
     else:
         encoded = urlencode(params, doseq=True)
     return f"{base_url}?{encoded}" if encoded else base_url
+
+
+def _resolve_post_redirect(
+    request: HttpRequest,
+    *,
+    default: str,
+    use_referer: bool = False,
+) -> str:
+    """Resolve a safe redirect URL from POST ``next``, optionally the Referer, or *default*."""
+    next_url = str(request.POST.get("next") or "").strip()
+    if next_url and url_has_allowed_host_and_scheme(
+        url=next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return next_url
+    if use_referer:
+        referer = str(request.META.get("HTTP_REFERER") or "").strip()
+        candidate = referer or default
+        if candidate and url_has_allowed_host_and_scheme(
+            url=candidate,
+            allowed_hosts={request.get_host()},
+            require_https=request.is_secure(),
+        ):
+            return candidate
+    return default

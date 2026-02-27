@@ -6,11 +6,11 @@ from unittest.mock import patch
 
 from django.conf import settings
 from django.core.cache import cache
+from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from core.backends import FreeIPAUser
 from core.elections_services import (
     BallotReceipt,
     ElectionError,
@@ -28,6 +28,7 @@ from core.elections_services import (
     submit_ballot,
     tally_election,
 )
+from core.freeipa.user import FreeIPAUser
 from core.models import AuditLogEntry, Ballot, Candidate, Election, Membership, MembershipType, VotingCredential
 from core.tests.ballot_chain import compute_chain_hash
 from core.tests.utils_test_data import ensure_core_categories, ensure_email_templates
@@ -317,6 +318,65 @@ class ElectionCredentialIssuanceAndAnonymizationTests(TestCase):
             event_type="election_anonymized",
         ).latest("id")
         self.assertEqual(audit.is_public, False)
+
+    def test_votingcredential_create_rejects_issuance_after_anonymization(self) -> None:
+        issue_voting_credential(
+            election=self.election,
+            freeipa_username="voter1",
+            weight=1,
+        )
+
+        self.election.status = Election.Status.closed
+        self.election.save(update_fields=["status"])
+        anonymize_election(election=self.election)
+
+        with self.assertRaises(ValidationError):
+            VotingCredential.objects.create(
+                election=self.election,
+                public_id="late-credential-after-anonymize",
+                freeipa_username="late-voter",
+                weight=1,
+            )
+
+    def test_votingcredential_create_rejects_issuance_after_anonymization_without_existing_credentials(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="No credentials before anonymization",
+            description="",
+            start_datetime=now - datetime.timedelta(days=2),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+
+        election.status = Election.Status.closed
+        election.save(update_fields=["status"])
+        anonymize_election(election=election)
+
+        with self.assertRaisesMessage(
+            ValidationError,
+            "cannot issue voting credentials after election anonymization",
+        ):
+            VotingCredential.objects.create(
+                election=election,
+                public_id="late-credential-after-empty-anonymize",
+                freeipa_username="late-voter",
+                weight=1,
+            )
+
+    def test_issue_voting_credential_open_election_skips_anonymized_audit_lookup(self) -> None:
+        with patch(
+            "core.models.AuditLogEntry.objects.filter",
+            side_effect=AssertionError("open-election issuance should not query anonymization audit log"),
+        ):
+            credential = issue_voting_credential(
+                election=self.election,
+                freeipa_username="voter-open-short-circuit",
+                weight=1,
+            )
+
+        self.assertEqual(credential.freeipa_username, "voter-open-short-circuit")
+        self.assertEqual(credential.weight, 1)
 
     def test_send_voting_credential_email_composed_persists_election_context(self) -> None:
         from post_office.models import Email
@@ -1335,7 +1395,7 @@ class ElectionVoteEndpointTests(TestCase):
         url = reverse("election-vote-submit", args=[self.election.id])
 
         voter2 = FreeIPAUser("voter2", {"uid": ["voter2"], "memberof_group": []})
-        with patch("core.backends.FreeIPAUser.get", return_value=voter2):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=voter2):
             response = self.client.post(
                 url,
                 data={
@@ -1391,7 +1451,7 @@ class ElectionVoteEndpointTests(TestCase):
         url = reverse("election-vote-submit", args=[self.election.id])
 
         voter2 = FreeIPAUser("voter2", {"uid": ["voter2"], "memberof_group": []})
-        with patch("core.backends.FreeIPAUser.get", return_value=voter2):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=voter2):
             response = self.client.post(
                 url,
                 data={
@@ -1410,7 +1470,7 @@ class ElectionVoteEndpointTests(TestCase):
         url = reverse("election-vote-submit", args=[self.election.id])
 
         voter1 = FreeIPAUser("voter1", {"uid": ["voter1"], "memberof_group": []})
-        with patch("core.backends.FreeIPAUser.get", return_value=voter1):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=voter1):
             response = self.client.post(
                 url,
                 data={
@@ -1453,7 +1513,7 @@ class ElectionVoteEndpointTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=voter1):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=voter1):
             response = self.client.post(
                 url,
                 data={
@@ -1485,6 +1545,45 @@ class ElectionVoteEndpointTests(TestCase):
         self.assertIn(str(payload.get("ballot_hash") or ""), str(ctx.get("verify_url") or ""))
         self.assertNotIn("ranking", ctx)
 
+    def test_vote_submit_uses_request_user_context_for_receipt_without_extra_lookup(self) -> None:
+        from post_office.models import Email, EmailTemplate
+
+        EmailTemplate.objects.get_or_create(
+            name=settings.ELECTION_VOTE_RECEIPT_EMAIL_TEMPLATE_NAME,
+            defaults={
+                "subject": "Receipt",
+                "content": "Receipt {{ ballot_hash }}",
+                "html_content": "",
+            },
+        )
+
+        self._login_as_freeipa_user("voter1")
+
+        url = reverse("election-vote-submit", args=[self.election.id])
+
+        voter1 = FreeIPAUser(
+            "voter1",
+            {
+                "uid": ["voter1"],
+                "mail": ["voter1@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=voter1) as get_mock:
+            response = self.client.post(
+                url,
+                data={
+                    "credential_public_id": self.cred.public_id,
+                    "ranking": [self.c2.id, self.c1.id],
+                },
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(get_mock.call_count, 1)
+        self.assertEqual(Email.objects.count(), 1)
+
     @override_settings(ELECTION_VOTE_RECEIPT_EMAIL_TEMPLATE_NAME="test-vote-receipt")
     def test_vote_submit_queues_post_office_email_row(self) -> None:
         from post_office.models import Email, EmailTemplate
@@ -1508,7 +1607,7 @@ class ElectionVoteEndpointTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=voter1):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=voter1):
             response = self.client.post(
                 url,
                 data={
@@ -1539,7 +1638,7 @@ class ElectionVoteEndpointTests(TestCase):
         url = reverse("election-vote-submit", args=[self.election.id])
 
         voter1 = FreeIPAUser("voter1", {"uid": ["voter1"], "memberof_group": []})
-        with patch("core.backends.FreeIPAUser.get", return_value=voter1):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=voter1):
             response = self.client.post(
                 url,
                 data={
@@ -1564,7 +1663,7 @@ class ElectionVoteEndpointTests(TestCase):
         url = reverse("election-vote-submit", args=[self.election.id])
 
         voter1 = FreeIPAUser("voter1", {"uid": ["voter1"], "memberof_group": []})
-        with patch("core.backends.FreeIPAUser.get", return_value=voter1):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=voter1):
             missing_resp = self.client.post(
                 url,
                 data={
@@ -1574,7 +1673,7 @@ class ElectionVoteEndpointTests(TestCase):
                 content_type="application/json",
             )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=voter1):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=voter1):
             other_user_resp = self.client.post(
                 url,
                 data={
@@ -1597,7 +1696,7 @@ class ElectionVoteEndpointTests(TestCase):
         url = reverse("election-vote-submit", args=[self.election.id])
 
         voter1 = FreeIPAUser("voter1", {"uid": ["voter1"], "memberof_group": []})
-        with patch("core.backends.FreeIPAUser.get", return_value=voter1):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=voter1):
             response = self.client.post(
                 url,
                 data={
@@ -1615,7 +1714,7 @@ class ElectionVoteEndpointTests(TestCase):
         url = reverse("election-vote-submit", args=[self.election.id])
 
         ineligible = FreeIPAUser("ineligible", {"uid": ["ineligible"], "memberof_group": []})
-        with patch("core.backends.FreeIPAUser.get", return_value=ineligible):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=ineligible):
             response = self.client.post(
                 url,
                 data={
@@ -1639,7 +1738,7 @@ class ElectionVoteEndpointTests(TestCase):
         url = reverse("election-vote-submit", args=[self.election.id])
 
         voter1 = FreeIPAUser("voter1", {"uid": ["voter1"], "memberof_group": []})
-        with patch("core.backends.FreeIPAUser.get", return_value=voter1):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=voter1):
             resp1 = self.client.post(
                 url,
                 data={
@@ -1650,7 +1749,7 @@ class ElectionVoteEndpointTests(TestCase):
             )
         self.assertEqual(resp1.status_code, 200)
 
-        with patch("core.backends.FreeIPAUser.get", return_value=voter1):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=voter1):
             resp2 = self.client.post(
                 url,
                 data={
@@ -1712,7 +1811,7 @@ class ElectionPublicPagesTests(TestCase):
                 return viewer
             return None
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp1 = self.client.get(list_url)
             self.assertEqual(resp1.status_code, 200)
             resp2 = self.client.get(detail_url)
@@ -1750,17 +1849,17 @@ class ElectionPublicPagesTests(TestCase):
                 return nominator
             return None
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             self.assertEqual(self.client.get(vote_url).status_code, 200)
 
         election.status = Election.Status.closed
         election.save(update_fields=["status"])
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             self.assertEqual(self.client.get(vote_url).status_code, 410)
 
         election.status = Election.Status.tallied
         election.save(update_fields=["status"])
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             self.assertEqual(self.client.get(vote_url).status_code, 410)
 
     def test_vote_page_does_not_prefill_credential_from_query_param(self) -> None:
@@ -1795,7 +1894,7 @@ class ElectionPublicPagesTests(TestCase):
                 return nominator
             return None
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(vote_url + "?credential=cred-xyz")
         self.assertEqual(resp.status_code, 200)
         self.assertNotContains(resp, 'value="cred-xyz"')
@@ -1832,7 +1931,7 @@ class ElectionPublicPagesTests(TestCase):
                 return nominator
             return None
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(vote_url)
 
         self.assertEqual(resp.status_code, 200)
@@ -1872,7 +1971,7 @@ class ElectionPublicPagesTests(TestCase):
                 return nominator
             return None
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(vote_url)
 
         self.assertEqual(resp.status_code, 200)
@@ -1917,7 +2016,7 @@ class ElectionPublicPagesTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
             patch("random.shuffle") as shuffle_mock,
         ):
             resp = self.client.get(vote_url)
@@ -1960,7 +2059,7 @@ class ElectionPublicPagesTests(TestCase):
                 return nominator
             return None
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(detail_url)
 
         self.assertEqual(resp.status_code, 200)

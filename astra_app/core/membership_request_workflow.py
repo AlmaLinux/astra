@@ -10,7 +10,6 @@ from django.utils import timezone
 from post_office.models import EmailTemplate
 
 from core.agreements import missing_required_agreements_for_user_in_group
-from core.backends import FreeIPAUser
 from core.email_context import (
     freeform_message_email_context,
     membership_committee_email_context,
@@ -18,6 +17,7 @@ from core.email_context import (
     system_email_context,
     user_email_context_from_user,
 )
+from core.freeipa.user import FreeIPAUser
 from core.membership import (
     FreeIPACallerMode,
     FreeIPAGroupRemovalOutcome,
@@ -25,6 +25,7 @@ from core.membership import (
     remove_organization_representative_from_group_if_present,
     sync_organization_representative_groups,
 )
+from core.membership_log_side_effects import apply_membership_log_side_effects
 from core.membership_notes import add_note
 from core.membership_notifications import organization_sponsor_notification_recipient_email
 from core.models import (
@@ -169,6 +170,15 @@ def _try_record_email_note(
         )
 
 
+def _is_freeipa_noop_error(*, error: Exception, is_add: bool) -> bool:
+    text = str(error or "").strip().lower()
+    if not text:
+        return False
+    if is_add:
+        return "already" in text and "member" in text
+    return "not" in text and "member" in text
+
+
 def _send_membership_request_notification(
     *,
     target: MembershipTarget,
@@ -224,7 +234,7 @@ def _create_status_change_log(
         organization_identifier = membership_request.organization_identifier
         organization_name = membership_request.organization_display_name
 
-    return MembershipLog._create_log(
+    log = MembershipLog._create_log(
         actor_username=actor_username,
         target_username=membership_request.requested_username,
         target_organization=organization,
@@ -235,6 +245,11 @@ def _create_status_change_log(
         action=action,
         rejection_reason=rejection_reason,
     )
+    # Defensive call: current status-change actions routed through this helper
+    # are no-ops for membership side effects, but this preserves safety if a
+    # side-effecting action is routed through this path in the future.
+    apply_membership_log_side_effects(log=log)
+    return log
 
 
 def previous_expires_at_for_extension(
@@ -426,6 +441,8 @@ def approve_membership_request(
     membership_request: MembershipRequest,
     actor_username: str,
     send_approved_email: bool,
+    allow_on_hold_override: bool = False,
+    on_hold_override_justification: str = "",
     approved_email_template_name: str | None = None,
     decided_at: datetime.datetime | None = None,
 ) -> MembershipLog:
@@ -439,7 +456,13 @@ def approve_membership_request(
     decided = decided_at or timezone.now()
     log_prefix = "approve_membership_request"
 
-    if membership_request.status != MembershipRequest.Status.pending:
+    original_status = membership_request.status
+    allowed_statuses = {MembershipRequest.Status.pending}
+    if allow_on_hold_override:
+        allowed_statuses.add(MembershipRequest.Status.on_hold)
+    if original_status not in allowed_statuses:
+        if allow_on_hold_override:
+            raise ValidationError("Only pending or on-hold requests can be approved")
         raise ValidationError("Only pending requests can be approved")
 
     if membership_request.target_kind == MembershipRequest.TargetKind.organization:
@@ -503,12 +526,27 @@ def approve_membership_request(
                 ):
                     old_group_cn = str(old_membership.membership_type.group_cn or "").strip()
                     if old_group_cn:
-                        old_outcome = remove_organization_representative_from_group_if_present(
-                            representative_username=representative.username,
-                            group_cn=old_group_cn,
-                            caller_mode=FreeIPACallerMode.raise_on_error,
-                            missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
-                        )
+                        try:
+                            old_outcome = remove_organization_representative_from_group_if_present(
+                                representative_username=representative.username,
+                                group_cn=old_group_cn,
+                                caller_mode=FreeIPACallerMode.raise_on_error,
+                                missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
+                            )
+                        except Exception as exc:
+                            if _is_freeipa_noop_error(error=exc, is_add=False):
+                                logger.info(
+                                    "astra.membership.freeipa_group.not_member group_cn=%s outcome=noop",
+                                    old_group_cn,
+                                    extra={
+                                        "event": "astra.freeipa.group.mutation",
+                                        "component": "membership",
+                                        "outcome": "not_member",
+                                    },
+                                )
+                                old_outcome = FreeIPAGroupRemovalOutcome.already_not_member
+                            else:
+                                raise
                         if old_outcome == FreeIPAGroupRemovalOutcome.failed:
                             raise Exception("Failed to remove user from old group")
 
@@ -520,16 +558,29 @@ def approve_membership_request(
                         caller_mode=FreeIPACallerMode.raise_on_error,
                         missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
                     )
-                except Exception:
-                    logger.exception(
-                        "%s: add_to_group failed (org representative) request_id=%s org_id=%s representative=%r group_cn=%r",
-                        log_prefix,
-                        membership_request.pk,
-                        org.pk,
-                        representative.username,
-                        membership_type.group_cn,
-                    )
-                    raise
+                except Exception as exc:
+                    if _is_freeipa_noop_error(error=exc, is_add=True) or _is_freeipa_noop_error(error=exc, is_add=False):
+                        noop_outcome = "already_member" if _is_freeipa_noop_error(error=exc, is_add=True) else "not_member"
+                        logger.info(
+                            "astra.membership.freeipa_group.%s group_cn=%s outcome=noop",
+                            noop_outcome,
+                            membership_type.group_cn,
+                            extra={
+                                "event": "astra.freeipa.group.mutation",
+                                "component": "membership",
+                                "outcome": noop_outcome,
+                            },
+                        )
+                    else:
+                        logger.exception(
+                            "%s: add_to_group failed (org representative) request_id=%s org_id=%s representative=%r group_cn=%r",
+                            log_prefix,
+                            membership_request.pk,
+                            org.pk,
+                            representative.username,
+                            membership_type.group_cn,
+                        )
+                        raise
 
         email_context: dict[str, object] = (
             {
@@ -588,15 +639,26 @@ def approve_membership_request(
         )
         try:
             user.add_to_group(group_name=membership_type.group_cn)
-        except Exception:
-            logger.exception(
-                "%s: add_to_group failed request_id=%s target=%r group_cn=%r",
-                log_prefix,
-                membership_request.pk,
-                user.username,
-                membership_type.group_cn,
-            )
-            raise
+        except Exception as exc:
+            if _is_freeipa_noop_error(error=exc, is_add=True):
+                logger.info(
+                    "astra.membership.freeipa_group.already_member group_cn=%s outcome=noop",
+                    membership_type.group_cn,
+                    extra={
+                        "event": "astra.freeipa.group.mutation",
+                        "component": "membership",
+                        "outcome": "already_member",
+                    },
+                )
+            else:
+                logger.exception(
+                    "%s: add_to_group failed request_id=%s target=%r group_cn=%r",
+                    log_prefix,
+                    membership_request.pk,
+                    user.username,
+                    membership_type.group_cn,
+                )
+                raise
 
         email_context = (
             {
@@ -613,9 +675,10 @@ def approve_membership_request(
         log_kwargs = {"target_username": membership_request.requested_username}
 
     membership_request.status = MembershipRequest.Status.approved
+    membership_request.on_hold_at = None
     membership_request.decided_at = decided
     membership_request.decided_by_username = actor_username
-    membership_request.save(update_fields=["status", "decided_at", "decided_by_username"])
+    membership_request.save(update_fields=["status", "on_hold_at", "decided_at", "decided_by_username"])
 
     sent_email = None
     if template_name is not None:
@@ -650,6 +713,17 @@ def approve_membership_request(
         action={"type": "request_approved"},
         log_prefix=log_prefix,
     )
+    if original_status == MembershipRequest.Status.on_hold:
+        note_action: dict[str, str] = {"type": "on_hold_override_approved", "by": actor_username}
+        justification = str(on_hold_override_justification or "").strip()
+        if justification:
+            note_action["actors_note"] = justification
+        _try_add_note(
+            membership_request=membership_request,
+            username=actor_username,
+            action=note_action,
+            log_prefix=log_prefix,
+        )
     _try_record_email_note(
         membership_request=membership_request,
         actor_username=actor_username,
@@ -659,6 +733,31 @@ def approve_membership_request(
     )
 
     return log
+
+
+def approve_on_hold_membership_request(
+    *,
+    request_id: int,
+    actor_username: str,
+    justification: str,
+    send_approved_email: bool = True,
+) -> MembershipLog:
+    membership_request = MembershipRequest.objects.select_related("membership_type", "requested_organization").get(pk=request_id)
+
+    if membership_request.status != MembershipRequest.Status.on_hold:
+        raise ValidationError("Only on-hold requests can be approved with override")
+
+    normalized_justification = str(justification or "").strip()
+    if not normalized_justification:
+        raise ValidationError("Override justification is required")
+
+    return approve_membership_request(
+        membership_request=membership_request,
+        actor_username=actor_username,
+        send_approved_email=send_approved_email,
+        allow_on_hold_override=True,
+        on_hold_override_justification=normalized_justification,
+    )
 
 
 def reject_membership_request(

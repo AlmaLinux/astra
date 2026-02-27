@@ -43,6 +43,12 @@ from core.form_validators import (
     clean_fas_mailing_list_value,
     clean_fas_url_value,
 )
+from core.freeipa.agreement import FreeIPAFASAgreement
+from core.freeipa.client import clear_current_viewer_username, set_current_viewer_username
+from core.freeipa.exceptions import FreeIPAOperationFailed
+from core.freeipa.group import FreeIPAGroup
+from core.freeipa.user import FreeIPAUser
+from core.freeipa.utils import _invalidate_agreement_cache, _invalidate_agreements_list_cache
 from core.ipa_user_attrs import _split_lines
 from core.ipa_utils import sync_set_membership
 from core.membership_csv_import import (
@@ -75,16 +81,6 @@ from core.protected_resources import protected_freeipa_group_cns
 from core.user_labels import user_choice, user_choice_with_fallback, user_choices_from_users
 from core.views_utils import _normalize_str
 
-from .backends import (
-    FreeIPAFASAgreement,
-    FreeIPAGroup,
-    FreeIPAOperationFailed,
-    FreeIPAUser,
-    _invalidate_agreement_cache,
-    _invalidate_agreements_list_cache,
-    clear_current_viewer_username,
-    set_current_viewer_username,
-)
 from .listbacked_queryset import _ListBackedQuerySet
 from .models import (
     AuditLogEntry,
@@ -857,11 +853,84 @@ class IPAUserAdmin(FreeIPAModelAdmin):
     readonly_fields = ("displayname", "fasstatusnote", "is_staff")
     change_form_template = "admin/core/ipauser/change_form.html"
     change_list_template = "admin/core/ipauser/change_list.html"
+    freeipa_directory_search_cache_ttl_seconds = 30
 
     @override
     def get_queryset(self, request):
         clear_current_viewer_username()
-        return super().get_queryset(request)
+
+        search_term = str(request.GET.get("q") or "").strip()
+        page_raw = str(request.GET.get("p") or "0").strip()
+        page_index = int(page_raw) if page_raw.isdigit() else 0
+        if page_index < 0:
+            page_index = 0
+
+        per_page = int(self.list_per_page)
+        if search_term:
+            fetch_limit = per_page
+        else:
+            fetch_limit = per_page * (page_index + 1)
+
+        cache_key = (
+            "admin_ipauser_changelist:"
+            f"q={search_term.lower()}"
+            f":p={page_index}"
+            f":pp={per_page}"
+            f":limit={fetch_limit}"
+        )
+
+        cached = cache.get(cache_key)
+        if isinstance(cached, list):
+            users = cached
+        else:
+            result = FreeIPAUser.get_client().user_find(
+                a_criteria=search_term or None,
+                o_all=True,
+                o_no_members=False,
+                o_sizelimit=fetch_limit,
+                o_timelimit=0,
+            )
+
+            raw_rows = result.get("result") if isinstance(result, dict) else []
+            users = []
+            if isinstance(raw_rows, list):
+                for row in raw_rows:
+                    if not isinstance(row, dict):
+                        continue
+
+                    uid = row.get("uid")
+                    if isinstance(uid, list):
+                        username = str(uid[0] if uid else "").strip()
+                    else:
+                        username = str(uid or "").strip()
+                    if not username:
+                        continue
+
+                    users.append(FreeIPAUser(username, row))
+
+            cache.set(
+                cache_key,
+                users,
+                timeout=self.freeipa_directory_search_cache_ttl_seconds,
+            )
+
+        items = [self.model.from_freeipa(user) for user in users]
+        items.sort(key=lambda user: str(user.username).lower())
+
+        if not search_term and page_index > 0:
+            start = page_index * per_page
+            end = start + per_page
+            items = items[start:end]
+        elif search_term:
+            items = items[:per_page]
+
+        return _ListBackedQuerySet(self.model, items)
+
+    @override
+    def get_search_results(self, request, queryset, search_term):
+        if isinstance(queryset, _ListBackedQuerySet):
+            return queryset, False
+        return super().get_search_results(request, queryset, search_term)
 
     @override
     def get_object(self, request, object_id, from_field=None):

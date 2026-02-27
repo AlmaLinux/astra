@@ -5,7 +5,8 @@ from unittest.mock import patch
 from django.template import Context, Template
 from django.test import RequestFactory, TestCase
 
-from core.backends import FreeIPAUser, clear_current_viewer_username, set_current_viewer_username
+from core.freeipa.client import clear_current_viewer_username, set_current_viewer_username
+from core.freeipa.user import FreeIPAUser
 
 
 class UserGridTemplateTagTests(TestCase):

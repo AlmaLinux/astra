@@ -4,7 +4,7 @@ from django.contrib.messages import get_messages
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import Organization
 from core.organization_claim import make_organization_claim_token
 from core.tests.utils_test_data import ensure_core_categories

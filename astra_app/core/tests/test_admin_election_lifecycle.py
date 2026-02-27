@@ -7,13 +7,19 @@ from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
 
 from core import elections_services
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import AuditLogEntry, Ballot, Candidate, Election, Membership, MembershipType, VotingCredential
 from core.tests.ballot_chain import compute_chain_hash
+from core.tests.utils_test_data import ensure_core_categories, ensure_email_templates
 from core.tokens import election_genesis_chain_hash
 
 
 class AdminElectionLifecycleActionTests(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        ensure_core_categories()
+        ensure_email_templates()
+
     def _login_as_freeipa_admin(self, username: str = "alice") -> None:
         session = self.client.session
         session["_freeipa_username"] = username
@@ -39,7 +45,7 @@ class AdminElectionLifecycleActionTests(TestCase):
         self._login_as_freeipa_admin("alice")
         admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})
 
-        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
             url = reverse("admin:core_election_changelist")
             resp = self.client.post(
                 url,
@@ -78,7 +84,7 @@ class AdminElectionLifecycleActionTests(TestCase):
         self._login_as_freeipa_admin("alice")
         admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})
 
-        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
             url = reverse("admin:core_election_changelist")
             response = self.client.post(
                 url,
@@ -131,7 +137,7 @@ class AdminElectionLifecycleActionTests(TestCase):
         self._login_as_freeipa_admin("alice")
         admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})
 
-        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
             url = reverse("admin:core_election_changelist")
             resp = self.client.post(
                 url,
@@ -211,7 +217,7 @@ class AdminElectionLifecycleActionTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=get_user),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=get_user),
             patch("post_office.mail.send", autospec=True) as post_office_send_mock,
         ):
             url = reverse("admin:core_election_changelist")
@@ -243,7 +249,7 @@ class AdminElectionLifecycleActionTests(TestCase):
         self._login_as_freeipa_admin("alice")
         admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})
 
-        with patch("core.backends.FreeIPAUser.get", return_value=admin_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
             url = reverse("admin:core_election_change", args=[election.id])
             response = self.client.get(url)
 

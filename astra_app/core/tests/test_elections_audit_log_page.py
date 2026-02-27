@@ -7,7 +7,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core import elections_services
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import AuditLogEntry, Ballot, Candidate, Election, FreeIPAPermissionGrant
 from core.permissions import ASTRA_ADD_ELECTION
 from core.tests.ballot_chain import compute_chain_hash
@@ -52,7 +52,7 @@ class ElectionAuditLogPageTests(TestCase):
                 return nominator
             return None
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)
@@ -110,13 +110,13 @@ class ElectionAuditLogPageTests(TestCase):
         self.assertEqual(election.status, Election.Status.tallied)
 
         viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "memberof_group": []})
-        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             resp = self.client.get(reverse("election-audit-log", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "class=\"timeline\"")
         # The Meek tally always emits iteration summaries.
-        self.assertContains(resp, "iteration 1")
+        self.assertContains(resp, "Iteration 1")
         # Candidate IDs should not appear in summaries/audit text.
         self.assertNotContains(resp, f"(#{c1.id})")
         # Quota is floor(total/(seats+1)) + 1 = floor(1/2) + 1 = 1.
@@ -171,7 +171,7 @@ class ElectionAuditLogPageTests(TestCase):
         AuditLogEntry.objects.filter(id=round_two.id).update(timestamp=now - datetime.timedelta(minutes=1))
 
         viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "memberof_group": []})
-        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             resp = self.client.get(reverse("election-audit-log", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)
@@ -228,7 +228,7 @@ class ElectionAuditLogPageTests(TestCase):
         self.assertEqual(election.status, Election.Status.tallied)
 
         viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "memberof_group": []})
-        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             resp = self.client.get(reverse("election-audit-log", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)
@@ -289,7 +289,7 @@ class ElectionAuditLogPageTests(TestCase):
         AuditLogEntry.objects.filter(id=e4.id).update(timestamp=day2)
 
         admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
-        with patch("core.backends.FreeIPAUser.get", return_value=admin):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin):
             resp = self.client.get(reverse("election-audit-log", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)
@@ -331,7 +331,7 @@ class ElectionAuditLogPageTests(TestCase):
         )
 
         viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "memberof_group": []})
-        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             resp = self.client.get(reverse("election-audit-log", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)

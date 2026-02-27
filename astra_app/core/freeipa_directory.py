@@ -1,6 +1,6 @@
 from collections.abc import Collection
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 
 
 def search_freeipa_users(
@@ -14,21 +14,49 @@ def search_freeipa_users(
         return []
 
     excluded = {str(username).strip() for username in (exclude_usernames or []) if str(username).strip()}
+    fetch_limit = limit + len(excluded)
+    if fetch_limit <= 0:
+        return []
+
+    try:
+        client = FreeIPAUser.get_client()
+        result = client.user_find(
+            a_criteria=normalized_query,
+            o_all=True,
+            o_no_members=False,
+            o_sizelimit=fetch_limit,
+            o_timelimit=0,
+        )
+    except Exception:
+        return []
+
+    if not isinstance(result, dict):
+        return []
+
+    raw_matches = result.get("result")
+    if not isinstance(raw_matches, list):
+        return []
 
     matches: list[FreeIPAUser] = []
-    for user in FreeIPAUser.all():
-        username = str(user.username or "").strip()
+    for user_data in raw_matches:
+        if not isinstance(user_data, dict):
+            continue
+
+        uid = user_data.get("uid")
+        if isinstance(uid, list):
+            username = str(uid[0] if uid else "").strip()
+        else:
+            username = str(uid or "").strip()
         if not username:
             continue
 
         if username in excluded:
             continue
 
-        full_name = str(user.full_name or "")
-        if normalized_query not in username.lower() and normalized_query not in full_name.lower():
-            continue
-
+        user = FreeIPAUser(username, user_data)
         matches.append(user)
+        if len(matches) >= limit:
+            break
 
     matches.sort(key=lambda user: str(user.username).lower())
     return matches[:limit]

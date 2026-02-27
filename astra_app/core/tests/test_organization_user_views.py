@@ -19,7 +19,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core import views_membership
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import FreeIPAPermissionGrant, Membership, MembershipTypeCategory
 from core.organization_claim import make_organization_claim_token
 from core.permissions import (
@@ -37,7 +37,7 @@ class OrganizationUserViewsTests(TestCase):
 
     def setUp(self) -> None:
         self._country_code_patcher = patch(
-            "core.views_membership.block_action_without_country_code",
+            "core.views_membership.user.block_action_without_country_code",
             return_value=None,
         )
         self._country_code_patcher.start()
@@ -86,7 +86,7 @@ class OrganizationUserViewsTests(TestCase):
         payload.pop("country_code")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
             patch("core.views_utils.has_signed_coc", return_value=True),
         ):
             response = self.client.post(reverse("organization-create"), data=payload, follow=False)
@@ -105,7 +105,7 @@ class OrganizationUserViewsTests(TestCase):
         payload["country_code"] = "ca"
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
             patch("core.views_utils.has_signed_coc", return_value=True),
         ):
             response = self.client.post(reverse("organization-create"), data=payload, follow=False)
@@ -124,7 +124,7 @@ class OrganizationUserViewsTests(TestCase):
         payload["country_code"] = "ZZ"
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
             patch("core.views_utils.has_signed_coc", return_value=True),
         ):
             response = self.client.post(reverse("organization-create"), data=payload, follow=False)
@@ -143,7 +143,7 @@ class OrganizationUserViewsTests(TestCase):
         payload["country_code"] = "1A"
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
             patch("core.views_utils.has_signed_coc", return_value=True),
         ):
             response = self.client.post(reverse("organization-create"), data=payload, follow=False)
@@ -158,7 +158,7 @@ class OrganizationUserViewsTests(TestCase):
         alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
             patch("core.views_utils.has_signed_coc", return_value=True),
         ):
             resp = self.client.get(reverse("organization-create"), follow=False)
@@ -184,7 +184,7 @@ class OrganizationUserViewsTests(TestCase):
         alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
             patch("core.views_utils.has_signed_coc", return_value=True),
         ):
             resp_get = self.client.get(reverse("organization-edit", args=[org.pk]), follow=False)
@@ -199,7 +199,7 @@ class OrganizationUserViewsTests(TestCase):
         payload["country_code"] = "de"
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
             patch("core.views_utils.has_signed_coc", return_value=True),
         ):
             resp_post = self.client.post(reverse("organization-edit", args=[org.pk]), data=payload, follow=False)
@@ -220,7 +220,7 @@ class OrganizationUserViewsTests(TestCase):
         self._login_as_freeipa_user("bob")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
             patch("core.views_utils.has_signed_coc", return_value=True),
         ):
             resp = self.client.get(reverse("organization-create"), follow=False)
@@ -230,7 +230,7 @@ class OrganizationUserViewsTests(TestCase):
 
         payload = self._valid_org_payload(name="Second Org")
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
             patch("core.views_utils.has_signed_coc", return_value=True),
         ):
             resp = self.client.post(reverse("organization-create"), data=payload, follow=False)
@@ -240,7 +240,7 @@ class OrganizationUserViewsTests(TestCase):
         self.assertFalse(Organization.objects.filter(name="Second Org").exists())
 
     def test_organization_create_requires_signed_coc(self) -> None:
-        from core.backends import FreeIPAFASAgreement
+        from core.freeipa.agreement import FreeIPAFASAgreement
         from core.models import Organization
 
         self._login_as_freeipa_user("alice")
@@ -256,7 +256,7 @@ class OrganizationUserViewsTests(TestCase):
 
         payload = self._valid_org_payload(name="Blocked Org")
         alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
-        with patch("core.backends.FreeIPAUser.get", autospec=True, return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", autospec=True, return_value=alice):
             with patch("core.views_utils.FreeIPAFASAgreement.get", autospec=True, return_value=coc):
                 resp = self.client.post(reverse("organization-create"), data=payload, follow=False)
 
@@ -273,7 +273,7 @@ class OrganizationUserViewsTests(TestCase):
         alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
             patch("core.views_utils.has_signed_coc", return_value=True),
         ):
             resp = self.client.get(reverse("organization-create"), follow=False)
@@ -298,7 +298,7 @@ class OrganizationUserViewsTests(TestCase):
         payload["website_logo"] = ""
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
             patch("core.views_utils.has_signed_coc", return_value=True),
         ):
             resp = self.client.post(reverse("organization-create"), data=payload, follow=False)
@@ -338,7 +338,7 @@ class OrganizationUserViewsTests(TestCase):
         payload["representative"] = "bob"
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=fake_get),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=fake_get),
             patch("core.views_utils.has_signed_coc", return_value=True),
         ):
             resp = self.client.post(reverse("organization-create"), data=payload, follow=False)
@@ -367,9 +367,20 @@ class OrganizationUserViewsTests(TestCase):
         bob_user = FreeIPAUser("bob", {"uid": ["bob"], "displayname": ["Bob Example"], "memberof_group": [], "c": ["US"]})
         bobby_user = FreeIPAUser("bobby", {"uid": ["bobby"], "displayname": ["Bobby Example"], "memberof_group": [], "c": ["US"]})
 
+        def fake_search_freeipa_users(
+            *,
+            query: str,
+            limit: int,
+            exclude_usernames=None,
+        ) -> list[FreeIPAUser]:
+            _ = (query, limit)
+            excluded = set(exclude_usernames or set())
+            ordered = [bob_user, bobby_user]
+            return [user for user in ordered if user.username not in excluded]
+
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.backends.FreeIPAUser.all", return_value=[bobby_user, bob_user]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.views_organizations.search_freeipa_users", side_effect=fake_search_freeipa_users),
         ):
             url = reverse("organization-representatives-search")
             resp = self.client.get(url, {"q": "bo"})
@@ -426,7 +437,7 @@ class OrganizationUserViewsTests(TestCase):
         payload = self._valid_org_payload(name="Org 2")
         payload["representative"] = "bob"
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=fake_get):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=fake_get):
             resp = self.client.post(reverse("organization-edit", args=[org2.pk]), data=payload, follow=False)
 
         self.assertEqual(resp.status_code, 200)
@@ -504,7 +515,7 @@ class OrganizationUserViewsTests(TestCase):
         payload = self._valid_org_payload(name="Org")
         payload["representative"] = "bob"
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=fake_get):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=fake_get):
             resp = self.client.post(reverse("organization-edit", args=[org.pk]), data=payload, follow=False)
 
         self.assertEqual(resp.status_code, 302)
@@ -532,7 +543,7 @@ class OrganizationUserViewsTests(TestCase):
         self.assertEqual(note.action.get("old"), "carol")
         self.assertEqual(note.action.get("new"), "bob")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=fake_get):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=fake_get):
             resp = self.client.get(reverse("membership-request-detail", args=[mr.pk]), follow=False)
         self.assertEqual(resp.status_code, 200)
         from html import unescape
@@ -581,7 +592,7 @@ class OrganizationUserViewsTests(TestCase):
         payload = self._valid_org_payload(name="Org")
         payload["representative"] = "bob"
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=fake_get):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=fake_get):
             resp = self.client.post(reverse("organization-edit", args=[org.pk]), data=payload, follow=False)
 
         self.assertEqual(resp.status_code, 302)
@@ -628,7 +639,7 @@ class OrganizationUserViewsTests(TestCase):
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organizations"))
             self.assertEqual(resp.status_code, 200)
             self.assertContains(resp, "Create an organization profile only")
@@ -673,7 +684,7 @@ class OrganizationUserViewsTests(TestCase):
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             with patch("django.utils.timezone.now", autospec=True, return_value=frozen_now):
                 resp = self.client.get(reverse("organization-detail", args=[org.pk]))
 
@@ -714,7 +725,7 @@ class OrganizationUserViewsTests(TestCase):
 
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp_rep = self.client.get(reverse("organization-detail", args=[org.pk]))
         self.assertEqual(resp_rep.status_code, 200)
         self.assertContains(resp_rep, reverse("membership-request-self", args=[req.pk]))
@@ -730,7 +741,7 @@ class OrganizationUserViewsTests(TestCase):
         )
 
         self._login_as_freeipa_user("reviewer")
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp_committee = self.client.get(reverse("organization-detail", args=[org.pk]))
         self.assertEqual(resp_committee.status_code, 200)
         self.assertContains(resp_committee, reverse("membership-request-detail", args=[req.pk]))
@@ -771,7 +782,7 @@ class OrganizationUserViewsTests(TestCase):
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
             self.assertEqual(resp.status_code, 200)
             self.assertNotContains(resp, reverse("organization-edit", args=[org.pk]))
@@ -806,7 +817,7 @@ class OrganizationUserViewsTests(TestCase):
                 return bob
             return None
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=fake_get):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=fake_get):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
             self.assertEqual(resp.status_code, 200)
             self.assertContains(resp, "Representative")
@@ -830,7 +841,7 @@ class OrganizationUserViewsTests(TestCase):
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             organizations_response = self.client.get(reverse("organizations"))
             self.assertEqual(organizations_response.status_code, 200)
             self.assertContains(organizations_response, 'class="ribbon-wrapper organization-status-ribbon-widget"')
@@ -872,7 +883,7 @@ class OrganizationUserViewsTests(TestCase):
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             response = self.client.get(reverse("organization-detail", args=[organization.pk]))
 
         self.assertEqual(response.status_code, 200)
@@ -920,7 +931,7 @@ class OrganizationUserViewsTests(TestCase):
         self._login_as_freeipa_user("ClaImAnt")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=claimant),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=claimant),
             patch("core.views_organizations.block_action_without_coc", return_value=None),
             patch("core.views_organizations.block_action_without_country_code", return_value=None),
         ):
@@ -954,7 +965,7 @@ class OrganizationUserViewsTests(TestCase):
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             response = self.client.get(reverse("organization-detail", args=[organization.pk]))
 
         self.assertEqual(response.status_code, 200)
@@ -1010,7 +1021,7 @@ class OrganizationUserViewsTests(TestCase):
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-edit", args=[org.pk]))
             self.assertEqual(resp.status_code, 200)
             self.assertContains(resp, "AlmaLinux")
@@ -1078,7 +1089,7 @@ class OrganizationUserViewsTests(TestCase):
 
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
@@ -1142,7 +1153,7 @@ class OrganizationUserViewsTests(TestCase):
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
@@ -1225,7 +1236,7 @@ class OrganizationUserViewsTests(TestCase):
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
@@ -1238,8 +1249,8 @@ class OrganizationUserViewsTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
-            patch("core.views_membership.block_action_without_coc", return_value=None),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
+            patch("core.views_membership.user.block_action_without_coc", return_value=None),
         ):
             tier_change_resp = self.client.get(tier_change_url)
 
@@ -1279,7 +1290,7 @@ class OrganizationUserViewsTests(TestCase):
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
@@ -1331,7 +1342,7 @@ class OrganizationUserViewsTests(TestCase):
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
@@ -1387,7 +1398,7 @@ class OrganizationUserViewsTests(TestCase):
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
@@ -1433,7 +1444,7 @@ class OrganizationUserViewsTests(TestCase):
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
@@ -1466,7 +1477,7 @@ class OrganizationUserViewsTests(TestCase):
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
@@ -1520,7 +1531,7 @@ class OrganizationUserViewsTests(TestCase):
             content_type="image/jpeg",
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.post(
                 reverse("organization-edit", args=[org.pk]),
                 data={
@@ -1546,7 +1557,7 @@ class OrganizationUserViewsTests(TestCase):
         org.refresh_from_db()
         expected_logo_path = f"organizations/logos/{org.pk}.png"
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-edit", args=[org.pk]))
             self.assertEqual(resp.status_code, 200)
             self.assertContains(resp, expected_logo_path)
@@ -1634,8 +1645,8 @@ class OrganizationUserViewsTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
-            patch("core.views_membership.block_action_without_coc", return_value=None),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
+            patch("core.views_membership.user.block_action_without_coc", return_value=None),
         ):
             resp = views_membership.membership_request(request, organization_id=org.pk)
 
@@ -1668,7 +1679,7 @@ class OrganizationUserViewsTests(TestCase):
         self.assertEqual(req_log.membership_request_id, req.pk)
 
         self._login_as_freeipa_user("bob")
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
             self.assertEqual(resp.status_code, 200)
             self.assertContains(resp, "Under review")
@@ -1711,8 +1722,8 @@ class OrganizationUserViewsTests(TestCase):
         self._login_as_freeipa_user("bob")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
-            patch("core.views_membership.block_action_without_coc", return_value=None),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
+            patch("core.views_membership.user.block_action_without_coc", return_value=None),
         ):
             resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
 
@@ -1739,7 +1750,7 @@ class OrganizationUserViewsTests(TestCase):
 
         alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("alice")
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
         self.assertEqual(resp.status_code, 404)
 
@@ -1751,8 +1762,8 @@ class OrganizationUserViewsTests(TestCase):
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("reviewer")
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=reviewer),
-            patch("core.views_membership.block_action_without_coc", return_value=None),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.views_membership.user.block_action_without_coc", return_value=None),
         ):
             resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
         self.assertEqual(resp.status_code, 200)
@@ -1791,9 +1802,9 @@ class OrganizationUserViewsTests(TestCase):
         self._login_as_freeipa_user("reviewer")
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.views_membership.block_action_without_coc", return_value=None),
-            patch("core.views_membership.block_action_without_country_code", return_value=None) as country_mock,
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.views_membership.user.block_action_without_coc", return_value=None),
+            patch("core.views_membership.user.block_action_without_country_code", return_value=None) as country_mock,
         ):
             resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
 
@@ -1820,9 +1831,9 @@ class OrganizationUserViewsTests(TestCase):
         self._login_as_freeipa_user("bob")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=representative),
-            patch("core.views_membership.block_action_without_coc", return_value=None),
-            patch("core.views_membership.block_action_without_country_code", return_value=None) as country_mock,
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=representative),
+            patch("core.views_membership.user.block_action_without_coc", return_value=None),
+            patch("core.views_membership.user.block_action_without_country_code", return_value=None) as country_mock,
         ):
             resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
 
@@ -1848,9 +1859,9 @@ class OrganizationUserViewsTests(TestCase):
         self._login_as_freeipa_user("alice")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=alice),
-            patch("core.views_membership.block_action_without_coc", return_value=None),
-            patch("core.views_membership.block_action_without_country_code", return_value=None) as country_mock,
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
+            patch("core.views_membership.user.block_action_without_coc", return_value=None),
+            patch("core.views_membership.user.block_action_without_country_code", return_value=None) as country_mock,
         ):
             resp = self.client.get(reverse("membership-request"))
 
@@ -1884,7 +1895,7 @@ class OrganizationUserViewsTests(TestCase):
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
@@ -1919,7 +1930,7 @@ class OrganizationUserViewsTests(TestCase):
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.post(
                 reverse("organization-sponsorship-extend", args=[org.pk]),
                 data={"membership_type": "gold"},
@@ -1972,8 +1983,8 @@ class OrganizationUserViewsTests(TestCase):
         self._login_as_freeipa_user("bob")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
-            patch("core.views_membership.block_action_without_coc", return_value=None),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
+            patch("core.views_membership.user.block_action_without_coc", return_value=None),
         ):
             resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
 
@@ -2049,8 +2060,8 @@ class OrganizationUserViewsTests(TestCase):
         self._login_as_freeipa_user("bob")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
-            patch("core.views_membership.block_action_without_coc", return_value=None),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
+            patch("core.views_membership.user.block_action_without_coc", return_value=None),
         ):
             resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
 
@@ -2106,8 +2117,8 @@ class OrganizationUserViewsTests(TestCase):
         self._login_as_freeipa_user("bob")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
-            patch("core.views_membership.block_action_without_coc", return_value=None),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
+            patch("core.views_membership.user.block_action_without_coc", return_value=None),
         ):
             resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
 
@@ -2152,8 +2163,8 @@ class OrganizationUserViewsTests(TestCase):
         self._login_as_freeipa_user("bob")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
-            patch("core.views_membership.block_action_without_coc", return_value=None),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
+            patch("core.views_membership.user.block_action_without_coc", return_value=None),
         ):
             resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
 
@@ -2188,8 +2199,8 @@ class OrganizationUserViewsTests(TestCase):
         self._login_as_freeipa_user("bob")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
-            patch("core.views_membership.block_action_without_coc", return_value=None),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
+            patch("core.views_membership.user.block_action_without_coc", return_value=None),
         ):
             resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
 
@@ -2230,8 +2241,8 @@ class OrganizationUserViewsTests(TestCase):
         self._login_as_freeipa_user("bob")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
-            patch("core.views_membership.block_action_without_coc", return_value=None),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
+            patch("core.views_membership.user.block_action_without_coc", return_value=None),
         ):
             resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
 
@@ -2281,8 +2292,8 @@ class OrganizationUserViewsTests(TestCase):
         self._login_as_freeipa_user("bob")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
-            patch("core.views_membership.block_action_without_coc", return_value=None),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
+            patch("core.views_membership.user.block_action_without_coc", return_value=None),
         ):
             resp = self.client.post(
                 reverse("organization-membership-request", args=[org.pk]),
@@ -2299,7 +2310,7 @@ class OrganizationUserViewsTests(TestCase):
         self.assertEqual(MembershipRequest.objects.filter(requested_organization=org).count(), 1)
 
     def test_org_membership_request_requires_signed_coc(self) -> None:
-        from core.backends import FreeIPAFASAgreement
+        from core.freeipa.agreement import FreeIPAFASAgreement
         from core.models import MembershipRequest, MembershipType, Organization
 
         MembershipType.objects.update_or_create(
@@ -2338,7 +2349,7 @@ class OrganizationUserViewsTests(TestCase):
         )
 
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
-        with patch("core.backends.FreeIPAUser.get", autospec=True, return_value=bob):
+        with patch("core.freeipa.user.FreeIPAUser.get", autospec=True, return_value=bob):
             with patch("core.views_utils.FreeIPAFASAgreement.get", autospec=True, return_value=coc):
                 resp = self.client.post(
                     reverse("organization-membership-request", args=[org.pk]),
@@ -2395,7 +2406,7 @@ class OrganizationUserViewsTests(TestCase):
 
         new_expires_on = datetime.date(2030, 1, 31)
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
                 reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"]),
                 data={
@@ -2464,7 +2475,7 @@ class OrganizationUserViewsTests(TestCase):
             return reviewer
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=fake_get),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=fake_get),
             patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_from_group,
         ):
             resp = self.client.post(
@@ -2531,7 +2542,7 @@ class OrganizationUserViewsTests(TestCase):
 
         new_expires_on = datetime.date(2030, 1, 31)
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
                 reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"]),
                 data={
@@ -2582,7 +2593,7 @@ class OrganizationUserViewsTests(TestCase):
 
         new_expires_on = datetime.date(2030, 1, 31)
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
                 reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"]),
                 data={
@@ -2646,7 +2657,7 @@ class OrganizationUserViewsTests(TestCase):
 
         new_expires_on = datetime.date(2030, 1, 31)
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
                 reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"]),
                 data={
@@ -2698,7 +2709,7 @@ class OrganizationUserViewsTests(TestCase):
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
@@ -2775,7 +2786,7 @@ class OrganizationUserViewsTests(TestCase):
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
@@ -2830,7 +2841,7 @@ class OrganizationUserViewsTests(TestCase):
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
@@ -2871,7 +2882,7 @@ class OrganizationUserViewsTests(TestCase):
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
@@ -2932,7 +2943,7 @@ class OrganizationUserViewsTests(TestCase):
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
@@ -2993,7 +3004,7 @@ class OrganizationUserViewsTests(TestCase):
         )
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
@@ -3002,7 +3013,7 @@ class OrganizationUserViewsTests(TestCase):
         self.assertNotContains(resp, 'data-note-action="vote_approve"')
         self.assertNotContains(resp, 'data-note-action="vote_disapprove"')
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
                 reverse("membership-notes-aggregate-note-add"),
                 data={
@@ -3070,15 +3081,15 @@ class OrganizationUserViewsTests(TestCase):
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Expires")
         self.assertContains(resp, "Request renewal")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
-            patch("core.views_membership.block_action_without_coc", return_value=None),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
+            patch("core.views_membership.user.block_action_without_coc", return_value=None),
         ):
             shim_resp = self.client.post(
                 reverse("organization-sponsorship-extend", args=[org.pk]),
@@ -3149,7 +3160,7 @@ class OrganizationUserViewsTests(TestCase):
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.post(reverse("organization-sponsorship-extend", args=[org.pk]), follow=True)
 
         self.assertEqual(resp.status_code, 200)
@@ -3214,7 +3225,7 @@ class OrganizationUserViewsTests(TestCase):
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.post(
                 reverse("organization-sponsorship-extend", args=[org.pk]),
                 data={"membership_type": "gold"},
@@ -3272,7 +3283,7 @@ class OrganizationUserViewsTests(TestCase):
         self._login_as_freeipa_user("bob")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
             patch("django.utils.timezone.now", return_value=frozen_now),
         ):
             resp = self.client.post(
@@ -3319,7 +3330,7 @@ class OrganizationUserViewsTests(TestCase):
         self._login_as_freeipa_user("bob")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
             patch("django.utils.timezone.now", return_value=frozen_now),
         ):
             resp = self.client.post(
@@ -3386,8 +3397,8 @@ class OrganizationUserViewsTests(TestCase):
         self._login_as_freeipa_user("bob")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
-            patch("core.views_membership.block_action_without_coc", return_value=None),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
+            patch("core.views_membership.user.block_action_without_coc", return_value=None),
         ):
             shim_resp = self.client.post(
                 reverse("organization-sponsorship-extend", args=[org.pk]),
@@ -3416,8 +3427,8 @@ class OrganizationUserViewsTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
-            patch("core.views_membership.block_action_without_coc", return_value=None),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
+            patch("core.views_membership.user.block_action_without_coc", return_value=None),
         ):
             resp = self.client.post(
                 reverse("organization-membership-request", args=[org.pk]),
@@ -3501,7 +3512,7 @@ class OrganizationUserViewsTests(TestCase):
         )
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Edit expiration")
@@ -3558,12 +3569,12 @@ class OrganizationUserViewsTests(TestCase):
         self.assertNotContains(resp, 'data-expiry-action="go-confirm-terminate"')
         self.assertNotContains(resp, 'data-expiry-action="back-to-edit"')
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"]))
         self.assertEqual(resp.status_code, 404)
 
         new_expires_on = (timezone.now() + datetime.timedelta(days=90)).date().isoformat()
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
                 reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"]),
                 data={"expires_on": new_expires_on},
@@ -3584,7 +3595,7 @@ class OrganizationUserViewsTests(TestCase):
             ).exists()
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(reverse("organization-sponsorship-terminate", args=[org.pk, "gold"]), follow=False)
         self.assertEqual(resp.status_code, 302)
 
@@ -3643,7 +3654,7 @@ class OrganizationUserViewsTests(TestCase):
         self._login_as_freeipa_user("bob")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
             patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_from_group,
         ):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
@@ -3676,7 +3687,7 @@ class OrganizationUserViewsTests(TestCase):
         alice = FreeIPAUser("alice", {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("alice")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             resp = self.client.post(reverse("organization-delete", args=[org.pk]), follow=False)
 
         self.assertEqual(resp.status_code, 404)
@@ -3815,7 +3826,7 @@ class OrganizationUserViewsTests(TestCase):
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.post(reverse("organization-sponsorship-extend", args=[org.pk]), follow=False)
 
         self.assertEqual(resp.status_code, 302)
@@ -3855,7 +3866,7 @@ class OrganizationUserViewsTests(TestCase):
         alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("alice")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 404)
@@ -3927,7 +3938,7 @@ class OrganizationUserViewsTests(TestCase):
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("organization-edit", args=[org.pk]))
             self.assertEqual(resp.status_code, 200)
             self.assertContains(resp, 'name="representative"')
@@ -3983,7 +3994,7 @@ class OrganizationUserViewsTests(TestCase):
         payload = self._valid_org_payload(name="Unclaimed Editable Updated")
         payload["representative"] = ""
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             response = self.client.post(reverse("organization-edit", args=[organization.pk]), data=payload, follow=False)
 
         self.assertEqual(response.status_code, 302)
@@ -4040,14 +4051,14 @@ class OrganizationUserViewsTests(TestCase):
         self._login_as_freeipa_user("bob")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
             patch("core.views_utils.has_signed_coc", return_value=True),
         ):
             resp = self.client.get(reverse("organization-create"))
         self.assertEqual(resp.status_code, 200)
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
             patch("core.views_utils.has_signed_coc", return_value=True),
         ):
             resp = self.client.post(
@@ -4077,7 +4088,7 @@ class OrganizationUserViewsTests(TestCase):
         created = Organization.objects.get(name="AlmaLinux")
         self.assertEqual(created.representative, "bob")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organizations"))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, reverse("organization-detail", args=[created.pk]))
@@ -4100,7 +4111,7 @@ class OrganizationUserViewsTests(TestCase):
         self._login_as_freeipa_user("bob")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
             patch("core.views_utils.has_signed_coc", return_value=True),
         ):
             resp = self.client.post(
@@ -4131,7 +4142,7 @@ class OrganizationUserViewsTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
             patch("core.views_utils.has_signed_coc", return_value=True),
         ):
             request_resp = self.client.get(reverse("organization-membership-request", args=[created.pk]))
@@ -4151,7 +4162,7 @@ class OrganizationUserViewsTests(TestCase):
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=bob):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.post(
                 reverse("organization-edit", args=[org.pk]),
                 data={
@@ -4201,7 +4212,7 @@ class OrganizationUserViewsTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=fake_get),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=fake_get),
             patch("core.views_utils.has_signed_coc", return_value=True),
         ):
             resp = self.client.post(
@@ -4236,7 +4247,7 @@ class OrganizationUserViewsTests(TestCase):
         self._login_as_freeipa_user("bob")
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=bob),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
             patch("core.views_utils.has_signed_coc", return_value=True),
         ):
             resp = self.client.post(

@@ -1,6 +1,6 @@
 from django.http import HttpRequest, JsonResponse
 
-from core.backends import FreeIPAGroup
+from core.freeipa.group import FreeIPAGroup
 from core.freeipa_directory import search_freeipa_users
 from core.models import Organization
 from core.permissions import can_view_user_directory

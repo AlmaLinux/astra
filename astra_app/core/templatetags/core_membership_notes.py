@@ -10,7 +10,7 @@ from django.urls import reverse
 from django.utils.safestring import SafeString, mark_safe
 from post_office.models import Email
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.membership_notes import CUSTOS, note_action_icon, note_action_label, tally_last_votes
 from core.models import MembershipRequest, Note
 from core.views_utils import get_username

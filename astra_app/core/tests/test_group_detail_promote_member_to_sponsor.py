@@ -3,7 +3,8 @@ from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
 
-from core.backends import FreeIPAGroup, FreeIPAUser
+from core.freeipa.group import FreeIPAGroup
+from core.freeipa.user import FreeIPAUser
 
 
 class GroupDetailPromoteMemberToSponsorTests(TestCase):
@@ -30,8 +31,8 @@ class GroupDetailPromoteMemberToSponsorTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=sponsor),
-            patch("core.backends.FreeIPAGroup.get", return_value=group),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=sponsor),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
         ):
             resp = self.client.get("/group/testgroup/")
 
@@ -58,8 +59,8 @@ class GroupDetailPromoteMemberToSponsorTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=sponsor),
-            patch("core.backends.FreeIPAGroup.get", return_value=group),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=sponsor),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
         ):
             resp = self.client.get("/group/testgroup/")
 
@@ -87,8 +88,8 @@ class GroupDetailPromoteMemberToSponsorTests(TestCase):
         group.add_sponsor = MagicMock()
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=sponsor),
-            patch("core.backends.FreeIPAGroup.get", return_value=group),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=sponsor),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
         ):
             resp = self.client.post(
                 "/group/testgroup/",
@@ -118,8 +119,8 @@ class GroupDetailPromoteMemberToSponsorTests(TestCase):
         group.remove_sponsor = MagicMock()
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=sponsor),
-            patch("core.backends.FreeIPAGroup.get", return_value=group),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=sponsor),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
         ):
             resp = self.client.post(
                 "/group/testgroup/",

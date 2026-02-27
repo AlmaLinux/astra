@@ -9,18 +9,25 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.membership_notes import CUSTOS
 from core.models import FreeIPAPermissionGrant, MembershipRequest, MembershipType, Note
 from core.permissions import ASTRA_ADD_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP
+from core.tests.utils_test_data import ensure_core_categories
 
 
 class MembershipNotesAjaxTests(TestCase):
     def setUp(self) -> None:
         super().setUp()
+        ensure_core_categories()
 
         FreeIPAPermissionGrant.objects.get_or_create(
             permission=ASTRA_ADD_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.group,
+            principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
+        )
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
             principal_type=FreeIPAPermissionGrant.PrincipalType.group,
             principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
         )
@@ -54,7 +61,7 @@ class MembershipNotesAjaxTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
                 reverse("membership-request-note-add", args=[req.pk]),
                 data={
@@ -101,7 +108,7 @@ class MembershipNotesAjaxTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp1 = self.client.post(
                 reverse("membership-request-note-add", args=[req.pk]),
                 data={
@@ -127,7 +134,7 @@ class MembershipNotesAjaxTests(TestCase):
             action={},
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp2 = self.client.post(
                 reverse("membership-request-note-add", args=[req.pk]),
                 data={
@@ -166,7 +173,7 @@ class MembershipNotesAjaxTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
                 reverse("membership-request-note-add", args=[req.pk]),
                 data={
@@ -216,7 +223,7 @@ class MembershipNotesAjaxTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
                 reverse("membership-request-note-add", args=[req.pk]),
                 data={
@@ -265,7 +272,7 @@ class MembershipNotesAjaxTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             resp = self.client.post(
                 reverse("membership-request-note-add", args=[req.pk]),
                 data={
@@ -298,7 +305,7 @@ class MembershipNotesAjaxTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
                 reverse("membership-request-note-add", args=[req.pk]),
                 data={

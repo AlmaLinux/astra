@@ -1,15 +1,19 @@
 import html
+import logging
 from typing import TYPE_CHECKING
 
 from django.conf import settings
 from django.urls import reverse
 from django.utils.safestring import SafeString, mark_safe
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.public_urls import build_public_absolute_url, normalize_public_base_url
 
 if TYPE_CHECKING:
     from core.models import Organization
+
+
+logger = logging.getLogger(__name__)
 
 
 def user_email_context(*, username: str) -> dict[str, str]:
@@ -31,7 +35,20 @@ def user_email_context(*, username: str) -> dict[str, str]:
 
     try:
         user = FreeIPAUser.get(normalized_username)
-    except Exception:
+    except Exception as exc:
+        reason_code = str(exc.__class__.__name__ or "").strip() or "freeipa_unavailable"
+        logger.warning(
+            "Email context degraded due to FreeIPA lookup failure",
+            extra={
+                "event": "astra.email.context.degraded",
+                "component": "email",
+                "outcome": "warning",
+                "template_name": "unknown",
+                "reason_code": reason_code,
+                "freeipa_operation": "FreeIPAUser.get",
+                "correlation_id": "email_context.user_email_context",
+            },
+        )
         user = None
     if user is None:
         return {

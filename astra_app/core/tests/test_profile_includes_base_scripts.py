@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from django.test import TestCase
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 
 
 class ProfileIncludesBaseScriptsTests(TestCase):
@@ -32,7 +32,7 @@ class ProfileIncludesBaseScriptsTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=fu):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=fu):
             resp = self.client.get(f"/user/{username}/")
 
         self.assertEqual(resp.status_code, 200)

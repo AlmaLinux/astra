@@ -61,7 +61,13 @@
   }
 
   function init() {
-    ['shared-approve-modal', 'shared-reject-modal', 'shared-rfi-modal', 'shared-ignore-modal'].forEach(bindModal);
+    [
+      'shared-approve-modal',
+      'shared-approve-on-hold-modal',
+      'shared-reject-modal',
+      'shared-rfi-modal',
+      'shared-ignore-modal'
+    ].forEach(bindModal);
   }
 
   if (document.readyState === 'loading') {

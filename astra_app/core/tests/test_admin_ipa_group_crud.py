@@ -5,7 +5,9 @@ from django.contrib.admin.models import ADDITION, LogEntry
 from django.test import TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAGroup, FreeIPAUser, clear_current_viewer_username, set_current_viewer_username
+from core.freeipa.client import clear_current_viewer_username, set_current_viewer_username
+from core.freeipa.group import FreeIPAGroup
+from core.freeipa.user import FreeIPAUser
 
 
 class AdminIPAGroupCRUDTests(TestCase):
@@ -27,10 +29,10 @@ class AdminIPAGroupCRUDTests(TestCase):
         ]
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=admin_user),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
             patch("core.admin.FreeIPAUser.all", return_value=all_users),
-            patch("core.backends.FreeIPAGroup.create") as mock_create,
-            patch("core.backends.FreeIPAGroup.add_member"),
+            patch("core.freeipa.group.FreeIPAGroup.create") as mock_create,
+            patch("core.freeipa.group.FreeIPAGroup.add_member"),
         ):
             mock_create.return_value = FreeIPAGroup("testgroup", {"cn": ["testgroup"], "description": ["A test group"]})
             url = reverse("admin:auth_ipagroup_add")
@@ -87,9 +89,9 @@ class AdminIPAGroupCRUDTests(TestCase):
         ]
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=admin_user),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
             patch("core.admin.FreeIPAUser.all", return_value=all_users),
-            patch("core.backends.FreeIPAGroup.get", side_effect=_fake_get),
+            patch("core.freeipa.group.FreeIPAGroup.get", side_effect=_fake_get),
             patch.object(existing_group, "save") as mock_save,
             patch.object(existing_group, "add_member"),
             patch.object(existing_group, "remove_member"),
@@ -142,9 +144,9 @@ class AdminIPAGroupCRUDTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=admin_user),
-            patch("core.backends.FreeIPAGroup.get", side_effect=_fake_get),
-            patch("core.backends.FreeIPAGroup.all", return_value=[target_group]),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
+            patch("core.freeipa.group.FreeIPAGroup.get", side_effect=_fake_get),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[target_group]),
             patch.object(target_group, "delete"),
         ):
             url = reverse("admin:auth_ipagroup_changelist")
@@ -184,8 +186,8 @@ class AdminIPAGroupCRUDTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=admin_user),
-            patch("core.backends.FreeIPAGroup.get", side_effect=_fake_get),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
+            patch("core.freeipa.group.FreeIPAGroup.get", side_effect=_fake_get),
             patch.object(target_group, "delete") as mock_delete,
         ):
             # Simulate posting to the delete confirmation URL
@@ -231,11 +233,11 @@ class AdminIPAGroupCRUDTests(TestCase):
         ]
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=admin_user),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
             patch("core.admin.FreeIPAUser.all", return_value=all_users),
-            patch("core.backends._with_freeipa_service_client_retry", side_effect=_fake_retry),
-            patch("core.backends.FreeIPAGroup.add_member"),
-            patch("core.backends.FreeIPAGroup.remove_member"),
+            patch("core.freeipa.group._with_freeipa_service_client_retry", side_effect=_fake_retry),
+            patch("core.freeipa.group.FreeIPAGroup.add_member"),
+            patch("core.freeipa.group.FreeIPAGroup.remove_member"),
         ):
             # Do not mock FreeIPAGroup.create here; allow the create path to
             # call into the patched backend retry helper so we can observe
@@ -274,12 +276,12 @@ class AdminIPAGroupCRUDTests(TestCase):
         created_group = FreeIPAGroup("testgroup", {"cn": ["testgroup"], "fasgroup": [True]})
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=admin_user),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
             patch("core.admin.FreeIPAUser.all", return_value=[admin_user]),
-            patch("core.backends.FreeIPAGroup.create", return_value=created_group),
-            patch("core.backends.FreeIPAGroup.get", return_value=created_group),
+            patch("core.freeipa.group.FreeIPAGroup.create", return_value=created_group),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=created_group),
             patch.object(created_group, "save") as save_mock,
-            patch("core.backends.FreeIPAGroup.add_member"),
+            patch("core.freeipa.group.FreeIPAGroup.add_member"),
         ):
             url = reverse("admin:auth_ipagroup_add")
             resp = self.client.post(
@@ -333,11 +335,11 @@ class AdminIPAGroupCRUDTests(TestCase):
 
         all_users = [admin_user]
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=admin_user),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
             patch("core.admin.FreeIPAUser.all", return_value=all_users),
-            patch("core.backends.FreeIPAGroup.get", side_effect=_fake_get),
+            patch("core.freeipa.group.FreeIPAGroup.get", side_effect=_fake_get),
             patch.object(existing_group, "save"),
-            patch("core.backends._with_freeipa_service_client_retry", side_effect=_fake_retry),
+            patch("core.freeipa.group._with_freeipa_service_client_retry", side_effect=_fake_retry),
             patch.object(existing_group, "add_member"),
             patch.object(existing_group, "remove_member"),
         ):
@@ -403,9 +405,9 @@ class AdminIPAGroupEmailsCSVTests(TestCase):
         )
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=admin_user),
-            patch("core.backends.FreeIPAGroup.all", return_value=[group]),
-            patch("core.backends.FreeIPAGroup.get", return_value=group),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[group]),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
         ):
             url = reverse("admin:auth_ipagroup_change", args=["testgroup"])
             resp = self.client.get(url)
@@ -470,9 +472,9 @@ class AdminIPAGroupEmailsCSVTests(TestCase):
             return FreeIPAUser(username, {"uid": [username], "mail": [""]})
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_fake_user_get),
-            patch("core.backends.FreeIPAGroup.all", return_value=[root_group]),
-            patch("core.backends.FreeIPAGroup.get", side_effect=_fake_group_get),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_fake_user_get),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[root_group]),
+            patch("core.freeipa.group.FreeIPAGroup.get", side_effect=_fake_group_get),
         ):
             url = reverse("admin:auth_ipagroup_download_emails", args=["testgroup"])
             resp = self.client.get(url)
@@ -529,9 +531,9 @@ class AdminIPAGroupEmailsCSVTests(TestCase):
                 return FreeIPAUser(username, {"uid": [username], "mail": [""]})
 
             with (
-                patch("core.backends.FreeIPAUser.get", side_effect=_fake_user_get),
-                patch("core.backends.FreeIPAGroup.all", return_value=[group]),
-                patch("core.backends.FreeIPAGroup.get", return_value=group),
+                patch("core.freeipa.user.FreeIPAUser.get", side_effect=_fake_user_get),
+                patch("core.freeipa.group.FreeIPAGroup.all", return_value=[group]),
+                patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
             ):
                 url = reverse("admin:auth_ipagroup_download_emails", args=["testgroup"])
                 resp = self.client.get(url)

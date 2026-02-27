@@ -8,15 +8,12 @@ from django.shortcuts import redirect, render
 from django.views.decorators.http import require_GET
 
 from core.agreements import missing_required_agreements_for_user_in_group, required_agreements_for_group
-from core.backends import (
-    DegradedFreeIPAUser,
-    FreeIPAFASAgreement,
-    FreeIPAGroup,
-    FreeIPAOperationFailed,
-    FreeIPAUser,
-    _freeipa_circuit_open,
-)
 from core.forms_groups import GroupEditForm
+from core.freeipa.agreement import FreeIPAFASAgreement
+from core.freeipa.circuit_breaker import _freeipa_circuit_open
+from core.freeipa.exceptions import FreeIPAOperationFailed
+from core.freeipa.group import FreeIPAGroup
+from core.freeipa.user import DegradedFreeIPAUser, FreeIPAUser
 from core.permissions import ASTRA_ADD_ELECTION, json_permission_required
 from core.views_utils import (
     MSG_SERVICE_UNAVAILABLE,

@@ -5,7 +5,7 @@ from django.conf import settings
 from django.test import TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import FreeIPAPermissionGrant, MembershipType
 from core.permissions import ASTRA_ADD_SEND_MAIL
 from core.tests.utils_test_data import ensure_core_categories
@@ -30,7 +30,7 @@ class EmailTemplatesUiTests(TestCase):
         self._login_as_freeipa_user("alice")
         alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": []})
 
-        with patch("core.backends.FreeIPAUser.get", return_value=alice):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             resp = self.client.get(reverse("email-templates"))
 
         self.assertEqual(resp.status_code, 302)
@@ -49,7 +49,7 @@ class EmailTemplatesUiTests(TestCase):
             html_content="<p>Hi</p>",
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("email-templates"))
 
         self.assertEqual(resp.status_code, 200)
@@ -63,7 +63,7 @@ class EmailTemplatesUiTests(TestCase):
         self._login_as_freeipa_user("reviewer")
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             create_resp = self.client.post(
                 reverse("email-template-create"),
                 data={
@@ -79,7 +79,7 @@ class EmailTemplatesUiTests(TestCase):
         self.assertEqual(create_resp.status_code, 200)
         tpl = EmailTemplate.objects.get(name="created-1")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             edit_resp = self.client.post(
                 reverse("email-template-edit", kwargs={"template_id": tpl.pk}),
                 data={
@@ -99,7 +99,7 @@ class EmailTemplatesUiTests(TestCase):
         self.assertEqual(tpl.content, "Updated")
         self.assertEqual(tpl.html_content, "<p>Updated</p>")
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             delete_resp = self.client.post(
                 reverse("email-template-delete", kwargs={"template_id": tpl.pk}),
                 follow=True,
@@ -125,7 +125,7 @@ class EmailTemplatesUiTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
                 reverse("email-template-delete", kwargs={"template_id": tpl.pk}),
                 follow=True,
@@ -154,7 +154,7 @@ class EmailTemplatesUiTests(TestCase):
 
         delete_url = reverse("email-template-delete", kwargs={"template_id": tpl.pk})
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("email-templates"))
 
         self.assertEqual(resp.status_code, 200)
@@ -178,7 +178,7 @@ class EmailTemplatesUiTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("email-template-edit", kwargs={"template_id": tpl.pk}))
 
         self.assertEqual(resp.status_code, 200)
@@ -211,7 +211,7 @@ class EmailTemplatesUiTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
                 reverse("email-template-edit", kwargs={"template_id": tpl.pk}),
                 data={
@@ -256,7 +256,7 @@ class EmailTemplatesUiTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
                 reverse("email-template-delete", kwargs={"template_id": tpl.pk}),
                 follow=True,
@@ -293,7 +293,7 @@ class EmailTemplatesUiTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
                 reverse("email-template-edit", kwargs={"template_id": tpl.pk}),
                 data={
@@ -319,7 +319,7 @@ class EmailTemplatesUiTests(TestCase):
 
         too_long_subject = "Action required: more information needed for your membership application"
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
                 reverse("email-template-create"),
                 data={
@@ -342,7 +342,7 @@ class EmailTemplatesUiTests(TestCase):
 
         too_long_subject = "Action required: more information needed for your membership application"
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
                 reverse("email-template-save-as"),
                 data={
@@ -362,7 +362,7 @@ class EmailTemplatesUiTests(TestCase):
         self._login_as_freeipa_user("reviewer")
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
                 reverse("email-template-render-preview"),
                 data={
@@ -389,7 +389,7 @@ class EmailTemplatesUiTests(TestCase):
             f"<img src=\"{{% inline_image '{image_url}' %}}\" />\n"
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
                 reverse("email-template-render-preview"),
                 data={
@@ -418,7 +418,7 @@ class EmailTemplatesUiTests(TestCase):
             html_content="<p>Hi</p>",
         )
 
-        with patch("core.backends.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("email-template-edit", kwargs={"template_id": tpl.pk}))
 
         self.assertEqual(resp.status_code, 200)

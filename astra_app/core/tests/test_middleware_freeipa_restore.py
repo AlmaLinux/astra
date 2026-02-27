@@ -9,7 +9,9 @@ from django.test import RequestFactory, TestCase
 from django.utils import timezone
 from django.utils.functional import SimpleLazyObject
 
-from core import backends
+from core.freeipa.circuit_breaker import _open_freeipa_circuit, _reset_freeipa_circuit_failures
+from core.freeipa.exceptions import FreeIPAUnavailableError
+from core.freeipa.user import DegradedFreeIPAUser
 from core.middleware import FreeIPAAuthenticationMiddleware, FreeIPAUnavailableMiddleware
 from core.templatetags.core_membership_notes import _current_username_from_request
 from core.views_utils import get_username
@@ -162,7 +164,7 @@ class FreeIPAMiddlewareRestoreTests(TestCase):
         request.session["_freeipa_username"] = "alice"
         request.session.save()
 
-        backends._open_freeipa_circuit()
+        _open_freeipa_circuit()
 
         def get_response(req):
             return req.user
@@ -172,16 +174,16 @@ class FreeIPAMiddlewareRestoreTests(TestCase):
                 middleware = FreeIPAAuthenticationMiddleware(get_response)
                 user = middleware(request)
 
-        self.assertIsInstance(user, backends.DegradedFreeIPAUser)
+        self.assertIsInstance(user, DegradedFreeIPAUser)
         mocked_get.assert_not_called()
-        backends._reset_freeipa_circuit_failures()
+        _reset_freeipa_circuit_failures()
 
     def test_freeipa_unavailable_middleware_returns_503(self):
         factory = RequestFactory()
         request = factory.get("/user/alice/")
 
         middleware = FreeIPAUnavailableMiddleware(lambda _req: HttpResponse("ok"))
-        response = middleware.process_exception(request, backends.FreeIPAUnavailableError("open"))
+        response = middleware.process_exception(request, FreeIPAUnavailableError("open"))
 
         self.assertEqual(response.status_code, 503)
         self.assertIn(
@@ -197,15 +199,15 @@ class FreeIPAMiddlewareRestoreTests(TestCase):
         request.session.save()
 
         request.user = SimpleLazyObject(
-            lambda: (_ for _ in ()).throw(backends.FreeIPAUnavailableError("open"))
+            lambda: (_ for _ in ()).throw(FreeIPAUnavailableError("open"))
         )
-        backends._open_freeipa_circuit()
+        _open_freeipa_circuit()
 
         middleware = FreeIPAAuthenticationMiddleware(lambda req: req.user)
         user = middleware(request)
 
-        self.assertIsInstance(user, backends.DegradedFreeIPAUser)
-        backends._reset_freeipa_circuit_failures()
+        self.assertIsInstance(user, DegradedFreeIPAUser)
+        _reset_freeipa_circuit_failures()
 
     def test_username_ssot_session_authoritative_across_layers_without_lazy_evaluation(self):
         factory = RequestFactory()

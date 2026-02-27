@@ -6,12 +6,12 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
-from core.backends import FreeIPAUser
 from core.email_context import (
     organization_email_context_from_organization,
     organization_sponsor_email_context,
     user_email_context_from_user,
 )
+from core.freeipa.user import FreeIPAUser
 from core.ipa_user_attrs import _first
 from core.membership import (
     FreeIPACallerMode,

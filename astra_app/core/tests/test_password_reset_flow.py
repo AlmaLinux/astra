@@ -385,7 +385,7 @@ class AdminPasswordResetEmailTests(TestCase):
     def test_admin_send_password_reset_email(self):
         self._login_as_freeipa_admin("alice")
 
-        from core.backends import FreeIPAUser
+        from core.freeipa.user import FreeIPAUser
 
         admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"], "mail": ["alice@example.com"]})
         target_user = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "mail": ["bob@example.com"]})
@@ -398,7 +398,7 @@ class AdminPasswordResetEmailTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_fake_get),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_fake_get),
             patch("core.password_reset.queue_templated_email", autospec=True) as queue_email_mock,
         ):
             url = reverse("admin:auth_ipauser_send_password_reset", args=["bob"])
@@ -417,7 +417,7 @@ class AdminPasswordResetEmailTests(TestCase):
     def test_admin_change_form_shows_password_reset_and_disable_otp_tools(self):
         self._login_as_freeipa_admin("alice")
 
-        from core.backends import FreeIPAUser
+        from core.freeipa.user import FreeIPAUser
 
         admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"], "mail": ["alice@example.com"]})
         target_user = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "mail": ["bob@example.com"]})
@@ -438,8 +438,8 @@ class AdminPasswordResetEmailTests(TestCase):
                 return {"result": [{"ipatokenuniqueid": ["token-1"]}]}
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_fake_get),
-            patch("core.backends.FreeIPAUser.get_client", autospec=True, return_value=DummyClient()),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_fake_get),
+            patch("core.freeipa.user.FreeIPAUser.get_client", autospec=True, return_value=DummyClient()),
         ):
             resp = self.client.get(reverse("admin:auth_ipauser_change", args=["bob"]))
 
@@ -452,7 +452,7 @@ class AdminPasswordResetEmailTests(TestCase):
     def test_admin_change_form_hides_disable_otp_when_none(self):
         self._login_as_freeipa_admin("alice")
 
-        from core.backends import FreeIPAUser
+        from core.freeipa.user import FreeIPAUser
 
         admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"], "mail": ["alice@example.com"]})
         target_user = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "mail": ["bob@example.com"]})
@@ -473,8 +473,8 @@ class AdminPasswordResetEmailTests(TestCase):
                 return {"result": []}
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_fake_get),
-            patch("core.backends.FreeIPAUser.get_client", autospec=True, return_value=DummyClient()),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_fake_get),
+            patch("core.freeipa.user.FreeIPAUser.get_client", autospec=True, return_value=DummyClient()),
         ):
             resp = self.client.get(reverse("admin:auth_ipauser_change", args=["bob"]))
 
@@ -485,7 +485,7 @@ class AdminPasswordResetEmailTests(TestCase):
     def test_admin_disable_otp_tokens(self):
         self._login_as_freeipa_admin("alice")
 
-        from core.backends import FreeIPAUser
+        from core.freeipa.user import FreeIPAUser
 
         admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"], "mail": ["alice@example.com"]})
         target_user = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "mail": ["bob@example.com"]})
@@ -520,8 +520,8 @@ class AdminPasswordResetEmailTests(TestCase):
         dummy = DummyClient()
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_fake_get),
-            patch("core.backends.FreeIPAUser.get_client", autospec=True, return_value=dummy),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_fake_get),
+            patch("core.freeipa.user.FreeIPAUser.get_client", autospec=True, return_value=dummy),
         ):
             url = reverse("admin:auth_ipauser_disable_otp_tokens", args=["bob"])
             resp = self.client.post(url, data={"post": "1"}, follow=False)

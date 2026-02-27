@@ -8,7 +8,7 @@ from django.test import RequestFactory, TestCase, override_settings
 from django.utils.functional import SimpleLazyObject
 
 from core import views_users
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 
 
 class ProfileAvatarRenderingTests(TestCase):

@@ -8,7 +8,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import Candidate, Election
 
 
@@ -28,7 +28,7 @@ class ElectionsSidebarLinkTests(TestCase):
                 "memberof_group": [],
             },
         )
-        with patch("core.backends.FreeIPAUser.get", return_value=viewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             resp = self.client.get(reverse("user-profile", args=["viewer"]))
 
         self.assertEqual(resp.status_code, 200)
@@ -43,7 +43,7 @@ class ElectionsVoteAccessTests(TestCase):
         session.save()
 
     def test_vote_page_requires_signed_coc(self) -> None:
-        from core.backends import FreeIPAFASAgreement
+        from core.freeipa.agreement import FreeIPAFASAgreement
 
         now = timezone.now()
         election = Election.objects.create(
@@ -66,7 +66,7 @@ class ElectionsVoteAccessTests(TestCase):
 
         self._login_as_freeipa_user("voter1")
         voter = FreeIPAUser("voter1", {"uid": ["voter1"], "memberof_group": []})
-        with patch("core.backends.FreeIPAUser.get", autospec=True, return_value=voter):
+        with patch("core.freeipa.user.FreeIPAUser.get", autospec=True, return_value=voter):
             with patch("core.views_utils.FreeIPAFASAgreement.get", autospec=True, return_value=coc):
                 resp = self.client.get(reverse("election-vote", args=[election.id]), follow=False)
 
@@ -136,7 +136,7 @@ class ElectionsDetailCandidateCardsTests(TestCase):
                 return nominator
             return None
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)
@@ -204,7 +204,7 @@ class ElectionsDetailCandidateCardsTests(TestCase):
             return None
 
         self.assertIsNotNone(election.pk)
-        with patch("core.backends.FreeIPAUser.get", side_effect=_get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(reverse("election-detail", args=[election.pk]))
 
         self.assertEqual(resp.status_code, 200)

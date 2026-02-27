@@ -4,7 +4,7 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import FreeIPAPermissionGrant, Organization
 from core.permissions import ASTRA_ADD_MEMBERSHIP, ASTRA_CHANGE_MEMBERSHIP
 
@@ -39,7 +39,7 @@ class OrganizationCreateRepresentativesTests(TestCase):
             return FreeIPAUser(username, {"uid": [username], "memberof_group": []})
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=get_user),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=get_user),
             patch("core.views_utils.has_signed_coc", return_value=True),
         ):
             resp = self.client.get(reverse("organization-create"))
@@ -68,7 +68,7 @@ class OrganizationCreateRepresentativesTests(TestCase):
             return FreeIPAUser(username, {"uid": [username], "memberof_group": []})
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=get_user),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=get_user),
             patch("core.views_utils.has_signed_coc", return_value=True),
         ):
             resp = self.client.get(reverse("organization-create"))
@@ -96,7 +96,7 @@ class OrganizationCreateRepresentativesTests(TestCase):
         def get_user(username: str):
             return FreeIPAUser(username, {"uid": [username], "memberof_group": []})
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=get_user):
             resp = self.client.get(url, {"q": "bo"})
             self.assertEqual(resp.status_code, 403)
             self.assertEqual(resp.json().get("error"), "Permission denied.")
@@ -111,9 +111,18 @@ class OrganizationCreateRepresentativesTests(TestCase):
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
         bobby = FreeIPAUser("bobby", {"uid": ["bobby"], "memberof_group": []})
 
+        def fake_search_freeipa_users(
+            *,
+            query: str,
+            limit: int,
+            exclude_usernames=None,
+        ) -> list[FreeIPAUser]:
+            _ = (query, limit, exclude_usernames)
+            return [bob, bobby]
+
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=get_user),
-            patch("core.backends.FreeIPAUser.all", return_value=[bobby, bob]),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=get_user),
+            patch("core.views_organizations.search_freeipa_users", side_effect=fake_search_freeipa_users),
         ):
             resp = self.client.get(url, {"q": "bo"})
             self.assertEqual(resp.status_code, 200)
@@ -142,7 +151,7 @@ class OrganizationCreateRepresentativesTests(TestCase):
                 return FreeIPAUser("bob", {"uid": ["bob"], "displayname": ["Bob Example"], "memberof_group": []})
             return FreeIPAUser(username, {"uid": [username], "memberof_group": []})
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=get_user):
             resp = self.client.get(reverse("organization-edit", args=[org.id]))
 
         self.assertEqual(resp.status_code, 200)

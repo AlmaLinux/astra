@@ -4,7 +4,7 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.tests.utils_test_data import ensure_core_categories, ensure_email_templates
 
 
@@ -43,7 +43,7 @@ class OrganizationFormTabValidationTests(TestCase):
         payload["technical_contact_email"] = "invalid-email"
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
             patch("core.views_utils.has_signed_coc", return_value=True),
         ):
             response = self.client.post(reverse("organization-create"), data=payload, follow=False)
@@ -58,7 +58,7 @@ class OrganizationFormTabValidationTests(TestCase):
         payload["business_contact_email"] = "invalid-email"
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
             patch("core.views_utils.has_signed_coc", return_value=True),
         ):
             response = self.client.post(reverse("organization-create"), data=payload, follow=False)
@@ -73,7 +73,7 @@ class OrganizationFormTabValidationTests(TestCase):
         payload["country_code"] = "ZZ"
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
             patch("core.views_utils.has_signed_coc", return_value=True),
         ):
             response = self.client.post(reverse("organization-create"), data=payload, follow=False)
@@ -86,7 +86,7 @@ class OrganizationFormTabValidationTests(TestCase):
         alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
 
         with (
-            patch("core.backends.FreeIPAUser.get", return_value=alice),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
             patch("core.views_utils.has_signed_coc", return_value=True),
         ):
             response = self.client.get(reverse("organization-create"))

@@ -6,10 +6,15 @@ from django.utils import timezone
 
 from core.elections_eligibility import eligible_voters_from_memberships
 from core.models import Election, Membership, MembershipType, Organization
+from core.tests.utils_test_data import ensure_core_categories
 
 
 @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=90)
 class ElectionEligibilityOrganizationRepresentativesTests(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        ensure_core_categories()
+
     def test_org_representatives_inherit_org_sponsorship_for_eligibility(self) -> None:
         now = timezone.now()
         election = Election.objects.create(

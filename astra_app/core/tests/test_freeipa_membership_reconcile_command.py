@@ -7,7 +7,8 @@ from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 
-from core.backends import FreeIPAGroup, FreeIPAUser
+from core.freeipa.group import FreeIPAGroup
+from core.freeipa.user import FreeIPAUser
 from core.models import Membership, MembershipType, Organization
 
 

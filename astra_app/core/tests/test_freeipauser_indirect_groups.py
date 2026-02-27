@@ -1,7 +1,7 @@
 
 from django.test import TestCase
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 
 
 class FreeIPAUserIndirectGroupsTests(TestCase):

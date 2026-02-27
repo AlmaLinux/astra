@@ -11,7 +11,7 @@ gunicorn
 whitenoise
 Markdown
 Pillow
-python-freeipa
+python-freeipa==1.0.10
 django-avatar
 pyotp
 qrcode

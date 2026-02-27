@@ -39,7 +39,7 @@ def reset_fas_agreements_to_almalinux_coc(apps, schema_editor) -> None:
         return
     # Agreements are stored in FreeIPA (freeipa-fas plugin). We intentionally use
     # the FreeIPA-backed backend here rather than Django models.
-    from core.backends import FreeIPAFASAgreement
+    from core.freeipa.agreement import FreeIPAFASAgreement
 
     for agreement in FreeIPAFASAgreement.all():
         agreement.delete()

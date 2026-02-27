@@ -4,7 +4,7 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 
 
 class AdminIPAUserDisplayNameNotEditableTests(TestCase):
@@ -38,7 +38,7 @@ class AdminIPAUserDisplayNameNotEditableTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_fake_user_get),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_fake_user_get),
             patch("core.admin.FreeIPAGroup.all", return_value=[]),
         ):
             url = reverse("admin:auth_ipauser_change", args=["bob"])

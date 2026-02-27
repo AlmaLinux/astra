@@ -3,7 +3,8 @@ from unittest.mock import patch
 
 from django.test import TestCase
 
-from core.backends import FreeIPAGroup, FreeIPAUser
+from core.freeipa.group import FreeIPAGroup
+from core.freeipa.user import FreeIPAUser
 
 
 class GroupSponsorNestedGroupsDisplayTests(TestCase):
@@ -68,7 +69,7 @@ class GroupSponsorNestedGroupsDisplayTests(TestCase):
             )
 
         with (
-            patch("core.backends.FreeIPAGroup.get", side_effect=_fake_group_get),
+            patch("core.freeipa.group.FreeIPAGroup.get", side_effect=_fake_group_get),
             patch("core.templatetags.core_user_widget.FreeIPAUser.get", side_effect=_fake_user_get),
         ):
             resp = self.client.get("/group/parent/")
@@ -143,7 +144,7 @@ class GroupSponsorNestedGroupsDisplayTests(TestCase):
             )
 
         with (
-            patch("core.backends.FreeIPAGroup.get", side_effect=_fake_group_get),
+            patch("core.freeipa.group.FreeIPAGroup.get", side_effect=_fake_group_get),
             patch("core.templatetags.core_user_widget.FreeIPAUser.get", side_effect=_fake_user_get),
         ):
             resp = self.client.get("/group/parent/")
@@ -170,8 +171,8 @@ class GroupSponsorNestedGroupsDisplayTests(TestCase):
             },
         )
 
-        with patch("core.backends.FreeIPAGroup.get", return_value=group):
+        with patch("core.freeipa.group.FreeIPAGroup.get", return_value=group):
             resp = self.client.get("/group/parent/")
 
         self.assertEqual(resp.status_code, 200)
-        self.assertNotContains(resp, "Sponsors")
+        self.assertNotContains(resp, "card-title\">Team Lead")

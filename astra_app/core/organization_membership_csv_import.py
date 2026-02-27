@@ -1,5 +1,6 @@
 import datetime
 import logging
+import uuid
 from dataclasses import dataclass
 from typing import Any, override
 
@@ -302,6 +303,63 @@ class OrganizationMembershipCSVImportResource(resources.ModelResource):
         self._unmatched: list[dict[str, str]] = []
         self._decision_counts: dict[str, int] = {}
         self._skip_reason_counts: dict[str, int] = {}
+        self._import_batch_id: uuid.UUID | None = None
+
+    @override
+    def import_data(self, dataset: Dataset, dry_run: bool = False, raise_errors: bool = False, **kwargs: Any) -> Any:
+        if not dry_run:
+            self._import_batch_id = uuid.uuid4()
+        try:
+            rows_total = len(dataset)
+        except Exception:
+            rows_total = 0
+
+        result: Any | None = None
+        outcome = "applied"
+        try:
+            result = super().import_data(dataset, dry_run=dry_run, raise_errors=raise_errors, **kwargs)
+            return result
+        except Exception:
+            outcome = "failed"
+            raise
+        finally:
+            if not dry_run:
+                rows_applied = 0
+                rows_failed = rows_total if outcome == "failed" else 0
+
+                if result is not None:
+                    try:
+                        totals = dict(getattr(result, "totals", {}) or {})
+                    except Exception:
+                        totals = {}
+
+                    rows_applied = (
+                        int(totals.get("new", 0))
+                        + int(totals.get("update", 0))
+                        + int(totals.get("delete", 0))
+                    )
+                    rows_failed = int(totals.get("error", 0)) + int(totals.get("invalid", 0))
+
+                correlation_id = str(self._import_batch_id)
+                logger.info(
+                    (
+                        "event=astra.membership.csv_import.batch_applied "
+                        f"component=membership outcome={outcome} "
+                        f"correlation_id={correlation_id} batch_id={self._import_batch_id} "
+                        f"rows_total={rows_total} rows_applied={rows_applied} rows_failed={rows_failed}"
+                    ),
+                    extra={
+                        "event": "astra.membership.csv_import.batch_applied",
+                        "component": "membership",
+                        "outcome": outcome,
+                        "correlation_id": correlation_id,
+                        "batch_id": self._import_batch_id,
+                        "rows_total": rows_total,
+                        "rows_applied": rows_applied,
+                        "rows_failed": rows_failed,
+                    },
+                )
+            self._import_batch_id = None
 
     @override
     def before_import(self, dataset: Dataset, **kwargs: Any) -> None:
@@ -605,6 +663,7 @@ class OrganizationMembershipCSVImportResource(resources.ModelResource):
             membership_type=membership_type,
             target_organization=organization,
             membership_request=membership_request,
+            import_batch_id=self._import_batch_id,
         )
 
         previous_expires_at = self._previous_expires_at(
@@ -612,10 +671,10 @@ class OrganizationMembershipCSVImportResource(resources.ModelResource):
             approved_at=approved_at,
         )
 
-        # `create_for_approval_at()` persists a MembershipLog row. The model's
-        # `save()` hook then triggers `_apply_org_side_effects()`, which calls
-        # `Membership.replace_within_category()` to enforce one membership per
-        # category for the organization.
+        # `create_for_approval_at()` persists the MembershipLog row and then
+        # explicitly applies organization membership side effects via the
+        # membership log side-effects service, which enforces one membership
+        # per category through `Membership.replace_within_category()`.
         approval_log = MembershipLog.create_for_approval_at(
             actor_username=self._actor_username,
             membership_type=membership_type,
@@ -623,6 +682,7 @@ class OrganizationMembershipCSVImportResource(resources.ModelResource):
             target_organization=organization,
             previous_expires_at=previous_expires_at,
             membership_request=membership_request,
+            import_batch_id=self._import_batch_id,
         )
 
         if end_at is not None and approval_log.expires_at != end_at:
@@ -632,6 +692,7 @@ class OrganizationMembershipCSVImportResource(resources.ModelResource):
                 target_organization=organization,
                 expires_at=end_at,
                 membership_request=membership_request,
+                import_batch_id=self._import_batch_id,
             )
 
         membership_qs = Membership.objects.filter(

@@ -189,7 +189,12 @@ def _storage_key_from_inline_image_arg(raw: str) -> str:
     return value.lstrip("/")
 
 
-def stage_inline_images_for_sending(html_content: str, *, strict: bool = True) -> tuple[str, list[str]]:
+def stage_inline_images_for_sending(
+    html_content: str,
+    *,
+    strict: bool = True,
+    template_name: str = "unknown",
+) -> tuple[str, list[str]]:
     """Rewrite inline_image arguments to local temp files for sending.
 
     Returns (rewritten_html, temp_paths). Callers must delete temp_paths.
@@ -224,7 +229,17 @@ def stage_inline_images_for_sending(html_content: str, *, strict: bool = True) -
 
                 # Best-effort sending: missing inline images should not block the email.
                 # We drop the tag entirely so clients simply won't render the image.
-                logger.warning("Inline image missing in storage key=%s", key, exc_info=True)
+                logger.warning(
+                    "Inline image missing in storage; sending without image",
+                    extra={
+                        "event": "astra.email.inline_image.missing",
+                        "component": "email",
+                        "outcome": "warning",
+                        "template_name": str(template_name or "").strip() or "unknown",
+                        "image_ref": raw_arg,
+                        "correlation_id": "email.templated.queue",
+                    },
+                )
                 return ""
 
             with file_obj:
@@ -305,6 +320,7 @@ def queue_templated_email(
         bcc=bcc,
         reply_to=reply_to,
         strict_inline_images=strict_inline_images,
+        template_name=template_name,
     )
 
     # Preserve linkage to the EmailTemplate and original context so the admin UI
@@ -374,6 +390,7 @@ def queue_composed_email(
     bcc: list[str] | None = None,
     reply_to: list[str] | None = None,
     strict_inline_images: bool = False,
+    template_name: str = "unknown",
 ) -> Email:
     """Queue operator/template-composed email through the SSOT pipeline.
 
@@ -387,6 +404,7 @@ def queue_composed_email(
         staged_html_content, staged_files = stage_inline_images_for_sending(
             html_source,
             strict=strict_inline_images,
+            template_name=template_name,
         )
 
         template_engine = engines["post_office"]

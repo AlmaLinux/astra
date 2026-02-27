@@ -4,7 +4,7 @@ from django.template import Context, Library
 from django.template.loader import render_to_string
 from django.utils.safestring import mark_safe
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.templatetags._user_helpers import try_get_full_name
 from core.views_utils import _normalize_str
 

@@ -36,4 +36,13 @@ def allow_request(
         cache.set(cache_key, 1, timeout=window_seconds)
         return True
 
+    ttl_updated = False
+    try:
+        ttl_updated = bool(cache.touch(cache_key, timeout=window_seconds))
+    except Exception:
+        ttl_updated = False
+
+    if not ttl_updated:
+        cache.set(cache_key, count, timeout=window_seconds)
+
     return count <= limit

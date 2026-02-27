@@ -11,7 +11,6 @@ from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 
 from core import elections_services
-from core.backends import FreeIPAUser
 from core.elections_eligibility import vote_weight_breakdown_for_username
 from core.elections_services import (
     ElectionNotOpenError,
@@ -19,6 +18,7 @@ from core.elections_services import (
     InvalidCredentialError,
     submit_ballot,
 )
+from core.freeipa.user import DegradedFreeIPAUser, FreeIPAUser
 from core.ipa_user_attrs import _get_freeipa_timezone_name
 from core.models import Candidate, Election, VotingCredential
 from core.rate_limit import allow_request
@@ -138,10 +138,14 @@ def election_vote_submit(request, election_id: int):
     except (InvalidBallotError, InvalidCredentialError, ElectionNotOpenError) as exc:
         return JsonResponse({"ok": False, "error": str(exc)}, status=400)
 
-    freeipa_user = FreeIPAUser.get(username)
-    voter_email = str(freeipa_user.email or "").strip() if freeipa_user is not None else ""
+    request_user = request.user
+    receipt_user: FreeIPAUser | DegradedFreeIPAUser | None = None
+    if isinstance(request_user, (FreeIPAUser, DegradedFreeIPAUser)):
+        receipt_user = request_user
+
+    voter_email = str(receipt_user.email or "").strip() if receipt_user is not None else ""
     if voter_email:
-        tz_name = _get_freeipa_timezone_name(freeipa_user) if freeipa_user is not None else None
+        tz_name = _get_freeipa_timezone_name(receipt_user) if isinstance(receipt_user, FreeIPAUser) else None
         elections_services.send_vote_receipt_email(
             request=request,
             election=election,
@@ -149,6 +153,7 @@ def election_vote_submit(request, election_id: int):
             email=voter_email,
             receipt=receipt,
             tz_name=tz_name,
+            user=receipt_user,
         )
 
     return JsonResponse(

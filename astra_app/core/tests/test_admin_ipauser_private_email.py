@@ -1,11 +1,11 @@
 
-from unittest.mock import patch
 from html.parser import HTMLParser
+from unittest.mock import patch
 
 from django.test import TestCase
 from django.urls import reverse
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 
 
 class _FreeIPAHeadingPlacementParser(HTMLParser):
@@ -64,7 +64,7 @@ class AdminIPAUserPrivateEmailTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_fake_user_get),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_fake_user_get),
             patch("core.admin.FreeIPAGroup.all", return_value=[]),
         ):
             url = reverse("admin:auth_ipauser_change", args=["sej7278"])
@@ -96,7 +96,7 @@ class AdminIPAUserPrivateEmailTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_fake_user_get),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_fake_user_get),
             patch("core.admin.FreeIPAGroup.all", return_value=[]),
         ):
             url = reverse("admin:auth_ipauser_change", args=["sej7278"])
@@ -132,7 +132,7 @@ class AdminIPAUserPrivateEmailTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_fake_user_get),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_fake_user_get),
             patch("core.admin.FreeIPAGroup.all", return_value=[]),
         ):
             url = reverse("admin:auth_ipauser_change", args=["sej7278"])
@@ -163,7 +163,7 @@ class AdminIPAUserPrivateEmailTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_fake_user_get),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_fake_user_get),
             patch("core.admin.FreeIPAGroup.all", return_value=[]),
         ):
             url = reverse("admin:auth_ipauser_change", args=["sej7278"])
@@ -197,7 +197,7 @@ class AdminIPAUserPrivateEmailTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_fake_user_get),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_fake_user_get),
             patch("core.admin.FreeIPAGroup.all", return_value=[]),
         ):
             url = reverse("admin:auth_ipauser_change", args=["sej7278"])
@@ -233,7 +233,7 @@ class AdminIPAUserPrivateEmailTests(TestCase):
             return None
 
         with (
-            patch("core.backends.FreeIPAUser.get", side_effect=_fake_user_get),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_fake_user_get),
             patch("core.admin.FreeIPAGroup.all", return_value=[]),
         ):
             url = reverse("admin:auth_ipauser_change", args=["sej7278"])

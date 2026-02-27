@@ -10,8 +10,9 @@ from django.urls import reverse
 from django.utils import timezone
 from post_office.models import EmailTemplate
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.membership import FreeIPAGroupRemovalOutcome
+from core.membership_log_side_effects import apply_membership_log_side_effects
 from core.models import Membership, MembershipLog, MembershipType, MembershipTypeCategory, Organization
 from core.public_urls import normalize_public_base_url
 
@@ -53,6 +54,11 @@ class MembershipExpiredCleanupCommandTests(TestCase):
             html_content="<p>Sponsorship expired</p>",
         )
 
+    def _create_membership_log_with_side_effects(self, **kwargs) -> MembershipLog:
+        log = MembershipLog.objects.create(**kwargs)
+        apply_membership_log_side_effects(log=log)
+        return log
+
     def test_command_removes_group_deletes_row_and_sends_email(self) -> None:
         MembershipType.objects.update_or_create(
             code="individual",
@@ -78,7 +84,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
             expired_at = timezone.now() - datetime.timedelta(days=1)
-            MembershipLog.objects.create(
+            self._create_membership_log_with_side_effects(
                 actor_username="reviewer",
                 target_username="alice",
                 membership_type_id="individual",
@@ -91,7 +97,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
                 Membership.objects.filter(target_username="alice", membership_type_id="individual").exists()
             )
 
-            with patch("core.backends.FreeIPAUser.get", return_value=alice):
+            with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
                 with patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_mock:
                     call_command("membership_expired_cleanup")
 
@@ -133,7 +139,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
             expired_at = timezone.now() - datetime.timedelta(days=1)
-            MembershipLog.objects.create(
+            self._create_membership_log_with_side_effects(
                 actor_username="reviewer",
                 target_username="alice",
                 membership_type_id="individual",
@@ -146,7 +152,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
                 Membership.objects.filter(target_username="alice", membership_type_id="individual").exists()
             )
 
-            with patch("core.backends.FreeIPAUser.get", return_value=alice):
+            with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
                 with patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_mock:
                     call_command("membership_expired_cleanup", "--dry-run")
 
@@ -207,7 +213,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
         )
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
-            with patch("core.backends.FreeIPAUser.get", return_value=rep):
+            with patch("core.freeipa.user.FreeIPAUser.get", return_value=rep):
                 with patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_mock:
                     call_command("membership_expired_cleanup")
 
@@ -282,7 +288,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
         )
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
-            with patch("core.backends.FreeIPAUser.get", return_value=rep):
+            with patch("core.freeipa.user.FreeIPAUser.get", return_value=rep):
                 with patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_mock:
                     call_command("membership_expired_cleanup", "--dry-run")
 
@@ -325,7 +331,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
             expired_at = timezone.now() - datetime.timedelta(days=1)
-            MembershipLog.objects.create(
+            self._create_membership_log_with_side_effects(
                 actor_username="reviewer",
                 target_username="alice",
                 membership_type_id="individual",
@@ -338,7 +344,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
                 Membership.objects.filter(target_username="alice", membership_type_id="individual").exists()
             )
 
-            with patch("core.backends.FreeIPAUser.get", return_value=alice):
+            with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
                 with patch(
                     "core.management.commands.membership_expired_cleanup.remove_user_from_group",
                     return_value=False,
@@ -401,7 +407,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
         )
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
-            with patch("core.backends.FreeIPAUser.get", return_value=rep):
+            with patch("core.freeipa.user.FreeIPAUser.get", return_value=rep):
                 with patch(
                     "core.management.commands.membership_expired_cleanup.remove_organization_representative_from_group_if_present",
                     return_value=FreeIPAGroupRemovalOutcome.failed,
@@ -457,7 +463,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
             stderr = StringIO()
-            with patch("core.backends.FreeIPAUser.get", return_value=rep):
+            with patch("core.freeipa.user.FreeIPAUser.get", return_value=rep):
                 with patch.object(FreeIPAUser, "remove_from_group", autospec=True):
                     call_command("membership_expired_cleanup", stderr=stderr)
 
@@ -506,7 +512,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
                     "core.management.commands.membership_expired_cleanup.organization_sponsor_email_context",
                     return_value={},
                 ),
-                patch("core.backends.FreeIPAUser.get", side_effect=RuntimeError("ipa down")),
+                patch("core.freeipa.user.FreeIPAUser.get", side_effect=RuntimeError("ipa down")),
             ):
                 call_command("membership_expired_cleanup", stderr=stderr)
 

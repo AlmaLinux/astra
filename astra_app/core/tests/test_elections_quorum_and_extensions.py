@@ -6,8 +6,8 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from core.backends import FreeIPAUser
-from core.elections_services import election_quorum_status
+from core.elections_services import election_quorum_status, submit_ballot
+from core.freeipa.user import FreeIPAUser
 from core.models import (
     AuditLogEntry,
     Ballot,
@@ -88,7 +88,7 @@ class ElectionQuorumAuditTests(TestCase):
         Membership.objects.filter(pk=m2.pk).update(created_at=eligible_created_at)
 
         self._login_as_freeipa_user("voter1")
-        with patch("core.backends.FreeIPAUser.get") as mocked_get:
+        with patch("core.freeipa.user.FreeIPAUser.get") as mocked_get:
             mocked_get.return_value = FreeIPAUser(
                 "voter1",
                 {
@@ -98,15 +98,16 @@ class ElectionQuorumAuditTests(TestCase):
                     "memberofindirect_group": [],
                 },
             )
-            resp = self.client.post(
-                reverse("election-vote-submit", args=[election.id]),
-                {"credential_public_id": "cred-1", "ranking_usernames": "alice"},
-            )
+            with self.captureOnCommitCallbacks(execute=True):
+                resp = self.client.post(
+                    reverse("election-vote-submit", args=[election.id]),
+                    {"credential_public_id": "cred-1", "ranking_usernames": "alice"},
+                )
         self.assertEqual(resp.status_code, 200)
         self.assertFalse(AuditLogEntry.objects.filter(election=election, event_type="quorum_reached").exists())
 
         self._login_as_freeipa_user("voter2")
-        with patch("core.backends.FreeIPAUser.get") as mocked_get:
+        with patch("core.freeipa.user.FreeIPAUser.get") as mocked_get:
             mocked_get.return_value = FreeIPAUser(
                 "voter2",
                 {
@@ -116,10 +117,11 @@ class ElectionQuorumAuditTests(TestCase):
                     "memberofindirect_group": [],
                 },
             )
-            resp = self.client.post(
-                reverse("election-vote-submit", args=[election.id]),
-                {"credential_public_id": "cred-2", "ranking_usernames": "alice"},
-            )
+            with self.captureOnCommitCallbacks(execute=True):
+                resp = self.client.post(
+                    reverse("election-vote-submit", args=[election.id]),
+                    {"credential_public_id": "cred-2", "ranking_usernames": "alice"},
+                )
         self.assertEqual(resp.status_code, 200)
 
         reached = list(AuditLogEntry.objects.filter(election=election, event_type="quorum_reached"))
@@ -128,7 +130,7 @@ class ElectionQuorumAuditTests(TestCase):
 
         # Submitting again should not create duplicates.
         self._login_as_freeipa_user("voter2")
-        with patch("core.backends.FreeIPAUser.get") as mocked_get:
+        with patch("core.freeipa.user.FreeIPAUser.get") as mocked_get:
             mocked_get.return_value = FreeIPAUser(
                 "voter2",
                 {
@@ -138,10 +140,11 @@ class ElectionQuorumAuditTests(TestCase):
                     "memberofindirect_group": [],
                 },
             )
-            resp = self.client.post(
-                reverse("election-vote-submit", args=[election.id]),
-                {"credential_public_id": "cred-2", "ranking_usernames": "alice"},
-            )
+            with self.captureOnCommitCallbacks(execute=True):
+                resp = self.client.post(
+                    reverse("election-vote-submit", args=[election.id]),
+                    {"credential_public_id": "cred-2", "ranking_usernames": "alice"},
+                )
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(AuditLogEntry.objects.filter(election=election, event_type="quorum_reached").count(), 1)
 
@@ -160,7 +163,7 @@ class ElectionQuorumAuditTests(TestCase):
         self._login_as_freeipa_user("admin")
         self._grant_manage_permission("admin")
 
-        with patch("core.backends.FreeIPAUser.get") as mocked_get:
+        with patch("core.freeipa.user.FreeIPAUser.get") as mocked_get:
             mocked_get.return_value = FreeIPAUser(
                 "admin",
                 {
@@ -188,6 +191,47 @@ class ElectionQuorumAuditTests(TestCase):
         self.assertIn("previous_end_datetime", payload)
         self.assertIn("new_end_datetime", payload)
         self.assertIn("quorum_percent", payload)
+
+    def test_submit_ballot_defers_quorum_evaluation_to_on_commit(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Deferred quorum evaluation",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            quorum=100,
+            status=Election.Status.open,
+        )
+        candidate = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
+
+        VotingCredential.objects.create(
+            election=election,
+            public_id="cred-deferred-1",
+            freeipa_username="voter1",
+            weight=1,
+        )
+
+        callbacks = []
+        with (
+            patch(
+                "core.elections_services.election_quorum_status",
+                side_effect=AssertionError("quorum evaluation must be deferred"),
+            ),
+            patch(
+                "core.elections_services.transaction.on_commit",
+                side_effect=lambda callback: callbacks.append(callback),
+            ),
+        ):
+            receipt = submit_ballot(
+                election=election,
+                credential_public_id="cred-deferred-1",
+                ranking=[candidate.id],
+            )
+
+        self.assertIsNotNone(receipt.ballot.pk)
+        self.assertEqual(len(callbacks), 1)
+        self.assertFalse(AuditLogEntry.objects.filter(election=election, event_type="quorum_reached").exists())
 
 
 class ElectionQuorumStatusTests(TestCase):

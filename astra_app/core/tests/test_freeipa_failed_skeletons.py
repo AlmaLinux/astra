@@ -1,7 +1,8 @@
 
 from django.test import SimpleTestCase
 
-from core.backends import FreeIPAOperationFailed, _raise_if_freeipa_failed
+from core.freeipa.exceptions import FreeIPAOperationFailed
+from core.freeipa.utils import _raise_if_freeipa_failed
 
 
 class FreeIPAFailedSkeletonTests(SimpleTestCase):

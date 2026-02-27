@@ -24,14 +24,6 @@ from python_freeipa import ClientMeta, exceptions
 
 from core.agreements import has_enabled_agreements, list_agreements_for_user
 from core.avatar_storage import avatar_path_handler
-from core.backends import (
-    DegradedFreeIPAUser,
-    FreeIPAFASAgreement,
-    FreeIPAUser,
-    _build_freeipa_client,
-    _freeipa_circuit_open,
-    _get_freeipa_client,
-)
 from core.country_codes import country_label_from_code
 from core.email_context import system_email_context, user_email_context
 from core.forms_selfservice import (
@@ -45,6 +37,10 @@ from core.forms_selfservice import (
     ProfileForm,
     normalize_locale_tag,
 )
+from core.freeipa.agreement import FreeIPAFASAgreement
+from core.freeipa.circuit_breaker import _freeipa_circuit_open
+from core.freeipa.client import _build_freeipa_client, _get_freeipa_client
+from core.freeipa.user import DegradedFreeIPAUser, FreeIPAUser
 from core.ipa_user_attrs import (
     _add_change,
     _add_change_list_setattr,

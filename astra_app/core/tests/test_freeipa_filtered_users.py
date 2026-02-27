@@ -4,7 +4,7 @@ from unittest.mock import Mock, patch
 from django.core.cache import cache
 from django.test import TestCase, override_settings
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 
 
 class FreeIPAFilteredUsersTests(TestCase):
@@ -25,7 +25,7 @@ class FreeIPAFilteredUsersTests(TestCase):
             ]
         }
 
-        with patch("core.backends.FreeIPAUser.get_client", autospec=True, return_value=client):
+        with patch("core.freeipa.user.FreeIPAUser.get_client", autospec=True, return_value=client):
             users = FreeIPAUser.all()
 
         self.assertEqual([u.username for u in users], ["alice"])
@@ -38,7 +38,7 @@ class FreeIPAFilteredUsersTests(TestCase):
         client = Mock()
         client.user_show.return_value = {"result": {"uid": ["admin"], "mail": ["admin@example.com"]}}
 
-        with patch("core.backends.FreeIPAUser.get_client", autospec=True, return_value=client):
+        with patch("core.freeipa.user.FreeIPAUser.get_client", autospec=True, return_value=client):
             user = FreeIPAUser.get("admin")
 
         self.assertIsNotNone(user)

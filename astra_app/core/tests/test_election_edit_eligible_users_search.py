@@ -6,13 +6,18 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from core.backends import FreeIPAUser
+from core.freeipa.user import FreeIPAUser
 from core.models import FreeIPAPermissionGrant, Membership, MembershipType
 from core.permissions import ASTRA_ADD_ELECTION
+from core.tests.utils_test_data import ensure_core_categories
 
 
 @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=90)
 class ElectionEditEligibleUsersSearchTests(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        ensure_core_categories()
+
     def _login_as_freeipa_user(self, username: str) -> None:
         session = self.client.session
         session["_freeipa_username"] = username
@@ -54,7 +59,7 @@ class ElectionEditEligibleUsersSearchTests(TestCase):
 
         start_dt = (now + datetime.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=get_user):
             resp = self.client.get(
                 reverse("election-eligible-users-search", args=[0]),
                 data={"q": "ali", "start_datetime": start_dt},
@@ -91,7 +96,7 @@ class ElectionEditEligibleUsersSearchTests(TestCase):
                 return admin_user
             raise RuntimeError("FreeIPA is down")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=get_user):
             resp = self.client.get(
                 reverse("election-eligible-users-search", args=[0]),
                 data={"q": "ali"},
@@ -128,7 +133,7 @@ class ElectionEditEligibleUsersSearchTests(TestCase):
                 return admin_user
             raise RuntimeError("FreeIPA is down")
 
-        with patch("core.backends.FreeIPAUser.get", side_effect=get_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=get_user):
             resp = self.client.get(
                 reverse("election-eligible-users-search", args=[0]),
                 data={"q": ""},

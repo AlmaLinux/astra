@@ -6,8 +6,8 @@ from unittest.mock import patch
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from core.backends import FreeIPAMisconfiguredError
 from core.elections_eligibility import eligible_voters_from_memberships
+from core.freeipa.exceptions import FreeIPAMisconfiguredError
 from core.models import Election, Membership, MembershipType
 
 
@@ -53,7 +53,7 @@ class ElectionEligibleGroupTests(TestCase):
                 raise FreeIPAMisconfiguredError("Unknown group")
             return group
 
-        with patch("core.backends.get_freeipa_group_for_elections", side_effect=_get_group):
+        with patch("core.elections_eligibility.get_freeipa_group_for_elections", side_effect=_get_group):
             eligible = eligible_voters_from_memberships(election=election)
 
         eligible_usernames = {v.username for v in eligible}
@@ -108,7 +108,7 @@ class ElectionEligibleGroupTests(TestCase):
                 return child
             return None
 
-        with patch("core.backends.get_freeipa_group_for_elections", side_effect=_get_group):
+        with patch("core.elections_eligibility.get_freeipa_group_for_elections", side_effect=_get_group):
             eligible = eligible_voters_from_memberships(election=election)
 
         eligible_usernames = {v.username for v in eligible}

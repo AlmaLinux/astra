@@ -4,7 +4,7 @@ from unittest.mock import patch
 from django.test import TestCase
 from python_freeipa import exceptions
 
-from core.backends import FreeIPAFASAgreement
+from core.freeipa.agreement import FreeIPAFASAgreement
 
 
 class FreeIPAFASAgreementDeleteUnlinksTests(TestCase):
@@ -52,7 +52,7 @@ class FreeIPAFASAgreementDeleteUnlinksTests(TestCase):
             return fn(object())
 
         with (
-            patch("core.backends._with_freeipa_service_client_retry", side_effect=retry),
+            patch("core.freeipa.agreement._with_freeipa_service_client_retry", side_effect=retry),
             patch.object(FreeIPAFASAgreement, "_rpc", side_effect=rpc),
             patch.object(FreeIPAFASAgreement, "get", side_effect=get),
         ):

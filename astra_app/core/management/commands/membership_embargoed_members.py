@@ -5,12 +5,12 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
-from core.backends import FreeIPAUser
 from core.country_codes import (
     embargoed_country_codes_from_settings,
     embargoed_country_match_from_user_data,
 )
 from core.email_context import membership_committee_email_context
+from core.freeipa.user import FreeIPAUser
 from core.membership_notifications import (
     already_sent_today,
     committee_recipient_emails_for_permission_graceful,

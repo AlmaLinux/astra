@@ -211,6 +211,11 @@ urlpatterns = [
         name="membership-request-approve",
     ),
     path(
+        "membership/requests/<int:pk>/approve-on-hold/",
+        views_membership.membership_request_approve_on_hold,
+        name="membership-request-approve-on-hold",
+    ),
+    path(
         "membership/requests/<int:pk>/reject/",
         views_membership.membership_request_reject,
         name="membership-request-reject",

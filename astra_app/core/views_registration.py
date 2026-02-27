@@ -17,11 +17,17 @@ from core.account_invitation_reconcile import (
     reconcile_account_invitation_for_username,
 )
 from core.email_context import system_email_context
+from core.freeipa.client import _build_freeipa_client
+from core.freeipa.user import FreeIPAUser
+from core.rate_limit import allow_request
 from core.templated_email import queue_templated_email
-from core.views_auth import PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY
+from core.views_auth import (
+    PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY,
+    _emit_rate_limit_denial_log,
+    _rate_limit_client_ip,
+)
 from core.views_utils import _normalize_str
 
-from .backends import FreeIPAUser, _build_freeipa_client
 from .forms_registration import PasswordSetForm, RegistrationForm, ResendRegistrationEmailForm
 from .tokens import make_signed_token, read_signed_token
 
@@ -113,6 +119,38 @@ def register(request: HttpRequest) -> HttpResponse:
             invitation_token = session_invite_token
 
     form = RegistrationForm(request.POST or None, initial={"invitation_token": invitation_token})
+
+    if request.method == "POST":
+        client_ip = _rate_limit_client_ip(request)
+        submitted_username = _normalize_str(request.POST.get("username")).lower()
+        submitted_email = _normalize_str(request.POST.get("email")).lower()
+
+        limit = settings.AUTH_RATE_LIMIT_REGISTRATION_LIMIT
+        window_seconds = settings.AUTH_RATE_LIMIT_REGISTRATION_WINDOW_SECONDS
+        if not allow_request(
+            scope="auth.registration_initiation",
+            key_parts=[client_ip, submitted_username, submitted_email],
+            limit=limit,
+            window_seconds=window_seconds,
+        ):
+            form.add_error(None, "Too many registration attempts. Please try again later.")
+
+            endpoint = request.resolver_match.view_name if request.resolver_match is not None else "register"
+            subject = submitted_username or submitted_email
+            _emit_rate_limit_denial_log(
+                request,
+                endpoint=endpoint,
+                limit=limit,
+                window_seconds=window_seconds,
+                subject=subject,
+            )
+
+            return render(
+                request,
+                "core/register.html",
+                {"form": form, "registration_open": settings.REGISTRATION_OPEN},
+                status=429,
+            )
 
     if request.method == "POST" and form.is_valid():
         username = form.cleaned_data["username"]
