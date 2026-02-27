@@ -30,30 +30,6 @@
         </div>
       {% endif %}
 
-    {% with selected_contact=selected_contact|default:"" %}
-      {% if selected_contact %}
-        {% if selected_contact == "representative" and not show_representatives %}
-          {% with active_contact="business" %}
-            {% include "core/_organization_contacts_tabs.html" %}
-          {% endwith %}
-        {% else %}
-          {% with active_contact=selected_contact %}
-            {% include "core/_organization_contacts_tabs.html" %}
-          {% endwith %}
-        {% endif %}
-      {% else %}
-        {% if show_representatives %}
-          {% with active_contact="representative" %}
-            {% include "core/_organization_contacts_tabs.html" %}
-          {% endwith %}
-        {% else %}
-          {% with active_contact="business" %}
-            {% include "core/_organization_contacts_tabs.html" %}
-          {% endwith %}
-        {% endif %}
-      {% endif %}
-    {% endwith %}
-
       <div class="card">
       <div class="card-header">
         <h3 class="card-title">Branding</h3>
@@ -89,6 +65,30 @@
         {% include 'core/_form_field.html' with field=form.country_code %}
       </div>
     </div>
+
+    {% with selected_contact=selected_contact|default:"" %}
+      {% if selected_contact %}
+        {% if selected_contact == "representative" and not show_representatives %}
+          {% with active_contact="business" %}
+            {% include "core/_organization_contacts_tabs.html" %}
+          {% endwith %}
+        {% else %}
+          {% with active_contact=selected_contact %}
+            {% include "core/_organization_contacts_tabs.html" %}
+          {% endwith %}
+        {% endif %}
+      {% else %}
+        {% if show_representatives %}
+          {% with active_contact="representative" %}
+            {% include "core/_organization_contacts_tabs.html" %}
+          {% endwith %}
+        {% else %}
+          {% with active_contact="business" %}
+            {% include "core/_organization_contacts_tabs.html" %}
+          {% endwith %}
+        {% endif %}
+      {% endif %}
+    {% endwith %}
 
       <div class="card organization-form-footer">
         <div class="card-body">
