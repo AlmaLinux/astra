@@ -36,3 +36,30 @@ class MakePresetsTagTests(SimpleTestCase):
         )
         rendered = tpl.render(Context())
         self.assertEqual(rendered, "Alpha:a-value;Beta:b-value;")
+
+
+class MembershipTierClassFilterTests(SimpleTestCase):
+    """Verify membership tier slug to badge class mapping filter."""
+
+    def test_maps_known_unknown_and_case_insensitive_values(self) -> None:
+        tpl = Template(
+            '{% load core_dict %}'
+            '{{ known|membership_tier_class }}|'
+            '{{ upper|membership_tier_class }}|'
+            '{{ unknown|membership_tier_class }}|'
+            '{{ empty|membership_tier_class }}'
+        )
+        rendered = tpl.render(
+            Context(
+                {
+                    "known": "gold",
+                    "upper": "PlAtInUm",
+                    "unknown": "bronze",
+                    "empty": "",
+                }
+            )
+        )
+        self.assertEqual(
+            rendered,
+            "membership-gold|membership-platinum|membership-standard|membership-standard",
+        )

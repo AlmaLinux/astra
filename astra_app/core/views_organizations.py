@@ -304,7 +304,7 @@ def organizations(request: HttpRequest) -> HttpResponse:
             "organizations": page_ctx["page_obj"].object_list,
             **page_ctx,
             "grid_items": grid_items,
-            "create_url": reverse("organization-create") if can_create_organization else "",
+            "create_url": reverse("organization-create") if can_create_organization else None,
             "q": q,
             "empty_label": empty_label,
         },

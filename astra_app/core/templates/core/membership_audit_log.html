@@ -20,63 +20,65 @@
     </div>
 
     <div class="card-body p-0">
-      <table class="table table-striped mb-0">
-        <thead>
-          <tr>
-            <th class="text-nowrap" style="width: 1%; white-space: nowrap;">When</th>
-            <th class="text-nowrap" style="width: 1%; white-space: nowrap;">Who</th>
-            <th class="text-nowrap" style="width: 1%; white-space: nowrap;">Target</th>
-            <th class="text-nowrap" style="width: 1%; white-space: nowrap;">Membership</th>
-            <th>Action</th>
-            <th class="text-nowrap" style="width: 1%; white-space: nowrap;">Expires</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for l in logs %}
+      <div class="table-responsive">
+        <table class="table table-striped mb-0">
+          <thead>
             <tr>
-              <td class="text-muted text-nowrap" style="width: 1%; white-space: nowrap;">
-                {% if l.membership_request %}<a href="{% url 'membership-request-detail' l.membership_request.pk %}">Request #{{ l.membership_request.pk }}</a><br/>{% endif %}
-                {{ l.created_at|date:"r" }}
-              </td>
-              <td>{{ l.actor_username }}</td>
-              <td>
-                {% if l.target_username == '' %}
-                  {% if l.target_organization %}
-                    <a href="{% url 'organization-detail' l.target_organization.pk %}">{{ l.target_organization.name }}</a>
+              <th class="text-nowrap" style="width: 1%;">When</th>
+              <th class="text-nowrap" style="width: 1%;">Who</th>
+              <th class="text-nowrap" style="width: 1%;">Target</th>
+              <th class="text-nowrap" style="width: 1%;">Membership</th>
+              <th>Action</th>
+              <th class="text-nowrap" style="width: 1%;">Expires</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for l in logs %}
+              <tr>
+                <td class="text-muted text-nowrap" style="width: 1%;">
+                  {% if l.membership_request %}<a href="{% url 'membership-request-detail' l.membership_request.pk %}">Request #{{ l.membership_request.pk }}</a><br/>{% endif %}
+                  {{ l.created_at|date:"r" }}
+                </td>
+                <td>{{ l.actor_username }}</td>
+                <td>
+                  {% if l.target_username == '' %}
+                    {% if l.target_organization %}
+                      <a href="{% url 'organization-detail' l.target_organization.pk %}">{{ l.target_organization.name }}</a>
+                    {% else %}
+                      <span>{{ l.target_organization_name }}</span>
+                      <span class="text-muted">(deleted)</span>
+                    {% endif %}
                   {% else %}
-                    <span>{{ l.target_organization_name }}</span>
-                    <span class="text-muted">(deleted)</span>
+                    <a href="{% url 'user-profile' l.target_username %}">{{ l.target_username }}</a>
                   {% endif %}
-                {% else %}
-                  <a href="{% url 'user-profile' l.target_username %}">{{ l.target_username }}</a>
-                {% endif %}
-              </td>
-              <td>{{ l.membership_type.name }}</td>
-              <td>
-                {{ l.get_action_display }}
-                {% if l.membership_request %}
-                  <details class="mt-1">
-                    <summary class="small text-muted">Request responses</summary>
-                    <div class="mt-2">
-                      {% for item in l.membership_request.responses %}
-                        {% for k,v in item.items %}
-                            <div class="small text-muted font-weight-bold">{{ k }}</div>
-                            <div class="small" style="white-space: pre-wrap;">{{ v|membership_response_value:k }}</div>
+                </td>
+                <td>{{ l.membership_type.name }}</td>
+                <td>
+                  {{ l.get_action_display }}
+                  {% if l.membership_request %}
+                    <details class="mt-1">
+                      <summary class="small text-muted">Request responses</summary>
+                      <div class="mt-2">
+                        {% for item in l.membership_request.responses %}
+                          {% for k,v in item.items %}
+                              <div class="small text-muted font-weight-bold">{{ k }}</div>
+                              <div class="small" style="white-space: pre-wrap;">{{ v|membership_response_value:k }}</div>
+                          {% endfor %}
                         {% endfor %}
-                      {% endfor %}
-                    </div>
-                  </details>
-                {% endif %}
-              </td>
-              <td class="text-muted text-nowrap" style="width: 1%; white-space: nowrap;">{% if l.expires_at %}{{ l.expires_at|date:"M j, Y" }}{% endif %}</td>
-            </tr>
-          {% empty %}
-            <tr>
-              <td colspan="6" class="p-3 text-muted">No audit log entries.</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+                      </div>
+                    </details>
+                  {% endif %}
+                </td>
+                <td class="text-muted text-nowrap" style="width: 1%;">{% if l.expires_at %}{{ l.expires_at|date:"M j, Y" }}{% endif %}</td>
+              </tr>
+            {% empty %}
+              <tr>
+                <td colspan="6" class="p-3 text-muted">No audit log entries.</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <div class="card-footer clearfix">

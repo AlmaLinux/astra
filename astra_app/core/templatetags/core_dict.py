@@ -5,6 +5,13 @@ from django import template
 
 register = template.Library()
 
+_MEMBERSHIP_TIER_CLASSES: dict[str, str] = {
+    "platinum": "membership-platinum",
+    "gold": "membership-gold",
+    "silver": "membership-silver",
+    "ruby": "membership-ruby",
+}
+
 
 @register.filter(name="dict_get")
 def dict_get(mapping: Mapping[str, Any] | None, key: str) -> Any:  # noqa: ANN401
@@ -18,6 +25,12 @@ def dict_get(mapping: Mapping[str, Any] | None, key: str) -> Any:  # noqa: ANN40
     if mapping is None:
         return ""
     return mapping.get(key, "")
+
+
+@register.filter
+def membership_tier_class(tier_slug: str) -> str:
+    """Map a membership tier slug to its CSS badge class."""
+    return _MEMBERSHIP_TIER_CLASSES.get(str(tier_slug).lower(), "membership-standard")
 
 
 @register.simple_tag

@@ -32,19 +32,19 @@
           {% endif %}
 
           <div class="form-group">
-            <label for="id_username" class="sr-only">Username</label>
+            <label for="id_username">Username</label>
             <input type="text" name="username" class="form-control" id="id_username" placeholder="Username" autofocus required>
             {% if form.username.errors %}<div class="text-danger">{{ form.username.errors }}</div>{% endif %}
           </div>
 
           <div class="form-group">
-            <label for="id_password" class="sr-only">Password</label>
+            <label for="id_password">Password</label>
             <input type="password" name="password" class="form-control" id="id_password" placeholder="Password" required>
             {% if form.password.errors %}<div class="text-danger">{{ form.password.errors }}</div>{% endif %}
           </div>
 
           <div class="form-group">
-            <label for="id_otp" class="sr-only">One-Time Password</label>
+            <label for="id_otp">One-Time Password</label>
             <input type="text" name="otp" class="form-control" id="id_otp" placeholder="One-Time Password (if you have one)" autocomplete="off">
             {% if form.otp.errors %}<div class="text-danger">{{ form.otp.errors }}</div>{% endif %}
           </div>

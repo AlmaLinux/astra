@@ -43,77 +43,79 @@
       </div>
     </div>
     <div class="card-body p-0">
-      <table class="table table-striped mb-0">
-        <thead>
-          <tr>
-            <th style="width: 40px;" class="text-center">
-              <input type="checkbox" id="select-all-invitations-accepted" aria-label="Select all accepted invitations">
-            </th>
-            <th>Email</th>
-            <th>Full name</th>
-            <th>Organization</th>
-            <th>Note</th>
-            <th>Status</th>
-            <th>Accepted at</th>
-            <th class="text-right">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for invitation in accepted_invitations %}
+      <div class="table-responsive">
+        <table class="table table-striped mb-0">
+          <thead>
             <tr>
-              <td class="text-center align-top">
-                <input
-                  type="checkbox"
-                  class="invitation-checkbox invitation-checkbox--accepted"
-                  name="selected"
-                  value="{{ invitation.pk }}"
-                  form="bulk-invitations-accepted-form"
-                  aria-label="Select invitation"
-                >
-              </td>
-              <td>{{ invitation.email }}</td>
-              <td>{{ invitation.full_name }}</td>
-              <td>
-                {% if invitation.organization_id %}
-                  <a href="{% url 'organization-detail' invitation.organization_id %}">{{ invitation.organization.name }}</a>
-                {% else %}
-                  -
-                {% endif %}
-              </td>
-              <td>{{ invitation.note }}</td>
-              <td>
-                {% if invitation.freeipa_matched_usernames|length > 1 %}
-                  Accepted (multiple matches)
-                  <div class="text-muted small">
-                    {% for username in invitation.freeipa_matched_usernames %}
-                      <a href="{% url 'user-profile' username %}">{{ username }}</a>{% if not forloop.last %}, {% endif %}
-                    {% endfor %}
-                  </div>
-                  {% if invitation.accepted_username %}
-                    <div class="text-muted small">as <a href="{% url 'user-profile' invitation.accepted_username %}">{{ invitation.accepted_username }}</a></div>
-                  {% endif %}
-                {% else %}
-                  Accepted
-                  {% if invitation.accepted_username %}
-                    <div class="text-muted small">as <a href="{% url 'user-profile' invitation.accepted_username %}">{{ invitation.accepted_username }}</a></div>
-                  {% endif %}
-                {% endif %}
-              </td>
-              <td>{{ invitation.accepted_at }}</td>
-              <td class="text-right">
-                <form method="post" action="{% url 'account-invitation-dismiss' invitation.pk %}" class="d-inline">
-                  {% csrf_token %}
-                  <button type="submit" class="btn btn-sm btn-outline-secondary" title="Dismiss this invitation">Dismiss</button>
-                </form>
-              </td>
+              <th style="width: 40px;" class="text-center">
+                <input type="checkbox" id="select-all-invitations-accepted" aria-label="Select all accepted invitations">
+              </th>
+              <th>Email</th>
+              <th>Full name</th>
+              <th>Organization</th>
+              <th>Note</th>
+              <th>Status</th>
+              <th>Accepted at</th>
+              <th class="text-right">Actions</th>
             </tr>
-          {% empty %}
-            <tr>
-              <td colspan="8" class="text-muted text-center py-3">No accepted invitations.</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {% for invitation in accepted_invitations %}
+              <tr>
+                <td class="text-center align-top">
+                  <input
+                    type="checkbox"
+                    class="invitation-checkbox invitation-checkbox--accepted"
+                    name="selected"
+                    value="{{ invitation.pk }}"
+                    form="bulk-invitations-accepted-form"
+                    aria-label="Select invitation"
+                  >
+                </td>
+                <td>{{ invitation.email }}</td>
+                <td>{{ invitation.full_name }}</td>
+                <td>
+                  {% if invitation.organization_id %}
+                    <a href="{% url 'organization-detail' invitation.organization_id %}">{{ invitation.organization.name }}</a>
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
+                <td>{{ invitation.note }}</td>
+                <td>
+                  {% if invitation.freeipa_matched_usernames|length > 1 %}
+                    Accepted (multiple matches)
+                    <div class="text-muted small">
+                      {% for username in invitation.freeipa_matched_usernames %}
+                        <a href="{% url 'user-profile' username %}">{{ username }}</a>{% if not forloop.last %}, {% endif %}
+                      {% endfor %}
+                    </div>
+                    {% if invitation.accepted_username %}
+                      <div class="text-muted small">as <a href="{% url 'user-profile' invitation.accepted_username %}">{{ invitation.accepted_username }}</a></div>
+                    {% endif %}
+                  {% else %}
+                    Accepted
+                    {% if invitation.accepted_username %}
+                      <div class="text-muted small">as <a href="{% url 'user-profile' invitation.accepted_username %}">{{ invitation.accepted_username }}</a></div>
+                    {% endif %}
+                  {% endif %}
+                </td>
+                <td>{{ invitation.accepted_at }}</td>
+                <td class="text-right">
+                  <form method="post" action="{% url 'account-invitation-dismiss' invitation.pk %}" class="d-inline">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-sm btn-outline-secondary" title="Dismiss this invitation">Dismiss</button>
+                  </form>
+                </td>
+              </tr>
+            {% empty %}
+              <tr>
+                <td colspan="8" class="text-muted text-center py-3">No accepted invitations.</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 
@@ -149,68 +151,70 @@
       </div>
     </div>
     <div class="card-body p-0">
-      <table class="table table-striped mb-0">
-        <thead>
-          <tr>
-            <th style="width: 40px;" class="text-center">
-              <input type="checkbox" id="select-all-invitations-pending" aria-label="Select all pending invitations">
-            </th>
-            <th>Email</th>
-            <th>Full name</th>
-            <th>Organization</th>
-            <th>Note</th>
-            <th>Invited by</th>
-            <th>Invited at</th>
-            <th>Last sent</th>
-            <th>Send count</th>
-            <th class="text-right">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for invitation in pending_invitations %}
+      <div class="table-responsive">
+        <table class="table table-striped mb-0">
+          <thead>
             <tr>
-              <td class="text-center align-top">
-                <input
-                  type="checkbox"
-                  class="invitation-checkbox invitation-checkbox--pending"
-                  name="selected"
-                  value="{{ invitation.pk }}"
-                  form="bulk-invitations-pending-form"
-                  aria-label="Select invitation"
-                >
-              </td>
-              <td>{{ invitation.email }}</td>
-              <td>{{ invitation.full_name }}</td>
-              <td>
-                {% if invitation.organization_id %}
-                  <a href="{% url 'organization-detail' invitation.organization_id %}">{{ invitation.organization.name }}</a>
-                {% else %}
-                  -
-                {% endif %}
-              </td>
-              <td>{{ invitation.note }}</td>
-              <td>{{ invitation.invited_by_username }}</td>
-              <td>{{ invitation.invited_at }}</td>
-              <td>{{ invitation.last_sent_at|default:"-" }}</td>
-              <td>{{ invitation.send_count }}</td>
-              <td class="text-right">
-                <form method="post" action="{% url 'account-invitation-resend' invitation.pk %}" class="d-inline">
-                  {% csrf_token %}
-                  <button type="submit" class="btn btn-sm btn-outline-primary" title="Resend invitation email">Resend</button>
-                </form>
-                <form method="post" action="{% url 'account-invitation-dismiss' invitation.pk %}" class="d-inline">
-                  {% csrf_token %}
-                  <button type="submit" class="btn btn-sm btn-outline-secondary" title="Dismiss this invitation">Dismiss</button>
-                </form>
-              </td>
+              <th style="width: 40px;" class="text-center">
+                <input type="checkbox" id="select-all-invitations-pending" aria-label="Select all pending invitations">
+              </th>
+              <th>Email</th>
+              <th>Full name</th>
+              <th>Organization</th>
+              <th>Note</th>
+              <th>Invited by</th>
+              <th>Invited at</th>
+              <th>Last sent</th>
+              <th>Send count</th>
+              <th class="text-right">Actions</th>
             </tr>
-          {% empty %}
-            <tr>
-              <td colspan="10" class="text-muted text-center py-3">No pending invitations.</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {% for invitation in pending_invitations %}
+              <tr>
+                <td class="text-center align-top">
+                  <input
+                    type="checkbox"
+                    class="invitation-checkbox invitation-checkbox--pending"
+                    name="selected"
+                    value="{{ invitation.pk }}"
+                    form="bulk-invitations-pending-form"
+                    aria-label="Select invitation"
+                  >
+                </td>
+                <td>{{ invitation.email }}</td>
+                <td>{{ invitation.full_name }}</td>
+                <td>
+                  {% if invitation.organization_id %}
+                    <a href="{% url 'organization-detail' invitation.organization_id %}">{{ invitation.organization.name }}</a>
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
+                <td>{{ invitation.note }}</td>
+                <td>{{ invitation.invited_by_username }}</td>
+                <td>{{ invitation.invited_at }}</td>
+                <td>{{ invitation.last_sent_at|default:"-" }}</td>
+                <td>{{ invitation.send_count }}</td>
+                <td class="text-right">
+                  <form method="post" action="{% url 'account-invitation-resend' invitation.pk %}" class="d-inline">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-sm btn-outline-primary" title="Resend invitation email">Resend</button>
+                  </form>
+                  <form method="post" action="{% url 'account-invitation-dismiss' invitation.pk %}" class="d-inline">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-sm btn-outline-secondary" title="Dismiss this invitation">Dismiss</button>
+                  </form>
+                </td>
+              </tr>
+            {% empty %}
+              <tr>
+                <td colspan="10" class="text-muted text-center py-3">No pending invitations.</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 {% endblock %}

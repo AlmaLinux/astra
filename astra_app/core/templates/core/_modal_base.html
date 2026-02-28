@@ -9,11 +9,11 @@ Optional:
 - dialog_style: str (inline style for .modal-dialog)
 {% endcomment %}
 
-<div class="modal fade"{% if modal_id %} id="{{ modal_id }}"{% endif %} tabindex="-1" role="dialog" aria-hidden="true">
+<div class="modal fade"{% if modal_id %} id="{{ modal_id }}"{% endif %} tabindex="-1" role="dialog" aria-hidden="true"{% if modal_id %} aria-labelledby="{{ modal_id }}-title"{% endif %}>
   <div class="modal-dialog" role="document"{% if dialog_style %} style="{{ dialog_style }}"{% endif %}>
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title">{{ title }}</h5>
+        <h5 class="modal-title"{% if modal_id %} id="{{ modal_id }}-title"{% endif %}>{{ title }}</h5>
         <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog">
           <span aria-hidden="true">&times;</span>
         </button>
@@ -21,6 +21,7 @@ Optional:
       <div class="modal-body">
         {% block modal_body %}{% endblock %}
       </div>
+      {% block modal_footer %}{% endblock %}
     </div>
   </div>
 </div>

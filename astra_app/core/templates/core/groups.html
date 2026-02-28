@@ -13,30 +13,32 @@
   </div>
 
   <div class="card-body p-0">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Group</th>
-          <th>Description</th>
-          <th style="width: 110px" class="text-right">Members</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for g in groups %}
+    <div class="table-responsive">
+      <table class="table table-striped">
+        <thead>
           <tr>
-            <td><a href="{% url 'group-detail' g.cn %}">{{ g.cn }}</a></td>
-            <td class="text-muted">{% if g.description %}{{ g.description }}{% endif %}</td>
-            <td class="text-right">
-              <span class="badge badge-secondary">{{ g.member_count }}</span>
-            </td>
+            <th>Group</th>
+            <th>Description</th>
+            <th style="width: 110px" class="text-right">Members</th>
           </tr>
-        {% empty %}
-          <tr>
-            <td colspan="3" class="p-3 text-muted">No groups found.</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {% for g in groups %}
+            <tr>
+              <td><a href="{% url 'group-detail' g.cn %}">{{ g.cn }}</a></td>
+              <td class="text-muted">{% if g.description %}{{ g.description }}{% endif %}</td>
+              <td class="text-right">
+                <span class="badge badge-secondary">{{ g.member_count }}</span>
+              </td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="3" class="p-3 text-muted">No groups found.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </div>
 
   <div class="card-footer clearfix">

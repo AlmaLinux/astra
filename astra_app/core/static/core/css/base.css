@@ -589,3 +589,13 @@ a.alx-status-badge:focus-visible {
 .organization-form-footer .card-footer {
   background: rgba(0, 0, 0, 0.02);
 }
+
+/* Sidebar brand image opacity */
+.main-sidebar .brand-image {
+  opacity: .8;
+}
+
+/* Public top-navigation brand image opacity */
+.main-header .brand-image {
+  opacity: .9;
+}

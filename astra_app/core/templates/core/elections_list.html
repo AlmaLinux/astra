@@ -29,7 +29,7 @@
                   <div class="font-weight-bold">{{ election.name }}</div>
                   <div class="text-muted small">{{ election.start_datetime|date:"Y-m-d H:i T" }} &rarr; {{ election.end_datetime|date:"Y-m-d H:i T" }}</div>
                 </div>
-                <span class="badge {% if election.status == 'draft' %}badge-warning{% else %}badge-secondary{% endif %}">{{ election.status }}</span>
+                <span class="badge {% if election.status == 'draft' %}badge-warning{% elif election.status == 'open' %}badge-success{% else %}badge-secondary{% endif %}">{{ election.status }}</span>
               </a>
             {% empty %}
               <div class="list-group-item text-muted mb-0">No open elections.</div>

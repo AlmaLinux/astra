@@ -44,59 +44,61 @@
     </div>
 
     <div class="card-body p-0">
-      <table class="table table-striped mb-0">
-        <thead>
-          <tr>
-            <th style="width: 40px;" class="text-center">
-              <input type="checkbox" id="select-all-requests" aria-label="Select all requests">
-            </th>
-            <th class="text-nowrap" style="width: 1%; white-space: nowrap;">Request</th>
-            <th class="text-nowrap" style="width: 30%; white-space: nowrap;">Requested for</th>
-            <th>Type</th>
-            <th class="text-right" style="width: 15%; white-space: nowrap;">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-            {% for row in pending_page_obj %}
-              {% with r=row.r %}
+      <div class="table-responsive">
+        <table class="table table-striped mb-0">
+          <thead>
             <tr>
-              <td class="text-center align-top">
-                <input
-                  type="checkbox"
-                  class="request-checkbox request-checkbox--pending"
-                  name="selected"
-                  value="{{ r.pk }}"
-                  form="bulk-action-form"
-                  aria-label="Select request"
-                >
-              </td>
-              <td class="text-muted text-nowrap" style="width: 1%; white-space: nowrap;">
-                <a href="{% url 'membership-request-detail' r.pk %}">Request #{{ r.pk }}</a><br/>
-                {{ r.requested_at }}
-              </td>
-              <td>
-                {% include 'core/_membership_request_requester_cell.html' %}
-              </td>
-              <td>
-                {{ r.membership_type.name }}
-
-                {% include 'core/_membership_request_responses.html' with request_obj=r organization=row.organization as_details=True %}
-
-              </td>
-              <td class="text-right">
-                <div class="membership-request-actions membership-request-actions--list">
-                  {% include 'core/_membership_request_actions.html' with request=r %}
-                </div>
-              </td>
+              <th style="width: 40px;" class="text-center">
+                <input type="checkbox" id="select-all-requests" aria-label="Select all requests">
+              </th>
+              <th class="text-nowrap" style="width: 1%;">Request</th>
+              <th class="text-nowrap" style="width: 30%;">Requested for</th>
+              <th>Type</th>
+              <th class="text-right" style="width: 15%;">Actions</th>
             </tr>
-            {% endwith %}
-          {% empty %}
-            <tr>
-              <td colspan="5" class="p-3 text-muted">No pending requests.</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+              {% for row in pending_page_obj %}
+                {% with r=row.r %}
+              <tr>
+                <td class="text-center align-top">
+                  <input
+                    type="checkbox"
+                    class="request-checkbox request-checkbox--pending"
+                    name="selected"
+                    value="{{ r.pk }}"
+                    form="bulk-action-form"
+                    aria-label="Select request"
+                  >
+                </td>
+                <td class="text-muted text-nowrap" style="width: 1%;">
+                  <a href="{% url 'membership-request-detail' r.pk %}">Request #{{ r.pk }}</a><br/>
+                  {{ r.requested_at }}
+                </td>
+                <td>
+                  {% include 'core/_membership_request_requester_cell.html' %}
+                </td>
+                <td>
+                  {{ r.membership_type.name }}
+
+                  {% include 'core/_membership_request_responses.html' with request_obj=r organization=row.organization as_details=True %}
+
+                </td>
+                <td class="text-right">
+                  <div class="membership-request-actions membership-request-actions--list">
+                    {% include 'core/_membership_request_actions.html' with request=r %}
+                  </div>
+                </td>
+              </tr>
+              {% endwith %}
+            {% empty %}
+              <tr>
+                <td colspan="5" class="p-3 text-muted">No pending requests.</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
 
       {% if pending_is_paginated %}
         <div class="p-3 border-top">
@@ -140,64 +142,66 @@
       </div>
 
       <div class="card-body p-0">
-        <table class="table table-striped mb-0">
-          <thead>
-            <tr>
-              <th style="width: 40px;" class="text-center">
-                <input type="checkbox" id="select-all-requests-on-hold" aria-label="Select all on-hold requests">
-              </th>
-              <th class="text-nowrap" style="width: 1%; white-space: nowrap;">Request</th>
-              <th class="text-nowrap" style="width: 30%; white-space: nowrap;">Requested for</th>
-              <th>Type</th>
-              <th class="text-nowrap" style="width: 1%; white-space: nowrap;">On hold since</th>
-              <th class="text-right" style="width: 15%; white-space: nowrap;">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for row in on_hold_page_obj %}
-              {% with r=row.r %}
-                <tr>
-                  <td class="text-center align-top">
-                  <input
-                    type="checkbox"
-                    class="request-checkbox request-checkbox--on-hold"
-                    name="selected"
-                    value="{{ r.pk }}"
-                    form="bulk-action-form-on-hold"
-                    aria-label="Select request"
-                  >
-                </td>
-                <td class="text-muted text-nowrap" style="width: 1%; white-space: nowrap;">
-                  <a href="{% url 'membership-request-detail' r.pk %}">Request #{{ r.pk }}</a><br/>
-                  {{ r.requested_at }}
-                </td>
-                <td>
-                  {% include 'core/_membership_request_requester_cell.html' %}
-                </td>
-
-                <td>{{ r.membership_type.name }}</td>
-                <td class="text-nowrap">
-                  {% if r.on_hold_at %}
-                    {{ r.on_hold_at }}
-                    <div class="text-muted small">{{ r.on_hold_at|timesince }} ago</div>
-                  {% else %}
-                    <span class="text-muted">(unknown)</span>
-                  {% endif %}
-                </td>
-                <td class="text-right">
-                  <div class="membership-request-actions membership-request-actions--list">
-                    {% include 'core/_membership_request_actions.html' with request=r %}
-                  </div>
-                </td>
-              </tr>
-              {% endwith %}
-            {% empty %}
+        <div class="table-responsive">
+          <table class="table table-striped mb-0">
+            <thead>
               <tr>
-                <td colspan="6" class="p-3 text-muted">No on-hold requests.</td>
+                <th style="width: 40px;" class="text-center">
+                  <input type="checkbox" id="select-all-requests-on-hold" aria-label="Select all on-hold requests">
+                </th>
+                <th class="text-nowrap" style="width: 1%;">Request</th>
+                <th class="text-nowrap" style="width: 30%;">Requested for</th>
+                <th>Type</th>
+                <th class="text-nowrap" style="width: 1%;">On hold since</th>
+                <th class="text-right" style="width: 15%;">Actions</th>
               </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {% for row in on_hold_page_obj %}
+                {% with r=row.r %}
+                  <tr>
+                    <td class="text-center align-top">
+                    <input
+                      type="checkbox"
+                      class="request-checkbox request-checkbox--on-hold"
+                      name="selected"
+                      value="{{ r.pk }}"
+                      form="bulk-action-form-on-hold"
+                      aria-label="Select request"
+                    >
+                  </td>
+                  <td class="text-muted text-nowrap" style="width: 1%;">
+                    <a href="{% url 'membership-request-detail' r.pk %}">Request #{{ r.pk }}</a><br/>
+                    {{ r.requested_at }}
+                  </td>
+                  <td>
+                    {% include 'core/_membership_request_requester_cell.html' %}
+                  </td>
+
+                  <td>{{ r.membership_type.name }}</td>
+                  <td class="text-nowrap">
+                    {% if r.on_hold_at %}
+                      {{ r.on_hold_at }}
+                      <div class="text-muted small">{{ r.on_hold_at|timesince }} ago</div>
+                    {% else %}
+                      <span class="text-muted">(unknown)</span>
+                    {% endif %}
+                  </td>
+                  <td class="text-right">
+                    <div class="membership-request-actions membership-request-actions--list">
+                      {% include 'core/_membership_request_actions.html' with request=r %}
+                    </div>
+                  </td>
+                </tr>
+                {% endwith %}
+              {% empty %}
+                <tr>
+                  <td colspan="6" class="p-3 text-muted">No on-hold requests.</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
 
         {% if on_hold_is_paginated %}
           <div class="p-3 border-top">
