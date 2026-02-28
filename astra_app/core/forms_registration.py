@@ -1,5 +1,6 @@
 
 from django import forms
+from django.utils.safestring import mark_safe
 
 from core.forms_base import StyledForm
 from core.forms_security import PasswordConfirmationMixin, make_password_confirmation_field, make_password_field
@@ -16,7 +17,9 @@ class RegistrationForm(StyledForm):
         min_length=5,
         max_length=32,
         required=True,
-        help_text='Allowed: a-z, 0-9, and "-" (no leading/trailing dashes).',
+        help_text=mark_safe(
+            'Lowercase letters (a-z), digits (0-9), and hyphens only. 5-32 characters. Example: <code>alice-smith42</code>'
+        ),
     )
     first_name = forms.CharField(label="First name", required=True, max_length=64)
     last_name = forms.CharField(label="Last name", required=True, max_length=64)

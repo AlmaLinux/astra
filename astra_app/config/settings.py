@@ -720,8 +720,8 @@ if not DEBUG:
     SECURE_CONTENT_TYPE_NOSNIFF = True
     SECURE_REFERRER_POLICY = _env_str("SECURE_REFERRER_POLICY", default="same-origin")
 
-    # HSTS is opt-in by default because it can brick HTTP-only deployments.
-    SECURE_HSTS_SECONDS = _env_int("SECURE_HSTS_SECONDS", default=0)
+    # Start with a short HSTS TTL (5 min); ramp up to 31536000 in production once verified.
+    SECURE_HSTS_SECONDS = _env_int("SECURE_HSTS_SECONDS", default=300)
     SECURE_HSTS_INCLUDE_SUBDOMAINS = _env_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", default=False)
     SECURE_HSTS_PRELOAD = _env_bool("SECURE_HSTS_PRELOAD", default=False)
 

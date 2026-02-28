@@ -2,6 +2,11 @@
 Body content for the "Conclude Election" name-confirm modal.
 Included by _modal_name_confirm.html.
 {% endcomment %}
+{% if turnout_stats and quorum_required and not quorum_met %}
+<div class="alert alert-warning mb-3" role="alert">
+  <strong>Quorum not met:</strong> {{ participating_voter_count }} of {{ required_participating_voter_count }} required voters have participated. Concluding now will mark this election as concluded without meeting quorum.
+</div>
+{% endif %}
 <p class="mb-3">You are about to close this election and end voting.</p>
 
 <ul class="mb-3">

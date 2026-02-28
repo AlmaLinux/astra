@@ -262,7 +262,117 @@ class MembershipRequestsFlowTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         messages = [m.message for m in get_messages(resp.wsgi_request)]
-        self.assertIn("A membership request is already pending for that category.", messages)
+        self.assertTrue(
+            any(
+                str(message).startswith("A membership request is already pending for that category.")
+                for message in messages
+            )
+        )
+
+    def test_user_membership_request_duplicate_message_includes_request_link(self) -> None:
+        from core.models import MembershipRequest, MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "acceptance_template": None,
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        existing = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.pending,
+        )
+
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["alice@example.com"],
+                "fasstatusnote": ["US"],
+                "memberof_group": [],
+            },
+        )
+        self._login_as_freeipa_user("alice")
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
+            patch("core.views_membership.user.block_action_without_coc", return_value=None),
+            patch("core.views_membership.user.block_action_without_country_code", return_value=None),
+        ):
+            resp = self.client.post(
+                reverse("membership-request"),
+                data={
+                    "membership_type": "individual",
+                    "q_contributions": "Another request should be blocked.",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, f'View request #{existing.pk}')
+        self.assertContains(resp, reverse("membership-request-self", args=[existing.pk]))
+
+    def test_org_membership_request_duplicate_message_includes_request_link(self) -> None:
+        from core.models import MembershipRequest, MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold",
+                "group_cn": "almalinux-gold",
+                "acceptance_template": None,
+                "category_id": "sponsorship",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="Acme", representative="alice")
+        existing = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="gold",
+            status=MembershipRequest.Status.on_hold,
+        )
+
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["alice@example.com"],
+                "fasstatusnote": ["US"],
+                "memberof_group": [],
+            },
+        )
+        self._login_as_freeipa_user("alice")
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
+            patch("core.views_membership.user.block_action_without_coc", return_value=None),
+            patch("core.views_membership.user.block_action_without_country_code", return_value=None),
+        ):
+            resp = self.client.post(
+                reverse("organization-membership-request", kwargs={"organization_id": org.pk}),
+                data={
+                    "membership_type": "gold",
+                    "q_sponsorship_details": "Duplicate organization request.",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, f'View request #{existing.pk}')
+        self.assertContains(resp, reverse("membership-request-self", args=[existing.pk]))
 
     def test_membership_request_requires_signed_coc(self) -> None:
         from core.freeipa.agreement import FreeIPAFASAgreement
@@ -317,7 +427,9 @@ class MembershipRequestsFlowTests(TestCase):
         expected = (
             f"{reverse('settings')}?tab=agreements&agreement={quote_plus(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN)}"
         )
-        self.assertEqual(resp["Location"], expected)
+        location = str(resp["Location"])
+        self.assertTrue(location.startswith(expected))
+        self.assertIn("return=", location)
         self.assertEqual(MembershipRequest.objects.count(), 0)
 
     def test_membership_request_form_uses_eligibility_helper_as_pending_ssot(self) -> None:
@@ -403,18 +515,16 @@ class MembershipRequestsFlowTests(TestCase):
         )
         self._login_as_freeipa_user("alice")
 
+        MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.on_hold,
+        )
+
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
             patch("core.views_membership.user.block_action_without_coc", return_value=None),
             patch("core.views_membership.user.block_action_without_country_code", return_value=None),
-            patch(
-                "core.views_membership.user.get_membership_request_eligibility",
-                create=True,
-                return_value=SimpleNamespace(
-                    blocked_membership_type_codes=set(),
-                    pending_membership_category_ids={"individual"},
-                ),
-            ),
         ):
             resp = self.client.post(
                 reverse("membership-request"),
@@ -427,12 +537,18 @@ class MembershipRequestsFlowTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         messages = [m.message for m in get_messages(resp.wsgi_request)]
-        self.assertIn("A membership request is already pending for that category.", messages)
-        self.assertFalse(
+        self.assertTrue(
+            any(
+                str(message).startswith("A membership request is already pending for that category.")
+                for message in messages
+            )
+        )
+        self.assertEqual(
             MembershipRequest.objects.filter(
                 requested_username="alice",
                 membership_type_id="individual",
-            ).exists()
+            ).count(),
+            1,
         )
 
     def test_membership_request_blocks_category_with_pending_request(self) -> None:
@@ -703,10 +819,11 @@ class MembershipRequestsFlowTests(TestCase):
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch.object(FreeIPAUser, "add_to_group", autospec=True) as add_mock:
                 with patch("core.membership_request_workflow.queue_templated_email", autospec=True) as send_mock:
-                    resp = self.client.post(
-                        reverse("membership-request-approve", args=[req.pk]),
-                        follow=False,
-                    )
+                    with self.captureOnCommitCallbacks(execute=True):
+                        resp = self.client.post(
+                            reverse("membership-request-approve", args=[req.pk]),
+                            follow=False,
+                        )
 
         self.assertEqual(resp.status_code, 302)
         req.refresh_from_db()
@@ -791,6 +908,8 @@ class MembershipRequestsFlowTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Configured email template")
+        self.assertContains(resp, missing_name)
+        self.assertContains(resp, "was not found")
 
         req.refresh_from_db()
         self.assertEqual(req.status, MembershipRequest.Status.pending)
@@ -947,10 +1066,11 @@ class MembershipRequestsFlowTests(TestCase):
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch.object(FreeIPAUser, "add_to_group", autospec=True) as add_mock:
                 with patch("core.membership_request_workflow.queue_templated_email", autospec=True) as send_mock:
-                    resp = self.client.post(
-                        reverse("membership-request-approve", args=[req.pk]),
-                        follow=False,
-                    )
+                    with self.captureOnCommitCallbacks(execute=True):
+                        resp = self.client.post(
+                            reverse("membership-request-approve", args=[req.pk]),
+                            follow=False,
+                        )
 
         self.assertEqual(resp.status_code, 302)
         add_mock.assert_called_once()
@@ -1518,11 +1638,12 @@ class MembershipRequestsFlowTests(TestCase):
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch.object(FreeIPAUser, "add_to_group", autospec=True) as add_mock:
                 with patch("core.membership_request_workflow.queue_templated_email", autospec=True) as send_mock:
-                    resp = self.client.post(
-                        reverse("membership-requests-bulk"),
-                        data={"bulk_action": "approve", "selected": [str(req.pk)]},
-                        follow=False,
-                    )
+                    with self.captureOnCommitCallbacks(execute=True):
+                        resp = self.client.post(
+                            reverse("membership-requests-bulk"),
+                            data={"bulk_action": "approve", "selected": [str(req.pk)]},
+                            follow=False,
+                        )
 
         self.assertEqual(resp.status_code, 302)
         add_mock.assert_called_once()
@@ -1970,7 +2091,6 @@ class MembershipRequestsFlowTests(TestCase):
         Membership.objects.create(
             target_username="alice",
             membership_type_id="individual",
-            category_id="individual",
             expires_at=current_expires,
         )
 
@@ -2158,14 +2278,15 @@ class MembershipRequestsFlowTests(TestCase):
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch.object(FreeIPAUser, "add_to_group", autospec=True) as add_mock:
                 with patch("post_office.mail.send", autospec=True) as send_mock:
-                    resp = self.client.post(
-                        reverse("membership-requests-bulk"),
-                        data={
-                            "bulk_action": "approve",
-                            "selected": [str(req1.pk), str(req2.pk)],
-                        },
-                        follow=False,
-                    )
+                    with self.captureOnCommitCallbacks(execute=True):
+                        resp = self.client.post(
+                            reverse("membership-requests-bulk"),
+                            data={
+                                "bulk_action": "approve",
+                                "selected": [str(req1.pk), str(req2.pk)],
+                            },
+                            follow=False,
+                        )
 
         self.assertEqual(resp.status_code, 302)
         req1.refresh_from_db()

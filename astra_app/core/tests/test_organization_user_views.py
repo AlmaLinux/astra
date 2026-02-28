@@ -264,7 +264,9 @@ class OrganizationUserViewsTests(TestCase):
         expected = (
             f"{reverse('settings')}?tab=agreements&agreement={quote_plus(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN)}"
         )
-        self.assertEqual(resp["Location"], expected)
+        location = str(resp["Location"])
+        self.assertTrue(location.startswith(expected))
+        self.assertIn("return=", location)
         self.assertFalse(Organization.objects.filter(name="Blocked Org").exists())
 
     def test_organization_create_form_renders_without_required_text(self) -> None:
@@ -887,7 +889,7 @@ class OrganizationUserViewsTests(TestCase):
             response = self.client.get(reverse("organization-detail", args=[organization.pk]))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Send claim invitation")
+        self.assertContains(response, "Compose claim invitation email")
         send_claim_invitation_url = response.context["send_claim_invitation_url"]
         parsed_url = urlparse(send_claim_invitation_url)
         self.assertEqual(parsed_url.path, reverse("send-mail"))
@@ -969,7 +971,7 @@ class OrganizationUserViewsTests(TestCase):
             response = self.client.get(reverse("organization-detail", args=[organization.pk]))
 
         self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, "Send claim invitation")
+        self.assertNotContains(response, "Compose claim invitation email")
         self.assertNotContains(response, f"template={settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME}")
 
     def test_representative_can_edit_org_data_notes_hidden(self) -> None:
@@ -2364,7 +2366,9 @@ class OrganizationUserViewsTests(TestCase):
         expected = (
             f"{reverse('settings')}?tab=agreements&agreement={quote_plus(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN)}"
         )
-        self.assertEqual(resp["Location"], expected)
+        location = str(resp["Location"])
+        self.assertTrue(location.startswith(expected))
+        self.assertIn("return=", location)
         self.assertEqual(MembershipRequest.objects.count(), 0)
 
 

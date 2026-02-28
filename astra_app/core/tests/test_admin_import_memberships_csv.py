@@ -2149,7 +2149,8 @@ class AdminImportMembershipsCSVTests(TestCase):
             process_url = reverse("admin:core_membershipcsvimportlink_process_import")
             confirm_data = dict(confirm_form.initial)
             confirm_data["membership_type"] = "individual"
-            resp = self.client.post(process_url, data=confirm_data, follow=False)
+            with self.captureOnCommitCallbacks(execute=True):
+                resp = self.client.post(process_url, data=confirm_data, follow=False)
 
         self.assertEqual(resp.status_code, 302)
 
@@ -2663,19 +2664,23 @@ class AdminImportMembershipsCSVTests(TestCase):
             process_url = reverse("admin:core_membershipcsvimportlink_process_import")
             confirm_data = dict(confirm_form.initial)
             confirm_data["membership_type"] = "individual"
-            resp = self.client.post(process_url, data=confirm_data, follow=False)
+            with self.captureOnCommitCallbacks(execute=True):
+                resp = self.client.post(process_url, data=confirm_data, follow=False)
 
         self.assertEqual(resp.status_code, 302)
         req = MembershipRequest.objects.filter(requested_username="alice", membership_type_id="individual").first()
-        if req is not None:
-            self.assertFalse(
-                Note.objects.filter(
-                    membership_request=req,
-                    username="alex",
-                    content="[Import] Imported note",
-                ).exists()
-            )
-        self.assertFalse(
+        self.assertIsNotNone(req)
+        assert req is not None
+        req.refresh_from_db()
+        self.assertEqual(req.status, MembershipRequest.Status.approved)
+        self.assertTrue(
+            Note.objects.filter(
+                membership_request=req,
+                username="alex",
+                content="[Import] Imported note",
+            ).exists()
+        )
+        self.assertTrue(
             Membership.objects.filter(target_username="alice", membership_type_id="individual").exists()
         )
 

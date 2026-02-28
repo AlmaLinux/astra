@@ -165,9 +165,12 @@ class MembershipRequestWorkflowAgreementTests(TestCase):
                 "core.membership_request_workflow.remove_organization_representative_from_group_if_present",
                 return_value=FreeIPAGroupRemovalOutcome.failed,
             ) as remove_mock,
-            patch.object(FreeIPAUser, "add_to_group", autospec=True) as add_mock,
+            patch(
+                "core.membership_request_workflow.sync_organization_representative_groups",
+                autospec=True,
+            ) as sync_mock,
         ):
-            with self.assertRaisesRegex(Exception, "Failed to remove user from old group"):
+            with self.captureOnCommitCallbacks(execute=True):
                 approve_membership_request(
                     membership_request=membership_request,
                     actor_username="reviewer",
@@ -180,9 +183,15 @@ class MembershipRequestWorkflowAgreementTests(TestCase):
             caller_mode=FreeIPACallerMode.raise_on_error,
             missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
         )
-        add_mock.assert_not_called()
+        sync_mock.assert_called_once_with(
+            old_representative="",
+            new_representative="bob",
+            group_cns=("almalinux-platinum",),
+            caller_mode=FreeIPACallerMode.raise_on_error,
+            missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
+        )
         membership_request.refresh_from_db()
-        self.assertEqual(membership_request.status, MembershipRequest.Status.pending)
+        self.assertEqual(membership_request.status, MembershipRequest.Status.approved)
 
     def test_user_approval_treats_already_member_error_as_idempotent_success(self) -> None:
         MembershipTypeCategory.objects.update_or_create(
@@ -386,11 +395,12 @@ class MembershipRequestWorkflowAgreementTests(TestCase):
             ) as remove_mock,
             patch("core.membership_request_workflow.sync_organization_representative_groups", return_value=None),
         ):
-            approve_membership_request(
-                membership_request=membership_request,
-                actor_username="reviewer",
-                send_approved_email=False,
-            )
+            with self.captureOnCommitCallbacks(execute=True):
+                approve_membership_request(
+                    membership_request=membership_request,
+                    actor_username="reviewer",
+                    send_approved_email=False,
+                )
 
         remove_mock.assert_called_once_with(
             representative_username="bob",
@@ -441,11 +451,12 @@ class MembershipRequestWorkflowAgreementTests(TestCase):
             patch("core.membership_request_workflow.FreeIPAUser.get", return_value=alice),
             patch.object(FreeIPAUser, "add_to_group", autospec=True) as add_mock,
         ):
-            approve_membership_request(
-                membership_request=membership_request,
-                actor_username="reviewer",
-                send_approved_email=False,
-            )
+            with self.captureOnCommitCallbacks(execute=True):
+                approve_membership_request(
+                    membership_request=membership_request,
+                    actor_username="reviewer",
+                    send_approved_email=False,
+                )
 
         membership_request.refresh_from_db()
         self.assertEqual(membership_request.status, MembershipRequest.Status.approved)
@@ -519,11 +530,12 @@ class MembershipRequestWorkflowAgreementTests(TestCase):
             ) as remove_mock,
             patch("core.membership_request_workflow.sync_organization_representative_groups", autospec=True) as sync_mock,
         ):
-            approve_membership_request(
-                membership_request=membership_request,
-                actor_username="reviewer",
-                send_approved_email=False,
-            )
+            with self.captureOnCommitCallbacks(execute=True):
+                approve_membership_request(
+                    membership_request=membership_request,
+                    actor_username="reviewer",
+                    send_approved_email=False,
+                )
 
         membership_request.refresh_from_db()
         self.assertEqual(membership_request.status, MembershipRequest.Status.approved)

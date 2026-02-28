@@ -74,8 +74,8 @@ def _send_registration_email(
     ttl_seconds = settings.EMAIL_VALIDATION_TOKEN_TTL_SECONDS
     ttl_minutes = max(1, int((ttl_seconds + 59) / 60))
     valid_until = timezone.now() + datetime.timedelta(seconds=ttl_seconds)
-    # Use a stable UTC string for emails.
-    valid_until_utc = valid_until.astimezone(datetime.UTC).strftime("%H:%M")
+    # Include date + time to avoid ambiguity when expiry rolls into the next day.
+    valid_until_utc = valid_until.astimezone(datetime.UTC).strftime("%Y-%m-%d %H:%M UTC")
 
     full_name = f"{first_name} {last_name}".strip() or username
 
@@ -234,8 +234,7 @@ def confirm(request: HttpRequest) -> HttpResponse:
         stage = _stageuser_show(client, username)
         stage_data = stage.get("result") if isinstance(stage, dict) else None
     except exceptions.NotFound:
-        messages.warning(request, "The registration seems to have failed, please try again.")
-        return redirect("register")
+        stage_data = None
     except Exception:
         logger.exception("Registration confirm failed username=%s", username)
         messages.error(request, "Something went wrong")
@@ -277,7 +276,13 @@ def confirm(request: HttpRequest) -> HttpResponse:
     return render(
         request,
         "core/register_confirm.html",
-        {"username": username, "email": email, "form": form},
+        {
+            "username": username,
+            "email": email,
+            "first_name": first_name,
+            "last_name": last_name,
+            "form": form,
+        },
     )
 
 

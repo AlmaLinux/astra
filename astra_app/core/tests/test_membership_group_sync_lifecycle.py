@@ -53,7 +53,6 @@ class MembershipGroupSyncLifecycleTests(TestCase):
         Membership.objects.create(
             target_username="alice",
             membership_type_id="individual",
-            category_id="individual",
             expires_at=timezone.now() + datetime.timedelta(days=30),
         )
 

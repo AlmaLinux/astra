@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Callable, Collection
 from functools import wraps
 from typing import ParamSpec, TypeVar
@@ -46,6 +47,8 @@ MEMBERSHIP_REVIEW_PERMISSION_MAP: dict[str, str] = {
 
 P = ParamSpec("P")
 R = TypeVar("R", bound=HttpResponse)
+
+logger = logging.getLogger(__name__)
 
 
 def json_permission_required(permission: str) -> Callable[[Callable[P, R]], Callable[P, HttpResponse]]:
@@ -115,8 +118,11 @@ def membership_review_permissions(user: object) -> dict[str, bool]:
 def _has_permission(*, user: object, permission: str) -> bool:
     try:
         return bool(user.has_perm(permission))
-    except Exception:
+    except (AttributeError, TypeError):
         # Template context processors and tests may pass user-like stubs.
+        return False
+    except Exception:
+        logger.exception("Unexpected error in _has_permission for permission=%r", permission)
         return False
 
 

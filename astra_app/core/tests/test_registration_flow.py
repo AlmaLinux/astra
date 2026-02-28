@@ -6,6 +6,7 @@ from urllib.parse import unquote
 
 from django.contrib.messages import get_messages
 from django.test import Client, TestCase, override_settings
+from python_freeipa import exceptions
 
 from core.freeipa.user import FreeIPAUser
 from core.models import AccountInvitation
@@ -143,6 +144,23 @@ class RegistrationFlowTests(TestCase):
         activation_payload = read_signed_token(unquote(token_match.group(1)))
         self.assertEqual(activation_payload.get("i"), invitation_token)
 
+    @override_settings(REGISTRATION_OPEN=True)
+    def test_confirm_unknown_username_renders_same_template_without_redirect(self) -> None:
+        client = Client()
+
+        def _raise_not_found(*args, **kwargs):
+            _ = args, kwargs
+            raise exceptions.NotFound
+
+        ipa_client = SimpleNamespace(stageuser_show=_raise_not_found)
+        with patch("core.views_registration.FreeIPAUser.get_client", autospec=True, return_value=ipa_client):
+            resp = client.get("/register/confirm/?username=ghost-user")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertTemplateUsed(resp, "core/register_confirm.html")
+        self.assertEqual(resp.context["username"], "ghost-user")
+        self.assertIsNone(resp.context["email"])
+
     def test_registration_email_template_exists(self):
         from post_office.models import EmailTemplate
 
@@ -197,6 +215,39 @@ class RegistrationFlowTests(TestCase):
         self.assertEqual(ctx.get("last_name"), "User")
         self.assertIn("full_name", ctx)
         self.assertNotIn("displayname", ctx)
+
+    @override_settings(
+        REGISTRATION_OPEN=True,
+        DEFAULT_FROM_EMAIL="noreply@example.com",
+        EMAIL_VALIDATION_TOKEN_TTL_SECONDS=3600,
+    )
+    def test_register_email_context_includes_full_utc_date_and_time_for_expiry(self) -> None:
+        client = Client()
+
+        ipa_client = SimpleNamespace()
+        ipa_client.stageuser_add = lambda *args, **kwargs: {
+            "result": {"uid": ["alice"], "givenname": ["Alice"], "sn": ["User"], "mail": ["alice@example.com"]}
+        }
+
+        with (
+            patch("core.views_registration.FreeIPAUser.get_client", autospec=True, return_value=ipa_client),
+            patch("core.views_registration.queue_templated_email", autospec=True) as post_office_send_mock,
+        ):
+            response = client.post(
+                "/register/",
+                data={
+                    "username": "alice",
+                    "first_name": "Alice",
+                    "last_name": "User",
+                    "email": "alice@example.com",
+                    "over_16": "on",
+                },
+                follow=False,
+            )
+
+        self.assertEqual(response.status_code, 302)
+        ctx = post_office_send_mock.call_args.kwargs.get("context") or {}
+        self.assertRegex(str(ctx.get("valid_until_utc", "")), r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC$")
 
     @override_settings(REGISTRATION_OPEN=True, DEFAULT_FROM_EMAIL="noreply@example.com")
     def test_register_post_requires_over_16_checkbox(self):

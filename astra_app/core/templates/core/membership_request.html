@@ -50,6 +50,7 @@
           <div class="callout callout-danger">
             We sent you an email{% if user_email %} to <strong>{{ user_email }}</strong>{% endif %} asking for clarifications.
             Please update your request below and submit it to resume review.
+            If you have questions, email us at <a href="mailto:{{ committee_email }}">{{ committee_email }}</a>.
           </div>
         {% endif %}
       {% endif %}
@@ -61,9 +62,8 @@
 
       {% if req %}
         {% if req.status == 'pending' or req.status == 'on_hold' %}
-          <form id="membership-rescind-form" method="post" action="{% url 'membership-request-rescind' req.pk %}">
-            {% csrf_token %}
-          </form>
+        {% url 'membership-request-rescind' req.pk as rescind_url %}
+        {% include 'core/_modal_confirm.html' with modal_id='rescind-confirm-modal' title='Rescind membership request?' body_prefix='Are you sure you want to rescind this ' body_emphasis='membership request' body_suffix='? This action cannot be undone.' action_url=rescind_url submit_label='Rescind request' submit_class='btn-danger' %}
         {% endif %}
       {% endif %}
 
@@ -146,10 +146,10 @@
           {% if req %}
             {% if req.status == 'pending' or req.status == 'on_hold' %}
               <button
-                type="submit"
-                form="membership-rescind-form"
-                formnovalidate
+                type="button"
                 class="btn btn-outline-danger"
+                data-toggle="modal"
+                data-target="#rescind-confirm-modal"
                 title="Cancel your membership request"
               >Rescind request</button>
             {% endif %}

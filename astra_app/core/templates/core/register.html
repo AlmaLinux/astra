@@ -19,6 +19,7 @@
             <a class="nav-link active" href="{% url 'register' %}{% if request.GET.invite %}?invite={{ request.GET.invite|urlencode:'' }}{% endif %}">Register</a>
           </li>
         </ul>
+        <small class="text-muted d-block px-3 pt-1 pb-2">Step 1 of 3: Account details</small>
       </div>
 
       {% if not registration_open %}

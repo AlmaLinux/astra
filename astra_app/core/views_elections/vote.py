@@ -2,6 +2,7 @@
 
 import hmac
 import json
+import logging
 import random
 
 from django.conf import settings
@@ -20,10 +21,12 @@ from core.elections_services import (
 )
 from core.freeipa.user import DegradedFreeIPAUser, FreeIPAUser
 from core.ipa_user_attrs import _get_freeipa_timezone_name
-from core.models import Candidate, Election, VotingCredential
+from core.models import Candidate, Election, Membership, VotingCredential
 from core.rate_limit import allow_request
 from core.views_elections._helpers import _get_active_election, _load_candidate_users
 from core.views_utils import block_action_without_coc, get_username, has_signed_coc
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_vote_payload(request, *, election: Election) -> tuple[str, list[int]]:
@@ -113,8 +116,8 @@ def election_vote_submit(request, election_id: int):
             status=429,
         )
 
-    # Voting eligibility and weight are determined when credentials are issued.
-    # Do not re-check current memberships here; they can change while the election is open.
+    # VotingCredential confirms eligibility at issuance; we also re-verify active
+    # membership here to prevent revoked users from voting.
     try:
         user_credential = VotingCredential.objects.only("public_id", "weight").get(
             election_id=election.id,
@@ -128,6 +131,22 @@ def election_vote_submit(request, election_id: int):
 
     if not hmac.compare_digest(str(user_credential.public_id), str(credential_public_id)):
         return JsonResponse({"ok": False, "error": "Invalid credential."}, status=400)
+
+    has_individual = Membership.objects.filter(
+        target_username__iexact=username,
+        membership_type__votes__gt=0,
+        membership_type__enabled=True,
+    ).active().exists()
+    has_org = Membership.objects.filter(
+        target_organization__representative__iexact=username,
+        membership_type__votes__gt=0,
+        membership_type__enabled=True,
+    ).active().exists()
+    if not has_individual and not has_org:
+        return JsonResponse(
+            {"ok": False, "error": "Your membership is no longer active. You are not eligible to vote."},
+            status=403,
+        )
 
     try:
         receipt = submit_ballot(
@@ -144,22 +163,32 @@ def election_vote_submit(request, election_id: int):
         receipt_user = request_user
 
     voter_email = str(receipt_user.email or "").strip() if receipt_user is not None else ""
+    email_queued = False
     if voter_email:
         tz_name = _get_freeipa_timezone_name(receipt_user) if isinstance(receipt_user, FreeIPAUser) else None
-        elections_services.send_vote_receipt_email(
-            request=request,
-            election=election,
-            username=username,
-            email=voter_email,
-            receipt=receipt,
-            tz_name=tz_name,
-            user=receipt_user,
-        )
+        try:
+            elections_services.send_vote_receipt_email(
+                request=request,
+                election=election,
+                username=username,
+                email=voter_email,
+                receipt=receipt,
+                tz_name=tz_name,
+                user=receipt_user,
+            )
+            email_queued = True
+        except Exception:
+            logger.exception(
+                "send_vote_receipt_email failed for election_id=%s username=%s",
+                election.id,
+                username,
+            )
 
     return JsonResponse(
         {
             "ok": True,
             "election_id": election.id,
+            "email_queued": email_queued,
             "ballot_hash": receipt.ballot.ballot_hash,
             "nonce": receipt.nonce,
             "previous_chain_hash": receipt.ballot.previous_chain_hash,

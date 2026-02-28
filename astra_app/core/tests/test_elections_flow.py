@@ -434,7 +434,7 @@ class ElectionCredentialIssuanceAndAnonymizationTests(TestCase):
         self.assertGreaterEqual(result["emails_scrubbed"], 1)
         self.assertFalse(Email.objects.filter(pk=queued.pk).exists())
 
-    def test_scrub_election_emails_fallback_catches_receipt_email_without_context(self) -> None:
+    def test_scrub_election_emails_does_not_delete_receipt_without_context(self) -> None:
         from post_office.models import Email
 
         verify_path = reverse("ballot-verify")
@@ -449,8 +449,45 @@ class ElectionCredentialIssuanceAndAnonymizationTests(TestCase):
 
         deleted = scrub_election_emails(election=self.election)
 
+        self.assertEqual(deleted, 0)
+        self.assertTrue(Email.objects.filter(pk=queued.pk).exists())
+
+    def test_scrub_election_emails_does_not_delete_other_election_receipts(self) -> None:
+        from post_office.models import Email
+
+        now = timezone.now()
+        other_election = Election.objects.create(
+            name="Other election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+        verify_path = reverse("ballot-verify")
+
+        election1_email = Email.objects.create(
+            from_email="noreply@example.com",
+            to="voter1@example.com",
+            subject="Election 1 receipt",
+            message=f"Verify your ballot: {verify_path}?receipt=election1",
+            html_message=f"<a href=\"{verify_path}?receipt=election1\">Verify</a>",
+            context={"election_id": self.election.id},
+        )
+        election2_email = Email.objects.create(
+            from_email="noreply@example.com",
+            to="voter2@example.com",
+            subject="Election 2 receipt",
+            message=f"Verify your ballot: {verify_path}?receipt=election2",
+            html_message=f"<a href=\"{verify_path}?receipt=election2\">Verify</a>",
+            context={"election_id": other_election.id},
+        )
+
+        deleted = scrub_election_emails(election=other_election)
+
         self.assertEqual(deleted, 1)
-        self.assertFalse(Email.objects.filter(pk=queued.pk).exists())
+        self.assertTrue(Email.objects.filter(pk=election1_email.pk).exists())
+        self.assertFalse(Email.objects.filter(pk=election2_email.pk).exists())
 
     def test_anonymize_election_scrub_anomaly_logged_and_flagged(self) -> None:
         issue_voting_credential(
@@ -1464,6 +1501,30 @@ class ElectionVoteEndpointTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json().get("error"), "Invalid credential.")
 
+    def test_vote_submit_rejects_voter_with_revoked_membership(self) -> None:
+        self._login_as_freeipa_user("voter1")
+        Membership.objects.filter(target_username="voter1").delete()
+
+        url = reverse("election-vote-submit", args=[self.election.id])
+
+        voter1 = FreeIPAUser("voter1", {"uid": ["voter1"], "memberof_group": []})
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=voter1):
+            response = self.client.post(
+                url,
+                data={
+                    "credential_public_id": self.cred.public_id,
+                    "ranking": [self.c2.id, self.c1.id],
+                },
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.json().get("error"),
+            "Your membership is no longer active. You are not eligible to vote.",
+        )
+        self.assertFalse(Ballot.objects.filter(election=self.election, credential_public_id=self.cred.public_id).exists())
+
     def test_vote_submit_json_creates_or_updates_ballot(self) -> None:
         self._login_as_freeipa_user("voter1")
 
@@ -1526,6 +1587,7 @@ class ElectionVoteEndpointTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertTrue(payload["ok"])
+        self.assertEqual(payload.get("email_queued"), True)
 
         self.assertEqual(Email.objects.count(), 1)
         queued = Email.objects.first()
@@ -1583,6 +1645,38 @@ class ElectionVoteEndpointTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(get_mock.call_count, 1)
         self.assertEqual(Email.objects.count(), 1)
+
+    def test_vote_submit_returns_success_when_receipt_email_fails(self) -> None:
+        self._login_as_freeipa_user("voter1")
+        url = reverse("election-vote-submit", args=[self.election.id])
+
+        voter1 = FreeIPAUser(
+            "voter1",
+            {
+                "uid": ["voter1"],
+                "mail": ["voter1@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=voter1),
+            patch("core.views_elections.vote.elections_services.send_vote_receipt_email", side_effect=RuntimeError("mail down")),
+        ):
+            response = self.client.post(
+                url,
+                data={
+                    "credential_public_id": self.cred.public_id,
+                    "ranking": [self.c2.id, self.c1.id],
+                },
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload.get("email_queued"), False)
+        self.assertTrue(Ballot.objects.filter(election=self.election, credential_public_id=self.cred.public_id).exists())
 
     @override_settings(ELECTION_VOTE_RECEIPT_EMAIL_TEMPLATE_NAME="test-vote-receipt")
     def test_vote_submit_queues_post_office_email_row(self) -> None:

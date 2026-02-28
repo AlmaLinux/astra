@@ -37,7 +37,9 @@ from core.permissions import (
 from core.views_utils import (
     _normalize_str,
     _resolve_post_redirect,
+    build_page_url_prefix,
     get_username,
+    paginate_and_build_context,
     post_only_404,
     require_post_or_404,
     send_mail_url,
@@ -249,6 +251,24 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
     pending_requests, pending_rows = _build_rows(pending_requests_all)
     on_hold_requests, on_hold_rows = _build_rows(on_hold_requests_all)
 
+    pending_page_number = request.GET.get("pending_page")
+    _, pending_page_url_prefix = build_page_url_prefix(request.GET, page_param="pending_page")
+    pending_page_ctx = paginate_and_build_context(
+        pending_rows,
+        pending_page_number,
+        50,
+        page_url_prefix=pending_page_url_prefix,
+    )
+
+    on_hold_page_number = request.GET.get("on_hold_page")
+    _, on_hold_page_url_prefix = build_page_url_prefix(request.GET, page_param="on_hold_page")
+    on_hold_page_ctx = paginate_and_build_context(
+        on_hold_rows,
+        on_hold_page_number,
+        50,
+        page_url_prefix=on_hold_page_url_prefix,
+    )
+
     return render(
         request,
         "core/membership_requests.html",
@@ -257,6 +277,20 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
             "pending_request_rows": pending_rows,
             "on_hold_requests": on_hold_requests,
             "on_hold_request_rows": on_hold_rows,
+            "pending_paginator": pending_page_ctx["paginator"],
+            "pending_page_obj": pending_page_ctx["page_obj"],
+            "pending_is_paginated": pending_page_ctx["is_paginated"],
+            "pending_page_numbers": pending_page_ctx["page_numbers"],
+            "pending_show_first": pending_page_ctx["show_first"],
+            "pending_show_last": pending_page_ctx["show_last"],
+            "pending_page_url_prefix": pending_page_ctx["page_url_prefix"],
+            "on_hold_paginator": on_hold_page_ctx["paginator"],
+            "on_hold_page_obj": on_hold_page_ctx["page_obj"],
+            "on_hold_is_paginated": on_hold_page_ctx["is_paginated"],
+            "on_hold_page_numbers": on_hold_page_ctx["page_numbers"],
+            "on_hold_show_first": on_hold_page_ctx["show_first"],
+            "on_hold_show_last": on_hold_page_ctx["show_last"],
+            "on_hold_page_url_prefix": on_hold_page_ctx["page_url_prefix"],
         },
     )
 

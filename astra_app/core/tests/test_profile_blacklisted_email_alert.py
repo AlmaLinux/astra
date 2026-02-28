@@ -53,7 +53,12 @@ class ProfileBlacklistedEmailAlertTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'id="account-setup-required-alert"')
         self.assertContains(resp, 'id="email-blacklisted-alert"')
-        self.assertContains(resp, "blacklisted", html=False)
+        self.assertContains(
+            resp,
+            "your address may have bounced or been marked as spam",
+            html=False,
+        )
+        self.assertContains(resp, "Update your email address", html=False)
         self.assertContains(resp, f'href="{reverse("settings")}?tab=emails"')
 
         # Other user view: should not see the alert.
@@ -63,4 +68,8 @@ class ProfileBlacklistedEmailAlertTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertNotContains(resp, 'id="email-blacklisted-alert"')
-        self.assertNotContains(resp, "blacklisted", html=False)
+        self.assertNotContains(
+            resp,
+            "your address may have bounced or been marked as spam",
+            html=False,
+        )

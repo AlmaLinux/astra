@@ -136,7 +136,10 @@ class OrganizationClaimFlowTests(TestCase):
             response = self.client.get(reverse("organization-claim", args=[token]))
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], f"{reverse('settings')}?tab=profile&highlight=country_code")
+        expected = f"{reverse('settings')}?tab=profile&highlight=country_code"
+        location = str(response["Location"])
+        self.assertTrue(location.startswith(expected))
+        self.assertIn("return=", location)
 
     @override_settings(COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN="code-of-conduct")
     def test_claim_requires_signed_coc(self) -> None:
@@ -153,4 +156,7 @@ class OrganizationClaimFlowTests(TestCase):
             response = self.client.get(reverse("organization-claim", args=[token]))
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], f"{reverse('settings')}?tab=agreements&agreement=code-of-conduct")
+        expected = f"{reverse('settings')}?tab=agreements&agreement=code-of-conduct"
+        location = str(response["Location"])
+        self.assertTrue(location.startswith(expected))
+        self.assertIn("return=", location)

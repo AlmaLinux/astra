@@ -28,6 +28,9 @@ class FormFieldDryPhase1TemplateTests(SimpleTestCase):
                 "{% include 'core/_form_field.html' with field=form.fas_discussion_url",
             ],
             "_settings_tab_emails.html": [
+                "{% if email_is_blacklisted %}",
+                "<h5>Email delivery problem</h5>",
+                "Please update your email address to a working one below.",
                 "{% include 'core/_form_field.html' with field=emails_form.mail %}",
                 "{% include 'core/_form_field.html' with field=emails_form.fasRHBZEmail %}",
             ],

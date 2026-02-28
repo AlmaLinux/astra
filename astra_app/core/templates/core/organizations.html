@@ -10,7 +10,9 @@
   <div class="card">
     <div class="card-header">
       <div class="d-flex align-items-center justify-content-between" style="gap: .75rem;">
-        <a href="{{ create_url|default:'' }}" class="btn btn-primary" title="Create a new organization">Create organization</a>
+        {% if create_url %}
+          <a href="{{ create_url }}" class="btn btn-primary" title="Create a new organization">Create organization</a>
+        {% endif %}
 
         {% include 'core/_search_form.html' with search_value=q search_placeholder="Search" search_aria_label="Search organizations" search_submit_title="Search organizations" %}
       </div>

@@ -157,13 +157,15 @@ def election_detail(request, election_id: int):
     username = get_username(request)
 
     voter_votes: int | None = None
+    credential_issued_at: datetime.datetime | None = None
     if election.status == Election.Status.open and username:
         credential = (
             VotingCredential.objects.filter(election=election, freeipa_username=username)
-            .only("weight")
+            .only("weight", "created_at")
             .first()
         )
         voter_votes = int(credential.weight or 0) if credential is not None else 0
+        credential_issued_at = credential.created_at if credential is not None else None
 
     can_vote = election.status == Election.Status.open and bool(voter_votes and voter_votes > 0)
 
@@ -264,6 +266,7 @@ def election_detail(request, election_id: int):
             "can_vote": can_vote,
             "show_turnout_chart": show_turnout_chart,
             "eligibility_min_membership_age_days": settings.ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS,
+            "credential_issued_at": credential_issued_at,
             **admin_context,
             "turnout_stats": turnout_stats,
             "turnout_chart_data": turnout_chart_data,

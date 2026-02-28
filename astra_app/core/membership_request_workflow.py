@@ -5,6 +5,7 @@ from typing import Any
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.db.models import QuerySet
 from django.utils import timezone
 from post_office.models import EmailTemplate
@@ -436,6 +437,7 @@ def record_membership_request_created(
         raise email_error
 
 
+@transaction.atomic
 def approve_membership_request(
     *,
     membership_request: MembershipRequest,
@@ -452,6 +454,11 @@ def approve_membership_request(
     It updates the request status fields and optionally emails the requester.
     """
 
+    membership_request = (
+        MembershipRequest.objects.select_related("membership_type", "requested_organization")
+        .select_for_update(of=("self",))
+        .get(pk=membership_request.pk)
+    )
     membership_type = membership_request.membership_type
     decided = decided_at or timezone.now()
     log_prefix = "approve_membership_request"
@@ -464,6 +471,9 @@ def approve_membership_request(
         if allow_on_hold_override:
             raise ValidationError("Only pending or on-hold requests can be approved")
         raise ValidationError("Only pending requests can be approved")
+
+    group_add_payload: tuple[str, str] | None = None
+    representative_sync_payload: tuple[str, tuple[str, ...], str | None] | None = None
 
     if membership_request.target_kind == MembershipRequest.TargetKind.organization:
         org = membership_request.requested_organization
@@ -519,6 +529,7 @@ def approve_membership_request(
                 raise
 
             if representative is not None:
+                old_group_cn_for_cleanup: str | None = None
                 if (
                     old_membership is not None
                     and old_membership.membership_type != membership_type
@@ -526,61 +537,12 @@ def approve_membership_request(
                 ):
                     old_group_cn = str(old_membership.membership_type.group_cn or "").strip()
                     if old_group_cn:
-                        try:
-                            old_outcome = remove_organization_representative_from_group_if_present(
-                                representative_username=representative.username,
-                                group_cn=old_group_cn,
-                                caller_mode=FreeIPACallerMode.raise_on_error,
-                                missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
-                            )
-                        except Exception as exc:
-                            if _is_freeipa_noop_error(error=exc, is_add=False):
-                                logger.info(
-                                    "astra.membership.freeipa_group.not_member group_cn=%s outcome=noop",
-                                    old_group_cn,
-                                    extra={
-                                        "event": "astra.freeipa.group.mutation",
-                                        "component": "membership",
-                                        "outcome": "not_member",
-                                    },
-                                )
-                                old_outcome = FreeIPAGroupRemovalOutcome.already_not_member
-                            else:
-                                raise
-                        if old_outcome == FreeIPAGroupRemovalOutcome.failed:
-                            raise Exception("Failed to remove user from old group")
-
-                try:
-                    sync_organization_representative_groups(
-                        old_representative="",
-                        new_representative=representative.username,
-                        group_cns=(membership_type.group_cn,),
-                        caller_mode=FreeIPACallerMode.raise_on_error,
-                        missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
-                    )
-                except Exception as exc:
-                    if _is_freeipa_noop_error(error=exc, is_add=True) or _is_freeipa_noop_error(error=exc, is_add=False):
-                        noop_outcome = "already_member" if _is_freeipa_noop_error(error=exc, is_add=True) else "not_member"
-                        logger.info(
-                            "astra.membership.freeipa_group.%s group_cn=%s outcome=noop",
-                            noop_outcome,
-                            membership_type.group_cn,
-                            extra={
-                                "event": "astra.freeipa.group.mutation",
-                                "component": "membership",
-                                "outcome": noop_outcome,
-                            },
-                        )
-                    else:
-                        logger.exception(
-                            "%s: add_to_group failed (org representative) request_id=%s org_id=%s representative=%r group_cn=%r",
-                            log_prefix,
-                            membership_request.pk,
-                            org.pk,
-                            representative.username,
-                            membership_type.group_cn,
-                        )
-                        raise
+                        old_group_cn_for_cleanup = old_group_cn
+                representative_sync_payload = (
+                    representative.username,
+                    (membership_type.group_cn,),
+                    old_group_cn_for_cleanup,
+                )
 
         email_context: dict[str, object] = (
             {
@@ -637,28 +599,7 @@ def approve_membership_request(
             membership_request=membership_request,
             membership_type=membership_type,
         )
-        try:
-            user.add_to_group(group_name=membership_type.group_cn)
-        except Exception as exc:
-            if _is_freeipa_noop_error(error=exc, is_add=True):
-                logger.info(
-                    "astra.membership.freeipa_group.already_member group_cn=%s outcome=noop",
-                    membership_type.group_cn,
-                    extra={
-                        "event": "astra.freeipa.group.mutation",
-                        "component": "membership",
-                        "outcome": "already_member",
-                    },
-                )
-            else:
-                logger.exception(
-                    "%s: add_to_group failed request_id=%s target=%r group_cn=%r",
-                    log_prefix,
-                    membership_request.pk,
-                    user.username,
-                    membership_type.group_cn,
-                )
-                raise
+        group_add_payload = (membership_request.requested_username, membership_type.group_cn)
 
         email_context = (
             {
@@ -732,6 +673,127 @@ def approve_membership_request(
         log_prefix=log_prefix,
     )
 
+    if group_add_payload is not None:
+        username_to_add, group_cn_to_add = group_add_payload
+
+        def _on_commit_add_user_to_group() -> None:
+            try:
+                user_for_group_add = FreeIPAUser.get(username_to_add)
+            except Exception:
+                logger.exception(
+                    "%s: on_commit FreeIPAUser.get failed request_id=%s target=%r",
+                    log_prefix,
+                    membership_request.pk,
+                    username_to_add,
+                )
+                return
+
+            if user_for_group_add is None:
+                logger.warning(
+                    "%s: on_commit user missing for group add request_id=%s target=%r",
+                    log_prefix,
+                    membership_request.pk,
+                    username_to_add,
+                )
+                return
+
+            try:
+                user_for_group_add.add_to_group(group_name=group_cn_to_add)
+            except Exception as exc:
+                if _is_freeipa_noop_error(error=exc, is_add=True):
+                    logger.info(
+                        "astra.membership.freeipa_group.already_member group_cn=%s outcome=noop",
+                        group_cn_to_add,
+                        extra={
+                            "event": "astra.freeipa.group.mutation",
+                            "component": "membership",
+                            "outcome": "already_member",
+                        },
+                    )
+                else:
+                    logger.exception(
+                        "%s: on_commit add_to_group failed request_id=%s target=%r group_cn=%r",
+                        log_prefix,
+                        membership_request.pk,
+                        user_for_group_add.username,
+                        group_cn_to_add,
+                    )
+
+        transaction.on_commit(_on_commit_add_user_to_group)
+
+    if representative_sync_payload is not None:
+        representative_username, group_cns, old_group_cn_to_remove = representative_sync_payload
+
+        def _on_commit_sync_representative_groups() -> None:
+            if old_group_cn_to_remove:
+                try:
+                    old_outcome = remove_organization_representative_from_group_if_present(
+                        representative_username=representative_username,
+                        group_cn=old_group_cn_to_remove,
+                        caller_mode=FreeIPACallerMode.raise_on_error,
+                        missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
+                    )
+                except Exception as exc:
+                    if _is_freeipa_noop_error(error=exc, is_add=False):
+                        logger.info(
+                            "astra.membership.freeipa_group.not_member group_cn=%s outcome=noop",
+                            old_group_cn_to_remove,
+                            extra={
+                                "event": "astra.freeipa.group.mutation",
+                                "component": "membership",
+                                "outcome": "not_member",
+                            },
+                        )
+                    else:
+                        logger.exception(
+                            "%s: on_commit old-group cleanup failed request_id=%s org_rep=%r group_cn=%r",
+                            log_prefix,
+                            membership_request.pk,
+                            representative_username,
+                            old_group_cn_to_remove,
+                        )
+                else:
+                    if old_outcome == FreeIPAGroupRemovalOutcome.failed:
+                        logger.error(
+                            "%s: on_commit old-group cleanup returned failed request_id=%s org_rep=%r group_cn=%r",
+                            log_prefix,
+                            membership_request.pk,
+                            representative_username,
+                            old_group_cn_to_remove,
+                        )
+
+            try:
+                sync_organization_representative_groups(
+                    old_representative="",
+                    new_representative=representative_username,
+                    group_cns=group_cns,
+                    caller_mode=FreeIPACallerMode.raise_on_error,
+                    missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
+                )
+            except Exception as exc:
+                if _is_freeipa_noop_error(error=exc, is_add=True) or _is_freeipa_noop_error(error=exc, is_add=False):
+                    noop_outcome = "already_member" if _is_freeipa_noop_error(error=exc, is_add=True) else "not_member"
+                    logger.info(
+                        "astra.membership.freeipa_group.%s group_cn=%s outcome=noop",
+                        noop_outcome,
+                        ",".join(group_cns),
+                        extra={
+                            "event": "astra.freeipa.group.mutation",
+                            "component": "membership",
+                            "outcome": noop_outcome,
+                        },
+                    )
+                else:
+                    logger.exception(
+                        "%s: on_commit representative sync failed request_id=%s org_rep=%r group_cn=%r",
+                        log_prefix,
+                        membership_request.pk,
+                        representative_username,
+                        ",".join(group_cns),
+                    )
+
+        transaction.on_commit(_on_commit_sync_representative_groups)
+
     return log
 
 
@@ -760,6 +822,7 @@ def approve_on_hold_membership_request(
     )
 
 
+@transaction.atomic
 def reject_membership_request(
     *,
     membership_request: MembershipRequest,
@@ -768,6 +831,11 @@ def reject_membership_request(
     send_rejected_email: bool,
     decided_at: datetime.datetime | None = None,
 ) -> tuple[MembershipLog, Exception | None]:
+    membership_request = (
+        MembershipRequest.objects.select_related("membership_type", "requested_organization")
+        .select_for_update(of=("self",))
+        .get(pk=membership_request.pk)
+    )
     membership_type = membership_request.membership_type
     decided = decided_at or timezone.now()
     log_prefix = "reject_membership_request"
@@ -837,12 +905,18 @@ def reject_membership_request(
     return log, email_error
 
 
+@transaction.atomic
 def ignore_membership_request(
     *,
     membership_request: MembershipRequest,
     actor_username: str,
     decided_at: datetime.datetime | None = None,
 ) -> MembershipLog:
+    membership_request = (
+        MembershipRequest.objects.select_related("membership_type", "requested_organization")
+        .select_for_update(of=("self",))
+        .get(pk=membership_request.pk)
+    )
     membership_type = membership_request.membership_type
     decided = decided_at or timezone.now()
     log_prefix = "ignore_membership_request"
@@ -872,6 +946,7 @@ def ignore_membership_request(
     return log
 
 
+@transaction.atomic
 def reopen_ignored_membership_request(
     *,
     membership_request: MembershipRequest,
@@ -883,6 +958,11 @@ def reopen_ignored_membership_request(
     Raises ValidationError if the request is not ignored, or if another
     open request already exists for the same target + membership type.
     """
+    membership_request = (
+        MembershipRequest.objects.select_related("membership_type", "requested_organization")
+        .select_for_update(of=("self",))
+        .get(pk=membership_request.pk)
+    )
     if membership_request.status != MembershipRequest.Status.ignored:
         raise ValidationError("Only ignored requests can be reopened")
 
@@ -932,6 +1012,7 @@ def reopen_ignored_membership_request(
     return log
 
 
+@transaction.atomic
 def put_membership_request_on_hold(
     *,
     membership_request: MembershipRequest,
@@ -947,6 +1028,11 @@ def put_membership_request_on_hold(
     - pending -> on_hold
     """
 
+    membership_request = (
+        MembershipRequest.objects.select_related("membership_type", "requested_organization")
+        .select_for_update(of=("self",))
+        .get(pk=membership_request.pk)
+    )
     membership_type = membership_request.membership_type
     now = held_at or timezone.now()
     log_prefix = "put_membership_request_on_hold"

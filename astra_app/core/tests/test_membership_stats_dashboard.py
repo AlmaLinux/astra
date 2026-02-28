@@ -167,8 +167,9 @@ class MembershipStatsDashboardTests(TestCase):
                 raise RuntimeError("FreeIPA unavailable")
             return None
 
-        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
-            resp = self.client.get(reverse("membership-sponsors"))
+        with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
+            with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
+                resp = self.client.get(reverse("membership-sponsors"))
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Sponsor Org")
@@ -252,6 +253,86 @@ class MembershipStatsDashboardTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Drifted Sponsor Org")
+
+    def test_membership_sponsors_page_uses_bulk_freeipa_lookup_for_multiple_representatives(self) -> None:
+        MembershipTypeCategory.objects.update_or_create(
+            name="sponsorship",
+            defaults={
+                "is_individual": False,
+                "is_organization": True,
+                "sort_order": 0,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="sponsor-standard",
+            defaults={
+                "name": "Sponsor Standard",
+                "group_cn": "sponsor-standard",
+                "category_id": "sponsorship",
+                "enabled": True,
+            },
+        )
+
+        first_org = Organization.objects.create(name="First Sponsor", representative="repone")
+        second_org = Organization.objects.create(name="Second Sponsor", representative="reptwo")
+
+        Membership.objects.create(
+            target_organization=first_org,
+            membership_type_id="sponsor-standard",
+            expires_at=timezone.now() + datetime.timedelta(days=7),
+        )
+        Membership.objects.create(
+            target_organization=second_org,
+            membership_type_id="sponsor-standard",
+            expires_at=timezone.now() + datetime.timedelta(days=14),
+        )
+
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.group,
+            principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
+        )
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "displayname": ["Reviewer User"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+            },
+        )
+
+        rep_one = FreeIPAUser(
+            "repone",
+            {
+                "uid": ["repone"],
+                "displayname": ["Representative One"],
+                "memberof_group": [],
+            },
+        )
+        rep_two = FreeIPAUser(
+            "reptwo",
+            {
+                "uid": ["reptwo"],
+                "displayname": ["Representative Two"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            raise AssertionError(f"Unexpected per-user FreeIPA lookup for representative username={username}")
+
+        with patch("core.freeipa.user.FreeIPAUser.all", return_value=[rep_one, rep_two]) as mocked_all:
+            with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
+                resp = self.client.get(reverse("membership-sponsors"))
+
+        self.assertEqual(resp.status_code, 200)
+        mocked_all.assert_called_once()
+        self.assertContains(resp, "Representative One (repone)")
+        self.assertContains(resp, "Representative Two (reptwo)")
 
     def test_membership_stats_data_requires_permission(self) -> None:
         self._login_as_freeipa_user("viewer")

@@ -13,8 +13,8 @@
     {% if can_edit_organization or is_representative or can_send_claim_invitation %}
       <div class="d-flex align-items-center" style="gap: .5rem;">
         {% if can_send_claim_invitation %}
-          <a href="{{ send_claim_invitation_url }}" class="btn btn-sm btn-warning" title="Send claim invitation email">
-            Send claim invitation
+          <a href="{{ send_claim_invitation_url }}" class="btn btn-sm btn-warning" title="Compose claim invitation email">
+            Compose claim invitation email
           </a>
         {% endif %}
         {% if can_edit_organization %}
@@ -295,6 +295,6 @@
   </div>
 
   {% if can_delete_organization %}
-    {% include 'core/_modal_confirm.html' with modal_id='organization-delete-modal' title='Delete organization?' body_prefix='Delete organization ' body_emphasis=organization.name body_suffix='? This will terminate the membership and remove the representative from the member group. This cannot be undone.' action_url=organization_delete_url submit_label='Delete organization' submit_class='btn-danger' %}
+    {% include 'core/_modal_confirm.html' with modal_id='organization-delete-modal' title='Delete organization?' body_prefix='Delete organization ' body_emphasis=organization.name body_suffix='? This will terminate the membership and remove the representative from the member group. This cannot be undone. After deletion, you will be redirected to the organizations list.' action_url=organization_delete_url submit_label='Delete organization' submit_class='btn-danger' %}
   {% endif %}
 {% endblock %}

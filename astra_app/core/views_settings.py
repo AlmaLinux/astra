@@ -19,6 +19,7 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.module_loading import import_string
 from python_freeipa import ClientMeta, exceptions
 
@@ -104,7 +105,7 @@ def _send_email_validation_email(
     ttl_seconds = settings.EMAIL_VALIDATION_TOKEN_TTL_SECONDS
     ttl_minutes = max(1, int((ttl_seconds + 59) / 60))
     valid_until = timezone.now() + datetime.timedelta(seconds=ttl_seconds)
-    valid_until_utc = valid_until.astimezone(datetime.UTC).strftime("%H:%M")
+    valid_until_utc = valid_until.astimezone(datetime.UTC).strftime("%Y-%m-%d %H:%M UTC")
 
     queue_templated_email(
         recipients=[email_to_validate],
@@ -626,6 +627,16 @@ def settings_root(request: HttpRequest) -> HttpResponse:
     username = get_username(request)
     requested_tab = _normalize_str(request.POST.get("tab") or request.GET.get("tab")) or "profile"
     highlight = _normalize_str(request.GET.get("highlight"))
+    return_target = _normalize_str(request.GET.get("return"))
+    safe_relative_return_target = (
+        return_target.startswith("/")
+        and not return_target.startswith("//")
+        and url_has_allowed_host_and_scheme(
+            return_target,
+            allowed_hosts={request.get_host()},
+            require_https=request.is_secure(),
+        )
+    )
     if highlight != "country_code":
         highlight = ""
     if requested_tab not in _SETTINGS_TABS:
@@ -655,6 +666,16 @@ def settings_root(request: HttpRequest) -> HttpResponse:
         return redirect("home")
 
     data = fu._user_data
+
+    email_is_blacklisted = False
+    current_email = str(_first(data, "mail", "") or "").strip()
+    if current_email:
+        try:
+            from django_ses.models import BlacklistedEmail
+
+            email_is_blacklisted = BlacklistedEmail.objects.filter(email__iexact=current_email).exists()
+        except ImportError:
+            pass
 
     country_attr = str(settings.SELF_SERVICE_ADDRESS_COUNTRY_ATTR).strip()
     country_attr_lower = country_attr.lower()
@@ -997,6 +1018,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
         "avatar_url": avatar_url,
         "avatar_is_local": bool(avatar_provider_path and avatar_provider_path.endswith("LocalS3AvatarProvider")),
         "avatar_manage_url": _avatar_manage_url_for_provider(avatar_provider_path),
+        "email_is_blacklisted": email_is_blacklisted,
     }
 
     # Compatibility: some tests and older code expect `form` to be the active tab's primary form.
@@ -1161,6 +1183,8 @@ def settings_root(request: HttpRequest) -> HttpResponse:
             return _settings_update_error_response(
                 request, context, "profile", e, tab_label="profile", username=username,
             )
+        if safe_relative_return_target:
+            return redirect(return_target)
         return redirect(settings_url(tab="profile", highlight=highlight, status="saved"))
 
     if requested_tab == "emails" and emails_form.is_valid():
@@ -1227,8 +1251,6 @@ def settings_root(request: HttpRequest) -> HttpResponse:
         if not has_enabled_agreements():
             return redirect(settings_url(tab="profile"))
 
-        return_target = _normalize_str(request.GET.get("return"))
-
         action = _normalize_str(request.POST.get("action")).lower()
         cn = _normalize_str(request.POST.get("cn"))
         if action == "sign" and cn:
@@ -1237,6 +1259,8 @@ def settings_root(request: HttpRequest) -> HttpResponse:
                 raise Http404("Agreement not found")
             if username in set(agreement_obj.users):
                 messages.info(request, "You have already signed this agreement.")
+                if safe_relative_return_target:
+                    return redirect(return_target)
                 if return_target == "profile":
                     return redirect(reverse("user-profile", kwargs={"username": username}))
                 return redirect(settings_url(tab="agreements"))
@@ -1251,6 +1275,8 @@ def settings_root(request: HttpRequest) -> HttpResponse:
                 else:
                     messages.error(request, "Failed to sign agreement due to an internal error.")
 
+        if safe_relative_return_target:
+            return redirect(return_target)
         if return_target == "profile":
             return redirect(reverse("user-profile", kwargs={"username": username}))
         return redirect(settings_url(tab="agreements"))

@@ -20,6 +20,7 @@ from core.models import (
 )
 from core.permissions import ASTRA_ADD_ELECTION
 from core.tests.ballot_chain import compute_chain_hash
+from core.tests.utils_test_data import ensure_core_categories
 from core.tokens import election_genesis_chain_hash
 
 
@@ -142,7 +143,8 @@ class ElectionsListGroupingTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Open elections")
         self.assertContains(resp, "Past elections")
-        self.assertContains(resp, "collapsed-card")
+        self.assertNotContains(resp, 'class="card card-outline card-secondary collapsed-card')
+        self.assertNotContains(resp, '<div class="card-body" style="display: none;">')
         self.assertContains(resp, "Open election")
         self.assertContains(resp, "Past election")
         self.assertContains(resp, reverse("election-detail", args=[past_election.id]))
@@ -240,6 +242,10 @@ class ElectionsDeletedVisibilityTests(TestCase):
 
 @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=1)
 class ElectionDetailManagerUIStatsTests(TestCase):
+    @classmethod
+    def setUpTestData(cls) -> None:
+        ensure_core_categories()
+
     def _login_as_freeipa_user(self, username: str) -> None:
         session = self.client.session
         session["_freeipa_username"] = username

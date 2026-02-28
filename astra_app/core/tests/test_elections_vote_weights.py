@@ -154,7 +154,7 @@ class ElectionVoteWeightsTests(TestCase):
         # Droop quota: floor(votes / (seats + 1)) + 1. With seats=1, it is floor(votes/2) + 1.
         self.assertEqual(Decimal(str(result["quota"])), Decimal(expected // 2 + 1))
 
-    def test_vote_submit_uses_credential_weight_even_if_memberships_removed_after_issuance(self) -> None:
+    def test_vote_submit_rejects_when_memberships_removed_after_issuance(self) -> None:
         now = timezone.now()
         election = Election.objects.create(
             name="Credential snapshot election",
@@ -174,9 +174,8 @@ class ElectionVoteWeightsTests(TestCase):
         cred = next(c for c in issued if c.freeipa_username == "voter1")
         self.assertEqual(int(cred.weight), expected)
 
-        # Memberships and sponsorship responsibilities can change while the election is open.
-        # Once a credential is issued, vote submission must rely on the credential weight,
-        # not re-check current memberships.
+        # Vote submission must still verify that at least one voting membership
+        # remains active at submission time.
         Membership.objects.filter(target_username="voter1").delete()
         Membership.objects.filter(target_organization__isnull=False).delete()
         Organization.objects.all().delete()
@@ -198,16 +197,12 @@ class ElectionVoteWeightsTests(TestCase):
                 data=json.dumps({"credential_public_id": str(cred.public_id), "ranking": [c1.id, c2.id]}),
                 content_type="application/json",
             )
-        self.assertEqual(resp.status_code, 200, resp.content.decode("utf-8"))
-
-        ballot = Ballot.objects.get(election=election, credential_public_id=str(cred.public_id))
-        self.assertEqual(int(ballot.weight), expected)
-
-        election.status = Election.Status.closed
-        election.save(update_fields=["status"])
-
-        result = tally_election(election=election)
-        self.assertEqual(Decimal(str(result["quota"])), Decimal(expected // 2 + 1))
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(
+            resp.json().get("error"),
+            "Your membership is no longer active. You are not eligible to vote.",
+        )
+        self.assertFalse(Ballot.objects.filter(election=election, credential_public_id=str(cred.public_id)).exists())
 
     def test_vote_submit_returns_nonce_and_chain_hashes(self) -> None:
         now = timezone.now()

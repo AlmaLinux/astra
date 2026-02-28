@@ -200,15 +200,35 @@ def membership_sponsors_list(request: HttpRequest) -> HttpResponse:
     }
 
     representative_full_names: dict[str, str] = {}
-    for username in sorted(representative_usernames):
-        try:
-            representative = FreeIPAUser.get(username)
-        except Exception:
-            logger.exception(
-                "membership_sponsors_list: failed to fetch representative from FreeIPA username=%s",
-                username,
-            )
-            continue
+    usernames_to_lookup = sorted(representative_usernames)
+    users_by_username: dict[str, FreeIPAUser] = {}
+    use_bulk_lookup = len(usernames_to_lookup) > 1
+    if use_bulk_lookup:
+        all_freeipa_users = FreeIPAUser.all()
+        users_by_username = {
+            username: user
+            for user in all_freeipa_users
+            for username in [str(user.username or "").strip()]
+            if username
+        }
+        if not users_by_username:
+            # FreeIPAUser.all() can return [] when the backend is unavailable.
+            # Fall back to per-user lookups to preserve existing behavior.
+            use_bulk_lookup = False
+
+    for username in usernames_to_lookup:
+        representative: FreeIPAUser | None = None
+        if use_bulk_lookup:
+            representative = users_by_username.get(username)
+        else:
+            try:
+                representative = FreeIPAUser.get(username)
+            except Exception:
+                logger.exception(
+                    "membership_sponsors_list: failed to fetch representative from FreeIPA username=%s",
+                    username,
+                )
+                continue
 
         if representative is None:
             continue

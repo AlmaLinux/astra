@@ -198,9 +198,11 @@ def settings_url(
     if status_value:
         params["status"] = status_value
 
-    # Only `profile` is valid for cross-flow return behavior.
+    # Only allow safe relative paths or the legacy `profile` value.
     return_value = str(return_to or "").strip()
     if return_value == "profile":
+        params["return"] = return_value
+    elif return_value.startswith("/") and not return_value.startswith("//"):
         params["return"] = return_value
 
     base = reverse("settings")
@@ -237,7 +239,7 @@ def block_action_without_country_code(
         request,
         f"A valid country code is required before you can {action_label}. Please set it on the Profile tab.",
     )
-    return redirect(settings_url(tab="profile", highlight="country_code"))
+    return redirect(settings_url(tab="profile", highlight="country_code", return_to=request.get_full_path()))
 
 
 def _coc_agreement_for_user(username: str) -> FreeIPAFASAgreement | None:
@@ -275,7 +277,7 @@ def block_action_without_coc(
     agreement_cn = str(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN or "").strip()
     label = agreement_cn or "Community Code of Conduct"
     messages.error(request, f"You must sign the {label} before you can {action_label}.")
-    return redirect(agreement_settings_url(agreement_cn))
+    return redirect(agreement_settings_url(agreement_cn, return_to=request.get_full_path()))
 
 
 def _normalize_str(value: object) -> str:

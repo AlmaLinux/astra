@@ -133,7 +133,10 @@ class MembershipCountryRequirementsTests(TestCase):
             response = views_membership.membership_request(request)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], reverse("settings") + "?tab=profile&highlight=country_code")
+        expected = reverse("settings") + "?tab=profile&highlight=country_code"
+        location = str(response["Location"])
+        self.assertTrue(location.startswith(expected))
+        self.assertIn("return=", location)
         msgs = [m.message for m in get_messages(request)]
         self.assertTrue(any("country" in m.lower() for m in msgs))
 
@@ -154,7 +157,10 @@ class MembershipCountryRequirementsTests(TestCase):
             response = views_membership.membership_request(request, organization_id=org.pk)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], reverse("settings") + "?tab=profile&highlight=country_code")
+        expected = reverse("settings") + "?tab=profile&highlight=country_code"
+        location = str(response["Location"])
+        self.assertTrue(location.startswith(expected))
+        self.assertIn("return=", location)
         self.assertFalse(MembershipRequest.objects.filter(requested_organization=org).exists())
 
     @override_settings(SELF_SERVICE_ADDRESS_COUNTRY_ATTR="c")

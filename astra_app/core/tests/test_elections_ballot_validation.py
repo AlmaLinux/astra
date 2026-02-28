@@ -9,7 +9,15 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.freeipa.user import FreeIPAUser
-from core.models import Ballot, Candidate, Election, VotingCredential
+from core.models import (
+    Ballot,
+    Candidate,
+    Election,
+    Membership,
+    MembershipType,
+    MembershipTypeCategory,
+    VotingCredential,
+)
 
 
 class ElectionBallotValidationTests(TestCase):
@@ -37,6 +45,24 @@ class ElectionBallotValidationTests(TestCase):
             freeipa_username="voter1",
             weight=1,
         )
+        MembershipTypeCategory.objects.update_or_create(
+            pk="individual",
+            defaults={
+                "is_individual": True,
+                "is_organization": False,
+                "sort_order": 0,
+            },
+        )
+        voter_type, _created = MembershipType.objects.update_or_create(
+            code="voter",
+            defaults={
+                "name": "Voter",
+                "votes": 1,
+                "category_id": "individual",
+                "enabled": True,
+            },
+        )
+        Membership.objects.create(target_username="voter1", membership_type=voter_type, expires_at=None)
 
         self._login_as_freeipa_user("voter1")
         with (
@@ -95,6 +121,24 @@ class ElectionBallotValidationTests(TestCase):
             freeipa_username="voter1",
             weight=1,
         )
+        MembershipTypeCategory.objects.update_or_create(
+            pk="individual",
+            defaults={
+                "is_individual": True,
+                "is_organization": False,
+                "sort_order": 0,
+            },
+        )
+        voter_type, _created = MembershipType.objects.update_or_create(
+            code="voter",
+            defaults={
+                "name": "Voter",
+                "votes": 1,
+                "category_id": "individual",
+                "enabled": True,
+            },
+        )
+        Membership.objects.create(target_username="voter1", membership_type=voter_type, expires_at=None)
 
         self._login_as_freeipa_user("voter1")
         with (

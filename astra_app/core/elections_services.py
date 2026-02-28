@@ -760,19 +760,16 @@ def issue_voting_credentials_from_memberships(*, election: Election) -> list[Vot
 def scrub_election_emails(*, election: Election) -> int:
     """Delete sensitive emails (credentials, receipts) associated with the election."""
     vote_path = reverse("election-vote", args=[election.id])
-    verify_path = reverse("ballot-verify")
     credential_fragment = "#credential="
 
     legacy_composed_credential_match = (
         (Q(message__contains=vote_path) | Q(html_message__contains=vote_path))
         & (Q(message__contains=credential_fragment) | Q(html_message__contains=credential_fragment))
     )
-    legacy_receipt_match = Q(message__contains=verify_path) | Q(html_message__contains=verify_path)
 
     count, _ = Email.objects.filter(
         Q(context__contains={"election_id": election.id})
         | legacy_composed_credential_match
-        | legacy_receipt_match
     ).delete()
     return count
 

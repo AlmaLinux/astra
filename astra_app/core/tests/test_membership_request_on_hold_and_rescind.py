@@ -1089,6 +1089,71 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
         self.assertContains(resp, 'title="Cancel your membership request"')
         self.assertContains(resp, f'action="{reverse("membership-request-rescind", args=[req.pk])}"')
 
+    def test_on_hold_self_service_page_shows_committee_contact_email(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.on_hold,
+            on_hold_at=timezone.now(),
+            responses=[{"Contributions": "Old"}],
+        )
+
+        self._add_freeipa_user(username="alice", email="alice@example.com")
+        self._login_as_freeipa_user("alice")
+
+        resp = self.client.get(reverse("membership-request-self", args=[req.pk]))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(
+            resp,
+            f'mailto:{settings.MEMBERSHIP_COMMITTEE_EMAIL}',
+        )
+        self.assertContains(resp, settings.MEMBERSHIP_COMMITTEE_EMAIL)
+
+    def test_on_hold_self_service_page_uses_modal_confirmation_for_rescind(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.on_hold,
+            on_hold_at=timezone.now(),
+            responses=[{"Contributions": "Old"}],
+        )
+
+        self._add_freeipa_user(username="alice", email="alice@example.com")
+        self._login_as_freeipa_user("alice")
+
+        resp = self.client.get(reverse("membership-request-self", args=[req.pk]))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'data-target="#rescind-confirm-modal"')
+        self.assertContains(resp, 'id="rescind-confirm-modal"')
+        self.assertContains(resp, "Rescind membership request?")
+        self.assertContains(resp, f'action="{reverse("membership-request-rescind", args=[req.pk])}"')
+
     def test_rfi_custom_email_redirects_to_send_mail_with_recipient_and_template(self) -> None:
         from core.models import MembershipType
 

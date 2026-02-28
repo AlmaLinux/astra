@@ -268,6 +268,8 @@ def organizations(request: HttpRequest) -> HttpResponse:
 
     can_manage_memberships = has_any_membership_permission(request.user)
 
+    can_create_organization = request.user.has_perm(ASTRA_ADD_MEMBERSHIP)
+
     if can_manage_memberships:
         orgs = Organization.objects.all().order_by("name", "id")
         empty_label = "No organizations found."
@@ -277,6 +279,9 @@ def organizations(request: HttpRequest) -> HttpResponse:
             .order_by("name", "id")
         )
         empty_label = "You don't represent any organizations yet."
+
+        if not can_create_organization:
+            can_create_organization = not Organization.objects.filter(representative=username).exists()
 
     q = _normalize_str(request.GET.get("q"))
     page_number = _normalize_str(request.GET.get("page")) or None
@@ -299,7 +304,7 @@ def organizations(request: HttpRequest) -> HttpResponse:
             "organizations": page_ctx["page_obj"].object_list,
             **page_ctx,
             "grid_items": grid_items,
-            "create_url": reverse("organization-create"),
+            "create_url": reverse("organization-create") if can_create_organization else "",
             "q": q,
             "empty_label": empty_label,
         },

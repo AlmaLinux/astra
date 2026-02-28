@@ -55,3 +55,46 @@ class UnifiedSettingsTests(TestCase):
         # OTP + Password are merged into Security.
         self.assertNotIn("otp", tabs)
         self.assertNotIn("password", tabs)
+
+    def test_settings_root_context_sets_email_is_blacklisted_flag(self):
+        from django_ses.models import BlacklistedEmail
+
+        from core.views_settings import settings_root
+
+        blacklisted_email = "a@example.org"
+        BlacklistedEmail.objects.create(email=blacklisted_email)
+
+        factory = RequestFactory()
+        request = factory.get("/settings/?tab=emails")
+        request.user = self._auth_user("alice")
+
+        fake_user = SimpleNamespace(
+            username="alice",
+            first_name="Alice",
+            last_name="User",
+            email=blacklisted_email,
+            is_authenticated=True,
+            _user_data={
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "cn": ["Alice User"],
+                "mail": [blacklisted_email],
+                "fasstatusnote": ["US"],
+            },
+        )
+
+        captured: dict[str, object] = {}
+
+        def fake_render(_request, template, context):
+            captured["template"] = template
+            captured["context"] = context
+            return HttpResponse("ok")
+
+        with (
+            patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user),
+            patch("core.views_settings.render", autospec=True, side_effect=fake_render),
+        ):
+            response = settings_root(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(captured["context"].get("email_is_blacklisted"))

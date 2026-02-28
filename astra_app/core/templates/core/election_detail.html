@@ -93,6 +93,9 @@
               {% else %}
                 <p class="text-muted small mb-0 mt-2">You'll need your voting credential.</p>
               {% endif %}
+              {% if credential_issued_at %}
+                <p class="text-muted small mb-1">Voting credential issued: {{ credential_issued_at|date:"Y-m-d H:i" }} UTC</p>
+              {% endif %}
             {% else %}
               <p class="mb-2"><strong>You're not eligible to vote in this election.</strong></p>
               <p class="text-muted small mb-2">Eligibility is based on memberships/sponsorships of the AlmaLinux OS Foundation.</p>
@@ -101,7 +104,7 @@
                 <li>Or be a representative of a sponsoring organization</li>
                 <li>And it must have started at least {{ eligibility_min_membership_age_days }} day{{ eligibility_min_membership_age_days|pluralize }} before the election start</li>
               </ul>
-              <a class="btn btn-outline-primary btn-block" href="/membership/request/" title="Start a membership request">Request membership</a>
+              <a class="btn btn-outline-primary btn-block" href="{% url 'membership-request' %}" title="Start a membership request">Request membership</a>
             {% endif %}
           {% elif election_is_finished %}
             <a class="btn btn-outline-primary btn-block" href="{% url 'election-audit-log' election.id %}" title="Review the election audit log">View audit log</a>

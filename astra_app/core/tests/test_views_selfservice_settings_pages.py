@@ -1313,6 +1313,43 @@ class SelfServiceSettingsPagesTests(TestCase):
         FREEIPA_VERIFY_SSL=False,
         FREEIPA_SERVICE_USER="svc",
         FREEIPA_SERVICE_PASSWORD="pw",
+    )
+    def test_settings_agreement_sign_with_relative_return_redirects_back_to_path(self):
+        factory = RequestFactory()
+        request = factory.post(
+            "/settings/?return=/organizations/create/",
+            data={
+                "tab": "agreements",
+                "action": "sign",
+                "cn": "coc",
+            },
+        )
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        fake_user = SimpleNamespace(
+            username="alice",
+            email="a@example.org",
+            is_authenticated=True,
+            _user_data={"givenname": ["Alice"], "sn": ["User"], "cn": ["Alice User"]},
+            groups_list=[],
+        )
+        agreement = SimpleNamespace(enabled=True, users=[], add_user=lambda _username: None)
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            with patch("core.views_settings.has_enabled_agreements", return_value=True):
+                with patch("core.views_settings.list_agreements_for_user", autospec=True, return_value=[]):
+                    with patch("core.views_settings.FreeIPAFASAgreement.get", autospec=True, return_value=agreement):
+                        response = views_settings.settings_root(request)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/organizations/create/")
+
+    @override_settings(
+        FREEIPA_HOST="ipa.test",
+        FREEIPA_VERIFY_SSL=False,
+        FREEIPA_SERVICE_USER="svc",
+        FREEIPA_SERVICE_PASSWORD="pw",
         SELF_SERVICE_ADDRESS_COUNTRY_ATTR="c",
     )
     def test_settings_profile_save_redirects_with_query_tab_and_preserves_highlight(self):
@@ -1360,6 +1397,59 @@ class SelfServiceSettingsPagesTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], reverse("settings") + "?tab=profile&highlight=country_code&status=saved")
+
+    @override_settings(
+        FREEIPA_HOST="ipa.test",
+        FREEIPA_VERIFY_SSL=False,
+        FREEIPA_SERVICE_USER="svc",
+        FREEIPA_SERVICE_PASSWORD="pw",
+        SELF_SERVICE_ADDRESS_COUNTRY_ATTR="c",
+    )
+    def test_settings_profile_save_with_relative_return_redirects_back_to_path(self):
+        factory = RequestFactory()
+
+        fake_user = SimpleNamespace(
+            username="alice",
+            email="a@example.org",
+            is_authenticated=True,
+            _user_data={
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "cn": ["Alice User"],
+                "c": ["US"],
+                "fasLocale": ["en_US"],
+                "fasTimezone": ["UTC"],
+                "fasIsPrivate": ["FALSE"],
+            },
+        )
+
+        request = factory.post(
+            "/settings/?tab=profile&return=/organizations/claim/",
+            data={
+                "tab": "profile",
+                "givenname": "Alicia",
+                "sn": "User",
+                "country_code": "US",
+                "fasPronoun": "",
+                "fasLocale": "en-US",
+                "fasTimezone": "UTC",
+                "fasWebsiteUrl": "",
+                "fasRssUrl": "",
+                "fasIRCNick": "",
+                "fasGitHubUsername": "",
+                "fasGitLabUsername": "",
+                "fasIsPrivate": "",
+            },
+        )
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            with patch("core.views_settings._update_user_attrs", autospec=True, return_value=([], True)):
+                response = views_settings.settings_root(request)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/organizations/claim/")
 
     @override_settings(
         FREEIPA_HOST="ipa.test",

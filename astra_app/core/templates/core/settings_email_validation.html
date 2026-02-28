@@ -13,9 +13,13 @@
       {% include 'core/_settings_tabs.html' %}
     </div>
     <div class="card-body">
-      <h3 class="card-title mb-3">Validate your email address</h3>
-      <p class="mb-0">
-        Do you want to set <strong>{{ attr_label }}</strong> to <strong>{{ value }}</strong>?
+      <h3 class="card-title mb-3">Confirm email address change</h3>
+      <p class="mb-2">
+        You requested to update your <strong>{{ attr_label }}</strong> to <strong>{{ value }}</strong>.
+      </p>
+      <p class="text-muted mb-0">
+        Click <strong>Confirm</strong> to save the new address. A brief verification may take effect immediately.
+        If you did not request this change, you can cancel below.
       </p>
     </div>
 

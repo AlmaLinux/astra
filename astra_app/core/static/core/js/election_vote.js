@@ -367,7 +367,11 @@
           return;
         }
 
-        setResult('Vote recorded.', false);
+        var emailQueued = payload && payload.email_queued === true;
+        var successMessage = emailQueued
+          ? 'Your vote was recorded. A receipt was sent to your email.'
+          : 'Your vote was recorded. (A receipt email could not be sent.)';
+        setResult(successMessage, false);
         setReceiptDetails(payload);
       } catch (e) {
         setResult('Vote submission failed.', true);

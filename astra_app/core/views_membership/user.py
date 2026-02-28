@@ -1,10 +1,12 @@
 import logging
 
+from django.conf import settings
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils.html import format_html
 
 from core.country_codes import (
     embargoed_country_match_from_country_code,
@@ -12,7 +14,6 @@ from core.country_codes import (
 )
 from core.forms_membership import MembershipRequestForm, MembershipRequestUpdateResponsesForm
 from core.freeipa.user import FreeIPAUser
-from core.membership import get_membership_request_eligibility
 from core.membership_notes import CUSTOS, add_note
 from core.membership_request_workflow import (
     record_membership_request_created,
@@ -30,19 +31,6 @@ from core.views_utils import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _pending_category_request_exists(
-    *,
-    membership_type: MembershipType,
-    username: str | None,
-    organization: Organization | None,
-) -> bool:
-    eligibility = get_membership_request_eligibility(
-        username=username,
-        organization=organization,
-    )
-    return membership_type.category_id in eligibility.pending_membership_category_ids
 
 
 def _renewal_prefill_responses(
@@ -158,12 +146,27 @@ def membership_request(request: HttpRequest, organization_id: int | None = None)
             elif not membership_type.group_cn:
                 form.add_error("membership_type", "That membership type is not currently linked to a group.")
             else:
-                if _pending_category_request_exists(
-                    membership_type=membership_type,
-                    username=target_username,
-                    organization=organization,
-                ):
-                    messages.info(request, "A membership request is already pending for that category.")
+                existing_request = (
+                    MembershipRequest.objects.filter(
+                        membership_type__category=membership_type.category,
+                        requested_username="" if is_org_request else target_username,
+                        requested_organization=organization if is_org_request else None,
+                        status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
+                    )
+                    .order_by("-requested_at", "-pk")
+                    .first()
+                )
+                if existing_request is not None:
+                    request_url = reverse("membership-request-self", args=[existing_request.pk])
+                    messages.info(
+                        request,
+                        format_html(
+                            'A membership request is already pending for that category. '
+                            '<a href="{}">View request #{}</a>.',
+                            request_url,
+                            existing_request.pk,
+                        ),
+                    )
                     if is_org_request:
                         return redirect("organization-detail", organization_id=organization.pk)
                     return redirect("user-profile", username=username)
@@ -250,13 +253,29 @@ def membership_request(request: HttpRequest, organization_id: int | None = None)
                 )
                 if (
                     posted_membership_type is not None
-                    and _pending_category_request_exists(
-                        membership_type=posted_membership_type,
-                        username=target_username,
-                        organization=organization,
+                    and (
+                        existing_request := (
+                            MembershipRequest.objects.filter(
+                                membership_type__category=posted_membership_type.category,
+                                requested_username="" if is_org_request else target_username,
+                                requested_organization=organization if is_org_request else None,
+                                status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
+                            )
+                            .order_by("-requested_at", "-pk")
+                            .first()
+                        )
                     )
                 ):
-                    messages.info(request, "A membership request is already pending for that category.")
+                    request_url = reverse("membership-request-self", args=[existing_request.pk])
+                    messages.info(
+                        request,
+                        format_html(
+                            'A membership request is already pending for that category. '
+                            '<a href="{}">View request #{}</a>.',
+                            request_url,
+                            existing_request.pk,
+                        ),
+                    )
     else:
         if is_org_request and not prefill_membership_type:
             prefill_membership_type = (
@@ -334,6 +353,7 @@ def membership_request_self(request: HttpRequest, pk: int) -> HttpResponse:
 
     fu = FreeIPAUser.get(username)
     user_email = fu.email if fu is not None else ""
+    committee_email = str(settings.MEMBERSHIP_COMMITTEE_EMAIL or "").strip()
 
     if request.method == "POST":
         if req.status != MembershipRequest.Status.on_hold:
@@ -349,6 +369,7 @@ def membership_request_self(request: HttpRequest, pk: int) -> HttpResponse:
                     "req": req,
                     "form": form,
                     "user_email": user_email,
+                    "committee_email": committee_email,
                 },
             )
 
@@ -368,6 +389,7 @@ def membership_request_self(request: HttpRequest, pk: int) -> HttpResponse:
                     "req": req,
                     "form": form,
                     "user_email": user_email,
+                    "committee_email": committee_email,
                 },
             )
 
@@ -397,6 +419,7 @@ def membership_request_self(request: HttpRequest, pk: int) -> HttpResponse:
             "req": req,
             "form": form,
             "user_email": user_email,
+            "committee_email": committee_email,
             "organization": organization,
             "cancel_url": reverse("organization-detail", kwargs={"organization_id": organization.pk})
             if organization is not None

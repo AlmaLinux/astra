@@ -12,7 +12,7 @@ Treat tally as operationally irreversible. Even if files are removed later, resu
 
 ## Prerequisites
 - The election status is `closed`.
-- You have election admin permissions and operational access to run management commands.
+- You have election admin permissions and access to the election detail page in the admin UI.
 - Database is healthy and you can tolerate the tally runtime.
 - You have confirmed there is no unresolved incident that would invalidate tally (credential leak, widespread voting outage, active dispute).
 
@@ -25,17 +25,12 @@ If the election is still `open` and you are concluding it now:
 3. Submit.
 4. Confirm the UI message "Election closed and tallied." and confirm status becomes `tallied`.
 
-### Option B: Tally later using the management command
+### Option B: Tally later from the admin UI
 Use this when the election is already `closed` (or when you closed with "skip tally").
 
-1. Run a dry-run to see what would be tallied:
-   - `podman-compose exec -T web python manage.py advance_elections --dry-run`
-2. Confirm the output includes your election in the "would tally" set.
-3. Run the command:
-   - `podman-compose exec -T web python manage.py advance_elections`
-4. Confirm the output reports the election as tallied.
-
-Note: `advance_elections` may close or tally multiple elections. Run it only when you are confident that is safe.
+1. Open the election detail page.
+2. Use the available admin UI tally action for the closed election.
+3. Confirm the UI reports the election as tallied.
 
 ### Confirm results are published
 1. Open the election detail page.

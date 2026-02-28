@@ -82,7 +82,7 @@ The UI will show: "Election closed, but tally failed: ..."
 Actions:
 1. Do not attempt to re-open the election.
 2. Capture the exact error message.
-3. Run tally later using the tally runbook (recommended path is the `advance_elections` management command).
+3. Run tally later using the tally runbook's manual admin UI path.
 4. If you must publish results on a timeline, communicate that tally is delayed while the issue is investigated.
 
 ### C) Voters report they can still vote after close

@@ -74,7 +74,9 @@ class ElectionsVoteAccessTests(TestCase):
         expected = (
             f"{reverse('settings')}?tab=agreements&agreement={quote_plus(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN)}"
         )
-        self.assertEqual(resp["Location"], expected)
+        location = str(resp["Location"])
+        self.assertTrue(location.startswith(expected))
+        self.assertIn("return=", location)
 
 
 class ElectionsDetailCandidateCardsTests(TestCase):

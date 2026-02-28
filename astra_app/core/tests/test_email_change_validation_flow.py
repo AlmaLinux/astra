@@ -95,6 +95,7 @@ class EmailChangeValidationFlowTests(TestCase):
         self.assertNotIn("displayname", ctx)
         self.assertEqual(ctx.get("email_to_validate"), "new@example.org")
         self.assertIn("validate_url", ctx)
+        self.assertRegex(str(ctx.get("valid_until_utc", "")), r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC$")
 
     @override_settings(SECRET_KEY="test-secret", EMAIL_VALIDATION_TOKEN_TTL_SECONDS=3600)
     def test_settings_emails_reuses_verified_mail_for_bugzilla_without_new_validation(self):

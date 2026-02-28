@@ -57,7 +57,7 @@
           </tr>
         </thead>
         <tbody>
-            {% for row in pending_request_rows %}
+            {% for row in pending_page_obj %}
               {% with r=row.r %}
             <tr>
               <td class="text-center align-top">
@@ -97,6 +97,12 @@
           {% endfor %}
         </tbody>
       </table>
+
+      {% if pending_is_paginated %}
+        <div class="p-3 border-top">
+          {% include 'core/_pagination.html' with paginator=pending_paginator page_obj=pending_page_obj is_paginated=pending_is_paginated page_numbers=pending_page_numbers show_first=pending_show_first show_last=pending_show_last page_url_prefix=pending_page_url_prefix %}
+        </div>
+      {% endif %}
     </div>
   </div>
 
@@ -148,7 +154,7 @@
             </tr>
           </thead>
           <tbody>
-            {% for row in on_hold_request_rows %}
+            {% for row in on_hold_page_obj %}
               {% with r=row.r %}
                 <tr>
                   <td class="text-center align-top">
@@ -192,6 +198,12 @@
             {% endfor %}
           </tbody>
         </table>
+
+        {% if on_hold_is_paginated %}
+          <div class="p-3 border-top">
+            {% include 'core/_pagination.html' with paginator=on_hold_paginator page_obj=on_hold_page_obj is_paginated=on_hold_is_paginated page_numbers=on_hold_page_numbers show_first=on_hold_show_first show_last=on_hold_show_last page_url_prefix=on_hold_page_url_prefix %}
+          </div>
+        {% endif %}
       </div>
     </div>
   {% include 'core/_membership_request_shared_modals.html' %}

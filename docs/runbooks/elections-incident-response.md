@@ -105,7 +105,7 @@ Actions:
 1. Confirm whether the election is `closed` or `tallied`.
 2. Capture the error message.
 3. Do not modify data by hand.
-4. Retry tally once using the management command `advance_elections`.
+4. Retry tally once from the election admin UI.
 5. If it continues to fail, escalate to maintainers.
 
 ## Communications templates (short)

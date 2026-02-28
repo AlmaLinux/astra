@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import patch
+from urllib.parse import parse_qs, urlparse
 
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.http import HttpResponse, QueryDict
@@ -9,6 +11,7 @@ from django.utils.functional import SimpleLazyObject
 
 from core.views_utils import (
     agreement_settings_url,
+    block_action_without_coc,
     build_page_url_prefix,
     build_url_for_page,
     get_username,
@@ -39,6 +42,41 @@ class ViewsUtilsSSOTTests(SimpleTestCase):
             settings_url(tab="agreements", status="saved"),
             reverse("settings") + "?tab=agreements&status=saved",
         )
+
+    def test_settings_url_allows_safe_relative_return_path(self):
+        url = settings_url(tab="profile", return_to="/organizations/claim/")
+        query = parse_qs(urlparse(url).query)
+        self.assertEqual(query.get("tab"), ["profile"])
+        self.assertEqual(query.get("return"), ["/organizations/claim/"])
+
+    def test_settings_url_rejects_protocol_relative_return_path(self):
+        url = settings_url(tab="profile", return_to="//evil.example/path")
+        query = parse_qs(urlparse(url).query)
+        self.assertEqual(query.get("tab"), ["profile"])
+        self.assertNotIn("return", query)
+
+    def test_block_action_without_coc_redirect_includes_current_path(self):
+        request = RequestFactory().get("/organizations/claim/")
+
+        with (
+            patch("core.views_utils.has_signed_coc", return_value=False),
+            patch("core.views_utils.messages.error"),
+            patch("core.views_utils.settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN", "coc"),
+        ):
+            response = block_action_without_coc(
+                request,
+                username="alice",
+                action_label="claim this organization",
+            )
+
+        self.assertEqual(response.status_code, 302)
+        location = str(response["Location"])
+        parsed = urlparse(location)
+        self.assertEqual(parsed.path, reverse("settings"))
+        query = parse_qs(parsed.query)
+        self.assertEqual(query.get("tab"), ["agreements"])
+        self.assertEqual(query.get("agreement"), ["coc"])
+        self.assertEqual(query.get("return"), ["/organizations/claim/"])
 
     def test_get_username_can_skip_user_fallback_without_forcing_lazy_user(self):
         request = RequestFactory().get("/")

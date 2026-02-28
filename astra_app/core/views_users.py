@@ -276,9 +276,9 @@ def _profile_context_for_user(
             account_setup_required_actions.append(
                 {
                     "id": "email-blacklisted-alert",
-                    "label": "We're having trouble delivering emails",
+                    "label": "We're having trouble delivering your emails: your address may have bounced or been marked as spam",
                     "url": settings_url(tab="emails"),
-                    "url_label": "Update your email",
+                    "url_label": "Update your email address",
                 }
             )
 

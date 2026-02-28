@@ -294,3 +294,65 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
 
         # When they differ, it is shown.
         self.assertRegex(content, rf"Requested by:\s*<a href=\"{re.escape(charlie_profile)}\"")
+
+    def test_requests_list_paginates_pending_rows_and_preserves_query_params(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        for idx in range(55):
+            MembershipRequest.objects.create(
+                requested_username=f"user{idx}",
+                membership_type_id="individual",
+                status=MembershipRequest.Status.pending,
+            )
+
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username.startswith("user"):
+                return FreeIPAUser(
+                    username,
+                    {
+                        "uid": [username],
+                        "mail": [f"{username}@example.com"],
+                        "memberof_group": [],
+                    },
+                )
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
+            page_1 = self.client.get(f"{reverse('membership-requests')}?scope=all")
+            page_2 = self.client.get(f"{reverse('membership-requests')}?scope=all&pending_page=2")
+
+        self.assertEqual(page_1.status_code, 200)
+        self.assertEqual(page_2.status_code, 200)
+
+        pending_page_1 = page_1.context["pending_page_obj"]
+        pending_page_2 = page_2.context["pending_page_obj"]
+        self.assertEqual(pending_page_1.number, 1)
+        self.assertEqual(pending_page_1.paginator.per_page, 50)
+        self.assertEqual(len(pending_page_1.object_list), 50)
+        self.assertEqual(pending_page_2.number, 2)
+        self.assertEqual(len(pending_page_2.object_list), 5)
+
+        self.assertContains(page_1, "?scope=all&amp;pending_page=2")
+        self.assertContains(page_2, "?scope=all&amp;pending_page=1")
