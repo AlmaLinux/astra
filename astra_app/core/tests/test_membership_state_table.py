@@ -1,7 +1,7 @@
 
 import datetime
 
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
 from core.membership_log_side_effects import apply_membership_log_side_effects
@@ -89,3 +89,37 @@ class MembershipStateTableTests(TestCase):
         with self.assertRaises(Membership.DoesNotExist):
             Membership.objects.get(target_username="alice", membership_type_id="individual")
         self.assertEqual(get_valid_memberships(username="alice"), [])
+
+
+class MembershipStateTableTransactionTests(TransactionTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        ensure_core_categories()
+
+    def test_org_expiry_change_applies_side_effects_without_outer_atomic(self) -> None:
+        from core.models import Membership, MembershipLog, MembershipType, Organization
+
+        membership_type, _created = MembershipType.objects.update_or_create(
+            code="org-sponsor",
+            defaults={
+                "name": "Organization Sponsor",
+                "group_cn": "",
+                "category_id": "sponsorship",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        organization = Organization.objects.create(name="Acme Org", representative="acme-rep")
+        expires_at = timezone.now() + datetime.timedelta(days=45)
+
+        # Regression guard: this call runs side effects and must not require the
+        # caller to manage transaction.atomic for organization targets.
+        MembershipLog.create_for_expiry_change(
+            actor_username="reviewer",
+            membership_type=membership_type,
+            expires_at=expires_at,
+            target_organization=organization,
+        )
+
+        state = Membership.objects.get(target_organization=organization, membership_type=membership_type)
+        self.assertEqual(state.expires_at, expires_at)

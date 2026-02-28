@@ -103,34 +103,35 @@ def apply_org_side_effects(*, log: MembershipLog) -> None:
         ).delete()
         return
 
-    organization = Organization.objects.select_for_update().filter(pk=log.target_organization_id).first()
-    if organization is None:
-        logger.warning(
-            "apply_org_side_effects: organization not found org_id=%s",
-            log.target_organization_id,
+    with transaction.atomic():
+        organization = Organization.objects.select_for_update().filter(pk=log.target_organization_id).first()
+        if organization is None:
+            logger.warning(
+                "apply_org_side_effects: organization not found org_id=%s",
+                log.target_organization_id,
+            )
+            return
+
+        existing = (
+            Membership.objects.filter(
+                target_organization_id=log.target_organization_id,
+                membership_type=log.membership_type,
+            )
+            .only("created_at", "expires_at")
+            .first()
         )
-        return
 
-    existing = (
-        Membership.objects.filter(
-            target_organization_id=log.target_organization_id,
-            membership_type=log.membership_type,
+        log_filter = log.target_identity.for_membership_log_filter()
+        log_filter["membership_type"] = log.membership_type
+
+        start_at = resolve_term_start_at(log=log, existing=existing, log_filter=log_filter)
+
+        _new_membership, old = Membership.replace_within_category(
+            organization=organization,
+            new_membership_type=log.membership_type,
+            expires_at=log.expires_at,
+            created_at=start_at,
         )
-        .only("created_at", "expires_at")
-        .first()
-    )
-
-    log_filter = log.target_identity.for_membership_log_filter()
-    log_filter["membership_type"] = log.membership_type
-
-    start_at = resolve_term_start_at(log=log, existing=existing, log_filter=log_filter)
-
-    _new_membership, old = Membership.replace_within_category(
-        organization=organization,
-        new_membership_type=log.membership_type,
-        expires_at=log.expires_at,
-        created_at=start_at,
-    )
     if old is not None and old.membership_type_id != log.membership_type_id:
         logger.info(
             "apply_org_side_effects: replaced %s with %s for org_id=%s",
