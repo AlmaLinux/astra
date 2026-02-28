@@ -124,7 +124,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
                 "enabled": True,
             },
         )
-        MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
 
         alice = self._make_user("alice", full_name="Alice User")
         self._login_as_freeipa_user("alice")
@@ -138,6 +138,17 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Under review")
         self.assertContains(resp, "Individual")
+        self.assertContains(resp, "<div class=\"font-weight-bold\">Individual</div>", html=True)
+        self.assertContains(
+            resp,
+            f'<a href="{reverse("membership-request-self", args=[req.pk])}">Request #{req.pk}</a>',
+            html=True,
+        )
+        self.assertNotContains(
+            resp,
+            f'<a href="{reverse("membership-request-self", args=[req.pk])}">Individual</a>',
+            html=True,
+        )
 
     def test_committee_viewer_sees_in_review_badge_linked_to_request(self) -> None:
         from core.models import MembershipRequest, MembershipType
@@ -176,6 +187,17 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Under review")
         self.assertContains(resp, f'href="{reverse("membership-request-detail", args=[req.pk])}"')
+        self.assertContains(resp, "<div class=\"font-weight-bold\">Individual</div>", html=True)
+        self.assertContains(
+            resp,
+            f'<a href="{reverse("membership-request-detail", args=[req.pk])}">Request #{req.pk}</a>',
+            html=True,
+        )
+        self.assertNotContains(
+            resp,
+            f'<a href="{reverse("membership-request-detail", args=[req.pk])}">Individual</a>',
+            html=True,
+        )
 
     def test_committee_viewer_sees_active_badge_linked_to_request(self) -> None:
         from core.models import MembershipLog, MembershipRequest, MembershipType

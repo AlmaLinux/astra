@@ -2734,6 +2734,17 @@ class OrganizationUserViewsTests(TestCase):
         self.assertContains(resp, "Org note")
         self.assertContains(resp, f"(req. #{req.pk})")
         self.assertContains(resp, f'href="{reverse("membership-request-detail", args=[req.pk])}"')
+        self.assertContains(resp, "<div class=\"font-weight-bold\">Gold Sponsor Member</div>", html=True)
+        self.assertContains(
+            resp,
+            f'<a href="{reverse("membership-request-detail", args=[req.pk])}">Request #{req.pk}</a>',
+            html=True,
+        )
+        self.assertNotContains(
+            resp,
+            f'<a href="{reverse("membership-request-detail", args=[req.pk])}">Gold Sponsor Member</a>',
+            html=True,
+        )
 
     def test_organization_detail_scopes_request_links_per_membership_type(self) -> None:
         from core.models import Membership, MembershipLog, MembershipRequest, MembershipType, Organization

@@ -137,9 +137,16 @@
 
   {% if membership_is_owner or membership_can_view %}
     {% for pending_request in membership_pending_requests %}
-      <li class="list-group-item d-flex justify-content-between align-items-center text-muted">
+      <li class="list-group-item d-flex justify-content-between align-items-center">
         <div>
-          {% include 'core/_membership_pending_request_title.html' with req=pending_request is_self=membership_is_owner membership_can_view=membership_can_view %}
+          <div class="font-weight-bold">{{ pending_request.membership_type.name }}</div>
+          <div class="small text-muted">
+            <a href="{% if membership_is_owner %}
+              {% url 'membership-request-self' pending_request.request_id %}
+              {% else %}
+              {% url 'membership-request-detail' pending_request.request_id %}
+              {% endif %}">Request #{{ pending_request.request_id }}</a>
+          </div>
           {% if pending_request.organization_name %}
             <div class="small text-muted">Organization: {{ pending_request.organization_name }}</div>
           {% endif %}
