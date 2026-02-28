@@ -91,13 +91,20 @@ class Command(BaseCommand):
             fu = FreeIPAUser.get(membership.target_username)
             self.stdout.write(f"Processing expired membership for user {membership.target_username}...")
             if fu is None:
-                failed += 1
-                logger.warning(
-                    "membership_expired_cleanup_failure user=%s membership_type=%s group_cn=%s reason=freeipa_user_missing",
+                logger.debug(
+                    "membership_expired_cleanup_freeipa_user_missing user=%s membership_type=%s group_cn=%s",
                     membership.target_username,
                     membership.membership_type_id,
                     membership.membership_type.group_cn,
                 )
+                if dry_run:
+                    self.stdout.write(
+                        "[dry-run] Would delete membership "
+                        f"{membership.target_username}:{membership.membership_type_id}."
+                    )
+                else:
+                    membership.delete()
+                removed += 1
                 continue
 
             group_cn = str(membership.membership_type.group_cn or "").strip()

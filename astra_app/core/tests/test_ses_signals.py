@@ -1,8 +1,13 @@
 from unittest.mock import patch
 
 from django.contrib import admin
-from django.test import SimpleTestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 from django_ses.signals import bounce_received, complaint_received
+from post_office.models import STATUS as POST_OFFICE_STATUS
+from post_office.models import Email as PostOfficeEmail
+from post_office.models import Log as PostOfficeLog
+
+from core.ses_signals import handle_ses_bounce_received, handle_ses_complaint_received
 
 
 class SESOperationalVisibilityTests(SimpleTestCase):
@@ -79,3 +84,121 @@ class SESOperationalVisibilityTests(SimpleTestCase):
         self.assertIn(BlacklistedEmail, admin.site._registry)
         model_admin = admin.site._registry[BlacklistedEmail]
         self.assertIn("email", tuple(model_admin.search_fields or ()))
+
+
+class SESPostOfficeAuditLogTests(TestCase):
+    def _create_email(self, *, message_id: str, status: int) -> PostOfficeEmail:
+        return PostOfficeEmail.objects.create(
+            from_email="from@example.com",
+            to="to@example.com",
+            subject="Test",
+            message="Test message",
+            message_id=message_id,
+            status=status,
+        )
+
+    def test_bounce_creates_post_office_log_for_matching_smtp_message_id(self) -> None:
+        email = self._create_email(message_id="<abc123@example.com>", status=POST_OFFICE_STATUS.queued)
+
+        handle_ses_bounce_received(
+            sender=self.__class__,
+            mail_obj={
+                "messageId": "ses-internal-id",
+                "commonHeaders": {"messageId": "<abc123@example.com>"},
+            },
+            bounce_obj={
+                "bounceType": "Permanent",
+                "bouncedRecipients": [{"emailAddress": "to@example.com"}],
+            },
+            raw_message=b"{}",
+        )
+
+        log_entry = (
+            PostOfficeLog.objects.filter(email=email, exception_type="SESBounce")
+            .order_by("-id")
+            .first()
+        )
+        self.assertIsNotNone(log_entry)
+        assert log_entry is not None
+        self.assertEqual(log_entry.exception_type, "SESBounce")
+        self.assertEqual(log_entry.status, POST_OFFICE_STATUS.failed)
+        self.assertIn("Permanent", log_entry.message)
+        self.assertIn("to@example.com", log_entry.message)
+
+    def test_bounce_marks_queued_email_as_failed(self) -> None:
+        email = self._create_email(message_id="<queued@example.com>", status=POST_OFFICE_STATUS.queued)
+
+        handle_ses_bounce_received(
+            sender=self.__class__,
+            mail_obj={"commonHeaders": {"messageId": "<queued@example.com>"}},
+            bounce_obj={
+                "bounceType": "Transient",
+                "bouncedRecipients": [{"emailAddress": "to@example.com"}],
+            },
+            raw_message=b"{}",
+        )
+
+        email.refresh_from_db()
+        self.assertEqual(email.status, POST_OFFICE_STATUS.failed)
+
+    def test_bounce_keeps_sent_email_status_but_still_logs_failure(self) -> None:
+        email = self._create_email(message_id="<sent@example.com>", status=POST_OFFICE_STATUS.sent)
+
+        handle_ses_bounce_received(
+            sender=self.__class__,
+            mail_obj={"commonHeaders": {"messageId": "<sent@example.com>"}},
+            bounce_obj={
+                "bounceType": "Permanent",
+                "bouncedRecipients": [{"emailAddress": "to@example.com"}],
+            },
+            raw_message=b"{}",
+        )
+
+        email.refresh_from_db()
+        self.assertEqual(email.status, POST_OFFICE_STATUS.sent)
+        self.assertTrue(PostOfficeLog.objects.filter(email=email, exception_type="SESBounce").exists())
+
+    def test_bounce_with_missing_or_unmatched_message_id_is_safe(self) -> None:
+        self._create_email(message_id="<existing@example.com>", status=POST_OFFICE_STATUS.queued)
+
+        handle_ses_bounce_received(
+            sender=self.__class__,
+            mail_obj={"commonHeaders": {"messageId": "<missing@example.com>"}},
+            bounce_obj={
+                "bounceType": "Permanent",
+                "bouncedRecipients": [{"emailAddress": "missing@example.com"}],
+            },
+            raw_message=b"{}",
+        )
+
+        handle_ses_bounce_received(
+            sender=self.__class__,
+            mail_obj=None,
+            bounce_obj=None,
+            raw_message=b"{}",
+        )
+
+        self.assertEqual(PostOfficeLog.objects.count(), 0)
+
+    def test_complaint_creates_post_office_log_for_matching_smtp_message_id(self) -> None:
+        email = self._create_email(message_id="<complaint@example.com>", status=POST_OFFICE_STATUS.sent)
+
+        handle_ses_complaint_received(
+            sender=self.__class__,
+            mail_obj={"commonHeaders": {"messageId": "<complaint@example.com>"}},
+            complaint_obj={
+                "complainedRecipients": [{"emailAddress": "complaint@example.com"}],
+            },
+            raw_message=b"{}",
+        )
+
+        log_entry = (
+            PostOfficeLog.objects.filter(email=email, exception_type="SESComplaint")
+            .order_by("-id")
+            .first()
+        )
+        self.assertIsNotNone(log_entry)
+        assert log_entry is not None
+        self.assertEqual(log_entry.exception_type, "SESComplaint")
+        self.assertEqual(log_entry.status, POST_OFFICE_STATUS.failed)
+        self.assertEqual(log_entry.message, "SES spam complaint received")

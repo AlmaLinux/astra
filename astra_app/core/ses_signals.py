@@ -7,6 +7,9 @@ from typing import Any
 from django.conf import settings
 from django.dispatch import receiver
 from django_ses.signals import bounce_received, complaint_received
+from post_office.models import STATUS as POST_OFFICE_STATUS
+from post_office.models import Email as PostOfficeEmail
+from post_office.models import Log as PostOfficeLog
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +103,37 @@ def handle_ses_bounce_received(
         event_source="django_ses.bounce_received",
     )
 
+    if isinstance(mail_obj, dict):
+        smtp_message_id = str(
+            (mail_obj.get("commonHeaders") or {}).get("messageId") or ""
+        ).strip()
+        if smtp_message_id:
+            try:
+                post_office_email = PostOfficeEmail.objects.filter(message_id=smtp_message_id).first()
+                if post_office_email is not None:
+                    bounce_type = ""
+                    if isinstance(bounce_obj, dict):
+                        bounce_type = str(bounce_obj.get("bounceType") or "").strip()
+
+                    bounced_addrs = ", ".join(
+                        str(recipient.get("emailAddress") or "")
+                        for recipient in bounced_recipients
+                        if isinstance(recipient, dict) and recipient.get("emailAddress")
+                    )
+
+                    PostOfficeLog.objects.create(
+                        email=post_office_email,
+                        status=POST_OFFICE_STATUS.failed,
+                        exception_type="SESBounce",
+                        message=f"SES bounce ({bounce_type or 'unknown'}): {bounced_addrs}",
+                    )
+
+                    if post_office_email.status not in (POST_OFFICE_STATUS.sent,):
+                        post_office_email.status = POST_OFFICE_STATUS.failed
+                        post_office_email.save(update_fields=["status"])
+            except Exception:
+                logger.exception("ses_signals: failed to record bounce in post_office log")
+
 
 @receiver(complaint_received)
 def handle_ses_complaint_received(
@@ -126,3 +160,20 @@ def handle_ses_complaint_received(
         recipient_domain=recipient_domain,
         event_source="django_ses.complaint_received",
     )
+
+    if isinstance(mail_obj, dict):
+        smtp_message_id = str(
+            (mail_obj.get("commonHeaders") or {}).get("messageId") or ""
+        ).strip()
+        if smtp_message_id:
+            try:
+                post_office_email = PostOfficeEmail.objects.filter(message_id=smtp_message_id).first()
+                if post_office_email is not None:
+                    PostOfficeLog.objects.create(
+                        email=post_office_email,
+                        status=POST_OFFICE_STATUS.failed,
+                        exception_type="SESComplaint",
+                        message="SES spam complaint received",
+                    )
+            except Exception:
+                logger.exception("ses_signals: failed to record complaint in post_office log")

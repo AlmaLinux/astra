@@ -15,6 +15,8 @@ from django.core.files.uploadedfile import UploadedFile
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import IntegrityError, models, transaction
 from django.db.models import Q
+from django.db.models.signals import post_save
+from django.dispatch import receiver
 from django.utils import timezone
 from PIL import Image
 
@@ -1212,6 +1214,13 @@ class Candidate(models.Model):
     def __str__(self) -> str:
         return f"{self.freeipa_username} ({self.election_id})"
 
+    @override
+    def delete(self, *args, **kwargs) -> tuple[int, dict[str, int]]:
+        election_status = Election.objects.values_list("status", flat=True).get(pk=self.election_id)
+        if election_status != Election.Status.draft:
+            raise ValidationError(f"Cannot delete a candidate from a {election_status} election.")
+        return super().delete(*args, **kwargs)
+
 
 class ExclusionGroup(models.Model):
     """A constraint on how many candidates in a set may be elected."""
@@ -1426,7 +1435,14 @@ class Ballot(models.Model):
 
 
 class AuditLogEntry(models.Model):
-    election = models.ForeignKey(Election, on_delete=models.CASCADE, related_name="audit_log")
+    election = models.ForeignKey(Election, on_delete=models.CASCADE, related_name="audit_log", null=True, blank=True)
+    organization = models.ForeignKey(
+        "Organization",
+        on_delete=models.CASCADE,
+        related_name="audit_log",
+        null=True,
+        blank=True,
+    )
     timestamp = models.DateTimeField(auto_now_add=True)
     event_type = models.CharField(max_length=64)
     payload = models.JSONField(blank=True, default=dict)
@@ -1438,9 +1454,13 @@ class AuditLogEntry(models.Model):
         indexes = [
             models.Index(fields=["election", "timestamp"], name="audit_el_ts"),
             models.Index(fields=["election", "is_public"], name="audit_el_pub"),
+            models.Index(fields=["organization", "timestamp"], name="audit_org_ts"),
+            models.Index(fields=["organization", "is_public"], name="audit_org_pub"),
         ]
 
     def __str__(self) -> str:
+        if self.organization_id is not None:
+            return f"org:{self.organization_id}:{self.event_type}"
         return f"{self.election_id}:{self.event_type}"
 
 
@@ -1514,3 +1534,18 @@ class OrganizationMembershipCSVImportLink(Organization):
         proxy = True
         verbose_name = "Organization membership import (CSV)"
         verbose_name_plural = "Organization membership import (CSV)"
+
+
+@receiver(post_save, sender=Election)
+def _cleanup_credentials_on_election_soft_delete(
+    sender: type[Election],
+    instance: Election,
+    update_fields: set[str] | None,
+    **kwargs: object,
+) -> None:
+    """Delete voting credentials when an election is soft-deleted."""
+    if instance.status != Election.Status.deleted:
+        return
+    if update_fields is not None and "status" not in update_fields:
+        return
+    VotingCredential.objects.filter(election=instance).delete()

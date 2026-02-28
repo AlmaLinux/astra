@@ -119,6 +119,8 @@ def _with_freeipa_service_client_retry[T](get_client: Callable[[], ClientMeta], 
         try:
             result = fn(client)
         except Exception as exc:
+            if isinstance(exc, exceptions.PasswordExpired):
+                clear_freeipa_service_client_cache()
             if _is_freeipa_availability_error(exc):
                 _record_freeipa_availability_failure()
             logger.exception("FreeIPA service account operation failed: %s", exc)

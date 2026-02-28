@@ -789,6 +789,13 @@ def election_edit(request, election_id: int):
         ]
         group_empty_form.fields["candidate_usernames"].choices = candidate_choices
 
+    candidate_count = (
+        Candidate.objects.filter(election=election).count()
+        if election is not None and election.pk is not None
+        else 0
+    )
+    vacant_seats_count = max((election.number_of_seats if election is not None else 0) - candidate_count, 0)
+
     return render(
         request,
         "core/election_edit.html",
@@ -802,6 +809,8 @@ def election_edit(request, election_id: int):
             "group_empty_form": group_empty_form,
             "eligible_voters_count": len(eligible_voter_usernames),
             "nomination_eligible_voters_count": len(nomination_eligible_usernames),
+            "candidate_count": candidate_count,
+            "vacant_seats_count": vacant_seats_count,
             "templates": templates,
             "rendered_preview": rendered_preview,
             "email_template_variables": email_template_variables,

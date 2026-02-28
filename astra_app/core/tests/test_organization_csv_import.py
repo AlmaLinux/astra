@@ -52,6 +52,17 @@ class OrganizationCSVImportUtilitiesTests(TestCase):
 
         self.assertEqual(headers, ["Name", "Country Code", "Website"])
 
+    def test_extract_headers_supports_latin1_accents_without_corruption(self) -> None:
+        uploaded = SimpleUploadedFile(
+            "orgs.csv",
+            "García,Country Code\nAcme,US\n".encode("latin-1"),
+            content_type="text/csv",
+        )
+
+        headers = extract_csv_headers_from_uploaded_file(uploaded)
+
+        self.assertEqual(headers, ["García", "Country Code"])
+
 
 class OrganizationCSVImportResourceTests(TestCase):
     def test_decision_skips_missing_required_field(self) -> None:

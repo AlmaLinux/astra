@@ -123,10 +123,13 @@ def extract_csv_headers_from_uploaded_file(uploaded: UploadedFile) -> list[str]:
     sample = uploaded.read(64 * 1024)
     uploaded.seek(0)
 
-    try:
-        text = sample.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        text = sample.decode("utf-8", errors="replace")
+    text = ""
+    for encoding in ("utf-8-sig", "utf-8", "latin-1"):
+        try:
+            text = sample.decode(encoding)
+            break
+        except UnicodeDecodeError:
+            continue
 
     if not text.strip():
         return []

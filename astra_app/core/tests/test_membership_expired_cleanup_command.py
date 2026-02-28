@@ -169,6 +169,51 @@ class MembershipExpiredCleanupCommandTests(TestCase):
             ).exists()
         )
 
+    def test_command_deletes_row_when_freeipa_user_is_missing(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            expired_at = timezone.now() - datetime.timedelta(days=1)
+            self._create_membership_log_with_side_effects(
+                actor_username="reviewer",
+                target_username="missing-user",
+                membership_type_id="individual",
+                requested_group_cn="almalinux-individual",
+                action=MembershipLog.Action.approved,
+                expires_at=expired_at,
+            )
+
+        self.assertTrue(
+            Membership.objects.filter(target_username="missing-user", membership_type_id="individual").exists()
+        )
+
+        stdout = StringIO()
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=None),
+            patch(
+                "core.management.commands.membership_expired_cleanup.remove_user_from_group",
+                autospec=True,
+            ) as remove_user_from_group_mock,
+        ):
+            call_command("membership_expired_cleanup", stdout=stdout)
+
+        remove_user_from_group_mock.assert_not_called()
+        self.assertFalse(
+            Membership.objects.filter(target_username="missing-user", membership_type_id="individual").exists()
+        )
+        self.assertIn("Removed 1 membership(s)", stdout.getvalue())
+        self.assertIn("failed 0", stdout.getvalue())
+
     def test_command_removes_org_sponsorship_and_sends_email(self) -> None:
         membership_type, _ = MembershipType.objects.update_or_create(
             code="gold",

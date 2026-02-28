@@ -139,6 +139,12 @@
             </div>
             <div class="modal-body">
               <p class="mb-2">This will open the election and email voting credentials to all eligible voters.</p>
+              {% if vacant_seats_count > 0 %}
+                <p class="text-warning mb-2">
+                  <strong>Warning:</strong>
+                  This election has {{ election.number_of_seats }} seat{{ election.number_of_seats|pluralize }} but only {{ candidate_count }} candidate{{ candidate_count|pluralize }}, so it will finish with {{ vacant_seats_count }} vacant seat{{ vacant_seats_count|pluralize }}.
+                </p>
+              {% endif %}
               <p class="small mb-0">Eligible voters: <strong class="js-eligible-voters-count">{{ eligible_voters_count }}</strong></p>
             </div>
             <div class="modal-footer">

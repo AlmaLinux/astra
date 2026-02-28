@@ -191,6 +191,32 @@ class ElectionEditPermissionTests(_CoreCategoriesTestCase):
             r"<button[^>]*formnovalidate[^>]*title=\"Save changes as a draft\"[^>]*>",
         )
 
+    def test_edit_shows_vacant_seat_warning_in_start_modal(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Draft vacancy warning",
+            description="",
+            url="",
+            start_datetime=now + datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=2),
+            number_of_seats=3,
+            status=Election.Status.draft,
+        )
+        Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
+
+        resp = self.client.get(reverse("election-edit", args=[election.id]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "This election has 3 seats but only 1 candidate")
+        self.assertContains(resp, "vacant seat")
+
 
 class ElectionDraftDeletionTests(_CoreCategoriesTestCase):
     def _login_as_freeipa_user(self, username: str) -> None:

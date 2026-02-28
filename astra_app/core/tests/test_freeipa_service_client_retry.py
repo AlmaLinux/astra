@@ -1,3 +1,4 @@
+import threading
 from unittest.mock import Mock, patch
 
 from django.core.cache import cache
@@ -69,3 +70,23 @@ class FreeIPAServiceClientRetryTests(TestCase):
         # Ensure we emit a clear log line (not just a silent None).
         combined = "\n".join(captured.output).lower()
         self.assertIn("password expired", combined)
+
+    def test_retry_password_expired_clears_cached_service_client(self) -> None:
+        first_client = Mock()
+        second_client = Mock()
+        first_client.user_show.side_effect = exceptions.Unauthorized()
+        second_client.user_show.side_effect = exceptions.PasswordExpired()
+
+        patched_local = threading.local()
+        with (
+            patch("core.freeipa.client._service_client_local", new=patched_local),
+            patch(
+                "core.freeipa.client._get_freeipa_client",
+                autospec=True,
+                side_effect=[first_client, second_client],
+            ),
+        ):
+            with self.assertRaises(exceptions.PasswordExpired):
+                FreeIPAUser.get("alice")
+
+        self.assertFalse(hasattr(patched_local, "client"))

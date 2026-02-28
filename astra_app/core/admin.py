@@ -1627,6 +1627,18 @@ class CandidateAdmin(admin.ModelAdmin):
     search_fields = ("freeipa_username", "nominated_by", "election__name")
     ordering = ("election", "freeipa_username", "id")
 
+    @override
+    def has_delete_permission(self, request: HttpRequest, obj: object | None = None) -> bool:
+        if isinstance(obj, Candidate) and obj.election.status != Election.Status.draft:
+            return False
+        return super().has_delete_permission(request, obj)
+
+    @override
+    def get_actions(self, request: HttpRequest) -> dict[str, tuple[Callable, str, str]]:
+        actions = super().get_actions(request)
+        actions.pop("delete_selected", None)
+        return actions
+
 
 class ExclusionGroupCandidateInline(admin.TabularInline):
     model = ExclusionGroupCandidate
@@ -1645,11 +1657,11 @@ class ExclusionGroupAdmin(admin.ModelAdmin):
 
 @admin.register(AuditLogEntry)
 class AuditLogEntryAdmin(ReadOnlyModelAdmin):
-    list_display = ("election", "timestamp", "event_type", "is_public")
-    list_filter = ("election", "is_public", "event_type")
+    list_display = ("election", "organization", "timestamp", "event_type", "is_public")
+    list_filter = ("election", "organization", "is_public", "event_type")
     search_fields = ("event_type",)
     ordering = ("-timestamp", "id")
-    readonly_fields = ("election", "timestamp", "event_type", "payload", "is_public")
+    readonly_fields = ("election", "organization", "timestamp", "event_type", "payload", "is_public")
 
 
 class BaseCsvImportAdmin(ImportMixin, admin.ModelAdmin):

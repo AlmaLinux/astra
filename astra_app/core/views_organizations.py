@@ -33,7 +33,15 @@ from core.membership import (
     sync_organization_representative_groups,
 )
 from core.membership_notes import add_note
-from core.models import AccountInvitation, Membership, MembershipLog, MembershipRequest, MembershipType, Organization
+from core.models import (
+    AccountInvitation,
+    AuditLogEntry,
+    Membership,
+    MembershipLog,
+    MembershipRequest,
+    MembershipType,
+    Organization,
+)
 from core.organization_claim import (
     build_organization_claim_url,
     read_organization_claim_token,
@@ -718,6 +726,7 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
 
     if request.method == "POST" and form.is_valid():
         updated_org = form.save(commit=False)
+        changed_fields = list(form.changed_data)
 
         old_representative = ""
         new_representative = ""
@@ -788,6 +797,27 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
             )
             return _render_org_form(request, form, organization=organization, is_create=False)
 
+        actor_username = get_username(request) or ""
+
+        if changed_fields:
+            try:
+                AuditLogEntry.objects.create(
+                    organization=organization,
+                    event_type="organization_edited",
+                    payload={
+                        "changed_fields": changed_fields,
+                        "actor_username": actor_username,
+                    },
+                    is_public=False,
+                )
+            except Exception:
+                logger.exception(
+                    "organization_edit: failed to create organization_edited audit entry org_id=%s changed_fields=%r actor=%r",
+                    organization.pk,
+                    changed_fields,
+                    actor_username,
+                )
+
         if old_representative and new_representative and old_representative != new_representative:
             pending_requests = list(
                 MembershipRequest.objects.select_related("membership_type").filter(
@@ -796,7 +826,6 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
                 )
             )
             if pending_requests:
-                actor_username = get_username(request)
                 MembershipLog.objects.bulk_create(
                     [
                         MembershipLog(
@@ -838,6 +867,26 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
                         "organization_edit: missing actor username for representative_changed notes org_id=%s",
                         organization.pk,
                     )
+
+            try:
+                AuditLogEntry.objects.create(
+                    organization=organization,
+                    event_type="organization_representative_changed",
+                    payload={
+                        "old": old_representative,
+                        "new": new_representative,
+                        "actor": actor_username,
+                    },
+                    is_public=False,
+                )
+            except Exception:
+                logger.exception(
+                    "organization_edit: failed to create representative_changed audit entry org_id=%s actor=%r old=%r new=%r",
+                    organization.pk,
+                    actor_username,
+                    old_representative,
+                    new_representative,
+                )
 
         messages.success(request, "Organization details updated.")
 
