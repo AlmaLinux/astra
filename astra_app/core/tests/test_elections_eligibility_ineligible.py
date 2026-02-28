@@ -149,7 +149,13 @@ class IneligibleVotersWithReasonsTests(TestCase):
     def test_org_sponsorship_counts_as_membership(self) -> None:
         """Org sponsorship should be recognized as a vote-bearing membership."""
         election = self._make_election()
-        voter_type = self._make_voter_type()
+        voter_type = MembershipType.objects.create(
+            code="org-voter-b2",
+            name="Org Voter B2",
+            votes=1,
+            category_id="sponsorship",
+            enabled=True,
+        )
 
         now = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=datetime.UTC)
         org = Organization.objects.create(

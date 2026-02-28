@@ -78,7 +78,7 @@ def _membership_is_active_at_reference(
     expires_at: datetime.datetime | None,
     reference_datetime: datetime.datetime,
 ) -> bool:
-    return expires_at is None or expires_at >= reference_datetime
+    return expires_at is None or expires_at > reference_datetime
 
 
 def _membership_is_old_enough(*, created_at: datetime.datetime | None, cutoff: datetime.datetime) -> bool:
@@ -143,6 +143,7 @@ def _compute_eligibility_facts_by_username(*, election: Election) -> dict[str, E
             target_organization__isnull=False,
             membership_type__enabled=True,
             membership_type__votes__gt=0,
+            membership_type__category__is_organization=True,
         )
         .only(
             "target_organization__representative",

@@ -54,6 +54,11 @@ class Command(BaseCommand):
             .order_by("target_username")
             .values_list("target_username", flat=True)
         )
+        all_freeipa_users = {
+            str(user.username or "").strip(): user
+            for user in FreeIPAUser.all()
+            if str(user.username or "").strip()
+        }
 
         embargoed_members: list[dict[str, str]] = []
         seen_usernames: set[str] = set()
@@ -63,7 +68,7 @@ class Command(BaseCommand):
                 continue
             seen_usernames.add(uname)
 
-            user = FreeIPAUser.get(uname)
+            user = all_freeipa_users.get(uname)
             if user is None:
                 continue
 

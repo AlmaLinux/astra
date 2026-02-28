@@ -87,6 +87,39 @@ class ElectionEligibilityReferenceDatetimeTests(TestCase):
         self.assertEqual([v.username for v in eligible], [])
         self.assertEqual(weight, 0)
 
+    def test_started_election_treats_expiry_at_reference_as_expired(self) -> None:
+        now = datetime.datetime(2026, 1, 20, 12, 0, 0, tzinfo=datetime.UTC)
+
+        election = Election.objects.create(
+            name="Boundary eligibility election",
+            description="",
+            start_datetime=now,
+            end_datetime=now + datetime.timedelta(days=10),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+
+        voter_type = MembershipType.objects.create(
+            code="voter-boundary",
+            name="Voter Boundary",
+            votes=1,
+            category_id="individual",
+            enabled=True,
+        )
+
+        membership = Membership.objects.create(
+            target_username="alice",
+            membership_type=voter_type,
+            expires_at=election.start_datetime,
+        )
+        Membership.objects.filter(pk=membership.pk).update(created_at=now - datetime.timedelta(days=60))
+
+        eligible = eligible_voters_from_memberships(election=election)
+        weight = eligible_vote_weight_for_username(election=election, username="alice")
+
+        self.assertEqual([v.username for v in eligible], [])
+        self.assertEqual(weight, 0)
+
 
 @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=40)
 class ElectionEligibilityRenewalPreservesCreatedAtTests(TestCase):

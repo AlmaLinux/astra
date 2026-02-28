@@ -426,6 +426,66 @@ class MembershipStatsDashboardTests(TestCase):
         self.assertIn("summary", payload)
         self.assertIn("charts", payload)
 
+    def test_membership_stats_expirations_chart_excludes_expiry_exactly_at_now(self) -> None:
+        frozen_now = datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=datetime.UTC)
+
+        MembershipTypeCategory.objects.update_or_create(
+            name="individual",
+            defaults={
+                "is_individual": True,
+                "is_organization": False,
+                "sort_order": 0,
+            },
+        )
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        Membership.objects.create(
+            target_username="boundary-now",
+            membership_type_id="individual",
+            expires_at=frozen_now,
+        )
+        Membership.objects.create(
+            target_username="future",
+            membership_type_id="individual",
+            expires_at=frozen_now + datetime.timedelta(days=1),
+        )
+
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.group,
+            principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
+        )
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "displayname": ["Reviewer User"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+            },
+        )
+
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+                with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
+                    resp = self.client.get(reverse("membership-stats-data"))
+
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        expirations_counts = list(payload["charts"]["expirations_upcoming"]["counts"])
+        self.assertEqual(sum(expirations_counts), 1)
+
     def test_membership_stats_data_includes_nationality_distributions(self) -> None:
         from django.core.cache import cache
 

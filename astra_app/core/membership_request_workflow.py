@@ -5,7 +5,7 @@ from typing import Any
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import QuerySet
 from django.utils import timezone
 from post_office.models import EmailTemplate
@@ -1093,6 +1093,7 @@ def put_membership_request_on_hold(
     return log, email_error
 
 
+@transaction.atomic
 def resubmit_membership_request(
     *,
     membership_request: MembershipRequest,
@@ -1101,6 +1102,12 @@ def resubmit_membership_request(
     resubmitted_at: datetime.datetime | None = None,
 ) -> MembershipLog:
     """Update a request's answers and move it from on-hold back to pending."""
+
+    membership_request = (
+        MembershipRequest.objects.select_related("membership_type")
+        .select_for_update(of=("self",))
+        .get(pk=membership_request.pk)
+    )
 
     if membership_request.status != MembershipRequest.Status.on_hold:
         raise ValidationError("Only on-hold requests can be resubmitted")
@@ -1123,7 +1130,13 @@ def resubmit_membership_request(
     membership_request.responses = updated_responses
     membership_request.status = MembershipRequest.Status.pending
     membership_request.on_hold_at = None
-    membership_request.save(update_fields=["responses", "status", "on_hold_at"])
+    try:
+        with transaction.atomic():
+            membership_request.save(update_fields=["responses", "status", "on_hold_at"])
+    except IntegrityError as exc:
+        raise ValidationError(
+            "Cannot resubmit: a conflicting open request exists for this target and membership type."
+        ) from exc
 
     log = _create_status_change_log(
         membership_request=membership_request,

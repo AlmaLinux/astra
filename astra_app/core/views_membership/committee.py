@@ -4,6 +4,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import permission_required
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import IntegrityError
 from django.db.models import Prefetch
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -935,6 +936,9 @@ def membership_request_reopen(request: HttpRequest, pk: int) -> HttpResponse:
     except ValidationError as exc:
         message = exc.messages[0] if exc.messages else str(exc)
         messages.error(request, message)
+        return redirect(redirect_to)
+    except IntegrityError:
+        messages.error(request, "Cannot reopen: another open request for this target already exists.")
         return redirect(redirect_to)
     except Exception:
         logger.exception("Failed to reopen membership request pk=%s", req.pk)

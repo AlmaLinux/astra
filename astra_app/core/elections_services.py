@@ -552,10 +552,7 @@ def submit_ballot(*, election: Election, credential_public_id: str, ranking: lis
         nonce=nonce,
     )
 
-    last_chain_hash = (
-        Ballot.objects.select_for_update()
-        .latest_chain_head_hash_for_election(election=election)
-    )
+    last_chain_hash = Ballot.objects.latest_chain_head_hash_for_election(election=election)
     genesis_hash = election_genesis_chain_hash(election.id)
     previous_chain_hash = str(last_chain_hash or genesis_hash)
     chain_hash = election_chain_next_hash(previous_chain_hash=previous_chain_hash, ballot_hash=ballot_hash)
@@ -628,17 +625,11 @@ def submit_ballot(*, election: Election, credential_public_id: str, ranking: lis
             required_participating_vote_weight_total = int(status["required_participating_vote_weight_total"])
             quorum_met = bool(status["quorum_met"])
             if required_participating_voter_count and required_participating_vote_weight_total and quorum_met:
-                already_logged = AuditLogEntry.objects.filter(
+                AuditLogEntry.objects.get_or_create(
                     election=committed_election,
                     event_type="quorum_reached",
-                ).exists()
-                if not already_logged:
-                    AuditLogEntry.objects.create(
-                        election=committed_election,
-                        event_type="quorum_reached",
-                        payload=status,
-                        is_public=True,
-                    )
+                    defaults={"payload": status, "is_public": True},
+                )
         except Exception:
             logger.exception(
                 "Deferred quorum evaluation failed for election_id=%s",
@@ -744,6 +735,10 @@ def anonymize_election(*, election: Election) -> dict[str, int]:
 def issue_voting_credentials_from_memberships(*, election: Election) -> list[VotingCredential]:
     if election.status in {Election.Status.closed, Election.Status.tallied}:
         raise ElectionError("cannot issue credentials for a closed election")
+
+    # Check once before the issuance loop rather than once per credential save.
+    if AuditLogEntry.objects.filter(election=election, event_type="election_anonymized").exists():
+        raise ElectionError("cannot issue credentials for an anonymized election")
 
     eligible = eligible_voters_from_memberships(
         election=election,

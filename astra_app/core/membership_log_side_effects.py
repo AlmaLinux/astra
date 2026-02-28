@@ -103,6 +103,14 @@ def apply_org_side_effects(*, log: MembershipLog) -> None:
         ).delete()
         return
 
+    organization = Organization.objects.select_for_update().filter(pk=log.target_organization_id).first()
+    if organization is None:
+        logger.warning(
+            "apply_org_side_effects: organization not found org_id=%s",
+            log.target_organization_id,
+        )
+        return
+
     existing = (
         Membership.objects.filter(
             target_organization_id=log.target_organization_id,
@@ -116,14 +124,6 @@ def apply_org_side_effects(*, log: MembershipLog) -> None:
     log_filter["membership_type"] = log.membership_type
 
     start_at = resolve_term_start_at(log=log, existing=existing, log_filter=log_filter)
-
-    organization = Organization.objects.filter(pk=log.target_organization_id).first()
-    if organization is None:
-        logger.warning(
-            "apply_org_side_effects: organization not found org_id=%s",
-            log.target_organization_id,
-        )
-        return
 
     _new_membership, old = Membership.replace_within_category(
         organization=organization,

@@ -93,3 +93,41 @@ class ElectionEligibilityOrganizationRepresentativesTests(TestCase):
         self.assertIn("rep1", eligible_by_username)
         self.assertEqual(eligible_by_username["rep1"], 5)
         self.assertNotIn("rep2", eligible_by_username)
+
+    def test_org_membership_with_non_organization_category_does_not_add_vote_weight(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Eligibility election",
+            description="",
+            start_datetime=now,
+            end_datetime=now + datetime.timedelta(days=7),
+            number_of_seats=1,
+            status=Election.Status.draft,
+        )
+
+        misclassified_type = MembershipType.objects.create(
+            code="individual-misclassified-org",
+            name="Individual Misclassified",
+            votes=5,
+            category_id="individual",
+            enabled=True,
+        )
+
+        org = Organization.objects.create(
+            name="Acme",
+            representative="rep1",
+        )
+
+        membership = Membership.objects.create(
+            target_organization=org,
+            membership_type=misclassified_type,
+            expires_at=None,
+        )
+        Membership.objects.filter(pk=membership.pk).update(
+            created_at=election.start_datetime - datetime.timedelta(days=120)
+        )
+
+        eligible = eligible_voters_from_memberships(election=election)
+        eligible_by_username = {v.username: v.weight for v in eligible}
+
+        self.assertNotIn("rep1", eligible_by_username)

@@ -875,6 +875,12 @@ class MembershipCSVImportResource(resources.ModelResource):
                     username=username,
                     match_method=match_method,
                 )
+            return row_decision(
+                decision="IMPORT",
+                reason="Active membership, importing updates",
+                username=username,
+                match_method=match_method,
+            )
 
         if existing_membership is not None and start_at is None:
             if not has_updates:
@@ -887,22 +893,6 @@ class MembershipCSVImportResource(resources.ModelResource):
             return row_decision(
                 decision="IMPORT",
                 reason="Active membership, importing updates",
-                username=username,
-                match_method=match_method,
-            )
-
-        if existing_membership is not None and has_updates:
-            return row_decision(
-                decision="IMPORT",
-                reason="Active membership, importing updates",
-                username=username,
-                match_method=match_method,
-            )
-
-        if existing_membership is not None:
-            return row_decision(
-                decision="IMPORT",
-                reason="Active membership, updating start date",
                 username=username,
                 match_method=match_method,
             )

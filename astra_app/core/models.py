@@ -451,7 +451,7 @@ class MembershipQuerySet(models.QuerySet["Membership"]):
         at: datetime.datetime | None = None,
     ) -> MembershipQuerySet:
         reference = timezone.now() if at is None else at
-        return self.filter(Q(expires_at__isnull=True) | Q(expires_at__gte=reference))
+        return self.filter(Q(expires_at__isnull=True) | Q(expires_at__gt=reference))
 
 class AccountInvitation(models.Model):
     email = models.EmailField(unique=True)
@@ -1202,6 +1202,10 @@ class Candidate(models.Model):
             models.UniqueConstraint(
                 fields=["election", "freeipa_username"],
                 name="uniq_candidate_election_username",
+            ),
+            models.UniqueConstraint(
+                fields=["election", "tiebreak_uuid"],
+                name="uniq_candidate_election_tiebreak_uuid",
             ),
         ]
 

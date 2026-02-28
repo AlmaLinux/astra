@@ -1541,6 +1541,74 @@ class AdminImportMembershipsCSVTests(TestCase):
         self.assertEqual(decision, "SKIP")
         self.assertEqual(reason, "Already up-to-date")
 
+    def test_preview_reason_active_membership_imports_updates_when_start_matches(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "enabled": True,
+                "sort_order": 0,
+            },
+        )
+
+        self._login_as_freeipa_admin("alex")
+
+        now = timezone.now().astimezone(datetime.UTC)
+        membership = Membership.objects.create(
+            target_username="alice",
+            membership_type_id="individual",
+            expires_at=now + datetime.timedelta(days=30),
+        )
+        matching_start = datetime.datetime(2024, 1, 2, 0, 0, 0, tzinfo=datetime.UTC)
+        Membership.objects.filter(pk=membership.pk).update(created_at=matching_start)
+
+        dataset = Dataset(headers=["Email", "Start date", "Notes"])
+        dataset.append(["alice@example.org", "2024-01-02", "Updated note"])
+
+        admin_user = FreeIPAUser(
+            "alex",
+            {
+                "uid": ["alex"],
+                "mail": ["alex@example.org"],
+                "memberof_group": ["admins"],
+            },
+        )
+        alice_user = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.org"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "alex":
+                return admin_user
+            if username == "alice":
+                return alice_user
+            return None
+
+        with (
+            patch("core.membership_csv_import.FreeIPAUser.all", return_value=[admin_user, alice_user]),
+            patch("core.membership_csv_import.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
+        ):
+            resource = MembershipCSVImportResource(
+                membership_type=MembershipType.objects.get(code="individual"),
+                actor_username="alex",
+            )
+            resource.before_import(dataset)
+            row_decision = resource._decision_for_row(dataset.dict[0])
+            decision = row_decision.decision
+            reason = row_decision.reason
+
+        self.assertEqual(decision, "IMPORT")
+        self.assertEqual(reason, "Active membership, importing updates")
+
     def test_second_import_is_marked_up_to_date(self) -> None:
         MembershipType.objects.update_or_create(
             code="individual",

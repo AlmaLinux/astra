@@ -353,7 +353,7 @@ def membership_stats_data(_request: HttpRequest) -> HttpResponse:
             )
 
         exp_rows = (
-            Membership.objects.filter(expires_at__isnull=False, expires_at__gte=now, expires_at__lte=now + datetime.timedelta(days=365))
+            Membership.objects.filter(expires_at__isnull=False, expires_at__gt=now, expires_at__lte=now + datetime.timedelta(days=365))
             .annotate(period=TruncMonth("expires_at"))
             .values("period")
             .annotate(count=Count("id"))

@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError
 from django.test import TestCase
 from django.utils import timezone
 
@@ -12,6 +13,7 @@ from core.membership_request_workflow import (
     put_membership_request_on_hold,
     reject_membership_request,
     reopen_ignored_membership_request,
+    resubmit_membership_request,
 )
 from core.models import Membership, MembershipRequest, MembershipType, MembershipTypeCategory, Organization
 
@@ -165,6 +167,66 @@ class MembershipRequestWorkflowRaceConditionTests(TestCase):
                 membership_request=stale_request,
                 actor_username="reviewer",
             )
+
+    def test_reopen_blocks_when_another_open_request_exists_for_same_target_and_type(self) -> None:
+        ignored_request = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.ignored,
+        )
+        MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.pending,
+        )
+
+        with self.assertRaisesMessage(
+            ValidationError,
+            "Cannot reopen: an open request already exists for this target and membership type.",
+        ):
+            reopen_ignored_membership_request(
+                membership_request=ignored_request,
+                actor_username="reviewer",
+            )
+
+    def test_resubmit_requires_on_hold_status(self) -> None:
+        membership_request = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.pending,
+            responses=[{"Question": "Original"}],
+        )
+
+        with self.assertRaisesMessage(ValidationError, "Only on-hold requests can be resubmitted"):
+            resubmit_membership_request(
+                membership_request=membership_request,
+                actor_username="alice",
+                updated_responses=[{"Question": "Updated"}],
+            )
+
+    def test_resubmit_maps_integrity_error_to_validation_error(self) -> None:
+        membership_request = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.on_hold,
+            responses=[{"Question": "Original"}],
+        )
+
+        with patch.object(
+            MembershipRequest,
+            "save",
+            autospec=True,
+            side_effect=IntegrityError("duplicate key value violates unique constraint"),
+        ):
+            with self.assertRaisesMessage(
+                ValidationError,
+                "Cannot resubmit: a conflicting open request exists for this target and membership type.",
+            ):
+                resubmit_membership_request(
+                    membership_request=membership_request,
+                    actor_username="alice",
+                    updated_responses=[{"Question": "Updated"}],
+                )
 
     def test_approve_user_schedules_group_add_on_commit(self) -> None:
         membership_request = MembershipRequest.objects.create(

@@ -296,7 +296,7 @@ class MembershipHelperTests(TestCase):
         self.assertEqual(context.by_category["sponsorship"]["request_id"], first.pk)
         self.assertEqual(context.by_category["mirror"]["request_id"], mirror.pk)
 
-    def test_membership_queryset_active_inclusive_by_default(self) -> None:
+    def test_membership_queryset_active_excludes_exact_expiry_boundary(self) -> None:
         MembershipType.objects.update_or_create(
             code="basic",
             defaults={
@@ -361,7 +361,7 @@ class MembershipHelperTests(TestCase):
 
         membership_ids = {m.membership_type_id for m in memberships}
 
-        self.assertEqual(membership_ids, {"basic", "timed", "exact"})
+        self.assertEqual(membership_ids, {"basic", "timed"})
     @override_settings(MEMBERSHIP_EXPIRING_SOON_DAYS=30)
     def test_expiring_soon_cutoff_uses_settings(self) -> None:
         frozen_now = datetime.datetime(2026, 2, 1, 12, 0, 0, tzinfo=datetime.UTC)
@@ -504,7 +504,7 @@ class MembershipHelperTests(TestCase):
 
         self.assertEqual([m.membership_type_id for m in memberships], ["gold", "silver"])
 
-    def test_get_valid_memberships_for_username_includes_exact_expiry(self) -> None:
+    def test_get_valid_memberships_for_username_excludes_exact_expiry(self) -> None:
         MembershipType.objects.update_or_create(
             code="basic",
             defaults={
@@ -539,7 +539,7 @@ class MembershipHelperTests(TestCase):
         with patch("django.utils.timezone.now", autospec=True, return_value=now):
             memberships = get_valid_memberships(username="alice")
 
-        self.assertEqual([m.membership_type_id for m in memberships], ["basic", "exact"])
+        self.assertEqual([m.membership_type_id for m in memberships], ["basic"])
 
     def test_remove_user_from_group_handles_missing_user(self) -> None:
         with patch("core.membership.FreeIPAUser.get", return_value=None):
