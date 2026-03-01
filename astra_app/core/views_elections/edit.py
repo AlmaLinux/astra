@@ -473,12 +473,25 @@ def _handle_start_election(
         total_credentials, emailed, skipped, failures = _issue_and_email_credentials(request, locked)
 
         username = get_username(request)
+        candidate_snapshot = list(
+            Candidate.objects.filter(election=locked)
+            .only("id", "freeipa_username", "tiebreak_uuid")
+            .order_by("freeipa_username", "id")
+        )
         payload: dict[str, object] = {
             "eligible_voters": total_credentials,
             "emailed": emailed,
             "skipped": skipped,
             "failures": failures,
             "genesis_chain_hash": election_genesis_chain_hash(locked.id),
+            "candidates": [
+                {
+                    "id": c.id,
+                    "freeipa_username": c.freeipa_username,
+                    "tiebreak_uuid": str(c.tiebreak_uuid),
+                }
+                for c in candidate_snapshot
+            ],
         }
         if username:
             payload["actor"] = username

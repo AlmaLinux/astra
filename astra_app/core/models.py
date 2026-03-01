@@ -1215,6 +1215,19 @@ class Candidate(models.Model):
         return f"{self.freeipa_username} ({self.election_id})"
 
     @override
+    def save(self, *args, **kwargs) -> None:
+        # Enforce tiebreak_uuid immutability once the election is started.
+        if self.pk is not None:
+            election_status = Election.objects.values_list("status", flat=True).get(pk=self.election_id)
+            if election_status != Election.Status.draft:
+                original_uuid = Candidate.objects.values_list("tiebreak_uuid", flat=True).get(pk=self.pk)
+                if self.tiebreak_uuid != original_uuid:
+                    raise ValidationError(
+                        f"Cannot change tiebreak_uuid on a candidate in a {election_status} election."
+                    )
+        super().save(*args, **kwargs)
+
+    @override
     def delete(self, *args, **kwargs) -> tuple[int, dict[str, int]]:
         election_status = Election.objects.values_list("status", flat=True).get(pk=self.election_id)
         if election_status != Election.Status.draft:

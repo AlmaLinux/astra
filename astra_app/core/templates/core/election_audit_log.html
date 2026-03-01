@@ -322,6 +322,27 @@
                           <i class="fas fa-copy" aria-hidden="true"></i>
                         </button>
                       </p>
+                      {% if ev.payload.candidates %}
+                        <p class="mb-1"><strong>Candidates (tie-break order):</strong></p>
+                        <table class="table table-sm table-borderless mb-2" style="font-size:0.85em;">
+                          <thead>
+                            <tr>
+                              <th>Username</th>
+                              <th>ID</th>
+                              <th>Tie-break UUID</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {% for cand in ev.payload.candidates %}
+                              <tr>
+                                <td>{{ cand.freeipa_username }}</td>
+                                <td>{{ cand.id }}</td>
+                                <td><code>{{ cand.tiebreak_uuid }}</code></td>
+                              </tr>
+                            {% endfor %}
+                          </tbody>
+                        </table>
+                      {% endif %}
 
                     {% elif ev.event_type == 'election_closed' %}
                       <p class="mb-2">
