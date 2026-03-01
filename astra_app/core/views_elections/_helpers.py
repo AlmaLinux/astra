@@ -1,6 +1,7 @@
 """Shared private helpers used across election view sub-modules."""
 
 import datetime
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from django.http import Http404
@@ -11,7 +12,7 @@ from core.elections_services import ElectionError
 from core.email_context import user_email_context
 from core.forms_elections import ElectionEndDateForm
 from core.freeipa.user import FreeIPAUser
-from core.models import Election
+from core.models import Candidate, Election
 from core.views_utils import get_username
 
 
@@ -170,3 +171,21 @@ def _load_candidate_users(usernames: set[str]) -> dict[str, FreeIPAUser]:
             user = FreeIPAUser(username, {"uid": [username], "memberof_group": []})
         result[username] = user
     return result
+
+
+def _candidate_usernames(
+    candidates: Iterable[Candidate], *, include_nominators: bool = False,
+) -> set[str]:
+    """Collect candidate usernames, optionally including nominators."""
+    usernames: set[str] = set()
+    for candidate in candidates:
+        candidate_username = str(candidate.freeipa_username or "").strip()
+        if candidate_username:
+            usernames.add(candidate_username)
+
+        if include_nominators:
+            nominator_username = str(candidate.nominated_by or "").strip()
+            if nominator_username:
+                usernames.add(nominator_username)
+
+    return usernames

@@ -122,6 +122,68 @@ class ElectionAuditLogPageTests(TestCase):
         # Quota is floor(total/(seats+1)) + 1 = floor(1/2) + 1 = 1.
         self.assertContains(resp, "1.0000")
 
+    def test_audit_log_shows_full_name_and_username_for_elected_candidates_in_both_sections(self) -> None:
+        self._login_as_freeipa_user("viewer")
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Audit log elected display",
+            description="",
+            start_datetime=now - datetime.timedelta(days=2),
+            end_datetime=now - datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.tallied,
+            tally_result={
+                "quota": "1",
+                "elected": [],
+                "eliminated": [],
+                "forced_excluded": [],
+                "rounds": [],
+            },
+        )
+        candidate = Candidate.objects.create(
+            election=election,
+            freeipa_username="alice",
+            nominated_by="nominator",
+        )
+        election.tally_result = {
+            "quota": "1",
+            "elected": [candidate.id],
+            "eliminated": [],
+            "forced_excluded": [],
+            "rounds": [],
+        }
+        election.save(update_fields=["tally_result"])
+
+        AuditLogEntry.objects.create(
+            election=election,
+            event_type="tally_completed",
+            payload={"elected": [candidate.id]},
+            is_public=True,
+        )
+
+        viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "memberof_group": []})
+        alice = FreeIPAUser("alice", {"uid": ["alice"], "cn": ["Alice Candidate"], "memberof_group": []})
+
+        def _get_user(username: str):
+            if username == "viewer":
+                return viewer
+            if username == "alice":
+                return alice
+            return None
+
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
+            resp = self.client.get(reverse("election-audit-log", args=[election.id]))
+
+        self.assertEqual(resp.status_code, 200)
+        profile_url = reverse("user-profile", args=["alice"])
+        self.assertContains(
+            resp,
+            f'Alice Candidate (<a href="{profile_url}">alice</a>)',
+            count=2,
+            html=True,
+        )
+
     def test_tally_round_keeps_previous_round_elected_candidate_marked_elected(self) -> None:
         self._login_as_freeipa_user("viewer")
 

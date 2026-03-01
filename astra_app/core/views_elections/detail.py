@@ -13,7 +13,7 @@ from django.views.decorators.http import require_GET
 
 from core import elections_eligibility
 from core.elections_eligibility import ElectionEligibilityError
-from core.elections_services import election_quorum_status
+from core.elections_services import candidate_username_by_id_map, election_quorum_status
 from core.models import (
     AuditLogEntry,
     Candidate,
@@ -23,6 +23,7 @@ from core.models import (
 )
 from core.permissions import ASTRA_ADD_ELECTION
 from core.views_elections._helpers import (
+    _candidate_usernames,
     _elected_candidate_display,
     _get_active_election,
     _load_candidate_users,
@@ -82,15 +83,9 @@ def election_detail(request, election_id: int):
         raise Http404
 
     candidates = list(Candidate.objects.filter(election=election).order_by("freeipa_username", "id"))
-
-    usernames: set[str] = set()
-    for c in candidates:
-        if c.freeipa_username:
-            usernames.add(c.freeipa_username)
-        if c.nominated_by:
-            usernames.add(c.nominated_by)
-
-    users_by_username = _load_candidate_users(usernames)
+    users_by_username = _load_candidate_users(
+        _candidate_usernames(candidates, include_nominators=True),
+    )
 
     candidate_cards: list[dict[str, object]] = []
     for c in candidates:
@@ -145,7 +140,7 @@ def election_detail(request, election_id: int):
         )
 
     elected_ids, empty_seats = _tally_elected_ids(election)
-    candidate_username_by_id = {c.id: c.freeipa_username for c in candidates}
+    candidate_username_by_id = candidate_username_by_id_map(candidates)
     tally_winners = _elected_candidate_display(
         elected_ids,
         candidate_username_by_id=candidate_username_by_id,

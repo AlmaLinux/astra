@@ -82,7 +82,7 @@
               <p class="mb-2"><strong>Elected:</strong></p>
               <ul class="pl-3 ml-2">
                 {% for u in tally_elected_users %}
-                  <li><a href="{{ u.profile_url }}">{{ u.username }}</a></li>
+                  <li>{{ u.full_name }} (<a href="{{ u.profile_url }}">{{ u.username }}</a>)</li>
                 {% endfor %}
               </ul>
               {% if empty_seats > 0 %}
@@ -376,7 +376,7 @@
                         <p class="mb-2"><strong>Elected:</strong></p>
                         <ul class="pl-3 ml-2">
                           {% for u in ev.elected_users %}
-                            <li><a href="{{ u.profile_url }}">{{ u.username }}</a></li>
+                            <li>{{ u.full_name }} (<a href="{{ u.profile_url }}">{{ u.username }}</a>)</li>
                           {% endfor %}
                         </ul>
                       {% endif %}

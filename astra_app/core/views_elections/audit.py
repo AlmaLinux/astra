@@ -17,7 +17,13 @@ from core.elections_sankey import build_sankey_flows
 from core.elections_services import candidate_username_by_id_map
 from core.models import AuditLogEntry, Ballot, Candidate, Election
 from core.permissions import ASTRA_ADD_ELECTION
-from core.views_elections._helpers import _elected_candidate_display, _get_active_election, _tally_elected_ids
+from core.views_elections._helpers import (
+    _candidate_usernames,
+    _elected_candidate_display,
+    _get_active_election,
+    _load_candidate_users,
+    _tally_elected_ids,
+)
 from core.views_utils import build_url_for_page
 
 
@@ -73,6 +79,7 @@ def election_audit_log(request, election_id: int):
         Candidate.objects.filter(election=election).only("id", "freeipa_username").order_by("freeipa_username", "id")
     )
     candidate_username_by_id = candidate_username_by_id_map(candidates)
+    users_by_username = _load_candidate_users(_candidate_usernames(candidates))
 
     audit_qs = AuditLogEntry.objects.filter(election=election)
     can_manage_elections = request.user.has_perm(ASTRA_ADD_ELECTION)
@@ -445,14 +452,18 @@ def election_audit_log(request, election_id: int):
             elected_obj = payload.get("elected")
             elected_ids = [int(x) for x in elected_obj] if isinstance(elected_obj, list) else []
             event["elected_users"] = _elected_candidate_display(
-                elected_ids, candidate_username_by_id=candidate_username_by_id,
+                elected_ids,
+                candidate_username_by_id=candidate_username_by_id,
+                users_by_username=users_by_username,
             )
 
         events.append(event)
 
     elected_ids, empty_seats = _tally_elected_ids(election)
     tally_elected_users = _elected_candidate_display(
-        elected_ids, candidate_username_by_id=candidate_username_by_id,
+        elected_ids,
+        candidate_username_by_id=candidate_username_by_id,
+        users_by_username=users_by_username,
     )
 
     return render(
