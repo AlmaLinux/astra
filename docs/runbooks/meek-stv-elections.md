@@ -284,6 +284,18 @@ Settings defaults are defined in Django settings.[^fn73]
 
 ## 11. Security Guarantees and Trust Boundaries
 
+### Trust model
+
+Astra's security properties depend on who is trusted and to what degree.
+
+**Trusted — application server operators:** The app server process, application database, and artifact publication pipeline are controlled by operators. Operators can read and write all data before publication. The system cannot detect or prevent operator-level tampering prior to publishing the final public artifacts. The ballot hash chain and audit log provide tamper *evidence* that is detectable after publication, but this is a forensic control, not a preventive one.
+
+**Partially trusted — database administrators with read access:** During the active voting window, a party with direct database read access can correlate ballot rows to voter identities via the join chain `Ballot.credential_public_id → VotingCredential.public_id → VotingCredential.freeipa_username`. This linkage is removed at close time by anonymization (see section 4B). After the election is closed and anonymized, DBA read access to the credential table no longer reveals which voter submitted which ballot. The system does not provide cryptographic protection against DBA-level read access during the open window; that is an operational access-control responsibility.
+
+**Not trusted — coercers:** Any party attempting to determine or verify how a specific voter voted is treated as an adversary. The system provides inclusion verifiability (a voter can confirm their ballot is in the published set) but does not implement coercion resistance (a voter cannot plausibly deny their submitted ranking if they have disclosed their receipt inputs).
+
+**Out of scope — network adversaries and email providers:** TLS encryption in transit is assumed as an infrastructure baseline and is not documented here. Third-party email providers (SES or configured SMTP) receive credential delivery emails; operators are responsible for the trust model of their chosen email provider.
+
 ### What Astra provides
 
 - **Tally integrity:** The Meek STV count is deterministic given the published ballot set, candidate tie-break UUIDs, and convergence parameters. Tally round artifacts in `public-audit.json` document every round.
@@ -298,6 +310,26 @@ Settings defaults are defined in Django settings.[^fn73]
 - **Pre-close ballot secrecy from infrastructure operators:** During the active voting window, ballot-to-voter links exist in the database and are accessible to parties with database or application admin access. Secrecy during this window is an operational control, not a cryptographic guarantee.
 - **Protection from malicious operators with full DB/app access:** The chain and audit log provide tamper evidence after the fact, but do not prevent a party with full database write access from altering history before publication.
 - **External timestamp anchoring:** The chain head is published but not anchored to an external immutable timestamping authority. Chain integrity claims are verifiable post-publication but rely on operator honesty prior to publication.
+
+## 12. Operator Guidance: Privacy in Small Elections
+
+The public ballots export (`public-ballots.json`) includes all ballot rows for the election, with per-ballot `created_at` timestamps preserved at day granularity in the export. In elections with small electorates, this can create privacy risks beyond the pseudonymization that close-time anonymization provides.
+
+### Timing-correlation risk
+
+Ballot rows contain a submission timestamp. Even when `VotingCredential.freeipa_username` has been nulled at close, an observer who knows when a specific voter was active (for example, from email delivery logs, system access logs, or direct knowledge of the voter's schedule) may be able to correlate ballot submission times to specific individuals. The ballot-verify endpoint intentionally exposes only submission date (not time), but the export timestamp granularity is a day, which may still be sufficient to narrow down identity in small elections with few active voters on a given day.
+
+### Ballot ordering
+
+Ballets in the published export appear in submission order (chain order). In elections where the full voter list is publicly known and small, and where the voting window is short, the submission sequence itself may narrow the anonymity set, especially if some voters are known to vote immediately on opening.
+
+### Operator recommendations
+
+- **Consider the effective anonymity set** before publishing the ballot ledger. If the electorate is small enough that most ballot timestamps uniquely identify a voter by day or sequence, the pseudonymized export may be effectively de-anonymizing in practice.
+- **Longer voting windows** reduce timing-correlation effectiveness by increasing the number of active voters per time unit.
+- **No minimum electorate size is enforced** by Astra. This is an operational judgment. As a rough guideline, elections with fewer than approximately 20 voters should be reviewed carefully before publishing the full ballot ledger publicly, as individual ballots may be correlated to identities even without direct username linkage.
+- **Admin-only audit log:** The private `ballot_submitted` audit entries (visible only to election managers) include more detail than the public export. Restrict admin access appropriately and treat those logs as sensitive during the open window.
+- **Credential delivery timing:** Credential emails are delivered at election start. In very small elections, the time between credential receipt and ballot submission is short for some voters, which may itself be observable from email delivery logs outside Astra's control.
 
 ## Auditor Notes
 
