@@ -37,7 +37,7 @@ from core.tokens import election_chain_next_hash, election_genesis_chain_hash
 
 ELECTION_TALLY_ALGORITHM_NAME = "Meek STV (High-Precision Variant)"
 ELECTION_TALLY_ALGORITHM_VERSION = "1.0"
-ELECTION_TALLY_ALGORITHM_SPEC_DOC = "agent-output/architecture/002-meek-stv-complete-architecture.md (Section 10)"
+ELECTION_TALLY_ALGORITHM_SPEC_DOC = "docs/runbooks/meek-stv-elections.md"
 _MAX_RANKING_SIZE = 500
 
 logger = logging.getLogger(__name__)
