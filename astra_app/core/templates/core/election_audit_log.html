@@ -47,7 +47,7 @@
             <dt class="col-sm-5">Votes cast</dt>
             <dd class="col-sm-7">{{ votes_cast }}</dd>
             <dt class="col-sm-5">Counting method</dt>
-            <dd class="col-sm-7">Meek STV (High-Precision Variant)</dd>
+            <dd class="col-sm-7">{{ tally_result.algorithm.name|default:"Unknown" }}</dd>
             <dt class="col-sm-5">Algorithm version</dt>
             <dd class="col-sm-7">{{ tally_result.algorithm.version|default:"1.0" }}</dd>
             <dt class="col-sm-5">Specification</dt>

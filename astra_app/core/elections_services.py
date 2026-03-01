@@ -830,7 +830,7 @@ def close_election(*, election: Election, actor: str | None = None) -> None:
 
 
 def tally_election(*, election: Election, actor: str | None = None) -> dict[str, object]:
-    from core.elections_meek import tally_meek
+    from core.elections_meek import MEEK_DEFAULT_EPSILON, MEEK_DEFAULT_MAX_ITERATIONS, tally_meek
     from core.models import ExclusionGroup, ExclusionGroupCandidate
 
     try:
@@ -882,6 +882,8 @@ def tally_election(*, election: Election, actor: str | None = None) -> dict[str,
                 candidates=candidates,
                 seats=int(election.number_of_seats),
                 exclusion_groups=exclusion_groups,
+                epsilon=MEEK_DEFAULT_EPSILON,
+                max_iterations=MEEK_DEFAULT_MAX_ITERATIONS,
             )
             result = _jsonify_tally_result(raw_result)
 
@@ -892,6 +894,9 @@ def tally_election(*, election: Election, actor: str | None = None) -> dict[str,
                     "doc": ELECTION_TALLY_ALGORITHM_SPEC_DOC,
                     "url_path": reverse("election-algorithm"),
                 },
+                # Exact convergence parameters used — persisted for reproducibility.
+                "epsilon": str(MEEK_DEFAULT_EPSILON),
+                "max_iterations": MEEK_DEFAULT_MAX_ITERATIONS,
             }
 
             election.tally_result = result
@@ -916,8 +921,6 @@ def tally_election(*, election: Election, actor: str | None = None) -> dict[str,
                 "elected": result.get("elected"),
                 "eliminated": result.get("eliminated"),
                 "forced_excluded": result.get("forced_excluded"),
-                "method": "meek",
-                "algorithm": result.get("algorithm"),
             }
             if actor:
                 tally_completed_payload["actor"] = actor

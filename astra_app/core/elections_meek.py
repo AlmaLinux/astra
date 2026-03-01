@@ -2,6 +2,12 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from decimal import ROUND_DOWN, Decimal, localcontext
 
+# Single source of truth for the convergence parameters used by tally_meek.
+# These values are also persisted into Election.tally_result["algorithm"] so that
+# a third party can reproduce the same convergence/termination behavior.
+MEEK_DEFAULT_EPSILON: Decimal = Decimal("1e-28")
+MEEK_DEFAULT_MAX_ITERATIONS: int = 200
+
 
 @dataclass(frozen=True, slots=True)
 class _Candidate:
@@ -509,8 +515,8 @@ def tally_meek(
     candidates: list[dict[str, object]],
     seats: int,
     exclusion_groups: list[dict[str, object]] | None = None,
-    epsilon: Decimal = Decimal("1e-28"),
-    max_iterations: int = 200,
+    epsilon: Decimal = MEEK_DEFAULT_EPSILON,
+    max_iterations: int = MEEK_DEFAULT_MAX_ITERATIONS,
 ) -> dict[str, object]:
     """Tally an STV election using Meek STV.
 

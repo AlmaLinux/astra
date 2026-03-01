@@ -1,4 +1,4 @@
-"""Tests for Plan 130-A: Tie-break UUID hardening.
+"""Tests for Plan 130: Tie-break UUID hardening (A) and epsilon/convergence parameter exposure (B).
 
 Covers:
 - Candidate.tiebreak_uuid is immutable once the election is started (open/closed/tallied).
@@ -6,6 +6,7 @@ Covers:
 - Saving a candidate with other field changes (no tiebreak mutation) is allowed on started elections.
 - election_started AuditLogEntry payload includes candidate list with tiebreak UUIDs.
 - Audit log template renders candidates from election_started payload.
+- tally_result["algorithm"] includes epsilon and max_iterations after tally.
 """
 import datetime
 import uuid
@@ -17,7 +18,8 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.freeipa.user import FreeIPAUser
-from core.models import AuditLogEntry, Candidate, Election
+from core.models import AuditLogEntry, Ballot, Candidate, Election
+from core.tests.ballot_chain import compute_chain_hash
 from core.tokens import election_genesis_chain_hash
 
 
@@ -176,4 +178,57 @@ class ElectionStartedAuditLogTemplateTests(TestCase):
         self.assertContains(resp, "charlie")
         self.assertContains(resp, str(c1.tiebreak_uuid))
         self.assertContains(resp, str(c2.tiebreak_uuid))
+
+
+def _make_tallied_election() -> Election:
+    """Create a minimal closed election with one candidate and one ballot, ready to tally."""
+    from core import elections_services
+
+    now = timezone.now()
+    election = Election.objects.create(
+        name="Epsilon param test election",
+        description="",
+        start_datetime=now - datetime.timedelta(days=10),
+        end_datetime=now - datetime.timedelta(days=1),
+        number_of_seats=1,
+        status=Election.Status.closed,
+    )
+    c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
+    c2 = Candidate.objects.create(election=election, freeipa_username="bob", nominated_by="nominator")
+
+    genesis_hash = election_genesis_chain_hash(election.id)
+    ballot_hash = Ballot.compute_hash(
+        election_id=election.id,
+        credential_public_id="cred-eps",
+        ranking=[c1.id, c2.id],
+        weight=1,
+        nonce="0" * 32,
+    )
+    chain_hash = compute_chain_hash(previous_chain_hash=genesis_hash, ballot_hash=ballot_hash)
+    Ballot.objects.create(
+        election=election,
+        credential_public_id="cred-eps",
+        ranking=[c1.id, c2.id],
+        weight=1,
+        ballot_hash=ballot_hash,
+        previous_chain_hash=genesis_hash,
+        chain_hash=chain_hash,
+    )
+
+    elections_services.tally_election(election=election)
+    election.refresh_from_db()
+    return election
+
+
+class TallyAlgorithmParamsTests(TestCase):
+    """tally_result must expose epsilon and max_iterations for reproducibility."""
+
+    def test_tally_result_algorithm_includes_epsilon_and_max_iterations(self) -> None:
+        """epsilon and max_iterations in tally_result let a third party reproduce convergence."""
+        election = _make_tallied_election()
+        algo = election.tally_result.get("algorithm", {})
+        self.assertIn("epsilon", algo)
+        self.assertIn("max_iterations", algo)
+        self.assertIsNotNone(algo["epsilon"])
+        self.assertEqual(algo["max_iterations"], 200)
 
