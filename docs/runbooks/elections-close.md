@@ -18,6 +18,29 @@ Closing is an irreversible privacy action. Closing an election triggers anonymiz
   - Election-related emails (credential and receipt emails) are deleted from the email queue/history.
 - After close, you cannot recover the voter-to-credential mapping from the application.
 
+## What is and is not scrubbed at close
+
+Closing atomically runs anonymization. The following are the precise fields and records removed:
+
+| Category | What is removed |
+|---|---|
+| `VotingCredential.freeipa_username` | Set to `NULL` for every credential row belonging to the election. The credential row itself (public ID, weight) is **retained**. |
+| `Email` records | All `Email` rows where `context["election_id"]` matches the election ID are **deleted**. This covers credential-delivery and vote-receipt emails issued by the current implementation. Legacy credential emails composed as plain `message`/`html_message` with the credential link are also deleted. |
+
+The following are explicitly **not** scrubbed:
+
+| Category | Why retained |
+|---|---|
+| `VotingCredential` rows | Public ID and weight are needed for receipt verification and tally audit. Only the username mapping is removed. |
+| `Ballot` rows (ranking, hashes, chain) | Required for tally and the public cryptographic audit trail. These rows are not linkable to a username after close. |
+| `AuditLogEntry` records | Audit log is append-only and retained in full for accountability. |
+
+The private `election_anonymized` audit event (visible only to admins) records:
+- `credentials_affected`: count of credentials whose username was nulled.
+- `emails_scrubbed`: count of email records deleted.
+- `scrub_anomaly`: `true` if fewer emails were scrubbed than credentials affected (warranting review).
+- `scrubbed_fields`: stable list of field names/categories that were scrubbed.
+
 ## Procedure
 
 ### 1) Pre-close checks

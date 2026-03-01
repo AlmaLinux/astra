@@ -157,6 +157,37 @@ class ElectionCredentialAndBallotTests(TestCase):
                 ranking=[self.c1.id],
             )
 
+    def test_submit_ballot_rejects_for_tallied_election(self) -> None:
+        """F: ballot submission must be rejected for tallied elections."""
+        Election.objects.filter(pk=self.election.pk).update(status=Election.Status.tallied)
+
+        with self.assertRaises(ElectionNotOpenError):
+            submit_ballot(
+                election=self.election,
+                credential_public_id=self.cred.public_id,
+                ranking=[self.c1.id],
+            )
+
+    def test_submit_ballot_does_not_create_ballot_row_when_not_open(self) -> None:
+        """F: no Ballot row is created when status is not open (closed or tallied)."""
+        for status in (Election.Status.closed, Election.Status.tallied):
+            with self.subTest(status=status):
+                Election.objects.filter(pk=self.election.pk).update(status=status)
+                count_before = Ballot.objects.filter(election=self.election).count()
+                with self.assertRaises(ElectionNotOpenError):
+                    submit_ballot(
+                        election=self.election,
+                        credential_public_id=self.cred.public_id,
+                        ranking=[self.c1.id],
+                    )
+                self.assertEqual(
+                    Ballot.objects.filter(election=self.election).count(),
+                    count_before,
+                    f"No ballot row must be created when election is {status}",
+                )
+        # Restore to open so subsequent setUp-independent tests are not affected.
+        Election.objects.filter(pk=self.election.pk).update(status=Election.Status.open)
+
     def test_ballot_hash_unique_per_credential(self) -> None:
         cred2 = VotingCredential.objects.create(
             election=self.election,
@@ -521,6 +552,27 @@ class ElectionCredentialIssuanceAndAnonymizationTests(TestCase):
         ).latest("id")
         self.assertIsInstance(audit.payload, dict)
         self.assertEqual(audit.payload.get("scrub_anomaly"), True)
+
+    def test_anonymize_election_audit_entry_includes_scrubbed_fields(self) -> None:
+        """C: election_anonymized payload must list exactly which fields/categories were scrubbed."""
+        issue_voting_credential(
+            election=self.election,
+            freeipa_username="voter1",
+            weight=1,
+        )
+        self.election.status = Election.Status.closed
+        self.election.save(update_fields=["status"])
+
+        anonymize_election(election=self.election)
+
+        audit = AuditLogEntry.objects.filter(
+            election=self.election,
+            event_type="election_anonymized",
+        ).latest("id")
+        scrubbed = audit.payload.get("scrubbed_fields")
+        self.assertIsInstance(scrubbed, list)
+        self.assertIn("VotingCredential.freeipa_username", scrubbed)
+        self.assertIn("Email:election_credentials_and_receipts", scrubbed)
 
 
 @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=90)
@@ -1800,6 +1852,28 @@ class ElectionVoteEndpointTests(TestCase):
                 content_type="application/json",
             )
         self.assertEqual(response.status_code, 400)
+        self.assertIn("error", response.json())
+
+    def test_vote_submit_rejects_when_election_tallied(self) -> None:
+        """F: ballot submission endpoint must reject tallied elections (not just closed)."""
+        self._login_as_freeipa_user("voter1")
+
+        self.election.status = Election.Status.tallied
+        self.election.save(update_fields=["status"])
+
+        url = reverse("election-vote-submit", args=[self.election.id])
+
+        voter1 = FreeIPAUser("voter1", {"uid": ["voter1"], "memberof_group": []})
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=voter1):
+            response = self.client.post(
+                url,
+                data={
+                    "credential_public_id": self.cred.public_id,
+                    "ranking": [self.c1.id],
+                },
+                content_type="application/json",
+            )
+        self.assertIn(response.status_code, {400, 403})
         self.assertIn("error", response.json())
 
     def test_vote_submit_rejects_when_user_not_eligible(self) -> None:

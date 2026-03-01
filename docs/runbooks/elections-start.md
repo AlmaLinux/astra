@@ -79,6 +79,19 @@ If you started the wrong election or started too early:
 
 Do not try to repair this by editing the database directly in production. If a correction requires data changes, escalate to maintainers and document the full timeline.
 
+## Ballot receipts and security model
+
+Each voter receives a credential containing a `credential_public_id`. When a ballot is submitted, Astra issues a **ballot receipt** consisting of:
+- `ballot_hash`: a hash of the ranking, credential public ID, weight, and a random nonce.
+- `nonce`: a single-use random value included in the hash input (not stored after submission).
+- `chain_hash`: the running chain hash that links this ballot into the append-only ballot chain.
+
+**Inclusion verifiability**: a voter can retain their inputs (ranking, credential public ID, nonce) and recompute the receipt hash to confirm their ballot is present in the published audit data.
+
+**Coercion resistance is not provided**: a voter who discloses their credential, ranking, and nonce to a third party allows that party to verify how they voted. The system does not implement mechanisms to deny or obscure a submitted ranking. Operators should inform voters that their ballot receipt is private and should not be shared.
+
+**Re-voting**: credentials are not single-use. A voter can submit a new ranking while the election is open; each new submission creates a new ballot entry superseding the previous one. The audit chain includes all ballot entries and the final ballot per credential is the one used in tallying.
+
 ## Failure handling
 
 ### A) "Election started" but many emails were skipped

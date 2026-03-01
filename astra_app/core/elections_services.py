@@ -526,6 +526,21 @@ def election_quorum_status(*, election: Election) -> dict[str, int | bool]:
 
 @transaction.atomic
 def submit_ballot(*, election: Election, credential_public_id: str, ranking: list[int]) -> BallotReceipt:
+    """Record a voter's ranking for an election.
+
+    Status enforcement: the election row is fetched under SELECT FOR UPDATE so
+    that a concurrent `close_election()` call cannot race past this check.  Any
+    status other than ``open`` raises `ElectionNotOpenError` and no Ballot row
+    is created or modified.
+
+    Receipt / coercion-resistance note:
+    The returned `BallotReceipt` contains `(ballot_hash, nonce, chain_hash)`.  A
+    voter who discloses their ranking, credential public ID, and nonce to a third
+    party allows that party to recompute the hash and confirm consistency with the
+    published receipt.  This provides *inclusion verifiability*, not coercion
+    resistance: receipts can be used to prove how a specific ballot was ranked.
+    The system does not implement mechanisms to deny or obscure a submitted ranking.
+    """
     election = Election.objects.select_for_update().get(pk=election.pk)
     if election.status != Election.Status.open:
         raise ElectionNotOpenError("election is not open")
@@ -693,11 +708,39 @@ def issue_voting_credential(*, election: Election, freeipa_username: str, weight
             return credential
 
 
+# Stable, non-sensitive list of what anonymize_election() scrubs.
+# Included verbatim in the election_anonymized AuditLogEntry so auditors
+# can determine which fields were removed without reading source code.
+_ANONYMIZE_SCRUBBED_FIELDS: list[str] = [
+    # Username-to-credential mapping removed for all election credentials.
+    "VotingCredential.freeipa_username",
+    # Credential delivery and vote-receipt emails deleted from mail store.
+    "Email:election_credentials_and_receipts",
+]
+
+
 @transaction.atomic
 def anonymize_election(*, election: Election) -> dict[str, int]:
-    """Anonymize election credentials and scrub sensitive emails.
+    """Anonymize election credentials and scrub sensitive emails at close time.
 
-    Returns a dict with 'credentials_affected' and 'emails_scrubbed' counts.
+    What IS scrubbed:
+    - ``VotingCredential.freeipa_username``: set to NULL for every credential
+      associated with the election.  The credential row itself is retained to
+      preserve chain-of-custody for the credential public ID.
+    - Election-related emails: deleted from the mail store.  This covers
+      credential-delivery emails (matched by ``context["election_id"]``) and
+      legacy composed credential emails (matched by vote-path + credential
+      fragment in message body).
+
+    What is NOT scrubbed:
+    - ``VotingCredential`` rows (public_id, weight) — retained.
+    - ``Ballot`` rows (ranking, hashes, chain) — retained for audit/tally.
+    - ``AuditLogEntry`` records — retained in full.
+
+    The ``election_anonymized`` AuditLogEntry (non-public) records affected counts
+    and the ``scrubbed_fields`` list so auditors can verify completeness.
+
+    Returns a dict with ``credentials_affected`` and ``emails_scrubbed`` counts.
     """
     if election.status not in {Election.Status.closed, Election.Status.tallied}:
         raise ElectionNotClosedError("election must be closed or tallied to anonymize")
@@ -724,6 +767,7 @@ def anonymize_election(*, election: Election) -> dict[str, int]:
             "credentials_affected": credentials_affected,
             "emails_scrubbed": emails_scrubbed,
             "scrub_anomaly": scrub_anomaly,
+            "scrubbed_fields": _ANONYMIZE_SCRUBBED_FIELDS,
         },
         is_public=False,
     )
@@ -753,7 +797,19 @@ def issue_voting_credentials_from_memberships(*, election: Election) -> list[Vot
 
 @transaction.atomic
 def scrub_election_emails(*, election: Election) -> int:
-    """Delete sensitive emails (credentials, receipts) associated with the election."""
+    """Delete sensitive emails associated with an election from the mail store.
+
+    Two categories are removed:
+    1. **Context-keyed emails** — any ``Email`` whose ``context`` JSON includes
+       ``{"election_id": <election.id>}``.  This covers credential-delivery and
+       vote-receipt emails created by the current implementation.
+    2. **Legacy composed emails** — emails whose ``message`` or ``html_message``
+       body contains both the election vote-URL path and the ``#credential=``
+       fragment.  This covers credential emails composed before the context-keyed
+       approach was introduced.
+
+    Returns the count of deleted ``Email`` rows.
+    """
     vote_path = reverse("election-vote", args=[election.id])
     credential_fragment = "#credential="
 
@@ -770,6 +826,22 @@ def scrub_election_emails(*, election: Election) -> int:
 
 
 def close_election(*, election: Election, actor: str | None = None) -> None:
+    """Close an open election, anonymize credentials, and record a public audit event.
+
+    Sequence (all within a single transaction):
+    1. Lock the election row (SELECT FOR UPDATE) and verify status is ``open``.
+    2. Set ``status = closed`` and ``end_datetime = now``.
+    3. Call :func:`anonymize_election`, which:
+       - Nulls ``VotingCredential.freeipa_username`` for all election credentials.
+       - Deletes credential-delivery and vote-receipt emails from the mail store.
+       - Records a private ``election_anonymized`` AuditLogEntry with affected counts
+         and ``scrubbed_fields``.
+    4. Create a public ``election_closed`` AuditLogEntry with ``chain_head``,
+       ``credentials_affected``, and ``emails_scrubbed`` counts.
+
+    Once committed, the username-to-credential mapping for this election is gone
+    and cannot be recovered from the application.
+    """
     try:
         with transaction.atomic():
             election = Election.objects.select_for_update().get(pk=election.pk)
