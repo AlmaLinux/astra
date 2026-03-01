@@ -441,8 +441,13 @@ def membership_request_rescind(request: HttpRequest, pk: int) -> HttpResponse:
     if not _user_can_access_membership_request(username=username, membership_request=req):
         raise Http404("Not found")
 
-    rescind_membership_request(membership_request=req, actor_username=username)
-    messages.success(request, "Your request has been rescinded.")
+    try:
+        rescind_membership_request(membership_request=req, actor_username=username)
+    except ValidationError as exc:
+        error_message = exc.messages[0] if exc.messages else str(exc)
+        messages.error(request, error_message)
+    else:
+        messages.success(request, "Your request has been rescinded.")
 
     org = req.requested_organization
     if org is not None:

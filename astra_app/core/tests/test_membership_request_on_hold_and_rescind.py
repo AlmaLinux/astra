@@ -1362,3 +1362,34 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
                 action__type="request_rescinded",
             ).exists()
         )
+
+    def test_rescind_already_decided_request_shows_error_not_500(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.rescinded,
+            decided_at=timezone.now(),
+            decided_by_username="alice",
+        )
+
+        self._add_freeipa_user(username="alice", email="alice@example.com")
+        self._login_as_freeipa_user("alice")
+
+        resp = self.client.post(reverse("membership-request-rescind", args=[req.pk]), follow=False)
+        self.assertEqual(resp.status_code, 302)
+
+        follow = self.client.get(resp["Location"])
+        messages = [str(message.message) for message in get_messages(follow.wsgi_request)]
+        self.assertTrue(any("cannot" in message.lower() or "rescinded" in message.lower() for message in messages))

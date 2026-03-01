@@ -68,6 +68,33 @@ class PasswordResetFlowTests(TestCase):
         msgs = [m.message for m in get_messages(follow.wsgi_request)]
         self.assertTrue(any("email" in m.lower() and "password" in m.lower() for m in msgs))
 
+    @override_settings(DEFAULT_FROM_EMAIL="noreply@example.com")
+    def test_password_reset_email_includes_date_and_time_in_valid_until_utc(self) -> None:
+        client = Client()
+
+        user = SimpleNamespace(
+            username="alice",
+            email="alice@example.com",
+            last_password_change="",
+            first_name="Alice",
+            last_name="User",
+            full_name="Alice User",
+        )
+
+        with (
+            patch("core.password_reset.FreeIPAUser.get", autospec=True, return_value=user),
+            patch("core.password_reset.queue_templated_email", autospec=True) as queue_email_mock,
+        ):
+            resp = client.post(
+                reverse("password-reset"),
+                data={"username_or_email": "alice"},
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 302)
+        context = queue_email_mock.call_args.kwargs["context"]
+        self.assertRegex(context["valid_until_utc"], r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC$")
+
     def test_password_reset_request_does_not_send_for_unknown_user(self):
         client = Client()
 

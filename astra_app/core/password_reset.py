@@ -57,7 +57,7 @@ def send_password_reset_email(
     ttl_seconds = settings.PASSWORD_RESET_TOKEN_TTL_SECONDS
     ttl_minutes = max(1, int((ttl_seconds + 59) / 60))
     valid_until = timezone.now() + datetime.timedelta(seconds=ttl_seconds)
-    valid_until_utc = valid_until.astimezone(datetime.UTC).strftime("%H:%M")
+    valid_until_utc = valid_until.astimezone(datetime.UTC).strftime("%Y-%m-%d %H:%M UTC")
 
     base_ctx = user_email_context(username=username)
     queue_templated_email(
