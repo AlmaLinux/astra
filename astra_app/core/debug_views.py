@@ -209,6 +209,7 @@ def sankey_debug_view(request: HttpRequest) -> HttpResponse:
             "example_label": "Wikipedia example",
             "ballots": ballots,
             "candidates": candidates,
+            "seats": seats,
             "votes_cast": votes_cast,
             "sankey_flows": sankey_flows,
             "sankey_elected_nodes": elected_nodes,
