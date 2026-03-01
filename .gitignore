@@ -56,3 +56,4 @@ terraform.rc
 .github/skills/
 .vscode/
 agent-output/
+rekor-signing-key.pem

@@ -18,6 +18,7 @@ from django.utils import timezone
 from post_office.models import Email
 
 from core.elections_eligibility import eligible_voters_from_memberships
+from core.elections_timestamping import get_public_payload, schedule_attestation
 from core.email_context import (
     election_committee_email_context,
     user_email_context,
@@ -98,12 +99,13 @@ def extend_election_end_datetime(
     if actor:
         payload["actor"] = actor
 
-    AuditLogEntry.objects.create(
+    audit_entry = AuditLogEntry.objects.create(
         election=locked,
         event_type="election_end_extended",
         payload=payload,
         is_public=True,
     )
+    schedule_attestation(audit_entry)
 
 
 @dataclass(frozen=True)
@@ -233,21 +235,44 @@ def build_public_ballots_export(*, election: Election) -> dict[str, object]:
 def build_public_audit_export(*, election: Election) -> dict[str, object]:
     entries = (
         AuditLogEntry.objects.filter(election=election, is_public=True)
-        .only("timestamp", "event_type", "payload")
+        .only(
+            "timestamp",
+            "event_type",
+            "payload",
+            "rekor_log_id",
+            "rekor_endpoint",
+            "rekor_log_index",
+            "rekor_integrated_time",
+            "rekor_message_digest_hex",
+            "rekor_canonical_message_version",
+        )
         .order_by("timestamp", "id")
     )
 
     audit_log: list[dict[str, object]] = []
     for entry in entries:
-        payload = entry.payload if isinstance(entry.payload, dict) else {"data": entry.payload}
-        public_payload = {key: value for key, value in payload.items() if key != "actor"}
-        audit_log.append(
-            {
-                "timestamp": entry.timestamp.date().isoformat(),
-                "event_type": str(entry.event_type),
-                "payload": public_payload,
+        event: dict[str, object] = {
+            "timestamp": entry.timestamp.date().isoformat(),
+            "event_type": str(entry.event_type),
+            "payload": get_public_payload(entry),
+        }
+
+        if entry.rekor_log_id:
+            event["timestamping"] = {
+                "version": 1,
+                "rekor_log_id": entry.rekor_log_id,
+                "rekor_log_index": entry.rekor_log_index,
+                "rekor_integrated_time": (
+                    entry.rekor_integrated_time.isoformat().replace("+00:00", "Z")
+                    if entry.rekor_integrated_time
+                    else None
+                ),
+                "rekor_entry_url": f"{entry.rekor_endpoint}/api/v1/log/entries/{entry.rekor_log_id}",
+                "message_digest_hex": entry.rekor_message_digest_hex,
+                "canonical_message_version": entry.rekor_canonical_message_version,
             }
-        )
+
+        audit_log.append(event)
 
     algorithm = {}
     if isinstance(election.tally_result, dict):
@@ -640,11 +665,13 @@ def submit_ballot(*, election: Election, credential_public_id: str, ranking: lis
             required_participating_vote_weight_total = int(status["required_participating_vote_weight_total"])
             quorum_met = bool(status["quorum_met"])
             if required_participating_voter_count and required_participating_vote_weight_total and quorum_met:
-                AuditLogEntry.objects.get_or_create(
+                quorum_entry, created = AuditLogEntry.objects.get_or_create(
                     election=committed_election,
                     event_type="quorum_reached",
                     defaults={"payload": status, "is_public": True},
                 )
+                if created or not quorum_entry.rekor_log_id:
+                    schedule_attestation(quorum_entry)
         except Exception:
             logger.exception(
                 "Deferred quorum evaluation failed for election_id=%s",
@@ -867,12 +894,13 @@ def close_election(*, election: Election, actor: str | None = None) -> None:
             if actor:
                 payload["actor"] = actor
 
-            AuditLogEntry.objects.create(
+            audit_entry = AuditLogEntry.objects.create(
                 election=election,
                 event_type="election_closed",
                 payload=payload,
                 is_public=True,
             )
+            schedule_attestation(audit_entry)
     except ElectionError:
         raise
     except Exception as exc:
@@ -997,12 +1025,13 @@ def tally_election(*, election: Election, actor: str | None = None) -> dict[str,
             if actor:
                 tally_completed_payload["actor"] = actor
 
-            AuditLogEntry.objects.create(
+            tally_completed_entry = AuditLogEntry.objects.create(
                 election=election,
                 event_type="tally_completed",
                 payload=tally_completed_payload,
                 is_public=True,
             )
+            schedule_attestation(tally_completed_entry)
 
             return result
     except ElectionError:

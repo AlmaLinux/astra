@@ -95,10 +95,14 @@
               <a href="{% static 'verify-ballot-chain.py' %}">verify-ballot-chain.py</a>
               — Verify the complete ballot chain is unbroken and includes your ballot
             </li>
+            <li>
+              <a href="{% static 'verify-audit-log.py' %}">verify-audit-log.py</a>
+              — Verify Rekor transparency-log attestations in the public audit log (offline digest check; optional online Rekor query)
+            </li>
           </ul>
           <p>
             These scripts run locally on your computer and use the same algorithms as the election system.
-            They do not contact any server.
+            By default they do not contact any server; <code>verify-audit-log.py</code> can optionally query Rekor online when you set <code>verify_rekor_online = True</code>.
           </p>
 
           <h4>What makes it trustworthy</h4>

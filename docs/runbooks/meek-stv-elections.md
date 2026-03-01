@@ -135,6 +135,7 @@ The published verification scripts implement local checks:
 
 - `verify-ballot-hash.py`: recomputes ballot hash from receipt inputs with the same payload and SHA-256 method as model code.[^fn45]
 - `verify-ballot-chain.py`: reconstructs chain from genesis, verifies per-row hash links, and fails on fork, cycle, disconnected graph, missing genesis linkage, or head mismatch.[^fn46]
+- `verify-audit-log.py`: verifies Rekor transparency-log attestations in `public-audit.json`, recomputing canonical event digests and (optionally) querying each Rekor entry URL online.[^fn103]
 
 ## 6. Quorum Rules
 
@@ -262,6 +263,27 @@ Voters can independently verify:
 
 1. Receipt hash recomputation with `verify-ballot-hash.py`.
 2. Inclusion and chain consistency with `verify-ballot-chain.py` against published ballots + chain head.[^fn72]
+3. Rekor attestation digest verification with `verify-audit-log.py` against `public-audit.json`.[^fn103]
+
+### Rekor Transparency Log Attestation
+
+When configured by operators, Astra writes Rekor transparency-log attestations for critical public election events and exports their metadata in `public-audit.json`.
+
+What this guarantees:
+- Time-of-existence evidence in an append-only public log for each attested event message.
+
+What this does not guarantee:
+- It does not prove completeness of all election events.
+- It does not prevent Astra from choosing which events to publish.
+
+Verification approaches:
+- Lightweight check: run `verify-audit-log.py` to recompute each canonical event digest and compare to `timestamping.message_digest_hex` (offline, no network required unless `verify_rekor_online = True`).
+- Strong normative check: run `rekor-cli verify --uuid <uuid>` to validate Rekor inclusion proof and signed entry timestamp.
+- Entry inspection: run `rekor-cli get --uuid=<uuid>` or open `timestamping.rekor_entry_url`.
+
+Canonical message for digest recomputation is:
+- `{"event_type": <event_type>, "payload": <exported_payload>}`
+- Serialized as JSON with `sort_keys=True`, `separators=(",", ":")`, UTF-8 encoded, then SHA-256 hashed.
 
 ## 10. Key Settings Reference
 
@@ -442,3 +464,4 @@ Ballets in the published export appear in submission order (chain order). In ele
 [^fn99]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L755
 [^fn100]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/models.py#L1199
 [^fn101]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L848
+[^fn103]: astra_app/core/static/verify-audit-log.py

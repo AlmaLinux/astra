@@ -1,7 +1,14 @@
 
+import base64
+import hashlib
 import importlib.util
+import io
+import json
 import random
+from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
+from urllib.error import URLError
 
 from django.test import SimpleTestCase
 
@@ -92,3 +99,137 @@ class VerificationScriptsTests(SimpleTestCase):
         # Sanity: order-independent verification should still reach the same head.
         computed_head = ordered[-1]["chain_hash"] if ordered else genesis
         self.assertEqual(computed_head, export["chain_head"])
+
+    def test_verify_ballot_chain_script_rekor_canonical_digest_check_passes(self) -> None:
+        module = _load_script_module(
+            name="verify_audit_log",
+            path=Path(__file__).resolve().parents[1] / "static" / "verify-audit-log.py",
+        )
+
+        event_payload = {"chain_head": "abc"}
+        canonical_bytes = module._canonical_bytes(
+            event_type="election_closed",
+            payload=event_payload,
+        )
+        digest = hashlib.sha256(canonical_bytes).hexdigest()
+        audit_data = {
+            "audit_log": [
+                {
+                    "event_type": "election_closed",
+                    "payload": event_payload,
+                    "timestamping": {
+                        "canonical_message_version": 1,
+                        "message_digest_hex": digest,
+                        "rekor_entry_url": "https://rekor.example/api/v1/log/entries/uuid-1",
+                    },
+                }
+            ]
+        }
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            module.verify_rekor_attestations(audit_data=audit_data, verify_online=False)
+
+        self.assertIn("digest", output.getvalue().lower())
+
+    def test_verify_ballot_chain_script_rekor_network_error_warns_without_exit(self) -> None:
+        module = _load_script_module(
+            name="verify_audit_log",
+            path=Path(__file__).resolve().parents[1] / "static" / "verify-audit-log.py",
+        )
+
+        event_payload = {"chain_head": "abc"}
+        canonical_bytes = module._canonical_bytes(
+            event_type="election_closed",
+            payload=event_payload,
+        )
+        digest = hashlib.sha256(canonical_bytes).hexdigest()
+        audit_data = {
+            "audit_log": [
+                {
+                    "event_type": "election_closed",
+                    "payload": event_payload,
+                    "timestamping": {
+                        "canonical_message_version": 1,
+                        "message_digest_hex": digest,
+                        "rekor_entry_url": "https://rekor.example/api/v1/log/entries/uuid-1",
+                    },
+                }
+            ]
+        }
+
+        output = io.StringIO()
+        with (
+            redirect_stdout(output),
+            patch("urllib.request.urlopen", side_effect=URLError("network down")),
+        ):
+            module.verify_rekor_attestations(audit_data=audit_data, verify_online=True)
+
+        self.assertIn("warning", output.getvalue().lower())
+
+    def test_verify_ballot_chain_script_online_warns_for_multi_key_wrapper(self) -> None:
+        module = _load_script_module(
+            name="verify_audit_log",
+            path=Path(__file__).resolve().parents[1] / "static" / "verify-audit-log.py",
+        )
+
+        event_payload = {"chain_head": "abc"}
+        canonical_bytes = module._canonical_bytes(
+            event_type="election_closed",
+            payload=event_payload,
+        )
+        digest = hashlib.sha256(canonical_bytes).hexdigest()
+
+        rekor_body = {
+            "spec": {
+                "data": {
+                    "hash": {
+                        "value": digest,
+                    }
+                }
+            }
+        }
+        body_b64 = base64.b64encode(json.dumps(rekor_body).encode("utf-8")).decode("ascii")
+
+        wrapper_response = {
+            "uuid-1": {"body": body_b64},
+            "uuid-2": {"body": body_b64},
+        }
+
+        class _FakeResponse:
+            def __enter__(self) -> _FakeResponse:
+                return self
+
+            def __exit__(self, exc_type, exc, tb) -> bool:
+                del exc_type
+                del exc
+                del tb
+                return False
+
+            def read(self) -> bytes:
+                return json.dumps(wrapper_response).encode("utf-8")
+
+        audit_data = {
+            "audit_log": [
+                {
+                    "event_type": "election_closed",
+                    "payload": event_payload,
+                    "timestamping": {
+                        "canonical_message_version": 1,
+                        "message_digest_hex": digest,
+                        "rekor_entry_url": "https://rekor.example/api/v1/log/entries/uuid-1",
+                    },
+                }
+            ]
+        }
+
+        output = io.StringIO()
+        with (
+            redirect_stdout(output),
+            patch("urllib.request.urlopen", return_value=_FakeResponse()),
+        ):
+            module.verify_rekor_attestations(audit_data=audit_data, verify_online=True)
+
+        text = output.getvalue().lower()
+        self.assertIn("warning", text)
+        self.assertNotIn("online: pass", text)

@@ -1460,6 +1460,12 @@ class AuditLogEntry(models.Model):
     event_type = models.CharField(max_length=64)
     payload = models.JSONField(blank=True, default=dict)
     is_public = models.BooleanField(default=False)
+    rekor_log_id = models.CharField(max_length=200, null=True, blank=True, default=None)
+    rekor_endpoint = models.TextField(null=True, blank=True, default=None)
+    rekor_log_index = models.BigIntegerField(null=True, blank=True, default=None)
+    rekor_integrated_time = models.DateTimeField(null=True, blank=True, default=None)
+    rekor_message_digest_hex = models.CharField(max_length=64, null=True, blank=True, default=None)
+    rekor_canonical_message_version = models.IntegerField(null=True, blank=True, default=1)
 
     class Meta:
         verbose_name_plural = "Audit log entries"

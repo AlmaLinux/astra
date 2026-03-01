@@ -18,6 +18,7 @@ from core.elections_services import (
     election_genesis_chain_hash,
     issue_voting_credentials_from_memberships,
 )
+from core.elections_timestamping import schedule_attestation
 from core.forms_elections import (
     CandidateWizardFormSet,
     ElectionDetailsForm,
@@ -496,12 +497,13 @@ def _handle_start_election(
         if username:
             payload["actor"] = username
 
-        AuditLogEntry.objects.create(
+        audit_entry = AuditLogEntry.objects.create(
             election=locked,
             event_type="election_started",
             payload=payload,
             is_public=True,
         )
+        schedule_attestation(audit_entry)
 
     if emailed:
         messages.success(request, f"Election started; emailed {emailed} voter(s).")

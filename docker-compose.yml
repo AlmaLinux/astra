@@ -66,6 +66,7 @@ services:
     command: python manage.py runserver 0.0.0.0:8000
     volumes:
       - .:/app:z
+      - ./rekor-signing-key.pem:/run/secrets/rekor-signing-key.pem:ro,z
     ports:
       - "8000:8000"
     healthcheck:
@@ -110,19 +111,8 @@ services:
       - PUBLIC_BASE_URL=http://localhost:8000
       - AWS_S3_DOMAIN=http://localhost:9000
       - SELF_SERVICE_ADDRESS_COUNTRY_ATTR=fasstatusnote
-
-  bugsink:
-    image: bugsink/bugsink:latest
-    container_name: almalinux_bugsink
-    ports:
-      - "8080:8080"
-    environment:
-      #- SINGLE_TEAM=True
-      - SINGLE_USER=True
-      - SECRET_KEY=l1wUWh5R4ZRRVoDi87IvJYVnmtAkbyfPxD5xUWNZNT2A3rYhdt
-      - CREATE_SUPERUSER=admin:password
-      - PORT=8080
-      - DATABASE_URL=postgres://postgres:postgres@almalinux_db2:5432/bugsink
+      - ELECTION_REKOR_ENDPOINT=https://rekor.sigstore.dev
+      - ELECTION_REKOR_SIGNING_KEY=/run/secrets/rekor-signing-key.pem
 
 volumes:
   postgres_data2:
