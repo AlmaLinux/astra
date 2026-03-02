@@ -1,9 +1,11 @@
 
 import datetime
+import importlib
 import json
 import re
 from unittest.mock import patch
 
+from django.apps import apps
 from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
@@ -11,17 +13,18 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
+from core import elections_services
 from core.elections_services import (
     BallotReceipt,
     ElectionError,
     ElectionNotOpenError,
     InvalidBallotError,
     InvalidCredentialError,
+    _issue_voting_credential,
     anonymize_election,
     build_public_audit_export,
     close_election,
-    issue_voting_credential,
-    issue_voting_credentials_from_memberships,
+    issue_credentials_at_start_transition,
     scrub_election_emails,
     send_vote_receipt_email,
     send_voting_credential_email,
@@ -302,12 +305,12 @@ class ElectionCredentialIssuanceAndAnonymizationTests(TestCase):
         )
 
     def test_issue_voting_credential_idempotent_per_user(self) -> None:
-        cred1 = issue_voting_credential(
+        cred1 = _issue_voting_credential(
             election=self.election,
             freeipa_username="voter1",
             weight=2,
         )
-        cred2 = issue_voting_credential(
+        cred2 = _issue_voting_credential(
             election=self.election,
             freeipa_username="voter1",
             weight=2,
@@ -318,7 +321,7 @@ class ElectionCredentialIssuanceAndAnonymizationTests(TestCase):
         self.assertEqual(VotingCredential.objects.filter(election=self.election).count(), 1)
 
     def test_anonymize_election_clears_username(self) -> None:
-        cred = issue_voting_credential(
+        cred = _issue_voting_credential(
             election=self.election,
             freeipa_username="voter1",
             weight=1,
@@ -333,7 +336,7 @@ class ElectionCredentialIssuanceAndAnonymizationTests(TestCase):
         self.assertIsNone(cred.freeipa_username)
 
     def test_anonymize_election_audit_entry_is_not_public(self) -> None:
-        issue_voting_credential(
+        _issue_voting_credential(
             election=self.election,
             freeipa_username="voter1",
             weight=1,
@@ -351,7 +354,7 @@ class ElectionCredentialIssuanceAndAnonymizationTests(TestCase):
         self.assertEqual(audit.is_public, False)
 
     def test_votingcredential_create_rejects_issuance_after_anonymization(self) -> None:
-        issue_voting_credential(
+        _issue_voting_credential(
             election=self.election,
             freeipa_username="voter1",
             weight=1,
@@ -400,7 +403,7 @@ class ElectionCredentialIssuanceAndAnonymizationTests(TestCase):
             "core.models.AuditLogEntry.objects.filter",
             side_effect=AssertionError("open-election issuance should not query anonymization audit log"),
         ):
-            credential = issue_voting_credential(
+            credential = _issue_voting_credential(
                 election=self.election,
                 freeipa_username="voter-open-short-circuit",
                 weight=1,
@@ -521,12 +524,12 @@ class ElectionCredentialIssuanceAndAnonymizationTests(TestCase):
         self.assertFalse(Email.objects.filter(pk=election2_email.pk).exists())
 
     def test_anonymize_election_scrub_anomaly_logged_and_flagged(self) -> None:
-        issue_voting_credential(
+        _issue_voting_credential(
             election=self.election,
             freeipa_username="voter1",
             weight=1,
         )
-        issue_voting_credential(
+        _issue_voting_credential(
             election=self.election,
             freeipa_username="voter2",
             weight=1,
@@ -555,7 +558,7 @@ class ElectionCredentialIssuanceAndAnonymizationTests(TestCase):
 
     def test_anonymize_election_audit_entry_includes_scrubbed_fields(self) -> None:
         """C: election_anonymized payload must list exactly which fields/categories were scrubbed."""
-        issue_voting_credential(
+        _issue_voting_credential(
             election=self.election,
             freeipa_username="voter1",
             weight=1,
@@ -577,6 +580,137 @@ class ElectionCredentialIssuanceAndAnonymizationTests(TestCase):
 
 @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=90)
 class ElectionBulkCredentialIssuanceTests(TestCase):
+    def test_issue_credentials_at_start_transition_is_public_start_entrypoint(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Start entrypoint election",
+            description="",
+            start_datetime=now,
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+
+        voter = MembershipType.objects.create(
+            code="voter_start_entrypoint",
+            name="Voter",
+            votes=2,
+            category_id="individual",
+            enabled=True,
+        )
+        membership = Membership.objects.create(target_username="alice", membership_type=voter, expires_at=None)
+        Membership.objects.filter(pk=membership.pk).update(created_at=election.start_datetime - datetime.timedelta(days=200))
+
+        issued = elections_services.issue_credentials_at_start_transition(election=election)
+
+        self.assertEqual(len(issued), 1)
+        credential = VotingCredential.objects.get(election=election, freeipa_username="alice")
+        self.assertEqual(credential.weight, 2)
+
+    def test_credential_creation_only_at_start_transition(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Out of band issue election",
+            description="",
+            start_datetime=now,
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+
+        voter = MembershipType.objects.create(
+            code="voter_start_only",
+            name="Voter",
+            votes=1,
+            category_id="individual",
+            enabled=True,
+        )
+        membership = Membership.objects.create(target_username="alice", membership_type=voter, expires_at=None)
+        Membership.objects.filter(pk=membership.pk).update(created_at=election.start_datetime - datetime.timedelta(days=200))
+
+        self.assertFalse(hasattr(elections_services, "issue_voting_credentials_from_memberships"))
+        self.assertFalse(hasattr(elections_services, "issue_voting_credential"))
+
+    def test_credential_weight_is_immutable_once_open(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Immutable weight election",
+            description="",
+            start_datetime=now,
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+
+        cred1 = _issue_voting_credential(
+            election=election,
+            freeipa_username="alice",
+            weight=2,
+        )
+        cred2 = _issue_voting_credential(
+            election=election,
+            freeipa_username="alice",
+            weight=9,
+        )
+
+        self.assertEqual(cred2.id, cred1.id)
+        cred2.refresh_from_db()
+        self.assertEqual(cred2.weight, 2)
+
+    def test_credentials_anonymized_on_close(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Close deletes credentials election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+        VotingCredential.objects.create(
+            election=election,
+            public_id="cred-delete-on-close",
+            freeipa_username="alice",
+            weight=1,
+        )
+
+        close_election(election=election)
+
+        credential = VotingCredential.objects.get(election=election)
+        self.assertEqual(credential.public_id, "cred-delete-on-close")
+        self.assertIsNone(credential.freeipa_username)
+
+    def test_start_transition_creates_credentials(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Start transition issues credentials",
+            description="",
+            start_datetime=now,
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.draft,
+        )
+
+        voter = MembershipType.objects.create(
+            code="voter_start_transition",
+            name="Voter",
+            votes=3,
+            category_id="individual",
+            enabled=True,
+        )
+        membership = Membership.objects.create(target_username="alice", membership_type=voter, expires_at=None)
+        Membership.objects.filter(pk=membership.pk).update(created_at=election.start_datetime - datetime.timedelta(days=200))
+
+        election.status = Election.Status.open
+        election.save(update_fields=["status"])
+
+        issued = issue_credentials_at_start_transition(election=election)
+
+        self.assertEqual(len(issued), 1)
+        self.assertEqual(VotingCredential.objects.filter(election=election).count(), 1)
+        cred = VotingCredential.objects.get(election=election, freeipa_username="alice")
+        self.assertEqual(cred.weight, 3)
+
     def test_issue_voting_credentials_from_memberships_applies_eligibility_and_weights(self) -> None:
         now = timezone.now()
         election = Election.objects.create(
@@ -629,7 +763,14 @@ class ElectionBulkCredentialIssuanceTests(TestCase):
         m5 = Membership.objects.create(target_username="dave", membership_type=nonvoter, expires_at=None)
         Membership.objects.filter(pk=m5.pk).update(created_at=eligible_created_at)
 
-        affected = len(issue_voting_credentials_from_memberships(election=election))
+        election.status = Election.Status.open
+        election.save(update_fields=["status"])
+
+        affected = len(
+            issue_credentials_at_start_transition(
+                election=election,
+            )
+        )
         self.assertEqual(affected, 1)
         self.assertEqual(VotingCredential.objects.filter(election=election).count(), 1)
 
@@ -637,7 +778,7 @@ class ElectionBulkCredentialIssuanceTests(TestCase):
         self.assertEqual(cred.freeipa_username, "alice")
         self.assertEqual(cred.weight, 3)
 
-    def test_issue_voting_credentials_from_memberships_updates_weight_without_rotating_public_id(self) -> None:
+    def test_issue_voting_credentials_from_memberships_keeps_weight_without_rotating_public_id(self) -> None:
         now = timezone.now()
         election = Election.objects.create(
             name="Bulk update election",
@@ -658,20 +799,28 @@ class ElectionBulkCredentialIssuanceTests(TestCase):
         membership = Membership.objects.create(target_username="alice", membership_type=voter, expires_at=None)
         Membership.objects.filter(pk=membership.pk).update(created_at=eligible_created_at)
 
-        affected1 = len(issue_voting_credentials_from_memberships(election=election))
+        affected1 = len(
+            issue_credentials_at_start_transition(
+                election=election,
+            )
+        )
         self.assertEqual(affected1, 1)
         cred1 = VotingCredential.objects.get(election=election, freeipa_username="alice")
 
         voter.votes = 5
         voter.save(update_fields=["votes"])
 
-        affected2 = len(issue_voting_credentials_from_memberships(election=election))
+        affected2 = len(
+            issue_credentials_at_start_transition(
+                election=election,
+            )
+        )
         self.assertEqual(affected2, 1)
         cred2 = VotingCredential.objects.get(election=election, freeipa_username="alice")
 
         self.assertEqual(cred2.id, cred1.id)
         self.assertEqual(cred2.public_id, cred1.public_id)
-        self.assertEqual(cred2.weight, 5)
+        self.assertEqual(cred2.weight, 1)
 
 
 class ElectionPublicExportTests(TestCase):
@@ -971,7 +1120,9 @@ class ElectionCloseAndTallyTests(TestCase):
             AuditLogEntry.objects.filter(election=election, event_type="election_closed").count(),
             1,
         )
-        self.assertIsNone(VotingCredential.objects.get(election=election).freeipa_username)
+        credential = VotingCredential.objects.get(election=election)
+        self.assertEqual(credential.public_id, "cred-close-twice")
+        self.assertIsNone(credential.freeipa_username)
 
     def test_close_election_anonymizes_credentials_and_writes_public_and_private_audit(self) -> None:
         now = timezone.now()
@@ -994,7 +1145,9 @@ class ElectionCloseAndTallyTests(TestCase):
 
         election.refresh_from_db()
         self.assertEqual(election.status, Election.Status.closed)
-        self.assertIsNone(VotingCredential.objects.get(election=election).freeipa_username)
+        credential = VotingCredential.objects.get(election=election)
+        self.assertEqual(credential.public_id, "cred-1")
+        self.assertIsNone(credential.freeipa_username)
 
         public_events = list(
             AuditLogEntry.objects.filter(election=election, is_public=True).values_list("event_type", flat=True)
@@ -1091,6 +1244,9 @@ class ElectionCloseAndTallyTests(TestCase):
         self.assertIsNotNone(entry)
         self.assertIsInstance(entry.payload, dict)
         self.assertEqual(entry.payload.get("chain_head"), chain_hash_2)
+        self.assertEqual(entry.payload.get("credentials_affected"), 1)
+        self.assertEqual(entry.payload.get("emails_scrubbed"), 0)
+        self.assertNotIn("credentials_deleted", entry.payload)
 
     def test_different_elections_have_unique_genesis_hashes(self) -> None:
         """
@@ -1195,6 +1351,125 @@ class ElectionCloseAndTallyTests(TestCase):
             self.assertIn("summary_text", entry.payload)
             self.assertIsInstance(entry.payload["audit_text"], str)
             self.assertIsInstance(entry.payload["summary_text"], str)
+
+    def test_tally_election_preserves_anonymized_credentials_for_closed_election(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Closed election with lingering credentials",
+            description="",
+            start_datetime=now - datetime.timedelta(days=3),
+            end_datetime=now - datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.closed,
+        )
+        candidate = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
+        VotingCredential.objects.create(
+            election=election,
+            public_id="lingering-closed-cred",
+            freeipa_username=None,
+            weight=1,
+        )
+
+        ballot_hash = Ballot.compute_hash(
+            election_id=election.id,
+            credential_public_id="lingering-closed-cred",
+            ranking=[candidate.id],
+            weight=1,
+            nonce="0" * 32,
+        )
+        genesis = election_genesis_chain_hash(election.id)
+        Ballot.objects.create(
+            election=election,
+            credential_public_id="lingering-closed-cred",
+            ranking=[candidate.id],
+            weight=1,
+            ballot_hash=ballot_hash,
+            previous_chain_hash=genesis,
+            chain_hash=compute_chain_hash(previous_chain_hash=genesis, ballot_hash=ballot_hash),
+        )
+
+        tally_election(election=election)
+
+        credential = VotingCredential.objects.get(election=election)
+        self.assertEqual(credential.public_id, "lingering-closed-cred")
+        self.assertIsNone(credential.freeipa_username)
+
+    def test_migration_0088_anonymizes_non_open_credentials_but_preserves_open(self) -> None:
+        now = timezone.now()
+
+        draft_election = Election.objects.create(
+            name="Draft election credentials",
+            description="",
+            start_datetime=now,
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.draft,
+        )
+        open_election = Election.objects.create(
+            name="Open election credentials",
+            description="",
+            start_datetime=now,
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+        closed_election = Election.objects.create(
+            name="Closed election credentials",
+            description="",
+            start_datetime=now - datetime.timedelta(days=2),
+            end_datetime=now - datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.closed,
+        )
+        tallied_election = Election.objects.create(
+            name="Tallied election credentials",
+            description="",
+            start_datetime=now - datetime.timedelta(days=3),
+            end_datetime=now - datetime.timedelta(days=2),
+            number_of_seats=1,
+            status=Election.Status.tallied,
+        )
+
+        VotingCredential.objects.create(
+            election=draft_election,
+            public_id="cred-draft-0088",
+            freeipa_username="d",
+            weight=1,
+        )
+        VotingCredential.objects.create(
+            election=open_election,
+            public_id="cred-open-0088",
+            freeipa_username="o",
+            weight=1,
+        )
+        VotingCredential.objects.create(
+            election=closed_election,
+            public_id="cred-closed-0088",
+            freeipa_username="c",
+            weight=1,
+        )
+        VotingCredential.objects.create(
+            election=tallied_election,
+            public_id="cred-tallied-0088",
+            freeipa_username="t",
+            weight=1,
+        )
+
+        module = importlib.import_module("core.migrations.0088_delete_voting_credentials_for_non_open_elections")
+        module._anonymize_non_open_election_credentials(apps=apps, schema_editor=None)
+
+        draft_credential = VotingCredential.objects.get(election=draft_election)
+        self.assertIsNone(draft_credential.freeipa_username)
+
+        self.assertTrue(VotingCredential.objects.filter(election=open_election).exists())
+        open_credential = VotingCredential.objects.get(election=open_election)
+        self.assertEqual(open_credential.freeipa_username, "o")
+
+        closed_credential = VotingCredential.objects.get(election=closed_election)
+        self.assertIsNone(closed_credential.freeipa_username)
+
+        tallied_credential = VotingCredential.objects.get(election=tallied_election)
+        self.assertIsNone(tallied_credential.freeipa_username)
 
     def test_tally_applies_exclusion_groups(self) -> None:
         from core.models import ExclusionGroup, ExclusionGroupCandidate

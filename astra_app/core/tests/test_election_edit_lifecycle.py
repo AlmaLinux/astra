@@ -181,7 +181,7 @@ class ElectionEditLifecycleTests(TestCase):
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
             patch(
-                "core.views_elections.edit.issue_voting_credentials_from_memberships",
+                "core.views_elections.edit.issue_credentials_at_start_transition",
                 side_effect=RuntimeError("credential issue failed"),
             ),
         ):

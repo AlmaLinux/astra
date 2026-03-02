@@ -10,7 +10,7 @@ from django.urls import reverse_lazy
 from django.views.decorators.http import require_POST
 
 from core import elections_services
-from core.elections_services import ElectionError, issue_voting_credentials_from_memberships
+from core.elections_services import ElectionError
 from core.freeipa.user import FreeIPAUser
 from core.ipa_user_attrs import _get_freeipa_timezone_name
 from core.models import Election, VotingCredential
@@ -44,12 +44,11 @@ def election_send_mail_credentials(request: HttpRequest, election_id: int) -> Ht
 
     credentials_qs = VotingCredential.objects.filter(election=election).exclude(freeipa_username__isnull=True)
     if not credentials_qs.exists():
-        issued = issue_voting_credentials_from_memberships(election=election)
-        by_username = {c.freeipa_username: c for c in issued if c.freeipa_username}
-        if target_username:
-            credential_list = [by_username[target_username]] if target_username in by_username else []
-        else:
-            credential_list = list(by_username.values())
+        messages.error(
+            request,
+            "No voting credentials exist for this election. Credentials are issued only at election start (draft -> open).",
+        )
+        return redirect("election-detail", election_id=election.id)
     else:
         if target_username:
             credential_list = list(

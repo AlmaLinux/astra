@@ -1,9 +1,9 @@
 # Elections runbook: close an election
 
 ## Purpose
-Close an open election so no further ballots can be submitted, and anonymize voter credentials.
+Close an open election so no further ballots can be submitted, and anonymize voting credentials.
 
-Closing is an irreversible privacy action. Closing an election triggers anonymization of credentials and scrubs election-related emails from the mail system.
+Closing is an irreversible privacy action. Closing an election anonymizes credentials (sets `freeipa_username` to `NULL` on all credential rows) and scrubs election-related emails from the mail system.
 
 ## Prerequisites
 - You have election admin permissions in Astra.
@@ -13,10 +13,10 @@ Closing is an irreversible privacy action. Closing an election triggers anonymiz
 
 ## Safety notes
 - Closing sets the election status to `closed` and sets the election end time to "now".
-- Closing performs irreversible anonymization:
-  - Voter usernames are removed from stored voting credentials.
+- Closing performs irreversible cleanup:
+   - Voting credential usernames (`freeipa_username`) are set to `NULL`; credential rows are retained for chain-of-custody.
   - Election-related emails (credential and receipt emails) are deleted from the email queue/history.
-- After close, you cannot recover the voter-to-credential mapping from the application.
+- After close, credential rows still exist but carry no username (`freeipa_username = NULL`).
 
 ## What is and is not scrubbed at close
 
@@ -24,19 +24,18 @@ Closing atomically runs anonymization. The following are the precise fields and 
 
 | Category | What is removed |
 |---|---|
-| `VotingCredential.freeipa_username` | Set to `NULL` for every credential row belonging to the election. The credential row itself (public ID, weight) is **retained**. |
+| `VotingCredential` rows | `freeipa_username` set to `NULL`; rows retained for chain-of-custody. `public_id` and `weight` are preserved. |
 | `Email` records | All `Email` rows where `context["election_id"]` matches the election ID are **deleted**. This covers credential-delivery and vote-receipt emails issued by the current implementation. Legacy credential emails composed as plain `message`/`html_message` with the credential link are also deleted. |
 
 The following are explicitly **not** scrubbed:
 
 | Category | Why retained |
 |---|---|
-| `VotingCredential` rows | Public ID and weight are needed for receipt verification and tally audit. Only the username mapping is removed. |
 | `Ballot` rows (ranking, hashes, chain) | Required for tally and the public cryptographic audit trail. These rows are not linkable to a username after close. |
 | `AuditLogEntry` records | Audit log is append-only and retained in full for accountability. |
 
 The private `election_anonymized` audit event (visible only to admins) records:
-- `credentials_affected`: count of credentials whose username was nulled.
+- `credentials_affected`: count of credentials affected by close-time credential cleanup.
 - `emails_scrubbed`: count of email records deleted.
 - `scrub_anomaly`: `true` if fewer emails were scrubbed than credentials affected (warranting review).
 - `scrubbed_fields`: stable list of field names/categories that were scrubbed.

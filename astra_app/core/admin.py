@@ -31,10 +31,9 @@ from tablib import Dataset
 from core.admin_import_preview_utils import build_import_preview_context
 from core.agreements import missing_required_agreements_for_user_in_group
 from core.elections_services import (
+    START_TRANSITION_CREDENTIAL_ISSUANCE_ERROR,
     ElectionError,
     close_election,
-    issue_voting_credentials_from_memberships,
-    send_voting_credential_email,
     tally_election,
 )
 from core.form_validators import (
@@ -1522,77 +1521,21 @@ class ElectionAdmin(admin.ModelAdmin):
 
     def issue_credentials_from_memberships_action(self, request: HttpRequest, queryset) -> None:
         for election in queryset:
-            try:
-                affected = len(issue_voting_credentials_from_memberships(election=election))
-            except ElectionError as exc:
-                self.message_user(request, f"{election}: {exc}", level=messages.ERROR)
-                continue
             self.message_user(
                 request,
-                f"{election}: issued/updated {affected} credential(s) from memberships.",
-                level=messages.SUCCESS,
+                f"{election}: {START_TRANSITION_CREDENTIAL_ISSUANCE_ERROR}",
+                level=messages.ERROR,
             )
 
     issue_credentials_from_memberships_action.short_description = "Issue credentials from memberships"  # type: ignore[attr-defined]
 
     def issue_and_email_credentials_from_memberships_action(self, request: HttpRequest, queryset) -> None:
         for election in queryset:
-            try:
-                credentials = issue_voting_credentials_from_memberships(election=election)
-            except ElectionError as exc:
-                self.message_user(request, f"{election}: {exc}", level=messages.ERROR)
-                continue
-
-            emailed = 0
-            skipped = 0
-            failures = 0
-            for cred in credentials:
-                username = str(cred.freeipa_username or "").strip()
-                if not username:
-                    skipped += 1
-                    continue
-
-                try:
-                    user = FreeIPAUser.get(username)
-                except Exception:
-                    failures += 1
-                    continue
-
-                if user is None or not user.email:
-                    skipped += 1
-                    continue
-
-                try:
-                    send_voting_credential_email(
-                        request=request,
-                        election=election,
-                        username=username,
-                        email=user.email,
-                        credential_public_id=str(cred.public_id),
-                    )
-                except Exception:
-                    failures += 1
-                    continue
-                emailed += 1
-
-            if emailed:
-                self.message_user(
-                    request,
-                    f"{election}: emailed {emailed} credential(s).",
-                    level=messages.SUCCESS,
-                )
-            if skipped:
-                self.message_user(
-                    request,
-                    f"{election}: skipped {skipped} credential(s) (missing username/email).",
-                    level=messages.WARNING,
-                )
-            if failures:
-                self.message_user(
-                    request,
-                    f"{election}: failed to email {failures} credential(s).",
-                    level=messages.ERROR,
-                )
+            self.message_user(
+                request,
+                f"{election}: {START_TRANSITION_CREDENTIAL_ISSUANCE_ERROR}",
+                level=messages.ERROR,
+            )
 
     issue_and_email_credentials_from_memberships_action.short_description = (
         "Issue credentials from memberships and email voters"

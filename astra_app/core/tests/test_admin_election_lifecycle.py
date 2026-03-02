@@ -59,7 +59,9 @@ class AdminElectionLifecycleActionTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         election.refresh_from_db()
         self.assertEqual(election.status, Election.Status.closed)
-        self.assertIsNone(VotingCredential.objects.get(election=election).freeipa_username)
+        credential = VotingCredential.objects.get(election=election)
+        self.assertEqual(credential.public_id, "cred-1")
+        self.assertIsNone(credential.freeipa_username)
         self.assertTrue(
             AuditLogEntry.objects.filter(election=election, event_type="election_closed", is_public=True).exists()
         )
@@ -182,7 +184,7 @@ class AdminElectionLifecycleActionTests(TestCase):
             AuditLogEntry.objects.filter(election=election, event_type="tally_completed", is_public=True).exists()
         )
 
-    def test_admin_action_issue_and_email_credentials_from_memberships(self) -> None:
+    def test_admin_action_issue_and_email_credentials_from_memberships_is_blocked(self) -> None:
         now = timezone.now()
         election = Election.objects.create(
             name="Admin issue+email election",
@@ -231,9 +233,8 @@ class AdminElectionLifecycleActionTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 302)
-        self.assertTrue(VotingCredential.objects.filter(election=election, freeipa_username="voter1").exists())
-        self.assertEqual(post_office_send_mock.call_count, 1)
-        self.assertEqual(post_office_send_mock.call_args.kwargs.get("recipients"), ["voter1@example.com"])
+        self.assertFalse(VotingCredential.objects.filter(election=election, freeipa_username="voter1").exists())
+        self.assertEqual(post_office_send_mock.call_count, 0)
 
     def test_election_admin_status_is_readonly(self) -> None:
         now = timezone.now()

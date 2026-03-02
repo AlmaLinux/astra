@@ -16,7 +16,7 @@ from core.elections_eligibility import (
 )
 from core.elections_services import (
     close_election,
-    issue_voting_credentials_from_memberships,
+    issue_credentials_at_start_transition,
     submit_ballot,
     tally_election,
 )
@@ -134,7 +134,7 @@ class ElectionVoteWeightsTests(TestCase):
 
         expected = self._make_weighted_voter(election=election, username="voter1")
 
-        issued = issue_voting_credentials_from_memberships(election=election)
+        issued = issue_credentials_at_start_transition(election=election)
         cred = next(c for c in issued if c.freeipa_username == "voter1")
         self.assertEqual(int(cred.weight), expected)
 
@@ -170,7 +170,7 @@ class ElectionVoteWeightsTests(TestCase):
 
         expected = self._make_weighted_voter(election=election, username="voter1")
 
-        issued = issue_voting_credentials_from_memberships(election=election)
+        issued = issue_credentials_at_start_transition(election=election)
         cred = next(c for c in issued if c.freeipa_username == "voter1")
         self.assertEqual(int(cred.weight), expected)
 
@@ -220,7 +220,7 @@ class ElectionVoteWeightsTests(TestCase):
 
         self._make_weighted_voter(election=election, username="voter1")
 
-        issued = issue_voting_credentials_from_memberships(election=election)
+        issued = issue_credentials_at_start_transition(election=election)
         cred = next(c for c in issued if c.freeipa_username == "voter1")
 
         self._login_as_freeipa_user("voter1")
@@ -271,7 +271,7 @@ class ElectionVoteWeightsTests(TestCase):
         c2 = Candidate.objects.create(election=election, freeipa_username="bob", nominated_by="nominator")
 
         expected = self._make_weighted_voter(election=election, username="voter1")
-        issued = issue_voting_credentials_from_memberships(election=election)
+        issued = issue_credentials_at_start_transition(election=election)
         cred = next(c for c in issued if c.freeipa_username == "voter1")
 
         receipt = submit_ballot(
@@ -282,11 +282,13 @@ class ElectionVoteWeightsTests(TestCase):
         ballot = receipt.ballot
         self.assertEqual(int(ballot.weight), expected)
 
-        # Closing an election anonymizes credentials. Tally must not rely on the
-        # credential/user identity at this stage.
+        # Closing anonymizes credentials. Tally must not rely on username linkage.
         close_election(election=election)
-        cred_refreshed = VotingCredential.objects.get(election=election, public_id=str(cred.public_id))
-        self.assertIsNone(cred_refreshed.freeipa_username)
+        persisted_credential = VotingCredential.objects.get(
+            election=election,
+            public_id=str(cred.public_id),
+        )
+        self.assertIsNone(persisted_credential.freeipa_username)
 
         # Even if membership data is later removed, the tally should still use the
         # stored ballot weights.
@@ -310,7 +312,7 @@ class ElectionVoteWeightsTests(TestCase):
 
         expected = self._make_weighted_voter(election=election, username="voter1")
 
-        issued = issue_voting_credentials_from_memberships(election=election)
+        issued = issue_credentials_at_start_transition(election=election)
         cred = next(c for c in issued if c.freeipa_username == "voter1")
         self.assertEqual(int(cred.weight), expected)
 
@@ -500,7 +502,7 @@ class ElectionVoteWeightsTests(TestCase):
             status=Election.Status.open,
         )
         self._make_weighted_voter(election=election, username="voter1")
-        issue_voting_credentials_from_memberships(election=election)
+        issue_credentials_at_start_transition(election=election)
 
         self._login_as_freeipa_user("voter1")
         voter1_ipa = FreeIPAUser("voter1", {"uid": ["voter1"], "memberof_group": []})

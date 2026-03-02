@@ -16,7 +16,7 @@ from core import elections_eligibility, elections_services
 from core.elections_eligibility import ElectionEligibilityError
 from core.elections_services import (
     election_genesis_chain_hash,
-    issue_voting_credentials_from_memberships,
+    issue_credentials_at_start_transition,
 )
 from core.elections_timestamping import schedule_attestation
 from core.forms_elections import (
@@ -299,7 +299,7 @@ def _issue_and_email_credentials(
 
     Returns (total_credentials, emailed, skipped, failures).
     """
-    credentials = issue_voting_credentials_from_memberships(election=election)
+    credentials = issue_credentials_at_start_transition(election=election)
     emailed = 0
     skipped = 0
     failures = 0

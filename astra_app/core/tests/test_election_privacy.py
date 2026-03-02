@@ -6,12 +6,11 @@ from post_office.models import Email, EmailTemplate
 
 from core.elections_services import (
     close_election,
-    issue_voting_credential,
     send_vote_receipt_email,
     send_voting_credential_email,
     submit_ballot,
 )
-from core.models import Election
+from core.models import Election, VotingCredential
 
 
 class ElectionPrivacyTest(TestCase):
@@ -45,8 +44,13 @@ class ElectionPrivacyTest(TestCase):
         # 1. Issue Credential
         username = "alice"
         email_addr = "alice@example.com"
-        cred = issue_voting_credential(election=self.election, freeipa_username=username, weight=1)
-        
+        cred = VotingCredential.objects.create(
+            election=self.election,
+            public_id="privacy-test-credential-1",
+            freeipa_username=username,
+            weight=1,
+        )
+
         send_voting_credential_email(
             request=None,
             election=self.election,
@@ -87,7 +91,7 @@ class ElectionPrivacyTest(TestCase):
         # 3. Close Election
         close_election(election=self.election)
 
-        # 4. Verify Anonymization of Credentials (this is already implemented)
+        # 4. Verify credentials are anonymized for non-open elections.
         cred.refresh_from_db()
         self.assertIsNone(cred.freeipa_username)
 

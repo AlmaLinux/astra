@@ -32,7 +32,7 @@ Voting routes are available at `/elections/<id>/vote/` and `/elections/<id>/vote
 
 `election_conclude` calls `close_election` (and optionally `tally_election` unless `skip_tally` is set).[^fn10]
 
-`close_election` requires `status == open`, sets `status = closed`, sets `end_datetime = now`, anonymizes credential/user links, and records a public `election_closed` event including `chain_head` and anonymization/scrub counters.[^fn11]
+`close_election` requires `status == open`, sets `status = closed`, sets `end_datetime = now`, scrubs election-linked credential/receipt emails, anonymizes election credentials (sets `VotingCredential.freeipa_username = NULL`), and records a public `election_closed` event including `chain_head` and cleanup counters.[^fn11]
 
 ### Tally
 
@@ -107,17 +107,17 @@ Credential IDs (`VotingCredential.public_id`) are URL-safe random strings (`secr
 
 A dedicated credential revocation state machine (e.g. `revoked`/`consumed` states) is not present in this implementation. Effective vote blocking occurs when a user loses their credential row, has a non-positive credential weight, or no longer holds an active vote-bearing membership.[^fn91]
 
-Credential issuance is idempotent by `(election, username)`: existing credentials are returned and have their weight updated if it changed; new credentials are only created when none exists. Credential re-send is an explicit admin action (re-invoking issuance and email delivery).[^fn92][^fn93]
+Credential issuance is limited to election start transition (`draft -> open`). Out-of-band issuance paths are blocked with explicit operator-facing errors. Existing credentials keep their original `weight`; weight is not mutated after issuance.[^fn92][^fn93]
 
-After close-time anonymization, `VotingCredential.freeipa_username` is nulled for all credentials associated with the election. The credential row itself is retained (to preserve the chain of custody for the credential public ID), but the username linkage is removed.[^fn94]
+When an election leaves `open`, election credentials are anonymized by setting `VotingCredential.freeipa_username = NULL`. This enforces the invariant that credential rows carry no username linkage outside the open voting window while preserving chain-of-custody fields.[^fn94]
 
 ## 4B. Ballot Privacy Model
 
 Before close-time anonymization, a ballot row can be linked to a voter identity at the database level through the join chain: `Ballot.credential_public_id → VotingCredential.public_id → VotingCredential.freeipa_username`.[^fn95][^fn96] This linkage is accessible to anyone with direct database access (e.g. a DBA) or application-level admin access to credential rows during the active voting window. Ballot content (ranking) is not exposed through established Django admin interfaces for the `Ballot` model.[^fn97]
 
-At close/tally time, Astra performs anonymization: `VotingCredential.freeipa_username` is set to `NULL` for all election credentials, and election-linked credential and vote-receipt emails are scrubbed from the mail queue.[^fn98][^fn99] Ballot rows themselves are not rewritten; they retain ranking, weight, receipt hash, chain hashes, and timestamp.
+At close/tally time, Astra performs cleanup: election-linked credential and vote-receipt emails are scrubbed from the mail queue, and election credential usernames are anonymized (`VotingCredential.freeipa_username = NULL`).[^fn98][^fn99] Ballot rows themselves are not rewritten; they retain ranking, weight, receipt hash, chain hashes, and timestamp.
 
-The post-anonymization model is pseudonymous: credential IDs remain in ballot rows, and a `VotingCredential` row still exists per credential, but the direct username-to-credential mapping for that election is removed. Independent correlation of a credential ID back to a specific voter is no longer possible through the application's credential table after anonymization.
+The post-close model keeps ballots, audit data, and credential rows, but username linkage is removed for non-open elections (`freeipa_username = NULL`). This removes the credential table as a post-close identity linkage surface.
 
 **System trust boundary:** ballot secrecy during the open voting window depends on access controls to the application database and credential table. This is an operational control, not a cryptographic one. The system does not implement cryptographic ballot unlinkability at submission time.
 

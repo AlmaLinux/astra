@@ -173,7 +173,7 @@ class GlobalSearchTests(TestCase):
         )
         set_current_viewer_username("admin")
         try:
-            bob_private = FreeIPAUser(
+            FreeIPAUser(
                 "bob",
                 {
                     "uid": ["bob"],

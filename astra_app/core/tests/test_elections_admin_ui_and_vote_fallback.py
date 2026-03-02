@@ -451,13 +451,7 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
                 return FreeIPAUser("nominator", {"uid": ["nominator"], "displayname": ["Nom"], "memberof_group": []})
             return None
 
-        with (
-            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
-            patch(
-                "core.views_elections.lifecycle.issue_voting_credentials_from_memberships",
-                side_effect=AssertionError("should not bulk issue"),
-            ),
-        ):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.post(reverse("election-send-mail-credentials", args=[election.id]), data={"username": "alice"})
 
         self.assertEqual(resp.status_code, 302)

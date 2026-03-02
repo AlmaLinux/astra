@@ -133,7 +133,7 @@ def verify_rekor_attestations(*, audit_data: dict[str, object], verify_online: b
 
             integrated_time_raw = wrapper_entry.get("integratedTime")
             if integrated_time_raw is not None:
-                ts = datetime.datetime.fromtimestamp(int(integrated_time_raw), tz=datetime.timezone.utc)
+                ts = datetime.datetime.fromtimestamp(int(integrated_time_raw), tz=datetime.UTC)
                 print(f"    rekor timestamp: {ts.isoformat()}")
         except Exception as exc:
             print(f"  Warning: online check failed ({type(exc).__name__}: {exc})")

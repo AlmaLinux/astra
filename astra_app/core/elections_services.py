@@ -43,6 +43,10 @@ _MAX_RANKING_SIZE = 500
 
 logger = logging.getLogger(__name__)
 
+START_TRANSITION_CREDENTIAL_ISSUANCE_ERROR = (
+    "Voting credentials can only be issued during election start (draft -> open)."
+)
+
 
 class ElectionError(Exception):
     pass
@@ -687,13 +691,18 @@ def submit_ballot(*, election: Election, credential_public_id: str, ranking: lis
 
 
 @transaction.atomic
-def issue_voting_credential(*, election: Election, freeipa_username: str, weight: int) -> VotingCredential:
+def _issue_voting_credential(
+    *,
+    election: Election,
+    freeipa_username: str,
+    weight: int,
+) -> VotingCredential:
     if not freeipa_username.strip():
         raise ElectionError("freeipa_username is required")
     if weight <= 0:
         raise ElectionError("weight must be positive")
-    if election.status in {Election.Status.closed, Election.Status.tallied}:
-        raise ElectionError("cannot issue credentials for a closed election")
+    if election.status != Election.Status.open:
+        raise ElectionError("cannot issue credentials unless election is open")
 
     try:
         credential = VotingCredential.objects.select_for_update().get(
@@ -705,8 +714,13 @@ def issue_voting_credential(*, election: Election, freeipa_username: str, weight
 
     if credential is not None:
         if credential.weight != weight:
-            credential.weight = weight
-            credential.save(update_fields=["weight"])
+            logger.warning(
+                "Election %s credential weight is immutable after issuance: username=%s existing=%s requested=%s",
+                election.id,
+                freeipa_username,
+                credential.weight,
+                weight,
+            )
         return credential
 
     while True:
@@ -730,8 +744,13 @@ def issue_voting_credential(*, election: Election, freeipa_username: str, weight
                 continue
 
             if credential.weight != weight:
-                credential.weight = weight
-                credential.save(update_fields=["weight"])
+                logger.warning(
+                    "Election %s credential weight is immutable after issuance: username=%s existing=%s requested=%s",
+                    election.id,
+                    freeipa_username,
+                    credential.weight,
+                    weight,
+                )
             return credential
 
 
@@ -772,8 +791,10 @@ def anonymize_election(*, election: Election) -> dict[str, int]:
     if election.status not in {Election.Status.closed, Election.Status.tallied}:
         raise ElectionNotClosedError("election must be closed or tallied to anonymize")
 
-    credentials_affected = VotingCredential.objects.filter(
-        election=election, freeipa_username__isnull=False
+    credentials_affected = VotingCredential.objects.filter(election=election).count()
+    VotingCredential.objects.filter(
+        election=election,
+        freeipa_username__isnull=False,
     ).update(freeipa_username=None)
 
     emails_scrubbed = scrub_election_emails(election=election)
@@ -803,9 +824,12 @@ def anonymize_election(*, election: Election) -> dict[str, int]:
 
 
 @transaction.atomic
-def issue_voting_credentials_from_memberships(*, election: Election) -> list[VotingCredential]:
-    if election.status in {Election.Status.closed, Election.Status.tallied}:
-        raise ElectionError("cannot issue credentials for a closed election")
+def _issue_voting_credentials_from_memberships(
+    *,
+    election: Election,
+) -> list[VotingCredential]:
+    if election.status != Election.Status.open:
+        raise ElectionError("cannot issue credentials unless election is open")
 
     # Check once before the issuance loop rather than once per credential save.
     if AuditLogEntry.objects.filter(election=election, event_type="election_anonymized").exists():
@@ -817,9 +841,27 @@ def issue_voting_credentials_from_memberships(*, election: Election) -> list[Vot
     )
     issued: list[VotingCredential] = []
     for voter in eligible:
-        credential = issue_voting_credential(election=election, freeipa_username=voter.username, weight=voter.weight)
+        credential = _issue_voting_credential(
+            election=election,
+            freeipa_username=voter.username,
+            weight=voter.weight,
+        )
         issued.append(credential)
     return issued
+
+
+@transaction.atomic
+def issue_credentials_at_start_transition(*, election: Election) -> list[VotingCredential]:
+    """Issue credentials for eligible voters as part of election start transition.
+
+    This is the only public issuance entry point. Keeping issuance behind a
+    single transition-named API prevents callers from bypassing lifecycle policy
+    via intent flags.
+    """
+    if election.status != Election.Status.open:
+        raise ElectionError(START_TRANSITION_CREDENTIAL_ISSUANCE_ERROR)
+
+    return _issue_voting_credentials_from_memberships(election=election)
 
 
 @transaction.atomic
@@ -866,8 +908,8 @@ def close_election(*, election: Election, actor: str | None = None) -> None:
     4. Create a public ``election_closed`` AuditLogEntry with ``chain_head``,
        ``credentials_affected``, and ``emails_scrubbed`` counts.
 
-    Once committed, the username-to-credential mapping for this election is gone
-    and cannot be recovered from the application.
+    Lifecycle invariant: when an election closes, credential rows are retained for
+    chain-of-custody but anonymized by setting ``freeipa_username = NULL``.
     """
     try:
         with transaction.atomic():
@@ -1021,6 +1063,7 @@ def tally_election(*, election: Election, actor: str | None = None) -> dict[str,
                 "elected": result.get("elected"),
                 "eliminated": result.get("eliminated"),
                 "forced_excluded": result.get("forced_excluded"),
+                "algorithm": result.get("algorithm"),
             }
             if actor:
                 tally_completed_payload["actor"] = actor

@@ -5,6 +5,12 @@ Start a draft election, issue voting credentials, and send credential emails to 
 
 Starting an election is a high-impact operation. It sets the election status to `open`, sets the published start time to the current time, and sends credential emails.
 
+## Credential lifecycle policy
+- Credentials are created only when the election transitions from `draft` to `open`.
+- Credential `weight` is frozen at issuance time and is not updated later.
+- Credential rows are anonymized (username link removed) when the election leaves `open`; rows are retained for chain-of-custody.
+- Credential resend can only reuse existing credentials; it cannot mint missing ones.
+
 ## Prerequisites
 - You have election admin permissions in Astra (can create and manage elections).
 - You have a stable connection to FreeIPA (user lookup, email addresses, timezones).
@@ -64,6 +70,7 @@ Starting an election is a high-impact operation. It sets the election status to 
 1. In the election detail page, use `Resend voting credential` for one or two known users.
 2. Confirm those users receive the email.
 3. Confirm the vote link works and the credential autofill behavior matches expectations.
+4. If resend reports missing credentials, do not attempt out-of-band issuance. Investigate why the start transition did not create credentials and resolve before continuing operations.
 
 ## Rollback or abort guidance
 Starting an election cannot be "undone" cleanly:
@@ -127,3 +134,4 @@ Actions:
 2. Ask them to check spam/junk.
 3. Use `Resend voting credential` for their username.
 4. If the user has no email on file, fix the email in FreeIPA (if policy allows) and resend.
+5. If the user has no credential row, treat this as an incident. Credentials are only created at start and should not be created later.
