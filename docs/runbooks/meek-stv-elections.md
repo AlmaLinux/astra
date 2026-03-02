@@ -113,7 +113,7 @@ When an election leaves `open`, election credentials are anonymized by setting `
 
 ## 4B. Ballot Privacy Model
 
-Before close-time anonymization, a ballot row can be linked to a voter identity at the database level through the join chain: `Ballot.credential_public_id → VotingCredential.public_id → VotingCredential.freeipa_username`.[^fn95][^fn96] This linkage is accessible to anyone with direct database access (e.g. a DBA) or application-level admin access to credential rows during the active voting window. Ballot content (ranking) is not exposed through established Django admin interfaces for the `Ballot` model.[^fn97]
+Before close-time anonymization, a ballot row can be linked to a voter identity at the database level through the join chain: `Ballot.credential_public_id → VotingCredential.public_id → VotingCredential.freeipa_username`.[^fn95][^fn96] This linkage is accessible to anyone with direct database access (e.g. a DBA) or application-level admin access to credential rows during the active voting window. The `Ballot` model is not registered in Django admin.
 
 At close/tally time, Astra performs cleanup: election-linked credential and vote-receipt emails are scrubbed from the mail queue, and election credential usernames are anonymized (`VotingCredential.freeipa_username = NULL`).[^fn98][^fn99] Ballot rows themselves are not rewritten; they retain ranking, weight, receipt hash, chain hashes, and timestamp.
 
@@ -123,7 +123,11 @@ The post-close model keeps ballots, audit data, and credential rows, but usernam
 
 ## 5. Ballot Chain Integrity
 
-Genesis chain hash is election-specific (`sha256("election:<id>..."`), preventing cross-election chain splicing from a shared genesis.[^fn41]
+Genesis chain hash is election-specific, preventing cross-election chain splicing from a shared genesis. The exact preimage string hashed (UTF-8) is:
+
+- `f"election:{election_id}. alex estuvo aquí, dejándose el alma."`
+
+and the genesis hash is `sha256(preimage_bytes).hexdigest()`.[^fn41]
 
 Next chain hash is `sha256(f"{previous_chain_hash}:{ballot_hash}")`.[^fn42]
 
@@ -139,7 +143,7 @@ The published verification scripts implement local checks:
 
 ## 6. Quorum Rules
 
-Election model stores quorum as a percentage (`0..100`) with default `10`.[^fn47]
+Election model stores quorum as a percentage (`0..100`) in the `quorum` field with default `10`.[^fn47]
 
 Quorum status calculation:
 
@@ -149,8 +153,8 @@ Quorum status calculation:
 
 Required participation thresholds use integer ceil math for both voter count and vote weight:
 
-- `required_voters = ceil(eligible_voters * quorum_percent / 100)`
-- `required_weight = ceil(eligible_weight * quorum_percent / 100)`
+- `required_voters = ceil(eligible_voters * quorum / 100)`
+- `required_weight = ceil(eligible_weight * quorum / 100)`
 
 and `quorum_met` is true only if both required thresholds are non-zero and both participation metrics meet/exceed thresholds.[^fn49]
 
@@ -212,7 +216,7 @@ The count loop stops when any applicable condition is met:
 - Seats filled.
 - No eligible candidates remain.
 - Remaining eligible candidates exactly fill remaining seats.
-- Numeric convergence (`max_retention_delta < epsilon` and no new elections/forced exclusions) followed by elimination loop as needed.
+- Numeric convergence (`max_retention_delta < epsilon` and no new elections/forced exclusions) stops the inner fixed-point iteration for the current round; the outer loop can then proceed to election/elimination and may re-enter iteration in a subsequent round if seats remain unfilled.
 - Failure to converge within `max_iterations` raises an error.[^fn60]
 
 ### i) Special edge cases
@@ -231,7 +235,7 @@ In code metadata, Astra identifies its tally implementation as `Meek STV (High-P
 
 As of this commit, the code does not cite an external formal Meek STV specification text directly.[^fn4] Auditors should treat Astra's internal architecture documentation, the published `public-audit.json` round artifacts, and the tally implementation source as the normative reference for this deployment.
 
-Convergence parameters: `epsilon` (default `1e-28`, used without override in standard tally calls) and `max_iterations` (default `200`) are defined in the tally function and are not currently exposed in published artifacts. A forthcoming hardening item will publish these in `public-audit.json` so independent verifiers can reproduce convergence behavior exactly.[^fn4][^fn60]
+Convergence parameters: `epsilon` (default `1e-28`) and `max_iterations` (default `200`) are defined as module-level constants (`MEEK_DEFAULT_EPSILON`, `MEEK_DEFAULT_MAX_ITERATIONS`) and are included in the `algorithm` key of `tally_result`, published within the `tally_completed` event payload in `public-audit.json`. Independent verifiers can use these to reproduce convergence behavior exactly.[^fn4][^fn60]
 
 ## 8. Audit Report
 
@@ -257,7 +261,7 @@ Published verification surfaces:
 - `GET /elections/ballot/verify/?receipt=<hash>`
 - `GET /elections/<id>/audit/`[^fn70]
 
-Ballot verify accepts 64-char hex receipts (case-insensitive; normalized to lowercase before matching) and is rate-limited. It reports whether the receipt hash exists, whether it is superseded/final, and links to public artifacts for tallied elections.[^fn71]
+Ballot verify accepts 64-char hex receipts (case-insensitive; normalized to lowercase before matching) and is rate-limited. It reports whether the receipt hash exists, whether it is superseded/final, and links to the public ballots JSON (`public_ballots_url`) plus the web audit-log page (`audit_log_url`) for tallied elections.[^fn71]
 
 Voters can independently verify:
 
@@ -321,8 +325,8 @@ Astra's security properties depend on who is trusted and to what degree.
 ### What Astra provides
 
 - **Tally integrity:** The Meek STV count is deterministic given the published ballot set, candidate tie-break UUIDs, and convergence parameters. Tally round artifacts in `public-audit.json` document every round.
-- **Inclusion verifiability:** Each voter receives a receipt hash they can use to confirm their ballot appears in `public-ballots.json`.
-- **Chain integrity:** The ballot hash chain from genesis to chain head is independently verifiable using the published `verify-ballot-chain.py` script.
+- **Inclusion and chain-position verifiability:** Each voter receives `ballot_hash`, `previous_chain_hash`, and `chain_hash` in their receipt email. They can independently recompute their ballot hash from their ranking and nonce, verify the chain update formula, and confirm both that their ballot appears in `public-ballots.json` and that the chain hash at their position matches. Any tampering with an intermediate ballot would conflict with that voter's receipt and cascade to all subsequent voters' `previous_chain_hash` values.
+- **Chain integrity:** The full ballot hash chain from genesis to chain head is independently verifiable using the published `verify-ballot-chain.py` script. The `election_started` payload includes the chain origin (`genesis_chain_hash`), and the `election_closed` payload includes the chain terminus (`chain_head`). If Astra is configured to use [Sigstore's Rekor](https://docs.sigstore.dev/logging/overview/) (intended default) and Rekor is working, Astra will attempt to attest those events (and other critical events) to Rekor; if Rekor is not configured or attestation fails, the events are still present in `public-audit.json` but may not have Rekor metadata.
 - **Post-election auditability:** Public artifacts (`public-ballots.json`, `public-audit.json`) are generated at tally and allow third-party review of the count, ballot set, and anonymized voter weights.
 - **Pseudonymization at close:** Direct username-to-ballot linkage is removed at close time.
 
@@ -331,23 +335,22 @@ Astra's security properties depend on who is trusted and to what degree.
 - **Coercion resistance:** Ballot receipts commit to the voter's ranking. A voter can use their receipt inputs (ballot hash + credential ID + nonce + ranking) to prove to a third party how they voted. The system does not implement mechanisms to deny or obscure a submitted ranking.
 - **Pre-close ballot secrecy from infrastructure operators:** During the active voting window, ballot-to-voter links exist in the database and are accessible to parties with database or application admin access. Secrecy during this window is an operational control, not a cryptographic guarantee.
 - **Protection from malicious operators with full DB/app access:** The chain and audit log provide tamper evidence after the fact, but do not prevent a party with full database write access from altering history before publication.
-- **External timestamp anchoring:** The chain head is published but not anchored to an external immutable timestamping authority. Chain integrity claims are verifiable post-publication but rely on operator honesty prior to publication.
 
 ## 12. Operator Guidance: Privacy in Small Elections
 
-The public ballots export (`public-ballots.json`) includes all ballot rows for the election, with per-ballot `created_at` timestamps preserved at day granularity in the export. In elections with small electorates, this can create privacy risks beyond the pseudonymization that close-time anonymization provides.
+The public ballots export (`public-ballots.json`) includes all ballot rows for the election. It does not export per-ballot timestamps/dates, but it is ordered by submission time (`created_at`, then `id`). In elections with small electorates, this can create privacy risks beyond the pseudonymization that close-time anonymization provides.
 
 ### Timing-correlation risk
 
-Ballot rows contain a submission timestamp. Even when `VotingCredential.freeipa_username` has been nulled at close, an observer who knows when a specific voter was active (for example, from email delivery logs, system access logs, or direct knowledge of the voter's schedule) may be able to correlate ballot submission times to specific individuals. The ballot-verify endpoint intentionally exposes only submission date (not time), but the export timestamp granularity is a day, which may still be sufficient to narrow down identity in small elections with few active voters on a given day.
+Even when `VotingCredential.freeipa_username` has been nulled at close, an observer who knows when a specific voter was active (for example, from email delivery logs, system access logs, or direct knowledge of the voter's schedule) may be able to correlate likely submission timing to a position in the published ordering. The ballot-verify endpoint intentionally exposes only a submission date (not time) for a specific receipt.
 
 ### Ballot ordering
 
-Ballets in the published export appear in submission order (chain order). In elections where the full voter list is publicly known and small, and where the voting window is short, the submission sequence itself may narrow the anonymity set, especially if some voters are known to vote immediately on opening.
+Ballots in the published export appear in submission order (not necessarily identical to chain order). In elections where the full voter list is publicly known and small, and where the voting window is short, the submission sequence itself may narrow the anonymity set, especially if some voters are known to vote immediately on opening.
 
 ### Operator recommendations
 
-- **Consider the effective anonymity set** before publishing the ballot ledger. If the electorate is small enough that most ballot timestamps uniquely identify a voter by day or sequence, the pseudonymized export may be effectively de-anonymizing in practice.
+- **Consider the effective anonymity set** before publishing the ballot ledger. If the electorate is small enough that ballot sequence is highly identifying, the pseudonymized export may be effectively de-anonymizing in practice.
 - **Longer voting windows** reduce timing-correlation effectiveness by increasing the number of active voters per time unit.
 - **No minimum electorate size is enforced** by Astra. This is an operational judgment. As a rough guideline, elections with fewer than approximately 20 voters should be reviewed carefully before publishing the full ballot ledger publicly, as individual ballots may be correlated to identities even without direct username linkage.
 - **Admin-only audit log:** The private `ballot_submitted` audit entries (visible only to election managers) include more detail than the public export. Restrict admin access appropriately and treat those logs as sensitive during the open window.
@@ -361,107 +364,106 @@ Ballets in the published export appear in submission order (chain order). In ele
 - The ballot-verify endpoint intentionally does not reveal ranking, voter IP addresses, or precise timestamps; it exposes only a submission date. This is a deliberate privacy guardrail.[^fn71]
 - Rate-limit scoping: vote submission is scoped per (election, username); ballot verification is scoped per client IP address.[^fn50][^fn71]
 - Empty-election chain head: if no ballots are cast, the chain head equals the election genesis hash. Independent verifiers should account for this case when no ballot rows are present.[^fn41]
-- Quorum and closure: the election model's `quorum_percent` help text implies quorum affects whether an election can be concluded, but `close_election` does not block when quorum is unmet. Quorum is informational/tracked, and extension is a separate explicit action. Auditors should verify participation independently via the `public-audit.json` `quorum_reached` event (or its absence).[^fn49][^fn51]
+- Quorum and closure: the election model's `quorum` help text implies quorum affects whether an election can be concluded, but `close_election` does not block when quorum is unmet. Quorum is informational/tracked, and extension is a separate explicit action. Auditors should verify participation independently via the `public-audit.json` `quorum_reached` event (or its absence).[^fn49][^fn51]
 
-[^fn1]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L38
-[^fn2]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L832
-[^fn3]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L889
-[^fn4]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_meek.py#L607
-[^fn5]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/urls.py#L68
-[^fn6]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/views_elections/edit.py#L716
-[^fn7]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/views_elections/edit.py#L467
-[^fn8]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/urls.py#L88
-[^fn9]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/views_elections/vote.py#L203
-[^fn10]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/views_elections/lifecycle.py#L137
-[^fn11]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L784
-[^fn12]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L840
-[^fn13]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L264 / https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L901
-[^fn14]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/views_elections/audit.py#L39
-[^fn15]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/views_elections/audit.py#L48
-[^fn16]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_eligibility.py#L69
-[^fn17]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_eligibility.py#L98
-[^fn18]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_eligibility.py#L106
-[^fn19]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_eligibility.py#L129
-[^fn20]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_eligibility.py#L305
-[^fn21]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_eligibility.py#L268
-[^fn22]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_eligibility.py#L332 / https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_eligibility.py#L357
-[^fn23]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_eligibility.py#L460
-[^fn24]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/config/settings.py#L831
-[^fn25]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_eligibility.py#L537
-[^fn26]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/views_elections/vote.py#L87
-[^fn27]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/views_elections/vote.py#L99
-[^fn28]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/views_elections/vote.py#L108
-[^fn29]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/views_elections/vote.py#L32
-[^fn30]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L528
-[^fn31]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L282
-[^fn32]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/models.py#L1416
-[^fn33]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/static/verify-ballot-hash.py#L58
-[^fn34]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L545
-[^fn35]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L555
-[^fn36]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L569
-[^fn37]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/models.py#L1397
-[^fn38]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L615
-[^fn39]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/views_elections/vote.py#L191
-[^fn40]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L343
-[^fn41]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/tokens.py#L25
-[^fn42]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/tokens.py#L47
-[^fn43]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L181
-[^fn44]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L791
-[^fn45]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/static/verify-ballot-hash.py#L65
-[^fn46]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/static/verify-ballot-chain.py#L47
-[^fn47]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/models.py#L1134
-[^fn48]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L469
-[^fn49]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L499
-[^fn50]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L623
-[^fn51]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L777
-[^fn52]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_meek.py#L611
-[^fn53]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_meek.py#L613
-[^fn54]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_meek.py#L58
-[^fn55]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_meek.py#L958
-[^fn56]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_meek.py#L912
-[^fn57]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_meek.py#L773
-[^fn58]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_meek.py#L681
-[^fn59]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_meek.py#L1068
-[^fn60]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_meek.py#L968
-[^fn61]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_meek.py#L531
-[^fn62]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_meek.py#L541
-[^fn63]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_meek.py#L1011
-[^fn64]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_meek.py#L626
-[^fn65]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/models.py#L1437
-[^fn66]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L800
-[^fn67]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_meek.py#L834
-[^fn68]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L243
-[^fn69]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/views_elections/audit.py#L84
-[^fn70]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/urls.py#L105
-[^fn71]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/views_elections/ballot_verify.py#L18 / https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/views_elections/ballot_verify.py#L26
-[^fn72]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/static/verify-ballot-chain.py#L147
-[^fn73]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/config/settings.py#L448
-[^fn74]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/models.py#L1121
-[^fn75]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/models.py#L1109
-[^fn76]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L84
-[^fn77]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L722
-[^fn78]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L906
-[^fn79]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L927
-[^fn80]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L817
-[^fn81]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L946
-[^fn82]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/views_elections/vote.py#L132
-[^fn83]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/views_elections/vote.py#L136
-[^fn84]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L86
-[^fn85]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L103
-[^fn86]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L372
-[^fn87]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/static/verify-ballot-hash.py#L49
-[^fn88]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/models.py#L1397
-[^fn89]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/models.py#L1270
-[^fn90]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/models.py#L1269
-[^fn91]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/views_elections/vote.py#L122
-[^fn92]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L657
-[^fn93]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/admin.py#L1516
-[^fn94]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L707
-[^fn95]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/models.py#L1372
-[^fn96]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/models.py#L1273
-[^fn97]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/admin.py#L1502
-[^fn98]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L705
-[^fn99]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L755
-[^fn100]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/models.py#L1199
-[^fn101]: https://github.com/AlmaLinux/astra/blob/089549a726552204126dca498f5f78ee56ca5e40/astra_app/core/elections_services.py#L848
-[^fn103]: astra_app/core/static/verify-audit-log.py
+[^fn1]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L39
+[^fn2]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L1033
+[^fn3]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L288
+[^fn4]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_meek.py#L8 / https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_meek.py#L614
+[^fn5]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/urls.py#L68
+[^fn6]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/views_elections/edit.py#L731
+[^fn7]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/views_elections/edit.py#L502
+[^fn8]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/urls.py#L88
+[^fn9]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/views_elections/vote.py#L203
+[^fn10]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/views_elections/lifecycle.py#L147
+[^fn11]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L897
+[^fn12]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L974
+[^fn13]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L293 / https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L1048
+[^fn14]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/views_elections/audit.py#L45
+[^fn15]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/views_elections/audit.py#L55
+[^fn16]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_eligibility.py#L69
+[^fn17]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_eligibility.py#L98
+[^fn18]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_eligibility.py#L106
+[^fn19]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_eligibility.py#L146
+[^fn20]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_eligibility.py#L321
+[^fn21]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_eligibility.py#L268 / https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_eligibility.py#L297
+[^fn22]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_eligibility.py#L332 / https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_eligibility.py#L348
+[^fn23]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_eligibility.py#L460
+[^fn24]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/config/settings.py#L836
+[^fn25]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_eligibility.py#L537 / https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_eligibility.py#L540
+[^fn26]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/views_elections/vote.py#L89
+[^fn27]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/views_elections/vote.py#L99
+[^fn28]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/views_elections/vote.py#L108
+[^fn29]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/views_elections/vote.py#L32
+[^fn30]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L557
+[^fn31]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L42 / https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L315
+[^fn32]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/models.py#L1438
+[^fn33]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/static/verify-ballot-hash.py#L66
+[^fn34]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L590
+[^fn35]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L601
+[^fn36]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L637 / https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L644
+[^fn37]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/models.py#L1391
+[^fn38]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L659
+[^fn39]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/views_elections/vote.py#L192
+[^fn40]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L372 / https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L411
+[^fn41]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/tokens.py#L25
+[^fn42]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/tokens.py#L47
+[^fn43]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L183
+[^fn44]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L932
+[^fn45]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/static/verify-ballot-hash.py#L70
+[^fn46]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/static/verify-ballot-chain.py#L47
+[^fn47]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/models.py#L1134
+[^fn48]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L498
+[^fn49]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L528 / https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L532
+[^fn50]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L674
+[^fn51]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L897
+[^fn52]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_meek.py#L617
+[^fn53]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_meek.py#L964
+[^fn54]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_meek.py#L88
+[^fn55]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_meek.py#L530
+[^fn56]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_meek.py#L921
+[^fn57]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_meek.py#L807
+[^fn58]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_meek.py#L687
+[^fn59]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_meek.py#L892 / https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_meek.py#L1076
+[^fn60]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_meek.py#L1004
+[^fn61]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_meek.py#L536 / https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_meek.py#L553
+[^fn62]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_meek.py#L548
+[^fn63]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_meek.py#L1017
+[^fn64]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_meek.py#L632
+[^fn65]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/models.py#L1450
+[^fn66]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L941
+[^fn67]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_meek.py#L832
+[^fn68]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L261 / https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_timestamping.py#L37
+[^fn69]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/views_elections/audit.py#L84 / https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/views_elections/audit.py#L87
+[^fn70]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/urls.py#L115
+[^fn71]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/views_elections/ballot_verify.py#L19 / https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/views_elections/ballot_verify.py#L26
+[^fn72]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/static/verify-ballot-chain.py#L146 / https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/static/verify-ballot-chain.py#L147
+[^fn73]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/config/settings.py#L450
+[^fn74]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/models.py#L1126
+[^fn75]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/models.py#L1109
+[^fn76]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L72
+[^fn77]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L813
+[^fn78]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L1093
+[^fn79]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L959
+[^fn80]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L1073
+[^fn81]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L959
+[^fn82]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/views_elections/vote.py#L132
+[^fn83]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/views_elections/vote.py#L132
+[^fn84]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L72
+[^fn85]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L108
+[^fn86]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L397
+[^fn87]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/static/verify-ballot-hash.py#L32
+[^fn88]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/models.py#L1391
+[^fn89]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/models.py#L1362
+[^fn90]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/models.py#L1283
+[^fn91]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/views_elections/vote.py#L129
+[^fn92]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L854 / https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L862
+[^fn93]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/admin.py#L1522 / https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/admin.py#L1532
+[^fn94]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L769
+[^fn95]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/models.py#L1385
+[^fn96]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/models.py#L1286
+[^fn98]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L800
+[^fn99]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L798
+[^fn100]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/models.py#L1199
+[^fn101]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L990
+[^fn103]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/static/verify-audit-log.py#L32 / https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/static/verify-audit-log.py#L154
