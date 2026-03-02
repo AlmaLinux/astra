@@ -386,6 +386,41 @@ class ElectionVoteWeightsTests(TestCase):
         self.assertEqual(org_lines[0].votes, 5)
         self.assertEqual(org_lines[0].org_name, "ACME")
 
+    def test_vote_weight_breakdown_ignores_org_memberships_without_org_category(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Breakdown org category test",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+
+        misclassified_type = MembershipType.objects.create(
+            code="individual-misclassified-org",
+            name="Individual Misclassified",
+            votes=5,
+            category_id="individual",
+            enabled=True,
+        )
+
+        org = Organization.objects.create(
+            name="Acme",
+            representative="alice",
+        )
+        membership = Membership.objects.create(
+            target_organization=org,
+            membership_type=misclassified_type,
+            expires_at=None,
+        )
+        Membership.objects.filter(pk=membership.pk).update(
+            created_at=election.start_datetime - datetime.timedelta(days=10)
+        )
+
+        breakdown = vote_weight_breakdown_for_username(election=election, username="alice")
+        self.assertEqual(breakdown, [])
+
     @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=14)
     def test_breakdown_uses_election_start_reference_for_membership_age(self) -> None:
         now = timezone.now()

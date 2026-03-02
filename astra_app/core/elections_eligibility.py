@@ -418,6 +418,7 @@ def vote_weight_breakdown_for_username(*, election: Election, username: str) -> 
             target_organization__representative__iexact=username_lower,
             membership_type__enabled=True,
             membership_type__votes__gt=0,
+            membership_type__category__is_organization=True,
         )
         .order_by(
             "membership_type__category__sort_order",

@@ -158,6 +158,38 @@ class MembershipTypeCategory(models.Model):
     def __str__(self) -> str:
         return self.name
 
+    @override
+    def clean(self) -> None:
+        super().clean()
+
+        # The Django admin validates models via full_clean(), so this blocks
+        # admin edits that would make existing Membership rows inconsistent.
+        if self._state.adding:
+            return
+
+        if not self.is_organization and Membership.objects.filter(
+            target_organization__isnull=False,
+            membership_type__category=self,
+        ).exists():
+            raise ValidationError(
+                {
+                    "is_organization": (
+                        "Cannot disable organization targeting while organization memberships exist in this category."
+                    )
+                }
+            )
+
+        if not self.is_individual and Membership.objects.exclude(target_username="").filter(
+            membership_type__category=self,
+        ).exists():
+            raise ValidationError(
+                {
+                    "is_individual": (
+                        "Cannot disable individual targeting while user memberships exist in this category."
+                    )
+                }
+            )
+
 
 class MembershipTypeQuerySet(models.QuerySet["MembershipType"]):
     def enabled(self) -> MembershipTypeQuerySet:
@@ -203,6 +235,38 @@ class MembershipType(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name}"
+
+    @override
+    def clean(self) -> None:
+        super().clean()
+
+        # Prevent admin edits that would reclassify a membership type into a
+        # category that cannot represent the existing Membership targets.
+        if self._state.adding:
+            return
+
+        if not self.category.is_organization and Membership.objects.filter(
+            membership_type=self,
+            target_organization__isnull=False,
+        ).exists():
+            raise ValidationError(
+                {
+                    "category": (
+                        "This membership type has organization memberships, so it cannot be moved to a non-organization category."
+                    )
+                }
+            )
+
+        if not self.category.is_individual and Membership.objects.exclude(target_username="").filter(
+            membership_type=self,
+        ).exists():
+            raise ValidationError(
+                {
+                    "category": (
+                        "This membership type has user memberships, so it cannot be moved to a non-individual category."
+                    )
+                }
+            )
 
 
 class Organization(models.Model):
