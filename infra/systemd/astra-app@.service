@@ -11,7 +11,7 @@ NotifyAccess=all
 EnvironmentFile=/etc/astra/astra.env
 TimeoutStartSec=600
 ExecStartPre=-/usr/bin/podman rm -f astra-app-%i
-ExecStart=/usr/bin/podman run --rm --log-driver=journald --sdnotify=container --name astra-app-%i --env-file /etc/astra/astra.env -p 127.0.0.1:800%i:8000 ${APP_IMAGE}
+ExecStart=/usr/bin/podman run --rm --log-driver=journald --sdnotify=container --name astra-app-%i --env-file /etc/astra/astra.env -v /etc/astra/rekor-signing-key.pem:/etc/astra/rekor-signing-key.pem:ro -p 127.0.0.1:800%i:8000 ${APP_IMAGE}
 ExecStop=/usr/bin/podman stop -t 10 astra-app-%i
 Restart=always
 RestartSec=5
