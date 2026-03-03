@@ -42,8 +42,8 @@ expected_ballot_hash = "your-ballot-hash-from-receipt-email"
 # ===== END OF USER INPUT =====
 
 
-import hashlib
-import json
+import hashlib  # noqa: E402
+import json  # noqa: E402
 
 
 def compute_ballot_hash(

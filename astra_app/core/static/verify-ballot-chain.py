@@ -29,8 +29,8 @@ ballots_file = "public-ballots.json"
 # ===== END OF USER INPUT =====
 
 
-import hashlib
-import json
+import hashlib  # noqa: E402
+import json  # noqa: E402
 
 
 def compute_genesis_hash(election_id: int) -> str:

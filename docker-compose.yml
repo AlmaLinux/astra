@@ -90,9 +90,9 @@ services:
       - DEBUG=True
       - SECRET_KEY=dev_secret_key
       # Error reporting (Bugsink is Sentry-compatible). Get the DSN from Bugsink UI.
-      - SENTRY_DSN=http://fed1fa2cb35545a0873e5a36b5865bb8@bugsink:8080/1
-      - SENTRY_ENVIRONMENT=development
-      - SENTRY_RELEASE=dev
+      # - SENTRY_DSN=http://fed1fa2cb35545a0873e5a36b5865bb8@bugsink:8080/1
+      # - SENTRY_ENVIRONMENT=development
+      # - SENTRY_RELEASE=dev
       # - SENTRY_SEND_DEFAULT_PII=False
       #- DJANGO_AUTO_MIGRATE=1
       - DATABASE_URL=postgres://postgres:postgres@almalinux_db2:5432/almalinux_members

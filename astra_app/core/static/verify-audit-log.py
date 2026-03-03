@@ -22,11 +22,11 @@ audit_file: str = "public-audit.json"
 verify_rekor_online: bool = True
 # ===== END OF USER INPUT =====
 
-import base64
-import datetime
-import hashlib
-import json
-from urllib import request as _urllib_request
+import base64  # noqa: E402
+import datetime  # noqa: E402
+import hashlib  # noqa: E402
+import json  # noqa: E402
+from urllib import request as _urllib_request  # noqa: E402
 
 
 def _canonical_bytes(*, event_type: object, payload: object) -> bytes:
