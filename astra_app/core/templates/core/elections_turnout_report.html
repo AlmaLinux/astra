@@ -1,0 +1,103 @@
+{% extends 'core/base.html' %}
+{% load static %}
+
+{% block title %}Election Turnout Report{% endblock %}
+
+{% block header %}
+  <div class="d-flex align-items-center justify-content-between">
+    <h1 class="m-0">Election turnout report</h1>
+    <a class="btn btn-outline-secondary" href="{% url 'elections' %}" title="Back to elections">Back to elections</a>
+  </div>
+{% endblock %}
+
+{% block content %}
+  <div class="row">
+    <div class="col-12">
+      <div class="card card-outline card-primary">
+        <div class="card-header">
+          <h3 class="card-title">Cross-election turnout comparison</h3>
+        </div>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-striped table-hover mb-0">
+              <thead>
+                <tr>
+                  <th>Election</th>
+                  <th>Start date</th>
+                  <th>Status</th>
+                  <th class="text-right">Eligible voters</th>
+                  <th class="text-right">Eligible weight</th>
+                  <th class="text-right">Participating voters</th>
+                  <th class="text-right">Participating weight</th>
+                  <th class="text-right">Turnout % (count)</th>
+                  <th class="text-right">Turnout % (weight)</th>
+                  <th class="text-right">Candidates / seats</th>
+                  <th class="text-right">Contest ratio</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in report_rows %}
+                  <tr>
+                    <td><a href="{% url 'election-detail' row.election.id %}">{{ row.election.name }}</a></td>
+                    <td>{{ row.election.start_datetime|date:"Y-m-d" }}</td>
+                    <td>{{ row.election.status }}</td>
+                    <td class="text-right">{{ row.eligible_count }}</td>
+                    <td class="text-right">{{ row.eligible_weight }}</td>
+                    <td class="text-right">{{ row.participating_count }}</td>
+                    <td class="text-right">{{ row.participating_weight }}</td>
+                    <td class="text-right">
+                      {% if row.credentials_issued %}
+                        {{ row.turnout_count_pct }}%
+                      {% else %}
+                        <span class="text-muted">credentials not yet issued</span>
+                      {% endif %}
+                    </td>
+                    <td class="text-right">
+                      {% if row.credentials_issued %}
+                        {{ row.turnout_weight_pct }}%
+                      {% else %}
+                        <span class="text-muted">credentials not yet issued</span>
+                      {% endif %}
+                    </td>
+                    <td class="text-right">{{ row.candidates_count }} / {{ row.seats }}</td>
+                    <td class="text-right">{{ row.contest_ratio }}</td>
+                  </tr>
+                {% empty %}
+                  <tr>
+                    <td colspan="11" class="text-center text-muted">No non-draft elections are available yet.</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if report_rows %}
+    <div class="row">
+      <div class="col-12">
+        <div class="card card-outline card-secondary">
+          <div class="card-header">
+            <h3 class="card-title">Turnout trend by election</h3>
+          </div>
+          <div class="card-body">
+            {{ chart_data|json_script:"elections-turnout-report-chart-data" }}
+            <div class="chart">
+              <canvas id="elections-turnout-report-chart" style="min-height: 320px; height: 320px; max-height: 320px; max-width: 100%;"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+{% endblock %}
+
+{% block scripts %}
+  {{ block.super }}
+  {% if report_rows %}
+    <script src="{% static 'core/vendor/chartjs/chart.umd.min.js' %}"></script>
+    <script src="{% static 'core/js/elections_turnout_report.js' %}"></script>
+  {% endif %}
+{% endblock %}

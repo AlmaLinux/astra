@@ -66,6 +66,11 @@ urlpatterns = [
     path("robots.txt", views_static.robots_txt, name="robots-txt"),
 
     path("elections/", views_elections.elections_list, name="elections"),
+    path(
+        "elections/reports/turnout/",
+        views_elections.elections_turnout_report,
+        name="elections-turnout-report",
+    ),
     path("elections/algorithm/", views_elections.election_algorithm, name="election-algorithm"),
     path("elections/ballot/verify/", views_elections.ballot_verify, name="ballot-verify"),
     path("elections/<int:election_id>/edit/", views_elections.election_edit, name="election-edit"),

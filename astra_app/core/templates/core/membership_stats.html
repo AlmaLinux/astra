@@ -22,6 +22,19 @@
 
 {% block content %}
 <div id="membership-stats-root" data-url="{{ stats_data_url }}">
+  <div class="row mb-3">
+    <div class="col-12">
+      <div class="d-flex align-items-baseline flex-wrap gap-2">
+        <div class="btn-group" role="group" aria-label="Membership stats date range presets">
+          {% for preset_key, preset_label in days_presets %}
+          <a class="btn {% if current_days == preset_key %}btn-primary{% else %}btn-outline-secondary{% endif %}" href="?days={{ preset_key }}">{{ preset_label }}</a>
+          {% endfor %}
+        </div>
+        <small class="text-muted ml-3">Affects approval time cards, Requests Trend, and Decision Outcomes.</small>
+      </div>
+    </div>
+  </div>
+
   <div class="row membership-stats-summary">
     <div class="col-12 col-sm-6 col-md-4 membership-stats-summary-col">
       <div class="info-box">
@@ -85,6 +98,94 @@
   </div>
 
   <div class="row">
+    <div class="col-12 col-md-4">
+      <div class="info-box">
+        <span class="info-box-icon bg-success"><i class="fas fa-stopwatch"></i></span>
+        <div class="info-box-content">
+          <span class="info-box-text">Approval Time (Mean)<br><small class="text-muted font-weight-normal">{% if current_days == 'all' %}All time{% else %}Last {{ current_days }} days{% endif %}</small></span>
+          <span class="info-box-number" data-stat-key="approval_time_mean_hours">
+            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12 col-md-4">
+      <div class="info-box">
+        <span class="info-box-icon bg-success"><i class="fas fa-ruler-combined"></i></span>
+        <div class="info-box-content">
+          <span class="info-box-text">Approval Time (Median)<br><small class="text-muted font-weight-normal">{% if current_days == 'all' %}All time{% else %}Last {{ current_days }} days{% endif %}</small></span>
+          <span class="info-box-number" data-stat-key="approval_time_median_hours">
+            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12 col-md-4">
+      <div class="info-box">
+        <span class="info-box-icon bg-success"><i class="fas fa-chart-line"></i></span>
+        <div class="info-box-content">
+          <span class="info-box-text">Approval Time (P90)<br><small class="text-muted font-weight-normal">{% if current_days == 'all' %}All time{% else %}Last {{ current_days }} days{% endif %}</small></span>
+          <span class="info-box-number" data-stat-key="approval_time_p90_hours">
+            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="col-12 col-md-3">
+      <div class="info-box">
+        <span class="info-box-icon bg-primary"><i class="fas fa-layer-group"></i></span>
+        <div class="info-box-content">
+          <span class="info-box-text">Members Tracked (12m)</span>
+          <span class="info-box-number" data-stat-key="retention_cohorts_count">
+            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12 col-md-3">
+      <div class="info-box">
+        <span class="info-box-icon bg-success"><i class="fas fa-user-check"></i></span>
+        <div class="info-box-content">
+          <span class="info-box-text">Retained</span>
+          <span class="info-box-number" data-stat-key="retention_retained_count">
+            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12 col-md-3">
+      <div class="info-box">
+        <span class="info-box-icon bg-warning"><i class="fas fa-user-clock"></i></span>
+        <div class="info-box-content">
+          <span class="info-box-text">Lapsed Then Renewed</span>
+          <span class="info-box-number" data-stat-key="retention_lapsed_then_renewed_count">
+            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12 col-md-3">
+      <div class="info-box">
+        <span class="info-box-icon bg-danger"><i class="fas fa-user-times"></i></span>
+        <div class="info-box-content">
+          <span class="info-box-text">Lapsed (Not Renewed)</span>
+          <span class="info-box-number" data-stat-key="retention_lapsed_not_renewed_count">
+            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
     <div class="col-lg-6">
       <div class="card">
         <div class="card-header"><h3 class="card-title">Membership Types (Active)</h3></div>
@@ -102,7 +203,12 @@
 
     <div class="col-lg-6">
       <div class="card">
-        <div class="card-header"><h3 class="card-title">Requests Trend</h3></div>
+        <div class="card-header">
+          <h3 class="card-title">Requests Trend</h3>
+          <div class="card-tools">
+            <span class="badge badge-secondary">{% if current_days == 'all' %}All time{% else %}Last {{ current_days }} days{% endif %}</span>
+          </div>
+        </div>
         <div class="card-body" style="position: relative; min-height: 320px;">
           <div class="d-flex align-items-center justify-content-center" data-chart-loading="requests-trend" style="position:absolute; inset:0;">
             <div class="text-center">
@@ -119,7 +225,12 @@
   <div class="row">
     <div class="col-lg-6">
       <div class="card">
-        <div class="card-header"><h3 class="card-title">Decision Outcomes</h3></div>
+        <div class="card-header">
+          <h3 class="card-title">Decision Outcomes</h3>
+          <div class="card-tools">
+            <span class="badge badge-secondary">{% if current_days == 'all' %}All time{% else %}Last {{ current_days }} days{% endif %}</span>
+          </div>
+        </div>
         <div class="card-body" style="position: relative; min-height: 320px;">
           <div class="d-flex align-items-center justify-content-center" data-chart-loading="decisions-trend" style="position:absolute; inset:0;">
             <div class="text-center">
@@ -151,7 +262,7 @@
   <div class="row">
     <div class="col-lg-6">
       <div class="card">
-        <div class="card-header"><h3 class="card-title">User Distribution by Country (All Users)</h3></div>
+        <div class="card-header"><h3 class="card-title">Country Code Distribution (All Active FreeIPA Users)</h3></div>
         <div class="card-body" style="position: relative; min-height: 320px;">
           <div class="d-flex align-items-center justify-content-center" data-chart-loading="nationality-all-users" style="position:absolute; inset:0;">
             <div class="text-center">
@@ -166,7 +277,7 @@
 
     <div class="col-lg-6">
       <div class="card">
-        <div class="card-header"><h3 class="card-title">Nationality (Active Members)</h3></div>
+        <div class="card-header"><h3 class="card-title">Country Code Distribution (Active Individual Members)</h3></div>
         <div class="card-body" style="position: relative; min-height: 320px;">
           <div class="d-flex align-items-center justify-content-center" data-chart-loading="nationality-active-members" style="position:absolute; inset:0;">
             <div class="text-center">
@@ -175,6 +286,23 @@
             </div>
           </div>
           <canvas id="nationality-active-members-chart" height="260"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="col-12">
+      <div class="card">
+        <div class="card-header"><h3 class="card-title">Member Renewal by Join Month</h3></div>
+        <div class="card-body" style="position: relative; min-height: 320px;">
+          <div class="d-flex align-items-center justify-content-center" data-chart-loading="retention-cohorts" style="position:absolute; inset:0;">
+            <div class="text-center">
+              <div class="spinner-border" role="status" aria-hidden="true"></div>
+              <div class="mt-2 text-muted">Loading…</div>
+            </div>
+          </div>
+          <canvas id="retention-cohorts-chart" height="260"></canvas>
         </div>
       </div>
     </div>

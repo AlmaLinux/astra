@@ -6,7 +6,10 @@
   <div class="d-flex align-items-center justify-content-between">
     <h1 class="m-0">Elections</h1>
     {% if can_manage_elections %}
-      <a class="btn btn-primary" href="{% url 'election-edit' 0 %}" title="Create a new election">New election</a>
+      <div class="btn-group">
+        <a class="btn btn-outline-secondary" href="{% url 'elections-turnout-report' %}" title="View turnout metrics across elections">Turnout report</a>
+        <a class="btn btn-primary" href="{% url 'election-edit' 0 %}" title="Create a new election">New election</a>
+      </div>
     {% endif %}
   </div>
 {% endblock %}

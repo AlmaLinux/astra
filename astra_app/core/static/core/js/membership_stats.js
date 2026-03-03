@@ -25,6 +25,35 @@
     el.textContent = String(value);
   }
 
+  function formatMetricValue(value) {
+    if (value === null || value === undefined || value === '') return 'N/A';
+    return String(value);
+  }
+
+  function formatHoursDuration(hours) {
+    if (hours === null || hours === undefined) return 'N/A';
+
+    var numericHours = Number(hours);
+    if (!Number.isFinite(numericHours) || Number.isNaN(numericHours)) return 'N/A';
+
+    if (numericHours < 24) {
+      var totalMinutes = Math.round(numericHours * 60);
+      if (totalMinutes >= 24 * 60) {
+        return (numericHours / 24).toFixed(1) + ' days';
+      }
+
+      var wholeHours = Math.floor(totalMinutes / 60);
+      var remainingMinutes = totalMinutes % 60;
+      return wholeHours + 'h ' + remainingMinutes + 'm';
+    }
+
+    if (numericHours < 168) {
+      return (numericHours / 24).toFixed(1) + ' days';
+    }
+
+    return (numericHours / 168).toFixed(1) + ' weeks';
+  }
+
   function get2dContext(canvasId) {
     var canvas = document.getElementById(canvasId);
     if (!canvas) return null;
@@ -136,6 +165,23 @@
     setSummaryValue('on_hold_requests', summary.on_hold_requests || 0);
     setSummaryValue('expiring_soon_90_days', summary.expiring_soon_90_days || 0);
 
+    var approval = summary.approval_time || {};
+    setSummaryValue('approval_time_mean_hours', formatHoursDuration(approval.mean_hours));
+    setSummaryValue('approval_time_median_hours', formatHoursDuration(approval.median_hours));
+    setSummaryValue('approval_time_p90_hours', formatHoursDuration(approval.p90_hours));
+
+    var retentionSummary = summary.retention_cohort_12m || {};
+    setSummaryValue('retention_cohorts_count', formatMetricValue(retentionSummary.cohorts || 0));
+    setSummaryValue('retention_retained_count', formatMetricValue(retentionSummary.retained || 0));
+    setSummaryValue(
+      'retention_lapsed_then_renewed_count',
+      formatMetricValue(retentionSummary.lapsed_then_renewed || 0)
+    );
+    setSummaryValue(
+      'retention_lapsed_not_renewed_count',
+      formatMetricValue(retentionSummary.lapsed_not_renewed || 0)
+    );
+
     var charts = payload && payload.charts ? payload.charts : {};
 
     var types = charts.membership_types || { labels: [], counts: [] };
@@ -164,7 +210,7 @@
         'nationality-all-users-chart',
         natAll.labels || [],
         natAll.counts || [],
-        'Nationality (all users)'
+        'Country code (all active FreeIPA users)'
       );
     }, 'nationality-all-users');
 
@@ -174,9 +220,35 @@
         'nationality-active-members-chart',
         natMem.labels || [],
         natMem.counts || [],
-        'Nationality (active members)'
+        'Country code (active individual members)'
       );
     }, 'nationality-active-members');
+
+    var retentionCohorts = charts.retention_cohorts_12m || {
+      labels: [],
+      retained: [],
+      lapsed_then_renewed: [],
+      lapsed_not_renewed: [],
+    };
+    renderChartSafely(function () {
+      renderStackedBar('retention-cohorts-chart', retentionCohorts.labels || [], [
+        {
+          label: 'Retained',
+          data: retentionCohorts.retained || [],
+          backgroundColor: 'rgba(40,167,69,0.75)',
+        },
+        {
+          label: 'Lapsed then renewed',
+          data: retentionCohorts.lapsed_then_renewed || [],
+          backgroundColor: 'rgba(255,193,7,0.8)',
+        },
+        {
+          label: 'Lapsed (not renewed)',
+          data: retentionCohorts.lapsed_not_renewed || [],
+          backgroundColor: 'rgba(220,53,69,0.75)',
+        },
+      ]);
+    }, 'retention-cohorts');
   }
 
   function init() {
@@ -203,6 +275,7 @@
         hideLoading('expirations-upcoming');
         hideLoading('nationality-all-users');
         hideLoading('nationality-active-members');
+        hideLoading('retention-cohorts');
       });
   }
 

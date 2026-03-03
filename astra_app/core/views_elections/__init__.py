@@ -21,6 +21,7 @@ from core.views_elections.lifecycle import (
     election_extend_end,
     election_send_mail_credentials,
 )
+from core.views_elections.reporting import elections_turnout_report
 from core.views_elections.search import (
     election_eligible_users_search,
     election_email_render_preview,
@@ -44,5 +45,6 @@ __all__ = [
     "election_send_mail_credentials",
     "election_vote",
     "election_vote_submit",
+    "elections_turnout_report",
     "elections_list",
 ]
