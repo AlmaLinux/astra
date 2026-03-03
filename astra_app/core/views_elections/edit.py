@@ -13,6 +13,7 @@ from django.utils import timezone
 from post_office.models import EmailTemplate
 
 from core import elections_eligibility, elections_services
+from core import signals as astra_signals
 from core.elections_eligibility import ElectionEligibilityError
 from core.elections_services import (
     election_genesis_chain_hash,
@@ -504,6 +505,18 @@ def _handle_start_election(
             is_public=True,
         )
         schedule_attestation(audit_entry)
+
+        opened_election_id = locked.id
+
+        def _send_opened_signal() -> None:
+            committed_election = Election.objects.get(pk=opened_election_id)
+            astra_signals.election_opened.send(
+                sender=Election,
+                election=committed_election,
+                actor=username,
+            )
+
+        transaction.on_commit(_send_opened_signal)
 
     if emailed:
         messages.success(request, f"Election started; emailed {emailed} voter(s).")

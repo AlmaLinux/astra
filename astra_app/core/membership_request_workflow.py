@@ -10,6 +10,7 @@ from django.db.models import QuerySet
 from django.utils import timezone
 from post_office.models import EmailTemplate
 
+from core import signals as astra_signals
 from core.agreements import missing_required_agreements_for_user_in_group
 from core.email_context import (
     freeform_message_email_context,
@@ -253,6 +254,45 @@ def _create_status_change_log(
     return log
 
 
+def _emit_membership_request_signal_on_commit(
+    *,
+    membership_request: MembershipRequest,
+    actor_username: str,
+    user_signal: object,
+    organization_signal: object,
+) -> None:
+    request_id = membership_request.pk
+    if request_id is None:
+        return
+
+    if membership_request.is_organization_target:
+        organization_id = membership_request.requested_organization_id
+        organization_display_name = membership_request.organization_display_name
+
+        def _send_org_signal() -> None:
+            committed_request = MembershipRequest.objects.get(pk=request_id)
+            organization_signal.send(
+                sender=MembershipRequest,
+                membership_request=committed_request,
+                actor=actor_username,
+                organization_id=organization_id,
+                organization_display_name=organization_display_name,
+            )
+
+        transaction.on_commit(_send_org_signal)
+        return
+
+    def _send_user_signal() -> None:
+        committed_request = MembershipRequest.objects.get(pk=request_id)
+        user_signal.send(
+            sender=MembershipRequest,
+            membership_request=committed_request,
+            actor=actor_username,
+        )
+
+    transaction.on_commit(_send_user_signal)
+
+
 def previous_expires_at_for_extension(
     *,
     membership_request: MembershipRequest,
@@ -362,6 +402,13 @@ def record_membership_request_created(
             )
             raise
 
+        _emit_membership_request_signal_on_commit(
+            membership_request=membership_request,
+            actor_username=actor_username,
+            user_signal=astra_signals.membership_request_submitted,
+            organization_signal=astra_signals.organization_membership_request_submitted,
+        )
+
         if email_error is not None:
             raise email_error
         return
@@ -432,6 +479,13 @@ def record_membership_request_created(
             membership_type.code,
         )
         raise
+
+    _emit_membership_request_signal_on_commit(
+        membership_request=membership_request,
+        actor_username=actor_username,
+        user_signal=astra_signals.membership_request_submitted,
+        organization_signal=astra_signals.organization_membership_request_submitted,
+    )
 
     if email_error is not None:
         raise email_error
@@ -794,6 +848,13 @@ def approve_membership_request(
 
         transaction.on_commit(_on_commit_sync_representative_groups)
 
+    _emit_membership_request_signal_on_commit(
+        membership_request=membership_request,
+        actor_username=actor_username,
+        user_signal=astra_signals.membership_request_approved,
+        organization_signal=astra_signals.organization_membership_request_approved,
+    )
+
     return log
 
 
@@ -902,6 +963,14 @@ def reject_membership_request(
         email_kind="rejected",
         log_prefix=log_prefix,
     )
+
+    _emit_membership_request_signal_on_commit(
+        membership_request=membership_request,
+        actor_username=actor_username,
+        user_signal=astra_signals.membership_request_rejected,
+        organization_signal=astra_signals.organization_membership_request_rejected,
+    )
+
     return log, email_error
 
 
@@ -1090,6 +1159,13 @@ def put_membership_request_on_hold(
         log_prefix=log_prefix,
     )
 
+    _emit_membership_request_signal_on_commit(
+        membership_request=membership_request,
+        actor_username=actor_username,
+        user_signal=astra_signals.membership_rfi_sent,
+        organization_signal=astra_signals.organization_membership_rfi_sent,
+    )
+
     return log, email_error
 
 
@@ -1152,6 +1228,13 @@ def resubmit_membership_request(
         log_prefix="resubmit_membership_request",
     )
 
+    _emit_membership_request_signal_on_commit(
+        membership_request=membership_request,
+        actor_username=actor_username,
+        user_signal=astra_signals.membership_rfi_replied,
+        organization_signal=astra_signals.organization_membership_rfi_replied,
+    )
+
     return log
 
 
@@ -1185,6 +1268,13 @@ def rescind_membership_request(
         username=actor_username,
         action={"type": "request_rescinded"},
         log_prefix="rescind_membership_request",
+    )
+
+    _emit_membership_request_signal_on_commit(
+        membership_request=membership_request,
+        actor_username=actor_username,
+        user_signal=astra_signals.membership_request_rescinded,
+        organization_signal=astra_signals.organization_membership_request_rescinded,
     )
 
     return log

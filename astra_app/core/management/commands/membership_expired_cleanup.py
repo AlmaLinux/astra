@@ -6,6 +6,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
+from core import signals as astra_signals
 from core.email_context import (
     organization_email_context_from_organization,
     organization_sponsor_email_context,
@@ -319,3 +320,8 @@ class Command(BaseCommand):
         else:
             self.stdout.write(membership_summary)
             self.stdout.write(sponsorship_summary)
+            astra_signals.membership_expired.send(
+                sender=astra_signals.MembershipExpirationCommand,
+                count=removed + sponsorship_removed,
+                membership_type="all",
+            )

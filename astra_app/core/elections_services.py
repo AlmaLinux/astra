@@ -17,6 +17,7 @@ from django.urls import reverse
 from django.utils import timezone
 from post_office.models import Email
 
+from core import signals as astra_signals
 from core.elections_eligibility import eligible_voters_from_memberships
 from core.elections_timestamping import get_public_payload, schedule_attestation
 from core.email_context import (
@@ -110,6 +111,22 @@ def extend_election_end_datetime(
         is_public=True,
     )
     schedule_attestation(audit_entry)
+
+    extended_election_id = locked.id
+    previous_end_datetime = old_end
+    new_end_datetime_value = new_end_datetime
+
+    def _send_deadline_extended_signal() -> None:
+        committed_election = Election.objects.get(pk=extended_election_id)
+        astra_signals.election_deadline_extended.send(
+            sender=Election,
+            election=committed_election,
+            actor=actor,
+            previous_end_datetime=previous_end_datetime,
+            new_end_datetime=new_end_datetime_value,
+        )
+
+    transaction.on_commit(_send_deadline_extended_signal)
 
 
 @dataclass(frozen=True)
@@ -676,6 +693,11 @@ def submit_ballot(*, election: Election, credential_public_id: str, ranking: lis
                 )
                 if created or not quorum_entry.rekor_log_id:
                     schedule_attestation(quorum_entry)
+                if created:
+                    astra_signals.election_quorum_met.send(
+                        sender=Election,
+                        election=committed_election,
+                    )
         except Exception:
             logger.exception(
                 "Deferred quorum evaluation failed for election_id=%s",
@@ -943,6 +965,18 @@ def close_election(*, election: Election, actor: str | None = None) -> None:
                 is_public=True,
             )
             schedule_attestation(audit_entry)
+
+            closed_election_id = election.id
+
+            def _send_closed_signal() -> None:
+                committed_election = Election.objects.get(pk=closed_election_id)
+                astra_signals.election_closed.send(
+                    sender=Election,
+                    election=committed_election,
+                    actor=actor,
+                )
+
+            transaction.on_commit(_send_closed_signal)
     except ElectionError:
         raise
     except Exception as exc:
@@ -1075,6 +1109,18 @@ def tally_election(*, election: Election, actor: str | None = None) -> dict[str,
                 is_public=True,
             )
             schedule_attestation(tally_completed_entry)
+
+            tallied_election_id = election.id
+
+            def _send_tallied_signal() -> None:
+                committed_election = Election.objects.get(pk=tallied_election_id)
+                astra_signals.election_tallied.send(
+                    sender=Election,
+                    election=committed_election,
+                    actor=actor,
+                )
+
+            transaction.on_commit(_send_tallied_signal)
 
             return result
     except ElectionError:

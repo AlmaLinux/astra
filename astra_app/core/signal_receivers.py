@@ -1,0 +1,53 @@
+"""Signal receiver registry.
+
+Import this module in CoreConfig.ready() to connect all receivers.
+"""
+
+import functools
+import logging
+import time
+from collections.abc import Callable
+from typing import Any
+
+from core import signal_debug  # noqa: F401
+
+logger = logging.getLogger("core.signal_receivers")
+
+
+def safe_receiver(event_key: str) -> Callable[[Callable[..., Any]], Callable[..., None]]:
+    """Wrap a signal receiver so failures are logged and never propagated."""
+
+    def decorator(fn: Callable[..., Any]) -> Callable[..., None]:
+        @functools.wraps(fn)
+        def wrapper(*args: Any, **kwargs: Any) -> None:
+            started_at = time.monotonic()
+            try:
+                fn(*args, **kwargs)
+            except Exception as exc:
+                duration_ms = round((time.monotonic() - started_at) * 1000, 1)
+                logger.error(
+                    "receiver.error",
+                    extra={
+                        "receiver": fn.__qualname__,
+                        "event_key": event_key,
+                        "exc_type": type(exc).__name__,
+                        "exc_message": str(exc),
+                        "duration_ms": duration_ms,
+                    },
+                    exc_info=True,
+                )
+                return
+
+            duration_ms = round((time.monotonic() - started_at) * 1000, 1)
+            logger.debug(
+                "receiver.ok",
+                extra={
+                    "receiver": fn.__qualname__,
+                    "event_key": event_key,
+                    "duration_ms": duration_ms,
+                },
+            )
+
+        return wrapper
+
+    return decorator

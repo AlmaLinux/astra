@@ -14,6 +14,7 @@ from django.utils import timezone
 from django.utils.html import format_html
 from django.views.decorators.http import require_GET
 
+from core import signals as astra_signals
 from core.forms_organizations import OrganizationEditForm
 from core.freeipa.user import FreeIPAUser
 from core.freeipa_directory import search_freeipa_users
@@ -158,6 +159,18 @@ def organization_claim(request: HttpRequest, token: str) -> HttpResponse:
                 accepted_at=claim_completed_at,
                 accepted_username=normalized_username,
             )
+
+            claimed_organization_id = locked_organization.id
+
+            def _send_organization_claimed_signal() -> None:
+                committed_organization = Organization.objects.get(pk=claimed_organization_id)
+                astra_signals.organization_claimed.send(
+                    sender=Organization,
+                    organization=committed_organization,
+                    actor=username,
+                )
+
+            transaction.on_commit(_send_organization_claimed_signal)
     except IntegrityError:
         messages.error(
             request,
@@ -387,6 +400,19 @@ def organization_create(request: HttpRequest) -> HttpResponse:
                         ),
                     )
                 return _render_org_form(request, form, organization=None, is_create=True)
+
+            created_organization_id = organization.id
+
+            def _send_organization_created_signal() -> None:
+                committed_organization = Organization.objects.get(pk=created_organization_id)
+                astra_signals.organization_created.send(
+                    sender=Organization,
+                    organization=committed_organization,
+                    actor=username,
+                )
+
+            transaction.on_commit(_send_organization_created_signal)
+
             messages.success(request, "Organization created.")
             if organization.representative == username:
                 return redirect("organization-membership-request", organization_id=organization.pk)

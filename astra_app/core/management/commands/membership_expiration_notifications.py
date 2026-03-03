@@ -8,6 +8,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
+from core import signals as astra_signals
 from core.email_context import user_email_context_from_user
 from core.freeipa.user import FreeIPAUser
 from core.ipa_user_attrs import _first
@@ -209,3 +210,8 @@ class Command(BaseCommand):
             self.stdout.write(f"[dry-run] {summary}")
         else:
             self.stdout.write(summary)
+            astra_signals.membership_expiring_soon.send(
+                sender=astra_signals.MembershipExpirationCommand,
+                count=queued,
+                membership_type="all",
+            )

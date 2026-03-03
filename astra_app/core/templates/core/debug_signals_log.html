@@ -1,0 +1,197 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Signals Debug Log{% endblock %}
+
+{% block header %}
+  <h1 class="m-0">Signals Debug Log</h1>
+{% endblock %}
+
+{% block content %}
+  {# ---- Compose & send ---- #}
+  <div class="card card-outline card-warning mb-4">
+    <div class="card-header">
+      <h3 class="card-title">Send a Signal</h3>
+    </div>
+    <div class="card-body">
+      <p class="text-muted small">
+        Manually dispatch a debug signal to all connected receivers in this process.
+        Useful for smoke-testing a receiver without triggering real business logic.
+      </p>
+      <form id="signal-send-form">
+        {% csrf_token %}
+        <div class="form-group">
+          <label for="event-key-select">Event key</label>
+          <select id="event-key-select" name="event_key" class="form-control form-control-sm" required>
+            <option value="" disabled selected>— select an event key —</option>
+            {% for key in event_keys %}
+              <option value="{{ key }}">{{ key }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="kwargs-json">
+            Kwargs <span class="text-muted small">(JSON object — merged with <code>actor</code>, <code>debug</code>, <code>event_key</code>)</span>
+          </label>
+          <textarea id="kwargs-json" name="kwargs_json" class="form-control form-control-sm"
+                    rows="6" placeholder="{}"
+                    style="font-family: monospace; font-size: 0.85em;"></textarea>
+          <small class="form-text text-muted">
+            Selecting an event key above auto-fills a template. Edit freely. Scalars only — ORM instances are not available in this debug form.
+          </small>
+        </div>
+        <button type="submit" class="btn btn-sm btn-warning">Send</button>
+      </form>
+      <div id="signal-send-result" class="mt-2" style="display:none;"></div>
+    </div>
+  </div>
+
+  {# ---- Ring-buffer log ---- #}
+  <div class="card card-outline card-info">
+    <div class="card-header">
+      <h3 class="card-title">Recent Emissions</h3>
+      <div class="card-tools">
+        <a href="{% url 'signals-log-debug' %}" class="btn btn-sm btn-default" title="Refresh">
+          <i class="fas fa-sync-alt"></i> Refresh
+        </a>
+      </div>
+    </div>
+    <div class="card-body">
+      <p class="text-muted small">
+        Per-process and ephemeral - entries are not shared across workers and are cleared on restart.
+      </p>
+      <div class="table-responsive" id="signal-log-table">
+        <table class="table table-sm table-striped">
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Signal</th>
+              <th>Sender</th>
+              <th>Kwargs</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in log %}
+              <tr>
+                <td>{{ entry.timestamp }}</td>
+                <td><code>{{ entry.signal }}</code></td>
+                <td>{{ entry.sender }}</td>
+                <td><pre class="mb-0" style="font-size:0.8em;">{{ entry.kwargs }}</pre></td>
+              </tr>
+            {% empty %}
+              <tr>
+                <td colspan="4" class="text-muted">No signal emissions captured in this process yet.</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      var form = document.getElementById('signal-send-form');
+      var resultBox = document.getElementById('signal-send-result');
+      var kwargsArea = document.getElementById('kwargs-json');
+      var select = document.getElementById('event-key-select');
+
+      // Per-signal kwargs templates (scalar placeholders matching the canonical registry spec).
+      var TEMPLATES = {
+        election_opened:            { actor: "username" },
+        election_closed:            { actor: "username" },
+        election_tallied:           { actor: "username" },
+        election_deadline_extended: { actor: "username", previous_end_datetime: "2026-01-01T00:00:00Z", new_end_datetime: "2026-06-01T00:00:00Z" },
+        election_quorum_met:        {},
+        membership_request_submitted:  { actor: "username" },
+        membership_request_approved:   { actor: "username" },
+        membership_request_rejected:   { actor: "username" },
+        membership_request_rescinded:  { actor: "username" },
+        membership_rfi_sent:           { actor: "username" },
+        membership_rfi_replied:        { actor: "username" },
+        membership_expiring_soon:      { count: 5, membership_type: "full" },
+        membership_expired:            { count: 5, membership_type: "full" },
+        organization_membership_request_submitted:  { actor: "username", organization_id: 1, organization_display_name: "Example Org" },
+        organization_membership_request_approved:   { actor: "username", organization_id: 1, organization_display_name: "Example Org" },
+        organization_membership_request_rejected:   { actor: "username", organization_id: 1, organization_display_name: "Example Org" },
+        organization_membership_request_rescinded:  { actor: "username", organization_id: 1, organization_display_name: "Example Org" },
+        organization_membership_rfi_sent:           { actor: "username", organization_id: 1, organization_display_name: "Example Org" },
+        organization_membership_rfi_replied:        { actor: "username", organization_id: 1, organization_display_name: "Example Org" },
+        organization_claimed: { actor: "username" },
+        organization_created: { actor: "username" },
+      };
+
+      select.addEventListener('change', function () {
+        var tpl = TEMPLATES[select.value];
+        kwargsArea.value = tpl !== undefined ? JSON.stringify(tpl, null, 2) : '{}';
+      });
+
+      function getCsrfToken() {
+        var name = 'csrftoken';
+        var cookies = document.cookie.split(';');
+        for (var i = 0; i < cookies.length; i++) {
+          var c = cookies[i].trim();
+          if (c.startsWith(name + '=')) {
+            return decodeURIComponent(c.slice(name.length + 1));
+          }
+        }
+        var input = form.querySelector('[name=csrfmiddlewaretoken]');
+        return input ? input.value : '';
+      }
+
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var eventKey = select ? select.value : '';
+        if (!eventKey) { return; }
+
+        // Basic client-side JSON validation before sending.
+        var kwargsRaw = kwargsArea.value.trim();
+        if (kwargsRaw) {
+          try { JSON.parse(kwargsRaw); } catch (ex) {
+            resultBox.style.display = 'block';
+            resultBox.innerHTML = '<div class="alert alert-danger py-1 mb-0">Invalid JSON: ' + escHtml(String(ex)) + '</div>';
+            return;
+          }
+        }
+
+        var body = new URLSearchParams();
+        body.append('event_key', eventKey);
+        body.append('kwargs_json', kwargsRaw || '{}');
+        body.append('csrfmiddlewaretoken', getCsrfToken());
+
+        fetch('{% url "signals-send-debug" %}', {
+          method: 'POST',
+          headers: { 'X-CSRFToken': getCsrfToken(), 'X-Requested-With': 'XMLHttpRequest' },
+          body: body,
+        })
+        .then(function (resp) {
+          return resp.json().then(function (data) { return { ok: resp.ok, data: data }; });
+        })
+        .then(function (result) {
+          resultBox.style.display = 'block';
+          if (result.ok) {
+            resultBox.innerHTML =
+              '<div class="alert alert-success py-1 mb-0">Sent <strong>' +
+              escHtml(result.data.event_key) + '</strong>. Kwargs: ' +
+              escHtml(result.data.kwargs.join(', ')) +
+              '. <a href="{% url "signals-log-debug" %}">Refresh</a> to see it in the log.</div>';
+          } else {
+            resultBox.innerHTML =
+              '<div class="alert alert-danger py-1 mb-0">Error: ' +
+              escHtml((result.data && result.data.error) ? result.data.error : 'Unknown error') +
+              '</div>';
+          }
+        })
+        .catch(function (err) {
+          resultBox.style.display = 'block';
+          resultBox.innerHTML = '<div class="alert alert-danger py-1 mb-0">Request failed: ' + escHtml(String(err)) + '</div>';
+        });
+      });
+
+      function escHtml(str) {
+        return String(str)
+          .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      }
+    })();
+  </script>
+{% endblock %}

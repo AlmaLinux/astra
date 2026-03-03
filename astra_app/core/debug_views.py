@@ -6,8 +6,9 @@ from django.contrib.auth.decorators import user_passes_test
 from django.core.cache import caches
 from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import render
-from django.views.decorators.http import require_GET
+from django.views.decorators.http import require_GET, require_http_methods
 
+from core import signals as astra_signals
 from core.elections_meek import tally_meek
 from core.elections_sankey import build_sankey_flows
 from core.views_utils import _normalize_str
@@ -219,3 +220,64 @@ def sankey_debug_view(request: HttpRequest) -> HttpResponse:
             "tally_result": tally_result,
         },
     )
+
+
+@require_http_methods(["GET"])
+@user_passes_test(lambda u: bool(u.is_superuser), login_url="/admin/login/")
+def signals_log_debug_view(request: HttpRequest) -> HttpResponse:
+    """Show recent signal emissions from the in-process ring buffer.
+
+    Per-process and ephemeral: this data is not shared across workers and is
+    cleared on process restart.
+    """
+
+    from core.signal_debug import get_signal_log
+
+    log = get_signal_log()
+    return render(
+        request,
+        "core/debug_signals_log.html",
+        {
+            "log": log,
+            "event_keys": sorted(astra_signals.CANONICAL_SIGNALS.keys()),
+        },
+    )
+
+
+@require_http_methods(["POST"])
+@user_passes_test(lambda u: bool(u.is_superuser), login_url="/admin/login/")
+def signals_send_debug_view(request: HttpRequest) -> JsonResponse:
+    """Manually dispatch a debug signal by canonical event key."""
+
+    event_key = _normalize_str(request.POST.get("event_key") or "")
+    signal = astra_signals.CANONICAL_SIGNALS.get(event_key)
+    if signal is None:
+        return JsonResponse(
+            {"error": "Unknown event key.", "event_key": event_key},
+            status=400,
+        )
+
+    extra_kwargs: dict[str, Any] = {}
+    kwargs_json_raw = (request.POST.get("kwargs_json") or "").strip()
+    if kwargs_json_raw:
+        try:
+            parsed = json.loads(kwargs_json_raw)
+        except json.JSONDecodeError as exc:
+            return JsonResponse({"error": f"Invalid JSON in kwargs: {exc}"}, status=400)
+        if not isinstance(parsed, dict):
+            return JsonResponse({"error": "kwargs_json must be a JSON object."}, status=400)
+        extra_kwargs = parsed
+
+    actor = request.user.get_username() if request.user.is_authenticated else ""
+    payload: dict[str, Any] = {
+        "actor": actor,
+        "debug": True,
+        "event_key": event_key,
+    }
+    # User-supplied kwargs override defaults (actor, event_key); debug=True is always forced.
+    payload.update(extra_kwargs)
+    payload["debug"] = True
+
+    signal.send(sender=type(request.user), **payload)
+
+    return JsonResponse({"event_key": event_key, "kwargs": sorted(payload.keys())})
