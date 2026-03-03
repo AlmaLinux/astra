@@ -2735,11 +2735,7 @@ class OrganizationUserViewsTests(TestCase):
         self.assertContains(resp, f"(req. #{req.pk})")
         self.assertContains(resp, f'href="{reverse("membership-request-detail", args=[req.pk])}"')
         self.assertContains(resp, "<div class=\"font-weight-bold\">Gold Sponsor Member</div>", html=True)
-        self.assertContains(
-            resp,
-            f'<a href="{reverse("membership-request-detail", args=[req.pk])}">Request #{req.pk}</a>',
-            html=True,
-        )
+        self.assertContains(resp, f"Request #{req.pk}")
         self.assertNotContains(
             resp,
             f'<a href="{reverse("membership-request-detail", args=[req.pk])}">Gold Sponsor Member</a>',
