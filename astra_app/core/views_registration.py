@@ -29,7 +29,7 @@ from core.views_auth import (
 from core.views_utils import _normalize_str
 
 from .forms_registration import PasswordSetForm, RegistrationForm, ResendRegistrationEmailForm
-from .tokens import make_signed_token, read_signed_token
+from .tokens import make_registration_activation_token, read_registration_activation_token
 
 logger = logging.getLogger(__name__)
 def _stageuser_add(client, username: str, **kwargs):
@@ -67,7 +67,7 @@ def _send_registration_email(
     normalized_invitation_token = _normalize_str(invitation_token)
     if normalized_invitation_token:
         payload["i"] = normalized_invitation_token
-    token = make_signed_token(payload)
+    token = make_registration_activation_token(payload)
     activate_url = request.build_absolute_uri(reverse("register-activate")) + f"?token={quote(token)}"
     confirm_url = request.build_absolute_uri(reverse("register-confirm")) + f"?username={quote(username)}"
 
@@ -296,7 +296,7 @@ def activate(request: HttpRequest) -> HttpResponse:
         return redirect("register")
 
     try:
-        token = read_signed_token(token_string)
+        token = read_registration_activation_token(token_string)
     except signing.SignatureExpired:
         messages.warning(request, "This token is no longer valid, please register again.")
         return redirect("register")

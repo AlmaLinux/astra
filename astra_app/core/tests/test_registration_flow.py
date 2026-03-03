@@ -11,7 +11,7 @@ from python_freeipa import exceptions
 from core.freeipa.user import FreeIPAUser
 from core.models import AccountInvitation
 from core.tests.utils_test_data import ensure_email_templates
-from core.tokens import read_signed_token
+from core.tokens import read_registration_activation_token
 from core.views_auth import PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY
 
 
@@ -141,7 +141,7 @@ class RegistrationFlowTests(TestCase):
         token_match = re.search(r"token=([^\s&]+)", activate_url)
         self.assertIsNotNone(token_match)
         assert token_match is not None
-        activation_payload = read_signed_token(unquote(token_match.group(1)))
+        activation_payload = read_registration_activation_token(unquote(token_match.group(1)))
         self.assertEqual(activation_payload.get("i"), invitation_token)
 
     @override_settings(REGISTRATION_OPEN=True)
@@ -427,7 +427,7 @@ class RegistrationFlowTests(TestCase):
 
     @override_settings(REGISTRATION_OPEN=True)
     def test_activate_invite_flow_uses_reconcile_helpers(self) -> None:
-        from core.tokens import make_signed_token
+        from core.tokens import make_registration_activation_token
 
         client = Client()
 
@@ -437,8 +437,9 @@ class RegistrationFlowTests(TestCase):
             note="",
             invited_by_username="committee",
         )
-        activation_token = make_signed_token(
+        activation_token = make_registration_activation_token(
             {
+                "p": "registration-activate",
                 "u": "alice",
                 "e": "alice@example.com",
                 "i": str(invitation.invitation_token),

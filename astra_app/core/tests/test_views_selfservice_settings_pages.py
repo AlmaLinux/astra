@@ -1003,7 +1003,7 @@ class SelfServiceSettingsPagesTests(TestCase):
         request.user = self._auth_user("alice")
 
         with patch(
-            "core.views_settings.read_signed_token",
+            "core.views_settings.read_settings_email_validation_token",
             autospec=True,
             return_value={"u": "alice", "a": "mail", "v": "new@example.org"},
         ):
@@ -1042,7 +1042,11 @@ class SelfServiceSettingsPagesTests(TestCase):
             _user_data={"mail": ["a@example.org"]},
         )
 
-        with patch("core.views_settings.read_signed_token", autospec=True, return_value={"u": "alice", "a": "mail", "v": "new@example.org"}):
+        with patch(
+            "core.views_settings.read_settings_email_validation_token",
+            autospec=True,
+            return_value={"u": "alice", "a": "mail", "v": "new@example.org"},
+        ):
             with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
                 with patch(
                     "core.views_settings._update_user_attrs",

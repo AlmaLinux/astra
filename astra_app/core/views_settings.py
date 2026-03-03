@@ -60,7 +60,7 @@ from core.ipa_utils import bool_from_ipa, bool_to_ipa
 from core.membership_notes import CUSTOS, add_note
 from core.models import MembershipRequest
 from core.templated_email import queue_templated_email
-from core.tokens import make_signed_token, read_signed_token
+from core.tokens import make_settings_email_validation_token, read_settings_email_validation_token
 from core.views_utils import (
     MSG_SERVICE_UNAVAILABLE,
     _normalize_str,
@@ -100,7 +100,9 @@ def _send_email_validation_email(
     email_to_validate: str,
 ) -> None:
     base_ctx = user_email_context(username=username)
-    token = make_signed_token({"u": username, "a": attr, "v": email_to_validate})
+    token = make_settings_email_validation_token(
+        {"u": username, "a": attr, "v": email_to_validate}
+    )
     validate_url = request.build_absolute_uri(reverse("settings-email-validate")) + f"?token={quote(token)}"
     ttl_seconds = settings.EMAIL_VALIDATION_TOKEN_TTL_SECONDS
     ttl_minutes = max(1, int((ttl_seconds + 59) / 60))
@@ -1380,7 +1382,7 @@ def settings_email_validate(request: HttpRequest) -> HttpResponse:
         return redirect(settings_url(tab="emails"))
 
     try:
-        token = read_signed_token(token_string)
+        token = read_settings_email_validation_token(token_string)
     except signing.SignatureExpired:
         messages.warning(request, "This token is no longer valid, please request a new validation email.")
         return redirect(settings_url(tab="emails"))

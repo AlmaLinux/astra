@@ -3,7 +3,10 @@ from datetime import datetime
 from django.core import signing
 
 from core.models import AccountInvitation
-from core.tokens import read_signed_token_unbounded
+from core.tokens import (
+    _read_signed_token_unbounded_legacy,
+    read_account_invitation_token_unbounded,
+)
 
 
 def load_account_invitation_from_token(invitation_token: str) -> AccountInvitation | None:
@@ -12,9 +15,15 @@ def load_account_invitation_from_token(invitation_token: str) -> AccountInvitati
         return None
 
     try:
-        payload = read_signed_token_unbounded(normalized_token)
+        payload = read_account_invitation_token_unbounded(normalized_token)
     except signing.BadSignature:
-        return None
+        try:
+            payload = _read_signed_token_unbounded_legacy(normalized_token)
+        except signing.BadSignature:
+            return None
+
+        if not isinstance(payload, dict):
+            return None
 
     if not isinstance(payload, dict):
         return None

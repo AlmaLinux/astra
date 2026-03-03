@@ -22,7 +22,7 @@ from PIL import Image
 
 from core.membership_log_side_effects import apply_membership_log_side_effects
 from core.membership_targets import MembershipTargetIdentity, MembershipTargetKind
-from core.tokens import make_signed_token
+from core.tokens import make_account_invitation_token
 
 logger = logging.getLogger(__name__)
 
@@ -570,7 +570,7 @@ class AccountInvitation(models.Model):
         super().save(*args, **kwargs)
 
         if not self.invitation_token:
-            token = make_signed_token({"invitation_id": self.pk})
+            token = make_account_invitation_token({"invitation_id": self.pk})
             type(self).objects.filter(pk=self.pk).update(invitation_token=token)
             self.invitation_token = token
 

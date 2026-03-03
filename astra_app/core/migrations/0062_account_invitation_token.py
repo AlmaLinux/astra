@@ -4,7 +4,7 @@ import uuid
 
 from django.db import migrations, models
 
-from core.tokens import make_signed_token
+from core.tokens import _make_signed_token_legacy
 
 
 def _backfill_invitation_tokens(apps, schema_editor) -> None:
@@ -20,10 +20,10 @@ def _backfill_invitation_tokens(apps, schema_editor) -> None:
         if token:
             payload["nonce"] = uuid.uuid4().hex
 
-        new_token = make_signed_token(payload)
+        new_token = _make_signed_token_legacy(payload)
         while new_token in seen:
             payload["nonce"] = uuid.uuid4().hex
-            new_token = make_signed_token(payload)
+            new_token = _make_signed_token_legacy(payload)
 
         invitation.invitation_token = new_token
         invitation.save(update_fields=["invitation_token"])

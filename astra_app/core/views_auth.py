@@ -23,7 +23,7 @@ from core.account_invitation_reconcile import (
 from core.freeipa.client import _build_freeipa_client
 from core.freeipa.user import FreeIPAUser
 from core.rate_limit import allow_request
-from core.tokens import make_signed_token
+from core.tokens import make_password_reset_token, read_password_reset_token
 from core.views_utils import _normalize_str, get_username
 
 from .forms_auth import (
@@ -34,9 +34,7 @@ from .forms_auth import (
     SyncTokenForm,
 )
 from .password_reset import (
-    PASSWORD_RESET_TOKEN_PURPOSE,
     find_user_for_password_reset,
-    read_password_reset_token,
     send_password_reset_email,
     send_password_reset_success_email,
 )
@@ -358,7 +356,6 @@ def password_reset_confirm(request: HttpRequest) -> HttpResponse:
             refreshed = find_user_for_password_reset(username)
             refreshed_lpc = _normalize_str(refreshed.last_password_change) if refreshed else ""
             next_token_payload = {
-                "p": PASSWORD_RESET_TOKEN_PURPOSE,
                 "u": username,
                 "e": user_email,
                 "lpc": refreshed_lpc,
@@ -367,7 +364,7 @@ def password_reset_confirm(request: HttpRequest) -> HttpResponse:
             if invitation_token:
                 next_token_payload["i"] = invitation_token
 
-            next_token = make_signed_token(next_token_payload)
+            next_token = make_password_reset_token(next_token_payload)
             form.add_error("otp" if has_otp else None, "Incorrect value.")
             return render(
                 request,

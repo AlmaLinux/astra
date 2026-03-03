@@ -1,4 +1,3 @@
-import datetime
 from dataclasses import dataclass
 
 from django.core import signing
@@ -7,11 +6,13 @@ from django.urls import reverse
 
 from core.models import Organization
 from core.public_urls import build_public_absolute_url
-from core.tokens import make_signed_token, read_signed_token
+from core.tokens import (
+    make_organization_claim_token as _make_organization_claim_token_payload,
+)
+from core.tokens import (
+    read_organization_claim_token as _read_organization_claim_token_payload,
+)
 from core.views_utils import _normalize_str
-
-ORGANIZATION_CLAIM_TOKEN_PURPOSE = "org_claim"
-ORGANIZATION_CLAIM_TOKEN_TTL_SECONDS = int(datetime.timedelta(days=7).total_seconds())
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,9 +22,8 @@ class OrganizationClaimTokenPayload:
 
 
 def make_organization_claim_token(organization: Organization) -> str:
-    return make_signed_token(
+    return _make_organization_claim_token_payload(
         {
-            "p": ORGANIZATION_CLAIM_TOKEN_PURPOSE,
             "org_id": organization.pk,
             "claim_secret": organization.claim_secret,
         }
@@ -39,9 +39,7 @@ def build_organization_claim_url(*, organization: Organization, request: HttpReq
 
 
 def read_organization_claim_token(token: str) -> OrganizationClaimTokenPayload:
-    payload = read_signed_token(token, max_age_seconds=ORGANIZATION_CLAIM_TOKEN_TTL_SECONDS)
-    if _normalize_str(payload.get("p")) != ORGANIZATION_CLAIM_TOKEN_PURPOSE:
-        raise signing.BadSignature("Wrong token purpose")
+    payload = _read_organization_claim_token_payload(token)
 
     organization_id_raw = _normalize_str(payload.get("org_id"))
     if not organization_id_raw.isdigit():

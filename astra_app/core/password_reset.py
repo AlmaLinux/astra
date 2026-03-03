@@ -3,7 +3,6 @@ import logging
 from urllib.parse import quote
 
 from django.conf import settings
-from django.core import signing
 from django.http import HttpRequest
 from django.urls import reverse
 from django.utils import timezone
@@ -11,18 +10,10 @@ from django.utils import timezone
 from core.email_context import user_email_context
 from core.freeipa.user import FreeIPAUser
 from core.templated_email import queue_templated_email
-from core.tokens import make_signed_token, read_signed_token
+from core.tokens import make_password_reset_token
 from core.views_utils import _normalize_str
 
 logger = logging.getLogger(__name__)
-
-PASSWORD_RESET_TOKEN_PURPOSE = "password-reset"
-
-def read_password_reset_token(token: str) -> dict[str, object]:
-    payload = read_signed_token(token, max_age_seconds=settings.PASSWORD_RESET_TOKEN_TTL_SECONDS)
-    if _normalize_str(payload.get("p")) != PASSWORD_RESET_TOKEN_PURPOSE:
-        raise signing.BadSignature("Wrong token purpose")
-    return payload
 
 
 def password_reset_confirm_url(*, request: HttpRequest, token: str) -> str:
@@ -42,7 +33,6 @@ def send_password_reset_email(
     invitation_token: str | None = None,
 ) -> None:
     token_payload: dict[str, str] = {
-        "p": PASSWORD_RESET_TOKEN_PURPOSE,
         "u": username,
         "e": email,
         "lpc": last_password_change,
@@ -51,7 +41,7 @@ def send_password_reset_email(
     if normalized_invitation_token:
         token_payload["i"] = normalized_invitation_token
 
-    token = make_signed_token(token_payload)
+    token = make_password_reset_token(token_payload)
     reset_url = password_reset_confirm_url(request=request, token=token)
 
     ttl_seconds = settings.PASSWORD_RESET_TOKEN_TTL_SECONDS

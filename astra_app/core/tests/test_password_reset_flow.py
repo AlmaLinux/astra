@@ -10,8 +10,7 @@ from django.urls import reverse
 from python_freeipa import exceptions
 
 from core.models import AccountInvitation
-from core.password_reset import PASSWORD_RESET_TOKEN_PURPOSE, read_password_reset_token
-from core.tokens import make_signed_token
+from core.tokens import make_password_reset_token, read_password_reset_token
 from core.views_auth import PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY
 
 
@@ -260,9 +259,8 @@ class PasswordResetFlowTests(TestCase):
             invited_by_username="committee",
         )
 
-        token = make_signed_token(
+        token = make_password_reset_token(
             {
-                "p": PASSWORD_RESET_TOKEN_PURPOSE,
                 "u": "alice",
                 "e": "alice@example.com",
                 "lpc": "",
@@ -317,9 +315,8 @@ class PasswordResetFlowTests(TestCase):
             invited_by_username="committee",
         )
 
-        token = make_signed_token(
+        token = make_password_reset_token(
             {
-                "p": PASSWORD_RESET_TOKEN_PURPOSE,
                 "u": "alice",
                 "e": "alice@example.com",
                 "lpc": "",

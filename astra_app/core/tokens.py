@@ -1,24 +1,105 @@
 import hashlib
 from collections.abc import Mapping
+from datetime import timedelta
 from typing import Any
 
 from django.conf import settings
 from django.core import signing
 
+TOKEN_SALT_PREFIX = "astra.core.tokens:v1:"
+_PASSWORD_RESET_TOKEN_PURPOSE = "password-reset"
+_REGISTRATION_ACTIVATION_TOKEN_PURPOSE = "registration-activate"
+_SETTINGS_EMAIL_VALIDATION_TOKEN_PURPOSE = "settings-email-validate"
+_ORGANIZATION_CLAIM_TOKEN_PURPOSE = "org_claim"
+_ACCOUNT_INVITATION_TOKEN_PURPOSE = "account-invitation"
 
-def make_signed_token(payload: Mapping[str, Any]) -> str:
-    return signing.dumps(dict(payload), salt=settings.SECRET_KEY)
+ORGANIZATION_CLAIM_TOKEN_TTL_SECONDS = int(timedelta(days=7).total_seconds())
 
 
-def read_signed_token(token: str, *, max_age_seconds: int | None = None) -> dict[str, Any]:
-    return signing.loads(
+def _salt_for_purpose(*, purpose: str) -> str:
+    return f"{TOKEN_SALT_PREFIX}{purpose}"
+
+
+def _dumps(*, purpose: str, payload: Mapping[str, Any]) -> str:
+    return signing.dumps(dict(payload), salt=_salt_for_purpose(purpose=purpose))
+
+
+def _loads(*, purpose: str, token: str, max_age_seconds: int | None) -> dict[str, Any]:
+    payload = signing.loads(
         token,
-        salt=settings.SECRET_KEY,
-        max_age=max_age_seconds if max_age_seconds is not None else settings.EMAIL_VALIDATION_TOKEN_TTL_SECONDS,
+        salt=_salt_for_purpose(purpose=purpose),
+        max_age=max_age_seconds,
+    )
+    if not isinstance(payload, dict):
+        raise signing.BadSignature("Invalid token payload")
+    return payload
+
+
+def make_password_reset_token(payload: Mapping[str, Any]) -> str:
+    return _dumps(purpose=_PASSWORD_RESET_TOKEN_PURPOSE, payload=payload)
+
+
+def read_password_reset_token(token: str) -> dict[str, Any]:
+    return _loads(
+        purpose=_PASSWORD_RESET_TOKEN_PURPOSE,
+        token=token,
+        max_age_seconds=settings.PASSWORD_RESET_TOKEN_TTL_SECONDS,
     )
 
 
-def read_signed_token_unbounded(token: str) -> dict[str, Any]:
+def make_registration_activation_token(payload: Mapping[str, Any]) -> str:
+    return _dumps(purpose=_REGISTRATION_ACTIVATION_TOKEN_PURPOSE, payload=payload)
+
+
+def read_registration_activation_token(token: str) -> dict[str, Any]:
+    return _loads(
+        purpose=_REGISTRATION_ACTIVATION_TOKEN_PURPOSE,
+        token=token,
+        max_age_seconds=settings.EMAIL_VALIDATION_TOKEN_TTL_SECONDS,
+    )
+
+
+def make_settings_email_validation_token(payload: Mapping[str, Any]) -> str:
+    return _dumps(purpose=_SETTINGS_EMAIL_VALIDATION_TOKEN_PURPOSE, payload=payload)
+
+
+def read_settings_email_validation_token(token: str) -> dict[str, Any]:
+    return _loads(
+        purpose=_SETTINGS_EMAIL_VALIDATION_TOKEN_PURPOSE,
+        token=token,
+        max_age_seconds=settings.EMAIL_VALIDATION_TOKEN_TTL_SECONDS,
+    )
+
+
+def make_organization_claim_token(payload: Mapping[str, Any]) -> str:
+    return _dumps(purpose=_ORGANIZATION_CLAIM_TOKEN_PURPOSE, payload=payload)
+
+
+def read_organization_claim_token(token: str) -> dict[str, Any]:
+    return _loads(
+        purpose=_ORGANIZATION_CLAIM_TOKEN_PURPOSE,
+        token=token,
+        max_age_seconds=ORGANIZATION_CLAIM_TOKEN_TTL_SECONDS,
+    )
+
+
+def make_account_invitation_token(payload: Mapping[str, Any]) -> str:
+    return _dumps(purpose=_ACCOUNT_INVITATION_TOKEN_PURPOSE, payload=payload)
+
+
+def read_account_invitation_token_unbounded(token: str) -> dict[str, Any]:
+    return _loads(
+        purpose=_ACCOUNT_INVITATION_TOKEN_PURPOSE,
+        token=token,
+        max_age_seconds=None,
+    )
+
+
+def _make_signed_token_legacy(payload: Mapping[str, Any]) -> str:
+    return signing.dumps(dict(payload), salt=settings.SECRET_KEY)
+
+
+def _read_signed_token_unbounded_legacy(token: str) -> dict[str, Any]:
     return signing.loads(token, salt=settings.SECRET_KEY)
 
 

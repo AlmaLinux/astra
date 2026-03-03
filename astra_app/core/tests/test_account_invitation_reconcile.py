@@ -2,6 +2,8 @@ import datetime
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from django.conf import settings
+from django.core import signing
 from django.test import TestCase
 from django.utils import timezone
 
@@ -10,9 +12,47 @@ from core.account_invitation_reconcile import (
     reconcile_account_invitation_for_username,
 )
 from core.models import AccountInvitation, Organization
+from core.tokens import _make_signed_token_legacy
 
 
 class AccountInvitationReconcileTests(TestCase):
+    def test_legacy_token_is_accepted_via_fallback(self) -> None:
+        invitation = AccountInvitation.objects.create(
+            email="legacy-invitee@example.com",
+            full_name="Legacy Invitee",
+            invited_by_username="committee",
+            invitation_token="placeholder-token",
+        )
+        legacy_token = _make_signed_token_legacy({"invitation_id": invitation.pk})
+        invitation.invitation_token = legacy_token
+        invitation.save(update_fields=["invitation_token"])
+
+        loaded = load_account_invitation_from_token(legacy_token)
+
+        self.assertIsNotNone(loaded)
+        assert loaded is not None
+        self.assertEqual(loaded.pk, invitation.pk)
+
+    def test_legacy_token_with_invalid_payload_returns_none(self) -> None:
+        legacy_token = signing.dumps("not-a-dict", salt=settings.SECRET_KEY)
+
+        loaded = load_account_invitation_from_token(legacy_token)
+
+        self.assertIsNone(loaded)
+
+    def test_legacy_token_db_mismatch_returns_none(self) -> None:
+        invitation = AccountInvitation.objects.create(
+            email="mismatch-invitee@example.com",
+            full_name="Mismatch Invitee",
+            invited_by_username="committee",
+            invitation_token="different-token",
+        )
+        legacy_token = _make_signed_token_legacy({"invitation_id": invitation.pk})
+
+        loaded = load_account_invitation_from_token(legacy_token)
+
+        self.assertIsNone(loaded)
+
     def test_load_account_invitation_from_token_requires_row_token_match(self) -> None:
         invitation = AccountInvitation.objects.create(
             email="invitee@example.com",
@@ -21,7 +61,7 @@ class AccountInvitationReconcileTests(TestCase):
         )
 
         with patch(
-            "core.account_invitation_reconcile.read_signed_token_unbounded",
+            "core.account_invitation_reconcile.read_account_invitation_token_unbounded",
             return_value={"invitation_id": invitation.pk},
         ):
             loaded = load_account_invitation_from_token("forged-token")
