@@ -310,6 +310,11 @@ def membership_request(request: HttpRequest, organization_id: int | None = None)
     if is_org_request:
         cancel_url = reverse("organization-detail", kwargs={"organization_id": organization.pk})
 
+    no_types_available = (
+        not is_org_request
+        and not form.fields["membership_type"].queryset.exists()
+    )
+
     return render(
         request,
         "core/membership_request.html",
@@ -317,6 +322,7 @@ def membership_request(request: HttpRequest, organization_id: int | None = None)
             "form": form,
             "organization": organization,
             "cancel_url": cancel_url,
+            "no_types_available": no_types_available,
         },
     )
 

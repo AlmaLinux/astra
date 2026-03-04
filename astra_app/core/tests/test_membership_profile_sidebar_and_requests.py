@@ -2128,3 +2128,52 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "(Australia/Brisbane)")
+
+    def test_membership_request_shows_no_types_message_when_all_types_blocked(self) -> None:
+        """When a user already holds all available individual membership types, the
+        request page should thank them and not show the form."""
+        from core.models import MembershipLog, MembershipType
+
+        MembershipType.objects.update(enabled=False)
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror Membership",
+                "group_cn": "almalinux-mirror",
+                "category_id": "mirror",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        # Alice holds active, non-expiring memberships in both categories.
+        for mt_code, group_cn in [("individual", "almalinux-individual"), ("mirror", "almalinux-mirror")]:
+            self._create_membership_log_with_side_effects(
+                actor_username="reviewer",
+                target_username="alice",
+                membership_type_id=mt_code,
+                requested_group_cn=group_cn,
+                action=MembershipLog.Action.approved,
+                expires_at=timezone.now() + datetime.timedelta(days=365),
+            )
+
+        alice = self._make_user("alice", full_name="Alice User")
+        self._login_as_freeipa_user("alice")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
+            resp = self.client.get(reverse("membership-request"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Thank you")
+        self.assertNotContains(resp, "Submit request")
