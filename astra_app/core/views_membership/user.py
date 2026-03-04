@@ -315,6 +315,24 @@ def membership_request(request: HttpRequest, organization_id: int | None = None)
         and not form.fields["membership_type"].queryset.exists()
     )
 
+    # If a specific type was requested via ?membership_type= but it is not available to this
+    # user (blocked by active membership or pending request), surface its name so
+    # the template can explain why and still show the form for other types.
+    prefill_type_unavailable_name: str | None = None
+    if request.method == "GET" and not is_org_request and prefill_membership_type and not no_types_available:
+        if not form.fields["membership_type"].queryset.filter(pk=prefill_membership_type).exists():
+            blocked_type = (
+                MembershipType.objects.filter(
+                    pk=prefill_membership_type,
+                    enabled=True,
+                    category__is_individual=True,
+                )
+                .select_related("category")
+                .first()
+            )
+            if blocked_type is not None:
+                prefill_type_unavailable_name = blocked_type.name
+
     return render(
         request,
         "core/membership_request.html",
@@ -323,6 +341,7 @@ def membership_request(request: HttpRequest, organization_id: int | None = None)
             "organization": organization,
             "cancel_url": cancel_url,
             "no_types_available": no_types_available,
+            "prefill_type_unavailable_name": prefill_type_unavailable_name,
         },
     )
 

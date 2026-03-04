@@ -69,6 +69,13 @@
           Your request will be reviewed by the Membership Committee.
         </div>
 
+        {% if prefill_type_unavailable_name %}
+          <div class="alert alert-info" role="alert">
+            You already hold an active <strong>{{ prefill_type_unavailable_name }}</strong> membership.
+            Please select from the available options below.
+          </div>
+        {% endif %}
+
         {% if req %}
           {% if req.status == 'pending' or req.status == 'on_hold' %}
           {% url 'membership-request-rescind' req.pk as rescind_url %}

@@ -2177,3 +2177,90 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Thank you")
         self.assertNotContains(resp, "Submit request")
+
+    def test_membership_request_type_param_preselects_form(self) -> None:
+        """?type=individual should pre-select the individual option in the form."""
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror Membership",
+                "group_cn": "almalinux-mirror",
+                "category_id": "mirror",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        alice = self._make_user("alice", full_name="Alice User")
+        self._login_as_freeipa_user("alice")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
+            resp = self.client.get(reverse("membership-request") + "?membership_type=individual")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'value="individual" selected')
+        self.assertNotContains(resp, 'value="mirror" selected')
+
+    def test_membership_request_type_param_shows_message_when_unavailable(self) -> None:
+        """When ?type=individual but user already holds an active individual
+        membership, show an informational message and still render the form
+        with other available types."""
+        from core.models import MembershipLog, MembershipType
+
+        MembershipType.objects.update(enabled=False)
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror Membership",
+                "group_cn": "almalinux-mirror",
+                "category_id": "mirror",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        self._create_membership_log_with_side_effects(
+            actor_username="reviewer",
+            target_username="alice",
+            membership_type_id="individual",
+            requested_group_cn="almalinux-individual",
+            action=MembershipLog.Action.approved,
+            expires_at=timezone.now() + datetime.timedelta(days=365),
+        )
+
+        alice = self._make_user("alice", full_name="Alice User")
+        self._login_as_freeipa_user("alice")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
+            resp = self.client.get(reverse("membership-request") + "?membership_type=individual")
+
+        self.assertEqual(resp.status_code, 200)
+        # Should show a message about the unavailable type.
+        self.assertContains(resp, "Individual")
+        self.assertContains(resp, "already")
+        # Should still show the form with mirror available.
+        self.assertContains(resp, "Submit request")
+        self.assertContains(resp, 'value="mirror"')
