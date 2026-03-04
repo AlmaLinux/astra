@@ -428,6 +428,7 @@ JAZZMIN_SETTINGS = {
             "models": [
                 "auth.ipafasagreement",
                 "core.freeipapermissiongrant",
+                "core.mattermostwebhookendpoint",
             ],
         },
     ],
@@ -816,6 +817,14 @@ AVATAR_PROVIDERS = (
     "avatar.providers.DefaultAvatarProvider",
 )
 AVATAR_GRAVATAR_DEFAULT = _env_str("AVATAR_GRAVATAR_DEFAULT", default="identicon")
+
+# Mattermost webhook configuration
+MATTERMOST_WEBHOOK_TIMEOUT_SECONDS = _env_int("MATTERMOST_WEBHOOK_TIMEOUT_SECONDS", default=5)
+MATTERMOST_WEBHOOK_DEFAULT_USERNAME = _env_str("MATTERMOST_WEBHOOK_DEFAULT_USERNAME", default="AlmaLinux Astra")
+MATTERMOST_WEBHOOK_DEFAULT_ICON_URL = _env_str(
+    "MATTERMOST_WEBHOOK_DEFAULT_ICON_URL",
+    default="/static/core/images/almalinux_astra_small.png",
+)
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field

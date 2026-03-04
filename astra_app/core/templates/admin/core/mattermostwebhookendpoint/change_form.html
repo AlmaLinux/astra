@@ -1,0 +1,19 @@
+{% extends "admin/change_form.html" %}
+
+{% block object-tools-items %}
+  {% if change and has_change_permission %}
+    {% url 'admin:core_mattermostwebhookendpoint_test' original.pk as admin_test_notification_url %}
+    <button
+      type="submit"
+      name="_send_test_notification"
+      formaction="{{ admin_test_notification_url }}"
+      formmethod="post"
+      formnovalidate
+      class="btn btn-block btn-outline-primary mb-2"
+      title="Send a test Mattermost notification to this endpoint"
+    >
+      Send test notification
+    </button>
+  {% endif %}
+  {{ block.super }}
+{% endblock %}

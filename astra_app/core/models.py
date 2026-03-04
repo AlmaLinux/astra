@@ -5,6 +5,7 @@ import json
 import logging
 import secrets
 import uuid
+import warnings
 from io import BytesIO
 from typing import override
 
@@ -22,6 +23,7 @@ from PIL import Image
 
 from core.membership_log_side_effects import apply_membership_log_side_effects
 from core.membership_targets import MembershipTargetIdentity, MembershipTargetKind
+from core.signals import CANONICAL_SIGNALS
 from core.tokens import make_account_invitation_token
 
 logger = logging.getLogger(__name__)
@@ -1545,6 +1547,51 @@ class AuditLogEntry(models.Model):
         if self.organization_id is not None:
             return f"org:{self.organization_id}:{self.event_type}"
         return f"{self.election_id}:{self.event_type}"
+
+
+class MattermostWebhookEndpoint(models.Model):
+    label = models.CharField(max_length=200, blank=True)
+    url = models.URLField(max_length=500)
+    channel = models.CharField(max_length=200, blank=True)
+    username = models.CharField(max_length=200, blank=True)
+    icon_url = models.URLField(max_length=500, blank=True)
+    enabled = models.BooleanField(default=True)
+    events = models.JSONField(default=list)
+    text = models.TextField(blank=True)
+    attachments = models.JSONField(null=True, blank=True)
+    props = models.JSONField(null=True, blank=True)
+    priority = models.JSONField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Mattermost Webhook"
+        verbose_name_plural = "Mattermost Webhooks"
+
+    def __str__(self) -> str:
+        label = self.label or "endpoint"
+        if len(self.url) > 40:
+            return f"{label} ({self.url[:40]}...)"
+        return f"{label} ({self.url})"
+
+    @override
+    def clean(self) -> None:
+        super().clean()
+
+        if self.url and not self.url.startswith("https://"):
+            raise ValidationError({"url": "Webhook URL must use HTTPS."})
+
+        if not isinstance(self.events, list):
+            raise ValidationError({"events": "Events must be a list of event key strings."})
+
+        non_string_events = [item for item in self.events if not isinstance(item, str)]
+        if non_string_events:
+            raise ValidationError({"events": "Events must be a list of event key strings."})
+
+        unknown_events = [key for key in self.events if key not in CANONICAL_SIGNALS]
+        if unknown_events:
+            warnings.warn(
+                f"Unknown event keys in MattermostWebhookEndpoint: {sorted(set(unknown_events))}",
+                stacklevel=2,
+            )
 
 
 class FreeIPAPermissionGrant(models.Model):

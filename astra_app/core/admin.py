@@ -1,7 +1,10 @@
 import csv
+import datetime
 import io
 import json
 import logging
+import secrets
+import time
 from collections.abc import Callable
 from typing import Any, override
 from urllib.parse import urlparse
@@ -77,6 +80,7 @@ from core.organization_membership_csv_import import (
     required_organization_membership_csv_columns,
 )
 from core.protected_resources import protected_freeipa_group_cns
+from core.signals import CANONICAL_SIGNALS
 from core.user_labels import user_choice, user_choice_with_fallback, user_choices_from_users
 from core.views_utils import _normalize_str
 
@@ -91,6 +95,7 @@ from .models import (
     IPAFASAgreement,
     IPAGroup,
     IPAUser,
+    MattermostWebhookEndpoint,
     Membership,
     MembershipCSVImportLink,
     MembershipType,
@@ -101,6 +106,151 @@ from .models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+EVENT_KEY_CHOICES = [(key, key) for key in sorted(CANONICAL_SIGNALS.keys())]
+PRIORITY_LEVEL_CHOICES = [
+    ("", "No priority"),
+    ("standard", "Standard"),
+    ("important", "Important"),
+    ("urgent", "Urgent"),
+]
+
+
+class MattermostWebhookEndpointAdminForm(forms.ModelForm):
+    events = forms.MultipleChoiceField(
+        choices=EVENT_KEY_CHOICES,
+        required=False,
+        widget=forms.CheckboxSelectMultiple,
+        help_text="Select the event keys this endpoint should receive.",
+    )
+    priority_level = forms.ChoiceField(
+        choices=PRIORITY_LEVEL_CHOICES,
+        required=False,
+        label="Priority",
+        help_text="Set message priority. Use Important or Urgent to enable acknowledgement options.",
+    )
+    priority_requested_ack = forms.BooleanField(
+        required=False,
+        label="Requested acknowledgement",
+        help_text="Requires Important or Urgent priority.",
+    )
+    priority_persistent_notifications = forms.BooleanField(
+        required=False,
+        label="Persistent notifications",
+        help_text="Only for Urgent priority. Sends repeated notifications until acknowledged.",
+    )
+
+    class Meta:
+        model = MattermostWebhookEndpoint
+        fields = "__all__"
+
+    @override
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        if "priority" in self.fields:
+            # Replace raw JSON editing with structured controls below.
+            self.fields.pop("priority")
+
+        self.fields["text"].help_text = (
+            "Django template syntax is supported using signal kwargs "
+            "(for example: {{ actor }}, {{ election.name }}). "
+            "Leave blank to use default event text."
+        )
+        self.fields["attachments"].help_text = (
+            "JSON list of Mattermost attachments. String values may include "
+            "Django template syntax. Leave blank to use default attachments."
+            "See https://developers.mattermost.com/integrate/reference/message-attachments/ for details."
+        )
+        self.fields["props"].help_text = (
+            "JSON object merged into Mattermost props. Useful for metadata "
+            "like card content shown in the right-hand panel."
+            "See https://developers.mattermost.com/integrate/webhooks/incoming/ for details."
+        )
+
+        configured_events: list[str] = []
+        if isinstance(self.instance.events, list):
+            configured_events.extend([item for item in self.instance.events if isinstance(item, str)])
+
+        unknown_events = [
+            key
+            for key in configured_events
+            if key not in CANONICAL_SIGNALS
+        ]
+        if unknown_events:
+            current_choices = list(self.fields["events"].choices)
+            current_choices.extend([(key, f"{key} (unknown)") for key in sorted(set(unknown_events))])
+            self.fields["events"].choices = current_choices
+
+        if configured_events:
+            self.initial["events"] = configured_events
+
+        priority_payload = self.instance.priority if isinstance(self.instance.priority, dict) else None
+        if priority_payload:
+            configured_priority = priority_payload.get("priority")
+            if isinstance(configured_priority, str) and configured_priority:
+                allowed_values = {choice[0] for choice in PRIORITY_LEVEL_CHOICES if choice[0]}
+                if configured_priority not in allowed_values:
+                    self.fields["priority_level"].choices = [
+                        *self.fields["priority_level"].choices,
+                        (configured_priority, f"{configured_priority} (custom)"),
+                    ]
+                self.initial["priority_level"] = configured_priority
+            self.initial["priority_requested_ack"] = bool(priority_payload.get("requested_ack"))
+            self.initial["priority_persistent_notifications"] = bool(
+                priority_payload.get("persistent_notifications")
+            )
+
+    def clean_events(self) -> list[str]:
+        raw = self.cleaned_data.get("events") or []
+        cleaned = [str(item).strip() for item in raw if str(item).strip()]
+        return list(dict.fromkeys(cleaned))
+
+    @override
+    def clean(self) -> dict[str, Any]:
+        cleaned = super().clean()
+
+        priority_level = str(cleaned.get("priority_level") or "").strip()
+        requested_ack = bool(cleaned.get("priority_requested_ack"))
+        persistent_notifications = bool(cleaned.get("priority_persistent_notifications"))
+
+        if not priority_level:
+            if requested_ack:
+                self.add_error("priority_requested_ack", "Set priority to Important or Urgent to request acknowledgement.")
+            if persistent_notifications:
+                self.add_error(
+                    "priority_persistent_notifications",
+                    "Set priority to Urgent to enable persistent notifications.",
+                )
+            cleaned["priority"] = None
+            return cleaned
+
+        if requested_ack and priority_level not in {"important", "urgent"}:
+            self.add_error("priority_requested_ack", "Requested acknowledgement is only available for Important or Urgent.")
+
+        if persistent_notifications and priority_level != "urgent":
+            self.add_error("priority_persistent_notifications", "Persistent notifications are only available for Urgent.")
+
+        priority_payload: dict[str, object] = {"priority": priority_level}
+        if requested_ack:
+            priority_payload["requested_ack"] = True
+        if persistent_notifications:
+            priority_payload["persistent_notifications"] = True
+
+        cleaned["priority"] = priority_payload
+        return cleaned
+
+    @override
+    def save(self, commit: bool = True) -> MattermostWebhookEndpoint:
+        instance = super().save(commit=False)
+        instance.priority = self.cleaned_data.get("priority")
+
+        if commit:
+            instance.save()
+            self.save_m2m()
+
+        return instance
 
 
 
@@ -1605,6 +1755,238 @@ class AuditLogEntryAdmin(ReadOnlyModelAdmin):
     search_fields = ("event_type",)
     ordering = ("-timestamp", "id")
     readonly_fields = ("election", "organization", "timestamp", "event_type", "payload", "is_public")
+
+
+@admin.register(MattermostWebhookEndpoint)
+class MattermostWebhookEndpointAdmin(admin.ModelAdmin):
+    form = MattermostWebhookEndpointAdminForm
+    change_form_template = "admin/core/mattermostwebhookendpoint/change_form.html"
+    readonly_fields = ["template_variables_reference"]
+
+    list_display = ["label", "url_masked", "enabled", "events_summary"]
+    list_filter = ["enabled"]
+    search_fields = ["label", "url"]
+    save_on_top = True
+
+    fieldsets = [
+        ("Endpoint", {"fields": ["label", "url", "enabled"]}),
+        ("Routing", {"fields": ["events"]}),
+        ("Template variables reference", {"fields": ["template_variables_reference"]}),
+        ("Mattermost overrides", {"fields": ["channel", "username", "icon_url"]}),
+        ("Message content (optional)", {"fields": ["text", "attachments", "props"]}),
+        (
+            "Priority (optional)",
+            {
+                "fields": [
+                    "priority_level",
+                    "priority_requested_ack",
+                    "priority_persistent_notifications",
+                ]
+            },
+        ),
+    ]
+
+    @admin.display(description="Template variables by selected events")
+    def template_variables_reference(self, obj: MattermostWebhookEndpoint | None) -> str:
+        from core import mattermost_webhooks
+
+        selected_events: list[str] = []
+        if obj is not None and isinstance(obj.events, list):
+            selected_events = [item for item in obj.events if isinstance(item, str)]
+
+        reference_text = mattermost_webhooks.template_variable_reference_text(selected_events)
+        return format_html("<pre style='white-space: pre-wrap; margin: 0;'>{}</pre>", reference_text)
+
+    def url_masked(self, obj: MattermostWebhookEndpoint) -> str:
+        parsed = urlparse(obj.url)
+        return f"{parsed.scheme}://{parsed.netloc}{parsed.path[:30]}..."
+
+    url_masked.short_description = "URL"  # type: ignore[attr-defined]
+
+    def events_summary(self, obj: MattermostWebhookEndpoint) -> str:
+        events = obj.events if isinstance(obj.events, list) else []
+        normalized = [item for item in events if isinstance(item, str)]
+        if len(normalized) <= 3:
+            return ", ".join(normalized) or "(none)"
+        return f"{', '.join(normalized[:3])} +{len(normalized) - 3} more"
+
+    events_summary.short_description = "Events"  # type: ignore[attr-defined]
+
+    @override
+    def get_urls(self):
+        urls = super().get_urls()
+        custom = [
+            path(
+                "<int:pk>/test/",
+                self.admin_site.admin_view(self.test_notification_view),
+                name="core_mattermostwebhookendpoint_test",
+            ),
+        ]
+        return custom + urls
+
+    def test_notification_view(self, request: HttpRequest, pk: int) -> HttpResponseRedirect:
+        obj = self.get_object(request, str(pk))
+        if obj is None:
+            raise Http404("Mattermost webhook endpoint not found.")
+
+        if not self.has_change_permission(request, obj=obj):
+            raise PermissionDenied
+
+        change_url = reverse("admin:core_mattermostwebhookendpoint_change", args=[obj.pk])
+        if request.method != "POST":
+            self.message_user(request, "Test notifications must be sent with POST.", level=messages.WARNING)
+            return redirect(change_url)
+
+        now_iso = datetime.datetime.now(datetime.UTC).isoformat()
+        endpoint_label = str(obj.label or obj.pk)
+        test_ref = secrets.token_hex(4)
+        started_at = time.monotonic()
+
+        from core import mattermost_webhooks
+
+        actor = str(request.user)
+        payload = mattermost_webhooks.build_admin_test_payload(
+            obj,
+            endpoint_label=endpoint_label,
+            timestamp_iso=now_iso,
+            actor=actor,
+            test_ref=test_ref,
+        )
+        outbound_payload = mattermost_webhooks._apply_default_identity(payload)
+        payload_json = json.dumps(outbound_payload, sort_keys=True, default=str)
+        url_hash = mattermost_webhooks._url_hash(obj.url)
+        mattermost_webhooks.logger.info(
+            "mattermost.admin_test_start ref=%s endpoint_id=%s url_hash=%s actor=%s",
+            test_ref,
+            obj.pk,
+            url_hash,
+            actor,
+            extra={
+                "endpoint_id": obj.pk,
+                "url_hash": url_hash,
+                "test_ref": test_ref,
+                "actor": actor,
+            },
+        )
+
+        try:
+            success, status_code, error, exc_type, response_excerpt = mattermost_webhooks.post_mattermost_payload(
+                obj,
+                outbound_payload,
+            )
+            duration_ms = round((time.monotonic() - started_at) * 1000, 1)
+            if success:
+                mattermost_webhooks.logger.info(
+                    "mattermost.admin_test_success ref=%s endpoint_id=%s url_hash=%s status_code=%s duration_ms=%s",
+                    test_ref,
+                    obj.pk,
+                    url_hash,
+                    status_code,
+                    duration_ms,
+                    extra={
+                        "endpoint_id": obj.pk,
+                        "url_hash": url_hash,
+                        "status_code": status_code,
+                        "test_ref": test_ref,
+                        "duration_ms": duration_ms,
+                    },
+                )
+                self.message_user(
+                    request,
+                    f"Test notification sent successfully (Mattermost responded {status_code}). Ref: {test_ref}.",
+                    level=messages.SUCCESS,
+                )
+            elif status_code is not None:
+                mattermost_webhooks.logger.error(
+                    "mattermost.admin_test_failed ref=%s endpoint_id=%s url_hash=%s status_code=%s error=%s exc_type=%s response_excerpt=%s payload_json=%s duration_ms=%s",
+                    test_ref,
+                    obj.pk,
+                    url_hash,
+                    status_code,
+                    error,
+                    exc_type,
+                    response_excerpt or "-",
+                    payload_json,
+                    duration_ms,
+                    extra={
+                        "endpoint_id": obj.pk,
+                        "url_hash": url_hash,
+                        "status_code": status_code,
+                        "error": error,
+                        "exc_type": exc_type,
+                        "response_excerpt": response_excerpt,
+                        "payload_json": payload_json,
+                        "test_ref": test_ref,
+                        "duration_ms": duration_ms,
+                    },
+                )
+                response_details = f" Response: {response_excerpt}." if response_excerpt else ""
+                self.message_user(
+                    request,
+                    f"Test failed: HTTP {status_code} from Mattermost.{response_details} Ref: {test_ref}.",
+                    level=messages.ERROR,
+                )
+            else:
+                mattermost_webhooks.logger.error(
+                    "mattermost.admin_test_failed ref=%s endpoint_id=%s url_hash=%s status_code=%s error=%s exc_type=%s response_excerpt=%s payload_json=%s duration_ms=%s",
+                    test_ref,
+                    obj.pk,
+                    url_hash,
+                    status_code,
+                    error,
+                    exc_type,
+                    response_excerpt or "-",
+                    payload_json,
+                    duration_ms,
+                    extra={
+                        "endpoint_id": obj.pk,
+                        "url_hash": url_hash,
+                        "status_code": status_code,
+                        "error": error,
+                        "exc_type": exc_type,
+                        "response_excerpt": response_excerpt,
+                        "payload_json": payload_json,
+                        "test_ref": test_ref,
+                        "duration_ms": duration_ms,
+                    },
+                )
+                self.message_user(
+                    request,
+                    f"Test failed: {error}. Ref: {test_ref}.",
+                    level=messages.ERROR,
+                )
+        except Exception as exc:
+            sanitized_error = mattermost_webhooks._sanitize_error(exc)
+            duration_ms = round((time.monotonic() - started_at) * 1000, 1)
+            mattermost_webhooks.logger.error(
+                "mattermost.admin_test_failed ref=%s endpoint_id=%s url_hash=%s status_code=%s error=%s exc_type=%s payload_json=%s duration_ms=%s",
+                test_ref,
+                obj.pk,
+                url_hash,
+                None,
+                sanitized_error,
+                type(exc).__name__,
+                payload_json,
+                duration_ms,
+                extra={
+                    "endpoint_id": obj.pk,
+                    "url_hash": url_hash,
+                    "status_code": None,
+                    "error": sanitized_error,
+                    "exc_type": type(exc).__name__,
+                    "payload_json": payload_json,
+                    "test_ref": test_ref,
+                    "duration_ms": duration_ms,
+                },
+                exc_info=True,
+            )
+            self.message_user(
+                request,
+                f"Test failed: {sanitized_error}. Ref: {test_ref}.",
+                level=messages.ERROR,
+            )
+
+        return redirect(change_url)
 
 
 class BaseCsvImportAdmin(ImportMixin, admin.ModelAdmin):

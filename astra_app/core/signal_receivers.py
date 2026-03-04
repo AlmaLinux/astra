@@ -51,3 +51,8 @@ def safe_receiver(event_key: str) -> Callable[[Callable[..., Any]], Callable[...
         return wrapper
 
     return decorator
+
+
+from core import mattermost_webhooks as _mattermost_webhooks  # noqa: E402
+
+_mattermost_webhooks.connect_mattermost_receivers()
