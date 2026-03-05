@@ -13,6 +13,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core import signing
+from django.db import transaction
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.http import Http404, HttpRequest, HttpResponse
@@ -23,6 +24,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.module_loading import import_string
 from python_freeipa import ClientMeta, exceptions
 
+from core import signals as astra_signals
 from core.agreements import has_enabled_agreements, list_agreements_for_user
 from core.avatar_storage import avatar_path_handler
 from core.country_codes import country_label_from_code
@@ -58,7 +60,7 @@ from core.ipa_user_attrs import (
 )
 from core.ipa_utils import bool_from_ipa, bool_to_ipa
 from core.membership_notes import CUSTOS, add_note
-from core.models import MembershipRequest
+from core.models import IPAUser, MembershipRequest
 from core.templated_email import queue_templated_email
 from core.tokens import make_settings_email_validation_token, read_settings_email_validation_token
 from core.views_utils import (
@@ -543,6 +545,19 @@ def _apply_and_report_profile_update(
                         mr.pk,
                         username,
                     )
+
+            _old = old_country
+            _new = new_country
+            _u = username
+            transaction.on_commit(
+                lambda: astra_signals.user_country_changed.send(
+                    sender=IPAUser,
+                    username=_u,
+                    old_country=_old,
+                    new_country=_new,
+                    actor=_u,
+                )
+            )
     else:
         messages.info(request, no_changes_message)
     return applied

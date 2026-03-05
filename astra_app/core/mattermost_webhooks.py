@@ -47,6 +47,8 @@ _ORANGE_EVENTS = {
     "organization_membership_rfi_replied",
     "election_deadline_extended",
     "membership_expiring_soon",
+    "user_country_changed",
+    "organization_country_changed",
 }
 
 _RED_EVENTS = {
@@ -255,6 +257,18 @@ _EVENT_TEMPLATE_VARIABLES: dict[str, dict[str, str]] = {
     },
     "organization_created": {
         "organization": "Organization object (example: {{ organization.name }}, {{ organization.pk }}).",
+    },
+    "user_country_changed": {
+        "username": "Username of the user whose country changed.",
+        "old_country": "Previous ISO country code.",
+        "new_country": "New ISO country code.",
+        "actor": "Username of user who made the change.",
+    },
+    "organization_country_changed": {
+        "organization": "Organization object (example: {{ organization.name }}, {{ organization.pk }}).",
+        "old_country": "Previous ISO country code.",
+        "new_country": "New ISO country code.",
+        "actor": "Username of user who made the change.",
     },
 }
 
@@ -498,6 +512,29 @@ def _default_payload(event_key: str, kwargs: dict[str, object]) -> dict[str, obj
     elif event_key == "organization_created":
         text = "Organization created"
         fields = _organization_fields(kwargs)
+    elif event_key == "organization_country_changed":
+        text = "Organization country changed"
+        fields = _organization_fields(kwargs)
+        old_country = str(kwargs.get("old_country") or "").strip()
+        new_country = str(kwargs.get("new_country") or "").strip()
+        if old_country:
+            fields.append({"title": "Old country", "value": old_country, "short": True})
+        if new_country:
+            fields.append({"title": "New country", "value": new_country, "short": True})
+    elif event_key == "user_country_changed":
+        text = "User country changed"
+        actor = str(kwargs.get("actor") or "system").strip() or "system"
+        disp_username = str(kwargs.get("username") or "").strip()
+        old_country = str(kwargs.get("old_country") or "").strip()
+        new_country = str(kwargs.get("new_country") or "").strip()
+        fields = []
+        if disp_username:
+            fields.append({"title": "Username", "value": disp_username, "short": True})
+        if old_country:
+            fields.append({"title": "Old country", "value": old_country, "short": True})
+        if new_country:
+            fields.append({"title": "New country", "value": new_country, "short": True})
+        fields.append({"title": "Actor", "value": actor, "short": True})
     else:
         text = title
         fields = [{"title": "Event", "value": event_key, "short": True}]

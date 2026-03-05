@@ -34,6 +34,10 @@ organization_membership_rfi_replied = Signal()
 organization_claimed = Signal()
 organization_created = Signal()
 
+# Profile changes
+user_country_changed = Signal()
+organization_country_changed = Signal()
+
 CANONICAL_SIGNALS: dict[str, Signal] = {
     "election_opened": election_opened,
     "election_closed": election_closed,
@@ -56,6 +60,8 @@ CANONICAL_SIGNALS: dict[str, Signal] = {
     "organization_membership_rfi_replied": organization_membership_rfi_replied,
     "organization_claimed": organization_claimed,
     "organization_created": organization_created,
+    "user_country_changed": user_country_changed,
+    "organization_country_changed": organization_country_changed,
 }
 
 

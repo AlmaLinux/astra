@@ -730,6 +730,7 @@ def organization_sponsorship_extend(request: HttpRequest, organization_id: int) 
 
 def organization_edit(request: HttpRequest, organization_id: int) -> HttpResponse:
     organization = get_object_or_404(Organization, pk=organization_id)
+    old_country_code = organization.country_code
     _require_organization_edit_access(request, organization)
 
     can_select_representatives = request.user.has_perm(ASTRA_CHANGE_MEMBERSHIP)
@@ -843,6 +844,20 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
                     changed_fields,
                     actor_username,
                 )
+
+        if "country_code" in changed_fields:
+            _actor = actor_username
+            _old = old_country_code
+            _new = updated_org.country_code
+            transaction.on_commit(
+                lambda: astra_signals.organization_country_changed.send(
+                    sender=Organization,
+                    organization=Organization.objects.get(pk=updated_org.pk),
+                    old_country=_old,
+                    new_country=_new,
+                    actor=_actor,
+                )
+            )
 
         if old_representative and new_representative and old_representative != new_representative:
             pending_requests = list(

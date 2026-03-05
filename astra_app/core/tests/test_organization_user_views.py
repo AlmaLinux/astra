@@ -208,6 +208,46 @@ class OrganizationUserViewsTests(TestCase):
         org.refresh_from_db()
         self.assertEqual(org.country_code, "DE")
 
+    def test_organization_edit_sends_country_changed_signal_when_country_code_changes(self) -> None:
+        import importlib
+
+        from core.models import Organization
+
+        signal_module = importlib.import_module("core.signals")
+
+        org = Organization.objects.create(
+            name="Edit Org",
+            representative="alice",
+            country_code="US",
+        )
+
+        self._login_as_freeipa_user("alice")
+        alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
+
+        payload = self._valid_org_payload(name="Edit Org")
+        payload["country_code"] = "de"
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
+            patch("core.views_utils.has_signed_coc", return_value=True),
+            patch.object(signal_module.organization_country_changed, "send", autospec=True) as send_mock,
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            resp_post = self.client.post(reverse("organization-edit", args=[org.pk]), data=payload, follow=False)
+
+        self.assertEqual(resp_post.status_code, 302)
+        send_mock.assert_called_once()
+        kwargs = send_mock.call_args.kwargs
+        self.assertEqual(kwargs.get("sender"), Organization)
+        self.assertEqual(kwargs.get("old_country"), "US")
+        self.assertEqual(kwargs.get("new_country"), "DE")
+        self.assertEqual(kwargs.get("actor"), "alice")
+
+        sent_org = kwargs.get("organization")
+        self.assertIsNotNone(sent_org)
+        self.assertEqual(getattr(sent_org, "pk", None), org.pk)
+        self.assertEqual(getattr(sent_org, "country_code", None), "DE")
+
     def test_non_committee_representative_cannot_create_second_org(self) -> None:
         from core.models import Organization
 

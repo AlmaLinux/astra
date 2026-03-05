@@ -296,6 +296,70 @@ class FASAttributesTests(TestCase):
         )
         self.assertEqual((fu._user_data or {}).get("fasstatusnote"), ["US"])
 
+    @patch("core.forms_selfservice.get_timezone_options", autospec=True, return_value=["UTC"])
+    @patch("core.forms_selfservice.get_locale_options", autospec=True, return_value=["en-US"])
+    def test_profile_country_change_sends_user_country_changed_signal(self, _mock_locales, _mock_tzs):
+        import importlib
+
+        from core.models import IPAUser
+
+        signal_module = importlib.import_module("core.signals")
+
+        fu = _DummyFreeIPAUser(
+            username="alice",
+            first_name="Alice",
+            last_name="User",
+            email="alice@example.com",
+            _user_data={
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "cn": ["Alice User"],
+            },
+        )
+        self._seed_valid_country_code(fu, code="US")
+
+        client = SimpleNamespace(user_mod=Mock())
+        client.user_mod.side_effect = lambda _username, **kwargs: self._apply_user_mod_to_dummy(fu, kwargs)
+
+        req = self.factory.post(
+            "/settings/",
+            data={
+                "tab": "profile",
+                "givenname": "Alice",
+                "sn": "User",
+                "country_code": "FR",
+                "fasPronoun": "",
+                "fasLocale": "",
+                "fasTimezone": "",
+                "fasWebsiteUrl": "",
+                "fasRssUrl": "",
+                "fasIRCNick": "",
+                "fasGitHubUsername": "",
+                "fasGitLabUsername": "",
+                "fasIsPrivate": "",
+            },
+        )
+        self._add_session_and_messages(req)
+        req.user = self._auth_user("alice")
+
+        with (
+            patch("core.views_settings._get_full_user", autospec=True, return_value=fu),
+            patch("core.ipa_user_attrs.FreeIPAUser.get", autospec=True, return_value=fu),
+            patch("core.ipa_user_attrs.FreeIPAUser.get_client", autospec=True, return_value=client),
+            patch.object(signal_module.user_country_changed, "send", autospec=True) as send_mock,
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            resp = settings_root(req)
+
+        self.assertEqual(resp.status_code, 302)
+        send_mock.assert_called_once()
+        kwargs = send_mock.call_args.kwargs
+        self.assertEqual(kwargs.get("sender"), IPAUser)
+        self.assertEqual(kwargs.get("username"), "alice")
+        self.assertEqual(kwargs.get("old_country"), "US")
+        self.assertEqual(kwargs.get("new_country"), "FR")
+        self.assertEqual(kwargs.get("actor"), "alice")
+
 
     @patch("core.views_users.render", autospec=True)
     @override_settings(SELF_SERVICE_ADDRESS_COUNTRY_ATTR="fasstatusnote")

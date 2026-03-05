@@ -208,6 +208,58 @@ class MattermostWebhookTemplateAndPayloadTests(SimpleTestCase):
 
         self.assertEqual(payload["text"], "winners=alice, bob")
 
+    def test_payload_organization_country_changed(self) -> None:
+        org = SimpleNamespace(pk=123, name="Example Org")
+        endpoint = MattermostWebhookEndpoint(
+            label="Ops",
+            url="https://hooks.example.invalid/abc",
+            events=["organization_country_changed"],
+        )
+
+        payload = _build_payload(
+            endpoint,
+            "organization_country_changed",
+            {
+                "organization": org,
+                "old_country": "US",
+                "new_country": "DE",
+                "actor": "alice",
+            },
+        )
+
+        self.assertEqual(payload["text"], "Organization country changed")
+
+        fields = payload["attachments"][0]["fields"]
+        by_title = {str(field.get("title")): str(field.get("value")) for field in fields}
+        self.assertEqual(by_title.get("Old country"), "US")
+        self.assertEqual(by_title.get("New country"), "DE")
+
+    def test_payload_user_country_changed(self) -> None:
+        endpoint = MattermostWebhookEndpoint(
+            label="Ops",
+            url="https://hooks.example.invalid/abc",
+            events=["user_country_changed"],
+        )
+
+        payload = _build_payload(
+            endpoint,
+            "user_country_changed",
+            {
+                "username": "carol",
+                "old_country": "US",
+                "new_country": "FR",
+                "actor": "carol",
+            },
+        )
+
+        self.assertEqual(payload["text"], "User country changed")
+
+        fields = payload["attachments"][0]["fields"]
+        by_title = {str(field.get("title")): str(field.get("value")) for field in fields}
+        self.assertEqual(by_title.get("Username"), "carol")
+        self.assertEqual(by_title.get("Old country"), "US")
+        self.assertEqual(by_title.get("New country"), "FR")
+
 
 @override_settings(MATTERMOST_WEBHOOK_TIMEOUT_SECONDS=3)
 class MattermostWebhookPostTests(SimpleTestCase):
