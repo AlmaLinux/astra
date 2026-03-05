@@ -3,7 +3,7 @@ from pathlib import Path
 import markdown
 from django.conf import settings
 from django.http import Http404, HttpRequest, HttpResponse
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.utils.safestring import mark_safe
 from django.views.decorators.http import require_GET
 
@@ -30,6 +30,12 @@ def privacy_policy(request: HttpRequest) -> HttpResponse:
             "content_html": mark_safe(html),
         },
     )
+
+
+@require_GET
+def coc_redirect(request: HttpRequest) -> HttpResponse:
+    cn = settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN
+    return redirect("agreement-detail", cn=cn)
 
 
 @require_GET

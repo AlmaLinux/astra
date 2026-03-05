@@ -205,6 +205,7 @@ class LoginRequiredMiddleware:
             "/ses/event-webhook/",
             "/privacy-policy/",
             "/agreements/",
+            "/coc/",
             "/robots.txt",
             "/favicon.ico",
             "/healthz",

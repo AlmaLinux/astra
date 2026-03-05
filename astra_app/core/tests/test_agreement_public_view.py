@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from django.conf import settings
 from django.test import TestCase
 from django.urls import reverse
 
@@ -44,3 +45,16 @@ class AgreementPublicViewTests(TestCase):
             response = self.client.get(reverse("agreement-detail", kwargs={"cn": "Public Agreement"}))
         # 200, not a redirect to /login/
         self.assertEqual(response.status_code, 200)
+
+
+class CoCRedirectTests(TestCase):
+    def test_coc_redirects_to_agreement_detail(self) -> None:
+        response = self.client.get(reverse("coc"))
+        cn = settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN
+        expected_url = reverse("agreement-detail", kwargs={"cn": cn})
+        self.assertRedirects(response, expected_url, fetch_redirect_response=False)
+
+    def test_coc_publicly_accessible_without_login(self) -> None:
+        response = self.client.get(reverse("coc"))
+        # redirect, not auth wall
+        self.assertIn(response.status_code, (301, 302))

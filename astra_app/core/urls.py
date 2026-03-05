@@ -64,6 +64,7 @@ urlpatterns = [
 
     path("privacy-policy/", views_static.privacy_policy, name="privacy-policy"),
     path("agreements/<str:cn>/", views_static.agreement_detail, name="agreement-detail"),
+    path("coc/", views_static.coc_redirect, name="coc"),
     path("robots.txt", views_static.robots_txt, name="robots-txt"),
 
     path("elections/", views_elections.elections_list, name="elections"),
