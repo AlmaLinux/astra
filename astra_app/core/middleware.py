@@ -194,6 +194,8 @@ class LoginRequiredMiddleware:
         self._allowed_prefixes: tuple[str, ...] = (
             settings.STATIC_URL,
             settings.MEDIA_URL,
+            "/register",
+            "/password-reset",
             "/admin/",
             "/elections/ballot/verify/",
             "/ses/event-webhook/",
@@ -204,9 +206,7 @@ class LoginRequiredMiddleware:
             "/login",
             "/logout",
             "/otp/sync",
-            "/password-reset",
             "/password-expired",
-            "/register",
             "/robots.txt",
             "/favicon.ico",
             "/healthz",
