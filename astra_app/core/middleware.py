@@ -195,28 +195,31 @@ class LoginRequiredMiddleware:
             settings.STATIC_URL,
             settings.MEDIA_URL,
             "/admin/",
-            "/login/",
-            "/logout/",
-            "/otp/sync/",
-            "/password-reset/",
-            "/password-expired/",
-            "/register/",
             "/elections/ballot/verify/",
             "/ses/event-webhook/",
-            "/privacy-policy/",
             "/agreements/",
-            "/coc/",
+        )
+        # Exact-match paths that must not be treated as prefixes.
+        self._allowed_exact: frozenset[str] = frozenset({
+            "/login",
+            "/logout",
+            "/otp/sync",
+            "/password-reset",
+            "/password-expired",
+            "/register",
             "/robots.txt",
             "/favicon.ico",
             "/healthz",
             "/readyz",
-        )
+            "/privacy-policy",
+            "/coc",
+        })
 
     def __call__(self, request):
         path = request.path
 
         # Allow webhook/static/admin and auth-related URLs.
-        if any(path.startswith(p) for p in self._allowed_prefixes):
+        if path.rstrip('/') in self._allowed_exact or any(path.startswith(p) for p in self._allowed_prefixes):
             return self.get_response(request)
 
         # Keep election public exports public (auditable public artifacts).
