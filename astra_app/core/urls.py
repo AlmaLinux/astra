@@ -63,6 +63,7 @@ urlpatterns = [
     path("search/", views_search.global_search, name="global-search"),
 
     path("privacy-policy/", views_static.privacy_policy, name="privacy-policy"),
+    path("agreements/<str:cn>/", views_static.agreement_detail, name="agreement-detail"),
     path("robots.txt", views_static.robots_txt, name="robots-txt"),
 
     path("elections/", views_elections.elections_list, name="elections"),

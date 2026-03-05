@@ -204,6 +204,7 @@ class LoginRequiredMiddleware:
             "/elections/ballot/verify/",
             "/ses/event-webhook/",
             "/privacy-policy/",
+            "/agreements/",
             "/robots.txt",
             "/favicon.ico",
             "/healthz",

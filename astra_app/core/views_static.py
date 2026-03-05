@@ -7,6 +7,8 @@ from django.shortcuts import render
 from django.utils.safestring import mark_safe
 from django.views.decorators.http import require_GET
 
+from core.freeipa.agreement import FreeIPAFASAgreement
+
 
 @require_GET
 def privacy_policy(request: HttpRequest) -> HttpResponse:
@@ -33,3 +35,21 @@ def privacy_policy(request: HttpRequest) -> HttpResponse:
 @require_GET
 def robots_txt(_request: HttpRequest) -> HttpResponse:
     return HttpResponse("User-agent: *\nDisallow: /\n", content_type="text/plain")
+
+
+@require_GET
+def agreement_detail(request: HttpRequest, cn: str) -> HttpResponse:
+    agreement = FreeIPAFASAgreement.get(cn)
+    if not agreement or not agreement.enabled:
+        raise Http404("Agreement not found.")
+
+    html = markdown.markdown(agreement.description, extensions=["extra", "sane_lists"])
+
+    return render(
+        request,
+        "core/legal_markdown.html",
+        {
+            "title": agreement.cn,
+            "content_html": mark_safe(html),
+        },
+    )
