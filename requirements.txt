@@ -10,6 +10,7 @@ django-logentry-admin
 gunicorn
 whitenoise
 Markdown
+django-markdownify
 Pillow
 python-freeipa==1.0.10
 django-avatar

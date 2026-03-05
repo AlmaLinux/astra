@@ -285,6 +285,7 @@ INSTALLED_APPS = [
     'post_office',
     'django_ses',
     'avatar',
+    'markdownify.apps.MarkdownifyConfig',
     'core',
 ]
 
@@ -817,6 +818,23 @@ AVATAR_PROVIDERS = (
     "avatar.providers.DefaultAvatarProvider",
 )
 AVATAR_GRAVATAR_DEFAULT = _env_str("AVATAR_GRAVATAR_DEFAULT", default="identicon")
+
+# django-markdownify: render agreement descriptions with safe Markdown.
+# Allows basic text formatting while stripping unsafe HTML via bleach.
+MARKDOWNIFY = {
+    "default": {
+        "WHITELIST_TAGS": [
+            "a", "abbr", "acronym", "b", "blockquote", "code", "em", "i",
+            "li", "ol", "p", "pre", "strong", "ul",
+            "h1", "h2", "h3", "h4", "h5", "h6",
+            "hr",
+        ],
+        "WHITELIST_ATTRS": ["href", "src", "alt", "title"],
+        "WHITELIST_PROTOCOLS": ["http", "https"],
+        "STRIP": False,
+        "BLEACH": True,
+    }
+}
 
 # Mattermost webhook configuration
 MATTERMOST_WEBHOOK_TIMEOUT_SECONDS = _env_int("MATTERMOST_WEBHOOK_TIMEOUT_SECONDS", default=5)

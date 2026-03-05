@@ -15,7 +15,8 @@
 			{% endfor %}
 		</div>
 	{% endif %}
-	<div class="mb-3">{{ agreement.description|linebreaksbr }}</div>
+	{% load markdownify %}
+	<div class="mb-3">{{ agreement.description|markdownify }}</div>
 	<form method="post" novalidate>
 		{% csrf_token %}
 		<input type="hidden" name="tab" value="agreements" />
