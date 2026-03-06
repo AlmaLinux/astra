@@ -53,6 +53,21 @@ def safe_receiver(event_key: str) -> Callable[[Callable[..., Any]], Callable[...
     return decorator
 
 
+def connect_once(fn: Callable[[], None]) -> Callable[[], None]:
+    """Ensure a receiver-connect function only executes once (idempotent)."""
+    connected = False
+
+    @functools.wraps(fn)
+    def wrapper() -> None:
+        nonlocal connected
+        if connected:
+            return
+        fn()
+        connected = True
+
+    return wrapper
+
+
 from core import mattermost_webhooks as _mattermost_webhooks  # noqa: E402
 from core import membership_notes_receivers as _membership_notes_receivers  # noqa: E402
 

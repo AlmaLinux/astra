@@ -11,12 +11,9 @@ from core.country_codes import (
 from core.freeipa.user import FreeIPAUser
 from core.membership_notes import CUSTOS, add_note
 from core.models import MembershipRequest, Organization
-from core.signal_receivers import safe_receiver
+from core.signal_receivers import connect_once, safe_receiver
 
 logger = logging.getLogger(__name__)
-
-_CONNECTED: bool = False
-
 
 def record_country_change_notes_for_pending_membership_requests(
     sender: object,
@@ -256,11 +253,8 @@ def record_embargoed_country_note_for_org_submission(
         )
 
 
+@connect_once
 def connect_membership_notes_receivers() -> None:
-    global _CONNECTED
-    if _CONNECTED:
-        return
-
     wrapped_receiver = safe_receiver("user_country_changed")(
         record_country_change_notes_for_pending_membership_requests,
     )
@@ -284,5 +278,3 @@ def connect_membership_notes_receivers() -> None:
         wrapped_org_submission,
         dispatch_uid="core.membership_notes_receivers.organization_membership_request_submitted",
     )
-
-    _CONNECTED = True

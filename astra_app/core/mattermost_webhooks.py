@@ -18,6 +18,7 @@ from core.membership_notifications import (
 )
 from core.models import Ballot, MattermostWebhookEndpoint
 from core.public_urls import build_public_absolute_url
+from core.signal_receivers import connect_once, safe_receiver
 from core.signals import CANONICAL_SIGNALS
 from core.tokens import election_genesis_chain_hash
 
@@ -58,8 +59,6 @@ _RED_EVENTS = {
     "membership_expired",
     "election_closed",
 }
-
-_CONNECTED = False
 
 _COMMON_TEMPLATE_VARIABLES: dict[str, str] = {
     "actor": "Username that triggered the event (often empty for scheduled tasks).",
@@ -982,14 +981,8 @@ def dispatch_mattermost_event(event_key: str, **kwargs: object) -> None:
 _RECEIVER_FUNCTIONS: dict[str, Callable[..., None]] = {}
 
 
+@connect_once
 def connect_mattermost_receivers() -> None:
-    global _CONNECTED
-    if _CONNECTED:
-        return
-
-    # Import lazily to avoid circular import at Django startup.
-    from core.signal_receivers import safe_receiver
-
     for event_key, signal in CANONICAL_SIGNALS.items():
         @safe_receiver(event_key)
         def _receiver(*args: object, __event_key: str = event_key, **kwargs: object) -> None:
@@ -998,5 +991,3 @@ def connect_mattermost_receivers() -> None:
 
         _RECEIVER_FUNCTIONS[event_key] = _receiver
         signal.connect(_receiver, dispatch_uid=f"core.mattermost_webhooks.{event_key}")
-
-    _CONNECTED = True
