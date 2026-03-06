@@ -63,10 +63,10 @@ class CoCRedirectTests(TestCase):
         """Navigating to /coc (no trailing slash) must not hit the login wall."""
         response = self.client.get("/coc")
         self.assertIn(response.status_code, (301, 302))
-        self.assertNotIn(response.get("Location", ""), ["/login/", f"/login/?next=/coc"])
+        self.assertNotIn(response.get("Location", ""), ["/login/", "/login/?next=/coc"])
 
     def test_coc_trailing_slash_publicly_accessible(self) -> None:
         """Navigating to /coc (trailing slash) must not hit the login wall."""
         response = self.client.get("/coc/")
         self.assertIn(response.status_code, (301, 302))
-        self.assertNotIn(response.get("Location", ""), ["/login/", f"/login/?next=/coc/"])
+        self.assertNotIn(response.get("Location", ""), ["/login/", "/login/?next=/coc/"])

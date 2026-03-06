@@ -18,7 +18,6 @@ from core.membership_notifications import (
 )
 from core.models import Ballot, MattermostWebhookEndpoint
 from core.public_urls import build_public_absolute_url
-from core.signal_receivers import safe_receiver
 from core.signals import CANONICAL_SIGNALS
 from core.tokens import election_genesis_chain_hash
 
@@ -987,6 +986,9 @@ def connect_mattermost_receivers() -> None:
     global _CONNECTED
     if _CONNECTED:
         return
+
+    # Import lazily to avoid circular import at Django startup.
+    from core.signal_receivers import safe_receiver
 
     for event_key, signal in CANONICAL_SIGNALS.items():
         @safe_receiver(event_key)

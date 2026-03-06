@@ -83,7 +83,7 @@ class MembershipCountryRequirementsTests(TestCase):
 
     @staticmethod
     def _fake_freeipa_user(*, username: str, user_data: dict) -> SimpleNamespace:
-        return SimpleNamespace(username=username, _user_data=user_data)
+        return SimpleNamespace(username=username, _user_data=user_data, email=None)
 
     def _ensure_org_membership_type(self) -> MembershipType:
         MembershipTypeCategory.objects.update_or_create(
@@ -211,21 +211,19 @@ class MembershipCountryRequirementsTests(TestCase):
 
         fake_user = self._fake_freeipa_user(username="alice", user_data={"fasstatusnote": ["RU"]})
 
-        with patch(
-            "core.forms_membership.get_membership_request_eligibility",
-            autospec=True,
-            return_value=SimpleNamespace(
-                blocked_membership_type_codes=set(),
-                pending_membership_category_ids=set(),
+        with (
+            patch(
+                "core.forms_membership.get_membership_request_eligibility",
+                autospec=True,
+                return_value=SimpleNamespace(
+                    blocked_membership_type_codes=set(),
+                    pending_membership_category_ids=set(),
+                ),
             ),
+            patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_user),
+            self.captureOnCommitCallbacks(execute=True),
         ):
-            with patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_user):
-                with patch(
-                    "core.views_membership.user.record_membership_request_created",
-                    autospec=True,
-                    return_value=None,
-                ):
-                    response = views_membership.membership_request(request)
+            response = views_membership.membership_request(request)
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], reverse("user-profile", kwargs={"username": "alice"}))
@@ -280,13 +278,11 @@ class MembershipCountryRequirementsTests(TestCase):
 
         fake_user = self._fake_freeipa_user(username="bob", user_data={"fasstatusnote": ["RU"]})
 
-        with patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_user):
-            with patch(
-                "core.views_membership.user.record_membership_request_created",
-                autospec=True,
-                return_value=None,
-            ):
-                response = views_membership.membership_request(request, organization_id=org.pk)
+        with (
+            patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_user),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            response = views_membership.membership_request(request, organization_id=org.pk)
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], reverse("organization-detail", kwargs={"organization_id": org.pk}))
@@ -325,13 +321,11 @@ class MembershipCountryRequirementsTests(TestCase):
 
         fake_user = self._fake_freeipa_user(username="bob", user_data={"fasstatusnote": ["US"]})
 
-        with patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_user):
-            with patch(
-                "core.views_membership.user.record_membership_request_created",
-                autospec=True,
-                return_value=None,
-            ):
-                response = views_membership.membership_request(request, organization_id=org.pk)
+        with (
+            patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_user),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            response = views_membership.membership_request(request, organization_id=org.pk)
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], reverse("organization-detail", kwargs={"organization_id": org.pk}))
@@ -372,13 +366,11 @@ class MembershipCountryRequirementsTests(TestCase):
 
         fake_user = self._fake_freeipa_user(username="bob", user_data={"fasstatusnote": ["RU"]})
 
-        with patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_user):
-            with patch(
-                "core.views_membership.user.record_membership_request_created",
-                autospec=True,
-                return_value=None,
-            ):
-                response = views_membership.membership_request(request, organization_id=org.pk)
+        with (
+            patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_user),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            response = views_membership.membership_request(request, organization_id=org.pk)
 
         self.assertEqual(response.status_code, 302)
 
@@ -420,13 +412,11 @@ class MembershipCountryRequirementsTests(TestCase):
 
         fake_user = self._fake_freeipa_user(username="bob", user_data={"fasstatusnote": ["US"]})
 
-        with patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_user):
-            with patch(
-                "core.views_membership.user.record_membership_request_created",
-                autospec=True,
-                return_value=None,
-            ):
-                response = views_membership.membership_request(request, organization_id=org.pk)
+        with (
+            patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_user),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            response = views_membership.membership_request(request, organization_id=org.pk)
 
         self.assertEqual(response.status_code, 302)
 
@@ -556,9 +546,12 @@ class MembershipCountryRequirementsTests(TestCase):
             },
         )
 
-        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
-            with patch("core.views_settings._update_user_attrs", autospec=True, return_value=([], True)):
-                response = views_settings.settings_root(request)
+        with (
+            patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user),
+            patch("core.views_settings._update_user_attrs", autospec=True, return_value=([], True)),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            response = views_settings.settings_root(request)
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], reverse("settings") + "?tab=profile&status=saved")

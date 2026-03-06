@@ -8,13 +8,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.html import format_html
 
-from core.country_codes import (
-    embargoed_country_match_from_country_code,
-    embargoed_country_match_from_user_data,
-)
 from core.forms_membership import MembershipRequestForm, MembershipRequestUpdateResponsesForm
 from core.freeipa.user import FreeIPAUser
-from core.membership_notes import CUSTOS, add_note
 from core.membership_request_workflow import (
     record_membership_request_created,
     rescind_membership_request,
@@ -186,53 +181,6 @@ def membership_request(request: HttpRequest, organization_id: int | None = None)
                     actor_username=username,
                     send_submitted_email=True,
                 )
-
-                try:
-                    if not is_org_request:
-                        embargoed_match = embargoed_country_match_from_user_data(user_data=fu._user_data)
-                        if embargoed_match is not None:
-                            add_note(
-                                membership_request=mr,
-                                username=CUSTOS,
-                                content=(
-                                    "This user's declared country, "
-                                    f"{embargoed_match.label}, is on the list of embargoed countries."
-                                ),
-                            )
-                    else:
-                        org_country_match = embargoed_country_match_from_country_code(
-                            organization.country_code if organization is not None else ""
-                        )
-                        if org_country_match is not None:
-                            add_note(
-                                membership_request=mr,
-                                username=CUSTOS,
-                                content=(
-                                    "This organization's declared country, "
-                                    f"{org_country_match.label}, is on the list of embargoed countries."
-                                ),
-                            )
-
-                        if representative_user is not None:
-                            embargoed_match = embargoed_country_match_from_user_data(
-                                user_data=representative_user._user_data,
-                            )
-                            if embargoed_match is not None:
-                                add_note(
-                                    membership_request=mr,
-                                    username=CUSTOS,
-                                    content=(
-                                        "This organization's representative's declared country, "
-                                        f"{embargoed_match.label}, is on the list of embargoed countries."
-                                    ),
-                                )
-                except Exception:
-                    logger.exception(
-                        "Failed to record embargoed-country system note request_id=%s org_id=%s username=%s",
-                        mr.pk,
-                        organization.pk if organization is not None else None,
-                        username,
-                    )
 
                 if is_org_request:
                     redirect_target = "organization-detail"

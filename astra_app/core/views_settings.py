@@ -13,9 +13,9 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core import signing
-from django.db import transaction
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
+from django.db import transaction
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -27,7 +27,6 @@ from python_freeipa import ClientMeta, exceptions
 from core import signals as astra_signals
 from core.agreements import has_enabled_agreements, list_agreements_for_user
 from core.avatar_storage import avatar_path_handler
-from core.country_codes import country_label_from_code
 from core.email_context import system_email_context, user_email_context
 from core.forms_selfservice import (
     EmailsForm,
@@ -59,8 +58,7 @@ from core.ipa_user_attrs import (
     _value_to_text,
 )
 from core.ipa_utils import bool_from_ipa, bool_to_ipa
-from core.membership_notes import CUSTOS, add_note
-from core.models import IPAUser, MembershipRequest
+from core.models import IPAUser
 from core.templated_email import queue_templated_email
 from core.tokens import make_settings_email_validation_token, read_settings_email_validation_token
 from core.views_utils import (
@@ -501,7 +499,7 @@ def _apply_and_report_profile_update(
     profile_form: ProfileForm,
     no_changes_message: str = "No changes were applied.",
 ) -> bool:
-    """Apply profile changes to FreeIPA, report via messages, record country-change notes.
+    """Apply profile changes to FreeIPA and report via messages.
 
     Returns whether changes were applied.  Raises on IPA communication errors.
     """
@@ -523,29 +521,6 @@ def _apply_and_report_profile_update(
     if applied:
         messages.success(request, "Profile updated in FreeIPA.")
         if old_country and new_country and old_country != new_country and country_attr not in (skipped or []):
-            pending = list(
-                MembershipRequest.objects.filter(
-                    requested_username=username,
-                    status=MembershipRequest.Status.pending,
-                ).only("pk")
-            )
-            for mr in pending:
-                try:
-                    add_note(
-                        membership_request=mr,
-                        username=CUSTOS,
-                        content=(
-                            f"{username} updated their country from {country_label_from_code(old_country)} "
-                            f"to {country_label_from_code(new_country)}."
-                        ),
-                    )
-                except Exception:
-                    logger.exception(
-                        "Failed to record country-change system note request_id=%s username=%s",
-                        mr.pk,
-                        username,
-                    )
-
             _old = old_country
             _new = new_country
             _u = username

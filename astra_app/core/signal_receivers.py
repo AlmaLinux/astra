@@ -54,5 +54,7 @@ def safe_receiver(event_key: str) -> Callable[[Callable[..., Any]], Callable[...
 
 
 from core import mattermost_webhooks as _mattermost_webhooks  # noqa: E402
+from core import membership_notes_receivers as _membership_notes_receivers  # noqa: E402
 
 _mattermost_webhooks.connect_mattermost_receivers()
+_membership_notes_receivers.connect_membership_notes_receivers()
