@@ -33,11 +33,26 @@ from core.views_utils import _normalize_str, agreement_settings_url, get_usernam
 logger = logging.getLogger(__name__)
 
 
+def _is_membership_committee_viewer(request: HttpRequest) -> bool:
+    committee_group = str(settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP or "").strip()
+    if not committee_group:
+        return False
+
+    # Request user can be a test double without FreeIPA group metadata.
+    try:
+        viewer_groups = request.user.groups_list
+    except AttributeError:
+        return False
+
+    return committee_group in viewer_groups
+
+
 def _profile_context_for_user(
     request: HttpRequest,
     *,
     fu: FreeIPAUser,
     is_self: bool,
+    viewer_is_membership_committee: bool,
 ) -> dict[str, object]:
     data = fu._user_data
 
@@ -330,6 +345,10 @@ def _profile_context_for_user(
         for action in account_setup_required_actions
     )
 
+    # Test helpers and some stubs use user-like objects without this attribute.
+    profile_is_private = fu.fas_is_private if hasattr(fu, "fas_is_private") else False
+    show_membership_card = (not profile_is_private) or is_self or viewer_is_membership_committee
+
     return {
         "fu": fu,
         "profile_avatar_user": profile_avatar_user,
@@ -341,6 +360,7 @@ def _profile_context_for_user(
         "account_setup_required_is_rfi": account_setup_required_is_rfi,
         "account_setup_recommended_actions": account_setup_recommended_actions,
         "membership_request_url": membership_request_url,
+        "show_membership_card": show_membership_card,
         "membership_can_request_any": membership_can_request_any,
         "memberships": memberships,
         "membership_pending_requests": pending_requests,
@@ -384,8 +404,14 @@ def user_profile(request: HttpRequest, username: str) -> HttpResponse:
         raise Http404("User not found")
 
     is_self = username == viewer_username
+    viewer_is_membership_committee = _is_membership_committee_viewer(request)
 
-    context = _profile_context_for_user(request, fu=fu, is_self=is_self)
+    context = _profile_context_for_user(
+        request,
+        fu=fu,
+        is_self=is_self,
+        viewer_is_membership_committee=viewer_is_membership_committee,
+    )
     return render(request, "core/user_profile.html", context)
 
 

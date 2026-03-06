@@ -193,7 +193,9 @@
     </div>
 
     <div class="col-md-8">
-      {% include 'core/_membership_profile_section.html' with membership_target_kind='user' membership_is_owner=is_self membership_can_request_any=membership_can_request_any membership_entries=memberships membership_pending_requests=membership_pending_requests membership_request_url=membership_request_url %}
+      {% if show_membership_card %}
+        {% include 'core/_membership_profile_section.html' with membership_target_kind='user' membership_is_owner=is_self membership_can_request_any=membership_can_request_any membership_entries=memberships membership_pending_requests=membership_pending_requests membership_request_url=membership_request_url %}
+      {% endif %}
 
       <ul class="list-group profile-memberships">
         <li class="list-group-item profile-memberships-header text-right">

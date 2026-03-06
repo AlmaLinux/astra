@@ -2,6 +2,7 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from django.conf import settings
 from django.core.cache import cache
 from django.test import RequestFactory, TestCase
 
@@ -109,3 +110,111 @@ class FASIsPrivateAnonymizeTests(TestCase):
 
         # Username remains visible
         self.assertIn("bob", html)
+
+    def test_user_profile_hides_membership_card_for_private_profile_non_committee_viewer(self) -> None:
+        factory = RequestFactory()
+        request = factory.get("/user/bob/")
+        request.user = SimpleNamespace(
+            is_authenticated=True,
+            get_username=lambda: "alice",
+            groups_list=[],
+        )
+
+        set_current_viewer_username("alice")
+        try:
+            bob = FreeIPAUser(
+                "bob",
+                {
+                    "uid": ["bob"],
+                    "givenname": ["Bob"],
+                    "sn": ["User"],
+                    "mail": ["bob@example.org"],
+                    "fasIsPrivate": ["TRUE"],
+                    "memberof_group": ["packagers"],
+                },
+            )
+        finally:
+            clear_current_viewer_username()
+
+        with (
+            patch("core.views_users._get_full_user", autospec=True, return_value=bob),
+            patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]),
+            patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
+        ):
+            resp = views_users.user_profile(request, "bob")
+
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+        self.assertNotIn("Membership</strong>", html)
+
+    def test_user_profile_shows_membership_card_for_private_profile_self_viewer(self) -> None:
+        factory = RequestFactory()
+        request = factory.get("/user/bob/")
+        request.user = SimpleNamespace(
+            is_authenticated=True,
+            get_username=lambda: "bob",
+            groups_list=[],
+        )
+
+        set_current_viewer_username("bob")
+        try:
+            bob = FreeIPAUser(
+                "bob",
+                {
+                    "uid": ["bob"],
+                    "givenname": ["Bob"],
+                    "sn": ["User"],
+                    "mail": ["bob@example.org"],
+                    "fasIsPrivate": ["TRUE"],
+                    "memberof_group": ["packagers"],
+                },
+            )
+        finally:
+            clear_current_viewer_username()
+
+        with (
+            patch("core.views_users._get_full_user", autospec=True, return_value=bob),
+            patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]),
+            patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
+        ):
+            resp = views_users.user_profile(request, "bob")
+
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+        self.assertIn("Membership</strong>", html)
+
+    def test_user_profile_shows_membership_card_for_private_profile_committee_viewer(self) -> None:
+        factory = RequestFactory()
+        request = factory.get("/user/bob/")
+        request.user = SimpleNamespace(
+            is_authenticated=True,
+            get_username=lambda: "reviewer",
+            groups_list=[settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+        )
+
+        set_current_viewer_username("reviewer")
+        try:
+            bob = FreeIPAUser(
+                "bob",
+                {
+                    "uid": ["bob"],
+                    "givenname": ["Bob"],
+                    "sn": ["User"],
+                    "mail": ["bob@example.org"],
+                    "fasIsPrivate": ["TRUE"],
+                    "memberof_group": ["packagers"],
+                },
+            )
+        finally:
+            clear_current_viewer_username()
+
+        with (
+            patch("core.views_users._get_full_user", autospec=True, return_value=bob),
+            patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]),
+            patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
+        ):
+            resp = views_users.user_profile(request, "bob")
+
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+        self.assertIn("Membership</strong>", html)

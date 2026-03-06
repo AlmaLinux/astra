@@ -63,6 +63,7 @@ class GroupsSponsorsAndAgreementsTests(TestCase):
                         request=SimpleNamespace(),
                         fu=fu,
                         is_self=True,
+                        viewer_is_membership_committee=False,
                     )
 
         self.assertEqual(ctx["agreements"], [])
@@ -584,6 +585,7 @@ class GroupsSponsorsAndAgreementsTests(TestCase):
                     request=SimpleNamespace(),
                     fu=fu,
                     is_self=True,
+                    viewer_is_membership_committee=False,
                 )
 
         groups = ctx["groups"]
