@@ -308,7 +308,31 @@ def organizations(request: HttpRequest) -> HttpResponse:
     page_number = _normalize_str(request.GET.get("page")) or None
 
     if q:
-        orgs = orgs.filter(name__icontains=q)
+        name_query = q
+        if can_manage_memberships:
+            status_tokens = {
+                "is:claimed": Organization.Status.active,
+                "is:unclaimed": Organization.Status.unclaimed,
+            }
+            q_terms = q.split()
+            matched_statuses = {status_tokens[term.lower()] for term in q_terms if term.lower() in status_tokens}
+            if len(matched_statuses) == 1:
+                orgs = orgs.filter(status=matched_statuses.pop())
+                name_query = " ".join(
+                    term
+                    for term in q_terms
+                    if term.lower() not in status_tokens
+                )
+            elif len(matched_statuses) > 1:
+                orgs = orgs.none()
+                name_query = " ".join(
+                    term
+                    for term in q_terms
+                    if term.lower() not in status_tokens
+                )
+
+        if name_query:
+            orgs = orgs.filter(name__icontains=name_query)
 
     _, page_url_prefix = build_page_url_prefix(request.GET, page_param="page")
     page_ctx = paginate_and_build_context(orgs, page_number, 25, page_url_prefix=page_url_prefix)
