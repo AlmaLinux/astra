@@ -16,6 +16,9 @@ from core.membership import (
 from core.membership_constants import MembershipCategoryCode
 from core.models import MembershipRequest, MembershipType, MembershipTypeCategory, Organization
 
+MIRROR_ADDITIONAL_INFO_QUESTION = "Additional info"
+GENERIC_ADDITIONAL_INFORMATION_QUESTION = "Additional information"
+
 
 class _AnswerKind(StrEnum):
     text = "text"
@@ -85,7 +88,7 @@ class MembershipRequestForm(StyledForm):
             url_assume_scheme="https",
         ),
         _QuestionSpec(
-            name="Additional info",
+            name=MIRROR_ADDITIONAL_INFO_QUESTION,
             title="Please provide any additional information the Membership Committee should know",
             required=False,
         ),
@@ -266,15 +269,25 @@ class MembershipRequestUpdateResponsesForm(StyledForm):
         super().__init__(*args, **kwargs)
 
         self._question_specs: list[_QuestionSpec] = []
+        is_mirror_request = membership_request.membership_type.category_id == MembershipCategoryCode.mirror
+        mirror_clarification_answer: str | None = None
+        mirror_clarification_alias_answer: str | None = None
 
         for item in membership_request.responses or []:
             if not isinstance(item, dict):
                 continue
             for question, answer in item.items():
                 question_name = str(question)
-                if question_name.strip().lower() == "additional information":
+                question_key = question_name.strip().lower()
+                if is_mirror_request and question_key == MIRROR_ADDITIONAL_INFO_QUESTION.lower():
+                    mirror_clarification_answer = str(answer or "")
+                    continue
+                if is_mirror_request and question_key == GENERIC_ADDITIONAL_INFORMATION_QUESTION.lower():
+                    mirror_clarification_alias_answer = str(answer or "")
+                    continue
+                if question_key == GENERIC_ADDITIONAL_INFORMATION_QUESTION.lower():
                     # Canonicalize legacy casing variants onto one persisted key.
-                    question_name = "Additional information"
+                    question_name = GENERIC_ADDITIONAL_INFORMATION_QUESTION
                 spec = _QuestionSpec(name=question_name, title=question_name, required=False)
                 if spec.field_name in self.fields:
                     continue
@@ -294,11 +307,28 @@ class MembershipRequestUpdateResponsesForm(StyledForm):
 
         # Always provide a place for clarifications; reuses the same field name
         # so an existing response isn't duplicated.
-        extra_spec = _QuestionSpec(name="Additional information", title="Additional information", required=False)
+        if is_mirror_request:
+            extra_spec = _QuestionSpec(
+                name=MIRROR_ADDITIONAL_INFO_QUESTION,
+                title=MIRROR_ADDITIONAL_INFO_QUESTION,
+                required=False,
+            )
+            initial = mirror_clarification_alias_answer.strip() if mirror_clarification_alias_answer else ""
+            if not initial:
+                initial = mirror_clarification_answer or ""
+        else:
+            extra_spec = _QuestionSpec(
+                name=GENERIC_ADDITIONAL_INFORMATION_QUESTION,
+                title=GENERIC_ADDITIONAL_INFORMATION_QUESTION,
+                required=False,
+            )
+            initial = ""
+
         if extra_spec.field_name not in self.fields:
             self.fields[extra_spec.field_name] = forms.CharField(
                 required=False,
                 label=extra_spec.title,
+                initial=initial,
                 widget=forms.Textarea(attrs={"rows": 4}),
             )
             self._question_specs.append(extra_spec)

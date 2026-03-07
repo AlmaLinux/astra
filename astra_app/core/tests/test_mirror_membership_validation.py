@@ -19,6 +19,7 @@ from core.mirror_membership_validation import (
     finalize_validation,
     mirror_answers_fingerprint,
     mirror_request_answers,
+    mirror_request_answers_from_responses,
     schedule_mirror_membership_validation,
 )
 from core.models import MembershipRequest, MembershipType, MirrorMembershipValidation, Note, Organization
@@ -318,6 +319,71 @@ class MirrorMembershipValidationTests(TestCase):
             )
 
         self.assertFalse(MirrorMembershipValidation.objects.filter(membership_request=membership_request).exists())
+
+    def test_rfi_resubmission_requeues_when_only_alias_clarification_changes(self) -> None:
+        membership_request = self._create_user_request(status=MembershipRequest.Status.on_hold)
+        fingerprint = mirror_answers_fingerprint(mirror_request_answers(membership_request))
+        validation = MirrorMembershipValidation.objects.create(
+            membership_request=membership_request,
+            status=MirrorMembershipValidation.Status.completed,
+            answer_fingerprint=fingerprint,
+            attempt_count=2,
+            next_run_at=timezone.now() + datetime.timedelta(days=1),
+            result={"domain": {"status": "reachable"}},
+            noted_result_fingerprint="stale-note",
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            resubmit_membership_request(
+                membership_request=membership_request,
+                actor_username="alice",
+                updated_responses=[
+                    {"Domain": "https://mirror.example.org"},
+                    {"Pull request": "https://github.com/AlmaLinux/mirrors/pull/123"},
+                    {"Additional info": "Primary EU mirror"},
+                    {"Additional information": "Updated clarification"},
+                ],
+            )
+
+        membership_request.refresh_from_db()
+        validation.refresh_from_db()
+        self.assertEqual(membership_request.status, MembershipRequest.Status.pending)
+        self.assertIsNone(membership_request.on_hold_at)
+        self.assertEqual(validation.status, MirrorMembershipValidation.Status.pending)
+        self.assertNotEqual(validation.answer_fingerprint, fingerprint)
+        self.assertEqual(validation.result, {})
+
+    def test_mirror_request_answers_prefers_alias_clarification_for_mixed_key_rows(self) -> None:
+        membership_type = MembershipType.objects.get(code="mirror")
+
+        answers = mirror_request_answers_from_responses(
+            membership_type=membership_type,
+            responses=[
+                {"Domain": "https://mirror.example.org"},
+                {"Pull request": "https://github.com/AlmaLinux/mirrors/pull/123"},
+                {"Additional info": "Old note"},
+                {"Additional information": "Newer note"},
+            ],
+        )
+
+        assert answers is not None
+        self.assertEqual(answers.additional_info, "Newer note")
+
+    def test_mirror_request_answers_fall_back_to_canonical_when_alias_blank(self) -> None:
+        membership_type = MembershipType.objects.get(code="mirror")
+
+        answers = mirror_request_answers_from_responses(
+            membership_type=membership_type,
+            responses=[
+                {"Domain": "https://mirror.example.org"},
+                {"Pull request": "https://github.com/AlmaLinux/mirrors/pull/123"},
+                {"Additional info": "Primary EU mirror"},
+                {"Additional information": "   "},
+            ],
+        )
+
+        assert answers is not None
+        self.assertEqual(answers.additional_info, "Primary EU mirror")
 
     def test_command_writes_terminal_summary_note_once(self) -> None:
         membership_request = self._create_user_request()

@@ -12,7 +12,13 @@ import urllib3
 from django.db import transaction
 from django.utils import timezone
 
-from core.forms_membership import MembershipRequestForm, _AnswerKind, _QuestionSpec
+from core.forms_membership import (
+    GENERIC_ADDITIONAL_INFORMATION_QUESTION,
+    MIRROR_ADDITIONAL_INFO_QUESTION,
+    MembershipRequestForm,
+    _AnswerKind,
+    _QuestionSpec,
+)
 from core.membership_constants import MembershipCategoryCode
 from core.membership_notes import CUSTOS, add_note
 from core.models import MembershipRequest, MembershipType, MirrorMembershipValidation
@@ -454,16 +460,32 @@ def _response_map_from_responses(
     specs = MembershipRequestForm.question_specs_for_membership_type(membership_type)
     wanted = {spec.name.strip().lower(): spec.name for spec in specs}
     answers: dict[str, str] = {spec.name: "" for spec in specs}
+    mirror_additional_info_answer: str | None = None
+    mirror_clarification_alias_answer: str | None = None
+    is_mirror_membership = membership_type.category_id == MembershipCategoryCode.mirror
 
     for item in responses or []:
         if not isinstance(item, dict):
             continue
         for question, answer in item.items():
             key = str(question or "").strip().lower()
+            answer_value = str(answer or "").strip()
+            if is_mirror_membership and key == MIRROR_ADDITIONAL_INFO_QUESTION.lower():
+                mirror_additional_info_answer = answer_value
+                continue
+            if is_mirror_membership and key == GENERIC_ADDITIONAL_INFORMATION_QUESTION.lower():
+                mirror_clarification_alias_answer = answer_value
+                continue
             canonical_name = wanted.get(key)
             if canonical_name is None:
                 continue
-            answers[canonical_name] = str(answer or "").strip()
+            answers[canonical_name] = answer_value
+
+    if is_mirror_membership:
+        if mirror_clarification_alias_answer:
+            answers[MIRROR_ADDITIONAL_INFO_QUESTION] = mirror_clarification_alias_answer
+        elif mirror_additional_info_answer is not None:
+            answers[MIRROR_ADDITIONAL_INFO_QUESTION] = mirror_additional_info_answer
     return answers
 
 

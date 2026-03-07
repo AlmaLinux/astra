@@ -932,6 +932,106 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
         self.assertEqual(len(additional_info_items), 1)
         self.assertTrue(any(item.get("Additional information") == "New" for item in additional_info_items))
 
+    def test_mirror_rfi_form_uses_single_canonical_clarification_field(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror",
+                "group_cn": "almalinux-mirror",
+                "category_id": "mirror",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="mirror",
+            status=MembershipRequest.Status.on_hold,
+            on_hold_at=timezone.now(),
+            responses=[
+                {"Domain": "https://mirror.example.org"},
+                {"Pull request": "https://github.com/AlmaLinux/mirrors/pull/123"},
+                {"Additional info": "Old note"},
+                {"Additional information": "Newer note"},
+            ],
+        )
+
+        self._add_freeipa_user(username="alice", email="alice@example.com")
+        self._login_as_freeipa_user("alice")
+
+        resp_get = self.client.get(reverse("membership-request-self", args=[req.pk]))
+        self.assertEqual(resp_get.status_code, 200)
+        form = resp_get.context["form"]
+        self.assertIn("q_additional_info", form.fields)
+        self.assertNotIn("q_additional_information", form.fields)
+        self.assertEqual(form["q_additional_info"].value(), "Newer note")
+
+        resp_post = self.client.post(
+            reverse("membership-request-self", args=[req.pk]),
+            data={
+                "q_domain": "https://mirror.example.org",
+                "q_pull_request": "https://github.com/AlmaLinux/mirrors/pull/123",
+                "q_additional_info": "Newest note",
+            },
+            follow=False,
+        )
+
+        self.assertEqual(resp_post.status_code, 302)
+        req.refresh_from_db()
+        self.assertEqual(req.status, MembershipRequest.Status.pending)
+        self.assertIsNone(req.on_hold_at)
+
+        clarification_items = [
+            item
+            for item in req.responses
+            if isinstance(item, dict)
+            and any(
+                str(key).strip().lower() in {"additional info", "additional information"}
+                for key in item
+            )
+        ]
+        self.assertEqual(clarification_items, [{"Additional info": "Newest note"}])
+
+    def test_mirror_rfi_form_falls_back_to_canonical_clarification_when_alias_blank(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror",
+                "group_cn": "almalinux-mirror",
+                "category_id": "mirror",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="mirror",
+            status=MembershipRequest.Status.on_hold,
+            on_hold_at=timezone.now(),
+            responses=[
+                {"Domain": "https://mirror.example.org"},
+                {"Pull request": "https://github.com/AlmaLinux/mirrors/pull/123"},
+                {"Additional info": "Primary EU mirror"},
+                {"Additional information": "   "},
+            ],
+        )
+
+        self._add_freeipa_user(username="alice", email="alice@example.com")
+        self._login_as_freeipa_user("alice")
+
+        resp_get = self.client.get(reverse("membership-request-self", args=[req.pk]))
+        self.assertEqual(resp_get.status_code, 200)
+        form = resp_get.context["form"]
+        self.assertIn("q_additional_info", form.fields)
+        self.assertNotIn("q_additional_information", form.fields)
+        self.assertEqual(form["q_additional_info"].value(), "Primary EU mirror")
+
     def test_membership_request_self_readonly_shows_legacy_additional_information_key(self) -> None:
         from core.models import MembershipType, Organization
 
