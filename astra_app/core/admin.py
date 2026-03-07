@@ -2113,11 +2113,18 @@ class BaseCsvImportAdmin(ImportMixin, admin.ModelAdmin):
         ]
         return custom + urls
 
-    def download_unmatched_view(self, request: HttpRequest, token: str) -> HttpResponse:
+    def _download_cached_csv(
+        self,
+        request: HttpRequest,
+        token: str,
+        *,
+        cache_key_prefix: str,
+        filename: str,
+    ) -> HttpResponse:
         if not self.has_view_permission(request):
             raise PermissionDenied
 
-        cache_key = f"{self.unmatched_cache_key_prefix}:{token}"
+        cache_key = f"{cache_key_prefix}:{token}"
         content = cache.get(cache_key)
         if content is None:
             content = request.session.get(cache_key)
@@ -2128,8 +2135,16 @@ class BaseCsvImportAdmin(ImportMixin, admin.ModelAdmin):
             raise Http404("Export expired")
 
         resp = HttpResponse(content, content_type="text/csv; charset=utf-8")
-        resp["Content-Disposition"] = f'attachment; filename="{self.unmatched_download_filename}"'
+        resp["Content-Disposition"] = f'attachment; filename="{filename}"'
         return resp
+
+    def download_unmatched_view(self, request: HttpRequest, token: str) -> HttpResponse:
+        return self._download_cached_csv(
+            request,
+            token,
+            cache_key_prefix=self.unmatched_cache_key_prefix,
+            filename=self.unmatched_download_filename,
+        )
 
 
 @admin.register(MembershipCSVImportLink)
@@ -2302,6 +2317,9 @@ class OrganizationCSVImportLinkAdmin(BaseCsvImportAdmin):
     unmatched_download_url_name = "core_organizationcsvimportlink_download_unmatched"
     unmatched_download_filename = "unmatched_organizations.csv"
     unmatched_message_label = "Unmatched organizations export"
+    enriched_cache_key_prefix = "organization-import-enriched"
+    enriched_download_url_name = "core_organizationcsvimportlink_download_enriched"
+    enriched_download_filename = "enriched_organizations.csv"
 
     @override
     def get_confirm_form_initial(self, request: HttpRequest, import_form: forms.Form) -> dict[str, Any]:
@@ -2393,6 +2411,60 @@ class OrganizationCSVImportLinkAdmin(BaseCsvImportAdmin):
                         confirm_form.fields["selected_row_numbers"].initial = selected_default
 
         return response
+
+    @override
+    def process_result(self, result: Any, request: HttpRequest) -> HttpResponse:
+        # import-export's Result object is duck-typed and may or may not carry
+        # our dynamic enriched-download attributes depending on the resource path.
+        enriched_url = getattr(result, "enriched_download_url", "")
+        if enriched_url:
+            parsed = urlparse(enriched_url)
+            token = parsed.path.rstrip("/").split("/")[-1] if parsed.path else ""
+            # The cached CSV content is attached dynamically to the third-party
+            # Result instance alongside the download URL during after_import().
+            content = getattr(result, "enriched_csv_content", None)
+            if token and content is not None:
+                request.session[f"{self.enriched_cache_key_prefix}:{token}"] = content
+        return super().process_result(result, request)
+
+    @override
+    def add_success_message(self, result: Any, request: HttpRequest) -> None:
+        # import-export's Result object is duck-typed and only exposes this
+        # dynamic attribute when the org importer attached an enriched download.
+        enriched_url = getattr(result, "enriched_download_url", "")
+        if not enriched_url:
+            super().add_success_message(result, request)
+            return
+
+        messages.success(
+            request,
+            format_html(
+                '{} <a href="{}">{}</a>',
+                "Import complete. Download the enriched CSV to review the selected representative and the new organization's Astra profile link.",
+                enriched_url,
+                "Download enriched CSV",
+            ),
+        )
+
+    @override
+    def get_urls(self):
+        urls = super().get_urls()
+        custom = [
+            path(
+                "download-enriched/<str:token>/",
+                self.admin_site.admin_view(self.download_enriched_view),
+                name=self.enriched_download_url_name,
+            ),
+        ]
+        return custom + urls
+
+    def download_enriched_view(self, request: HttpRequest, token: str) -> HttpResponse:
+        return self._download_cached_csv(
+            request,
+            token,
+            cache_key_prefix=self.enriched_cache_key_prefix,
+            filename=self.enriched_download_filename,
+        )
 
     @override
     def changelist_view(self, request: HttpRequest, extra_context: dict[str, Any] | None = None) -> HttpResponse:

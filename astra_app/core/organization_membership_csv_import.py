@@ -179,6 +179,7 @@ class OrganizationMembershipCSVImportForm(ImportForm):
                     (
                         norm_csv_header(spec.title),
                         norm_csv_header(spec.name),
+                        *(norm_csv_header(alias) for alias in spec.csv_header_aliases),
                         norm_csv_header(spec.field_name),
                         norm_csv_header(spec.field_name.removeprefix("q_")),
                     ),
@@ -446,6 +447,7 @@ class OrganizationMembershipCSVImportResource(resources.ModelResource):
                 self._question_column_overrides,
                 spec.title,
                 spec.name,
+                *spec.csv_header_aliases,
                 spec.field_name,
                 spec.field_name.removeprefix("q_"),
             )

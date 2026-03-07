@@ -4,6 +4,7 @@ from typing import Any, override
 
 from django import forms
 from django.core.exceptions import ValidationError
+from django.urls import reverse
 from import_export import fields, resources
 from import_export.forms import ConfirmImportForm, ImportForm
 from tablib import Dataset
@@ -11,13 +12,16 @@ from tablib import Dataset
 from core.address_geocoding import decompose_full_address_with_photon
 from core.country_codes import is_valid_country_alpha2, normalize_country_alpha2
 from core.csv_import_utils import (
+    attach_unmatched_csv_to_result,
     extract_csv_headers_from_uploaded_file,
     norm_csv_header,
     normalize_csv_email,
+    sanitize_csv_cell,
     set_form_column_field_choices,
 )
 from core.freeipa.user import FreeIPAUser
 from core.models import Organization
+from core.public_urls import build_public_absolute_url
 from core.views_utils import _normalize_str
 
 _ORG_COLUMN_FIELDS = (
@@ -243,6 +247,7 @@ class OrganizationCSVImportResource(resources.ModelResource):
         self._suggested_usernames_cache: dict[str, list[str]] = {}
         self._selected_representative_cache: dict[str, str] = {}
         self._decision_cache: dict[str, tuple[str, str]] = {}
+        self._imported_organization_ids: dict[str, int] = {}
 
         self._duplicate_csv_keys: set[tuple[str, str]] = set()
         self._existing_org_keys: set[tuple[str, str]] = set()
@@ -692,9 +697,56 @@ class OrganizationCSVImportResource(resources.ModelResource):
 
         super().save_instance(instance, is_create, row, **kwargs)
 
+        if instance.pk is not None:
+            self._imported_organization_ids[self._row_cache_key(row)] = instance.pk
+
         selected = _normalize_str(kwargs_by_field.get("representative", "")).lower()
         if selected:
             self._existing_representatives.add(selected)
+
+    @override
+    def after_import(self, dataset: Dataset, result: Any, **kwargs: Any) -> None:
+        super().after_import(dataset, result, **kwargs)
+
+        if bool(kwargs.get("dry_run")):
+            return
+
+        headers = [header for header in list(dataset.headers or []) if header]
+        if not headers:
+            return
+
+        enriched_dataset = Dataset()
+        enriched_headers = [*headers, "selected_org_representative", "astra_organization_profile_url"]
+        enriched_dataset.headers = enriched_headers
+
+        for row in dataset.dict:
+            row_cache_key = self._row_cache_key(row)
+            organization_id = self._imported_organization_ids.get(row_cache_key)
+            representative = ""
+            profile_url = ""
+            if organization_id is not None:
+                representative = self._selected_representative_for_row(row)
+                profile_url = build_public_absolute_url(
+                    reverse("organization-detail", kwargs={"organization_id": organization_id}),
+                    on_missing="relative",
+                )
+
+            enriched_dataset.append(
+                [
+                    *[sanitize_csv_cell(str(row.get(header, ""))) for header in headers],
+                    sanitize_csv_cell(representative),
+                    sanitize_csv_cell(profile_url),
+                ]
+            )
+
+        attach_unmatched_csv_to_result(
+            result,
+            enriched_dataset,
+            "organization-import-enriched",
+            "admin:core_organizationcsvimportlink_download_enriched",
+            content_attr_name="enriched_csv_content",
+            url_attr_name="enriched_download_url",
+        )
 
 
 def iter_representative_selection_items(post_items: Iterable[tuple[str, str]]) -> dict[str, str]:

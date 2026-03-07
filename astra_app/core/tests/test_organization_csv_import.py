@@ -1,18 +1,19 @@
 import csv
 import hashlib
+import html
 import io
 import json
 from unittest.mock import patch
 
 from django.contrib.admin.sites import AdminSite
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import RequestFactory, TestCase
+from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from import_export.formats import base_formats
 from tablib import Dataset
 
 from core.admin import OrganizationCSVImportLinkAdmin
-from core.csv_import_utils import extract_csv_headers_from_uploaded_file
+from core.csv_import_utils import extract_csv_headers_from_uploaded_file, sanitize_csv_cell
 from core.freeipa.user import FreeIPAUser
 from core.models import Organization, OrganizationCSVImportLink
 from core.organization_csv_import import OrganizationCSVImportResource
@@ -941,6 +942,377 @@ class OrganizationCSVImportAdminFlowTests(TestCase):
         organization = Organization.objects.get(name="Globex")
         self.assertEqual(organization.representative, "alice")
         self.assertEqual(organization.status, Organization.Status.active)
+
+    @override_settings(PUBLIC_BASE_URL="https://astra.example.org")
+    def test_confirm_success_surfaces_enriched_csv_download_with_imported_rows_in_original_order(self) -> None:
+        self._login_as_freeipa_admin("alex")
+
+        admin_user = FreeIPAUser("alex", {"uid": ["alex"], "mail": ["alex@example.com"], "memberof_group": ["admins"]})
+        alice = FreeIPAUser("alice", {"uid": ["alice"], "mail": ["alice@example.com"]})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "mail": ["bob@example.com"]})
+
+        uploaded_rows = [
+            [
+                "Initech",
+                "Biz",
+                "biz@example.com",
+                "+1 555 111",
+                "PR",
+                "pr@example.com",
+                "+1 555 112",
+                "Tech",
+                "tech@example.com",
+                "+1 555 113",
+                "https://initech.example.com",
+                "https://initech.example.com/logo.png",
+                "US",
+                "",
+                "rep@example.com",
+            ],
+            [
+                "Umbrella",
+                "Biz",
+                "umbrella-biz@example.com",
+                "+1 555 211",
+                "PR",
+                "umbrella-pr@example.com",
+                "+1 555 212",
+                "Tech",
+                "umbrella-tech@example.com",
+                "+1 555 213",
+                "",
+                "https://umbrella.example.com/logo.png",
+                "US",
+                "",
+                "",
+            ],
+        ]
+        uploaded = self._csv_upload(uploaded_rows)
+
+        def get_user(username: str) -> FreeIPAUser | None:
+            if username == "alex":
+                return admin_user
+            if username == "alice":
+                return alice
+            if username == "bob":
+                return bob
+            return None
+
+        row_key = hashlib.sha256(
+            "|".join(
+                [
+                    "Initech",
+                    "US",
+                    "biz@example.com",
+                    "tech@example.com",
+                ]
+            ).encode("utf-8")
+        ).hexdigest()[:16]
+        download_url = reverse(
+            "admin:core_organizationcsvimportlink_download_enriched",
+            kwargs={"token": "enriched-token"},
+        )
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=get_user),
+            patch("core.organization_csv_import.FreeIPAUser.all", return_value=[admin_user, alice, bob]),
+            patch("core.organization_csv_import.FreeIPAUser.get", side_effect=get_user),
+            patch("core.organization_csv_import.FreeIPAUser.find_usernames_by_email", return_value=["alice", "bob"]),
+            patch("core.organization_csv_import.FreeIPAUser.find_by_email", return_value=None),
+            patch("core.csv_import_utils.secrets.token_urlsafe", return_value="enriched-token"),
+        ):
+            preview = self.client.post(
+                reverse("admin:core_organizationcsvimportlink_import"),
+                data={
+                    "resource": "0",
+                    "format": "0",
+                    "import_file": uploaded,
+                },
+                follow=False,
+            )
+
+            self.assertEqual(preview.status_code, 200)
+            confirm_form = preview.context["confirm_form"]
+
+            confirm_data = dict(confirm_form.initial)
+            confirm_data[f"representative_for_{row_key}"] = "bob"
+            result = self.client.post(
+                reverse("admin:core_organizationcsvimportlink_process_import"),
+                data=confirm_data,
+                follow=True,
+            )
+
+            download_response = self.client.get(download_url)
+
+        self.assertEqual(result.status_code, 200)
+        page_content = html.unescape(result.content.decode("utf-8"))
+        self.assertIn(
+            "Import complete. Download the enriched CSV to review the selected representative and the new organization's Astra profile link.",
+            page_content,
+        )
+        self.assertContains(result, "Download enriched CSV")
+        self.assertContains(result, download_url)
+        self.assertNotContains(result, "Import finished:")
+
+        organization = Organization.objects.get(name="Initech")
+        self.assertEqual(organization.representative, "bob")
+
+        self.assertEqual(download_response.status_code, 200)
+        self.assertEqual(download_response["Content-Type"], "text/csv; charset=utf-8")
+
+        exported_rows = list(csv.reader(io.StringIO(download_response.content.decode("utf-8"))))
+        self.assertEqual(
+            exported_rows,
+            [
+                [
+                    "name",
+                    "business_contact_name",
+                    "business_contact_email",
+                    "business_contact_phone",
+                    "pr_marketing_contact_name",
+                    "pr_marketing_contact_email",
+                    "pr_marketing_contact_phone",
+                    "technical_contact_name",
+                    "technical_contact_email",
+                    "technical_contact_phone",
+                    "website",
+                    "website_logo",
+                    "country_code",
+                    "representative_username",
+                    "representative_email",
+                    "selected_org_representative",
+                    "astra_organization_profile_url",
+                ],
+                [
+                    *[sanitize_csv_cell(value) for value in uploaded_rows[0]],
+                    "bob",
+                    f"https://astra.example.org/organization/{organization.pk}/",
+                ],
+                [
+                    *[sanitize_csv_cell(value) for value in uploaded_rows[1]],
+                    "",
+                    "",
+                ],
+            ],
+        )
+
+    @override_settings(PUBLIC_BASE_URL="https://astra.example.org")
+    def test_confirm_success_enriched_csv_sanitizes_formula_prefixed_cells(self) -> None:
+        self._login_as_freeipa_admin("alex")
+
+        admin_user = FreeIPAUser("alex", {"uid": ["alex"], "mail": ["alex@example.com"], "memberof_group": ["admins"]})
+        representative = FreeIPAUser("bob", {"uid": ["bob"], "mail": ["bob@example.com"]})
+
+        uploaded_rows = [
+            [
+                "Initech",
+                "Biz",
+                "biz@example.com",
+                "+1 555 111",
+                "PR",
+                "pr@example.com",
+                "+1 555 112",
+                "Tech",
+                "tech@example.com",
+                "+1 555 113",
+                "https://initech.example.com",
+                "https://initech.example.com/logo.png",
+                "US",
+                "",
+                "rep@example.com",
+            ],
+            [
+                "=SUM(1,2)",
+                "Biz",
+                "unsafe@example.com",
+                "+1 555 211",
+                "PR",
+                "unsafe-pr@example.com",
+                "+1 555 212",
+                "Tech",
+                "unsafe-tech@example.com",
+                "+1 555 213",
+                "",
+                "https://unsafe.example.com/logo.png",
+                "US",
+                "",
+                "",
+            ],
+        ]
+        uploaded = self._csv_upload(uploaded_rows)
+
+        def get_user(username: str) -> FreeIPAUser | None:
+            if username == "alex":
+                return admin_user
+            if username == "bob":
+                return representative
+            return None
+
+        row_key = hashlib.sha256(
+            "|".join(
+                [
+                    "Initech",
+                    "US",
+                    "biz@example.com",
+                    "tech@example.com",
+                ]
+            ).encode("utf-8")
+        ).hexdigest()[:16]
+        download_url = reverse(
+            "admin:core_organizationcsvimportlink_download_enriched",
+            kwargs={"token": "sanitized-token"},
+        )
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=get_user),
+            patch("core.organization_csv_import.FreeIPAUser.all", return_value=[admin_user, representative]),
+            patch("core.organization_csv_import.FreeIPAUser.get", side_effect=get_user),
+            patch("core.organization_csv_import.FreeIPAUser.find_usernames_by_email", return_value=["bob"]),
+            patch("core.organization_csv_import.FreeIPAUser.find_by_email", return_value=None),
+            patch("core.csv_import_utils.secrets.token_urlsafe", return_value="sanitized-token"),
+        ):
+            preview = self.client.post(
+                reverse("admin:core_organizationcsvimportlink_import"),
+                data={
+                    "resource": "0",
+                    "format": "0",
+                    "import_file": uploaded,
+                },
+                follow=False,
+            )
+
+            self.assertEqual(preview.status_code, 200)
+            confirm_form = preview.context["confirm_form"]
+
+            confirm_data = dict(confirm_form.initial)
+            confirm_data[f"representative_for_{row_key}"] = "bob"
+            self.client.post(
+                reverse("admin:core_organizationcsvimportlink_process_import"),
+                data=confirm_data,
+                follow=True,
+            )
+
+            download_response = self.client.get(download_url)
+
+        self.assertEqual(download_response.status_code, 200)
+        exported_rows = list(csv.reader(io.StringIO(download_response.content.decode("utf-8"))))
+        self.assertEqual(exported_rows[2][0], "'=SUM(1,2)")
+
+    def test_download_enriched_route_returns_404_for_unknown_token(self) -> None:
+        self._login_as_freeipa_admin("alex")
+
+        admin_user = FreeIPAUser("alex", {"uid": ["alex"], "mail": ["alex@example.com"], "memberof_group": ["admins"]})
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
+            response = self.client.get(
+                reverse(
+                    "admin:core_organizationcsvimportlink_download_enriched",
+                    kwargs={"token": "missing-token"},
+                )
+            )
+
+        self.assertEqual(response.status_code, 404)
+
+    @override_settings(PUBLIC_BASE_URL="https://astra.example.org")
+    def test_download_enriched_uses_session_fallback_when_cache_misses(self) -> None:
+        self._login_as_freeipa_admin("alex")
+
+        admin_user = FreeIPAUser("alex", {"uid": ["alex"], "mail": ["alex@example.com"], "memberof_group": ["admins"]})
+        representative = FreeIPAUser("bob", {"uid": ["bob"], "mail": ["bob@example.com"]})
+
+        uploaded = self._csv_upload(
+            [
+                [
+                    "Initech",
+                    "Biz",
+                    "biz@example.com",
+                    "+1 555 111",
+                    "PR",
+                    "pr@example.com",
+                    "+1 555 112",
+                    "Tech",
+                    "tech@example.com",
+                    "+1 555 113",
+                    "https://initech.example.com",
+                    "https://initech.example.com/logo.png",
+                    "US",
+                    "",
+                    "rep@example.com",
+                ]
+            ]
+        )
+
+        def get_user(username: str) -> FreeIPAUser | None:
+            if username == "alex":
+                return admin_user
+            if username == "bob":
+                return representative
+            return None
+
+        row_key = hashlib.sha256(
+            "|".join(
+                [
+                    "Initech",
+                    "US",
+                    "biz@example.com",
+                    "tech@example.com",
+                ]
+            ).encode("utf-8")
+        ).hexdigest()[:16]
+        download_url = reverse(
+            "admin:core_organizationcsvimportlink_download_enriched",
+            kwargs={"token": "session-token"},
+        )
+        session_key = "organization-import-enriched:session-token"
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=get_user),
+            patch("core.organization_csv_import.FreeIPAUser.all", return_value=[admin_user, representative]),
+            patch("core.organization_csv_import.FreeIPAUser.get", side_effect=get_user),
+            patch("core.organization_csv_import.FreeIPAUser.find_usernames_by_email", return_value=["bob"]),
+            patch("core.organization_csv_import.FreeIPAUser.find_by_email", return_value=None),
+            patch("core.csv_import_utils.secrets.token_urlsafe", return_value="session-token"),
+        ):
+            preview = self.client.post(
+                reverse("admin:core_organizationcsvimportlink_import"),
+                data={
+                    "resource": "0",
+                    "format": "0",
+                    "import_file": uploaded,
+                },
+                follow=False,
+            )
+
+            self.assertEqual(preview.status_code, 200)
+            confirm_form = preview.context["confirm_form"]
+
+            confirm_data = dict(confirm_form.initial)
+            confirm_data[f"representative_for_{row_key}"] = "bob"
+            self.client.post(
+                reverse("admin:core_organizationcsvimportlink_process_import"),
+                data=confirm_data,
+                follow=True,
+            )
+
+        session = self.client.session
+        self.assertIn(session_key, session)
+
+        with (
+            patch("core.admin.cache.get", return_value=None),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
+        ):
+            response = self.client.get(download_url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(session_key, self.client.session)
+
+        with (
+            patch("core.admin.cache.get", return_value=None),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
+        ):
+            expired_response = self.client.get(download_url)
+
+        self.assertEqual(expired_response.status_code, 404)
 
     def test_upload_preview_shows_email_hint_representative_suggestions(self) -> None:
         self._login_as_freeipa_admin("alex")

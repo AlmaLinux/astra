@@ -16,8 +16,26 @@ from core.membership import (
 from core.membership_constants import MembershipCategoryCode
 from core.models import MembershipRequest, MembershipType, MembershipTypeCategory, Organization
 
-MIRROR_ADDITIONAL_INFO_QUESTION = "Additional info"
-GENERIC_ADDITIONAL_INFORMATION_QUESTION = "Additional information"
+ADDITIONAL_INFORMATION_QUESTION = "Additional information"
+_LEGACY_ADDITIONAL_INFORMATION_QUESTION = "Additional info"
+ADDITIONAL_INFORMATION_QUESTION_KEYS = frozenset(
+    {
+        ADDITIONAL_INFORMATION_QUESTION.casefold(),
+        _LEGACY_ADDITIONAL_INFORMATION_QUESTION.casefold(),
+    }
+)
+ADDITIONAL_INFORMATION_HEADER_ALIASES = (
+    _LEGACY_ADDITIONAL_INFORMATION_QUESTION,
+    "q_additional_info",
+    "additional_info",
+)
+
+
+def canonicalize_additional_information_question(question_name: object) -> str:
+    normalized = str(question_name or "").strip()
+    if normalized.casefold() in ADDITIONAL_INFORMATION_QUESTION_KEYS:
+        return ADDITIONAL_INFORMATION_QUESTION
+    return normalized
 
 
 class _AnswerKind(StrEnum):
@@ -32,6 +50,7 @@ class _QuestionSpec:
     required: bool
     answer_kind: _AnswerKind = _AnswerKind.text
     url_assume_scheme: str | None = None
+    csv_header_aliases: tuple[str, ...] = ()
 
     @property
     def field_name(self) -> str:
@@ -88,9 +107,10 @@ class MembershipRequestForm(StyledForm):
             url_assume_scheme="https",
         ),
         _QuestionSpec(
-            name=MIRROR_ADDITIONAL_INFO_QUESTION,
+            name=ADDITIONAL_INFORMATION_QUESTION,
             title="Please provide any additional information the Membership Committee should know",
             required=False,
+            csv_header_aliases=ADDITIONAL_INFORMATION_HEADER_ALIASES,
         ),
     )
 
@@ -111,7 +131,10 @@ class MembershipRequestForm(StyledForm):
     q_contributions = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 6, "spellcheck": "true"}))
     q_domain = forms.CharField(required=False)
     q_pull_request = forms.CharField(required=False)
-    q_additional_info = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 4, "spellcheck": "true"}))
+    q_additional_information = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 4, "spellcheck": "true"}),
+    )
     q_sponsorship_details = forms.CharField(
         required=False,
         widget=forms.Textarea(attrs={"rows": 4, "spellcheck": "true"}),
@@ -271,23 +294,21 @@ class MembershipRequestUpdateResponsesForm(StyledForm):
         self._question_specs: list[_QuestionSpec] = []
         is_mirror_request = membership_request.membership_type.category_id == MembershipCategoryCode.mirror
         mirror_clarification_answer: str | None = None
-        mirror_clarification_alias_answer: str | None = None
+        mirror_legacy_clarification_answer: str | None = None
 
         for item in membership_request.responses or []:
             if not isinstance(item, dict):
                 continue
             for question, answer in item.items():
                 question_name = str(question)
-                question_key = question_name.strip().lower()
-                if is_mirror_request and question_key == MIRROR_ADDITIONAL_INFO_QUESTION.lower():
+                question_key = question_name.strip().casefold()
+                if is_mirror_request and question_key == ADDITIONAL_INFORMATION_QUESTION.casefold():
                     mirror_clarification_answer = str(answer or "")
                     continue
-                if is_mirror_request and question_key == GENERIC_ADDITIONAL_INFORMATION_QUESTION.lower():
-                    mirror_clarification_alias_answer = str(answer or "")
+                if is_mirror_request and question_key in ADDITIONAL_INFORMATION_QUESTION_KEYS:
+                    mirror_legacy_clarification_answer = str(answer or "")
                     continue
-                if question_key == GENERIC_ADDITIONAL_INFORMATION_QUESTION.lower():
-                    # Canonicalize legacy casing variants onto one persisted key.
-                    question_name = GENERIC_ADDITIONAL_INFORMATION_QUESTION
+                question_name = canonicalize_additional_information_question(question_name)
                 spec = _QuestionSpec(name=question_name, title=question_name, required=False)
                 if spec.field_name in self.fields:
                     continue
@@ -309,17 +330,17 @@ class MembershipRequestUpdateResponsesForm(StyledForm):
         # so an existing response isn't duplicated.
         if is_mirror_request:
             extra_spec = _QuestionSpec(
-                name=MIRROR_ADDITIONAL_INFO_QUESTION,
-                title=MIRROR_ADDITIONAL_INFO_QUESTION,
+                name=ADDITIONAL_INFORMATION_QUESTION,
+                title=ADDITIONAL_INFORMATION_QUESTION,
                 required=False,
             )
-            initial = mirror_clarification_alias_answer.strip() if mirror_clarification_alias_answer else ""
+            initial = mirror_clarification_answer.strip() if mirror_clarification_answer else ""
             if not initial:
-                initial = mirror_clarification_answer or ""
+                initial = mirror_legacy_clarification_answer or ""
         else:
             extra_spec = _QuestionSpec(
-                name=GENERIC_ADDITIONAL_INFORMATION_QUESTION,
-                title=GENERIC_ADDITIONAL_INFORMATION_QUESTION,
+                name=ADDITIONAL_INFORMATION_QUESTION,
+                title=ADDITIONAL_INFORMATION_QUESTION,
                 required=False,
             )
             initial = ""

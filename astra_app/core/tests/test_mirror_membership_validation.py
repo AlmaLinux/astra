@@ -94,7 +94,7 @@ class MirrorMembershipValidationTests(TestCase):
         return [
             {"Domain": domain},
             {"Pull request": pull_request},
-            {"Additional info": additional_info},
+            {"Additional information": additional_info},
         ]
 
     def _create_user_request(

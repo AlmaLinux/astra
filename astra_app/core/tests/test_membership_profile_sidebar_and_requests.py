@@ -1445,7 +1445,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
                     "membership_type": "mirror",
                     "q_domain": "example.com",
                     "q_pull_request": "https://github.com/example/repo/pull/123",
-                    "q_additional_info": "Extra details",
+                    "q_additional_information": "Extra details",
                 },
             )
 
@@ -1460,7 +1460,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             [
                 {"Domain": "https://example.com"},
                 {"Pull request": "https://github.com/example/repo/pull/123"},
-                {"Additional info": "Extra details"},
+                {"Additional information": "Extra details"},
             ],
         )
 

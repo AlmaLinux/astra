@@ -932,6 +932,52 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
         self.assertEqual(len(additional_info_items), 1)
         self.assertTrue(any(item.get("Additional information") == "New" for item in additional_info_items))
 
+    def test_org_rfi_resubmit_rejects_legacy_additional_information_noop(self) -> None:
+        from core.models import MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="org",
+            defaults={
+                "name": "Organization",
+                "group_cn": "almalinux-org",
+                "category_id": "sponsorship",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        for index, legacy_label in enumerate(("Additional Information", "Additional info"), start=1):
+            with self.subTest(legacy_label=legacy_label):
+                representative_username = f"bob{index}"
+                self._add_freeipa_user(username=representative_username, email=f"{representative_username}@example.com")
+                req = MembershipRequest.objects.create(
+                    requested_username="",
+                    requested_organization=Organization.objects.create(
+                        name=f"Acme {index}", representative=representative_username
+                    ),
+                    membership_type_id="org",
+                    status=MembershipRequest.Status.on_hold,
+                    on_hold_at=timezone.now(),
+                    responses=[{legacy_label: "Same details"}],
+                )
+
+                self._login_as_freeipa_user(representative_username)
+                resp_post = self.client.post(
+                    reverse("membership-request-self", args=[req.pk]),
+                    data={
+                        "q_additional_information": "Same details",
+                    },
+                    follow=False,
+                )
+
+                self.assertEqual(resp_post.status_code, 200)
+                self.assertContains(resp_post, "Please update your request before resubmitting it")
+
+                req.refresh_from_db()
+                self.assertEqual(req.status, MembershipRequest.Status.on_hold)
+                self.assertIsNotNone(req.on_hold_at)
+                self.assertEqual(req.responses, [{legacy_label: "Same details"}])
+
     def test_mirror_rfi_form_uses_single_canonical_clarification_field(self) -> None:
         from core.models import MembershipType
 
@@ -965,16 +1011,16 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
         resp_get = self.client.get(reverse("membership-request-self", args=[req.pk]))
         self.assertEqual(resp_get.status_code, 200)
         form = resp_get.context["form"]
-        self.assertIn("q_additional_info", form.fields)
-        self.assertNotIn("q_additional_information", form.fields)
-        self.assertEqual(form["q_additional_info"].value(), "Newer note")
+        self.assertIn("q_additional_information", form.fields)
+        self.assertNotIn("q_additional_info", form.fields)
+        self.assertEqual(form["q_additional_information"].value(), "Newer note")
 
         resp_post = self.client.post(
             reverse("membership-request-self", args=[req.pk]),
             data={
                 "q_domain": "https://mirror.example.org",
                 "q_pull_request": "https://github.com/AlmaLinux/mirrors/pull/123",
-                "q_additional_info": "Newest note",
+                "q_additional_information": "Newest note",
             },
             follow=False,
         )
@@ -993,7 +1039,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
                 for key in item
             )
         ]
-        self.assertEqual(clarification_items, [{"Additional info": "Newest note"}])
+        self.assertEqual(clarification_items, [{"Additional information": "Newest note"}])
 
     def test_mirror_rfi_form_falls_back_to_canonical_clarification_when_alias_blank(self) -> None:
         from core.models import MembershipType
@@ -1028,9 +1074,9 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
         resp_get = self.client.get(reverse("membership-request-self", args=[req.pk]))
         self.assertEqual(resp_get.status_code, 200)
         form = resp_get.context["form"]
-        self.assertIn("q_additional_info", form.fields)
-        self.assertNotIn("q_additional_information", form.fields)
-        self.assertEqual(form["q_additional_info"].value(), "Primary EU mirror")
+        self.assertIn("q_additional_information", form.fields)
+        self.assertNotIn("q_additional_info", form.fields)
+        self.assertEqual(form["q_additional_information"].value(), "Primary EU mirror")
 
     def test_membership_request_self_readonly_shows_legacy_additional_information_key(self) -> None:
         from core.models import MembershipType, Organization

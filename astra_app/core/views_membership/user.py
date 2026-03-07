@@ -8,7 +8,12 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.html import format_html
 
-from core.forms_membership import MembershipRequestForm, MembershipRequestUpdateResponsesForm
+from core.forms_membership import (
+    ADDITIONAL_INFORMATION_QUESTION_KEYS,
+    MembershipRequestForm,
+    MembershipRequestUpdateResponsesForm,
+    canonicalize_additional_information_question,
+)
 from core.freeipa.user import FreeIPAUser
 from core.membership_request_workflow import (
     record_membership_request_created,
@@ -58,11 +63,7 @@ def _renewal_prefill_responses(
         if not isinstance(item, dict):
             continue
         for question, answer in item.items():
-            question_name = str(question or "").strip()
-            if question_name.lower() == "additional information":
-                # Legacy request update forms used "Additional information";
-                # canonical request forms use "Additional info".
-                question_name = "Additional info"
+            question_name = canonicalize_additional_information_question(question)
             spec = spec_by_name.get(question_name)
             if spec is None:
                 continue
@@ -375,7 +376,7 @@ def membership_request_self(request: HttpRequest, pk: int) -> HttpResponse:
         # responses using the same form visualization as the on-hold update screen.
         has_additional_info = any(
             isinstance(item, dict)
-            and any(str(key).strip().lower() == "additional information" for key in item)
+            and any(str(key).strip().casefold() in ADDITIONAL_INFORMATION_QUESTION_KEYS for key in item)
             for item in (req.responses or [])
         )
         if not has_additional_info and "q_additional_information" in form.fields:

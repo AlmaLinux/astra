@@ -1784,9 +1784,63 @@ class AdminImportMembershipsCSVTests(TestCase):
             [
                 {"Domain": "mirror.example.org"},
                 {"Pull request": "https://github.com/AlmaLinux/mirrors/pull/1"},
-                {"Additional info": "Some notes"},
+                {"Additional information": "Some notes"},
             ],
         )
+
+    def test_mirror_import_auto_detect_maps_legacy_additional_info_field_headers(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror",
+                "group_cn": "almalinux-mirror",
+                "category_id": "mirror",
+                "enabled": True,
+                "sort_order": 0,
+            },
+        )
+
+        membership_type = MembershipType.objects.get(code="mirror")
+
+        for header in ("q_additional_info", "additional_info"):
+            with self.subTest(header=header):
+                dataset = Dataset(
+                    headers=[
+                        "Email",
+                        "Active Member",
+                        "Membership Start Date",
+                        "Membership Type",
+                        "Domain",
+                        "Pull request",
+                        header,
+                    ]
+                )
+                dataset.append(
+                    [
+                        "alice@example.org",
+                        "Active Member",
+                        "2024-01-02",
+                        "mirror",
+                        "mirror.example.org",
+                        "https://github.com/AlmaLinux/mirrors/pull/1",
+                        "Some notes",
+                    ]
+                )
+
+                resource = MembershipCSVImportResource(
+                    membership_type=membership_type,
+                    actor_username="alex",
+                )
+                resource.before_import(dataset)
+
+                self.assertEqual(
+                    resource._row_responses(dataset.dict[0]),
+                    [
+                        {"Domain": "mirror.example.org"},
+                        {"Pull request": "https://github.com/AlmaLinux/mirrors/pull/1"},
+                        {"Additional information": "Some notes"},
+                    ],
+                )
 
     def test_live_import_without_active_member_column_imports_rows(self) -> None:
         MembershipType.objects.update_or_create(

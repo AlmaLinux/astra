@@ -69,6 +69,9 @@ def attach_unmatched_csv_to_result(
     dataset: Dataset,
     cache_key_prefix: str,
     reverse_url_name: str,
+    *,
+    content_attr_name: str = "unmatched_csv_content",
+    url_attr_name: str = "unmatched_download_url",
 ) -> None:
     token = secrets.token_urlsafe(16)
     cache_key = f"{cache_key_prefix}:{token}"
@@ -78,8 +81,8 @@ def attach_unmatched_csv_to_result(
     download_url = reverse(reverse_url_name, kwargs={"token": token})
     # `Result` is a third-party import-export type with no extension hook;
     # dynamic attributes are used as a lightweight duck-typed contract.
-    setattr(result, "unmatched_csv_content", csv_content)
-    setattr(result, "unmatched_download_url", download_url)
+    setattr(result, content_attr_name, csv_content)
+    setattr(result, url_attr_name, download_url)
 
 
 def sanitize_csv_cell(value: str) -> str:

@@ -19,6 +19,7 @@ from core.email_context import (
     system_email_context,
     user_email_context_from_user,
 )
+from core.forms_membership import canonicalize_additional_information_question
 from core.freeipa.user import FreeIPAUser
 from core.membership import (
     FreeIPACallerMode,
@@ -1134,7 +1135,7 @@ def resubmit_membership_request(
             if not isinstance(item, dict):
                 continue
             for question, answer in item.items():
-                question_s = str(question or "").strip()
+                question_s = canonicalize_additional_information_question(question)
                 answer_s = str(answer or "").strip()
                 if question_s and answer_s:
                     out.append({question_s: answer_s})
