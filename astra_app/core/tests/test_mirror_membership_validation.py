@@ -464,6 +464,10 @@ class MirrorMembershipValidationTests(TestCase):
                 return _FakeResponse(status_code=200, body=b"not-a-real-timestamp\n")
             if url == "https://mirror.example.org/almalinux-kitten/timestamp.txt":
                 return _FakeResponse(status_code=404)
+            if url == "https://mirror.example.org/alma/timestamp.txt":
+                return _FakeResponse(status_code=404)
+            if url == "https://mirror.example.org/timestamp.txt":
+                return _FakeResponse(status_code=404)
             raise AssertionError(f"unexpected bound URL: {url}")
 
         with (
@@ -481,6 +485,65 @@ class MirrorMembershipValidationTests(TestCase):
         self.assertEqual(validation.status, MirrorMembershipValidation.Status.failed_terminal)
         self.assertEqual(validation.result["timestamp"]["status"], "not_found")
         self.assertIn("Mirror status: not found", note.content)
+
+    def test_command_accepts_alma_prefix_timestamp_file_when_standard_paths_missing(self) -> None:
+        membership_request = self._create_user_request(
+            responses=self._mirror_responses(domain="https://almalinux.mirrors.itworxx.de/"),
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            record_membership_request_created(
+                membership_request=membership_request,
+                actor_username="alice",
+                send_submitted_email=False,
+            )
+
+        def bound_http_get(url: str) -> _FakeResponse:
+            if url == "https://almalinux.mirrors.itworxx.de":
+                return _FakeResponse(status_code=200)
+            if url == "https://almalinux.mirrors.itworxx.de/timestamp.txt":
+                return _FakeResponse(status_code=404)
+            if url == "https://almalinux.mirrors.itworxx.de/almalinux/timestamp.txt":
+                return _FakeResponse(status_code=404)
+            if url == "https://almalinux.mirrors.itworxx.de/almalinux-kitten/timestamp.txt":
+                return _FakeResponse(status_code=404)
+            if url == "https://almalinux.mirrors.itworxx.de/alma/timestamp.txt":
+                return _FakeResponse(status_code=200, body=self._alma_timestamp_text(age=datetime.timedelta(hours=2)))
+            raise AssertionError(f"unexpected bound URL: {url}")
+
+        def github_requests_get(url: str, **kwargs) -> _FakeResponse:
+            _ = kwargs
+            if url == "https://github.com/AlmaLinux/mirrors/pull/123":
+                return _FakeResponse(status_code=200)
+            raise AssertionError(f"unexpected URL: {url}")
+
+        with (
+            patch("core.mirror_membership_validation._bound_http_get", side_effect=bound_http_get, autospec=True),
+            patch(
+                "core.mirror_membership_validation.requests.get",
+                side_effect=github_requests_get,
+                autospec=True,
+            ),
+        ):
+            call_command("membership_mirror_validation")
+
+        validation = MirrorMembershipValidation.objects.get(membership_request=membership_request)
+        note = Note.objects.get(membership_request=membership_request, username=CUSTOS)
+        self.assertEqual(validation.status, MirrorMembershipValidation.Status.completed)
+        self.assertEqual(validation.result["timestamp"]["status"], "up_to_date")
+        self.assertEqual(
+            validation.result["timestamp"]["url"],
+            "https://almalinux.mirrors.itworxx.de/alma/timestamp.txt",
+        )
+        self.assertEqual(
+            validation.result["timestamp"]["checked_urls"],
+            [
+                "https://almalinux.mirrors.itworxx.de",
+                "https://almalinux.mirrors.itworxx.de/almalinux/timestamp.txt",
+                "https://almalinux.mirrors.itworxx.de/almalinux-kitten/timestamp.txt",
+                "https://almalinux.mirrors.itworxx.de/alma/timestamp.txt",
+            ],
+        )
+        self.assertIn("Mirror status: up-to-date", note.content)
 
     def test_command_redacts_userinfo_from_stored_mirror_urls_and_notes(self) -> None:
         membership_request = self._create_user_request(

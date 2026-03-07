@@ -28,6 +28,11 @@ _MAX_ATTEMPTS = 3
 _CLAIM_LEASE = datetime.timedelta(minutes=5)
 _MIRROR_STALE_AFTER = datetime.timedelta(hours=24)
 _TIMESTAMP_CONTENT_READ_LIMIT_BYTES = 256
+_TIMESTAMP_PATH_PREFIXES = (
+    "/almalinux",
+    "/almalinux-kitten",
+    "/alma",
+)
 _RETRY_BACKOFF_SCHEDULE = (
     datetime.timedelta(minutes=5),
     datetime.timedelta(minutes=15),
@@ -731,16 +736,9 @@ def _resolve_public_ip_addresses(url: str) -> tuple[str, ...]:
 
 def _timestamp_candidate_urls(url: str) -> tuple[str, ...]:
     split = urlsplit(url)
-    base_path = split.path.rstrip("/")
     candidates: list[str] = []
-    for suffix in ("/almalinux/timestamp.txt", "/almalinux-kitten/timestamp.txt"):
-        if base_path.endswith("/almalinux") and suffix == "/almalinux/timestamp.txt":
-            path = f"{base_path}/timestamp.txt"
-        elif base_path.endswith("/almalinux-kitten") and suffix == "/almalinux-kitten/timestamp.txt":
-            path = f"{base_path}/timestamp.txt"
-        else:
-            path = f"{base_path}{suffix}"
-        candidate = _replace_path(split, path)
+    for prefix in ("",) + _TIMESTAMP_PATH_PREFIXES:
+        candidate = _replace_path(split, f"{prefix}/timestamp.txt")
         if candidate not in candidates:
             candidates.append(candidate)
     return tuple(candidates)
@@ -794,9 +792,10 @@ def _sanitize_timestamp_url_for_storage(url: str) -> str:
         return origin_url
 
     normalized_path = urlsplit(str(url or "").strip()).path.rstrip("/")
-    for suffix in ("/almalinux/timestamp.txt", "/almalinux-kitten/timestamp.txt"):
-        if normalized_path.endswith(suffix):
-            return f"{origin_url}{suffix}"
+    for prefix in _TIMESTAMP_PATH_PREFIXES:
+        path = f"{prefix}/timestamp.txt" if prefix else "/timestamp.txt"
+        if normalized_path.endswith(path):
+            return f"{origin_url}{path}"
     return origin_url
 
 
