@@ -123,11 +123,11 @@
                           class="direct-chat-text membership-notes-bubble"
                           style="{{ entry.bubble_style }}{% if entry.is_custos %} border: 1px dashed rgba(0,0,0,0.15);{% endif %}"
                         >
-                          {{ entry.note.content }}
+                          {{ entry.rendered_content }}
                         </div>
                       {% else %}
                         <div class="direct-chat-text{% if entry.is_self %} membership-notes-self-bubble{% endif %}">
-                          {{ entry.note.content }}
+                          {{ entry.rendered_content }}
                         </div>
                       {% endif %}
                     {% endif %}

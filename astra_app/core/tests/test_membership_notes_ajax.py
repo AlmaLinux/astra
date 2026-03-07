@@ -193,6 +193,134 @@ class MembershipNotesAjaxTests(TestCase):
         self.assertIn("core/images/almalinux-logo.svg", html)
         self.assertIn("--bubble-bg: #e9ecef", html)
 
+    def test_mirror_validation_notes_render_multiline_with_bold_result_values(self) -> None:
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+        Note.objects.create(
+            membership_request=req,
+            username=CUSTOS,
+            content=(
+                "Mirror validation summary\n"
+                "Domain: reachable\n"
+                "Mirror status: up-to-date\n"
+                "GitHub pull request: valid"
+            ),
+            action={},
+        )
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+            },
+        )
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.post(
+                reverse("membership-request-note-add", args=[req.pk]),
+                data={
+                    "note_action": "message",
+                    "message": "Hello via ajax",
+                    "next": reverse("membership-requests"),
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        payload = json.loads(resp.content)
+        html = payload.get("html", "")
+        self.assertTrue(payload.get("ok"))
+        self.assertIn("Mirror validation summary<br>", html)
+        self.assertIn("Domain: <strong>reachable</strong>", html)
+        self.assertIn("Mirror status: <strong>up-to-date</strong>", html)
+        self.assertIn("GitHub pull request: <strong>valid</strong>", html)
+
+    def test_regular_notes_render_safe_markdown_subset(self) -> None:
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+        Note.objects.create(
+            membership_request=req,
+            username="someone_else",
+            content=(
+                "**Bold** and *italic*\n\n"
+                "- first item\n"
+                "- second item\n\n"
+                "<script>alert('x')</script>"
+            ),
+            action={},
+        )
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+            },
+        )
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.post(
+                reverse("membership-request-note-add", args=[req.pk]),
+                data={
+                    "note_action": "message",
+                    "message": "Hello via ajax",
+                    "next": reverse("membership-requests"),
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        payload = json.loads(resp.content)
+        html = payload.get("html", "")
+        self.assertTrue(payload.get("ok"))
+        self.assertIn("<strong>Bold</strong>", html)
+        self.assertIn("<em>italic</em>", html)
+        self.assertIn("<ul>", html)
+        self.assertIn("<li>first item</li>", html)
+        self.assertIn("<li>second item</li>", html)
+        self.assertIn("&lt;script&gt;alert", html)
+        self.assertNotIn("<script>alert", html)
+
+    def test_regular_note_html_remains_escaped(self) -> None:
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+        Note.objects.create(
+            membership_request=req,
+            username="someone_else",
+            content="<em>not safe</em>",
+            action={},
+        )
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+            },
+        )
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.post(
+                reverse("membership-request-note-add", args=[req.pk]),
+                data={
+                    "note_action": "message",
+                    "message": "Hello via ajax",
+                    "next": reverse("membership-requests"),
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        payload = json.loads(resp.content)
+        html = payload.get("html", "")
+        self.assertTrue(payload.get("ok"))
+        self.assertIn("&lt;em&gt;not safe&lt;/em&gt;", html)
+        self.assertNotIn("<em>not safe</em>", html)
+
     def test_consecutive_actions_by_same_user_within_minute_are_grouped(self) -> None:
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
 

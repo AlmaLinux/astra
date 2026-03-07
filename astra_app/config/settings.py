@@ -833,6 +833,13 @@ MARKDOWNIFY = {
         "WHITELIST_PROTOCOLS": ["http", "https"],
         "STRIP": False,
         "BLEACH": True,
+    },
+    "membership_note": {
+        "WHITELIST_TAGS": ["b", "em", "i", "li", "ol", "p", "strong", "ul"],
+        "WHITELIST_ATTRS": [],
+        "WHITELIST_PROTOCOLS": ["http", "https"],
+        "STRIP": False,
+        "BLEACH": True,
     }
 }
 

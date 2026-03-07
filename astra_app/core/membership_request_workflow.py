@@ -30,6 +30,7 @@ from core.membership import (
 from core.membership_log_side_effects import apply_membership_log_side_effects
 from core.membership_notes import add_note
 from core.membership_notifications import organization_sponsor_notification_recipient_email
+from core.mirror_membership_validation import mirror_answers_fingerprint, mirror_request_answers_from_responses
 from core.models import (
     Membership,
     MembershipLog,
@@ -1200,7 +1201,25 @@ def resubmit_membership_request(
                     out.append({question_s: answer_s})
         return out
 
-    if _normalized_responses(membership_request.responses) == _normalized_responses(updated_responses):
+    normalized_existing_responses = _normalized_responses(membership_request.responses)
+    normalized_updated_responses = _normalized_responses(updated_responses)
+    existing_mirror_answers = mirror_request_answers_from_responses(
+        membership_type=membership_request.membership_type,
+        responses=normalized_existing_responses,
+    )
+    updated_mirror_answers = mirror_request_answers_from_responses(
+        membership_type=membership_request.membership_type,
+        responses=normalized_updated_responses,
+    )
+
+    unchanged_responses = normalized_existing_responses == normalized_updated_responses
+    unchanged_mirror_answers = (
+        existing_mirror_answers is not None
+        and updated_mirror_answers is not None
+        and mirror_answers_fingerprint(existing_mirror_answers) == mirror_answers_fingerprint(updated_mirror_answers)
+    )
+
+    if unchanged_responses or unchanged_mirror_answers:
         raise ValidationError("Please update your request before resubmitting it")
 
     membership_request.responses = updated_responses

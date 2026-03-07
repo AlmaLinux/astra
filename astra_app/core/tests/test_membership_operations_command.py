@@ -20,6 +20,7 @@ class MembershipOperationsCommandTests(TestCase):
                 call("freeipa_membership_reconcile", report=True, dry_run=False),
                 call("membership_pending_requests", force=False, dry_run=False),
                 call("membership_embargoed_members", force=False, dry_run=False),
+                call("membership_mirror_validation", force=False, dry_run=False),
             ],
         )
 
@@ -37,6 +38,7 @@ class MembershipOperationsCommandTests(TestCase):
                 call("freeipa_membership_reconcile", report=True, dry_run=False),
                 call("membership_pending_requests", force=True, dry_run=False),
                 call("membership_embargoed_members", force=True, dry_run=False),
+                call("membership_mirror_validation", force=True, dry_run=False),
             ],
         )
 
@@ -54,5 +56,6 @@ class MembershipOperationsCommandTests(TestCase):
                 call("freeipa_membership_reconcile", report=True, dry_run=True),
                 call("membership_pending_requests", force=False, dry_run=True),
                 call("membership_embargoed_members", force=False, dry_run=True),
+                call("membership_mirror_validation", force=False, dry_run=True),
             ],
         )

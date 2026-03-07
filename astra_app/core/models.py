@@ -511,6 +511,49 @@ class MembershipRequest(models.Model):
         return self.target_identity.organization_identifier or "?"
 
 
+class MirrorMembershipValidation(models.Model):
+    class Status(models.TextChoices):
+        pending = "pending", "Pending"
+        running = "running", "Running"
+        completed = "completed", "Completed"
+        failed_retryable = "failed_retryable", "Failed (retryable)"
+        failed_terminal = "failed_terminal", "Failed (terminal)"
+        skipped = "skipped", "Skipped"
+
+    membership_request = models.OneToOneField(
+        MembershipRequest,
+        on_delete=models.CASCADE,
+        related_name="mirror_validation",
+    )
+    status = models.CharField(max_length=32, choices=Status.choices, default=Status.pending, db_index=True)
+    answer_fingerprint = models.CharField(max_length=64, blank=True, default="")
+    result = models.JSONField(blank=True, default=dict)
+    attempt_count = models.PositiveIntegerField(default=0)
+    last_attempt_at = models.DateTimeField(blank=True, null=True)
+    next_run_at = models.DateTimeField(default=timezone.now, db_index=True)
+    claimed_at = models.DateTimeField(blank=True, null=True)
+    claim_expires_at = models.DateTimeField(blank=True, null=True, db_index=True)
+    noted_result_fingerprint = models.CharField(max_length=64, blank=True, default="")
+    noted_at = models.DateTimeField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["status", "next_run_at"], name="mirror_val_status_next"),
+            models.Index(fields=["status", "claim_expires_at"], name="mirror_val_status_claim"),
+        ]
+        ordering = ("next_run_at", "pk")
+
+    @override
+    def save(self, *args, **kwargs) -> None:
+        self.answer_fingerprint = str(self.answer_fingerprint or "").strip()
+        self.noted_result_fingerprint = str(self.noted_result_fingerprint or "").strip()
+        if not isinstance(self.result, dict):
+            self.result = {}
+        super().save(*args, **kwargs)
+
+
 
 class MembershipQuerySet(models.QuerySet["Membership"]):
     def active(

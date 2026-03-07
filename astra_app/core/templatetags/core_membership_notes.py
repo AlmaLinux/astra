@@ -7,7 +7,9 @@ from django import template
 from django.http import HttpRequest
 from django.template.loader import render_to_string
 from django.urls import reverse
+from django.utils.html import escape, format_html, format_html_join
 from django.utils.safestring import SafeString, mark_safe
+from markdownify.templatetags.markdownify import markdownify as render_markdown
 from post_office.models import Email
 
 from core.freeipa.user import FreeIPAUser
@@ -41,6 +43,13 @@ _BUBBLE_BG_COLORS: list[str] = [
     "#FFCDD2",
     "#E6EE9C",
 ]
+_MIRROR_VALIDATION_NOTE_HEADER = "Mirror validation summary"
+_MIRROR_VALIDATION_BOLD_LABELS = {
+    "Domain",
+    "Mirror status",
+    "GitHub pull request",
+}
+_MEMBERSHIP_NOTE_MARKDOWN_SETTINGS = "membership_note"
 
 
 def _relative_luminance_from_hex(hex_color: str) -> float:
@@ -213,6 +222,32 @@ def _custos_bubble_style() -> str:
     return "--bubble-bg: #e9ecef; --bubble-fg: #212529;"
 
 
+def _render_membership_note_markdown(content: str) -> SafeString:
+    # Escape first so markdown syntax is supported without trusting inline HTML.
+    rendered = render_markdown(escape(content), custom_settings=_MEMBERSHIP_NOTE_MARKDOWN_SETTINGS)
+    if rendered.startswith("<p>") and rendered.endswith("</p>"):
+        inner = rendered.removeprefix("<p>").removesuffix("</p>")
+        if "<p>" not in inner and "</p>" not in inner:
+            return mark_safe(inner)
+    return rendered
+
+
+def _render_note_content(note: Note) -> SafeString | str:
+    content = "" if note.content is None else str(note.content)
+    if note.username != CUSTOS or not content.startswith(_MIRROR_VALIDATION_NOTE_HEADER):
+        return _render_membership_note_markdown(content)
+
+    rendered_lines: list[SafeString] = []
+    for line in content.splitlines():
+        label, separator, value = line.partition(": ")
+        if separator and label in _MIRROR_VALIDATION_BOLD_LABELS and value:
+            rendered_lines.append(format_html("{}: <strong>{}</strong>", label, value))
+            continue
+        rendered_lines.append(format_html("{}", line))
+
+    return format_html_join(mark_safe("<br>"), "{}", ((line,) for line in rendered_lines))
+
+
 def _timeline_entries_for_notes(
     notes: list[Note],
     *,
@@ -269,6 +304,7 @@ def _timeline_entries_for_notes(
                 {
                     "kind": "message",
                     "note": n,
+                    "rendered_content": _render_note_content(n),
                     "is_self": is_self,
                     "avatar_user": avatar_user,
                     "bubble_style": bubble_style,
