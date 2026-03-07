@@ -225,6 +225,43 @@ class MembershipHelperTests(TestCase):
         )
         self.assertEqual(outcome, FreeIPAGroupRemovalOutcome.noop_blank_input)
 
+    def test_sync_organization_representative_membership_groups_continues_after_cleanup_failure(self) -> None:
+        from core.membership import sync_organization_representative_membership_groups
+
+        with (
+            patch(
+                "core.membership.remove_organization_representative_from_group_if_present",
+                return_value=FreeIPAGroupRemovalOutcome.failed,
+            ) as remove_mock,
+            patch(
+                "core.membership.sync_organization_representative_groups",
+                autospec=True,
+            ) as sync_mock,
+        ):
+            sync_organization_representative_membership_groups(
+                representative_username="bob",
+                group_cns=("almalinux-platinum",),
+                old_group_cn_to_remove="almalinux-gold",
+                membership_request_id=42,
+                log_prefix="test_sync",
+                caller_mode=FreeIPACallerMode.raise_on_error,
+                missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
+            )
+
+        remove_mock.assert_called_once_with(
+            representative_username="bob",
+            group_cn="almalinux-gold",
+            caller_mode=FreeIPACallerMode.raise_on_error,
+            missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
+        )
+        sync_mock.assert_called_once_with(
+            old_representative="",
+            new_representative="bob",
+            group_cns=("almalinux-platinum",),
+            caller_mode=FreeIPACallerMode.raise_on_error,
+            missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
+        )
+
     def test_build_pending_request_context_returns_entries_and_category_index(self) -> None:
         MembershipTypeCategory.objects.update_or_create(
             pk="sponsorship",

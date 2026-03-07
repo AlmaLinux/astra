@@ -6,7 +6,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from core.freeipa.user import FreeIPAUser
-from core.membership import FreeIPACallerMode, FreeIPAGroupRemovalOutcome, FreeIPAMissingUserPolicy
+from core.membership import FreeIPACallerMode, FreeIPAMissingUserPolicy
 from core.membership_request_workflow import (
     approve_membership_request,
     ignore_membership_request,
@@ -327,10 +327,8 @@ class MembershipRequestWorkflowRaceConditionTests(TestCase):
             ),
             patch("core.membership_request_workflow.FreeIPAUser.get", return_value=representative),
             patch(
-                "core.membership_request_workflow.remove_organization_representative_from_group_if_present",
-                return_value=FreeIPAGroupRemovalOutcome.removed,
-            ) as remove_mock,
-            patch("core.membership_request_workflow.sync_organization_representative_groups") as sync_mock,
+                "core.membership_request_workflow.sync_organization_representative_membership_groups"
+            ) as sync_helper,
         ):
             with self.captureOnCommitCallbacks(execute=False) as callbacks:
                 approve_membership_request(
@@ -340,21 +338,16 @@ class MembershipRequestWorkflowRaceConditionTests(TestCase):
                 )
 
             self.assertGreaterEqual(len(callbacks), 1)
-            remove_mock.assert_not_called()
-            sync_mock.assert_not_called()
+            sync_helper.assert_not_called()
             for callback in callbacks:
                 callback()
 
-            remove_mock.assert_called_once_with(
+            sync_helper.assert_called_once_with(
                 representative_username="bob",
-                group_cn="almalinux-gold",
-                caller_mode=FreeIPACallerMode.raise_on_error,
-                missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
-            )
-            sync_mock.assert_called_once_with(
-                old_representative="",
-                new_representative="bob",
                 group_cns=("almalinux-platinum",),
+                old_group_cn_to_remove="almalinux-gold",
+                membership_request_id=membership_request.pk,
+                log_prefix="approve_membership_request",
                 caller_mode=FreeIPACallerMode.raise_on_error,
                 missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
             )

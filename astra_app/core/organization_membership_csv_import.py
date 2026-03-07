@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, override
 
 from django import forms
+from django.db import transaction
 from django.utils import timezone
 from import_export import fields, resources
 from import_export.forms import ConfirmImportForm, ImportForm
@@ -20,6 +21,11 @@ from core.csv_import_utils import (
     set_form_column_field_choices,
 )
 from core.forms_membership import MembershipRequestForm
+from core.membership import (
+    FreeIPACallerMode,
+    FreeIPAMissingUserPolicy,
+    sync_organization_representative_membership_groups,
+)
 from core.membership_notes import add_note
 from core.models import Membership, MembershipLog, MembershipRequest, MembershipType, Organization
 from core.views_utils import _normalize_str
@@ -644,6 +650,29 @@ class OrganizationMembershipCSVImportResource(resources.ModelResource):
             raise ValueError("membership_type is required")
 
         approved_at = timezone.now().astimezone(datetime.UTC)
+        representative_sync_payload: tuple[str, tuple[str, ...], str | None] | None = None
+
+        new_group_cn = str(membership_type.group_cn or "").strip()
+
+        if new_group_cn and organization.representative:
+            old_membership = (
+                Membership.objects.select_related("membership_type")
+                .filter(
+                    target_organization=organization,
+                    membership_type__category=membership_type.category,
+                )
+                .first()
+            )
+            old_group_cn_for_cleanup: str | None = None
+            if old_membership is not None and old_membership.membership_type.group_cn:
+                old_group_cn = str(old_membership.membership_type.group_cn or "").strip()
+                if old_group_cn and old_group_cn != new_group_cn:
+                    old_group_cn_for_cleanup = old_group_cn
+            representative_sync_payload = (
+                organization.representative,
+                (new_group_cn,),
+                old_group_cn_for_cleanup,
+            )
 
         membership_request = MembershipRequest.objects.create(
             requested_username="",
@@ -671,10 +700,9 @@ class OrganizationMembershipCSVImportResource(resources.ModelResource):
             approved_at=approved_at,
         )
 
-        # `create_for_approval_at()` persists the MembershipLog row and then
-        # explicitly applies organization membership side effects via the
-        # membership log side-effects service, which enforces one membership
-        # per category through `Membership.replace_within_category()`.
+        # `create_for_approval_at()` persists the MembershipLog row and applies
+        # DB membership side effects through the membership log service; any
+        # FreeIPA representative-group sync still belongs to the caller.
         approval_log = MembershipLog.create_for_approval_at(
             actor_username=self._actor_username,
             membership_type=membership_type,
@@ -684,6 +712,22 @@ class OrganizationMembershipCSVImportResource(resources.ModelResource):
             membership_request=membership_request,
             import_batch_id=self._import_batch_id,
         )
+
+        if representative_sync_payload is not None:
+            representative_username, group_cns, old_group_cn_to_remove = representative_sync_payload
+
+            def _on_commit_sync_representative_groups() -> None:
+                sync_organization_representative_membership_groups(
+                    representative_username=representative_username,
+                    group_cns=group_cns,
+                    old_group_cn_to_remove=old_group_cn_to_remove,
+                    membership_request_id=membership_request.pk,
+                    log_prefix="organization_membership_csv_import",
+                    caller_mode=FreeIPACallerMode.raise_on_error,
+                    missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
+                )
+
+            transaction.on_commit(_on_commit_sync_representative_groups)
 
         if end_at is not None and approval_log.expires_at != end_at:
             MembershipLog.create_for_expiry_change(

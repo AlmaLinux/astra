@@ -22,10 +22,8 @@ from core.email_context import (
 from core.freeipa.user import FreeIPAUser
 from core.membership import (
     FreeIPACallerMode,
-    FreeIPAGroupRemovalOutcome,
     FreeIPAMissingUserPolicy,
-    remove_organization_representative_from_group_if_present,
-    sync_organization_representative_groups,
+    sync_organization_representative_membership_groups,
 )
 from core.membership_log_side_effects import apply_membership_log_side_effects
 from core.membership_notes import add_note
@@ -570,7 +568,9 @@ def approve_membership_request(
             .first()
         )
 
-        if membership_type.group_cn and org.representative:
+        new_group_cn = str(membership_type.group_cn or "").strip()
+
+        if new_group_cn and org.representative:
             try:
                 representative = FreeIPAUser.get(org.representative)
             except Exception:
@@ -585,17 +585,13 @@ def approve_membership_request(
 
             if representative is not None:
                 old_group_cn_for_cleanup: str | None = None
-                if (
-                    old_membership is not None
-                    and old_membership.membership_type != membership_type
-                    and old_membership.membership_type.group_cn
-                ):
+                if old_membership is not None and old_membership.membership_type.group_cn:
                     old_group_cn = str(old_membership.membership_type.group_cn or "").strip()
-                    if old_group_cn:
+                    if old_group_cn and old_group_cn != new_group_cn:
                         old_group_cn_for_cleanup = old_group_cn
                 representative_sync_payload = (
                     representative.username,
-                    (membership_type.group_cn,),
+                    (new_group_cn,),
                     old_group_cn_for_cleanup,
                 )
 
@@ -780,72 +776,15 @@ def approve_membership_request(
         representative_username, group_cns, old_group_cn_to_remove = representative_sync_payload
 
         def _on_commit_sync_representative_groups() -> None:
-            if old_group_cn_to_remove:
-                try:
-                    old_outcome = remove_organization_representative_from_group_if_present(
-                        representative_username=representative_username,
-                        group_cn=old_group_cn_to_remove,
-                        caller_mode=FreeIPACallerMode.raise_on_error,
-                        missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
-                    )
-                except Exception as exc:
-                    if _is_freeipa_noop_error(error=exc, is_add=False):
-                        logger.info(
-                            "astra.membership.freeipa_group.not_member group_cn=%s outcome=noop",
-                            old_group_cn_to_remove,
-                            extra={
-                                "event": "astra.freeipa.group.mutation",
-                                "component": "membership",
-                                "outcome": "not_member",
-                            },
-                        )
-                    else:
-                        logger.exception(
-                            "%s: on_commit old-group cleanup failed request_id=%s org_rep=%r group_cn=%r",
-                            log_prefix,
-                            membership_request.pk,
-                            representative_username,
-                            old_group_cn_to_remove,
-                        )
-                else:
-                    if old_outcome == FreeIPAGroupRemovalOutcome.failed:
-                        logger.error(
-                            "%s: on_commit old-group cleanup returned failed request_id=%s org_rep=%r group_cn=%r",
-                            log_prefix,
-                            membership_request.pk,
-                            representative_username,
-                            old_group_cn_to_remove,
-                        )
-
-            try:
-                sync_organization_representative_groups(
-                    old_representative="",
-                    new_representative=representative_username,
-                    group_cns=group_cns,
-                    caller_mode=FreeIPACallerMode.raise_on_error,
-                    missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
-                )
-            except Exception as exc:
-                if _is_freeipa_noop_error(error=exc, is_add=True) or _is_freeipa_noop_error(error=exc, is_add=False):
-                    noop_outcome = "already_member" if _is_freeipa_noop_error(error=exc, is_add=True) else "not_member"
-                    logger.info(
-                        "astra.membership.freeipa_group.%s group_cn=%s outcome=noop",
-                        noop_outcome,
-                        ",".join(group_cns),
-                        extra={
-                            "event": "astra.freeipa.group.mutation",
-                            "component": "membership",
-                            "outcome": noop_outcome,
-                        },
-                    )
-                else:
-                    logger.exception(
-                        "%s: on_commit representative sync failed request_id=%s org_rep=%r group_cn=%r",
-                        log_prefix,
-                        membership_request.pk,
-                        representative_username,
-                        ",".join(group_cns),
-                    )
+            sync_organization_representative_membership_groups(
+                representative_username=representative_username,
+                group_cns=group_cns,
+                old_group_cn_to_remove=old_group_cn_to_remove,
+                membership_request_id=membership_request.pk,
+                log_prefix=log_prefix,
+                caller_mode=FreeIPACallerMode.raise_on_error,
+                missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
+            )
 
         transaction.on_commit(_on_commit_sync_representative_groups)
 

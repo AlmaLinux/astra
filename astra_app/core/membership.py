@@ -246,6 +246,102 @@ def sync_organization_representative_groups(
     return result
 
 
+def sync_organization_representative_membership_groups(
+    *,
+    representative_username: str,
+    group_cns: tuple[str, ...],
+    old_group_cn_to_remove: str | None,
+    membership_request_id: int,
+    log_prefix: str,
+    caller_mode: FreeIPACallerMode,
+    missing_user_policy: FreeIPAMissingUserPolicy,
+) -> None:
+    """Apply representative-group side effects for an org membership transition.
+
+    This keeps the old-group cleanup and new-group sync semantics aligned
+    between the approval workflow and importer without merging their broader
+    policy differences.
+    """
+
+    normalized_representative = str(representative_username or "").strip()
+    normalized_old_group_cn = str(old_group_cn_to_remove or "").strip() or None
+
+    def is_freeipa_noop_error(*, error: Exception, is_add: bool) -> bool:
+        text = str(error or "").strip().lower()
+        if not text:
+            return False
+        if is_add:
+            return "already" in text and "member" in text
+        return "not" in text and "member" in text
+
+    if normalized_old_group_cn:
+        try:
+            old_outcome = remove_organization_representative_from_group_if_present(
+                representative_username=normalized_representative,
+                group_cn=normalized_old_group_cn,
+                caller_mode=caller_mode,
+                missing_user_policy=missing_user_policy,
+            )
+        except Exception as exc:
+            if is_freeipa_noop_error(error=exc, is_add=False):
+                logger.info(
+                    "astra.membership.freeipa_group.not_member group_cn=%r outcome=noop",
+                    normalized_old_group_cn,
+                    extra={
+                        "event": "astra.freeipa.group.mutation",
+                        "component": "membership",
+                        "outcome": "not_member",
+                    },
+                )
+            else:
+                logger.exception(
+                    "%s: on_commit old-group cleanup failed request_id=%s org_rep=%r group_cn=%r",
+                    log_prefix,
+                    membership_request_id,
+                    normalized_representative,
+                    normalized_old_group_cn,
+                )
+        else:
+            if old_outcome == FreeIPAGroupRemovalOutcome.failed:
+                logger.error(
+                    "%s: on_commit old-group cleanup returned failed request_id=%s org_rep=%r group_cn=%r",
+                    log_prefix,
+                    membership_request_id,
+                    normalized_representative,
+                    normalized_old_group_cn,
+                )
+
+    try:
+        sync_organization_representative_groups(
+            old_representative="",
+            new_representative=normalized_representative,
+            group_cns=group_cns,
+            caller_mode=caller_mode,
+            missing_user_policy=missing_user_policy,
+        )
+    except Exception as exc:
+        if is_freeipa_noop_error(error=exc, is_add=True) or is_freeipa_noop_error(error=exc, is_add=False):
+            noop_outcome = "already_member" if is_freeipa_noop_error(error=exc, is_add=True) else "not_member"
+            logger.info(
+                "astra.membership.freeipa_group.%s group_cn=%r outcome=noop",
+                noop_outcome,
+                ",".join(group_cns),
+                extra={
+                    "event": "astra.freeipa.group.mutation",
+                    "component": "membership",
+                    "outcome": noop_outcome,
+                },
+            )
+        else:
+            logger.exception(
+                "%s: on_commit representative sync failed request_id=%s org_rep=%r group_cn=%r",
+                log_prefix,
+                membership_request_id,
+                normalized_representative,
+                ",".join(group_cns),
+            )
+
+
 def rollback_organization_representative_groups(
     *,
     old_representative: str,

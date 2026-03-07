@@ -21,6 +21,7 @@ import core.organization_membership_csv_import as organization_membership_csv_im
 from core.admin import OrganizationMembershipCSVImportLinkAdmin
 from core.csv_import_utils import resolve_column_header
 from core.freeipa.user import FreeIPAUser
+from core.membership import FreeIPACallerMode, FreeIPAMissingUserPolicy
 from core.models import (
     Membership,
     MembershipLog,
@@ -445,6 +446,220 @@ class OrganizationMembershipCSVImportResourceTests(TestCase):
             ).exists()
         )
         self.assertEqual(Email.objects.count(), 0)
+
+    def test_confirm_import_schedules_representative_sync_on_commit(self) -> None:
+        old_membership_type = self._membership_type(code="silver", category_id="sponsorship")
+        membership_type = self._membership_type(code="gold", category_id="sponsorship")
+
+        org = Organization.objects.create(
+            name="Org Sync",
+            representative="bob",
+            country_code="US",
+            business_contact_name="Biz",
+            business_contact_email="biz@example.com",
+            pr_marketing_contact_name="PR",
+            pr_marketing_contact_email="pr@example.com",
+            technical_contact_name="Tech",
+            technical_contact_email="tech@example.com",
+            website="https://example.com",
+            website_logo="https://example.com/logo.png",
+        )
+        Membership.objects.create(
+            target_organization=org,
+            membership_type=old_membership_type,
+            expires_at=timezone.now().astimezone(datetime.UTC) + datetime.timedelta(days=30),
+        )
+
+        dataset = Dataset(headers=["organization_id"])
+        dataset.append([str(org.pk)])
+
+        resource = OrganizationMembershipCSVImportResource(
+            membership_type=membership_type,
+            actor_username="alex",
+        )
+
+        with patch(
+            "core.organization_membership_csv_import.sync_organization_representative_membership_groups"
+        ) as sync_helper:
+            with self.captureOnCommitCallbacks(execute=False) as callbacks:
+                resource.import_data(dataset, dry_run=False, raise_errors=True)
+
+            self.assertGreaterEqual(len(callbacks), 1)
+            sync_helper.assert_not_called()
+            for callback in callbacks:
+                callback()
+
+        membership_request = MembershipRequest.objects.get(
+            requested_organization=org,
+            membership_type=membership_type,
+            status=MembershipRequest.Status.approved,
+        )
+        sync_helper.assert_called_once_with(
+            representative_username="bob",
+            group_cns=("almalinux-gold",),
+            old_group_cn_to_remove="almalinux-silver",
+            membership_request_id=membership_request.pk,
+            log_prefix="organization_membership_csv_import",
+            caller_mode=FreeIPACallerMode.raise_on_error,
+            missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
+        )
+        self.assertEqual(Email.objects.count(), 0)
+
+    def test_confirm_import_same_group_replacement_skips_old_group_cleanup(self) -> None:
+        old_membership_type = self._membership_type(code="legacy-shared", category_id="sponsorship")
+        membership_type = self._membership_type(code="modern-shared", category_id="sponsorship")
+        old_membership_type.group_cn = "almalinux-shared-sponsor"
+        old_membership_type.save(update_fields=["group_cn"])
+        membership_type.group_cn = "almalinux-shared-sponsor"
+        membership_type.save(update_fields=["group_cn"])
+
+        org = Organization.objects.create(
+            name="Org Shared Group",
+            representative="bob",
+            country_code="US",
+            business_contact_name="Biz",
+            business_contact_email="biz@example.com",
+            pr_marketing_contact_name="PR",
+            pr_marketing_contact_email="pr@example.com",
+            technical_contact_name="Tech",
+            technical_contact_email="tech@example.com",
+            website="https://example.com",
+            website_logo="https://example.com/logo.png",
+        )
+        Membership.objects.create(
+            target_organization=org,
+            membership_type=old_membership_type,
+            expires_at=timezone.now().astimezone(datetime.UTC) + datetime.timedelta(days=30),
+        )
+
+        dataset = Dataset(headers=["organization_id"])
+        dataset.append([str(org.pk)])
+
+        resource = OrganizationMembershipCSVImportResource(
+            membership_type=membership_type,
+            actor_username="alex",
+        )
+
+        with patch(
+            "core.organization_membership_csv_import.sync_organization_representative_membership_groups"
+        ) as sync_helper:
+            with self.captureOnCommitCallbacks(execute=False) as callbacks:
+                resource.import_data(dataset, dry_run=False, raise_errors=True)
+
+            self.assertGreaterEqual(len(callbacks), 1)
+            for callback in callbacks:
+                callback()
+
+        membership_request = MembershipRequest.objects.get(
+            requested_organization=org,
+            membership_type=membership_type,
+            status=MembershipRequest.Status.approved,
+        )
+        sync_helper.assert_called_once_with(
+            representative_username="bob",
+            group_cns=("almalinux-shared-sponsor",),
+            old_group_cn_to_remove=None,
+            membership_request_id=membership_request.pk,
+            log_prefix="organization_membership_csv_import",
+            caller_mode=FreeIPACallerMode.raise_on_error,
+            missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
+        )
+
+    def test_confirm_import_mirror_org_membership_schedules_representative_sync_on_commit(self) -> None:
+        membership_type = self._membership_type(code="mirror-org", category_id="mirror")
+        org = Organization.objects.create(
+            name="Mirror Org",
+            representative="bob",
+            country_code="US",
+            business_contact_name="Biz",
+            business_contact_email="biz@example.com",
+            pr_marketing_contact_name="PR",
+            pr_marketing_contact_email="pr@example.com",
+            technical_contact_name="Tech",
+            technical_contact_email="tech@example.com",
+            website="https://example.com",
+            website_logo="https://example.com/logo.png",
+        )
+
+        dataset = Dataset(headers=["organization_id"])
+        dataset.append([str(org.pk)])
+
+        resource = OrganizationMembershipCSVImportResource(
+            membership_type=membership_type,
+            actor_username="alex",
+        )
+
+        with patch(
+            "core.organization_membership_csv_import.sync_organization_representative_membership_groups"
+        ) as sync_helper:
+            with self.captureOnCommitCallbacks(execute=False) as callbacks:
+                resource.import_data(dataset, dry_run=False, raise_errors=True)
+
+            self.assertGreaterEqual(len(callbacks), 1)
+            sync_helper.assert_not_called()
+            for callback in callbacks:
+                callback()
+
+        membership_request = MembershipRequest.objects.get(
+            requested_organization=org,
+            membership_type=membership_type,
+            status=MembershipRequest.Status.approved,
+        )
+        sync_helper.assert_called_once_with(
+            representative_username="bob",
+            group_cns=("almalinux-mirror-org",),
+            old_group_cn_to_remove=None,
+            membership_request_id=membership_request.pk,
+            log_prefix="organization_membership_csv_import",
+            caller_mode=FreeIPACallerMode.raise_on_error,
+            missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
+        )
+
+    def test_preview_import_does_not_schedule_representative_sync(self) -> None:
+        membership_type = self._membership_type(code="previewsync", category_id="sponsorship")
+        org = Organization.objects.create(
+            name="Preview Sync Org",
+            representative="bob",
+            country_code="US",
+            business_contact_name="Biz",
+            business_contact_email="biz@example.com",
+            pr_marketing_contact_name="PR",
+            pr_marketing_contact_email="pr@example.com",
+            technical_contact_name="Tech",
+            technical_contact_email="tech@example.com",
+            website="https://example.com",
+            website_logo="https://example.com/logo.png",
+        )
+
+        dataset = Dataset(headers=["organization_id"])
+        dataset.append([str(org.pk)])
+
+        resource = OrganizationMembershipCSVImportResource(
+            membership_type=membership_type,
+            actor_username="alex",
+        )
+
+        with patch(
+            "core.organization_membership_csv_import.sync_organization_representative_membership_groups"
+        ) as sync_helper:
+            with self.captureOnCommitCallbacks(execute=False) as callbacks:
+                result = resource.import_data(dataset, dry_run=True, raise_errors=True)
+
+        self.assertEqual(result.totals["new"], 1)
+        self.assertEqual(callbacks, [])
+        sync_helper.assert_not_called()
+        self.assertFalse(
+            MembershipRequest.objects.filter(
+                requested_organization=org,
+                membership_type=membership_type,
+            ).exists()
+        )
+        self.assertFalse(
+            Membership.objects.filter(
+                target_organization=org,
+                membership_type=membership_type,
+            ).exists()
+        )
 
     def test_confirm_result_totals_reports_new_and_skipped_rows(self) -> None:
         membership_type = self._membership_type(code="diamond", category_id="sponsorship")

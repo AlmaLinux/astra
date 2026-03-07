@@ -6,7 +6,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from core.freeipa.user import FreeIPAUser
-from core.membership import FreeIPACallerMode, FreeIPAGroupRemovalOutcome, FreeIPAMissingUserPolicy
+from core.membership import FreeIPACallerMode, FreeIPAMissingUserPolicy
 from core.membership_request_workflow import approve_membership_request
 from core.models import (
     Membership,
@@ -106,7 +106,7 @@ class MembershipRequestWorkflowAgreementTests(TestCase):
         membership_request.refresh_from_db()
         self.assertEqual(membership_request.status, MembershipRequest.Status.pending)
 
-    def test_org_approval_fails_when_old_group_removal_fails(self) -> None:
+    def test_org_approval_uses_shared_representative_sync_for_group_transition(self) -> None:
         MembershipTypeCategory.objects.update_or_create(
             pk="sponsorship",
             defaults={
@@ -162,13 +162,8 @@ class MembershipRequestWorkflowAgreementTests(TestCase):
             ),
             patch("core.membership_request_workflow.FreeIPAUser.get", return_value=bob),
             patch(
-                "core.membership_request_workflow.remove_organization_representative_from_group_if_present",
-                return_value=FreeIPAGroupRemovalOutcome.failed,
-            ) as remove_mock,
-            patch(
-                "core.membership_request_workflow.sync_organization_representative_groups",
-                autospec=True,
-            ) as sync_mock,
+                "core.membership_request_workflow.sync_organization_representative_membership_groups",
+            ) as sync_helper,
         ):
             with self.captureOnCommitCallbacks(execute=True):
                 approve_membership_request(
@@ -177,16 +172,90 @@ class MembershipRequestWorkflowAgreementTests(TestCase):
                     send_approved_email=False,
                 )
 
-        remove_mock.assert_called_once_with(
+        sync_helper.assert_called_once_with(
             representative_username="bob",
-            group_cn="almalinux-gold",
+            group_cns=("almalinux-platinum",),
+            old_group_cn_to_remove="almalinux-gold",
+            membership_request_id=membership_request.pk,
+            log_prefix="approve_membership_request",
             caller_mode=FreeIPACallerMode.raise_on_error,
             missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
         )
-        sync_mock.assert_called_once_with(
-            old_representative="",
-            new_representative="bob",
-            group_cns=("almalinux-platinum",),
+        membership_request.refresh_from_db()
+        self.assertEqual(membership_request.status, MembershipRequest.Status.approved)
+
+    def test_org_approval_same_group_replacement_skips_old_group_cleanup(self) -> None:
+        MembershipTypeCategory.objects.update_or_create(
+            pk="sponsorship",
+            defaults={
+                "is_organization": True,
+                "sort_order": 1,
+            },
+        )
+        membership_type_old, _ = MembershipType.objects.update_or_create(
+            code="legacy-shared",
+            defaults={
+                "name": "Legacy Shared",
+                "group_cn": "almalinux-shared-sponsor",
+                "category_id": "sponsorship",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        membership_type_new, _ = MembershipType.objects.update_or_create(
+            code="modern-shared",
+            defaults={
+                "name": "Modern Shared",
+                "group_cn": "almalinux-shared-sponsor",
+                "category_id": "sponsorship",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+        org = Organization.objects.create(name="Acme Shared", representative="bob")
+        membership_request = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type=membership_type_new,
+        )
+        Membership.objects.create(
+            target_organization=org,
+            membership_type=membership_type_old,
+            expires_at=timezone.now() + datetime.timedelta(days=60),
+        )
+
+        bob = FreeIPAUser(
+            "bob",
+            {
+                "uid": ["bob"],
+                "mail": ["bob@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        with (
+            patch(
+                "core.membership_request_workflow.missing_required_agreements_for_user_in_group",
+                return_value=[],
+            ),
+            patch("core.membership_request_workflow.FreeIPAUser.get", return_value=bob),
+            patch(
+                "core.membership_request_workflow.sync_organization_representative_membership_groups",
+            ) as sync_helper,
+        ):
+            with self.captureOnCommitCallbacks(execute=True):
+                approve_membership_request(
+                    membership_request=membership_request,
+                    actor_username="reviewer",
+                    send_approved_email=False,
+                )
+
+        sync_helper.assert_called_once_with(
+            representative_username="bob",
+            group_cns=("almalinux-shared-sponsor",),
+            old_group_cn_to_remove=None,
+            membership_request_id=membership_request.pk,
+            log_prefix="approve_membership_request",
             caller_mode=FreeIPACallerMode.raise_on_error,
             missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
         )
@@ -306,19 +375,20 @@ class MembershipRequestWorkflowAgreementTests(TestCase):
             ),
             patch("core.membership_request_workflow.FreeIPAUser.get", return_value=bob),
             patch(
-                "core.membership_request_workflow.remove_organization_representative_from_group_if_present",
+                "core.membership.remove_organization_representative_from_group_if_present",
                 side_effect=RuntimeError("This entry is not a member"),
             ),
             patch(
-                "core.membership_request_workflow.sync_organization_representative_groups",
+                "core.membership.sync_organization_representative_groups",
                 autospec=True,
             ),
         ):
-            approve_membership_request(
-                membership_request=membership_request,
-                actor_username="reviewer",
-                send_approved_email=False,
-            )
+            with self.captureOnCommitCallbacks(execute=True):
+                approve_membership_request(
+                    membership_request=membership_request,
+                    actor_username="reviewer",
+                    send_approved_email=False,
+                )
 
         membership_request.refresh_from_db()
         self.assertEqual(membership_request.status, MembershipRequest.Status.approved)
@@ -390,10 +460,8 @@ class MembershipRequestWorkflowAgreementTests(TestCase):
             ),
             patch("core.membership_request_workflow.FreeIPAUser.get", return_value=bob),
             patch(
-                "core.membership_request_workflow.remove_organization_representative_from_group_if_present",
-                return_value=FreeIPAGroupRemovalOutcome.removed,
-            ) as remove_mock,
-            patch("core.membership_request_workflow.sync_organization_representative_groups", return_value=None),
+                "core.membership_request_workflow.sync_organization_representative_membership_groups"
+            ) as sync_helper,
         ):
             with self.captureOnCommitCallbacks(execute=True):
                 approve_membership_request(
@@ -402,9 +470,12 @@ class MembershipRequestWorkflowAgreementTests(TestCase):
                     send_approved_email=False,
                 )
 
-        remove_mock.assert_called_once_with(
+        sync_helper.assert_called_once_with(
             representative_username="bob",
-            group_cn="almalinux-gold",
+            group_cns=("almalinux-platinum",),
+            old_group_cn_to_remove="almalinux-gold",
+            membership_request_id=membership_request.pk,
+            log_prefix="approve_membership_request",
             caller_mode=FreeIPACallerMode.raise_on_error,
             missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
         )
@@ -525,10 +596,8 @@ class MembershipRequestWorkflowAgreementTests(TestCase):
             ),
             patch("core.membership_request_workflow.FreeIPAUser.get", return_value=bob),
             patch(
-                "core.membership_request_workflow.remove_organization_representative_from_group_if_present",
-                return_value=FreeIPAGroupRemovalOutcome.removed,
-            ) as remove_mock,
-            patch("core.membership_request_workflow.sync_organization_representative_groups", autospec=True) as sync_mock,
+                "core.membership_request_workflow.sync_organization_representative_membership_groups"
+            ) as sync_helper,
         ):
             with self.captureOnCommitCallbacks(execute=True):
                 approve_membership_request(
@@ -551,16 +620,12 @@ class MembershipRequestWorkflowAgreementTests(TestCase):
                 membership_type=membership_type_new,
             ).exists()
         )
-        remove_mock.assert_called_once_with(
+        sync_helper.assert_called_once_with(
             representative_username="bob",
-            group_cn="almalinux-gold",
-            caller_mode=FreeIPACallerMode.raise_on_error,
-            missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
-        )
-        sync_mock.assert_called_once_with(
-            old_representative="",
-            new_representative="bob",
             group_cns=("almalinux-platinum",),
+            old_group_cn_to_remove="almalinux-gold",
+            membership_request_id=membership_request.pk,
+            log_prefix="approve_membership_request",
             caller_mode=FreeIPACallerMode.raise_on_error,
             missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
         )
