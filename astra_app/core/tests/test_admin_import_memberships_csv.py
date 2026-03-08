@@ -429,6 +429,43 @@ class AdminImportMembershipsCSVTests(TestCase):
         formats = admin_instance.get_import_formats()
         self.assertEqual(formats, [base_formats.CSV])
 
+    def test_get_import_resource_kwargs_uses_session_username_and_preserves_existing_kwargs(self) -> None:
+        membership_type, _ = MembershipType.objects.update_or_create(
+            code="platinum",
+            defaults={
+                "name": "Platinum",
+                "group_cn": "almalinux-sponsor-platinum",
+                "category_id": "sponsorship",
+                "enabled": True,
+                "sort_order": 5,
+            },
+        )
+        site = AdminSite()
+        admin_instance = MembershipCSVImportLinkAdmin(MembershipCSVImportLink, site)
+        request = RequestFactory().post("/admin/core/membershipcsvimportlink/process_import/")
+        request.session = {"_freeipa_username": "session-alex"}
+        request.user = SimpleNamespace(get_username=lambda: "user-alex")
+
+        kwargs = admin_instance.get_import_resource_kwargs(
+            request,
+            form=SimpleNamespace(
+                cleaned_data={
+                    "membership_type": membership_type,
+                    "name_column": "Full Name",
+                    "email_column": "Email Address",
+                    "enable_name_matching": "on",
+                    "q_contributions_column": "Why?",
+                }
+            ),
+        )
+
+        self.assertEqual(kwargs["membership_type"], membership_type)
+        self.assertEqual(kwargs["actor_username"], "session-alex")
+        self.assertEqual(kwargs["name_column"], "Full Name")
+        self.assertEqual(kwargs["email_column"], "Email Address")
+        self.assertTrue(kwargs["enable_name_matching"])
+        self.assertEqual(kwargs["question_column_overrides"], {"q_contributions_column": "Why?"})
+
     def test_import_page_includes_format_field(self) -> None:
         self._login_as_freeipa_admin("alex")
 

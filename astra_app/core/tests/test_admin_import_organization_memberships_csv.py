@@ -1486,3 +1486,33 @@ class OrganizationMembershipCSVImportAdminFlowTests(TestCase):
                 "q_domain_column": "Mirror domain",
             },
         )
+
+    def test_get_import_resource_kwargs_uses_session_username_and_preserves_existing_kwargs(self) -> None:
+        membership_type = self._membership_type(code="sessionactor")
+        admin_instance = OrganizationMembershipCSVImportLinkAdmin(OrganizationMembershipCSVImportLink, AdminSite())
+
+        request: Any = RequestFactory().post("/admin/core/organizationmembershipcsvimportlink/process_import/")
+        request.session = {"_freeipa_username": "session-alex"}
+        request.user = SimpleNamespace(get_username=lambda: "user-alex")
+
+        import_form = SimpleNamespace(
+            cleaned_data={
+                "membership_type": membership_type,
+                "organization_id_column": "organization_id",
+                "organization_name_column": "organization_name",
+                "q_sponsorship_details_column": "Sponsorship answer",
+            }
+        )
+
+        kwargs = admin_instance.get_import_resource_kwargs(request, form=import_form)
+
+        self.assertEqual(kwargs["membership_type"], membership_type)
+        self.assertEqual(kwargs["actor_username"], "session-alex")
+        self.assertEqual(kwargs["organization_id_column"], "organization_id")
+        self.assertEqual(kwargs["organization_name_column"], "organization_name")
+        self.assertEqual(
+            kwargs["question_column_overrides"],
+            {
+                "q_sponsorship_details_column": "Sponsorship answer",
+            },
+        )

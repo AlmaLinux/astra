@@ -3,6 +3,7 @@ import hashlib
 import html
 import io
 import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.admin.sites import AdminSite
@@ -698,6 +699,31 @@ class OrganizationCSVImportAdminFlowTests(TestCase):
         formats = admin_instance.get_import_formats()
 
         self.assertEqual(formats, [base_formats.CSV])
+
+    def test_get_import_resource_kwargs_uses_session_username_and_preserves_existing_kwargs(self) -> None:
+        admin_instance = OrganizationCSVImportLinkAdmin(OrganizationCSVImportLink, AdminSite())
+        request = RequestFactory().post(
+            "/admin/core/organizationcsvimportlink/process_import/",
+            data={
+                "representative_for_deadbeef": "alice",
+            },
+        )
+        request.session = {"_freeipa_username": "session-alex"}
+        request.user = SimpleNamespace(get_username=lambda: "user-alex")
+
+        import_form = SimpleNamespace(
+            cleaned_data={
+                "name_column": "Organization Name",
+                "country_code_column": "Country Code",
+            }
+        )
+
+        kwargs = admin_instance.get_import_resource_kwargs(request, form=import_form)
+
+        self.assertEqual(kwargs["actor_username"], "session-alex")
+        self.assertEqual(kwargs["name_column"], "Organization Name")
+        self.assertEqual(kwargs["country_code_column"], "Country Code")
+        self.assertEqual(kwargs["representative_selections"], {"deadbeef": "alice"})
 
     def test_upload_preview_and_confirm_auto_selects_identified_representative(self) -> None:
         self._login_as_freeipa_admin("alex")

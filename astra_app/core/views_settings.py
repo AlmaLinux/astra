@@ -746,23 +746,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
 
         try:
             client = _build_freeipa_client()
-
-            # Prefer the password-change endpoint: it works for self-service password changes
-            # and supports OTP validation.
-            change_password = getattr(client, "change_password", None)
-            if callable(change_password):
-                # python-freeipa signature: change_password(username, new_password, old_password, otp=None)
-                change_password(username, new, current, otp=otp)
-            else:
-                # Fallback for very old python-freeipa versions.
-                client.login(username, current)
-                passwd = getattr(client, "passwd", None)
-                if not callable(passwd):
-                    raise RuntimeError("python-freeipa client does not support password changes")
-                try:
-                    passwd(username, current, new)
-                except TypeError:
-                    passwd(username, o_password=current, o_new_password=new)
+            client.change_password(username, new, current, otp=otp)
 
             messages.success(request, "Password changed.")
             return redirect(settings_url(tab="security"))

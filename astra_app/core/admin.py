@@ -83,7 +83,7 @@ from core.organization_membership_csv_import import (
 from core.protected_resources import protected_freeipa_group_cns
 from core.signals import CANONICAL_SIGNALS
 from core.user_labels import user_choice, user_choice_with_fallback, user_choices_from_users
-from core.views_utils import _normalize_str
+from core.views_utils import _normalize_str, get_username
 
 from .listbacked_queryset import _ListBackedQuerySet
 from .models import (
@@ -2283,7 +2283,7 @@ class MembershipCSVImportLinkAdmin(BaseCsvImportAdmin):
 
         return {
             "membership_type": membership_type,
-            "actor_username": request.user.get_username(),
+            "actor_username": get_username(request),
             **extra,
         }
 
@@ -2392,7 +2392,7 @@ class OrganizationCSVImportLinkAdmin(BaseCsvImportAdmin):
         representative_selections = iter_representative_selection_items(request.POST.items())
 
         return {
-            "actor_username": request.user.get_username(),
+            "actor_username": get_username(request),
             "representative_selections": representative_selections,
             **extra,
         }
@@ -2593,7 +2593,7 @@ class OrganizationMembershipCSVImportLinkAdmin(BaseCsvImportAdmin):
 
         return {
             "membership_type": membership_type,
-            "actor_username": request.user.get_username(),
+            "actor_username": get_username(request),
             **extra,
         }
 

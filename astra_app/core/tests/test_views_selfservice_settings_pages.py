@@ -1127,6 +1127,8 @@ class SelfServiceSettingsPagesTests(TestCase):
             with patch("core.views_settings._build_freeipa_client", autospec=True) as mocked_build:
                 mocked_client = mocked_build.return_value
                 mocked_client.change_password.return_value = None
+                mocked_client.login.side_effect = AssertionError("login() fallback should not run")
+                mocked_client.passwd.side_effect = AssertionError("passwd() fallback should not run")
 
                 response = views_settings.settings_root(request)
 
