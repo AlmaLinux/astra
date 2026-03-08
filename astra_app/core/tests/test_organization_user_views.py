@@ -1,5 +1,6 @@
 
 import datetime
+import importlib
 from io import BytesIO
 from pathlib import Path
 from tempfile import mkdtemp
@@ -983,6 +984,51 @@ class OrganizationUserViewsTests(TestCase):
         invitation.refresh_from_db()
         self.assertIsNotNone(invitation.accepted_at)
         self.assertEqual(invitation.accepted_username, "claimant")
+
+    def test_organization_claim_emits_org_signal_and_invitation_signal_for_each_accepted_row(self) -> None:
+        from core.models import AccountInvitation, Organization
+
+        organization = Organization.objects.create(
+            name="Claim Signal Org",
+            business_contact_email="contact@example.com",
+        )
+        first_invitation = AccountInvitation.objects.create(
+            email="contact@example.com",
+            invited_by_username="reviewer",
+            organization=organization,
+            email_template_name=settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME,
+        )
+        second_invitation = AccountInvitation.objects.create(
+            email="alt-contact@example.com",
+            invited_by_username="reviewer",
+            organization=organization,
+            email_template_name=settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME,
+        )
+        token = make_organization_claim_token(organization)
+
+        claimant = FreeIPAUser("claimant", {"uid": ["claimant"], "memberof_group": [], "c": ["US"]})
+        self._login_as_freeipa_user("ClaImAnt")
+        signal_module = importlib.import_module("core.signals")
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=claimant),
+            patch("core.views_organizations.block_action_without_coc", return_value=None),
+            patch("core.views_organizations.block_action_without_country_code", return_value=None),
+            patch.object(signal_module.organization_claimed, "send", autospec=True) as org_send_mock,
+            patch.object(signal_module.account_invitation_accepted, "send", autospec=True) as invitation_send_mock,
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            response = self.client.post(reverse("organization-claim", args=[token]), follow=False)
+
+        self.assertEqual(response.status_code, 302)
+        org_send_mock.assert_called_once()
+        invitation_send_mock.assert_called()
+        self.assertEqual(invitation_send_mock.call_count, 2)
+        accepted_ids = {call.kwargs["account_invitation"].pk for call in invitation_send_mock.call_args_list}
+        self.assertEqual(accepted_ids, {first_invitation.pk, second_invitation.pk})
+        for call in invitation_send_mock.call_args_list:
+            self.assertEqual(call.kwargs.get("sender"), AccountInvitation)
+            self.assertEqual(call.kwargs.get("actor"), "claimant")
 
     def test_active_org_detail_hides_send_claim_invitation_link(self) -> None:
         from core.models import Organization

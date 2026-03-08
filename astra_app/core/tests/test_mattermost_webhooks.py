@@ -17,7 +17,8 @@ from core.mattermost_webhooks import (
     _render_template,
     dispatch_mattermost_event,
 )
-from core.models import MattermostWebhookEndpoint
+from core.models import AccountInvitation, MattermostWebhookEndpoint, Organization
+from core.signals import CANONICAL_SIGNALS
 from core.tokens import election_genesis_chain_hash
 
 
@@ -260,6 +261,43 @@ class MattermostWebhookTemplateAndPayloadTests(SimpleTestCase):
         self.assertEqual(by_title.get("Old country"), "US")
         self.assertEqual(by_title.get("New country"), "FR")
 
+    def test_build_payload_account_invitation_accepted_exposes_invitation_context_and_link(self) -> None:
+        invitation = SimpleNamespace(
+            pk=42,
+            email="invitee@example.com",
+            full_name="Invitee",
+            accepted_username="alice",
+            freeipa_matched_usernames=["alice", "ally"],
+            organization_id=7,
+            organization=SimpleNamespace(pk=7, name="Example Org"),
+        )
+        endpoint = MattermostWebhookEndpoint(
+            label="Ops",
+            url="https://hooks.example.invalid/abc",
+            events=["account_invitation_accepted"],
+            text=(
+                "invite={{ account_invitation_email }} accepted={{ account_invitation_accepted_username }} "
+                "matches={{ account_invitation_matched_usernames_csv }} org={{ account_invitation_organization_name }}"
+            ),
+        )
+
+        payload = _build_payload(
+            endpoint,
+            "account_invitation_accepted",
+            {"account_invitation": invitation, "actor": "committee"},
+        )
+
+        self.assertEqual(
+            payload["text"],
+            "invite=invitee@example.com accepted=alice matches=alice, ally org=Example Org",
+        )
+        self.assertTrue(str(payload["attachments"][0]["title_link"]).endswith(reverse("account-invitations")))
+        fields = payload["attachments"][0]["fields"]
+        by_title = {str(field.get("title")): str(field.get("value")) for field in fields}
+        self.assertEqual(by_title.get("Email"), "invitee@example.com")
+        self.assertEqual(by_title.get("Accepted username"), "alice")
+        self.assertEqual(by_title.get("Organization"), "Example Org")
+
 
 @override_settings(MATTERMOST_WEBHOOK_TIMEOUT_SECONDS=3)
 class MattermostWebhookPostTests(SimpleTestCase):
@@ -470,6 +508,53 @@ class MattermostWebhookDispatchTests(TestCase):
     @patch("core.mattermost_webhooks.MattermostWebhookEndpoint.objects.filter", side_effect=RuntimeError("DB down"))
     def test_dispatch_never_raises_on_db_error(self, _mock_filter: Mock) -> None:
         dispatch_mattermost_event("election_opened", actor="test")
+
+    def test_account_invitation_accepted_signal_posts_through_connected_receiver(self) -> None:
+        endpoint = MattermostWebhookEndpoint.objects.create(
+            label="Invites",
+            url="https://hooks.example.invalid/invites",
+            enabled=True,
+            events=["account_invitation_accepted"],
+        )
+        invitation = AccountInvitation.objects.create(
+            email="invitee@example.com",
+            full_name="Invitee",
+            invited_by_username="committee",
+            accepted_username="alice",
+        )
+
+        with patch("core.mattermost_webhooks._post_to_endpoint") as post_mock:
+            CANONICAL_SIGNALS["account_invitation_accepted"].send(
+                sender=AccountInvitation,
+                account_invitation=invitation,
+                actor="alice",
+            )
+
+        post_mock.assert_called_once()
+        self.assertEqual(post_mock.call_args.args[0].pk, endpoint.pk)
+        payload = post_mock.call_args.args[1]
+        self.assertEqual(payload["text"], "Account invitation accepted")
+
+    def test_organization_claimed_signal_posts_through_connected_receiver(self) -> None:
+        endpoint = MattermostWebhookEndpoint.objects.create(
+            label="Organizations",
+            url="https://hooks.example.invalid/orgs",
+            enabled=True,
+            events=["organization_claimed"],
+        )
+        organization = Organization.objects.create(name="Claimed Org")
+
+        with patch("core.mattermost_webhooks._post_to_endpoint") as post_mock:
+            CANONICAL_SIGNALS["organization_claimed"].send(
+                sender=Organization,
+                organization=organization,
+                actor="alice",
+            )
+
+        post_mock.assert_called_once()
+        self.assertEqual(post_mock.call_args.args[0].pk, endpoint.pk)
+        payload = post_mock.call_args.args[1]
+        self.assertEqual(payload["text"], "Organization claimed")
 
 
 class MattermostWebhookAdminTests(TestCase):

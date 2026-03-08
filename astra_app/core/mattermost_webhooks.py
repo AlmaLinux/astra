@@ -26,6 +26,7 @@ logger = logging.getLogger("core.mattermost_webhooks")
 _URL_RE = re.compile(r"https?://\S+")
 
 _GREEN_EVENTS = {
+    "account_invitation_accepted",
     "membership_request_approved",
     "organization_membership_request_approved",
     "election_tallied",
@@ -65,6 +66,19 @@ _COMMON_TEMPLATE_VARIABLES: dict[str, str] = {
 }
 
 _EVENT_TEMPLATE_VARIABLES: dict[str, dict[str, str]] = {
+    "account_invitation_accepted": {
+        "account_invitation": "AccountInvitation object (example: {{ account_invitation.pk }}).",
+        "account_invitation_id": "Account invitation primary key.",
+        "account_invitation_email": "Invitation email address.",
+        "account_invitation_full_name": "Invitation full name.",
+        "account_invitation_accepted_username": "Accepted username when known.",
+        "account_invitation_accepted_at": "Accepted timestamp object.",
+        "account_invitation_accepted_at_iso": "Accepted timestamp as an ISO string.",
+        "account_invitation_matched_usernames": "Matched FreeIPA usernames list.",
+        "account_invitation_matched_usernames_csv": "Comma-separated matched usernames.",
+        "account_invitation_organization_id": "Linked organization primary key when present.",
+        "account_invitation_organization_name": "Linked organization display name when present.",
+    },
     "election_opened": {
         "election": "Election object (example: {{ election.name }}, {{ election.pk }}).",
         "election_id": "Election primary key.",
@@ -324,6 +338,9 @@ def _event_title(event_key: str) -> str:
 
 
 def _event_link(event_key: str, kwargs: dict[str, object]) -> str:
+    if event_key == "account_invitation_accepted":
+        return build_public_absolute_url(reverse("account-invitations"), on_missing="relative")
+
     if event_key.startswith("election_"):
         election = kwargs.get("election")
         if election is not None:
@@ -447,7 +464,48 @@ def _default_payload(event_key: str, kwargs: dict[str, object]) -> dict[str, obj
     title = _event_title(event_key)
     color = _attachment_color_for_event(event_key)
 
-    if event_key == "election_opened":
+    if event_key == "account_invitation_accepted":
+        text = "Account invitation accepted"
+        actor = str(kwargs.get("actor") or "system").strip() or "system"
+        fields: list[dict[str, object]] = []
+        account_invitation = kwargs.get("account_invitation")
+        if account_invitation is not None:
+            try:
+                fields.append({"title": "Invitation ID", "value": str(account_invitation.pk), "short": True})
+            except Exception:
+                pass
+            try:
+                invitation_email = str(account_invitation.email or "").strip()
+            except Exception:
+                invitation_email = ""
+            if invitation_email:
+                fields.append({"title": "Email", "value": invitation_email, "short": True})
+                title = f"Account invitation {invitation_email}"
+            try:
+                accepted_username = str(account_invitation.accepted_username or "").strip()
+            except Exception:
+                accepted_username = ""
+            if accepted_username:
+                fields.append({"title": "Accepted username", "value": accepted_username, "short": True})
+            try:
+                matched_usernames = list(account_invitation.freeipa_matched_usernames or [])
+            except Exception:
+                matched_usernames = []
+            if matched_usernames:
+                fields.append({"title": "Matched usernames", "value": ", ".join(map(str, matched_usernames)), "short": False})
+            try:
+                organization = account_invitation.organization
+            except Exception:
+                organization = None
+            if organization is not None:
+                try:
+                    organization_name = str(organization.name or "").strip()
+                except Exception:
+                    organization_name = ""
+                if organization_name:
+                    fields.append({"title": "Organization", "value": organization_name, "short": True})
+        fields.append({"title": "Actor", "value": actor, "short": True})
+    elif event_key == "election_opened":
         text = "Election opened"
         fields = _election_fields(kwargs)
     elif event_key == "election_closed":
@@ -540,6 +598,11 @@ def _default_payload(event_key: str, kwargs: dict[str, object]) -> dict[str, obj
     if event_key.startswith("election_"):
         try:
             title = f"Election {kwargs.get('election').name}"
+        except Exception:
+            pass
+    elif event_key == "account_invitation_accepted":
+        try:
+            title = f"Account invitation {kwargs.get('account_invitation').email}"
         except Exception:
             pass
     elif event_key.startswith("membership_") or event_key.startswith("organization_membership_"):
@@ -757,6 +820,70 @@ def _build_template_context(event_key: str, kwargs: dict[str, object]) -> dict[s
     context = dict(kwargs)
     context.update(_membership_request_template_context(kwargs))
     context.update(_election_template_context(event_key, kwargs))
+
+    account_invitation = kwargs.get("account_invitation")
+    if account_invitation is not None:
+        try:
+            context["account_invitation_id"] = account_invitation.pk
+        except Exception:
+            pass
+
+        try:
+            invitation_email = str(account_invitation.email or "").strip()
+        except Exception:
+            invitation_email = ""
+        if invitation_email:
+            context["account_invitation_email"] = invitation_email
+
+        try:
+            invitation_full_name = str(account_invitation.full_name or "").strip()
+        except Exception:
+            invitation_full_name = ""
+        if invitation_full_name:
+            context["account_invitation_full_name"] = invitation_full_name
+
+        try:
+            accepted_username = str(account_invitation.accepted_username or "").strip()
+        except Exception:
+            accepted_username = ""
+        if accepted_username:
+            context["account_invitation_accepted_username"] = accepted_username
+
+        try:
+            accepted_at = account_invitation.accepted_at
+        except Exception:
+            accepted_at = None
+        if isinstance(accepted_at, datetime.datetime):
+            context["account_invitation_accepted_at"] = accepted_at
+            context["account_invitation_accepted_at_iso"] = accepted_at.isoformat()
+
+        try:
+            matched_usernames = list(account_invitation.freeipa_matched_usernames or [])
+        except Exception:
+            matched_usernames = []
+        if matched_usernames:
+            context["account_invitation_matched_usernames"] = matched_usernames
+            context["account_invitation_matched_usernames_csv"] = ", ".join(map(str, matched_usernames))
+
+        try:
+            organization_id = account_invitation.organization_id
+        except Exception:
+            organization_id = None
+        if organization_id is not None:
+            context["account_invitation_organization_id"] = organization_id
+
+        try:
+            organization = account_invitation.organization
+        except Exception:
+            organization = None
+        if organization is not None:
+            try:
+                organization_name = str(organization.name or "").strip()
+            except Exception:
+                organization_name = ""
+            if organization_name:
+                context["account_invitation_organization_name"] = organization_name
+
     return context
 
 

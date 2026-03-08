@@ -14,6 +14,7 @@ from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from post_office.models import EmailTemplate
 
+from core.account_invitation_reconcile import persist_non_org_invitation_acceptance
 from core.account_invitations import (
     build_freeipa_email_lookup,
     classify_invitation_rows,
@@ -218,20 +219,24 @@ def send_organization_claim_invitation(
     return result, invitation
 
 
-def _refresh_pending_invitations(*, pending: list[AccountInvitation], now: timezone.datetime) -> tuple[int, int]:
+def _refresh_pending_invitations(
+    *,
+    pending: list[AccountInvitation],
+    actor_username: str,
+    now: timezone.datetime,
+) -> tuple[int, int]:
     updated = 0
     checked = 0
     for invitation in pending:
         checked += 1
         matches = find_account_invitation_matches(invitation.email)
         if matches:
-            invitation.freeipa_matched_usernames = matches
-            invitation.freeipa_last_checked_at = now
-            if invitation.organization_id is None:
-                invitation.accepted_at = invitation.accepted_at or now
-                invitation.save(update_fields=["accepted_at", "freeipa_matched_usernames", "freeipa_last_checked_at"])
-            else:
-                invitation.save(update_fields=["freeipa_matched_usernames", "freeipa_last_checked_at"])
+            _mark_invitation_accepted_from_email_match(
+                invitation=invitation,
+                matched_usernames=matches,
+                actor_username=actor_username,
+                now=now,
+            )
             updated += 1
         else:
             invitation.freeipa_matched_usernames = []
@@ -273,10 +278,12 @@ def _resend_invitation(
     if invitation.organization_id is None:
         matches = find_account_invitation_matches(invitation.email)
         if matches:
-            invitation.accepted_at = invitation.accepted_at or now
-            invitation.freeipa_matched_usernames = matches
-            invitation.freeipa_last_checked_at = now
-            invitation.save(update_fields=["accepted_at", "freeipa_matched_usernames", "freeipa_last_checked_at"])
+            _mark_invitation_accepted_from_email_match(
+                invitation=invitation,
+                matched_usernames=matches,
+                actor_username=actor_username,
+                now=now,
+            )
             return "accepted"
 
     if not template_names:
@@ -301,12 +308,28 @@ def _resend_invitation(
     )
 
 
+def _mark_invitation_accepted_from_email_match(
+    *,
+    invitation: AccountInvitation,
+    matched_usernames: list[str],
+    actor_username: str,
+    now: timezone.datetime,
+) -> bool:
+    return persist_non_org_invitation_acceptance(
+        invitation=invitation,
+        matched_usernames=matched_usernames,
+        actor_username=actor_username,
+        now=now,
+    )
+
+
 class AccountInvitationUploadForm(StyledForm):
     csv_file = forms.FileField(required=True)
 
 
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
 def account_invitations(request: HttpRequest) -> HttpResponse:
+    actor_username = get_username(request)
     pending_invitations = list(
         AccountInvitation.objects.select_related("organization")
         .filter(dismissed_at__isnull=True, accepted_at__isnull=True)
@@ -314,7 +337,7 @@ def account_invitations(request: HttpRequest) -> HttpResponse:
         .all()
     )
     if pending_invitations:
-        _refresh_pending_invitations(pending=pending_invitations, now=timezone.now())
+        _refresh_pending_invitations(pending=pending_invitations, now=timezone.now(), actor_username=actor_username)
         pending_invitations = list(
             AccountInvitation.objects.select_related("organization")
             .filter(dismissed_at__isnull=True, accepted_at__isnull=True)

@@ -1,4 +1,6 @@
 
+import datetime
+import importlib
 from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import quote
@@ -14,7 +16,10 @@ from core.account_invitations import find_account_invitation_matches
 from core.freeipa.user import FreeIPAUser
 from core.models import AccountInvitation, AccountInvitationSend, FreeIPAPermissionGrant, Organization
 from core.permissions import ASTRA_ADD_MEMBERSHIP
-from core.views_account_invitations import _build_invitation_email_context
+from core.views_account_invitations import (
+    _build_invitation_email_context,
+    _mark_invitation_accepted_from_email_match,
+)
 
 
 class AccountInvitationFreeIPAServiceTests(TestCase):
@@ -75,6 +80,83 @@ class AccountInvitationViewsTests(TestCase):
                 "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
             },
         )
+
+    def test_mark_invitation_accepted_from_email_match_emits_signal_only_for_first_transition(self) -> None:
+        invitation = AccountInvitation.objects.create(
+            email="pending@example.com",
+            full_name="Pending User",
+            note="",
+            invited_by_username="committee",
+        )
+        signal_module = importlib.import_module("core.signals")
+        first_now = timezone.now()
+        second_now = first_now + datetime.timedelta(minutes=5)
+
+        with (
+            patch.object(signal_module.account_invitation_accepted, "send", autospec=True) as send_mock,
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            first_changed = _mark_invitation_accepted_from_email_match(
+                invitation=invitation,
+                matched_usernames=["pendinguser"],
+                actor_username="committee",
+                now=first_now,
+            )
+            second_changed = _mark_invitation_accepted_from_email_match(
+                invitation=invitation,
+                matched_usernames=["pendinguser"],
+                actor_username="committee",
+                now=second_now,
+            )
+
+        self.assertTrue(first_changed)
+        self.assertFalse(second_changed)
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.accepted_at, first_now)
+        self.assertEqual(invitation.freeipa_matched_usernames, ["pendinguser"])
+        send_mock.assert_called_once()
+        kwargs = send_mock.call_args.kwargs
+        self.assertEqual(kwargs.get("sender"), AccountInvitation)
+        self.assertEqual(kwargs.get("actor"), "committee")
+        self.assertEqual(kwargs.get("account_invitation").pk, invitation.pk)
+
+    def test_mark_invitation_accepted_from_email_match_stale_instance_does_not_double_emit_signal(self) -> None:
+        invitation = AccountInvitation.objects.create(
+            email="pending@example.com",
+            full_name="Pending User",
+            note="",
+            invited_by_username="committee",
+        )
+        first_copy = AccountInvitation.objects.get(pk=invitation.pk)
+        stale_copy = AccountInvitation.objects.get(pk=invitation.pk)
+        signal_module = importlib.import_module("core.signals")
+        first_now = timezone.now()
+        second_now = first_now + datetime.timedelta(minutes=5)
+
+        with (
+            patch.object(signal_module.account_invitation_accepted, "send", autospec=True) as send_mock,
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            first_changed = _mark_invitation_accepted_from_email_match(
+                invitation=first_copy,
+                matched_usernames=["pendinguser"],
+                actor_username="committee",
+                now=first_now,
+            )
+            second_changed = _mark_invitation_accepted_from_email_match(
+                invitation=stale_copy,
+                matched_usernames=["pendinguser"],
+                actor_username="committee",
+                now=second_now,
+            )
+
+        self.assertTrue(first_changed)
+        self.assertFalse(second_changed)
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.accepted_at, first_now)
+        self.assertEqual(invitation.freeipa_last_checked_at, second_now)
+        self.assertEqual(invitation.freeipa_matched_usernames, ["pendinguser"])
+        send_mock.assert_called_once()
 
     def test_account_invitations_invalid_email_in_preview(self) -> None:
         self._login_as_freeipa_user("committee")
@@ -607,6 +689,39 @@ class AccountInvitationViewsTests(TestCase):
         self.assertIsNotNone(invitation.accepted_at)
         self.assertEqual(invitation.freeipa_matched_usernames, ["pendinguser"])
 
+    def test_account_invitations_get_refresh_emits_signal_only_for_first_email_match_acceptance(self) -> None:
+        self._login_as_freeipa_user("committee")
+
+        invitation = AccountInvitation.objects.create(
+            email="pending@example.com",
+            full_name="Pending User",
+            note="",
+            invited_by_username="committee",
+        )
+        signal_module = importlib.import_module("core.signals")
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
+            patch("core.views_account_invitations.find_account_invitation_matches", return_value=["pendinguser"]),
+            patch(
+                "core.views_account_invitations.confirm_existing_usernames",
+                return_value=(["pendinguser"], True),
+            ),
+            patch.object(signal_module.account_invitation_accepted, "send", autospec=True) as send_mock,
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            first_response = self.client.get(reverse("account-invitations"))
+            second_response = self.client.get(reverse("account-invitations"))
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
+        invitation.refresh_from_db()
+        self.assertIsNotNone(invitation.accepted_at)
+        send_mock.assert_called_once()
+        kwargs = send_mock.call_args.kwargs
+        self.assertEqual(kwargs.get("actor"), "committee")
+        self.assertEqual(kwargs.get("account_invitation").pk, invitation.pk)
+
     def test_account_invitations_get_does_not_accept_org_linked_invitation_from_account_match(self) -> None:
         self._login_as_freeipa_user("committee")
 
@@ -657,6 +772,31 @@ class AccountInvitationViewsTests(TestCase):
         self.assertIsNone(invitation.accepted_at)
         self.assertEqual(invitation.freeipa_matched_usernames, [])
 
+    def test_account_invitations_clears_stale_accepted_without_emitting_signal(self) -> None:
+        self._login_as_freeipa_user("committee")
+
+        invitation = AccountInvitation.objects.create(
+            email="stale@example.com",
+            full_name="Stale User",
+            note="",
+            invited_by_username="committee",
+            accepted_at=timezone.now(),
+            freeipa_matched_usernames=["staleuser"],
+        )
+        signal_module = importlib.import_module("core.signals")
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
+            patch("core.views_account_invitations.confirm_existing_usernames", return_value=([], True)),
+            patch.object(signal_module.account_invitation_accepted, "send", autospec=True) as send_mock,
+        ):
+            response = self.client.get(reverse("account-invitations"))
+
+        self.assertEqual(response.status_code, 200)
+        invitation.refresh_from_db()
+        self.assertIsNone(invitation.accepted_at)
+        send_mock.assert_not_called()
+
     def test_account_invitation_resend_and_dismiss(self) -> None:
         invitation = AccountInvitation.objects.create(
             email="bob@example.com",
@@ -687,6 +827,35 @@ class AccountInvitationViewsTests(TestCase):
         _args, kwargs = queue_mock.call_args
         self.assertEqual(kwargs["context"].get("membership_committee_email"), settings.MEMBERSHIP_COMMITTEE_EMAIL)
         self.assertEqual(kwargs.get("reply_to"), [settings.MEMBERSHIP_COMMITTEE_EMAIL])
+
+    def test_account_invitation_resend_marks_email_match_as_accepted_and_emits_signal(self) -> None:
+        invitation = AccountInvitation.objects.create(
+            email="bob@example.com",
+            full_name="Bob Example",
+            note="",
+            invited_by_username="committee",
+        )
+        self._login_as_freeipa_user("committee")
+        signal_module = importlib.import_module("core.signals")
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
+            patch("core.views_account_invitations.find_account_invitation_matches", return_value=["bob"]),
+            patch("core.views_account_invitations.queue_templated_email") as queue_mock,
+            patch.object(signal_module.account_invitation_accepted, "send", autospec=True) as send_mock,
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            response = self.client.post(reverse("account-invitation-resend", args=[invitation.pk]))
+
+        self.assertEqual(response.status_code, 302)
+        invitation.refresh_from_db()
+        self.assertIsNotNone(invitation.accepted_at)
+        self.assertEqual(invitation.freeipa_matched_usernames, ["bob"])
+        queue_mock.assert_not_called()
+        send_mock.assert_called_once()
+        kwargs = send_mock.call_args.kwargs
+        self.assertEqual(kwargs.get("actor"), "committee")
+        self.assertEqual(kwargs.get("account_invitation").pk, invitation.pk)
 
     def test_account_invitations_bulk_resend(self) -> None:
         self._login_as_freeipa_user("committee")

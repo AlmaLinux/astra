@@ -41,10 +41,11 @@ from core.tokens import election_genesis_chain_hash
 
 
 class Phase1SignalsRegistryTests(TestCase):
-    def test_all_21_signals_are_importable_and_signal_instances(self) -> None:
+    def test_all_current_canonical_signals_are_importable_and_signal_instances(self) -> None:
         signal_module = importlib.import_module("core.signals")
 
         expected_names = [
+            "account_invitation_accepted",
             "election_opened",
             "election_closed",
             "election_tallied",
@@ -66,9 +67,11 @@ class Phase1SignalsRegistryTests(TestCase):
             "organization_membership_rfi_replied",
             "organization_claimed",
             "organization_created",
+            "user_country_changed",
+            "organization_country_changed",
         ]
 
-        self.assertEqual(len(expected_names), 21)
+        self.assertEqual(set(signal_module.CANONICAL_SIGNALS.keys()), set(expected_names))
         for name in expected_names:
             with self.subTest(signal=name):
                 signal_obj = getattr(signal_module, name)

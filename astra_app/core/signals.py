@@ -5,6 +5,9 @@ Canonical event registry.
 
 from django.dispatch import Signal
 
+# Account invitations
+account_invitation_accepted = Signal()
+
 # Elections
 election_opened = Signal()
 election_closed = Signal()
@@ -39,6 +42,7 @@ user_country_changed = Signal()
 organization_country_changed = Signal()
 
 CANONICAL_SIGNALS: dict[str, Signal] = {
+    "account_invitation_accepted": account_invitation_accepted,
     "election_opened": election_opened,
     "election_closed": election_closed,
     "election_tallied": election_tallied,

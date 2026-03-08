@@ -1,4 +1,5 @@
 import datetime
+import importlib
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -10,12 +11,38 @@ from django.utils import timezone
 from core.account_invitation_reconcile import (
     load_account_invitation_from_token,
     reconcile_account_invitation_for_username,
+    schedule_account_invitation_accepted_signal,
 )
 from core.models import AccountInvitation, Organization
 from core.tokens import _make_signed_token_legacy
 
 
 class AccountInvitationReconcileTests(TestCase):
+    def test_schedule_account_invitation_accepted_signal_sends_after_commit(self) -> None:
+        invitation = AccountInvitation.objects.create(
+            email="invitee@example.com",
+            full_name="Invitee",
+            invited_by_username="committee",
+            accepted_at=timezone.now(),
+            accepted_username="alice",
+            freeipa_matched_usernames=["alice"],
+        )
+        signal_module = importlib.import_module("core.signals")
+
+        with patch.object(signal_module.account_invitation_accepted, "send", autospec=True) as send_mock:
+            with self.captureOnCommitCallbacks(execute=False) as callbacks:
+                schedule_account_invitation_accepted_signal(invitation_id=invitation.pk, actor="alice")
+
+            self.assertEqual(len(callbacks), 1)
+            send_mock.assert_not_called()
+            callbacks[0]()
+            send_mock.assert_called_once()
+
+        kwargs = send_mock.call_args.kwargs
+        self.assertEqual(kwargs.get("sender"), AccountInvitation)
+        self.assertEqual(kwargs.get("actor"), "alice")
+        self.assertEqual(kwargs.get("account_invitation").pk, invitation.pk)
+
     def test_legacy_token_is_accepted_via_fallback(self) -> None:
         invitation = AccountInvitation.objects.create(
             email="legacy-invitee@example.com",
@@ -101,6 +128,55 @@ class AccountInvitationReconcileTests(TestCase):
         self.assertEqual(invitation.freeipa_last_checked_at, second_now)
         self.assertEqual(invitation.freeipa_matched_usernames, ["alice", "zara"])
 
+    def test_reconcile_account_invitation_for_username_emits_signal_only_for_first_non_org_acceptance(self) -> None:
+        invitation = AccountInvitation.objects.create(
+            email="invitee@example.com",
+            full_name="Invitee",
+            invited_by_username="committee",
+        )
+        first_now = timezone.make_aware(datetime.datetime(2026, 2, 15, 10, 0, 0), datetime.UTC)
+        second_now = timezone.make_aware(datetime.datetime(2026, 2, 15, 11, 0, 0), datetime.UTC)
+        signal_module = importlib.import_module("core.signals")
+
+        with (
+            patch.object(signal_module.account_invitation_accepted, "send", autospec=True) as send_mock,
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            reconcile_account_invitation_for_username(invitation=invitation, username="alice", now=first_now)
+            reconcile_account_invitation_for_username(invitation=invitation, username="alice", now=second_now)
+
+        send_mock.assert_called_once()
+        kwargs = send_mock.call_args.kwargs
+        self.assertEqual(kwargs.get("sender"), AccountInvitation)
+        self.assertEqual(kwargs.get("actor"), "alice")
+        self.assertEqual(kwargs.get("account_invitation").pk, invitation.pk)
+
+    def test_reconcile_account_invitation_for_username_stale_instance_does_not_double_emit_signal(self) -> None:
+        invitation = AccountInvitation.objects.create(
+            email="invitee@example.com",
+            full_name="Invitee",
+            invited_by_username="committee",
+        )
+        first_copy = AccountInvitation.objects.get(pk=invitation.pk)
+        stale_copy = AccountInvitation.objects.get(pk=invitation.pk)
+        first_now = timezone.make_aware(datetime.datetime(2026, 2, 15, 10, 0, 0), datetime.UTC)
+        second_now = timezone.make_aware(datetime.datetime(2026, 2, 15, 11, 0, 0), datetime.UTC)
+        signal_module = importlib.import_module("core.signals")
+
+        with (
+            patch.object(signal_module.account_invitation_accepted, "send", autospec=True) as send_mock,
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            reconcile_account_invitation_for_username(invitation=first_copy, username="alice", now=first_now)
+            reconcile_account_invitation_for_username(invitation=stale_copy, username="alice", now=second_now)
+
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.accepted_at, first_now)
+        self.assertEqual(invitation.accepted_username, "alice")
+        self.assertEqual(invitation.freeipa_last_checked_at, second_now)
+        self.assertEqual(invitation.freeipa_matched_usernames, ["alice"])
+        send_mock.assert_called_once()
+
     def test_reconcile_account_invitation_for_username_does_not_overwrite_existing_accepted_username(self) -> None:
         invitation = AccountInvitation.objects.create(
             email="invitee@example.com",
@@ -120,6 +196,7 @@ class AccountInvitationReconcileTests(TestCase):
     def test_reconcile_account_invitation_for_username_normalizes_username_to_lowercase(self) -> None:
         now = timezone.make_aware(datetime.datetime(2026, 2, 15, 10, 0, 0), datetime.UTC)
         invitation = SimpleNamespace(
+            pk=None,
             organization_id=None,
             accepted_at=None,
             accepted_username="",

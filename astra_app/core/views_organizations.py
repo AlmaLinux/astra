@@ -15,6 +15,7 @@ from django.utils.html import format_html
 from django.views.decorators.http import require_GET
 
 from core import signals as astra_signals
+from core.account_invitation_reconcile import schedule_account_invitation_accepted_signal
 from core.forms_organizations import OrganizationEditForm
 from core.freeipa.user import FreeIPAUser
 from core.freeipa_directory import search_freeipa_users
@@ -151,6 +152,14 @@ def organization_claim(request: HttpRequest, token: str) -> HttpResponse:
             locked_organization.claim_secret = secrets.token_urlsafe(32)
             locked_organization.save(update_fields=["representative", "status", "claim_secret"])
 
+            accepted_invitation_ids = list(
+                AccountInvitation.objects.filter(
+                    organization=locked_organization,
+                    dismissed_at__isnull=True,
+                    accepted_at__isnull=True,
+                ).values_list("pk", flat=True)
+            )
+
             AccountInvitation.objects.filter(
                 organization=locked_organization,
                 dismissed_at__isnull=True,
@@ -169,6 +178,8 @@ def organization_claim(request: HttpRequest, token: str) -> HttpResponse:
                     organization=committed_organization,
                     actor=username,
                 )
+                for invitation_id in accepted_invitation_ids:
+                    schedule_account_invitation_accepted_signal(invitation_id=invitation_id, actor=normalized_username)
 
             transaction.on_commit(_send_organization_claimed_signal)
     except IntegrityError:
