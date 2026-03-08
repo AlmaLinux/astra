@@ -25,6 +25,7 @@ from django.shortcuts import redirect
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
 from django.utils.html import format_html
+from django.utils.text import Truncator
 from django.utils.translation import gettext_lazy as _
 from import_export.admin import ImportMixin
 from import_export.formats import base_formats
@@ -621,10 +622,39 @@ def _override_post_office_email_admin() -> None:
         return
 
     class SafeEmailAdmin(PostOfficeEmailAdmin):
+        readonly_fields = [*PostOfficeEmailAdmin.readonly_fields, "recipient_delivery_summary"]
+
+        @admin.display(description="Subject", ordering="subject")
+        def shortened_subject(self, instance):
+            if instance.context and instance.template_id is None:
+                return Truncator(instance.subject).chars(100)
+            return super().shortened_subject(instance)
+
+        @admin.display(description="Recipient delivery summary")
+        def recipient_delivery_summary(self, obj):
+            summary = "No aggregate recipient status recorded."
+            if obj.recipient_delivery_status is not None:
+                summary = obj.get_recipient_delivery_status_display()
+
+            recipient_count = 0
+            for value in (obj.to, obj.cc, obj.bcc):
+                if isinstance(value, str):
+                    recipient_count += len([item for item in value.split(",") if item.strip()])
+                elif value:
+                    recipient_count += len([str(item).strip() for item in value if str(item).strip()])
+
+            if recipient_count > 1:
+                return format_html(
+                    "{}<div class='help text-muted small'>{}</div>",
+                    summary,
+                    "Single rolled-up status across all recipients. Individual recipient outcomes may differ.",
+                )
+            return summary
+
         @override
         def get_fieldsets(self, request, obj=None):
             try:
-                return super().get_fieldsets(request, obj=obj)
+                fieldsets = super().get_fieldsets(request, obj=obj)
             except Exception as e:
                 messages.warning(request, f"Unable to render email preview: {e}")
 
@@ -633,12 +663,24 @@ def _override_post_office_email_admin() -> None:
                     "to",
                     "cc",
                     "bcc",
+                    "recipient_delivery_summary",
                     "priority",
                     ("status", "scheduled_time"),
                 ]
                 if obj is not None and obj.message_id:
                     fields.insert(0, "message_id")
                 return [(None, {"fields": fields})]
+
+            general_name, general_options = fieldsets[0]
+            general_fields = list(general_options.get("fields", ()))
+            if "recipient_delivery_summary" not in general_fields:
+                insert_at = 5 if "message_id" in general_fields else 4
+                insert_at = min(insert_at, len(general_fields))
+                general_fields.insert(insert_at, "recipient_delivery_summary")
+
+            updated_fieldsets = [(general_name, {**general_options, "fields": general_fields})]
+            updated_fieldsets.extend(fieldsets[1:])
+            return updated_fieldsets
 
     _safe_reregister(Email, SafeEmailAdmin)
 

@@ -41,6 +41,14 @@ Expected context:
             <dt class="col-sm-3">Reply-To</dt>
             <dd class="col-sm-9">{{ modal.reply_to }}</dd>
           {% endif %}
+
+          <dt class="col-sm-3">Recipient delivery summary</dt>
+          <dd class="col-sm-9">
+            {{ modal.recipient_delivery_summary }}
+            {% if modal.recipient_delivery_summary_note %}
+              <div class="text-muted small">{{ modal.recipient_delivery_summary_note }}</div>
+            {% endif %}
+          </dd>
         </dl>
 
         {% if modal.headers %}

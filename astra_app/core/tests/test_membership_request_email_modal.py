@@ -4,7 +4,7 @@ from unittest.mock import patch
 from django.conf import settings
 from django.test import TestCase
 from django.urls import reverse
-from post_office.models import STATUS, Email, EmailTemplate, Log
+from post_office.models import STATUS, Email, EmailTemplate, Log, RecipientDeliveryStatus
 
 from core.freeipa.user import FreeIPAUser
 from core.membership_notes import add_note
@@ -164,3 +164,120 @@ class MembershipRequestEmailModalTests(TestCase):
         self.assertNotContains(resp, "Template subject")
         self.assertNotContains(resp, "Template html")
         self.assertNotContains(resp, "Template text")
+
+    def test_membership_notes_render_aggregate_recipient_delivery_summary(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        email = Email.objects.create(
+            from_email="noreply@example.com",
+            to="alice@example.com,bob@example.com",
+            subject="Approval notice",
+            message="Plain text body",
+            html_message="<p>HTML body</p>",
+            recipient_delivery_status=RecipientDeliveryStatus.DELIVERED,
+        )
+        Log.objects.create(
+            email=email,
+            status=STATUS.sent,
+            message="sent",
+            exception_type="",
+        )
+
+        add_note(
+            membership_request=req,
+            username="reviewer",
+            action={"type": "contacted", "kind": "approved", "email_id": email.id},
+        )
+
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
+            resp = self.client.get(reverse("membership-request-detail", args=[req.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Recipient delivery summary")
+        self.assertContains(resp, "Delivered")
+        self.assertContains(resp, "Single rolled-up status across all recipients. Individual recipient outcomes may differ.")
+
+    def test_membership_notes_render_empty_recipient_delivery_summary(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        email = Email.objects.create(
+            from_email="noreply@example.com",
+            to="alice@example.com",
+            subject="Approval notice",
+            message="Plain text body",
+            html_message="<p>HTML body</p>",
+            recipient_delivery_status=None,
+        )
+        Log.objects.create(
+            email=email,
+            status=STATUS.sent,
+            message="sent",
+            exception_type="",
+        )
+
+        add_note(
+            membership_request=req,
+            username="reviewer",
+            action={"type": "contacted", "kind": "approved", "email_id": email.id},
+        )
+
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
+            resp = self.client.get(reverse("membership-request-detail", args=[req.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Recipient delivery summary")
+        self.assertContains(resp, "No aggregate recipient status recorded.")

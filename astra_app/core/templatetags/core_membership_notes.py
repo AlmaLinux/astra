@@ -176,6 +176,15 @@ def _email_modals_for_notes(notes: list[Note]) -> list[dict[str, Any]]:
             for log in logs_sorted
         ]
 
+        recipient_count = (
+            len(_split_emails(email.to))
+            + len(_split_emails(email.cc))
+            + len(_split_emails(email.bcc))
+        )
+        recipient_delivery_summary = "No aggregate recipient status recorded."
+        if email.recipient_delivery_status is not None:
+            recipient_delivery_summary = email.get_recipient_delivery_status_display()
+
         modals.append(
             {
                 "email_id": email.id,
@@ -189,6 +198,12 @@ def _email_modals_for_notes(notes: list[Note]) -> list[dict[str, Any]]:
                 "subject": subject,
                 "html": html,
                 "text": text,
+                "recipient_delivery_summary": recipient_delivery_summary,
+                "recipient_delivery_summary_note": (
+                    "Single rolled-up status across all recipients. Individual recipient outcomes may differ."
+                    if recipient_count > 1
+                    else ""
+                ),
                 "logs": logs,
             }
         )

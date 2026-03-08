@@ -358,7 +358,7 @@ TEMPLATES = [
 WSGI_APPLICATION = 'config.wsgi.application'
 
 # Database
-# https://docs.djangoproject.com/en/5.0/ref/settings/#databases
+# https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
 _database_url = _env_str("DATABASE_URL", default=None)
 if not _database_url:
@@ -650,6 +650,7 @@ EMAIL_BACKEND = 'post_office.EmailBackend'
 POST_OFFICE = {
     'DEFAULT_PRIORITY': 'now' if DEBUG else 'medium',
     'MESSAGE_ID_ENABLED': True,
+    'LOG_LEVEL': 2,
     'MAX_RETRIES': 4,
     'RETRY_INTERVAL': datetime.timedelta(minutes=5),
     'TEMPLATE_ENGINE': 'post_office',
@@ -692,7 +693,7 @@ AWS_SES_ADD_COMPLAINT_TO_BLACKLIST = _env_bool("AWS_SES_ADD_COMPLAINT_TO_BLACKLI
 AWS_SES_CONFIGURATION_SET = (_env_str("AWS_SES_CONFIGURATION_SET", default="")).strip() or None
 
 # Password validation
-# https://docs.djangoproject.com/en/5.0/ref/settings/#auth-password-validators
+# https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
 AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
@@ -709,7 +710,7 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 # Internationalization
-# https://docs.djangoproject.com/en/5.0/topics/i18n/
+# https://docs.djangoproject.com/en/6.0/topics/i18n/
 LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'UTC'
 USE_I18N = True
@@ -852,7 +853,7 @@ MATTERMOST_WEBHOOK_DEFAULT_ICON_URL = _env_str(
 )
 
 # Default primary key field type
-# https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field
+# https://docs.djangoproject.com/en/6.0/ref/settings/#default-auto-field
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Authentication Backends
