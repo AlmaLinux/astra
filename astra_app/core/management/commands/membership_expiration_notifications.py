@@ -70,6 +70,7 @@ class Command(BaseCommand):
 
         queued = 0
         skipped = 0
+        had_expiring_memberships = False
 
         for membership in memberships:
             if not membership.expires_at:
@@ -83,6 +84,8 @@ class Command(BaseCommand):
 
             if days_until not in schedule_days:
                 continue
+
+            had_expiring_memberships = True
 
             template = settings.MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME
 
@@ -136,6 +139,8 @@ class Command(BaseCommand):
 
             if days_until not in schedule_days:
                 continue
+
+            had_expiring_memberships = True
 
             template = settings.ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME
 
@@ -210,8 +215,9 @@ class Command(BaseCommand):
             self.stdout.write(f"[dry-run] {summary}")
         else:
             self.stdout.write(summary)
-            astra_signals.membership_expiring_soon.send(
-                sender=astra_signals.MembershipExpirationCommand,
-                count=queued,
-                membership_type="all",
-            )
+            if had_expiring_memberships:
+                astra_signals.membership_expiring_soon.send(
+                    sender=astra_signals.MembershipExpirationCommand,
+                    count=queued,
+                    membership_type="all",
+                )

@@ -87,8 +87,10 @@ class Command(BaseCommand):
         sponsorship_emailed = 0
         sponsorship_skipped = 0
         sponsorship_failed = 0
+        had_expired_memberships = False
 
         for membership in expired_memberships:
+            had_expired_memberships = True
             fu = FreeIPAUser.get(membership.target_username)
             self.stdout.write(f"Processing expired membership for user {membership.target_username}...")
             if fu is None:
@@ -178,6 +180,7 @@ class Command(BaseCommand):
                 removed += 1
 
         for sponsorship in expired_sponsorships:
+            had_expired_memberships = True
             org = sponsorship.target_organization
             if org is None:
                 continue
@@ -320,8 +323,9 @@ class Command(BaseCommand):
         else:
             self.stdout.write(membership_summary)
             self.stdout.write(sponsorship_summary)
-            astra_signals.membership_expired.send(
-                sender=astra_signals.MembershipExpirationCommand,
-                count=removed + sponsorship_removed,
-                membership_type="all",
-            )
+            if had_expired_memberships:
+                astra_signals.membership_expired.send(
+                    sender=astra_signals.MembershipExpirationCommand,
+                    count=removed + sponsorship_removed,
+                    membership_type="all",
+                )

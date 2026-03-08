@@ -657,7 +657,7 @@ class Phase1ManagementCommandSignalTests(TestCase):
         super().setUp()
         ensure_email_templates()
 
-    def test_membership_expiring_soon_signal_emitted_from_command(self) -> None:
+    def test_membership_expiring_soon_signal_not_emitted_when_no_memberships_are_expiring(self) -> None:
         signal_module = importlib.import_module("core.signals")
         with (
             patch("core.management.commands.membership_expiration_notifications.get_expiring_memberships", return_value=[]),
@@ -665,24 +665,14 @@ class Phase1ManagementCommandSignalTests(TestCase):
         ):
             call_command("membership_expiration_notifications")
 
-        send_mock.assert_called_once()
-        kwargs = send_mock.call_args.kwargs
-        sender = kwargs.get("sender")
-        self.assertEqual(sender.__name__, "MembershipExpirationCommand")
-        self.assertIn("count", kwargs)
-        self.assertIn("membership_type", kwargs)
+        send_mock.assert_not_called()
 
-    def test_membership_expired_signal_emitted_from_cleanup_command(self) -> None:
+    def test_membership_expired_signal_not_emitted_when_no_memberships_are_expired(self) -> None:
         signal_module = importlib.import_module("core.signals")
         with patch.object(signal_module.membership_expired, "send", autospec=True) as send_mock:
             call_command("membership_expired_cleanup")
 
-        send_mock.assert_called_once()
-        kwargs = send_mock.call_args.kwargs
-        sender = kwargs.get("sender")
-        self.assertEqual(sender.__name__, "MembershipExpirationCommand")
-        self.assertIn("count", kwargs)
-        self.assertIn("membership_type", kwargs)
+        send_mock.assert_not_called()
 
 
 class Phase1OrganizationSignalTests(TestCase):
