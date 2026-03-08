@@ -2,10 +2,11 @@ import queue
 import threading
 from unittest.mock import patch
 
+from django.apps import apps
 from django.contrib import admin
-from django.db import close_old_connections, connection
+from django.db import IntegrityError, close_old_connections, connection
 from django.test import SimpleTestCase, TestCase, TransactionTestCase, override_settings
-from django_ses.signals import bounce_received, complaint_received
+from django_ses.signals import bounce_received, complaint_received, message_sent
 from post_office.models import STATUS as POST_OFFICE_STATUS
 from post_office.models import Email as PostOfficeEmail
 from post_office.models import Log as PostOfficeLog
@@ -13,6 +14,7 @@ from post_office.models import RecipientDeliveryStatus
 
 from core.ses_signals import (
     _matched_post_office_email,
+    _message_id_hash,
     handle_ses_bounce_received,
     handle_ses_complaint_received,
     handle_ses_delivery_received,
@@ -487,6 +489,473 @@ class SESPostOfficeAuditLogTests(TestCase):
                 RecipientDeliveryStatus.SPAM_COMPLAINT,
             ],
         )
+
+
+class SESEmailCorrelationAttemptTests(TestCase):
+    def _attempt_model(self):
+        return apps.get_model("core", "SESEmailCorrelationAttempt")
+
+    def _create_email(self, *, message_id: str, status: int = POST_OFFICE_STATUS.sent) -> PostOfficeEmail:
+        return PostOfficeEmail.objects.create(
+            from_email="from@example.com",
+            to="to@example.com",
+            subject="Test",
+            message="Test message",
+            message_id=message_id,
+            status=status,
+        )
+
+    def _build_sent_message(
+        self,
+        email: PostOfficeEmail,
+        *,
+        provider_message_id: str | None = None,
+        request_id: str | None = None,
+    ):
+        message = email.prepare_email_message()
+        if provider_message_id is not None:
+            message.extra_headers["message_id"] = provider_message_id
+        if request_id is not None:
+            message.extra_headers["request_id"] = request_id
+        return message
+
+    def _processed_event(self, info_mock: object) -> dict[str, object]:
+        processed_events = [
+            call.kwargs.get("extra", {})
+            for call in info_mock.call_args_list
+            if call.kwargs.get("extra", {}).get("event") == "astra.email.ses.event_processed"
+        ]
+        self.assertEqual(len(processed_events), 1)
+        return processed_events[0]
+
+    def _persistence_event(self, info_mock: object) -> dict[str, object]:
+        persistence_events = [
+            call.kwargs.get("extra", {})
+            for call in info_mock.call_args_list
+            if call.kwargs.get("extra", {}).get("event") == "astra.email.ses.attempt_persisted"
+        ]
+        self.assertEqual(len(persistence_events), 1)
+        return persistence_events[0]
+
+    def test_message_sent_persists_provider_message_id_and_request_id_for_matching_email(self) -> None:
+        email = self._create_email(message_id="<persist@example.com>")
+        sent_message = self._build_sent_message(
+            email,
+            provider_message_id="ses-provider-1",
+            request_id="ses-request-1",
+        )
+
+        with patch("core.ses_signals.logger.info") as info_mock:
+            message_sent.send(sender=self.__class__, message=sent_message)
+
+        attempt = self._attempt_model().objects.get(post_office_email=email)
+        self.assertEqual(attempt.ses_provider_message_id, "ses-provider-1")
+        self.assertEqual(attempt.ses_request_id, "ses-request-1")
+
+        persistence_event = self._persistence_event(info_mock)
+        self.assertEqual(persistence_event["post_office_email_id"], email.pk)
+        self.assertEqual(persistence_event["persistence_action"], "created")
+
+    def test_message_sent_duplicate_callback_reuses_existing_attempt(self) -> None:
+        email = self._create_email(message_id="<duplicate@example.com>")
+        first = self._build_sent_message(
+            email,
+            provider_message_id="ses-provider-duplicate",
+            request_id="ses-request-1",
+        )
+        second = self._build_sent_message(
+            email,
+            provider_message_id="ses-provider-duplicate",
+            request_id="ses-request-2",
+        )
+
+        message_sent.send(sender=self.__class__, message=first)
+
+        with patch("core.ses_signals.logger.info") as info_mock:
+            message_sent.send(sender=self.__class__, message=second)
+
+        attempt_model = self._attempt_model()
+        self.assertEqual(attempt_model.objects.filter(ses_provider_message_id="ses-provider-duplicate").count(), 1)
+        attempt = attempt_model.objects.get(ses_provider_message_id="ses-provider-duplicate")
+        self.assertEqual(attempt.post_office_email_id, email.pk)
+        self.assertEqual(attempt.ses_request_id, "ses-request-1")
+
+        persistence_event = self._persistence_event(info_mock)
+        self.assertEqual(persistence_event["outcome"], "request_id_conflict")
+        self.assertEqual(persistence_event["post_office_email_id"], email.pk)
+
+    def test_message_sent_duplicate_callback_with_blank_request_id_keeps_existing_value(self) -> None:
+        email = self._create_email(message_id="<duplicate-blank@example.com>")
+        first = self._build_sent_message(
+            email,
+            provider_message_id="ses-provider-blank",
+            request_id="ses-request-1",
+        )
+        second = self._build_sent_message(
+            email,
+            provider_message_id="ses-provider-blank",
+        )
+
+        message_sent.send(sender=self.__class__, message=first)
+
+        with patch("core.ses_signals.logger.info") as info_mock:
+            message_sent.send(sender=self.__class__, message=second)
+
+        attempt = self._attempt_model().objects.get(ses_provider_message_id="ses-provider-blank")
+        self.assertEqual(attempt.post_office_email_id, email.pk)
+        self.assertEqual(attempt.ses_request_id, "ses-request-1")
+
+        persistence_event = self._persistence_event(info_mock)
+        self.assertEqual(persistence_event["outcome"], "persisted")
+        self.assertEqual(persistence_event["persistence_action"], "reused")
+        self.assertEqual(persistence_event["post_office_email_id"], email.pk)
+
+    def test_message_sent_duplicate_callback_backfills_blank_request_id_once(self) -> None:
+        email = self._create_email(message_id="<duplicate-backfill@example.com>")
+        attempt = self._attempt_model().objects.create(
+            post_office_email=email,
+            ses_provider_message_id="ses-provider-backfill",
+            ses_request_id="",
+        )
+        sent_message = self._build_sent_message(
+            email,
+            provider_message_id="ses-provider-backfill",
+            request_id="ses-request-backfilled",
+        )
+
+        with patch("core.ses_signals.logger.info") as info_mock:
+            message_sent.send(sender=self.__class__, message=sent_message)
+
+        self.assertEqual(self._attempt_model().objects.filter(ses_provider_message_id="ses-provider-backfill").count(), 1)
+        attempt.refresh_from_db()
+        self.assertEqual(attempt.ses_request_id, "ses-request-backfilled")
+
+        persistence_event = self._persistence_event(info_mock)
+        self.assertEqual(persistence_event["outcome"], "persisted")
+        self.assertEqual(persistence_event["persistence_action"], "reused")
+        self.assertEqual(persistence_event["post_office_email_id"], email.pk)
+        self.assertEqual(persistence_event["ses_email_correlation_attempt_id"], attempt.pk)
+
+    def test_message_sent_second_successful_attempt_creates_second_row(self) -> None:
+        email = self._create_email(message_id="<multiple@example.com>")
+
+        message_sent.send(
+            sender=self.__class__,
+            message=self._build_sent_message(
+                email,
+                provider_message_id="ses-provider-old",
+                request_id="ses-request-old",
+            ),
+        )
+        message_sent.send(
+            sender=self.__class__,
+            message=self._build_sent_message(
+                email,
+                provider_message_id="ses-provider-new",
+                request_id="ses-request-new",
+            ),
+        )
+
+        self.assertEqual(
+            list(
+                self._attempt_model().objects.filter(post_office_email=email).order_by("created_at").values_list(
+                    "ses_provider_message_id",
+                    flat=True,
+                )
+            ),
+            ["ses-provider-old", "ses-provider-new"],
+        )
+
+    def test_model_enforces_unique_provider_message_id_across_rows(self) -> None:
+        attempt_model = self._attempt_model()
+        first_email = self._create_email(message_id="<unique-one@example.com>")
+        second_email = self._create_email(message_id="<unique-two@example.com>")
+
+        attempt_model.objects.create(
+            post_office_email=first_email,
+            ses_provider_message_id="ses-provider-unique",
+            ses_request_id="ses-request-1",
+        )
+
+        with self.assertRaises(IntegrityError):
+            attempt_model.objects.create(
+                post_office_email=second_email,
+                ses_provider_message_id="ses-provider-unique",
+                ses_request_id="ses-request-2",
+            )
+
+    def test_message_sent_without_provider_id_logs_noop_and_does_not_create_attempt(self) -> None:
+        email = self._create_email(message_id="<missing-provider@example.com>")
+        sent_message = self._build_sent_message(email, provider_message_id=None, request_id="ses-request-1")
+
+        with patch("core.ses_signals.logger.info") as info_mock:
+            message_sent.send(sender=self.__class__, message=sent_message)
+
+        self.assertEqual(self._attempt_model().objects.count(), 0)
+
+        persistence_event = self._persistence_event(info_mock)
+        self.assertEqual(persistence_event["outcome"], "missing_provider_message_id")
+        self.assertEqual(persistence_event["smtp_message_id_hash"], _message_id_hash(email.message_id))
+        self.assertFalse(persistence_event["provider_message_id_present"])
+
+    def test_message_sent_without_smtp_header_logs_noop_and_does_not_create_attempt(self) -> None:
+        email = self._create_email(message_id="<missing-smtp@example.com>")
+        sent_message = self._build_sent_message(email, provider_message_id="ses-provider-missing-smtp")
+        sent_message.extra_headers.pop("Message-ID", None)
+
+        with patch("core.ses_signals.logger.info") as info_mock:
+            message_sent.send(sender=self.__class__, message=sent_message)
+
+        self.assertEqual(self._attempt_model().objects.count(), 0)
+
+        persistence_event = self._persistence_event(info_mock)
+        self.assertEqual(persistence_event["outcome"], "missing_message_id")
+        self.assertEqual(
+            persistence_event["provider_message_id_hash"],
+            _message_id_hash("ses-provider-missing-smtp"),
+        )
+        self.assertFalse(persistence_event["smtp_message_id_present"])
+
+    def test_message_sent_with_missing_parent_email_logs_noop_and_does_not_create_attempt(self) -> None:
+        email = self._create_email(message_id="<persist-missing-parent@example.com>")
+        sent_message = self._build_sent_message(email, provider_message_id="ses-provider-missing-parent")
+        sent_message.extra_headers["Message-ID"] = "<missing-parent@example.com>"
+
+        with patch("core.ses_signals.logger.info") as info_mock:
+            message_sent.send(sender=self.__class__, message=sent_message)
+
+        self.assertEqual(self._attempt_model().objects.count(), 0)
+
+        persistence_event = self._persistence_event(info_mock)
+        self.assertEqual(persistence_event["outcome"], "missing_match")
+        self.assertEqual(
+            persistence_event["provider_message_id_hash"],
+            _message_id_hash("ses-provider-missing-parent"),
+        )
+        self.assertEqual(
+            persistence_event["smtp_message_id_hash"],
+            _message_id_hash("<missing-parent@example.com>"),
+        )
+
+    def test_message_sent_with_ambiguous_parent_email_logs_noop_and_does_not_create_attempt(self) -> None:
+        duplicate_message_id = "<ambiguous-parent@example.com>"
+        first_email = self._create_email(message_id=duplicate_message_id)
+        self._create_email(message_id=duplicate_message_id)
+        sent_message = self._build_sent_message(first_email, provider_message_id="ses-provider-ambiguous")
+
+        with patch("core.ses_signals.logger.info") as info_mock:
+            message_sent.send(sender=self.__class__, message=sent_message)
+
+        self.assertEqual(self._attempt_model().objects.count(), 0)
+
+        persistence_event = self._persistence_event(info_mock)
+        self.assertEqual(persistence_event["outcome"], "ambiguous_match")
+        self.assertEqual(persistence_event["match_count"], 2)
+        self.assertEqual(
+            persistence_event["provider_message_id_hash"],
+            _message_id_hash("ses-provider-ambiguous"),
+        )
+
+    def test_message_sent_provider_id_conflict_logs_noop_and_does_not_mutate_existing_attempt(self) -> None:
+        attempt_model = self._attempt_model()
+        existing_email = self._create_email(message_id="<existing-provider@example.com>")
+        conflicting_email = self._create_email(message_id="<conflicting-provider@example.com>")
+        existing_attempt = attempt_model.objects.create(
+            post_office_email=existing_email,
+            ses_provider_message_id="ses-provider-conflict",
+            ses_request_id="ses-request-existing",
+        )
+        sent_message = self._build_sent_message(
+            conflicting_email,
+            provider_message_id="ses-provider-conflict",
+            request_id="ses-request-new",
+        )
+
+        with patch("core.ses_signals.logger.info") as info_mock:
+            message_sent.send(sender=self.__class__, message=sent_message)
+
+        self.assertEqual(attempt_model.objects.count(), 1)
+        existing_attempt.refresh_from_db()
+        self.assertEqual(existing_attempt.post_office_email_id, existing_email.pk)
+        self.assertEqual(existing_attempt.ses_request_id, "ses-request-existing")
+
+        persistence_event = self._persistence_event(info_mock)
+        self.assertEqual(persistence_event["outcome"], "provider_id_conflict")
+        self.assertEqual(persistence_event["post_office_email_id"], conflicting_email.pk)
+        self.assertEqual(persistence_event["existing_post_office_email_id"], existing_email.pk)
+        self.assertEqual(persistence_event["ses_email_correlation_attempt_id"], existing_attempt.pk)
+
+    def test_delivery_prefers_provider_message_id_match(self) -> None:
+        attempt_model = self._attempt_model()
+        email = self._create_email(message_id="<provider-path@example.com>")
+        attempt_model.objects.create(
+            post_office_email=email,
+            ses_provider_message_id="ses-provider-path",
+            ses_request_id="ses-request-path",
+        )
+
+        with patch("core.ses_signals.logger.info") as info_mock:
+            handle_ses_delivery_received(
+                sender=self.__class__,
+                mail_obj={"messageId": "ses-provider-path"},
+                delivery_obj={"recipients": ["to@example.com"]},
+                raw_message=b"{}",
+            )
+
+        email.refresh_from_db()
+        self.assertEqual(email.recipient_delivery_status, RecipientDeliveryStatus.DELIVERED)
+
+        processed_event = self._processed_event(info_mock)
+        self.assertEqual(processed_event["outcome"], "recorded")
+        self.assertEqual(processed_event["correlation_source"], "provider_message_id")
+        self.assertEqual(processed_event["post_office_email_id"], email.pk)
+
+    def test_late_event_matches_older_attempt_after_newer_attempt_exists(self) -> None:
+        attempt_model = self._attempt_model()
+        email = self._create_email(message_id="<late-attempt@example.com>")
+        attempt_model.objects.create(
+            post_office_email=email,
+            ses_provider_message_id="ses-provider-older",
+            ses_request_id="ses-request-older",
+        )
+        attempt_model.objects.create(
+            post_office_email=email,
+            ses_provider_message_id="ses-provider-newer",
+            ses_request_id="ses-request-newer",
+        )
+
+        handle_ses_delivery_received(
+            sender=self.__class__,
+            mail_obj={
+                "messageId": "ses-provider-older",
+                "commonHeaders": {"messageId": "<late-attempt@example.com>"},
+            },
+            delivery_obj={"recipients": ["to@example.com"]},
+            raw_message=b"{}",
+        )
+
+        email.refresh_from_db()
+        self.assertEqual(email.recipient_delivery_status, RecipientDeliveryStatus.DELIVERED)
+        self.assertEqual(PostOfficeLog.objects.filter(email=email, status=RecipientDeliveryStatus.DELIVERED).count(), 1)
+
+    def test_delivery_falls_back_when_payload_has_no_provider_message_id(self) -> None:
+        email = self._create_email(message_id="<legacy@example.com>")
+
+        with patch("core.ses_signals.logger.info") as info_mock:
+            handle_ses_delivery_received(
+                sender=self.__class__,
+                mail_obj={"commonHeaders": {"messageId": "legacy@example.com"}},
+                delivery_obj={"recipients": ["to@example.com"]},
+                raw_message=b"{}",
+            )
+
+        email.refresh_from_db()
+        self.assertEqual(email.recipient_delivery_status, RecipientDeliveryStatus.DELIVERED)
+
+        processed_event = self._processed_event(info_mock)
+        self.assertEqual(processed_event["correlation_source"], "smtp_message_id_fallback_no_provider_id")
+        self.assertEqual(processed_event["post_office_email_id"], email.pk)
+
+    def test_delivery_falls_back_when_provider_id_missing_but_email_has_no_attempt_metadata(self) -> None:
+        email = self._create_email(message_id="<rollout@example.com>")
+
+        with patch("core.ses_signals.logger.info") as info_mock:
+            handle_ses_delivery_received(
+                sender=self.__class__,
+                mail_obj={
+                    "messageId": "ses-provider-rollout",
+                    "commonHeaders": {"messageId": "rollout@example.com"},
+                },
+                delivery_obj={"recipients": ["to@example.com"]},
+                raw_message=b"{}",
+            )
+
+        email.refresh_from_db()
+        self.assertEqual(email.recipient_delivery_status, RecipientDeliveryStatus.DELIVERED)
+
+        processed_event = self._processed_event(info_mock)
+        self.assertEqual(processed_event["correlation_source"], "smtp_message_id_fallback_no_provider_metadata")
+        self.assertEqual(processed_event["post_office_email_id"], email.pk)
+
+    def test_provider_conflict_is_non_mutating_when_smtp_row_has_different_attempt_metadata(self) -> None:
+        attempt_model = self._attempt_model()
+        email = self._create_email(message_id="<conflict@example.com>")
+        attempt_model.objects.create(
+            post_office_email=email,
+            ses_provider_message_id="ses-provider-known",
+            ses_request_id="ses-request-known",
+        )
+
+        with patch("core.ses_signals.logger.info") as info_mock:
+            handle_ses_delivery_received(
+                sender=self.__class__,
+                mail_obj={
+                    "messageId": "ses-provider-conflict",
+                    "commonHeaders": {"messageId": "conflict@example.com"},
+                },
+                delivery_obj={"recipients": ["to@example.com"]},
+                raw_message=b"{}",
+            )
+
+        email.refresh_from_db()
+        self.assertIsNone(email.recipient_delivery_status)
+        self.assertFalse(PostOfficeLog.objects.filter(email=email).exists())
+
+        processed_event = self._processed_event(info_mock)
+        self.assertEqual(processed_event["outcome"], "provider_id_conflict")
+        self.assertEqual(processed_event["correlation_source"], "provider_id_conflict")
+        self.assertEqual(processed_event["smtp_post_office_email_id"], email.pk)
+
+    def test_cross_row_disagreement_is_non_mutating(self) -> None:
+        attempt_model = self._attempt_model()
+        provider_email = self._create_email(message_id="<provider-row@example.com>")
+        smtp_email = self._create_email(message_id="<smtp-row@example.com>")
+        attempt_model.objects.create(
+            post_office_email=provider_email,
+            ses_provider_message_id="ses-provider-row",
+            ses_request_id="ses-request-row",
+        )
+
+        with patch("core.ses_signals.logger.info") as info_mock:
+            handle_ses_delivery_received(
+                sender=self.__class__,
+                mail_obj={
+                    "messageId": "ses-provider-row",
+                    "commonHeaders": {"messageId": "smtp-row@example.com"},
+                },
+                delivery_obj={"recipients": ["to@example.com"]},
+                raw_message=b"{}",
+            )
+
+        provider_email.refresh_from_db()
+        smtp_email.refresh_from_db()
+        self.assertIsNone(provider_email.recipient_delivery_status)
+        self.assertIsNone(smtp_email.recipient_delivery_status)
+        self.assertEqual(PostOfficeLog.objects.count(), 0)
+
+        processed_event = self._processed_event(info_mock)
+        self.assertEqual(processed_event["outcome"], "provider_id_conflict")
+        self.assertEqual(processed_event["provider_post_office_email_id"], provider_email.pk)
+        self.assertEqual(processed_event["smtp_post_office_email_id"], smtp_email.pk)
+
+    def test_missing_match_logs_identifier_domain_specific_hashes(self) -> None:
+        with patch("core.ses_signals.logger.info") as info_mock:
+            handle_ses_delivery_received(
+                sender=self.__class__,
+                mail_obj={
+                    "messageId": "ses-provider-missing",
+                    "commonHeaders": {"messageId": "missing@example.com"},
+                },
+                delivery_obj={"recipients": ["to@example.com"]},
+                raw_message=b"{}",
+            )
+
+        processed_event = self._processed_event(info_mock)
+        self.assertEqual(processed_event["outcome"], "missing_match")
+        self.assertEqual(processed_event["correlation_source"], "missing_match")
+        self.assertIn("provider_message_id_hash", processed_event)
+        self.assertIn("smtp_message_id_hash", processed_event)
+        self.assertNotIn("ses_message_id_hash", processed_event)
 
 
 class SESPostOfficeConcurrencyTests(TransactionTestCase):

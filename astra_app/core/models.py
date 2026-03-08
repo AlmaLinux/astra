@@ -20,6 +20,7 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.utils import timezone
 from PIL import Image
+from post_office.models import Email as PostOfficeEmail
 
 from core.membership_log_side_effects import apply_membership_log_side_effects
 from core.membership_targets import MembershipTargetIdentity, MembershipTargetKind
@@ -1676,6 +1677,29 @@ class FreeIPAPermissionGrant(models.Model):
         self.permission = str(self.permission or "").strip().lower()
         self.principal_name = str(self.principal_name or "").strip().lower()
         super().save(*args, **kwargs)
+
+
+class SESEmailCorrelationAttempt(models.Model):
+    """Durable SES correlation metadata for one successful provider acceptance."""
+
+    post_office_email = models.ForeignKey(
+        PostOfficeEmail,
+        on_delete=models.CASCADE,
+        related_name="ses_correlation_attempts",
+    )
+    ses_provider_message_id = models.CharField(max_length=255, unique=True, db_index=True)
+    ses_request_id = models.CharField(max_length=255, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("created_at", "pk")
+        indexes = [
+            models.Index(fields=["post_office_email", "created_at"], name="ses_corr_email_created"),
+        ]
+
+    def __str__(self) -> str:
+        return f"SES attempt {self.ses_provider_message_id} -> email {self.post_office_email_id}"
 
 
 class MembershipCSVImportLink(MembershipType):
