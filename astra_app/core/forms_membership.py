@@ -14,28 +14,12 @@ from core.membership import (
     get_membership_request_eligibility,
 )
 from core.membership_constants import MembershipCategoryCode
+from core.membership_response_normalization import (
+    ADDITIONAL_INFORMATION_HEADER_ALIASES,
+    ADDITIONAL_INFORMATION_QUESTION,
+    normalize_membership_request_responses,
+)
 from core.models import MembershipRequest, MembershipType, MembershipTypeCategory, Organization
-
-ADDITIONAL_INFORMATION_QUESTION = "Additional information"
-_LEGACY_ADDITIONAL_INFORMATION_QUESTION = "Additional info"
-ADDITIONAL_INFORMATION_QUESTION_KEYS = frozenset(
-    {
-        ADDITIONAL_INFORMATION_QUESTION.casefold(),
-        _LEGACY_ADDITIONAL_INFORMATION_QUESTION.casefold(),
-    }
-)
-ADDITIONAL_INFORMATION_HEADER_ALIASES = (
-    _LEGACY_ADDITIONAL_INFORMATION_QUESTION,
-    "q_additional_info",
-    "additional_info",
-)
-
-
-def canonicalize_additional_information_question(question_name: object) -> str:
-    normalized = str(question_name or "").strip()
-    if normalized.casefold() in ADDITIONAL_INFORMATION_QUESTION_KEYS:
-        return ADDITIONAL_INFORMATION_QUESTION
-    return normalized
 
 
 class _AnswerKind(StrEnum):
@@ -292,58 +276,39 @@ class MembershipRequestUpdateResponsesForm(StyledForm):
         super().__init__(*args, **kwargs)
 
         self._question_specs: list[_QuestionSpec] = []
-        is_mirror_request = membership_request.membership_type.category_id == MembershipCategoryCode.mirror
-        mirror_clarification_answer: str | None = None
-        mirror_legacy_clarification_answer: str | None = None
+        self._is_mirror_request = membership_request.membership_type.category_id == MembershipCategoryCode.mirror
+        normalized_responses = normalize_membership_request_responses(
+            responses=membership_request.responses,
+            is_mirror_membership=self._is_mirror_request,
+        )
+        known_specs = MembershipRequestForm._question_spec_by_name()
 
-        for item in membership_request.responses or []:
-            if not isinstance(item, dict):
+        for question_name, answer in normalized_responses.entries:
+            spec = _QuestionSpec(name=question_name, title=question_name, required=False)
+            if spec.field_name in self.fields:
                 continue
-            for question, answer in item.items():
-                question_name = str(question)
-                question_key = question_name.strip().casefold()
-                if is_mirror_request and question_key == ADDITIONAL_INFORMATION_QUESTION.casefold():
-                    mirror_clarification_answer = str(answer or "")
-                    continue
-                if is_mirror_request and question_key in ADDITIONAL_INFORMATION_QUESTION_KEYS:
-                    mirror_legacy_clarification_answer = str(answer or "")
-                    continue
-                question_name = canonicalize_additional_information_question(question_name)
-                spec = _QuestionSpec(name=question_name, title=question_name, required=False)
-                if spec.field_name in self.fields:
-                    continue
 
-                known = MembershipRequestForm._question_spec_by_name().get(spec.name)
-                if known is not None and known.answer_kind == _AnswerKind.url:
-                    field = MembershipRequestForm._field_for_spec(known)
-                else:
-                    field = forms.CharField(
-                        required=False,
-                        widget=forms.Textarea(attrs={"rows": 4}),
-                    )
-                field.label = spec.title
-                field.initial = str(answer or "")
-                self.fields[spec.field_name] = field
-                self._question_specs.append(spec)
+            known = known_specs.get(spec.name)
+            if known is not None and known.answer_kind == _AnswerKind.url:
+                field = MembershipRequestForm._field_for_spec(known)
+            else:
+                field = forms.CharField(
+                    required=False,
+                    widget=forms.Textarea(attrs={"rows": 4}),
+                )
+            field.label = spec.title
+            field.initial = answer
+            self.fields[spec.field_name] = field
+            self._question_specs.append(spec)
 
         # Always provide a place for clarifications; reuses the same field name
         # so an existing response isn't duplicated.
-        if is_mirror_request:
-            extra_spec = _QuestionSpec(
-                name=ADDITIONAL_INFORMATION_QUESTION,
-                title=ADDITIONAL_INFORMATION_QUESTION,
-                required=False,
-            )
-            initial = mirror_clarification_answer.strip() if mirror_clarification_answer else ""
-            if not initial:
-                initial = mirror_legacy_clarification_answer or ""
-        else:
-            extra_spec = _QuestionSpec(
-                name=ADDITIONAL_INFORMATION_QUESTION,
-                title=ADDITIONAL_INFORMATION_QUESTION,
-                required=False,
-            )
-            initial = ""
+        extra_spec = _QuestionSpec(
+            name=ADDITIONAL_INFORMATION_QUESTION,
+            title=ADDITIONAL_INFORMATION_QUESTION,
+            required=False,
+        )
+        initial = normalized_responses.get(ADDITIONAL_INFORMATION_QUESTION)
 
         if extra_spec.field_name not in self.fields:
             self.fields[extra_spec.field_name] = forms.CharField(
@@ -358,12 +323,12 @@ class MembershipRequestUpdateResponsesForm(StyledForm):
         self._append_css_class("w-100")
 
     def responses(self) -> list[dict[str, str]]:
-        out: list[dict[str, str]] = []
-        for spec in self._question_specs:
-            value = str(self.cleaned_data.get(spec.field_name) or "").strip()
-            if value:
-                out.append({spec.name: value})
-        return out
+        raw_responses = [{spec.name: str(self.cleaned_data.get(spec.field_name) or "")} for spec in self._question_specs]
+        normalized_responses = normalize_membership_request_responses(
+            responses=raw_responses,
+            is_mirror_membership=self._is_mirror_request,
+        )
+        return normalized_responses.as_responses()
 
 
 class MembershipUpdateExpiryForm(forms.Form):

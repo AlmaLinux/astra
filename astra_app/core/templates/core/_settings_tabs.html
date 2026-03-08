@@ -1,19 +1,7 @@
 <ul class="nav nav-tabs" role="tablist">
-  <li class="nav-item">
-    <a class="nav-link {% if active_tab == 'profile' %}active{% endif %}" href="{% url 'settings' %}?tab=profile" data-toggle="tab" data-target="#profile" role="tab">Profile</a>
-  </li>
-  <li class="nav-item">
-    <a class="nav-link {% if active_tab == 'emails' %}active{% endif %}" href="{% url 'settings' %}?tab=emails" data-toggle="tab" data-target="#emails" role="tab">Emails</a>
-  </li>
-  <li class="nav-item">
-    <a class="nav-link {% if active_tab == 'keys' %}active{% endif %}" href="{% url 'settings' %}?tab=keys" data-toggle="tab" data-target="#keys" role="tab">SSH &amp; GPG Keys</a>
-  </li>
-  <li class="nav-item">
-    <a class="nav-link {% if active_tab == 'security' %}active{% endif %}" href="{% url 'settings' %}?tab=security" data-toggle="tab" data-target="#security" role="tab">Security</a>
-  </li>
-  {% if show_agreements_tab %}
+  {% for tab in settings_tabs %}
     <li class="nav-item">
-      <a class="nav-link {% if active_tab == 'agreements' %}active{% endif %}" href="{% url 'settings' %}?tab=agreements" data-toggle="tab" data-target="#agreements" role="tab">Agreements</a>
+      <a class="nav-link {% if active_tab == tab.tab_id %}active{% endif %}" href="{% url 'settings' %}?tab={{ tab.tab_id }}" data-toggle="tab" data-target="#{{ tab.tab_id }}" data-settings-tab="{{ tab.tab_id }}" role="tab">{{ tab.label }}</a>
     </li>
-  {% endif %}
+  {% endfor %}
 </ul>

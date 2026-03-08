@@ -59,6 +59,7 @@ from core.ipa_user_attrs import (
 )
 from core.ipa_utils import bool_from_ipa, bool_to_ipa
 from core.models import IPAUser
+from core.settings_tabs import is_settings_tab
 from core.templated_email import queue_templated_email
 from core.tokens import make_settings_email_validation_token, read_settings_email_validation_token
 from core.views_utils import (
@@ -72,14 +73,6 @@ from core.views_utils import (
 
 logger = logging.getLogger(__name__)
 
-
-_SETTINGS_TABS: Final[tuple[str, ...]] = (
-    "profile",
-    "emails",
-    "keys",
-    "security",
-    "agreements",
-)
 
 # Must be the same as KEY_LENGTH in ipaserver/plugins/otptoken.py.
 # For maximum compatibility, must be a multiple of 5.
@@ -612,7 +605,7 @@ def _apply_and_report_keys_update(
 def settings_root(request: HttpRequest) -> HttpResponse:
     """Unified settings page.
 
-    Tabs are selected by fragment (e.g. /settings/#emails). For form submissions, the
+    Tabs are selected by the `?tab=` query parameter. For form submissions, the
     active tab is posted as a `tab` field.
     """
 
@@ -631,7 +624,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
     )
     if highlight != "country_code":
         highlight = ""
-    if requested_tab not in _SETTINGS_TABS:
+    if not is_settings_tab(requested_tab):
         requested_tab = "profile"
 
     is_save_all = request.method == "POST" and _normalize_str(request.POST.get("save_all")) == "1"
@@ -971,8 +964,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
     # Context
     avatar_provider_path, avatar_url = _detect_avatar_provider(request.user, size=96)
     context = {
-        "tabs": list(_SETTINGS_TABS),
-        "active_tab": requested_tab,
+        **settings_context(requested_tab, show_agreements_tab=show_agreements_tab),
         "profile_form": profile_form,
         "emails_form": emails_form,
         "keys_form": keys_form,
@@ -988,7 +980,6 @@ def settings_root(request: HttpRequest) -> HttpResponse:
         "agreement_signed": agreement_signed,
         "agreement_cn": agreement_cn,
         "rename_form": OTPTokenRenameForm(prefix="rename"),
-        "show_agreements_tab": show_agreements_tab,
         "highlight": highlight,
         "avatar_provider": _avatar_provider_label(avatar_provider_path),
         "avatar_url": avatar_url,
@@ -1004,7 +995,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
         "keys": keys_form,
         "security": password_form,
         "agreements": None,
-    }.get(requested_tab)
+    }.get(str(context["active_tab"]))
 
     if request.method != "POST":
         return render(request, "core/settings.html", context)

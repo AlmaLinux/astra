@@ -16,27 +16,11 @@
 
 		<div class="card-body">
 			<div class="tab-content">
-				<div class="tab-pane {% if active_tab == 'profile' %}active{% endif %}" id="profile" role="tabpanel">
-					{% include 'core/_settings_tab_profile.html' %}
-				</div>
-
-				<div class="tab-pane {% if active_tab == 'emails' %}active{% endif %}" id="emails" role="tabpanel">
-					{% include 'core/_settings_tab_emails.html' %}
-				</div>
-
-				<div class="tab-pane {% if active_tab == 'keys' %}active{% endif %}" id="keys" role="tabpanel">
-					{% include 'core/_settings_tab_keys.html' %}
-				</div>
-
-				<div class="tab-pane {% if active_tab == 'security' %}active{% endif %}" id="security" role="tabpanel">
-					{% include 'core/_settings_tab_security.html' %}
-				</div>
-
-				{% if show_agreements_tab %}
-					<div class="tab-pane {% if active_tab == 'agreements' %}active{% endif %}" id="agreements" role="tabpanel">
-						{% include 'core/_settings_tab_agreements.html' %}
+				{% for tab in settings_tabs %}
+					<div class="tab-pane {% if active_tab == tab.tab_id %}active{% endif %}" id="{{ tab.tab_id }}" data-settings-tab-pane="{{ tab.tab_id }}" role="tabpanel">
+						{% include tab.pane_template %}
 					</div>
-				{% endif %}
+				{% endfor %}
 			</div>
 		</div>
 	</div>
@@ -49,7 +33,14 @@
 	<script>
 		(function () {
 			var forceTab = '{{ force_tab|default:""|escapejs }}';
-			var allowedTabs = ['profile', 'emails', 'keys', 'security', 'agreements'];
+			var tabLinks = Array.prototype.slice.call(document.querySelectorAll('a[data-settings-tab]'));
+			var allowedTabs = tabLinks
+				.map(function (link) {
+					return (link.getAttribute('data-settings-tab') || '').trim();
+				})
+				.filter(function (tab) {
+					return !!tab;
+				});
 
 			function isAllowedTab(tab) {
 				return allowedTabs.indexOf(tab) !== -1;
@@ -86,14 +77,14 @@
 					return hash;
 				}
 
-				return 'profile';
+				return allowedTabs[0] || 'profile';
 			}
 
 			function activateTab(tab, replaceUrl) {
 				if (!isAllowedTab(tab)) {
-					tab = 'profile';
+					tab = allowedTabs[0] || 'profile';
 				}
-				var link = document.querySelector('a[data-toggle="tab"][data-target="#' + tab + '"]');
+				var link = document.querySelector('a[data-settings-tab="' + tab + '"]');
 				if (!link || !window.jQuery) {
 					return;
 				}

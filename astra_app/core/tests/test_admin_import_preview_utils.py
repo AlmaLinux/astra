@@ -6,7 +6,11 @@ from django.contrib.admin.sites import AdminSite
 from django.http import HttpResponse
 from django.test import RequestFactory, TestCase
 
-from core.admin_import_preview_utils import build_import_preview_context
+from core.admin_import_preview_utils import (
+    apply_selected_row_numbers_initial,
+    build_import_preview_context,
+    build_result_preview_transport,
+)
 from core.csv_import_utils import build_csv_header_choices, set_form_column_field_choices
 
 
@@ -63,6 +67,47 @@ class ImportPreviewContextHelpersTests(TestCase):
         self.assertEqual(context["match_row_numbers"], [1, 7])
         self.assertEqual(context["matches_page_obj"].paginator.count, 2)
         self.assertEqual(context["skipped_page_obj"].paginator.count, 1)
+
+    def test_build_result_preview_transport_uses_result_rows_fallback_and_query_selection(self) -> None:
+        class DummyRowResult:
+            def __init__(self, import_type: str, number: int) -> None:
+                self.import_type = import_type
+                self.number = number
+                self.instance = SimpleNamespace()
+
+        transport = build_result_preview_transport(
+            result=SimpleNamespace(rows=[DummyRowResult("new", 2), DummyRowResult("skip", 5)]),
+            request_get={"selected_row_numbers": "5", "per_page": "100"},
+            instance_decision_attr="decision",
+            fallback_attr_name="rows",
+        )
+
+        self.assertEqual(transport["preview_summary"], {"total": 2, "to_import": 1, "skipped": 1})
+        self.assertEqual(transport["all_match_row_numbers_csv"], "2")
+        self.assertEqual(transport["selected_row_numbers"], "5")
+
+    def test_build_result_preview_transport_accepts_callable_valid_rows(self) -> None:
+        row = SimpleNamespace(import_type="new", number=8, instance=SimpleNamespace())
+
+        transport = build_result_preview_transport(
+            result=SimpleNamespace(valid_rows=lambda: [row]),
+            request_get={},
+            instance_decision_attr="decision",
+        )
+
+        self.assertEqual(transport["preview_summary"], {"total": 1, "to_import": 1, "skipped": 0})
+        self.assertEqual(transport["match_row_numbers"], [8])
+
+    def test_apply_selected_row_numbers_initial_updates_form_initial_and_field(self) -> None:
+        class _ConfirmForm(forms.Form):
+            selected_row_numbers = forms.CharField(required=False)
+
+        form = _ConfirmForm(initial={"selected_row_numbers": "1"})
+
+        apply_selected_row_numbers_initial(form, "3,4")
+
+        self.assertEqual(form.initial["selected_row_numbers"], "3,4")
+        self.assertEqual(form.fields["selected_row_numbers"].initial, "3,4")
 
 
 class CsvImportAdminArchitectureTests(TestCase):

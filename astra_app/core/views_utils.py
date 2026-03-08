@@ -20,10 +20,15 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from core.agreements import has_enabled_agreements
 from core.country_codes import country_code_status_from_user_data
 from core.freeipa.agreement import FreeIPAFASAgreement
+from core.settings_tabs import (
+    SETTINGS_TAB_REGISTRY,
+    get_settings_tabs,
+    is_settings_tab,
+    normalize_settings_tab,
+)
 
 logger = logging.getLogger(__name__)
 
-_SETTINGS_TABS: frozenset[str] = frozenset({"profile", "emails", "keys", "security", "agreements"})
 _SETTINGS_HIGHLIGHTS: frozenset[str] = frozenset({"country_code"})
 
 
@@ -163,10 +168,21 @@ MSG_SERVICE_UNAVAILABLE = (
 )
 
 
-def settings_context(active_tab: str) -> dict[str, object]:
+def settings_context(active_tab: str, *, show_agreements_tab: bool | None = None) -> dict[str, object]:
+    if show_agreements_tab is None:
+        try:
+            show_agreements_tab = has_enabled_agreements()
+        except Exception:
+            # Dedicated settings sub-pages should still render even if FreeIPA-backed
+            # agreement discovery is temporarily unavailable.
+            show_agreements_tab = False
+
+    visible_tabs = list(get_settings_tabs(show_agreements_tab=show_agreements_tab))
     return {
-        "active_tab": active_tab,
-        "show_agreements_tab": has_enabled_agreements(),
+        "active_tab": normalize_settings_tab(active_tab, show_agreements_tab=show_agreements_tab),
+        "show_agreements_tab": show_agreements_tab,
+        "tabs": [tab.tab_id for tab in SETTINGS_TAB_REGISTRY],
+        "settings_tabs": visible_tabs,
     }
 
 
@@ -183,7 +199,7 @@ def settings_url(
     params: dict[str, str] = {}
 
     tab_value = str(tab or "").strip()
-    if tab_value in _SETTINGS_TABS:
+    if is_settings_tab(tab_value):
         params["tab"] = tab_value
 
     agreement_value = str(agreement or "").strip()

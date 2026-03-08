@@ -21,6 +21,67 @@ def build_csv_header_choices(headers: Sequence[str]) -> list[tuple[str, str]]:
     return [AUTO_DETECT_CHOICE, *[(header, header) for header in headers]]
 
 
+def get_result_attr[T](result: Any, attr_name: str, default: T) -> Any | T:
+    # import-export Result objects are duck-typed and some optional attributes
+    # are missing or raise during access depending on the execution path.
+    try:
+        value = getattr(result, attr_name)
+    except Exception:
+        return default
+    return default if value is None else value
+
+
+def get_result_totals(result: Any) -> dict[str, Any]:
+    totals = get_result_attr(result, "totals", {})
+    try:
+        return dict(totals or {})
+    except Exception:
+        return {}
+
+
+def _coerce_result_sequence(value: Any) -> list[Any]:
+    if callable(value):
+        try:
+            value = value()
+        except TypeError:
+            return []
+
+    try:
+        return list(value or [])
+    except TypeError:
+        return []
+
+
+def get_result_rows(
+    result: Any,
+    attr_name: str = "valid_rows",
+    *,
+    fallback_attr_name: str | None = None,
+) -> list[Any]:
+    rows = _coerce_result_sequence(get_result_attr(result, attr_name, None))
+    if rows or fallback_attr_name is None:
+        return rows
+    return _coerce_result_sequence(get_result_attr(result, fallback_attr_name, None))
+
+
+def get_result_row_errors(result: Any) -> tuple[list[tuple[int, list[Any]]], list[Any]]:
+    raw = _coerce_result_sequence(get_result_attr(result, "row_errors", None))
+    if not raw:
+        return [], []
+
+    first_item = raw[0]
+    if not (isinstance(first_item, tuple) and len(first_item) == 2):
+        return [], raw
+
+    row_errors_pairs: list[tuple[int, list[Any]]] = []
+    try:
+        for row_number, errors in raw:
+            row_errors_pairs.append((int(row_number), list(errors or [])))
+    except (TypeError, ValueError):
+        return [], raw
+    return row_errors_pairs, []
+
+
 def set_form_column_field_choices(
     *,
     form: forms.Form,

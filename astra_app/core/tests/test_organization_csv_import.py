@@ -6,8 +6,10 @@ import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from django import forms
 from django.contrib.admin.sites import AdminSite
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.template.response import TemplateResponse
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from import_export.formats import base_formats
@@ -724,6 +726,31 @@ class OrganizationCSVImportAdminFlowTests(TestCase):
         self.assertEqual(kwargs["name_column"], "Organization Name")
         self.assertEqual(kwargs["country_code_column"], "Country Code")
         self.assertEqual(kwargs["representative_selections"], {"deadbeef": "alice"})
+
+    def test_import_action_falls_back_to_result_rows_when_valid_rows_missing(self) -> None:
+        admin_instance = OrganizationCSVImportLinkAdmin(OrganizationCSVImportLink, AdminSite())
+        request = RequestFactory().get("/admin/core/organizationcsvimportlink/import/")
+        request.user = SimpleNamespace(is_active=True, is_staff=True, get_username=lambda: "alex")
+
+        class DummyRowResult:
+            def __init__(self, import_type: str, number: int) -> None:
+                self.import_type = import_type
+                self.number = number
+                self.instance = SimpleNamespace()
+
+        confirm_form = forms.Form()
+        dummy_result = SimpleNamespace(rows=[DummyRowResult("new", 2), DummyRowResult("skip", 3)])
+
+        def _import_action(_: object, __: object, *args: object, **kwargs: object) -> TemplateResponse:
+            return TemplateResponse(request, "admin/import_export/import.html", {"result": dummy_result, "confirm_form": confirm_form})
+
+        with patch("import_export.admin.ImportMixin.import_action", _import_action):
+            resp = admin_instance.import_action(request)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context_data["preview_summary"], {"total": 2, "to_import": 1, "skipped": 1})
+        self.assertEqual(resp.context_data["all_match_row_numbers_csv"], "2")
+        self.assertEqual(confirm_form.initial["selected_row_numbers"], "2")
 
     def test_upload_preview_and_confirm_auto_selects_identified_representative(self) -> None:
         self._login_as_freeipa_admin("alex")

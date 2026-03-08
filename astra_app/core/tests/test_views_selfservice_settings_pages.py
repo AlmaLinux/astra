@@ -36,6 +36,39 @@ class SelfServiceSettingsPagesTests(TestCase):
     def _auth_user(self, username: str = "alice"):
         return SimpleNamespace(is_authenticated=True, get_username=lambda: username, email=f"{username}@example.org")
 
+    def test_settings_shell_renders_nav_panes_and_tab_metadata_from_same_registry(self):
+        factory = RequestFactory()
+
+        fake_user = SimpleNamespace(
+            username="alice",
+            email="a@example.org",
+            is_authenticated=True,
+            groups_list=[],
+            _user_data={
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "cn": ["Alice User"],
+                "fasstatusnote": ["US"],
+            },
+        )
+
+        request = factory.get("/settings/?tab=security")
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            with patch("core.views_settings.has_enabled_agreements", return_value=True):
+                with patch("core.views_settings.list_agreements_for_user", autospec=True, return_value=[]):
+                    response = views_settings.settings_root(request)
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode("utf-8")
+        for tab_id in ("profile", "emails", "keys", "security", "agreements"):
+            self.assertIn(f'data-settings-tab="{tab_id}"', content)
+            self.assertIn(f'data-settings-tab-pane="{tab_id}"', content)
+        self.assertNotIn("var allowedTabs = ['profile', 'emails', 'keys', 'security', 'agreements'];", content)
+        self.assertIn("document.querySelectorAll('a[data-settings-tab]')", content)
+
     def test_settings_profile_get_populates_initial_values(self):
         factory = RequestFactory()
 

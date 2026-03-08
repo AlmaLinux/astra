@@ -1126,6 +1126,33 @@ class AdminImportMembershipsCSVTests(TestCase):
         self.assertEqual(matches_page_obj.paginator.count, 1)
         self.assertEqual(skipped_page_obj.paginator.count, 0)
 
+    def test_preview_grouping_accepts_list_like_valid_rows_without_optional_download_attrs(self) -> None:
+        site = AdminSite()
+        admin_instance = MembershipCSVImportLinkAdmin(MembershipCSVImportLink, site)
+        request = RequestFactory().get("/admin/core/membershipcsvimportlink/import/")
+        request.user = SimpleNamespace(is_active=True, is_staff=True, get_username=lambda: "alex")
+        request.session = {}
+
+        class DummyRowResult:
+            def __init__(self) -> None:
+                self.import_type = "new"
+                self.number = 4
+                self.instance = SimpleNamespace()
+
+        dummy_result = SimpleNamespace(valid_rows=[DummyRowResult()])
+        confirm_form = forms.Form()
+
+        def _import_action(_: Any, __: Any, *args: Any, **kwargs: Any) -> TemplateResponse:
+            return TemplateResponse(request, "admin/import_export/import.html", {"result": dummy_result, "confirm_form": confirm_form})
+
+        with patch("import_export.admin.ImportMixin.import_action", _import_action):
+            resp = admin_instance.import_action(request)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotIn("unmatched_download_url", resp.context_data)
+        self.assertEqual(resp.context_data["all_match_row_numbers_csv"], "4")
+        self.assertEqual(confirm_form.initial["selected_row_numbers"], "4")
+
     def test_preview_reason_active_membership_updates_start_date(self) -> None:
         MembershipType.objects.update_or_create(
             code="individual",

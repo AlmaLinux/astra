@@ -16,6 +16,14 @@ from core.forms_selfservice import OTPAddForm, PasswordChangeFreeIPAForm
 from core.views_settings import OTP_KEY_LENGTH, settings_root
 
 
+MOCK_SETTINGS_CONTEXT = {
+    "active_tab": "security",
+    "show_agreements_tab": False,
+    "tabs": ["profile", "emails", "keys", "security", "agreements"],
+    "settings_tabs": [],
+}
+
+
 class SettingsOTPViewTests(TestCase):
     def setUp(self) -> None:
         super().setUp()
@@ -65,7 +73,11 @@ class SettingsOTPViewTests(TestCase):
         )
 
         with patch("core.views_settings.render", side_effect=fake_render, autospec=True):
-            with patch("core.views_settings.settings_context", return_value={}, autospec=True):
+            with patch(
+                "core.views_settings.settings_context",
+                return_value=MOCK_SETTINGS_CONTEXT,
+                autospec=True,
+            ):
                 with patch("core.views_settings._get_full_user", return_value=fake_fu, autospec=True):
                     with patch("core.views_settings.FreeIPAUser.get_client", autospec=True) as mocked_get_client:
                         mocked_get_client.return_value.otptoken_find.return_value = {"result": []}
@@ -113,7 +125,11 @@ class SettingsOTPViewTests(TestCase):
             _user_data={"fasstatusnote": ["US"]},
         )
 
-        with patch("core.views_settings.settings_context", return_value={}, autospec=True):
+        with patch(
+            "core.views_settings.settings_context",
+            return_value=MOCK_SETTINGS_CONTEXT,
+            autospec=True,
+        ):
             with patch("core.views_settings.render", side_effect=fake_render, autospec=True):
                 with patch("core.views_settings._get_full_user", return_value=fake_fu, autospec=True):
                     with patch("core.views_settings.FreeIPAUser.get_client", autospec=True) as mocked_get_client:
@@ -177,7 +193,11 @@ class SettingsOTPViewTests(TestCase):
         )
 
         with patch("core.views_settings.render", side_effect=fake_render, autospec=True):
-            with patch("core.views_settings.settings_context", return_value={}, autospec=True):
+            with patch(
+                "core.views_settings.settings_context",
+                return_value=MOCK_SETTINGS_CONTEXT,
+                autospec=True,
+            ):
                 with patch("core.views_settings._get_full_user", return_value=fake_fu, autospec=True):
                     with patch("core.views_settings.FreeIPAUser.get_client", autospec=True) as mocked_get_client:
                         mocked_get_client.return_value.otptoken_find.return_value = {"result": []}
@@ -232,7 +252,11 @@ class SettingsOTPViewTests(TestCase):
             _user_data={"fasstatusnote": ["US"]},
         )
 
-        with patch("core.views_settings.settings_context", return_value={}, autospec=True):
+        with patch(
+            "core.views_settings.settings_context",
+            return_value=MOCK_SETTINGS_CONTEXT,
+            autospec=True,
+        ):
             with patch("core.views_settings._get_full_user", return_value=fake_fu, autospec=True):
                 with patch("core.views_settings.FreeIPAUser.get_client", autospec=True) as mocked_get_client:
                     mocked_get_client.return_value.otptoken_find.return_value = {"result": []}
@@ -297,7 +321,11 @@ class SettingsOTPViewTests(TestCase):
         )
 
         with patch("core.views_settings.render", side_effect=fake_render, autospec=True):
-            with patch("core.views_settings.settings_context", return_value={}, autospec=True):
+            with patch(
+                "core.views_settings.settings_context",
+                return_value=MOCK_SETTINGS_CONTEXT,
+                autospec=True,
+            ):
                 with patch("core.views_settings._get_full_user", return_value=fake_fu, autospec=True):
                     with patch("core.views_settings.FreeIPAUser.get_client", autospec=True) as mocked_get_client:
                         mocked_get_client.return_value.otptoken_find.return_value = {"result": []}

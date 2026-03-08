@@ -19,16 +19,17 @@ from core.email_context import (
     system_email_context,
     user_email_context_from_user,
 )
-from core.forms_membership import canonicalize_additional_information_question
 from core.freeipa.user import FreeIPAUser
 from core.membership import (
     FreeIPACallerMode,
     FreeIPAMissingUserPolicy,
     sync_organization_representative_membership_groups,
 )
+from core.membership_constants import MembershipCategoryCode
 from core.membership_log_side_effects import apply_membership_log_side_effects
 from core.membership_notes import add_note
 from core.membership_notifications import organization_sponsor_notification_recipient_email
+from core.membership_response_normalization import normalize_membership_request_responses
 from core.mirror_membership_validation import mirror_answers_fingerprint, mirror_request_answers_from_responses
 from core.models import (
     Membership,
@@ -1129,30 +1130,27 @@ def resubmit_membership_request(
     if membership_request.status != MembershipRequest.Status.on_hold:
         raise ValidationError("Only on-hold requests can be resubmitted")
 
-    def _normalized_responses(responses: list[dict[str, str]] | None) -> list[dict[str, str]]:
-        out: list[dict[str, str]] = []
-        for item in responses or []:
-            if not isinstance(item, dict):
-                continue
-            for question, answer in item.items():
-                question_s = canonicalize_additional_information_question(question)
-                answer_s = str(answer or "").strip()
-                if question_s and answer_s:
-                    out.append({question_s: answer_s})
-        return out
-
-    normalized_existing_responses = _normalized_responses(membership_request.responses)
-    normalized_updated_responses = _normalized_responses(updated_responses)
+    is_mirror_request = membership_request.membership_type.category_id == MembershipCategoryCode.mirror
+    normalized_existing_responses = normalize_membership_request_responses(
+        responses=membership_request.responses,
+        is_mirror_membership=is_mirror_request,
+    )
+    normalized_updated_responses = normalize_membership_request_responses(
+        responses=updated_responses,
+        is_mirror_membership=is_mirror_request,
+    )
+    normalized_existing_response_list = normalized_existing_responses.as_responses()
+    normalized_updated_response_list = normalized_updated_responses.as_responses()
     existing_mirror_answers = mirror_request_answers_from_responses(
         membership_type=membership_request.membership_type,
-        responses=normalized_existing_responses,
+        responses=normalized_existing_response_list,
     )
     updated_mirror_answers = mirror_request_answers_from_responses(
         membership_type=membership_request.membership_type,
-        responses=normalized_updated_responses,
+        responses=normalized_updated_response_list,
     )
 
-    unchanged_responses = normalized_existing_responses == normalized_updated_responses
+    unchanged_responses = normalized_existing_response_list == normalized_updated_response_list
     unchanged_mirror_answers = (
         existing_mirror_answers is not None
         and updated_mirror_answers is not None
@@ -1162,7 +1160,7 @@ def resubmit_membership_request(
     if unchanged_responses or unchanged_mirror_answers:
         raise ValidationError("Please update your request before resubmitting it")
 
-    membership_request.responses = updated_responses
+    membership_request.responses = normalized_updated_response_list
     membership_request.status = MembershipRequest.Status.pending
     membership_request.on_hold_at = None
     try:

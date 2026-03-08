@@ -256,6 +256,8 @@ class AgreementsSelfServiceTests(TestCase):
         self.assertIn('badge badge-danger', content)
         self.assertIn('Not signed', content)
         self.assertIn('Required for:', content)
+        self.assertIn('data-settings-tab="agreements"', content)
+        self.assertIn('data-settings-tab-pane="agreements"', content)
         self.assertIn(
             f'href="{reverse("group-detail", kwargs={"name": "packagers"})}"',
             content,

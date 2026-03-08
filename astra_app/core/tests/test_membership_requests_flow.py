@@ -774,6 +774,43 @@ class MembershipRequestsFlowTests(TestCase):
         self.assertEqual(form.initial.get("q_contributions"), "Prior renewal context")
         self.assertFalse(form.fields["q_contributions"].disabled)
 
+    def test_renewal_prefill_prefers_canonical_additional_information_over_legacy_alias(self) -> None:
+        from core.models import MembershipRequest, MembershipType
+        from core.views_membership.user import _renewal_prefill_responses
+
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror",
+                "group_cn": "almalinux-mirror",
+                "category_id": "mirror",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="mirror",
+            status=MembershipRequest.Status.approved,
+            responses=[
+                {"Domain": "https://mirror.example.org"},
+                {"Pull request": "https://github.com/AlmaLinux/mirrors/pull/123"},
+                {"Additional information": "Canonical clarification"},
+                {"Additional info": "Legacy clarification"},
+            ],
+        )
+
+        initial = _renewal_prefill_responses(
+            membership_type_code="mirror",
+            username="alice",
+            organization=None,
+        )
+
+        self.assertEqual(initial.get("q_domain"), "https://mirror.example.org")
+        self.assertEqual(initial.get("q_pull_request"), "https://github.com/AlmaLinux/mirrors/pull/123")
+        self.assertEqual(initial.get("q_additional_information"), "Canonical clarification")
+
     def test_committee_can_approve_request_adds_user_to_group_logs_and_emails(self) -> None:
         from core.models import MembershipLog, MembershipRequest, MembershipType
 

@@ -12,15 +12,13 @@ import urllib3
 from django.db import transaction
 from django.utils import timezone
 
-from core.forms_membership import (
-    ADDITIONAL_INFORMATION_QUESTION,
-    ADDITIONAL_INFORMATION_QUESTION_KEYS,
-    MembershipRequestForm,
-    _AnswerKind,
-    _QuestionSpec,
-)
+from core.forms_membership import MembershipRequestForm, _AnswerKind, _QuestionSpec
 from core.membership_constants import MembershipCategoryCode
 from core.membership_notes import CUSTOS, add_note
+from core.membership_response_normalization import (
+    ADDITIONAL_INFORMATION_QUESTION,
+    normalize_membership_request_responses,
+)
 from core.models import MembershipRequest, MembershipType, MirrorMembershipValidation
 
 _HTTP_TIMEOUT_SECONDS = 5
@@ -143,7 +141,11 @@ def mirror_request_answers_from_responses(
     if membership_type.category_id != MembershipCategoryCode.mirror:
         return None
 
-    response_by_name = _response_map_from_responses(membership_type=membership_type, responses=responses)
+    normalized_responses = normalize_membership_request_responses(
+        responses=responses,
+        is_mirror_membership=True,
+    )
+    response_by_name = normalized_responses.as_response_map()
     specs = MembershipRequestForm.question_specs_for_membership_type(membership_type)
 
     answers: dict[str, str] = {}
@@ -448,54 +450,6 @@ def build_validation_note_content(*, validation: MirrorMembershipValidation) -> 
     if result.get("retry_exhausted"):
         lines.append(f"retry exhausted after {result.get('retry_exhausted_after', validation.attempt_count)} attempts.")
     return "\n".join(lines)
-
-
-def _response_map_from_request(membership_request: MembershipRequest) -> dict[str, str]:
-    return _response_map_from_responses(
-        membership_type=membership_request.membership_type,
-        responses=membership_request.responses,
-    )
-
-
-def _response_map_from_responses(
-    *,
-    membership_type: MembershipType,
-    responses: list[dict[str, str]] | None,
-) -> dict[str, str]:
-    specs = MembershipRequestForm.question_specs_for_membership_type(membership_type)
-    wanted = {spec.name.strip().casefold(): spec.name for spec in specs}
-    answers: dict[str, str] = {spec.name: "" for spec in specs}
-    mirror_additional_info_answer: str | None = None
-    mirror_legacy_additional_info_answer: str | None = None
-    is_mirror_membership = membership_type.category_id == MembershipCategoryCode.mirror
-
-    for item in responses or []:
-        if not isinstance(item, dict):
-            continue
-        for question, answer in item.items():
-            key = str(question or "").strip().casefold()
-            answer_value = str(answer or "").strip()
-            if is_mirror_membership and key == ADDITIONAL_INFORMATION_QUESTION.casefold():
-                mirror_additional_info_answer = answer_value
-                continue
-            if is_mirror_membership and key in ADDITIONAL_INFORMATION_QUESTION_KEYS:
-                mirror_legacy_additional_info_answer = answer_value
-                continue
-            canonical_name = wanted.get(key)
-            if canonical_name is None:
-                continue
-            answers[canonical_name] = answer_value
-
-    if is_mirror_membership:
-        if mirror_additional_info_answer:
-            answers[ADDITIONAL_INFORMATION_QUESTION] = mirror_additional_info_answer
-        elif mirror_legacy_additional_info_answer is not None:
-            answers[ADDITIONAL_INFORMATION_QUESTION] = mirror_legacy_additional_info_answer
-        elif mirror_additional_info_answer is not None:
-            answers[ADDITIONAL_INFORMATION_QUESTION] = mirror_additional_info_answer
-    return answers
-
-
 def _normalize_answer(*, spec: _QuestionSpec, value: str) -> str:
     normalized = str(value or "").strip()
     if not normalized:

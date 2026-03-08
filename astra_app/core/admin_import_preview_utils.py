@@ -1,7 +1,10 @@
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from django import forms
 from django.core.paginator import Paginator
+
+from core.csv_import_utils import get_result_rows
 
 
 def build_import_preview_context(
@@ -65,3 +68,44 @@ def build_import_preview_context(
             "skipped": len(skipped),
         },
     }
+
+
+def build_result_preview_transport(
+    *,
+    result: Any,
+    request_get: Mapping[str, Any],
+    instance_decision_attr: str,
+    current_selected_row_numbers: str = "",
+    fallback_attr_name: str | None = None,
+    per_page_default: int = 50,
+    per_page_min: int = 50,
+) -> dict[str, Any]:
+    preview_rows = get_result_rows(result, "valid_rows", fallback_attr_name=fallback_attr_name)
+    preview_context = build_import_preview_context(
+        valid_rows=preview_rows,
+        request_get=request_get,
+        instance_decision_attr=instance_decision_attr,
+        per_page_default=per_page_default,
+        per_page_min=per_page_min,
+    )
+
+    match_row_numbers = preview_context["match_row_numbers"]
+    all_match_row_numbers_csv = ",".join(str(n) for n in match_row_numbers)
+    selected_from_query = str(request_get.get("selected_row_numbers", "") or "").strip()
+    current_selected = str(current_selected_row_numbers or "").strip()
+
+    return {
+        **preview_context,
+        "preview_rows": preview_rows,
+        "all_match_row_numbers_csv": all_match_row_numbers_csv,
+        "selected_row_numbers": selected_from_query or current_selected or all_match_row_numbers_csv,
+    }
+
+
+def apply_selected_row_numbers_initial(confirm_form: forms.Form, selected_row_numbers: str) -> None:
+    if not selected_row_numbers:
+        return
+
+    confirm_form.initial["selected_row_numbers"] = selected_row_numbers
+    if "selected_row_numbers" in confirm_form.fields:
+        confirm_form.fields["selected_row_numbers"].initial = selected_row_numbers

@@ -9,16 +9,19 @@ from django.urls import reverse
 from django.utils.html import format_html
 
 from core.forms_membership import (
-    ADDITIONAL_INFORMATION_QUESTION_KEYS,
     MembershipRequestForm,
     MembershipRequestUpdateResponsesForm,
-    canonicalize_additional_information_question,
 )
 from core.freeipa.user import FreeIPAUser
+from core.membership_constants import MembershipCategoryCode
 from core.membership_request_workflow import (
     record_membership_request_created,
     rescind_membership_request,
     resubmit_membership_request,
+)
+from core.membership_response_normalization import (
+    ADDITIONAL_INFORMATION_QUESTION,
+    normalize_membership_request_responses,
 )
 from core.models import Membership, MembershipRequest, MembershipType, Organization
 from core.permissions import ASTRA_ADD_MEMBERSHIP
@@ -53,21 +56,24 @@ def _renewal_prefill_responses(
             return {}
         requests = requests.filter(requested_username=normalized_username)
 
-    latest = requests.only("responses").order_by("-requested_at", "-pk").first()
+    latest = requests.select_related("membership_type").only("responses", "membership_type__category_id").order_by(
+        "-requested_at",
+        "-pk",
+    ).first()
     if latest is None:
         return {}
 
     spec_by_name = MembershipRequestForm._question_spec_by_name()
     initial: dict[str, str] = {}
-    for item in latest.responses or []:
-        if not isinstance(item, dict):
+    normalized_responses = normalize_membership_request_responses(
+        responses=latest.responses,
+        is_mirror_membership=latest.membership_type.category_id == MembershipCategoryCode.mirror,
+    )
+    for question_name, answer in normalized_responses.entries:
+        spec = spec_by_name.get(question_name)
+        if spec is None:
             continue
-        for question, answer in item.items():
-            question_name = canonicalize_additional_information_question(question)
-            spec = spec_by_name.get(question_name)
-            if spec is None:
-                continue
-            initial[spec.field_name] = str(answer or "")
+        initial[spec.field_name] = answer
 
     return initial
 
@@ -374,12 +380,14 @@ def membership_request_self(request: HttpRequest, pk: int) -> HttpResponse:
     if req.status != MembershipRequest.Status.on_hold:
         # For non-editable requests (pending/accepted/etc), render a read-only version of the
         # responses using the same form visualization as the on-hold update screen.
-        has_additional_info = any(
-            isinstance(item, dict)
-            and any(str(key).strip().casefold() in ADDITIONAL_INFORMATION_QUESTION_KEYS for key in item)
-            for item in (req.responses or [])
+        normalized_responses = normalize_membership_request_responses(
+            responses=req.responses,
+            is_mirror_membership=req.membership_type.category_id == MembershipCategoryCode.mirror,
         )
-        if not has_additional_info and "q_additional_information" in form.fields:
+        if (
+            not normalized_responses.contains_question(ADDITIONAL_INFORMATION_QUESTION)
+            and "q_additional_information" in form.fields
+        ):
             del form.fields["q_additional_information"]
 
         for field in form.fields.values():

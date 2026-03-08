@@ -57,3 +57,4 @@ class AgreementsHiddenWhenNoneTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertNotIn(b"#agreements", resp.content)
         self.assertNotIn(b">Agreements<", resp.content)
+        self.assertNotIn(b"'agreements'", resp.content)

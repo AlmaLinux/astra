@@ -32,8 +32,9 @@ from import_export.formats import base_formats
 from python_freeipa import exceptions
 from tablib import Dataset
 
-from core.admin_import_preview_utils import build_import_preview_context
+from core.admin_import_preview_utils import apply_selected_row_numbers_initial, build_result_preview_transport
 from core.agreements import missing_required_agreements_for_user_in_group
+from core.csv_import_utils import get_result_attr
 from core.elections_services import (
     START_TRANSITION_CREDENTIAL_ISSUANCE_ERROR,
     ElectionError,
@@ -2131,7 +2132,7 @@ class BaseCsvImportAdmin(ImportMixin, admin.ModelAdmin):
 
     @override
     def process_result(self, result: Any, request: HttpRequest) -> HttpResponse:
-        unmatched_url = getattr(result, "unmatched_download_url", "")
+        unmatched_url = get_result_attr(result, "unmatched_download_url", "")
         if unmatched_url:
             messages.warning(
                 request,
@@ -2292,7 +2293,7 @@ class MembershipCSVImportLinkAdmin(BaseCsvImportAdmin):
         response = super().import_action(request, *args, **kwargs)
         if isinstance(response, TemplateResponse):
             result = response.context_data.get("result") if response.context_data else None
-            unmatched_url = getattr(result, "unmatched_download_url", "") if result is not None else ""
+            unmatched_url = get_result_attr(result, "unmatched_download_url", "") if result is not None else ""
             if unmatched_url:
                 response.context_data["unmatched_download_url"] = unmatched_url
                 parsed = urlparse(unmatched_url)
@@ -2301,45 +2302,31 @@ class MembershipCSVImportLinkAdmin(BaseCsvImportAdmin):
                     cache_key = f"membership-import-unmatched:{token}"
                     content = cache.get(cache_key)
                     if content is None and result is not None:
-                        # Optional attribute supplied by the import resource.
-                        content = getattr(result, "unmatched_csv_content", None)
+                        content = get_result_attr(result, "unmatched_csv_content", None)
                     if content is not None:
                         request.session[cache_key] = content
 
             confirm_form = response.context_data.get("confirm_form") if response.context_data else None
             if result is not None and response.context_data is not None:
                 response.context_data["csv_stats"] = {
-                    "total_records": getattr(result, "csv_total_records", 0),
-                    "matched_by_email": getattr(result, "matched_by_email", 0),
-                    "matched_by_name": getattr(result, "matched_by_name", 0),
-                    "matched_total": getattr(result, "matched_total", 0),
-                    "matched_total_percent": getattr(result, "matched_total_percent", 0.0),
+                    "total_records": get_result_attr(result, "csv_total_records", 0),
+                    "matched_by_email": get_result_attr(result, "matched_by_email", 0),
+                    "matched_by_name": get_result_attr(result, "matched_by_name", 0),
+                    "matched_total": get_result_attr(result, "matched_total", 0),
+                    "matched_total_percent": get_result_attr(result, "matched_total_percent", 0.0),
                 }
 
             if result is not None and confirm_form is not None and response.context_data is not None:
-                valid_rows_obj = getattr(result, "valid_rows", None)
-                if callable(valid_rows_obj):
-                    valid_rows = list(valid_rows_obj() or [])
-                else:
-                    valid_rows = list(valid_rows_obj or [])
-                preview_context = build_import_preview_context(
-                    valid_rows=valid_rows,
+                preview_transport = build_result_preview_transport(
+                    result=result,
                     request_get=request.GET,
                     instance_decision_attr="decision",
                 )
-                response.context_data["matches_page_obj"] = preview_context["matches_page_obj"]
-                response.context_data["skipped_page_obj"] = preview_context["skipped_page_obj"]
-                match_row_numbers = preview_context["match_row_numbers"]
-
-                if match_row_numbers:
-                    selected_default = ",".join(str(n) for n in sorted(set(match_row_numbers)))
-                    response.context_data["all_match_row_numbers_csv"] = selected_default
-
-                    selected_from_query = request.GET.get("selected_row_numbers", "")
-                    if selected_from_query:
-                        confirm_form.initial["selected_row_numbers"] = selected_from_query
-                    else:
-                        confirm_form.initial.setdefault("selected_row_numbers", selected_default)
+                response.context_data["matches_page_obj"] = preview_transport["matches_page_obj"]
+                response.context_data["skipped_page_obj"] = preview_transport["skipped_page_obj"]
+                if preview_transport["all_match_row_numbers_csv"]:
+                    response.context_data["all_match_row_numbers_csv"] = preview_transport["all_match_row_numbers_csv"]
+                apply_selected_row_numbers_initial(confirm_form, preview_transport["selected_row_numbers"])
         return response
 
     @override
@@ -2415,42 +2402,19 @@ class OrganizationCSVImportLinkAdmin(BaseCsvImportAdmin):
         if result is None or confirm_form is None:
             return response
 
-        valid_rows_obj = getattr(result, "valid_rows", None)
-        if callable(valid_rows_obj):
-            valid_rows = list(valid_rows_obj() or [])
-        else:
-            valid_rows = list(valid_rows_obj or [])
-
-        preview_rows = valid_rows
-        if not preview_rows:
-            rows_obj = getattr(result, "rows", None)
-            preview_rows = list(rows_obj or [])
-
-        preview_context = build_import_preview_context(
-            valid_rows=preview_rows,
+        preview_transport = build_result_preview_transport(
+            result=result,
             request_get=request.GET,
             instance_decision_attr="decision",
+            current_selected_row_numbers=str(confirm_form.initial.get("selected_row_numbers") or ""),
+            fallback_attr_name="rows",
         )
-        response.context_data["preview_summary"] = preview_context["preview_summary"]
-        response.context_data["matches_page_obj"] = preview_context["matches_page_obj"]
-        response.context_data["skipped_page_obj"] = preview_context["skipped_page_obj"]
-        match_row_numbers = preview_context["match_row_numbers"]
-
-        if match_row_numbers:
-            selected_default = ",".join(str(n) for n in sorted(set(match_row_numbers)))
-            response.context_data["all_match_row_numbers_csv"] = selected_default
-
-            selected_from_query = request.GET.get("selected_row_numbers", "")
-            if selected_from_query:
-                confirm_form.initial["selected_row_numbers"] = selected_from_query
-                if "selected_row_numbers" in confirm_form.fields:
-                    confirm_form.fields["selected_row_numbers"].initial = selected_from_query
-            else:
-                current_selected = str(confirm_form.initial.get("selected_row_numbers") or "").strip()
-                if not current_selected:
-                    confirm_form.initial["selected_row_numbers"] = selected_default
-                    if "selected_row_numbers" in confirm_form.fields:
-                        confirm_form.fields["selected_row_numbers"].initial = selected_default
+        response.context_data["preview_summary"] = preview_transport["preview_summary"]
+        response.context_data["matches_page_obj"] = preview_transport["matches_page_obj"]
+        response.context_data["skipped_page_obj"] = preview_transport["skipped_page_obj"]
+        if preview_transport["all_match_row_numbers_csv"]:
+            response.context_data["all_match_row_numbers_csv"] = preview_transport["all_match_row_numbers_csv"]
+        apply_selected_row_numbers_initial(confirm_form, preview_transport["selected_row_numbers"])
 
         return response
 
@@ -2458,13 +2422,13 @@ class OrganizationCSVImportLinkAdmin(BaseCsvImportAdmin):
     def process_result(self, result: Any, request: HttpRequest) -> HttpResponse:
         # import-export's Result object is duck-typed and may or may not carry
         # our dynamic enriched-download attributes depending on the resource path.
-        enriched_url = getattr(result, "enriched_download_url", "")
+        enriched_url = get_result_attr(result, "enriched_download_url", "")
         if enriched_url:
             parsed = urlparse(enriched_url)
             token = parsed.path.rstrip("/").split("/")[-1] if parsed.path else ""
             # The cached CSV content is attached dynamically to the third-party
             # Result instance alongside the download URL during after_import().
-            content = getattr(result, "enriched_csv_content", None)
+            content = get_result_attr(result, "enriched_csv_content", None)
             if token and content is not None:
                 request.session[f"{self.enriched_cache_key_prefix}:{token}"] = content
         return super().process_result(result, request)
@@ -2473,7 +2437,7 @@ class OrganizationCSVImportLinkAdmin(BaseCsvImportAdmin):
     def add_success_message(self, result: Any, request: HttpRequest) -> None:
         # import-export's Result object is duck-typed and only exposes this
         # dynamic attribute when the org importer attached an enriched download.
-        enriched_url = getattr(result, "enriched_download_url", "")
+        enriched_url = get_result_attr(result, "enriched_download_url", "")
         if not enriched_url:
             super().add_success_message(result, request)
             return
@@ -2612,7 +2576,7 @@ class OrganizationMembershipCSVImportLinkAdmin(BaseCsvImportAdmin):
         if result is None:
             return response
 
-        unmatched_url = getattr(result, "unmatched_download_url", "")
+        unmatched_url = get_result_attr(result, "unmatched_download_url", "")
         if unmatched_url:
             response.context_data["unmatched_download_url"] = unmatched_url
             parsed = urlparse(unmatched_url)
@@ -2621,7 +2585,7 @@ class OrganizationMembershipCSVImportLinkAdmin(BaseCsvImportAdmin):
                 cache_key = f"organization-membership-import-unmatched:{token}"
                 content = cache.get(cache_key)
                 if content is None:
-                    content = getattr(result, "unmatched_csv_content", None)
+                    content = get_result_attr(result, "unmatched_csv_content", None)
                 if content is not None:
                     request.session[cache_key] = content
 
@@ -2629,42 +2593,19 @@ class OrganizationMembershipCSVImportLinkAdmin(BaseCsvImportAdmin):
         if confirm_form is None:
             return response
 
-        valid_rows_obj = getattr(result, "valid_rows", None)
-        if callable(valid_rows_obj):
-            valid_rows = list(valid_rows_obj() or [])
-        else:
-            valid_rows = list(valid_rows_obj or [])
-
-        preview_rows = valid_rows
-        if not preview_rows:
-            rows_obj = getattr(result, "rows", None)
-            preview_rows = list(rows_obj or [])
-
-        preview_context = build_import_preview_context(
-            valid_rows=preview_rows,
+        preview_transport = build_result_preview_transport(
+            result=result,
             request_get=request.GET,
             instance_decision_attr="decision",
+            current_selected_row_numbers=str(confirm_form.initial.get("selected_row_numbers") or ""),
+            fallback_attr_name="rows",
         )
-        response.context_data["preview_summary"] = preview_context["preview_summary"]
-        response.context_data["matches_page_obj"] = preview_context["matches_page_obj"]
-        response.context_data["skipped_page_obj"] = preview_context["skipped_page_obj"]
-        match_row_numbers = preview_context["match_row_numbers"]
-
-        if match_row_numbers:
-            selected_default = ",".join(str(n) for n in sorted(set(match_row_numbers)))
-            response.context_data["all_match_row_numbers_csv"] = selected_default
-
-            selected_from_query = request.GET.get("selected_row_numbers", "")
-            if selected_from_query:
-                confirm_form.initial["selected_row_numbers"] = selected_from_query
-                if "selected_row_numbers" in confirm_form.fields:
-                    confirm_form.fields["selected_row_numbers"].initial = selected_from_query
-            else:
-                current_selected = str(confirm_form.initial.get("selected_row_numbers") or "").strip()
-                if not current_selected:
-                    confirm_form.initial["selected_row_numbers"] = selected_default
-                    if "selected_row_numbers" in confirm_form.fields:
-                        confirm_form.fields["selected_row_numbers"].initial = selected_default
+        response.context_data["preview_summary"] = preview_transport["preview_summary"]
+        response.context_data["matches_page_obj"] = preview_transport["matches_page_obj"]
+        response.context_data["skipped_page_obj"] = preview_transport["skipped_page_obj"]
+        if preview_transport["all_match_row_numbers_csv"]:
+            response.context_data["all_match_row_numbers_csv"] = preview_transport["all_match_row_numbers_csv"]
+        apply_selected_row_numbers_initial(confirm_form, preview_transport["selected_row_numbers"])
 
         return response
 

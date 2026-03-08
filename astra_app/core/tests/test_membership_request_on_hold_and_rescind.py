@@ -978,6 +978,57 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
                 self.assertIsNotNone(req.on_hold_at)
                 self.assertEqual(req.responses, [{legacy_label: "Same details"}])
 
+    def test_org_rfi_resubmit_rejects_duplicate_canonical_and_legacy_additional_information_noop(self) -> None:
+        from core.models import MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="org",
+            defaults={
+                "name": "Organization",
+                "group_cn": "almalinux-org",
+                "category_id": "sponsorship",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="Acme Canonical", representative="bob-canonical")
+        req = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="org",
+            status=MembershipRequest.Status.on_hold,
+            on_hold_at=timezone.now(),
+            responses=[
+                {"Additional info": "Same details"},
+                {"Additional information": "Same details"},
+            ],
+        )
+
+        self._add_freeipa_user(username="bob-canonical", email="bob-canonical@example.com")
+        self._login_as_freeipa_user("bob-canonical")
+        resp_post = self.client.post(
+            reverse("membership-request-self", args=[req.pk]),
+            data={
+                "q_additional_information": "Same details",
+            },
+            follow=False,
+        )
+
+        self.assertEqual(resp_post.status_code, 200)
+        self.assertContains(resp_post, "Please update your request before resubmitting it")
+
+        req.refresh_from_db()
+        self.assertEqual(req.status, MembershipRequest.Status.on_hold)
+        self.assertIsNotNone(req.on_hold_at)
+        self.assertEqual(
+            req.responses,
+            [
+                {"Additional info": "Same details"},
+                {"Additional information": "Same details"},
+            ],
+        )
+
     def test_mirror_rfi_form_uses_single_canonical_clarification_field(self) -> None:
         from core.models import MembershipType
 
@@ -1108,6 +1159,46 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Additional information")
         self.assertContains(resp, "Legacy details")
+
+    def test_membership_request_self_readonly_prefers_canonical_additional_information_without_rewriting_rows(self) -> None:
+        from core.models import MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="org",
+            defaults={
+                "name": "Organization",
+                "group_cn": "almalinux-org",
+                "category_id": "sponsorship",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(name="Acme Canonical", representative="bob-canonical")
+        original_responses = [
+            {"Additional information": "Canonical details"},
+            {"Additional info": "Legacy details"},
+        ]
+        req = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="org",
+            status=MembershipRequest.Status.pending,
+            responses=original_responses,
+        )
+
+        self._add_freeipa_user(username="bob-canonical", email="bob-canonical@example.com")
+        self._login_as_freeipa_user("bob-canonical")
+
+        resp = self.client.get(reverse("membership-request-self", args=[req.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        form = resp.context["form"]
+        self.assertIn("q_additional_information", form.fields)
+        self.assertEqual(form["q_additional_information"].value(), "Canonical details")
+
+        req.refresh_from_db()
+        self.assertEqual(req.responses, original_responses)
 
     def test_user_can_edit_on_hold_request_and_submit_returns_to_pending(self) -> None:
         from core.models import MembershipLog, MembershipType, Note

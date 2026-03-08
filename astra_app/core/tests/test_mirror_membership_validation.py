@@ -320,6 +320,32 @@ class MirrorMembershipValidationTests(TestCase):
 
         self.assertFalse(MirrorMembershipValidation.objects.filter(membership_request=membership_request).exists())
 
+    def test_resubmit_persists_normalized_responses_from_direct_service_call(self) -> None:
+        membership_request = self._create_user_request(status=MembershipRequest.Status.on_hold)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            resubmit_membership_request(
+                membership_request=membership_request,
+                actor_username="alice",
+                updated_responses=[
+                    {" Domain ": " https://mirror2.example.org "},
+                    {"Additional info": "Legacy clarification"},
+                    {"Additional information": "Canonical clarification"},
+                    {"Pull request": "https://github.com/AlmaLinux/mirrors/pull/999"},
+                    {"Empty value": "   "},
+                ],
+            )
+
+        membership_request.refresh_from_db()
+        self.assertEqual(
+            membership_request.responses,
+            [
+                {"Domain": "https://mirror2.example.org"},
+                {"Pull request": "https://github.com/AlmaLinux/mirrors/pull/999"},
+                {"Additional information": "Canonical clarification"},
+            ],
+        )
+
     def test_rfi_resubmission_requeues_when_only_alias_clarification_changes(self) -> None:
         membership_request = self._create_user_request(status=MembershipRequest.Status.on_hold)
         fingerprint = mirror_answers_fingerprint(mirror_request_answers(membership_request))
@@ -384,6 +410,82 @@ class MirrorMembershipValidationTests(TestCase):
 
         assert answers is not None
         self.assertEqual(answers.additional_info, "Primary EU mirror")
+
+    def test_normalize_membership_request_responses_collapses_mirror_clarification_precedence(self) -> None:
+        from core.membership_response_normalization import (
+            ADDITIONAL_INFORMATION_QUESTION,
+            normalize_membership_request_responses,
+        )
+
+        normalized = normalize_membership_request_responses(
+            responses=[
+                {" Domain ": " mirror.example.org "},
+                {"Pull request": "https://github.com/AlmaLinux/mirrors/pull/123"},
+                {"Additional info": "Legacy clarification"},
+                {"Additional information": "Canonical clarification"},
+                {"Empty value": "   "},
+            ],
+            is_mirror_membership=True,
+        )
+
+        self.assertEqual(
+            normalized.as_responses(),
+            [
+                {"Domain": "mirror.example.org"},
+                {"Pull request": "https://github.com/AlmaLinux/mirrors/pull/123"},
+                {ADDITIONAL_INFORMATION_QUESTION: "Canonical clarification"},
+            ],
+        )
+        self.assertEqual(normalized.get(ADDITIONAL_INFORMATION_QUESTION), "Canonical clarification")
+
+    def test_canonicalize_membership_response_question_normalizes_legacy_aliases(self) -> None:
+        from core.membership_response_normalization import (
+            ADDITIONAL_INFORMATION_QUESTION,
+            canonicalize_membership_response_question,
+        )
+
+        self.assertEqual(
+            canonicalize_membership_response_question(" Additional info "),
+            ADDITIONAL_INFORMATION_QUESTION,
+        )
+        self.assertEqual(
+            canonicalize_membership_response_question(" Additional information "),
+            ADDITIONAL_INFORMATION_QUESTION,
+        )
+        self.assertEqual(
+            canonicalize_membership_response_question(" Domain "),
+            "Domain",
+        )
+
+    def test_normalize_membership_request_responses_prefers_canonical_additional_information_for_non_mirror_rows(
+        self,
+    ) -> None:
+        from core.membership_response_normalization import (
+            ADDITIONAL_INFORMATION_QUESTION,
+            normalize_membership_request_responses,
+        )
+
+        for responses in (
+            [
+                {"Additional info": "Legacy clarification"},
+                {"Additional information": "Canonical clarification"},
+            ],
+            [
+                {"Additional information": "Canonical clarification"},
+                {"Additional info": "Legacy clarification"},
+            ],
+        ):
+            with self.subTest(responses=responses):
+                normalized = normalize_membership_request_responses(
+                    responses=responses,
+                    is_mirror_membership=False,
+                )
+
+                self.assertEqual(
+                    normalized.as_responses(),
+                    [{ADDITIONAL_INFORMATION_QUESTION: "Canonical clarification"}],
+                )
+                self.assertEqual(normalized.get(ADDITIONAL_INFORMATION_QUESTION), "Canonical clarification")
 
     def test_command_writes_terminal_summary_note_once(self) -> None:
         membership_request = self._create_user_request()

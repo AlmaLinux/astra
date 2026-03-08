@@ -14,6 +14,8 @@ from core.agreements import missing_required_agreements_for_user_in_group
 from core.csv_import_utils import (
     attach_unmatched_csv_to_result,
     extract_csv_headers_from_uploaded_file,
+    get_result_row_errors,
+    get_result_totals,
     norm_csv_header,
     normalize_csv_email,
     normalize_csv_name,
@@ -1372,10 +1374,7 @@ class MembershipCSVImportResource(resources.ModelResource):
         setattr(result, "matched_total", int(matched_total))
         setattr(result, "matched_total_percent", float(percent))
 
-        try:
-            totals = dict(getattr(result, "totals", {}) or {})
-        except Exception:
-            totals = {}
+        totals = get_result_totals(result)
 
         if totals:
             logger.info(
@@ -1386,26 +1385,10 @@ class MembershipCSVImportResource(resources.ModelResource):
         # In import-export 4.3.x, per-row exception tracebacks are stored on
         # Result.row_errors (not on RowResult). Always surface these at ERROR so
         # operators can diagnose why totals include error=N.
-        row_errors_obj = getattr(result, "row_errors", None)
-        # In import-export 4.3.x, Result.row_errors() returns:
-        #   list[tuple[int, list[Error]]]
-        # Newer versions may expose Error objects directly.
-        row_errors_pairs: list[tuple[int, list[Any]]] = []
-        row_errors_flat: list[Any] = []
-
-        if callable(row_errors_obj):
-            try:
-                raw = list(row_errors_obj())
-            except TypeError:
-                raw = []
-
-            if raw and isinstance(raw[0], tuple) and len(raw[0]) == 2:
-                # 4.3.x shape
-                row_errors_pairs = [(int(n), list(errs or [])) for n, errs in raw]
-            else:
-                row_errors_flat = raw
-        else:
-            row_errors_flat = list(row_errors_obj or [])
+        # In import-export 4.3.x, Result.row_errors() returns
+        # list[tuple[int, list[Error]]], while newer versions may expose Error
+        # objects directly. The shared helper preserves both shapes.
+        row_errors_pairs, row_errors_flat = get_result_row_errors(result)
 
         if row_errors_pairs:
             limit = 25

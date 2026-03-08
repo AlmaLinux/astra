@@ -15,11 +15,26 @@ from core.views_utils import (
     build_page_url_prefix,
     build_url_for_page,
     get_username,
+    settings_context,
     settings_url,
 )
 
 
 class ViewsUtilsSSOTTests(SimpleTestCase):
+    def test_settings_context_exposes_registry_filtered_tabs(self):
+        from core.settings_tabs import SETTINGS_TAB_REGISTRY
+
+        with patch("core.views_utils.has_enabled_agreements", return_value=False):
+            context = settings_context("agreements")
+
+        self.assertEqual(context["tabs"], [tab.tab_id for tab in SETTINGS_TAB_REGISTRY])
+        self.assertEqual(
+            [tab.tab_id for tab in context["settings_tabs"]],
+            ["profile", "emails", "keys", "security"],
+        )
+        self.assertEqual(context["active_tab"], "profile")
+        self.assertFalse(context["show_agreements_tab"])
+
     def test_agreement_settings_url_builds_expected_shapes(self):
         self.assertEqual(agreement_settings_url(None), reverse("settings") + "?tab=agreements")
         self.assertEqual(

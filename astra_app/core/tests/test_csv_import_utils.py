@@ -7,6 +7,10 @@ from tablib import Dataset
 
 from core.csv_import_utils import (
     attach_unmatched_csv_to_result,
+    get_result_attr,
+    get_result_row_errors,
+    get_result_rows,
+    get_result_totals,
     parse_csv_date,
     resolve_column_header,
     sanitize_csv_cell,
@@ -169,4 +173,57 @@ class AttachUnmatchedCsvToResultTests(TestCase):
         reverse.assert_called_once_with(
             "admin:core_membershipcsvimportlink_download_unmatched",
             kwargs={"token": "token-123"},
+        )
+
+
+class ImportResultAccessHelpersTests(TestCase):
+    def test_get_result_totals_tolerates_missing_or_invalid_totals_attr(self) -> None:
+        class BrokenTotalsResult:
+            @property
+            def totals(self) -> object:
+                raise TypeError("broken totals")
+
+        self.assertEqual(get_result_totals(SimpleNamespace()), {})
+        self.assertEqual(get_result_totals(BrokenTotalsResult()), {})
+        self.assertEqual(get_result_totals(SimpleNamespace(totals={"error": 2})), {"error": 2})
+
+    def test_get_result_row_errors_supports_tuple_and_flat_shapes(self) -> None:
+        pair_error = SimpleNamespace(error=ValueError("bad row"), traceback="traceback")
+        flat_error = SimpleNamespace(error=ValueError("other row"), traceback="traceback", number=4)
+
+        pair_result = SimpleNamespace(row_errors=lambda: [(3, [pair_error])])
+        flat_result = SimpleNamespace(row_errors=lambda: [flat_error])
+
+        self.assertEqual(get_result_row_errors(pair_result), ([(3, [pair_error])], []))
+        self.assertEqual(get_result_row_errors(flat_result), ([], [flat_error]))
+
+    def test_get_result_rows_supports_callable_list_like_and_fallback_rows(self) -> None:
+        callable_row = SimpleNamespace(number=1)
+        list_like_row = SimpleNamespace(number=2)
+        fallback_row = SimpleNamespace(number=3)
+
+        self.assertEqual(
+            get_result_rows(SimpleNamespace(valid_rows=lambda: [callable_row]), "valid_rows"),
+            [callable_row],
+        )
+        self.assertEqual(
+            get_result_rows(SimpleNamespace(valid_rows=[list_like_row]), "valid_rows"),
+            [list_like_row],
+        )
+        self.assertEqual(
+            get_result_rows(SimpleNamespace(rows=[fallback_row]), "valid_rows", fallback_attr_name="rows"),
+            [fallback_row],
+        )
+
+    def test_get_result_attr_returns_default_when_optional_attr_is_missing(self) -> None:
+        class BrokenAttrResult:
+            @property
+            def unmatched_download_url(self) -> str:
+                raise AttributeError("missing")
+
+        self.assertEqual(get_result_attr(SimpleNamespace(), "unmatched_download_url", ""), "")
+        self.assertEqual(get_result_attr(BrokenAttrResult(), "unmatched_download_url", ""), "")
+        self.assertEqual(
+            get_result_attr(SimpleNamespace(unmatched_download_url="/download/token/"), "unmatched_download_url", ""),
+            "/download/token/",
         )

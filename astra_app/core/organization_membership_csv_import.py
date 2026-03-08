@@ -14,6 +14,8 @@ from tablib import Dataset
 from core.csv_import_utils import (
     attach_unmatched_csv_to_result,
     extract_csv_headers_from_uploaded_file,
+    get_result_row_errors,
+    get_result_totals,
     norm_csv_header,
     parse_csv_date,
     resolve_column_header,
@@ -787,10 +789,7 @@ class OrganizationMembershipCSVImportResource(resources.ModelResource):
     def after_import(self, dataset: Dataset, result: Any, **kwargs: Any) -> None:
         super().after_import(dataset, result, **kwargs)
 
-        try:
-            totals = dict(getattr(result, "totals", {}) or {})
-        except Exception:
-            totals = {}
+        totals = get_result_totals(result)
 
         if totals:
             logger.info(
@@ -798,22 +797,7 @@ class OrganizationMembershipCSVImportResource(resources.ModelResource):
                 " ".join(f"{key}={totals[key]}" for key in sorted(totals)),
             )
 
-        row_errors_obj = getattr(result, "row_errors", None)
-        row_errors_pairs: list[tuple[int, list[Any]]] = []
-        row_errors_flat: list[Any] = []
-
-        if callable(row_errors_obj):
-            try:
-                raw = list(row_errors_obj())
-            except TypeError:
-                raw = []
-
-            if raw and isinstance(raw[0], tuple) and len(raw[0]) == 2:
-                row_errors_pairs = [(int(row_number), list(errors or [])) for row_number, errors in raw]
-            else:
-                row_errors_flat = raw
-        else:
-            row_errors_flat = list(row_errors_obj or [])
+        row_errors_pairs, row_errors_flat = get_result_row_errors(result)
 
         if row_errors_pairs:
             limit = 25
