@@ -1,3 +1,5 @@
+from email.utils import parseaddr
+
 from django.conf import settings
 
 from core.build_info import get_build_sha
@@ -48,7 +50,10 @@ def chat_networks(_request) -> dict[str, object]:
 
 
 def build_info(_request) -> dict[str, object]:
-    return {"build_sha": get_build_sha()}
+    return {
+        "build_sha": get_build_sha(),
+        "default_from_email_address": parseaddr(settings.DEFAULT_FROM_EMAIL)[1].strip(),
+    }
 
 
 _MEMBERSHIP_NAV_URLS = frozenset({

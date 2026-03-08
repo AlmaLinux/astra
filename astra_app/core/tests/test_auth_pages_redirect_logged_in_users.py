@@ -1,7 +1,7 @@
 
 from unittest.mock import patch
 
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
 from core.freeipa.user import FreeIPAUser
@@ -24,6 +24,7 @@ class AuthPagesRedirectLoggedInUsersTests(TestCase):
             },
         )
 
+    @override_settings(DEFAULT_FROM_EMAIL="Astra Support <support-test@example.com>")
     def test_login_redirects_logged_in_user_to_profile(self) -> None:
         client = Client()
         self._login_as_freeipa(client, "alice")
@@ -40,6 +41,15 @@ class AuthPagesRedirectLoggedInUsersTests(TestCase):
         profile_url = reverse("user-profile", kwargs={"username": "alice"})
         self.assertTrue(resp.redirect_chain)
         self.assertEqual(resp.redirect_chain[-1], (profile_url, 302))
+        self.assertContains(resp, "Contact Support")
+        self.assertContains(resp, "mailto:support-test@example.com")
+
+    def test_login_page_hides_footer_support_link_for_anonymous_user(self) -> None:
+        response = self.client.get(reverse("login"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Contact Support")
+        self.assertNotContains(response, "mailto:astra@almalinux.org")
 
     def test_password_expired_redirects_logged_in_user(self) -> None:
         client = Client()
