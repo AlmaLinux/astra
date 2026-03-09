@@ -15,7 +15,6 @@ from core.forms_security import PasswordConfirmationMixin, make_otp_field
 from core.forms_selfservice import OTPAddForm, PasswordChangeFreeIPAForm
 from core.views_settings import OTP_KEY_LENGTH, settings_root
 
-
 MOCK_SETTINGS_CONTEXT = {
     "active_tab": "security",
     "show_agreements_tab": False,

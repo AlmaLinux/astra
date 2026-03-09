@@ -34,3 +34,4 @@ class Command(BaseCommand):
         call_command("membership_pending_requests", force=force, dry_run=dry_run)
         call_command("membership_embargoed_members", force=force, dry_run=dry_run)
         call_command("membership_mirror_validation", force=force, dry_run=dry_run)
+        call_command("selfservice_lifecycle_cleanup", dry_run=dry_run)

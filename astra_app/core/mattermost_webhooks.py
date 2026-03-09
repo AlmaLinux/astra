@@ -27,6 +27,7 @@ _URL_RE = re.compile(r"https?://\S+")
 
 _GREEN_EVENTS = {
     "account_invitation_accepted",
+    "account_deletion_completed",
     "membership_request_approved",
     "organization_membership_request_approved",
     "election_tallied",
@@ -42,23 +43,61 @@ _BLUE_EVENTS = {
 }
 
 _ORANGE_EVENTS = {
+    "account_deletion_pending_privilege_check",
+    "account_deletion_approved",
     "membership_rfi_sent",
     "membership_rfi_replied",
     "organization_membership_rfi_sent",
     "organization_membership_rfi_replied",
     "election_deadline_extended",
     "membership_expiring_soon",
+    "membership_self_terminated",
     "user_country_changed",
     "organization_country_changed",
 }
 
 _RED_EVENTS = {
+    "account_deletion_cancelled",
     "membership_request_rejected",
     "membership_request_rescinded",
     "organization_membership_request_rejected",
     "organization_membership_request_rescinded",
+    "account_deletion_rejected",
     "membership_expired",
+    "account_deletion_requested",
     "election_closed",
+}
+
+_ACCOUNT_DELETION_EVENTS = {
+    "account_deletion_requested",
+    "account_deletion_pending_privilege_check",
+    "account_deletion_approved",
+    "account_deletion_rejected",
+    "account_deletion_cancelled",
+    "account_deletion_completed",
+}
+
+_ACCOUNT_DELETION_TEMPLATE_VARIABLES = {
+    # PRIVACY-RESTRICTED: This event exposes account_deletion_username (a plain username)
+    # alongside a deletion intent signal. Route this event ONLY to a restricted
+    # privacy/admin Mattermost channel. Do NOT route it to general #ops or
+    # community-visible channels; doing so constitutes an unauthorized disclosure.
+    "account_deletion_request": "AccountDeletionRequest object or equivalent.",
+    "account_deletion_request_id": "Deletion request primary key.",
+    "account_deletion_username": "Username that requested deletion. PRIVATE — see channel routing note above.",
+    "account_deletion_status": "Deletion request status.",
+    "account_deletion_manual_review_required": "Whether manual review is required.",
+    "account_deletion_blocker_codes": "Blocker-code list for manual review.",
+    "account_deletion_blocker_codes_csv": "Comma-separated blocker codes.",
+}
+
+_ACCOUNT_DELETION_EVENT_TEXT = {
+    "account_deletion_requested": "Account deletion requested",
+    "account_deletion_pending_privilege_check": "Account deletion pending privilege check",
+    "account_deletion_approved": "Account deletion approved",
+    "account_deletion_rejected": "Account deletion rejected",
+    "account_deletion_cancelled": "Account deletion cancelled",
+    "account_deletion_completed": "Account deletion completed",
 }
 
 _COMMON_TEMPLATE_VARIABLES: dict[str, str] = {
@@ -192,6 +231,18 @@ _EVENT_TEMPLATE_VARIABLES: dict[str, dict[str, str]] = {
         "count": "Number of expired memberships cleaned up by the job.",
         "membership_type": "Membership type selector used by the cleanup job (for current jobs: all).",
     },
+    "membership_self_terminated": {
+        "username": "Username of the member who self-terminated.",
+        "membership_type": "MembershipType-like object when available.",
+        "membership_type_code": "Membership type code.",
+        "membership_type_name": "Membership type display name.",
+    },
+    "account_deletion_requested": _ACCOUNT_DELETION_TEMPLATE_VARIABLES,
+    "account_deletion_pending_privilege_check": _ACCOUNT_DELETION_TEMPLATE_VARIABLES,
+    "account_deletion_approved": _ACCOUNT_DELETION_TEMPLATE_VARIABLES,
+    "account_deletion_rejected": _ACCOUNT_DELETION_TEMPLATE_VARIABLES,
+    "account_deletion_cancelled": _ACCOUNT_DELETION_TEMPLATE_VARIABLES,
+    "account_deletion_completed": _ACCOUNT_DELETION_TEMPLATE_VARIABLES,
     "organization_membership_request_submitted": {
         "membership_request": "MembershipRequest object (example: {{ membership_request.pk }}).",
         "membership_request_id": "Membership request primary key.",
@@ -378,6 +429,12 @@ def _event_link(event_key: str, kwargs: dict[str, object]) -> str:
             return membership_extend_url(membership_type_code=membership_type)
         return membership_requests_url()
 
+    if event_key == "membership_self_terminated":
+        return build_public_absolute_url(f"{reverse('settings')}?tab=membership", on_missing="relative")
+
+    if event_key in _ACCOUNT_DELETION_EVENTS:
+        return build_public_absolute_url(f"{reverse('settings')}?tab=privacy", on_missing="relative")
+
     membership_request = kwargs.get("membership_request")
     if membership_request is not None:
         try:
@@ -544,6 +601,40 @@ def _default_payload(event_key: str, kwargs: dict[str, object]) -> dict[str, obj
     elif event_key == "membership_expired":
         text = "Memberships expired"
         fields = _membership_fields(kwargs, org_targeted=False)
+    elif event_key == "membership_self_terminated":
+        text = "Membership self-terminated"
+        actor = str(kwargs.get("actor") or "system").strip() or "system"
+        disp_username = str(kwargs.get("username") or "").strip()
+        membership_type_code = str(kwargs.get("membership_type_code") or "").strip()
+        membership_type_name = str(kwargs.get("membership_type_name") or "").strip()
+        fields = []
+        if disp_username:
+            fields.append({"title": "Username", "value": disp_username, "short": True})
+        if membership_type_name:
+            fields.append({"title": "Membership", "value": membership_type_name, "short": True})
+        elif membership_type_code:
+            fields.append({"title": "Membership", "value": membership_type_code, "short": True})
+        fields.append({"title": "Actor", "value": actor, "short": True})
+    elif event_key in _ACCOUNT_DELETION_EVENTS:
+        text = _ACCOUNT_DELETION_EVENT_TEXT.get(event_key, _event_title(event_key))
+        actor = str(kwargs.get("actor") or "system").strip() or "system"
+        request_id = str(kwargs.get("account_deletion_request_id") or "").strip()
+        disp_username = str(kwargs.get("account_deletion_username") or "").strip()
+        status = str(kwargs.get("account_deletion_status") or "").strip()
+        manual_review_required = kwargs.get("account_deletion_manual_review_required")
+        blocker_codes_csv = str(kwargs.get("account_deletion_blocker_codes_csv") or "").strip()
+        fields = []
+        if request_id:
+            fields.append({"title": "Request ID", "value": request_id, "short": True})
+        if disp_username:
+            fields.append({"title": "Username", "value": disp_username, "short": True})
+        if status:
+            fields.append({"title": "Status", "value": status, "short": True})
+        if manual_review_required is not None:
+            fields.append({"title": "Manual review", "value": str(bool(manual_review_required)), "short": True})
+        if blocker_codes_csv:
+            fields.append({"title": "Blockers", "value": blocker_codes_csv, "short": False})
+        fields.append({"title": "Actor", "value": actor, "short": True})
     elif event_key == "organization_membership_request_submitted":
         text = "Organization membership request submitted"
         fields = _membership_fields(kwargs, org_targeted=True)
@@ -605,6 +696,14 @@ def _default_payload(event_key: str, kwargs: dict[str, object]) -> dict[str, obj
             title = f"Account invitation {kwargs.get('account_invitation').email}"
         except Exception:
             pass
+    elif event_key == "membership_self_terminated":
+        membership_type_name = str(kwargs.get("membership_type_name") or "").strip()
+        if membership_type_name:
+            title = f"Membership {membership_type_name}"
+    elif event_key in _ACCOUNT_DELETION_EVENTS:
+        request_id = str(kwargs.get("account_deletion_request_id") or "").strip()
+        if request_id:
+            title = f"Deletion request {request_id}"
     elif event_key.startswith("membership_") or event_key.startswith("organization_membership_"):
         try:
             title = f"Membership request {kwargs.get('membership_request').pk}"
@@ -883,6 +982,56 @@ def _build_template_context(event_key: str, kwargs: dict[str, object]) -> dict[s
                 organization_name = ""
             if organization_name:
                 context["account_invitation_organization_name"] = organization_name
+
+    membership_type = kwargs.get("membership_type")
+    if membership_type is not None:
+        try:
+            membership_type_code = str(membership_type.code or "").strip()
+        except Exception:
+            membership_type_code = ""
+        if membership_type_code:
+            context["membership_type_code"] = membership_type_code
+
+        try:
+            membership_type_name = str(membership_type.name or "").strip()
+        except Exception:
+            membership_type_name = ""
+        if membership_type_name:
+            context["membership_type_name"] = membership_type_name
+
+    account_deletion_request = kwargs.get("account_deletion_request")
+    if account_deletion_request is not None:
+        try:
+            context["account_deletion_request_id"] = account_deletion_request.pk
+        except Exception:
+            pass
+
+        try:
+            deletion_username = str(account_deletion_request.username or "").strip()
+        except Exception:
+            deletion_username = ""
+        if deletion_username:
+            context["account_deletion_username"] = deletion_username
+
+        try:
+            deletion_status = str(account_deletion_request.status or "").strip()
+        except Exception:
+            deletion_status = ""
+        if deletion_status:
+            context["account_deletion_status"] = deletion_status
+
+        try:
+            manual_review_required = bool(account_deletion_request.manual_review_required)
+        except Exception:
+            manual_review_required = False
+        context["account_deletion_manual_review_required"] = manual_review_required
+
+        try:
+            blocker_codes = list(account_deletion_request.blocker_codes or [])
+        except Exception:
+            blocker_codes = []
+        context["account_deletion_blocker_codes"] = blocker_codes
+        context["account_deletion_blocker_codes_csv"] = ", ".join(map(str, blocker_codes))
 
     return context
 

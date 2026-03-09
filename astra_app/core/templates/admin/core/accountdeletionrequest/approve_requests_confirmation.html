@@ -1,0 +1,47 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div id="content-main">
+  <h1>{{ title }}</h1>
+  <p>This action will immediately attempt to delete the selected FreeIPA account or accounts.</p>
+  <p>Successful execution will move each request to <strong>Completed</strong>. If execution fails, the request stays <strong>Approved</strong> so it remains active and auditable for retry.</p>
+
+  {% if ineligible_requests %}
+    <div class="messagelist">
+      <div class="warning">
+        {{ ineligible_requests|length }} selected request(s) are already closed and will be skipped.
+      </div>
+    </div>
+  {% endif %}
+
+  <h2>Requests that will execute</h2>
+  <ul>
+    {% for deletion_request in eligible_requests %}
+      <li>{{ deletion_request.username }} (current status: {{ deletion_request.get_status_display }})</li>
+    {% endfor %}
+  </ul>
+
+  {% if ineligible_requests %}
+    <h2>Requests that will be skipped</h2>
+    <ul>
+      {% for deletion_request in ineligible_requests %}
+        <li>{{ deletion_request.username }} (current status: {{ deletion_request.get_status_display }})</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  <form method="post" action="{{ changelist_url }}">
+    {% csrf_token %}
+    {% for request_id in selected_request_ids %}
+      <input type="hidden" name="{{ action_checkbox_name }}" value="{{ request_id }}">
+    {% endfor %}
+    <input type="hidden" name="action" value="approve_requests">
+    <input type="hidden" name="post" value="yes">
+    <input type="hidden" name="select_across" value="{{ select_across }}">
+    <div class="submit-row">
+      <input type="submit" value="Confirm approval and deletion" class="default">
+      <a href="{{ changelist_url }}" class="button cancel-link">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

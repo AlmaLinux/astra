@@ -1,0 +1,74 @@
+<div class="settings-membership-tab">
+	<h2 class="h4">Membership</h2>
+	<p class="text-muted">Review your active memberships, recent history, and self-service exit options.</p>
+
+	<h3 class="h5 mt-4">Active memberships</h3>
+	<ul class="list-group mb-4">
+		{% for row in membership_rows %}
+			<li class="list-group-item px-3 py-3">
+				<div class="d-flex flex-column flex-md-row justify-content-between align-items-md-start">
+					<div class="mb-3 mb-md-0 pr-md-3">
+						<div class="d-flex align-items-center flex-wrap">
+							<strong class="mr-2">{{ row.membership.membership_type.name }}</strong>
+							<span class="badge badge-success">Active</span>
+						</div>
+						<div class="small text-muted mt-1">
+							Joined {{ row.membership.created_at|date:"Y-m-d" }}
+							{% if row.membership.expires_at %}
+								. Current term ends {{ row.membership.expires_at|date:"Y-m-d" }}.
+							{% endif %}
+						</div>
+					</div>
+					<button
+						type="button"
+						class="btn btn-outline-danger btn-sm align-self-start"
+						data-toggle="collapse"
+						data-target="#membership-exit-{{ row.membership.membership_type.code }}"
+						aria-expanded="false"
+						aria-controls="membership-exit-{{ row.membership.membership_type.code }}"
+					>
+						Leave membership
+					</button>
+				</div>
+
+				<div class="collapse mt-3" id="membership-exit-{{ row.membership.membership_type.code }}">
+					<div class="border border-danger rounded p-3 bg-light">
+						<p class="small text-muted mb-3">
+							Leave <strong>{{ row.membership.membership_type.name }}</strong> when you no longer want this membership. This keeps the action compact until you need it.
+						</p>
+						<form
+							method="post"
+							action="{% url 'settings-membership-terminate' membership_type_code=row.membership.membership_type.code %}"
+							{% include 'core/_form_validation_attrs.html' with form=row.termination_form %}
+						>
+							{% csrf_token %}
+							{% include 'core/_form_field.html' with field=row.termination_form.reason_category %}
+							{% include 'core/_form_field.html' with field=row.termination_form.reason_text %}
+							{% include 'core/_form_field.html' with field=row.termination_form.current_password %}
+							<div class="d-flex justify-content-end">
+								<button type="submit" class="btn btn-danger btn-sm">Leave membership</button>
+							</div>
+						</form>
+					</div>
+				</div>
+			</li>
+		{% empty %}
+			<li class="list-group-item text-muted">You do not have any active memberships.</li>
+		{% endfor %}
+	</ul>
+
+	<h3 class="h5">Recent history</h3>
+	<ul class="list-group">
+		{% for entry in membership_history %}
+			<li class="list-group-item d-flex justify-content-between align-items-start flex-column flex-md-row">
+				<div>
+					<strong>{{ entry.membership_type.name }}</strong>
+					<div class="small text-muted mt-1">{{ entry.created_at|date:"Y-m-d H:i T" }}</div>
+				</div>
+				<span class="badge badge-light mt-2 mt-md-0">{{ entry.get_action_display }}</span>
+			</li>
+		{% empty %}
+			<li class="list-group-item text-muted">No membership history is available yet.</li>
+		{% endfor %}
+	</ul>
+</div>

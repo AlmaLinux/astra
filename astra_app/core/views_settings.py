@@ -15,27 +15,32 @@ from django.contrib.auth.decorators import login_required
 from django.core import signing
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.module_loading import import_string
+from django.views.decorators.csrf import csrf_protect
 from python_freeipa import ClientMeta, exceptions
 
 from core import signals as astra_signals
+from core.account_deletion import get_account_deletion_blockers
 from core.agreements import has_enabled_agreements, list_agreements_for_user
 from core.avatar_storage import avatar_path_handler
 from core.email_context import system_email_context, user_email_context
 from core.forms_selfservice import (
+    AccountDeletionRequestForm,
     EmailsForm,
     KeysForm,
+    MembershipTerminationForm,
     OTPAddForm,
     OTPConfirmForm,
     OTPTokenActionForm,
     OTPTokenRenameForm,
     PasswordChangeFreeIPAForm,
+    PrivacySettingsForm,
     ProfileForm,
     normalize_locale_tag,
 )
@@ -58,8 +63,18 @@ from core.ipa_user_attrs import (
     _value_to_text,
 )
 from core.ipa_utils import bool_from_ipa, bool_to_ipa
-from core.models import IPAUser
+from core.membership import get_valid_memberships, remove_user_from_group
+from core.models import (
+    AccountDeletionRequest,
+    IPAUser,
+    MembershipLog,
+    MembershipTerminationFeedback,
+    MembershipType,
+    privacy_reason_cleanup_due_at,
+)
+from core.rate_limit import allow_request
 from core.settings_tabs import is_settings_tab
+from core.signals import account_deletion_requested, membership_self_terminated
 from core.templated_email import queue_templated_email
 from core.tokens import make_settings_email_validation_token, read_settings_email_validation_token
 from core.views_utils import (
@@ -374,11 +389,6 @@ def _build_profile_changes(
             transform=str.upper,
         )
 
-    current_private = profile_initial["fasIsPrivate"]
-    new_private = profile_form.cleaned_data["fasIsPrivate"]
-    if current_private != new_private:
-        setattrs.append(f"fasIsPrivate={bool_to_ipa(new_private)}")
-
     return direct_updates, addattrs, setattrs, delattrs, old_country, new_country
 
 
@@ -602,6 +612,90 @@ def _apply_and_report_keys_update(
     return applied
 
 
+def _client_ip_for_rate_limit(request: HttpRequest) -> str:
+    # Only trust the socket peer seen by the app/proxy for destructive-action throttles.
+    return _normalize_str(request.META.get("REMOTE_ADDR")) or "unknown"
+
+
+def _allow_destructive_action(
+    request: HttpRequest,
+    *,
+    scope: str,
+    username: str,
+    limit: int,
+    window_seconds: int,
+    denial_message: str,
+) -> bool:
+    allowed = allow_request(
+        scope=scope,
+        key_parts=[username, _client_ip_for_rate_limit(request)],
+        limit=limit,
+        window_seconds=window_seconds,
+    )
+    if allowed:
+        return True
+
+    messages.error(request, denial_message)
+    logger.warning("Rate limit denied scope=%s username=%s", scope, username)
+    return False
+
+
+def _reauthenticate_destructive_action(
+    *,
+    username: str,
+    current_password: str,
+) -> bool:
+    _get_freeipa_client(username, current_password)
+    return True
+
+
+def _build_privacy_changes(
+    *,
+    privacy_form: PrivacySettingsForm,
+    current_private: bool,
+) -> tuple[list[str], list[str]]:
+    setattrs: list[str] = []
+    delattrs: list[str] = []
+
+    new_private = bool(privacy_form.cleaned_data["fasIsPrivate"])
+    if current_private != new_private:
+        setattrs.append(f"fasIsPrivate={bool_to_ipa(new_private)}")
+
+    return setattrs, delattrs
+
+
+def _apply_and_report_privacy_update(
+    request: HttpRequest,
+    username: str,
+    *,
+    setattrs: list[str],
+    delattrs: list[str],
+    privacy_form: PrivacySettingsForm,
+) -> bool:
+    skipped, applied = _update_user_attrs(
+        username,
+        setattrs=setattrs,
+        delattrs=delattrs,
+    )
+    if skipped:
+        for attr in skipped:
+            label = _form_label_for_attr(privacy_form, attr)
+            messages.warning(request, f"Saved, but '{label or attr}' is not editable on this FreeIPA server.")
+    if applied:
+        messages.success(request, "Privacy settings updated in FreeIPA.")
+    else:
+        messages.info(request, "No privacy changes were applied.")
+    return applied
+
+
+def _active_account_deletion_request(username: str) -> AccountDeletionRequest | None:
+    return (
+        AccountDeletionRequest.objects.filter(username=username, status__in=AccountDeletionRequest.ACTIVE_STATUSES)
+        .order_by("-created_at", "-pk")
+        .first()
+    )
+
+
 def settings_root(request: HttpRequest) -> HttpResponse:
     """Unified settings page.
 
@@ -686,6 +780,10 @@ def settings_root(request: HttpRequest) -> HttpResponse:
         request.POST if request.method == "POST" and (is_save_all or requested_tab == "profile") else None,
         request.FILES if request.method == "POST" and (is_save_all or requested_tab == "profile") else None,
         initial=profile_initial,
+    )
+    privacy_form = PrivacySettingsForm(
+        request.POST if request.method == "POST" and requested_tab == "privacy" else None,
+        initial={"fasIsPrivate": profile_initial["fasIsPrivate"]},
     )
 
     # --- Emails ---
@@ -961,14 +1059,39 @@ def settings_root(request: HttpRequest) -> HttpResponse:
         # do not render a broken/empty tab. Keep the user on a safe tab.
         return redirect(settings_url(tab="profile"))
 
+    active_memberships = list(get_valid_memberships(username=username))
+    membership_rows = [
+        {
+            "membership": membership,
+            "termination_form": MembershipTerminationForm(auto_id=f"id_membership_{membership.membership_type.code}_%s"),
+        }
+        for membership in active_memberships
+    ]
+    membership_history = list(
+        MembershipLog.objects.filter(target_username=username)
+        .select_related("membership_type")
+        .order_by("-created_at", "-pk")[:25]
+    )
+    active_deletion_request = _active_account_deletion_request(username)
+    privacy_blocker_codes, privacy_warnings = get_account_deletion_blockers(username)
+    account_deletion_form = None if active_deletion_request is not None else AccountDeletionRequestForm()
+
     # Context
     avatar_provider_path, avatar_url = _detect_avatar_provider(request.user, size=96)
     context = {
         **settings_context(requested_tab, show_agreements_tab=show_agreements_tab),
         "profile_form": profile_form,
+        "privacy_form": privacy_form,
         "emails_form": emails_form,
         "keys_form": keys_form,
         "password_form": password_form,
+        "active_memberships": active_memberships,
+        "membership_rows": membership_rows,
+        "membership_history": membership_history,
+        "active_deletion_request": active_deletion_request,
+        "account_deletion_form": account_deletion_form,
+        "privacy_blocker_codes": privacy_blocker_codes,
+        "privacy_warnings": privacy_warnings,
         "using_otp": using_otp,
         "otp_add_form": otp_add_form,
         "otp_confirm_form": otp_confirm_form,
@@ -991,6 +1114,8 @@ def settings_root(request: HttpRequest) -> HttpResponse:
     # Compatibility: some tests and older code expect `form` to be the active tab's primary form.
     context["form"] = {
         "profile": profile_form,
+        "membership": None,
+        "privacy": privacy_form,
         "emails": emails_form,
         "keys": keys_form,
         "security": password_form,
@@ -1024,6 +1149,8 @@ def settings_root(request: HttpRequest) -> HttpResponse:
             context["force_tab"] = invalid_tab
             context["form"] = {
                 "profile": profile_form,
+                "membership": None,
+                "privacy": privacy_form,
                 "emails": emails_form,
                 "keys": keys_form,
                 "security": password_form,
@@ -1154,6 +1281,31 @@ def settings_root(request: HttpRequest) -> HttpResponse:
             return redirect(return_target)
         return redirect(settings_url(tab="profile", highlight=highlight, status="saved"))
 
+    if requested_tab == "privacy" and privacy_form.is_valid():
+        setattrs, delattrs = _build_privacy_changes(
+            privacy_form=privacy_form,
+            current_private=bool(profile_initial["fasIsPrivate"]),
+        )
+
+        if not setattrs and not delattrs:
+            messages.info(request, "No changes to save.")
+            return redirect(settings_url(tab="privacy"))
+
+        try:
+            _apply_and_report_privacy_update(
+                request,
+                username,
+                setattrs=setattrs,
+                delattrs=delattrs,
+                privacy_form=privacy_form,
+            )
+        except Exception as e:
+            return _settings_update_error_response(
+                request, context, "privacy", e, tab_label="privacy settings", username=username,
+            )
+
+        return redirect(settings_url(tab="privacy", status="saved"))
+
     if requested_tab == "emails" and emails_form.is_valid():
         direct_updates, setattrs, delattrs, pending_validations = _build_emails_changes(
             emails_form=emails_form, emails_initial=emails_initial,
@@ -1250,6 +1402,177 @@ def settings_root(request: HttpRequest) -> HttpResponse:
 
     context["force_tab"] = requested_tab
     return render(request, "core/settings.html", context)
+
+
+@login_required
+@csrf_protect
+def settings_membership_terminate(request: HttpRequest, *, membership_type_code: str) -> HttpResponse:
+    if request.method != "POST":
+        return redirect(settings_url(tab="membership"))
+
+    username = get_username(request)
+    if not _allow_destructive_action(
+        request,
+        scope="settings_membership_terminate",
+        username=username,
+        limit=5,
+        window_seconds=3600,
+        denial_message="Too many membership termination attempts. Please try again later.",
+    ):
+        return redirect(settings_url(tab="membership"))
+
+    membership_type = MembershipType.objects.filter(code=membership_type_code, enabled=True).first()
+    active_membership = None
+    if membership_type is not None:
+        active_membership = next(
+            (
+                membership
+                for membership in get_valid_memberships(username=username)
+                if membership.membership_type.code == membership_type.code
+            ),
+            None,
+        )
+
+    if membership_type is None or active_membership is None:
+        messages.error(request, "That membership is no longer active.")
+        return redirect(settings_url(tab="membership"))
+
+    form = MembershipTerminationForm(request.POST or None)
+    if not form.is_valid():
+        messages.error(request, "Unable to terminate this membership.")
+        return redirect(settings_url(tab="membership"))
+
+    try:
+        _reauthenticate_destructive_action(
+            username=username,
+            current_password=form.cleaned_data["current_password"],
+        )
+    except Exception:
+        logger.info("Membership self-termination reauthentication failed username=%s", username)
+        messages.error(request, "Unable to verify your current password.")
+        return redirect(settings_url(tab="membership"))
+
+    if not remove_user_from_group(username=username, group_cn=membership_type.group_cn):
+        messages.error(request, "Failed to remove your membership from FreeIPA.")
+        return redirect(settings_url(tab="membership"))
+
+    reason_text = form.cleaned_data["reason_text"]
+    try:
+        with transaction.atomic():
+            log = MembershipLog.create_for_termination(
+                actor_username=username,
+                membership_type=membership_type,
+                target_username=username,
+            )
+            MembershipTerminationFeedback.objects.create(
+                membership_log=log,
+                username=username,
+                membership_type=membership_type,
+                reason_category=form.cleaned_data["reason_category"],
+                reason_text=reason_text,
+                reason_cleanup_due_at=privacy_reason_cleanup_due_at() if reason_text else None,
+            )
+            transaction.on_commit(
+                lambda: membership_self_terminated.send(
+                    sender=MembershipLog,
+                    actor=username,
+                    username=username,
+                    membership_type=membership_type,
+                )
+            )
+    except Exception:
+        logger.critical(
+            "Membership self-termination partial failure username=%s group_cn=%s: "
+            "FreeIPA removal succeeded but local persistence failed; manual reconciliation required",
+            username,
+            membership_type.group_cn,
+            exc_info=True,
+        )
+        messages.error(
+            request,
+            "We removed your membership in FreeIPA, but failed to finish recording the change locally. "
+            "Please contact support so we can reconcile it.",
+        )
+        return redirect(settings_url(tab="membership"))
+
+    messages.success(request, "Membership terminated.")
+    return redirect(settings_url(tab="membership", status="terminated"))
+
+
+@login_required
+@csrf_protect
+def settings_account_deletion_request(request: HttpRequest) -> HttpResponse:
+    if request.method != "POST":
+        return redirect(settings_url(tab="privacy"))
+
+    username = get_username(request)
+    if _active_account_deletion_request(username) is not None:
+        messages.info(request, "Your existing account deletion request is still pending review.")
+        return redirect(settings_url(tab="privacy", status="deletion-requested"))
+
+    if not _allow_destructive_action(
+        request,
+        scope="settings_account_deletion_request",
+        username=username,
+        limit=3,
+        window_seconds=3600,
+        denial_message="Too many account deletion requests. Please try again later.",
+    ):
+        return redirect(settings_url(tab="privacy"))
+
+    form = AccountDeletionRequestForm(request.POST or None)
+    if not form.is_valid():
+        messages.error(request, "Unable to submit your account deletion request.")
+        return redirect(settings_url(tab="privacy"))
+
+    try:
+        _reauthenticate_destructive_action(
+            username=username,
+            current_password=form.cleaned_data["current_password"],
+        )
+    except Exception:
+        logger.info("Account deletion request reauthentication failed username=%s", username)
+        messages.error(request, "Unable to verify your current password.")
+        return redirect(settings_url(tab="privacy"))
+
+    blocker_codes, _warnings = get_account_deletion_blockers(username)
+    created_request: AccountDeletionRequest | None = None
+
+    try:
+        with transaction.atomic():
+            existing_request = (
+                AccountDeletionRequest.objects.select_for_update()
+                .filter(username=username, status__in=AccountDeletionRequest.ACTIVE_STATUSES)
+                .order_by("-created_at", "-pk")
+                .first()
+            )
+            if existing_request is None:
+                created_request = AccountDeletionRequest.objects.create(
+                    username=username,
+                    request_source=AccountDeletionRequest.RequestSource.user_settings,
+                    status=AccountDeletionRequest.Status.pending_review,
+                    reason_category=form.cleaned_data["reason_category"],
+                    reason_text=form.cleaned_data["reason_text"],
+                    manual_review_required=bool(blocker_codes),
+                    blocker_codes=blocker_codes,
+                    fresh_auth_at=timezone.now(),
+                )
+                transaction.on_commit(
+                    lambda: account_deletion_requested.send(
+                        sender=AccountDeletionRequest,
+                        account_deletion_request=created_request,
+                        actor=username,
+                    )
+                )
+    except IntegrityError:
+        created_request = None
+
+    if created_request is not None:
+        messages.success(request, "Your account deletion request has been submitted for review.")
+    else:
+        messages.info(request, "Your existing account deletion request is still pending review.")
+
+    return redirect(settings_url(tab="privacy", status="deletion-requested"))
 
 
 def _otp_preamble(request: HttpRequest) -> HttpResponse | None:

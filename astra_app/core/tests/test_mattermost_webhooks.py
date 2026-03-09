@@ -17,7 +17,7 @@ from core.mattermost_webhooks import (
     _render_template,
     dispatch_mattermost_event,
 )
-from core.models import AccountInvitation, MattermostWebhookEndpoint, Organization
+from core.models import AccountInvitation, MattermostWebhookEndpoint, MembershipLog, Organization
 from core.signals import CANONICAL_SIGNALS
 from core.tokens import election_genesis_chain_hash
 
@@ -298,6 +298,71 @@ class MattermostWebhookTemplateAndPayloadTests(SimpleTestCase):
         self.assertEqual(by_title.get("Accepted username"), "alice")
         self.assertEqual(by_title.get("Organization"), "Example Org")
 
+    def test_build_payload_account_deletion_requested_exposes_request_context_without_reason_text(self) -> None:
+        deletion_request = SimpleNamespace(
+            pk=42,
+            username="alice",
+            status="pending_review",
+            manual_review_required=True,
+            blocker_codes=["organization_representative", "open_election"],
+            reason_text="This must never appear in Mattermost.",
+        )
+        endpoint = MattermostWebhookEndpoint(
+            label="Privacy",
+            url="https://hooks.example.invalid/privacy",
+            events=["account_deletion_requested"],
+            text=(
+                "request={{ account_deletion_request_id }} user={{ account_deletion_username }} "
+                "status={{ account_deletion_status }} manual={{ account_deletion_manual_review_required }} "
+                "blockers={{ account_deletion_blocker_codes_csv }}"
+            ),
+        )
+
+        payload = _build_payload(
+            endpoint,
+            "account_deletion_requested",
+            {"account_deletion_request": deletion_request, "actor": "alice"},
+        )
+
+        self.assertEqual(
+            payload["text"],
+            "request=42 user=alice status=pending_review manual=True blockers=organization_representative, open_election",
+        )
+        self.assertNotIn("This must never appear in Mattermost.", str(payload))
+
+    def test_build_payload_account_deletion_completed_exposes_request_context_without_reason_text(self) -> None:
+        deletion_request = SimpleNamespace(
+            pk=42,
+            username="alice",
+            status="completed",
+            manual_review_required=False,
+            blocker_codes=[],
+            reason_text="This must never appear in Mattermost.",
+        )
+        endpoint = MattermostWebhookEndpoint(
+            label="Privacy",
+            url="https://hooks.example.invalid/privacy",
+            events=["account_deletion_completed"],
+            text=(
+                "request={{ account_deletion_request_id }} user={{ account_deletion_username }} "
+                "status={{ account_deletion_status }} manual={{ account_deletion_manual_review_required }}"
+            ),
+        )
+
+        payload = _build_payload(
+            endpoint,
+            "account_deletion_completed",
+            {"account_deletion_request": deletion_request, "actor": "admin"},
+        )
+
+        self.assertEqual(
+            payload["text"],
+            "request=42 user=alice status=completed manual=False",
+        )
+        self.assertEqual(payload["attachments"][0]["title"], "Deletion request 42")
+        self.assertTrue(payload["attachments"][0]["title_link"].endswith(reverse("settings") + "?tab=privacy"))
+        self.assertNotIn("This must never appear in Mattermost.", str(payload))
+
 
 @override_settings(MATTERMOST_WEBHOOK_TIMEOUT_SECONDS=3)
 class MattermostWebhookPostTests(SimpleTestCase):
@@ -555,6 +620,55 @@ class MattermostWebhookDispatchTests(TestCase):
         self.assertEqual(post_mock.call_args.args[0].pk, endpoint.pk)
         payload = post_mock.call_args.args[1]
         self.assertEqual(payload["text"], "Organization claimed")
+
+    def test_membership_self_terminated_signal_posts_through_connected_receiver(self) -> None:
+        endpoint = MattermostWebhookEndpoint.objects.create(
+            label="Membership",
+            url="https://hooks.example.invalid/membership",
+            enabled=True,
+            events=["membership_self_terminated"],
+        )
+        membership_type = SimpleNamespace(code="individual", name="Individual")
+
+        with patch("core.mattermost_webhooks._post_to_endpoint") as post_mock:
+            CANONICAL_SIGNALS["membership_self_terminated"].send(
+                sender=MembershipLog,
+                actor="alice",
+                username="alice",
+                membership_type=membership_type,
+            )
+
+        post_mock.assert_called_once()
+        self.assertEqual(post_mock.call_args.args[0].pk, endpoint.pk)
+        payload = post_mock.call_args.args[1]
+        self.assertEqual(payload["text"], "Membership self-terminated")
+
+    def test_account_deletion_completed_signal_posts_through_connected_receiver(self) -> None:
+        endpoint = MattermostWebhookEndpoint.objects.create(
+            label="Privacy",
+            url="https://hooks.example.invalid/privacy",
+            enabled=True,
+            events=["account_deletion_completed"],
+        )
+        deletion_request = SimpleNamespace(
+            pk=42,
+            username="alice",
+            status="completed",
+            manual_review_required=False,
+            blocker_codes=[],
+        )
+
+        with patch("core.mattermost_webhooks._post_to_endpoint") as post_mock:
+            CANONICAL_SIGNALS["account_deletion_completed"].send(
+                sender=type(deletion_request),
+                account_deletion_request=deletion_request,
+                actor="admin",
+            )
+
+        post_mock.assert_called_once()
+        self.assertEqual(post_mock.call_args.args[0].pk, endpoint.pk)
+        payload = post_mock.call_args.args[1]
+        self.assertEqual(payload["text"], "Account deletion completed")
 
 
 class MattermostWebhookAdminTests(TestCase):

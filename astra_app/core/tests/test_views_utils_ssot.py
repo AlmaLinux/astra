@@ -30,7 +30,7 @@ class ViewsUtilsSSOTTests(SimpleTestCase):
         self.assertEqual(context["tabs"], [tab.tab_id for tab in SETTINGS_TAB_REGISTRY])
         self.assertEqual(
             [tab.tab_id for tab in context["settings_tabs"]],
-            ["profile", "emails", "keys", "security"],
+            ["profile", "emails", "keys", "security", "privacy", "membership"],
         )
         self.assertEqual(context["active_tab"], "profile")
         self.assertFalse(context["show_agreements_tab"])

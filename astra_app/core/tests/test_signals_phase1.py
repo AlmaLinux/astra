@@ -69,6 +69,13 @@ class Phase1SignalsRegistryTests(TestCase):
             "organization_created",
             "user_country_changed",
             "organization_country_changed",
+            "membership_self_terminated",
+            "account_deletion_requested",
+            "account_deletion_pending_privilege_check",
+            "account_deletion_approved",
+            "account_deletion_rejected",
+            "account_deletion_cancelled",
+            "account_deletion_completed",
         ]
 
         self.assertEqual(set(signal_module.CANONICAL_SIGNALS.keys()), set(expected_names))

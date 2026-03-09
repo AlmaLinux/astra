@@ -200,7 +200,6 @@ class FASAttributesTests(TestCase):
                 "fasIRCNick": "alice\nmatrix://matrix.example/alice",
                 "fasGitHubUsername": "alice-1",
                 "fasGitLabUsername": "alice_1",
-                "fasIsPrivate": "on",
             },
         )
         self._add_session_and_messages(req)
@@ -227,7 +226,6 @@ class FASAttributesTests(TestCase):
                 "fasTimezone=UTC",
                 "fasGitHubUsername=alice-1",
                 "fasGitLabUsername=alice_1",
-                "fasIsPrivate=TRUE",
             },
             del_=set(),
             direct={
@@ -523,7 +521,6 @@ class FASAttributesTests(TestCase):
                 "fasIRCNick": "alice:new.irc.example\n@alice:matrix.example",
                 "fasGitHubUsername": "alice-1",
                 "fasGitLabUsername": "alice_1",
-                # unchecked -> False
             },
         )
         self._add_session_and_messages(req)
@@ -550,7 +547,6 @@ class FASAttributesTests(TestCase):
                 "fasTimezone=Europe/Paris",
                 "fasGitHubUsername=alice-1",
                 "fasGitLabUsername=alice_1",
-                "fasIsPrivate=FALSE",
             },
             del_={
                 "fasPronoun=she/her",
@@ -567,6 +563,64 @@ class FASAttributesTests(TestCase):
         after = self._load_profile(fu)
         self.assertIn("they/them", after.get("pronouns", ""))
         self.assertEqual(after["fu"].full_name, "Alicia User")
+
+    @patch("core.forms_selfservice.get_timezone_options", autospec=True, return_value=["UTC"])
+    @patch("core.forms_selfservice.get_locale_options", autospec=True, return_value=["en-US"])
+    def test_profile_save_does_not_clear_private_profile_when_toggle_moved(self, _mock_locales, _mock_tzs):
+        fu = _DummyFreeIPAUser(
+            first_name="Alice",
+            last_name="User",
+            email="alice@example.com",
+            _user_data={
+                "cn": ["Alice User"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "fasIsPrivate": ["TRUE"],
+            },
+        )
+        self._seed_valid_country_code(fu)
+
+        client = SimpleNamespace(user_mod=Mock())
+        client.user_mod.side_effect = lambda _username, **kwargs: self._apply_user_mod_to_dummy(fu, kwargs)
+
+        req = self.factory.post(
+            "/settings/",
+            data={
+                "tab": "profile",
+                "givenname": "Alice",
+                "sn": "User-Updated",
+                "country_code": "US",
+                "fasPronoun": "",
+                "fasLocale": "",
+                "fasTimezone": "",
+                "fasWebsiteUrl": "",
+                "fasRssUrl": "",
+                "fasIRCNick": "",
+                "fasGitHubUsername": "",
+                "fasGitLabUsername": "",
+            },
+        )
+        self._add_session_and_messages(req)
+        req.user = self._auth_user()
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
+            with patch("core.ipa_user_attrs.FreeIPAUser.get", autospec=True, return_value=fu):
+                with patch("core.ipa_user_attrs.FreeIPAUser.get_client", autospec=True, return_value=client):
+                    resp = settings_root(req)
+
+        self.assertEqual(resp.status_code, 302)
+        self._assert_user_mod_called_with_sets(
+            client.user_mod,
+            "alice",
+            add=set(),
+            set_=set(),
+            del_=set(),
+            direct={
+                "o_sn": "User-Updated",
+                "o_cn": "Alice User-Updated",
+            },
+        )
+        self.assertEqual((fu._user_data or {}).get("fasIsPrivate"), ["TRUE"])
 
     @patch("core.forms_selfservice.get_timezone_options", autospec=True, return_value=["UTC"])
     @patch("core.forms_selfservice.get_locale_options", autospec=True, return_value=["en_US"])
@@ -613,7 +667,6 @@ class FASAttributesTests(TestCase):
                 "fasIRCNick": "",
                 "fasGitHubUsername": "",
                 "fasGitLabUsername": "",
-                # unchecked -> False
             },
         )
         self._add_session_and_messages(req)
@@ -629,7 +682,7 @@ class FASAttributesTests(TestCase):
             client.user_mod,
             "alice",
             add=set(),
-            set_={"fasIsPrivate=FALSE"},
+            set_=set(),
             del_={
                 "fasPronoun=she/her",
                 "fasPronoun=they/them",

@@ -1,0 +1,50 @@
+<div class="settings-privacy-tab">
+	<h2 class="h4">Privacy</h2>
+	<p class="text-muted">Manage your profile visibility and request account deletion review.</p>
+
+	<form method="post" action="{% url 'settings' %}" class="mb-4">
+		{% csrf_token %}
+		<input type="hidden" name="tab" value="privacy" />
+		{% include 'core/_form_field_checkbox.html' with field=privacy_form.fasIsPrivate help_text_override='Hide personal details, including your name and email, and hide your memberships from other signed-in users. Your profile stays visible, as do your groups.' %}
+		<button type="submit" class="btn btn-primary">Save privacy settings</button>
+	</form>
+
+	{% if privacy_warnings %}
+		<div class="alert alert-warning" role="alert">
+			<strong>Manual review required.</strong>
+			<ul class="mb-0 mt-2">
+				{% for warning in privacy_warnings %}
+					<li>{{ warning }}</li>
+				{% endfor %}
+			</ul>
+		</div>
+	{% endif %}
+
+	<div class="card border-danger">
+		<div class="card-body">
+			<h3 class="h5">Delete my account</h3>
+			<p class="text-muted">
+				Submitting a deletion request starts a staff-reviewed workflow. Some records may still be retained for legal,
+				security, election, or audit reasons.
+			</p>
+
+			{% if active_deletion_request %}
+				<div class="alert alert-info" role="alert">
+					Your current deletion request status is <strong>{{ active_deletion_request.get_status_display }}</strong>.
+				</div>
+				<p class="text-muted mb-0">
+					This request is already in progress. Contact support if you need help with the review.
+				</p>
+			{% else %}
+				<form method="post" action="{% url 'settings-account-deletion-request' %}" {% include 'core/_form_validation_attrs.html' with form=account_deletion_form %}>
+					{% csrf_token %}
+					{% include 'core/_form_field.html' with field=account_deletion_form.reason_category %}
+					{% include 'core/_form_field.html' with field=account_deletion_form.reason_text %}
+					{% include 'core/_form_field_checkbox.html' with field=account_deletion_form.acknowledge_retained_data %}
+					{% include 'core/_form_field.html' with field=account_deletion_form.current_password %}
+					<button type="submit" class="btn btn-danger">Submit deletion request</button>
+				</form>
+			{% endif %}
+		</div>
+	</div>
+</div>

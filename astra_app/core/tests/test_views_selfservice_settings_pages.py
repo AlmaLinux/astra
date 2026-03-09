@@ -140,7 +140,7 @@ class SelfServiceSettingsPagesTests(TestCase):
         self.assertEqual(widget_attrs.get("list"), "timezone-options")
         self.assertIn("Zurich", widget_attrs.get("placeholder", ""))
 
-    def test_settings_profile_get_accepts_boolean_fasisprivate(self):
+    def test_settings_privacy_get_accepts_boolean_fasisprivate(self):
         factory = RequestFactory()
 
         fake_user = SimpleNamespace(
@@ -158,7 +158,7 @@ class SelfServiceSettingsPagesTests(TestCase):
             },
         )
 
-        request = factory.get("/settings/")
+        request = factory.get("/settings/?tab=privacy")
         self._add_session_and_messages(request)
         request.user = self._auth_user("alice")
 
@@ -176,7 +176,7 @@ class SelfServiceSettingsPagesTests(TestCase):
         self.assertEqual(response.status_code, 200)
         ctx = captured.get("context")
         self.assertIsNotNone(ctx)
-        form = ctx["form"]
+        form = ctx["privacy_form"]
         self.assertTrue(form.initial.get("fasIsPrivate"))
 
     def test_settings_root_connection_error_shows_unavailable_message(self):

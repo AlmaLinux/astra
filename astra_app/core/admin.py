@@ -20,6 +20,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied
 from django.core.files.uploadedfile import InMemoryUploadedFile
+from django.db import transaction
 from django.http import Http404, HttpRequest, HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import redirect
 from django.template.response import TemplateResponse
@@ -32,6 +33,12 @@ from import_export.formats import base_formats
 from python_freeipa import exceptions
 from tablib import Dataset
 
+from core.account_deletion import (
+    ACCOUNT_DELETION_STATUS_EVENT_KEYS,
+    execute_account_deletion_request,
+    get_account_deletion_blockers,
+    schedule_account_deletion_signal,
+)
 from core.admin_import_preview_utils import apply_selected_row_numbers_initial, build_result_preview_transport
 from core.agreements import missing_required_agreements_for_user_in_group
 from core.csv_import_utils import get_result_attr
@@ -88,6 +95,7 @@ from core.views_utils import _normalize_str, get_username
 
 from .listbacked_queryset import _ListBackedQuerySet
 from .models import (
+    AccountDeletionRequest,
     AuditLogEntry,
     Candidate,
     Election,
@@ -1798,6 +1806,326 @@ class AuditLogEntryAdmin(ReadOnlyModelAdmin):
     search_fields = ("event_type",)
     ordering = ("-timestamp", "id")
     readonly_fields = ("election", "organization", "timestamp", "event_type", "payload", "is_public")
+
+
+@admin.register(AccountDeletionRequest)
+class AccountDeletionRequestAdmin(admin.ModelAdmin):
+    APPROVE_SOURCE_STATUSES = (
+        AccountDeletionRequest.Status.pending_review,
+        AccountDeletionRequest.Status.pending_privilege_check,
+        AccountDeletionRequest.Status.approved,
+    )
+    PENDING_PRIVILEGE_CHECK_SOURCE_STATUSES = (
+        AccountDeletionRequest.Status.pending_review,
+        AccountDeletionRequest.Status.approved,
+    )
+    CLOSE_SOURCE_STATUSES = AccountDeletionRequest.ACTIVE_STATUSES
+
+    list_display = (
+        "status",
+        "username",
+        "request_source",
+        "manual_review_flag",
+        "blockers_summary",
+        "created_at",
+        "updated_at",
+    )
+    list_filter = ("status", "request_source", "manual_review_required", "reason_category")
+    search_fields = ("username", "admin_outcome_notes")
+    ordering = ("-created_at", "-pk")
+    actions = (
+        "approve_requests",
+        "mark_requests_pending_privilege_check",
+        "reject_requests",
+        "cancel_requests",
+    )
+    readonly_fields = (
+        "username",
+        "request_source",
+        "status",
+        "reason_category",
+        "reason_text",
+        "manual_review_required",
+        "blocker_codes",
+        "fresh_auth_at",
+        "reason_cleanup_due_at",
+        "reason_text_cleared_at",
+        "created_at",
+        "updated_at",
+    )
+    fields = (
+        "username",
+        "request_source",
+        "status",
+        "reason_category",
+        "reason_text",
+        "manual_review_required",
+        "blocker_codes",
+        "fresh_auth_at",
+        "admin_outcome_notes",
+        "reason_cleanup_due_at",
+        "reason_text_cleared_at",
+        "created_at",
+        "updated_at",
+    )
+    approve_confirmation_template = "admin/core/accountdeletionrequest/approve_requests_confirmation.html"
+
+    @admin.display(description="Manual review")
+    def manual_review_flag(self, obj: AccountDeletionRequest) -> str:
+        return "Yes" if obj.manual_review_required else "No"
+
+    @admin.display(description="Blockers")
+    def blockers_summary(self, obj: AccountDeletionRequest) -> str:
+        blocker_codes = [str(code).strip() for code in obj.blocker_codes if str(code).strip()]
+        return ", ".join(blocker_codes) or "-"
+
+    @override
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False
+
+    @override
+    def has_delete_permission(self, request: HttpRequest, obj: object | None = None) -> bool:
+        return False
+
+    def _transition_requests(
+        self,
+        request: HttpRequest,
+        queryset,
+        *,
+        new_status: str,
+        allowed_source_statuses: tuple[str, ...],
+        success_label: str,
+        signal_event_key: str | None = None,
+    ) -> None:
+        updated = 0
+        skipped = 0
+        actor = get_username(request)
+
+        for deletion_request in queryset:
+            if deletion_request.status not in allowed_source_statuses:
+                skipped += 1
+                continue
+
+            previous_label = deletion_request.get_status_display()
+            deletion_request.status = new_status
+            try:
+                deletion_request.save()
+            except Exception as exc:
+                self.message_user(request, f"{deletion_request}: {exc}", level=messages.ERROR)
+                continue
+
+            self.log_change(
+                request,
+                deletion_request,
+                [{"changed": {"fields": ["status"], "name": f"{previous_label} -> {success_label}"}}],
+            )
+            if signal_event_key is not None:
+                schedule_account_deletion_signal(
+                    event_key=signal_event_key,
+                    account_deletion_request_id=deletion_request.pk,
+                    actor=actor,
+                )
+            updated += 1
+
+        if updated:
+            self.message_user(request, f"Updated {updated} request(s) to {success_label}.", level=messages.SUCCESS)
+        if skipped:
+            self.message_user(
+                request,
+                f"Skipped {skipped} request(s) that cannot transition to {success_label}.",
+                level=messages.WARNING,
+            )
+
+    @admin.action(description="Approve request(s)")
+    def approve_requests(self, request: HttpRequest, queryset) -> HttpResponse | None:
+        actor = get_username(request)
+        selected_request_ids = list(
+            dict.fromkeys(
+                request_id
+                for request_id in request.POST.getlist(helpers.ACTION_CHECKBOX_NAME)
+                if str(request_id).strip()
+            )
+        )
+        selected_requests = list(queryset)
+        eligible_requests = [
+            deletion_request
+            for deletion_request in selected_requests
+            if deletion_request.status in self.APPROVE_SOURCE_STATUSES
+        ]
+
+        if request.method != "POST" or not request.POST.get("post"):
+            if not eligible_requests:
+                self.message_user(
+                    request,
+                    (
+                        f"Skipped {len(selected_requests)} request(s) that cannot execute deletion; "
+                        "all selected rows are already closed."
+                    ),
+                    level=messages.WARNING,
+                )
+                return None
+
+            opts = self.model._meta
+            request.current_app = self.admin_site.name
+            return TemplateResponse(
+                request,
+                self.approve_confirmation_template,
+                {
+                    **self.admin_site.each_context(request),
+                    "title": "Approve and Execute Account Deletion Requests",
+                    "opts": opts,
+                    "queryset": selected_requests,
+                    "eligible_requests": eligible_requests,
+                    "ineligible_requests": [
+                        deletion_request
+                        for deletion_request in selected_requests
+                        if deletion_request.status not in self.APPROVE_SOURCE_STATUSES
+                    ],
+                    "action_checkbox_name": helpers.ACTION_CHECKBOX_NAME,
+                    "selected_request_ids": [str(deletion_request.pk) for deletion_request in selected_requests],
+                    "media": self.media,
+                    "changelist_url": reverse(
+                        f"admin:{opts.app_label}_{opts.model_name}_changelist",
+                    ),
+                    # Confirm against explicit IDs only so Django admin cannot widen the
+                    # destructive execution scope on repost when select_across was used.
+                    "select_across": "0",
+                },
+            )
+
+        if not selected_request_ids:
+            self.message_user(
+                request,
+                "No explicit account deletion request IDs were supplied for confirmed execution.",
+                level=messages.WARNING,
+            )
+            return None
+
+        executed = 0
+        skipped = 0
+
+        for request_id in selected_request_ids:
+            with transaction.atomic():
+                try:
+                    deletion_request = AccountDeletionRequest.objects.select_for_update().get(pk=request_id)
+                except AccountDeletionRequest.DoesNotExist:
+                    skipped += 1
+                    continue
+
+                if deletion_request.status not in self.APPROVE_SOURCE_STATUSES:
+                    skipped += 1
+                    continue
+
+                already_approved = deletion_request.status == AccountDeletionRequest.Status.approved
+                if not already_approved:
+                    previous_label = deletion_request.get_status_display()
+                    deletion_request.status = AccountDeletionRequest.Status.approved
+                    try:
+                        deletion_request.save()
+                    except Exception as exc:
+                        self.message_user(request, f"{deletion_request}: {exc}", level=messages.ERROR)
+                        continue
+
+                    self.log_change(
+                        request,
+                        deletion_request,
+                        [{"changed": {"fields": ["status"], "name": f"{previous_label} -> Approved"}}],
+                    )
+                    schedule_account_deletion_signal(
+                        event_key=ACCOUNT_DELETION_STATUS_EVENT_KEYS[AccountDeletionRequest.Status.approved],
+                        account_deletion_request_id=deletion_request.pk,
+                        actor=actor,
+                    )
+
+                # Keep the row locked across execution so concurrent confirm posts cannot
+                # run the same destructive request twice before the final status lands.
+                try:
+                    invalidated_sessions = execute_account_deletion_request(deletion_request)
+                except Exception as exc:
+                    blocker_codes, _warnings = get_account_deletion_blockers(deletion_request.username)
+                    failure_message = str(exc)
+                    if blocker_codes:
+                        deletion_request.manual_review_required = True
+                        deletion_request.blocker_codes = blocker_codes
+                        try:
+                            deletion_request.save(update_fields=["manual_review_required", "blocker_codes", "updated_at"])
+                        except Exception as metadata_exc:
+                            failure_message = f"{failure_message} Blocker metadata update failed: {metadata_exc}"
+
+                    self.log_change(request, deletion_request, f"Deletion execution failed: {failure_message}")
+                    self.message_user(request, f"{deletion_request}: {failure_message}", level=messages.ERROR)
+                    continue
+
+                deletion_request.status = AccountDeletionRequest.Status.completed
+                try:
+                    deletion_request.save()
+                except Exception as exc:
+                    deletion_request.status = AccountDeletionRequest.Status.approved
+                    self.log_change(
+                        request,
+                        deletion_request,
+                        f"Deletion execution failed after FreeIPA delete: {exc}",
+                    )
+                    self.message_user(request, f"{deletion_request}: {exc}", level=messages.ERROR)
+                    continue
+
+                self.log_change(
+                    request,
+                    deletion_request,
+                    (
+                        f"Approved -> Completed; executed account deletion for {deletion_request.username}; "
+                        f"invalidated {invalidated_sessions} session(s)."
+                    ),
+                )
+                schedule_account_deletion_signal(
+                    event_key=ACCOUNT_DELETION_STATUS_EVENT_KEYS[AccountDeletionRequest.Status.completed],
+                    account_deletion_request_id=deletion_request.pk,
+                    actor=actor,
+                )
+                executed += 1
+
+        if executed:
+            self.message_user(request, f"Approved and executed {executed} request(s).", level=messages.SUCCESS)
+        if skipped:
+            self.message_user(
+                request,
+                "Skipped "
+                f"{skipped} request(s) that cannot transition to {AccountDeletionRequest.Status.approved.label}.",
+                level=messages.WARNING,
+            )
+
+    @admin.action(description="Mark as pending privilege check")
+    def mark_requests_pending_privilege_check(self, request: HttpRequest, queryset) -> None:
+        self._transition_requests(
+            request,
+            queryset,
+            new_status=AccountDeletionRequest.Status.pending_privilege_check,
+            allowed_source_statuses=self.PENDING_PRIVILEGE_CHECK_SOURCE_STATUSES,
+            success_label=AccountDeletionRequest.Status.pending_privilege_check.label,
+            signal_event_key=ACCOUNT_DELETION_STATUS_EVENT_KEYS[AccountDeletionRequest.Status.pending_privilege_check],
+        )
+
+    @admin.action(description="Reject request(s)")
+    def reject_requests(self, request: HttpRequest, queryset) -> None:
+        self._transition_requests(
+            request,
+            queryset,
+            new_status=AccountDeletionRequest.Status.rejected,
+            allowed_source_statuses=self.CLOSE_SOURCE_STATUSES,
+            success_label=AccountDeletionRequest.Status.rejected.label,
+            signal_event_key=ACCOUNT_DELETION_STATUS_EVENT_KEYS[AccountDeletionRequest.Status.rejected],
+        )
+
+    @admin.action(description="Cancel request(s)")
+    def cancel_requests(self, request: HttpRequest, queryset) -> None:
+        self._transition_requests(
+            request,
+            queryset,
+            new_status=AccountDeletionRequest.Status.cancelled,
+            allowed_source_statuses=self.CLOSE_SOURCE_STATUSES,
+            success_label=AccountDeletionRequest.Status.cancelled.label,
+            signal_event_key=ACCOUNT_DELETION_STATUS_EVENT_KEYS[AccountDeletionRequest.Status.cancelled],
+        )
 
 
 @admin.register(MattermostWebhookEndpoint)

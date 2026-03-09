@@ -398,6 +398,7 @@ JAZZMIN_SETTINGS = {
                 "auth.ipauser",
                 "auth.ipagroup",
                 "core.organization",
+                "core.accountdeletionrequest",
             ],
         },
         {

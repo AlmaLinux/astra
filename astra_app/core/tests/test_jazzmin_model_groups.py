@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.test import SimpleTestCase
 
 from core.apps import _apply_jazzmin_model_groups
@@ -31,6 +32,12 @@ class JazzminModelGroupTests(SimpleTestCase):
                         "model_str": "core.organization",
                         "url": "/admin/core/organization/",
                         "icon": "fas fa-building",
+                    },
+                    {
+                        "name": "Account deletion requests",
+                        "model_str": "core.accountdeletionrequest",
+                        "url": "/admin/core/accountdeletionrequest/",
+                        "icon": "fas fa-user-times",
                     },
                     {
                         "name": "Membership type categories",
@@ -97,7 +104,10 @@ class JazzminModelGroupTests(SimpleTestCase):
         ]
 
         groups = [
-            {"name": "Users & Groups", "models": ["auth.ipauser", "auth.ipagroup", "core.organization"]},
+            {
+                "name": "Users & Groups",
+                "models": ["auth.ipauser", "auth.ipagroup", "core.organization", "core.accountdeletionrequest"],
+            },
             {
                 "name": "Elections",
                 "models": ["core.election", "core.candidate", "core.exclusiongroup", "core.auditlogentry"],
@@ -119,7 +129,10 @@ class JazzminModelGroupTests(SimpleTestCase):
         self.assertEqual([section["name"] for section in grouped_menu[:5]], [group["name"] for group in groups])
 
         users_and_groups_models = [model["model_str"] for model in grouped_menu[0]["models"]]
-        self.assertEqual(users_and_groups_models, ["auth.ipauser", "auth.ipagroup", "core.organization"])
+        self.assertEqual(
+            users_and_groups_models,
+            ["auth.ipauser", "auth.ipagroup", "core.organization", "core.accountdeletionrequest"],
+        )
 
         elections_models = [model["model_str"] for model in grouped_menu[1]["models"]]
         self.assertEqual(
@@ -132,6 +145,12 @@ class JazzminModelGroupTests(SimpleTestCase):
             for model in section.get("models", []):
                 imported_model_strs.append(model.get("model_str", ""))
         self.assertEqual(len(imported_model_strs), len(set(imported_model_strs)))
+
+    def test_jazzmin_settings_group_account_deletion_requests_with_users_and_groups(self) -> None:
+        groups = settings.JAZZMIN_SETTINGS["model_groups"]
+        users_and_groups = next(group for group in groups if group["name"] == "Users & Groups")
+
+        self.assertIn("core.accountdeletionrequest", users_and_groups["models"])
 
     def test_apply_jazzmin_model_groups_backfills_missing_models_from_fallback_menu(self) -> None:
         menu = [

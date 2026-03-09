@@ -30,6 +30,11 @@ from core.tokens import make_account_invitation_token
 logger = logging.getLogger(__name__)
 
 
+def privacy_reason_cleanup_due_at(*, reference_time: datetime.datetime | None = None) -> datetime.datetime:
+    base_time = reference_time or timezone.now()
+    return base_time + datetime.timedelta(days=30)
+
+
 def organization_logo_upload_to(instance: Organization, filename: str) -> str:
     # Always store organizations' logos with a deterministic name.
     # Access control (bucket policy / auth) must be the security boundary.
@@ -1204,6 +1209,130 @@ class MembershipLog(models.Model):
             membership_type=membership_type, membership_request=membership_request,
             action=cls.Action.ignored,
         )
+
+
+class MembershipTerminationFeedback(models.Model):
+    class TriggerSource(models.TextChoices):
+        settings_membership_tab = "settings_membership_tab", "Settings membership tab"
+
+    class ReasonCategory(models.TextChoices):
+        privacy = "privacy", "Privacy"
+        no_longer_needed = "no_longer_needed", "No longer needed"
+        duplicate = "duplicate", "Duplicate membership"
+        other = "other", "Other"
+
+    membership_log = models.OneToOneField(
+        MembershipLog,
+        on_delete=models.CASCADE,
+        related_name="termination_feedback",
+    )
+    username = models.CharField(max_length=255, db_index=True)
+    membership_type = models.ForeignKey(MembershipType, on_delete=models.PROTECT, related_name="+")
+    trigger_source = models.CharField(
+        max_length=64,
+        choices=TriggerSource.choices,
+        default=TriggerSource.settings_membership_tab,
+    )
+    reason_category = models.CharField(max_length=64, choices=ReasonCategory.choices)
+    reason_text = models.TextField(blank=True, default="")
+    reason_cleanup_due_at = models.DateTimeField(blank=True, null=True, db_index=True)
+    reason_text_cleared_at = models.DateTimeField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at", "-pk")
+        indexes = [
+            models.Index(fields=["username", "created_at"], name="mtf_user_created"),
+            models.Index(fields=["membership_type", "created_at"], name="mtf_type_created"),
+        ]
+
+    def __str__(self) -> str:
+        return f"Termination feedback {self.username} ({self.membership_type_id})"
+
+
+class AccountDeletionRequestQuerySet(models.QuerySet["AccountDeletionRequest"]):
+    def active(self) -> AccountDeletionRequestQuerySet:
+        return self.filter(status__in=AccountDeletionRequest.ACTIVE_STATUSES)
+
+
+class AccountDeletionRequest(models.Model):
+    class RequestSource(models.TextChoices):
+        user_settings = "user_settings", "User settings"
+        admin_created = "admin_created", "Admin created"
+
+    class Status(models.TextChoices):
+        pending_review = "pending_review", "Pending review"
+        pending_privilege_check = "pending_privilege_check", "Pending privilege check"
+        approved = "approved", "Approved"
+        rejected = "rejected", "Rejected"
+        cancelled = "cancelled", "Cancelled"
+        completed = "completed", "Completed"
+
+    class ReasonCategory(models.TextChoices):
+        privacy = "privacy", "Privacy"
+        security = "security", "Security"
+        no_longer_needed = "no_longer_needed", "No longer needed"
+        other = "other", "Other"
+
+    ACTIVE_STATUSES: tuple[str, ...] = (
+        Status.pending_review,
+        Status.pending_privilege_check,
+        Status.approved,
+    )
+    CLOSED_STATUSES: tuple[str, ...] = (
+        Status.rejected,
+        Status.cancelled,
+        Status.completed,
+    )
+
+    username = models.CharField(max_length=255, db_index=True)
+    request_source = models.CharField(
+        max_length=32,
+        choices=RequestSource.choices,
+        default=RequestSource.user_settings,
+    )
+    status = models.CharField(max_length=32, choices=Status.choices, default=Status.pending_review, db_index=True)
+    reason_category = models.CharField(max_length=64, choices=ReasonCategory.choices)
+    reason_text = models.TextField(blank=True, default="")
+    manual_review_required = models.BooleanField(default=False)
+    blocker_codes = models.JSONField(default=list, blank=True)
+    fresh_auth_at = models.DateTimeField(blank=True, null=True)
+    admin_outcome_notes = models.TextField(blank=True, default="")
+    reason_cleanup_due_at = models.DateTimeField(blank=True, null=True, db_index=True)
+    reason_text_cleared_at = models.DateTimeField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = AccountDeletionRequestQuerySet.as_manager()
+
+    class Meta:
+        ordering = ("-created_at", "-pk")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["username"],
+                condition=Q(status__in=["pending_review", "pending_privilege_check", "approved"]),
+                name="uniq_active_account_deletion_request_per_user",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["username", "created_at"], name="adr_user_created"),
+            models.Index(fields=["status", "created_at"], name="adr_status_created"),
+        ]
+
+    def __str__(self) -> str:
+        return f"Account deletion request {self.username} [{self.status}]"
+
+    @override
+    def save(self, *args, **kwargs) -> None:
+        if (
+            self.reason_text
+            and self.status in self.CLOSED_STATUSES
+            and self.reason_cleanup_due_at is None
+            and self.reason_text_cleared_at is None
+        ):
+            self.reason_cleanup_due_at = privacy_reason_cleanup_due_at()
+
+        super().save(*args, **kwargs)
 
 
 

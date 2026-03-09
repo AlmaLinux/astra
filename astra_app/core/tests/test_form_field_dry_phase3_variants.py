@@ -52,7 +52,9 @@ class FormFieldDryPhase3VariantTests(SimpleTestCase):
                 "{% include 'core/_form_field.html' with field=profile_form.country_code wrapper_attrs='id=\"country-code-field-wrapper\"' %}",
                 "{% include 'core/_form_field_input_group.html' with field=profile_form.fasGitHubUsername prefix='@' %}",
                 "{% include 'core/_form_field_input_group.html' with field=profile_form.fasGitLabUsername prefix='@' %}",
-                "{% include 'core/_form_field_checkbox.html' with field=profile_form.fasIsPrivate help_text_override='Hide personal details (including your name and email) from other signed-in users. Your profile stays visible, as do your groups and memberships.' %}",
+            ],
+            "_settings_tab_privacy.html": [
+                "{% include 'core/_form_field_checkbox.html' with field=privacy_form.fasIsPrivate help_text_override='Hide personal details, including your name and email, and hide your memberships from other signed-in users. Your profile stays visible, as do your groups.' %}",
             ],
         }
 

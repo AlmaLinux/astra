@@ -136,9 +136,11 @@ class FASIsPrivateAnonymizeTests(TestCase):
         finally:
             clear_current_viewer_username()
 
+        fas_group = SimpleNamespace(cn="packagers", fas_group=True, sponsors=[])
+
         with (
             patch("core.views_users._get_full_user", autospec=True, return_value=bob),
-            patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]),
+            patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[fas_group]),
             patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
         ):
             resp = views_users.user_profile(request, "bob")
@@ -146,6 +148,7 @@ class FASIsPrivateAnonymizeTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode("utf-8")
         self.assertNotIn("Membership</strong>", html)
+        self.assertIn("packagers", html)
 
     def test_user_profile_shows_membership_card_for_private_profile_self_viewer(self) -> None:
         factory = RequestFactory()

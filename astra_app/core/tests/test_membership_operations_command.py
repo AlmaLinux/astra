@@ -21,6 +21,7 @@ class MembershipOperationsCommandTests(TestCase):
                 call("membership_pending_requests", force=False, dry_run=False),
                 call("membership_embargoed_members", force=False, dry_run=False),
                 call("membership_mirror_validation", force=False, dry_run=False),
+                call("selfservice_lifecycle_cleanup", dry_run=False),
             ],
         )
 
@@ -39,6 +40,7 @@ class MembershipOperationsCommandTests(TestCase):
                 call("membership_pending_requests", force=True, dry_run=False),
                 call("membership_embargoed_members", force=True, dry_run=False),
                 call("membership_mirror_validation", force=True, dry_run=False),
+                call("selfservice_lifecycle_cleanup", dry_run=False),
             ],
         )
 
@@ -57,5 +59,6 @@ class MembershipOperationsCommandTests(TestCase):
                 call("membership_pending_requests", force=False, dry_run=True),
                 call("membership_embargoed_members", force=False, dry_run=True),
                 call("membership_mirror_validation", force=False, dry_run=True),
+                call("selfservice_lifecycle_cleanup", dry_run=True),
             ],
         )

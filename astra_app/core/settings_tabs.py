@@ -14,7 +14,9 @@ SETTINGS_TAB_REGISTRY: Final[tuple[SettingsTabSpec, ...]] = (
     SettingsTabSpec("emails", "Emails", "core/_settings_tab_emails.html"),
     SettingsTabSpec("keys", "SSH & GPG Keys", "core/_settings_tab_keys.html"),
     SettingsTabSpec("security", "Security", "core/_settings_tab_security.html"),
+    SettingsTabSpec("privacy", "Privacy", "core/_settings_tab_privacy.html"),
     SettingsTabSpec("agreements", "Agreements", "core/_settings_tab_agreements.html"),
+    SettingsTabSpec("membership", "Membership", "core/_settings_tab_membership.html"),
 )
 SETTINGS_DEFAULT_TAB: Final[str] = SETTINGS_TAB_REGISTRY[0].tab_id
 _ALL_SETTINGS_TAB_IDS: Final[frozenset[str]] = frozenset(tab.tab_id for tab in SETTINGS_TAB_REGISTRY)

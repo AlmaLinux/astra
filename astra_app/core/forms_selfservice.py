@@ -20,6 +20,7 @@ from core.forms_security import (
     make_password_field,
 )
 from core.ipa_user_attrs import _split_list_field
+from core.models import AccountDeletionRequest, MembershipTerminationFeedback
 from core.profanity import validate_no_profanity_or_hate_speech
 from core.views_utils import _normalize_str
 
@@ -246,8 +247,6 @@ class ProfileForm(StyledForm):
         widget=forms.TextInput(attrs={"autocomplete": "username"}),
     )
 
-    fasIsPrivate = forms.BooleanField(label="Private profile", required=False)
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -397,6 +396,61 @@ class EmailsForm(StyledForm):
         if not value:
             return ""
         return validate_no_profanity_or_hate_speech(value, field_label="Bugzilla email")
+
+
+class PrivacySettingsForm(StyledForm):
+    fasIsPrivate = forms.BooleanField(
+        label="Hide profile details",
+        required=False,
+        help_text=(
+            "Hide personal details, including your name and email, and hide your memberships "
+            "from other signed-in users. Your profile stays visible, as do your groups."
+        ),
+    )
+
+
+class MembershipTerminationForm(StyledForm):
+    reason_category = forms.ChoiceField(
+        label="Why are you leaving this membership?",
+        choices=MembershipTerminationFeedback.ReasonCategory.choices,
+    )
+    reason_text = forms.CharField(
+        label="Optional details",
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 4}),
+        help_text="Visible only to authorized operators and cleared after the retention window.",
+    )
+    current_password = make_password_field(
+        label="Current password",
+        help_text="Enter your current password to leave this membership.",
+    )
+
+    def clean_reason_text(self) -> str:
+        return _normalize_str(self.cleaned_data.get("reason_text"))
+
+
+class AccountDeletionRequestForm(StyledForm):
+    reason_category = forms.ChoiceField(
+        label="Why are you requesting account deletion?",
+        choices=AccountDeletionRequest.ReasonCategory.choices,
+    )
+    reason_text = forms.CharField(
+        label="Optional details",
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 4}),
+        help_text="Visible only to authorized operators and cleared after the retention window.",
+    )
+    acknowledge_retained_data = forms.BooleanField(
+        label="I understand that some records may be retained for legal, security, or audit reasons.",
+        required=True,
+    )
+    current_password = make_password_field(
+        label="Current password",
+        help_text="Enter your current password to submit this request.",
+    )
+
+    def clean_reason_text(self) -> str:
+        return _normalize_str(self.cleaned_data.get("reason_text"))
 
 
 class KeysForm(StyledForm):

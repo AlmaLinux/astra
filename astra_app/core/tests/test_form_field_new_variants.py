@@ -46,17 +46,21 @@ class FormFieldNewVariantsTests(SimpleTestCase):
 
     def test_settings_templates_use_new_variant_includes(self) -> None:
         profile_template = self._read_template("_settings_tab_profile.html")
+        membership_template = self._read_template("_settings_tab_membership.html")
+        privacy_template = self._read_template("_settings_tab_privacy.html")
         keys_template = self._read_template("_settings_tab_keys.html")
 
         profile_snippets = [
             "{% include 'core/_form_field_input_group.html' with field=profile_form.fasGitHubUsername prefix='@' %}",
             "{% include 'core/_form_field_input_group.html' with field=profile_form.fasGitLabUsername prefix='@' %}",
-            "{% include 'core/_form_field_checkbox.html' with field=profile_form.fasIsPrivate help_text_override='Hide personal details (including your name and email) from other signed-in users. Your profile stays visible, as do your groups and memberships.' %}",
             "{% include 'core/_form_field_datalist.html' with field=profile_form.fasLocale datalist_id='locale-options' datalist_options=profile_form.fasLocale.field.choices %}",
             "{% include 'core/_form_field_datalist.html' with field=profile_form.fasTimezone datalist_id='timezone-options' datalist_options=profile_form.fasTimezone.field.choices %}",
             "with field=profile_form.fasWebsiteUrl widget_id='website-urls-widget' fallback_id='website-urls-fallback'",
             "with field=profile_form.fasRssUrl widget_id='rss-urls-widget' fallback_id='rss-urls-fallback'",
             "with field=profile_form.fasIRCNick widget_id='chat-nicks-widget' fallback_id='chat-nicks-fallback'",
+        ]
+        privacy_snippets = [
+            "{% include 'core/_form_field_checkbox.html' with field=privacy_form.fasIsPrivate help_text_override='Hide personal details, including your name and email, and hide your memberships from other signed-in users. Your profile stays visible, as do your groups.' %}",
         ]
 
         keys_snippets = [
@@ -67,6 +71,15 @@ class FormFieldNewVariantsTests(SimpleTestCase):
         for snippet in profile_snippets:
             with self.subTest(template="_settings_tab_profile.html", snippet=snippet):
                 self.assertIn(snippet, profile_template)
+
+        for snippet in privacy_snippets:
+            with self.subTest(template="_settings_tab_privacy.html", snippet=snippet):
+                self.assertIn(snippet, privacy_template)
+
+        self.assertIn("core/_form_validation_attrs.html", membership_template)
+        self.assertIn("core/_form_field.html", membership_template)
+        self.assertNotIn("confirm_membership_name", membership_template)
+        self.assertNotIn("confirm_account_name", privacy_template)
 
         for snippet in keys_snippets:
             with self.subTest(template="_settings_tab_keys.html", snippet=snippet):
