@@ -10,14 +10,14 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from python_freeipa import exceptions
+from python_freeipa import ClientMeta, exceptions
 
 from core.account_invitation_reconcile import (
     load_account_invitation_from_token,
     reconcile_account_invitation_for_username,
 )
 from core.email_context import system_email_context
-from core.freeipa.client import _build_freeipa_client
+from core.freeipa.client import _build_freeipa_client, _with_freeipa_service_client_retry
 from core.freeipa.user import FreeIPAUser
 from core.rate_limit import allow_request
 from core.templated_email import queue_templated_email
@@ -32,7 +32,40 @@ from .forms_registration import PasswordSetForm, RegistrationForm, ResendRegistr
 from .tokens import make_registration_activation_token, read_registration_activation_token
 
 logger = logging.getLogger(__name__)
-def _stageuser_add(client, username: str, **kwargs):
+
+REGISTRATION_TEMPORARILY_UNAVAILABLE_MESSAGE = (
+    "Registration is temporarily unavailable. Please try again in a few minutes. "
+    "If the problem continues, contact support."
+)
+
+
+def _registration_freeipa_log_extra(
+    request: HttpRequest,
+    *,
+    freeipa_phase: str,
+    freeipa_exception_class: str,
+    retry_attempted: bool,
+    retry_outcome: str,
+) -> dict[str, str | bool]:
+    log_payload: dict[str, str | bool] = {
+        "event": "astra.registration.freeipa_unauthorized",
+        "component": "registration",
+        "freeipa_phase": freeipa_phase,
+        "freeipa_exception_class": freeipa_exception_class,
+        "retry_attempted": retry_attempted,
+        "retry_outcome": retry_outcome,
+    }
+
+    request_id = _normalize_str(request.META.get("HTTP_X_REQUEST_ID"))
+    if not request_id:
+        request_id = _normalize_str(request.headers.get("X-Request-ID"))
+    if request_id:
+        log_payload["request_id"] = request_id
+
+    return log_payload
+
+
+def _stageuser_add(client: ClientMeta, username: str, **kwargs: object) -> object:
     # python-freeipa call signatures vary by version. Try a couple.
     try:
         return client.stageuser_add(username, **kwargs)
@@ -40,14 +73,14 @@ def _stageuser_add(client, username: str, **kwargs):
         return client.stageuser_add(a_uid=username, **kwargs)
 
 
-def _stageuser_show(client, username: str):
+def _stageuser_show(client: ClientMeta, username: str) -> object:
     try:
         return client.stageuser_show(username)
     except TypeError:
         return client.stageuser_show(a_uid=username)
 
 
-def _stageuser_activate(client, username: str):
+def _stageuser_activate(client: ClientMeta, username: str) -> object:
     try:
         return client.stageuser_activate(username)
     except TypeError:
@@ -161,18 +194,44 @@ def register(request: HttpRequest) -> HttpResponse:
 
         common_name = f"{first_name} {last_name}".strip() or username
 
-        client = FreeIPAUser.get_client()
+        freeipa_phase = "service_login"
+        last_unauthorized_phase: str | None = None
+        get_client_calls = 0
+        stageuser_add_calls = 0
+
+        def _get_service_client() -> ClientMeta:
+            nonlocal freeipa_phase, get_client_calls, last_unauthorized_phase
+
+            freeipa_phase = "service_login"
+            get_client_calls += 1
+            try:
+                return FreeIPAUser.get_client()
+            except exceptions.Unauthorized:
+                last_unauthorized_phase = freeipa_phase
+                raise
+
+        def _create_stageuser(client: ClientMeta) -> object:
+            nonlocal freeipa_phase, stageuser_add_calls, last_unauthorized_phase
+
+            freeipa_phase = "stageuser_add"
+            stageuser_add_calls += 1
+            try:
+                return _stageuser_add(
+                    client,
+                    username,
+                    o_givenname=first_name,
+                    o_sn=last_name,
+                    o_cn=common_name,
+                    o_mail=email,
+                    o_loginshell="/bin/bash",
+                    fasstatusnote="active",
+                )
+            except exceptions.Unauthorized:
+                last_unauthorized_phase = freeipa_phase
+                raise
+
         try:
-            result = _stageuser_add(
-                client,
-                username,
-                o_givenname=first_name,
-                o_sn=last_name,
-                o_cn=common_name,
-                o_mail=email,
-                o_loginshell="/bin/bash",
-                fasstatusnote="active",
-            )
+            result = _with_freeipa_service_client_retry(_get_service_client, _create_stageuser)
             _ = result
         except exceptions.DuplicateEntry:
             form.add_error(None, f"The username '{username}' or the email address '{email}' are already taken.")
@@ -181,6 +240,21 @@ def register(request: HttpRequest) -> HttpResponse:
             # FreeIPA often encodes field name inside the message; keep it generic.
             logger.info("Registration validation error username=%s error=%s", username, e)
             form.add_error(None, str(e))
+            return render(request, "core/register.html", {"form": form, "registration_open": settings.REGISTRATION_OPEN})
+        except exceptions.Unauthorized as e:
+            retry_attempted = get_client_calls > 1 or stageuser_add_calls > 1
+            logged_freeipa_phase = last_unauthorized_phase or freeipa_phase
+            logger.warning(
+                "Registration FreeIPA Unauthorized",
+                extra=_registration_freeipa_log_extra(
+                    request,
+                    freeipa_phase=logged_freeipa_phase,
+                    freeipa_exception_class=e.__class__.__name__,
+                    retry_attempted=retry_attempted,
+                    retry_outcome="failed" if retry_attempted else "not_attempted",
+                ),
+            )
+            form.add_error(None, REGISTRATION_TEMPORARILY_UNAVAILABLE_MESSAGE)
             return render(request, "core/register.html", {"form": form, "registration_open": settings.REGISTRATION_OPEN})
         except exceptions.FreeIPAError as e:
             logger.warning("Registration FreeIPA error username=%s error=%s", username, e)
@@ -196,6 +270,20 @@ def register(request: HttpRequest) -> HttpResponse:
             else:
                 form.add_error(None, "Unable to create account due to an internal error.")
             return render(request, "core/register.html", {"form": form, "registration_open": settings.REGISTRATION_OPEN})
+
+        retry_attempted = get_client_calls > 1 or stageuser_add_calls > 1
+        if retry_attempted:
+            logged_freeipa_phase = last_unauthorized_phase or freeipa_phase
+            logger.info(
+                "Registration FreeIPA Unauthorized recovered",
+                extra=_registration_freeipa_log_extra(
+                    request,
+                    freeipa_phase=logged_freeipa_phase,
+                    freeipa_exception_class="Unauthorized",
+                    retry_attempted=True,
+                    retry_outcome="recovered",
+                ),
+            )
 
         try:
             _send_registration_email(

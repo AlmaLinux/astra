@@ -1,7 +1,7 @@
 
 import re
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from urllib.parse import unquote
 
 from django.contrib.messages import get_messages
@@ -13,6 +13,11 @@ from core.models import AccountInvitation
 from core.tests.utils_test_data import ensure_email_templates
 from core.tokens import read_registration_activation_token
 from core.views_auth import PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY
+
+REGISTRATION_TEMPORARILY_UNAVAILABLE_MESSAGE = (
+    "Registration is temporarily unavailable. Please try again in a few minutes. "
+    "If the problem continues, contact support."
+)
 
 
 class RegistrationFlowTests(TestCase):
@@ -215,6 +220,196 @@ class RegistrationFlowTests(TestCase):
         self.assertEqual(ctx.get("last_name"), "User")
         self.assertIn("full_name", ctx)
         self.assertNotIn("displayname", ctx)
+
+    @override_settings(REGISTRATION_OPEN=True, DEBUG=False)
+    def test_register_post_service_login_unauthorized_shows_service_message_and_logs_metadata(self) -> None:
+        client = Client()
+
+        with (
+            patch(
+                "core.views_registration.FreeIPAUser.get_client",
+                autospec=True,
+                side_effect=exceptions.Unauthorized(),
+            ),
+            patch("core.views_registration.logger.warning") as warning_mock,
+        ):
+            response = client.post(
+                "/register/",
+                data={
+                    "username": "alice",
+                    "first_name": "Alice",
+                    "last_name": "User",
+                    "email": "alice@example.com",
+                    "over_16": "on",
+                },
+                HTTP_X_REQUEST_ID="req-169-service-login",
+                follow=False,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, REGISTRATION_TEMPORARILY_UNAVAILABLE_MESSAGE)
+        self.assertNotContains(response, "An error occurred while creating the account, please try again.")
+        warning_mock.assert_called_once()
+        log_extra = warning_mock.call_args.kwargs["extra"]
+        self.assertEqual(log_extra["freeipa_phase"], "service_login")
+        self.assertEqual(log_extra["freeipa_exception_class"], "Unauthorized")
+        self.assertTrue(log_extra["retry_attempted"])
+        self.assertEqual(log_extra["retry_outcome"], "failed")
+        self.assertEqual(log_extra["request_id"], "req-169-service-login")
+        self.assertNotIn("alice@example.com", str(log_extra).lower())
+
+    @override_settings(REGISTRATION_OPEN=True, DEFAULT_FROM_EMAIL="noreply@example.com")
+    def test_register_post_service_login_unauthorized_recovery_logs_service_login_phase(self) -> None:
+        client = Client()
+
+        recovered_client = SimpleNamespace()
+        recovered_client.stageuser_add = Mock(
+            return_value={
+                "result": {
+                    "uid": ["alice"],
+                    "givenname": ["Alice"],
+                    "sn": ["User"],
+                    "mail": ["alice@example.com"],
+                }
+            }
+        )
+
+        with (
+            patch(
+                "core.views_registration.FreeIPAUser.get_client",
+                autospec=True,
+                side_effect=[exceptions.Unauthorized(), recovered_client],
+            ) as get_client_mock,
+            patch("core.views_registration._send_registration_email", autospec=True) as send_email_mock,
+            patch("core.views_registration.logger.info") as info_mock,
+            patch("core.views_registration.logger.warning") as warning_mock,
+        ):
+            response = client.post(
+                "/register/",
+                data={
+                    "username": "alice",
+                    "first_name": "Alice",
+                    "last_name": "User",
+                    "email": "alice@example.com",
+                    "over_16": "on",
+                },
+                HTTP_X_REQUEST_ID="req-169-service-login-recovered",
+                follow=False,
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response["Location"].startswith("/register/confirm"))
+        self.assertEqual(get_client_mock.call_count, 2)
+        send_email_mock.assert_called_once()
+        warning_mock.assert_not_called()
+        info_mock.assert_called_once()
+        log_extra = info_mock.call_args.kwargs["extra"]
+        self.assertEqual(log_extra["freeipa_phase"], "service_login")
+        self.assertEqual(log_extra["freeipa_exception_class"], "Unauthorized")
+        self.assertTrue(log_extra["retry_attempted"])
+        self.assertEqual(log_extra["retry_outcome"], "recovered")
+        self.assertEqual(log_extra["request_id"], "req-169-service-login-recovered")
+        self.assertNotIn("alice@example.com", str(log_extra).lower())
+
+    @override_settings(REGISTRATION_OPEN=True, DEFAULT_FROM_EMAIL="noreply@example.com")
+    def test_register_post_stageuser_add_unauthorized_retries_once_and_logs_recovery(self) -> None:
+        client = Client()
+
+        first_client = SimpleNamespace()
+        second_client = SimpleNamespace()
+        first_client.stageuser_add = Mock(side_effect=exceptions.Unauthorized())
+        second_client.stageuser_add = Mock(
+            return_value={
+                "result": {
+                    "uid": ["alice"],
+                    "givenname": ["Alice"],
+                    "sn": ["User"],
+                    "mail": ["alice@example.com"],
+                }
+            }
+        )
+
+        with (
+            patch(
+                "core.views_registration.FreeIPAUser.get_client",
+                autospec=True,
+                side_effect=[first_client, second_client],
+            ) as get_client_mock,
+            patch("core.views_registration._send_registration_email", autospec=True) as send_email_mock,
+            patch("core.views_registration.logger.info") as info_mock,
+            patch("core.views_registration.logger.warning") as warning_mock,
+        ):
+            response = client.post(
+                "/register/",
+                data={
+                    "username": "alice",
+                    "first_name": "Alice",
+                    "last_name": "User",
+                    "email": "alice@example.com",
+                    "over_16": "on",
+                },
+                HTTP_X_REQUEST_ID="req-169-stageuser-recovered",
+                follow=False,
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response["Location"].startswith("/register/confirm"))
+        self.assertEqual(get_client_mock.call_count, 2)
+        send_email_mock.assert_called_once()
+        warning_mock.assert_not_called()
+        info_mock.assert_called_once()
+        log_extra = info_mock.call_args.kwargs["extra"]
+        self.assertEqual(log_extra["freeipa_phase"], "stageuser_add")
+        self.assertEqual(log_extra["freeipa_exception_class"], "Unauthorized")
+        self.assertTrue(log_extra["retry_attempted"])
+        self.assertEqual(log_extra["retry_outcome"], "recovered")
+        self.assertEqual(log_extra["request_id"], "req-169-stageuser-recovered")
+        self.assertNotIn("alice@example.com", str(log_extra).lower())
+
+    @override_settings(REGISTRATION_OPEN=True, DEBUG=False)
+    def test_register_post_stageuser_add_unauthorized_after_retry_shows_service_message(self) -> None:
+        client = Client()
+
+        first_client = SimpleNamespace()
+        second_client = SimpleNamespace()
+        first_client.stageuser_add = Mock(side_effect=exceptions.Unauthorized())
+        second_client.stageuser_add = Mock(side_effect=exceptions.Unauthorized())
+
+        with (
+            patch(
+                "core.views_registration.FreeIPAUser.get_client",
+                autospec=True,
+                side_effect=[first_client, second_client],
+            ) as get_client_mock,
+            patch("core.views_registration._send_registration_email", autospec=True) as send_email_mock,
+            patch("core.views_registration.logger.warning") as warning_mock,
+        ):
+            response = client.post(
+                "/register/",
+                data={
+                    "username": "alice",
+                    "first_name": "Alice",
+                    "last_name": "User",
+                    "email": "alice@example.com",
+                    "over_16": "on",
+                },
+                HTTP_X_REQUEST_ID="req-169-stageuser-failed",
+                follow=False,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(get_client_mock.call_count, 2)
+        send_email_mock.assert_not_called()
+        self.assertContains(response, REGISTRATION_TEMPORARILY_UNAVAILABLE_MESSAGE)
+        self.assertNotContains(response, "An error occurred while creating the account, please try again.")
+        warning_mock.assert_called_once()
+        log_extra = warning_mock.call_args.kwargs["extra"]
+        self.assertEqual(log_extra["freeipa_phase"], "stageuser_add")
+        self.assertEqual(log_extra["freeipa_exception_class"], "Unauthorized")
+        self.assertTrue(log_extra["retry_attempted"])
+        self.assertEqual(log_extra["retry_outcome"], "failed")
+        self.assertEqual(log_extra["request_id"], "req-169-stageuser-failed")
+        self.assertNotIn("alice@example.com", str(log_extra).lower())
 
     @override_settings(
         REGISTRATION_OPEN=True,

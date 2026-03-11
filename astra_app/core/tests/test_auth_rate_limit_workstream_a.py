@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
+from django.core.cache import cache
 from django.test import Client, TestCase
+from django.test.utils import override_settings
 from django.urls import reverse
+from python_freeipa import exceptions
 
 from core.rate_limit import allow_request
 
@@ -224,6 +228,11 @@ class AuthRateLimitEndpointTests(TestCase):
 
         self.assertEqual(response.status_code, 429)
         self.assertContains(response, "Too many registration attempts", status_code=429)
+        self.assertNotContains(
+            response,
+            "An error occurred while creating the account, please try again.",
+            status_code=429,
+        )
         get_client_mock.assert_not_called()
         allow_mock.assert_called_once()
         warning_mock.assert_called_once()
@@ -241,3 +250,69 @@ class AuthRateLimitEndpointTests(TestCase):
         self.assertIn("subject_hash", log_extra)
         self.assertNotIn("198.51.100.22", str(log_extra))
         self.assertNotIn("alice@example.com", str(log_extra).lower())
+
+    @override_settings(
+        REGISTRATION_OPEN=True,
+        DEBUG=False,
+        AUTH_RATE_LIMIT_REGISTRATION_LIMIT=2,
+        AUTH_RATE_LIMIT_REGISTRATION_WINDOW_SECONDS=900,
+    )
+    def test_registration_repeated_backend_failures_then_denial_shows_429_message(self) -> None:
+        client = Client()
+        cache.clear()
+
+        failing_client = SimpleNamespace(stageuser_add=Mock(side_effect=exceptions.FreeIPAError("backend down")))
+
+        with patch(
+            "core.views_registration.FreeIPAUser.get_client",
+            autospec=True,
+            return_value=failing_client,
+        ) as get_client_mock:
+            first_response = client.post(
+                reverse("register"),
+                data={
+                    "username": "alice",
+                    "first_name": "Alice",
+                    "last_name": "User",
+                    "email": "alice@example.com",
+                    "over_16": "on",
+                },
+                REMOTE_ADDR="198.51.100.23",
+            )
+            second_response = client.post(
+                reverse("register"),
+                data={
+                    "username": "alice",
+                    "first_name": "Alice",
+                    "last_name": "User",
+                    "email": "alice@example.com",
+                    "over_16": "on",
+                },
+                REMOTE_ADDR="198.51.100.23",
+            )
+            third_response = client.post(
+                reverse("register"),
+                data={
+                    "username": "alice",
+                    "first_name": "Alice",
+                    "last_name": "User",
+                    "email": "alice@example.com",
+                    "over_16": "on",
+                },
+                REMOTE_ADDR="198.51.100.23",
+            )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertContains(first_response, "An error occurred while creating the account, please try again.")
+        self.assertEqual(second_response.status_code, 200)
+        self.assertContains(second_response, "An error occurred while creating the account, please try again.")
+        self.assertEqual(third_response.status_code, 429)
+        self.assertContains(third_response, "Too many registration attempts. Please try again later.", status_code=429)
+        self.assertNotContains(
+            third_response,
+            "An error occurred while creating the account, please try again.",
+            status_code=429,
+        )
+        self.assertEqual(get_client_mock.call_count, 2)
+
+        cache.clear()
