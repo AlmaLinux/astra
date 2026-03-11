@@ -3,6 +3,7 @@ import hashlib
 import ipaddress
 import json
 import logging
+import re
 import socket
 from dataclasses import dataclass
 from urllib.parse import SplitResult, urlsplit, urlunsplit
@@ -12,13 +13,15 @@ import urllib3
 from django.db import transaction
 from django.utils import timezone
 
-from core.forms_membership import MembershipRequestForm, _AnswerKind, _QuestionSpec
+from core.forms_membership import (
+    ADDITIONAL_INFORMATION_QUESTION,
+    MembershipRequestForm,
+    _AnswerKind,
+    _QuestionSpec,
+)
 from core.membership_constants import MembershipCategoryCode
 from core.membership_notes import CUSTOS, add_note
-from core.membership_response_normalization import (
-    ADDITIONAL_INFORMATION_QUESTION,
-    normalize_membership_request_responses,
-)
+from core.membership_response_normalization import normalize_membership_request_responses
 from core.models import MembershipRequest, MembershipType, MirrorMembershipValidation
 
 _HTTP_TIMEOUT_SECONDS = 5
@@ -256,11 +259,49 @@ def dry_run_validations(*, now: datetime.datetime, force: bool) -> list[MirrorMe
     return list(eligible_validation_queryset(now=now, force=force).order_by("next_run_at", "pk"))
 
 
+@transaction.atomic
+def claim_validation_for_request(
+    *,
+    membership_request: MembershipRequest,
+    now: datetime.datetime,
+) -> MirrorMembershipValidation:
+    answers = mirror_request_answers(membership_request)
+    answer_fingerprint = ""
+    if answers is not None:
+        answer_fingerprint = mirror_answers_fingerprint(answers)
+
+    validation, _created = MirrorMembershipValidation.objects.select_for_update().get_or_create(
+        membership_request=membership_request,
+        defaults={
+            "status": MirrorMembershipValidation.Status.pending,
+            "answer_fingerprint": answer_fingerprint,
+            "next_run_at": now,
+        },
+    )
+
+    validation.status = MirrorMembershipValidation.Status.running
+    validation.answer_fingerprint = answer_fingerprint
+    validation.claimed_at = now
+    validation.claim_expires_at = now + _CLAIM_LEASE
+    validation.next_run_at = now
+    validation.save(
+        update_fields=[
+            "status",
+            "answer_fingerprint",
+            "claimed_at",
+            "claim_expires_at",
+            "next_run_at",
+        ]
+    )
+    return validation
+
+
 def run_validation(*, membership_request: MembershipRequest) -> ValidationOutcome:
     if membership_request.status in _CLOSED_MEMBERSHIP_REQUEST_STATUSES:
         result = {
             "domain": {"status": "not_checked", "detail": "request closed before validation"},
             "timestamp": {"status": "not_checked", "detail": "request closed before validation"},
+            "almalinux_mirror_network": {"status": "not_checked", "detail": "request closed before validation"},
             "github": {"status": "not_checked", "detail": "request closed before validation"},
         }
         return ValidationOutcome(
@@ -274,6 +315,7 @@ def run_validation(*, membership_request: MembershipRequest) -> ValidationOutcom
         result = {
             "domain": {"status": "not_checked", "detail": "request is not a mirror membership"},
             "timestamp": {"status": "not_checked", "detail": "request is not a mirror membership"},
+            "almalinux_mirror_network": {"status": "not_checked", "detail": "request is not a mirror membership"},
             "github": {"status": "not_checked", "detail": "request is not a mirror membership"},
         }
         return ValidationOutcome(
@@ -285,13 +327,21 @@ def run_validation(*, membership_request: MembershipRequest) -> ValidationOutcom
     domain_result = _validate_domain(answers.domain_url)
     if domain_result["status"] == "reachable":
         timestamp_result = _validate_timestamp_files(answers.domain_url)
+        almalinux_mirror_network_result = _validate_almalinux_mirror_network_registration(answers.domain_url)
     else:
         timestamp_result = {
             "status": "not_checked",
             "detail": f"domain status was {domain_result['status']}",
             "checked_urls": [],
         }
-    github_result = _validate_github_reference(answers.pull_request_url)
+        almalinux_mirror_network_result = {
+            "status": "not_checked",
+            "detail": f"domain status was {domain_result['status']}",
+        }
+    github_result = _validate_github_reference(
+        answers.pull_request_url,
+        expected_file_path=str(almalinux_mirror_network_result.get("expected_file_path") or "") or None,
+    )
     sanitized_answers = answers.as_dict()
     sanitized_answers["domain_url"] = _sanitize_http_url_for_storage(answers.domain_url, keep_path=False)
     sanitized_answers["pull_request_url"] = _sanitize_github_url_for_storage(answers.pull_request_url)
@@ -299,6 +349,7 @@ def run_validation(*, membership_request: MembershipRequest) -> ValidationOutcom
     result = {
         "domain": domain_result,
         "timestamp": timestamp_result,
+        "almalinux_mirror_network": almalinux_mirror_network_result,
         "github": github_result,
         "answers": sanitized_answers,
     }
@@ -310,16 +361,18 @@ def run_validation(*, membership_request: MembershipRequest) -> ValidationOutcom
             "malformed",
             "inaccessible",
             "not_found",
+            "not_registered",
             "stale",
             "invalid_malformed",
             "invalid_wrong_repo",
             "invalid_not_found",
+            "invalid_missing_expected_file",
         }
-        for item in (domain_result, timestamp_result, github_result)
+        for item in (domain_result, timestamp_result, almalinux_mirror_network_result, github_result)
     )
     retryable_failure = any(
         item.get("status") in {"retryable_failure", "retryable_upstream_failure"}
-        for item in (domain_result, timestamp_result, github_result)
+        for item in (domain_result, timestamp_result, almalinux_mirror_network_result, github_result)
     )
 
     if terminal_failure:
@@ -446,10 +499,55 @@ def build_validation_note_content(*, validation: MirrorMembershipValidation) -> 
     lines = ["Mirror validation summary"]
     lines.append(f"Domain: {_describe_domain_result(result.get('domain', {}))}")
     lines.append(f"Mirror status: {_describe_timestamp_result(result.get('timestamp', {}))}")
+    lines.append(
+        f"AlmaLinux mirror network: {_describe_almalinux_mirror_network_result(result.get('almalinux_mirror_network', {}))}"
+    )
     lines.append(f"GitHub pull request: {_describe_github_result(result.get('github', {}))}")
     if result.get("retry_exhausted"):
         lines.append(f"retry exhausted after {result.get('retry_exhausted_after', validation.attempt_count)} attempts.")
     return "\n".join(lines)
+
+
+def build_validation_debug_lines(*, result: dict[str, object]) -> list[str]:
+    domain_result = _debug_result_dict(result.get("domain"))
+    timestamp_result = _debug_result_dict(result.get("timestamp"))
+    mirror_network_result = _debug_result_dict(result.get("almalinux_mirror_network"))
+    github_result = _debug_result_dict(result.get("github"))
+
+    return [
+        _build_debug_line(
+            label="domain",
+            target_label="target",
+            target=_debug_string(domain_result.get("url")),
+            status=_debug_status(domain_result),
+            detail=_debug_detail(domain_result),
+        ),
+        _build_debug_line(
+            label="mirror",
+            target_label="targets",
+            target=", ".join(_debug_list(timestamp_result.get("checked_urls"))),
+            status=_debug_status(timestamp_result),
+            detail=_debug_detail(timestamp_result),
+        ),
+        _build_debug_line(
+            label="AlmaLinux mirror network",
+            target_label="target",
+            target=_debug_string(mirror_network_result.get("url")),
+            status=_debug_status(mirror_network_result),
+            detail=_debug_detail(mirror_network_result),
+        ),
+        _build_debug_line(
+            label="GitHub",
+            target_label="target",
+            target=_debug_string(github_result.get("url")),
+            extra_target_label="diff",
+            extra_target=_debug_string(github_result.get("diff_url")),
+            status=_debug_status(github_result),
+            detail=_debug_detail(github_result),
+        ),
+    ]
+
+
 def _normalize_answer(*, spec: _QuestionSpec, value: str) -> str:
     normalized = str(value or "").strip()
     if not normalized:
@@ -470,13 +568,13 @@ def _validate_domain(url: str) -> dict[str, object]:
         sanitized_url = _sanitize_http_url_for_storage(normalized, keep_path=False)
         response = _bound_http_get(normalized)
     except UnsafeMirrorTargetError as exc:
-        return {"status": "unsafe_target", "detail": exc.category, "url": normalized or sanitized_url}
+        return {"status": "unsafe_target", "detail": exc.category, "url": sanitized_url}
     except MalformedMirrorAnswerError as exc:
         return {"status": "malformed", "detail": exc.category, "url": normalized or sanitized_url}
     except InaccessibleMirrorTargetError as exc:
-        return {"status": "inaccessible", "detail": exc.category, "url": normalized or sanitized_url}
+        return {"status": "inaccessible", "detail": exc.category, "url": sanitized_url}
     except requests.exceptions.RequestException as exc:
-        return {"status": "retryable_failure", "detail": _request_error_category(exc), "url": normalized or sanitized_url}
+        return {"status": "retryable_failure", "detail": _request_error_category(exc), "url": sanitized_url}
 
     try:
         return {
@@ -579,9 +677,16 @@ def _parse_mirror_timestamp_value(raw_value: bytes) -> datetime.datetime | None:
     return parsed.replace(tzinfo=datetime.UTC)
 
 
-def _validate_github_reference(url: str) -> dict[str, object]:
+def _validate_github_reference(
+    url: str,
+    *,
+    expected_file_path: str | None = None,
+) -> dict[str, object]:
     sanitized_url = _sanitize_github_url_for_storage(url)
     normalized = sanitized_url
+    expected_result: dict[str, object] = {}
+    if expected_file_path:
+        expected_result["expected_file_path"] = expected_file_path
     try:
         normalized, reference_kind = _normalize_github_reference(url)
         response = requests.get(
@@ -599,31 +704,157 @@ def _validate_github_reference(url: str) -> dict[str, object]:
             "status": "retryable_upstream_failure",
             "detail": _request_error_category(exc),
             "url": normalized,
+            **expected_result,
         }
 
     try:
         if response.status_code == 200:
-            return {
+            base_result = {
                 "status": reference_kind,
                 "url": normalized,
                 "http_status": int(response.status_code),
+                **expected_result,
+            }
+            if not expected_file_path:
+                return base_result
+
+            diff_url = f"{normalized}.diff"
+            try:
+                diff_response = requests.get(
+                    diff_url,
+                    allow_redirects=True,
+                    stream=True,
+                    timeout=_HTTP_TIMEOUT_SECONDS,
+                )
+            except requests.exceptions.RequestException as exc:
+                return {
+                    "status": "retryable_upstream_failure",
+                    "detail": _request_error_category(exc),
+                    "url": normalized,
+                    "diff_url": diff_url,
+                    **expected_result,
+                }
+
+            try:
+                if diff_response.status_code != 200:
+                    return {
+                        "status": "retryable_upstream_failure",
+                        "detail": f"github_diff_http_{diff_response.status_code}",
+                        "url": normalized,
+                        "diff_url": diff_url,
+                        "diff_http_status": int(diff_response.status_code),
+                        **expected_result,
+                    }
+
+                escaped_expected_file_path = re.escape(expected_file_path)
+                matches_expected_file = re.search(
+                    rf"(?m)^\+\+\+ b/{escaped_expected_file_path}$",
+                    diff_response.text,
+                ) is not None or re.search(
+                    rf"(?m)^diff --git a/{escaped_expected_file_path} b/{escaped_expected_file_path}$",
+                    diff_response.text,
+                ) is not None
+                if matches_expected_file:
+                    return {
+                        **base_result,
+                        "expected_file_status": "matched",
+                        "diff_url": diff_url,
+                        "diff_http_status": int(diff_response.status_code),
+                    }
+                return {
+                    "status": "invalid_missing_expected_file",
+                    "url": normalized,
+                    "http_status": int(response.status_code),
+                    "expected_file_status": "missing",
+                    "diff_url": diff_url,
+                    "diff_http_status": int(diff_response.status_code),
+                    **expected_result,
+                }
+            finally:
+                diff_response.close()
+
+            return {
+                **base_result,
             }
         if response.status_code == 404:
             return {
                 "status": "invalid_not_found",
                 "url": normalized,
                 "http_status": int(response.status_code),
+                **expected_result,
             }
         if response.status_code in _GITHUB_RETRYABLE_STATUS_CODES:
             return {
                 "status": "retryable_upstream_failure",
                 "url": normalized,
                 "http_status": int(response.status_code),
+                **expected_result,
             }
         return {
             "status": "invalid_malformed",
             "url": normalized,
             "http_status": int(response.status_code),
+            **expected_result,
+        }
+    finally:
+        response.close()
+
+
+def _validate_almalinux_mirror_network_registration(url: str) -> dict[str, object]:
+    try:
+        normalized = _normalize_http_url(url)
+    except MirrorValidationError as exc:
+        return {"status": "not_checked", "detail": exc.category}
+
+    hostname = urlsplit(normalized).hostname
+    if hostname is None:
+        return {"status": "not_checked", "detail": "missing_hostname"}
+
+    expected_file_path = f"mirrors.d/{hostname}.yml"
+    lookup_url = f"https://raw.githubusercontent.com/AlmaLinux/mirrors/refs/heads/master/{expected_file_path}"
+    try:
+        response = requests.get(
+            lookup_url,
+            allow_redirects=False,
+            stream=True,
+            timeout=_HTTP_TIMEOUT_SECONDS,
+        )
+    except requests.exceptions.RequestException as exc:
+        return {
+            "status": "retryable_upstream_failure",
+            "detail": _request_error_category(exc),
+            "url": lookup_url,
+            "expected_file_path": expected_file_path,
+        }
+
+    try:
+        if response.status_code == 200:
+            return {
+                "status": "registered",
+                "url": lookup_url,
+                "http_status": int(response.status_code),
+                "expected_file_path": expected_file_path,
+            }
+        if response.status_code == 404:
+            return {
+                "status": "not_registered",
+                "url": lookup_url,
+                "http_status": int(response.status_code),
+                "expected_file_path": expected_file_path,
+            }
+        if response.status_code in _GITHUB_RETRYABLE_STATUS_CODES:
+            return {
+                "status": "retryable_upstream_failure",
+                "url": lookup_url,
+                "http_status": int(response.status_code),
+                "expected_file_path": expected_file_path,
+            }
+        return {
+            "status": "retryable_upstream_failure",
+            "detail": f"github_http_{response.status_code}",
+            "url": lookup_url,
+            "http_status": int(response.status_code),
+            "expected_file_path": expected_file_path,
         }
     finally:
         response.close()
@@ -888,10 +1119,20 @@ def _coerce_transport_exception(exc: Exception) -> requests.exceptions.RequestEx
 
 def _describe_github_result(result: dict[str, object]) -> str:
     status = str(result.get("status") or "unknown")
+    expected_file_path = str(result.get("expected_file_path") or "")
+    expected_file_status = str(result.get("expected_file_status") or "")
     if status == "valid":
+        if expected_file_status == "matched" and expected_file_path:
+            return f"valid; touches {expected_file_path}"
         return "valid"
     if status == "commit":
+        if expected_file_status == "matched" and expected_file_path:
+            return f"commit URL is valid; touches {expected_file_path}"
         return "commit URL is valid"
+    if status == "invalid_missing_expected_file":
+        if expected_file_path:
+            return f"does not touch {expected_file_path}"
+        return "does not touch expected mirror file"
     if status == "retryable_upstream_failure":
         return f"retryable upstream failure ({result.get('detail')})"
     if status == "invalid_wrong_repo":
@@ -901,6 +1142,17 @@ def _describe_github_result(result: dict[str, object]) -> str:
     if status == "not_checked":
         return str(result.get("detail") or "not checked")
     return f"invalid ({result.get('detail')})"
+
+
+def _describe_almalinux_mirror_network_result(result: dict[str, object]) -> str:
+    status = str(result.get("status") or "unknown")
+    if status == "registered":
+        return "registered"
+    if status == "not_registered":
+        return "not registered"
+    if status == "retryable_upstream_failure":
+        return f"retryable upstream failure ({result.get('detail') or result.get('http_status')})"
+    return str(result.get("detail") or "not checked")
 
 
 def _retry_backoff_for_attempt(attempt_count: int) -> datetime.timedelta:
@@ -921,6 +1173,52 @@ def _request_error_category(exc: Exception) -> str:
     if isinstance(exc, requests.exceptions.RequestException):
         return "request_error"
     return type(exc).__name__.lower()
+
+
+def _build_debug_line(
+    *,
+    label: str,
+    target_label: str,
+    target: str,
+    status: str,
+    detail: str,
+    extra_target_label: str = "",
+    extra_target: str = "",
+) -> str:
+    line = f"debug: {label} {target_label}={target or 'none'}"
+    if extra_target_label and extra_target:
+        line = f"{line} {extra_target_label}={extra_target}"
+    line = f"{line} result={status}"
+    if detail:
+        line = f"{line} detail={detail}"
+    return line
+
+
+def _debug_result_dict(result: object) -> dict[str, object]:
+    if isinstance(result, dict):
+        return result
+    return {}
+
+
+def _debug_status(result: dict[str, object]) -> str:
+    return _debug_string(result.get("status")) or "unknown"
+
+
+def _debug_detail(result: dict[str, object]) -> str:
+    detail = _debug_string(result.get("detail"))
+    if not detail or detail == _debug_status(result):
+        return ""
+    return detail
+
+
+def _debug_string(value: object) -> str:
+    return str(value or "").strip()
+
+
+def _debug_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in (_debug_string(entry) for entry in value) if item]
 
 
 # Map requests exceptions onto stable categories used in results/notes.

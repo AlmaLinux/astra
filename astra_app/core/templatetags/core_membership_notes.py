@@ -47,6 +47,7 @@ _MIRROR_VALIDATION_NOTE_HEADER = "Mirror validation summary"
 _MIRROR_VALIDATION_BOLD_LABELS = {
     "Domain",
     "Mirror status",
+    "AlmaLinux mirror network",
     "GitHub pull request",
 }
 _MEMBERSHIP_NOTE_MARKDOWN_SETTINGS = "membership_note"

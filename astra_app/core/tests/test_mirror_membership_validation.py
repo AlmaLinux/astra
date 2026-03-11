@@ -3,10 +3,11 @@ import socket
 from io import StringIO
 from typing import override
 from unittest.mock import patch
+from urllib.parse import urlsplit
 
 import requests
 from django.core.exceptions import ValidationError
-from django.core.management import call_command
+from django.core.management import CommandError, call_command
 from django.test import TestCase
 from django.utils import timezone
 
@@ -14,7 +15,10 @@ from core import signals as astra_signals
 from core.membership_notes import CUSTOS
 from core.membership_request_workflow import record_membership_request_created, resubmit_membership_request
 from core.mirror_membership_validation import (
+    InaccessibleMirrorTargetError,
+    UnsafeMirrorTargetError,
     ValidationOutcome,
+    _validate_almalinux_mirror_network_registration,
     _validate_github_reference,
     finalize_validation,
     mirror_answers_fingerprint,
@@ -31,6 +35,14 @@ class _FakeResponse:
         self.status_code = status_code
         self.headers: dict[str, str] = {}
         self._body = body
+
+    @property
+    def content(self) -> bytes:
+        return self._body
+
+    @property
+    def text(self) -> str:
+        return self._body.decode("utf-8", errors="replace")
 
     def read(self, amt: int | None = None, decode_content: bool = False) -> bytes:
         _ = decode_content
@@ -138,7 +150,23 @@ class MirrorMembershipValidationTests(TestCase):
             return _FakeResponse(status_code=404)
         if url == "https://github.com/AlmaLinux/mirrors/pull/123":
             return _FakeResponse(status_code=200)
+        if url == "https://github.com/AlmaLinux/mirrors/pull/123.diff":
+            return _FakeResponse(
+                status_code=200,
+                body=(
+                    b"diff --git a/mirrors.d/mirror.example.org.yml b/mirrors.d/mirror.example.org.yml\n"
+                    b"+++ b/mirrors.d/mirror.example.org.yml\n"
+                ),
+            )
+        if url == self._mirror_network_lookup_url("mirror.example.org"):
+            return _FakeResponse(status_code=200)
+        if url.startswith("https://raw.githubusercontent.com/AlmaLinux/mirrors/refs/heads/master/mirrors.d/"):
+            return _FakeResponse(status_code=404)
         raise AssertionError(f"unexpected URL: {url}")
+
+    def _mirror_network_lookup_url(self, domain_or_hostname: str) -> str:
+        hostname = urlsplit(domain_or_hostname).hostname or domain_or_hostname
+        return f"https://raw.githubusercontent.com/AlmaLinux/mirrors/refs/heads/master/mirrors.d/{hostname}.yml"
 
     def _alma_timestamp_text(self, *, age: datetime.timedelta) -> bytes:
         timestamp = timezone.now().astimezone(datetime.UTC) - age
@@ -147,6 +175,8 @@ class MirrorMembershipValidationTests(TestCase):
     def _bound_http_get(self, url: str) -> _FakeResponse:
         if url == "https://mirror.example.org":
             return _FakeResponse(status_code=200)
+        if url == "https://mirror.example.org/timestamp.txt":
+            return _FakeResponse(status_code=404)
         if url == "https://mirror.example.org/almalinux/timestamp.txt":
             return _FakeResponse(status_code=200, body=self._alma_timestamp_text(age=datetime.timedelta(hours=2)))
         if url == "https://mirror.example.org/almalinux-kitten/timestamp.txt":
@@ -487,6 +517,126 @@ class MirrorMembershipValidationTests(TestCase):
                 )
                 self.assertEqual(normalized.get(ADDITIONAL_INFORMATION_QUESTION), "Canonical clarification")
 
+    def test_validate_almalinux_mirror_network_registration_uses_domain_hostname_lookup(self) -> None:
+        captured_urls: list[str] = []
+
+        def github_requests_get(url: str, **kwargs) -> _FakeResponse:
+            captured_urls.append(url)
+            _ = kwargs
+            if url == self._mirror_network_lookup_url("linuxsoft.cern.ch"):
+                return _FakeResponse(status_code=200)
+            raise AssertionError(f"unexpected URL: {url}")
+
+        with patch(
+            "core.mirror_membership_validation.requests.get",
+            side_effect=github_requests_get,
+            autospec=True,
+        ):
+            result = _validate_almalinux_mirror_network_registration("https://linuxsoft.cern.ch/almalinux")
+
+        self.assertEqual(result["status"], "registered")
+        self.assertEqual(
+            result["url"],
+            self._mirror_network_lookup_url("linuxsoft.cern.ch"),
+        )
+        self.assertEqual(
+            captured_urls,
+            [self._mirror_network_lookup_url("linuxsoft.cern.ch")],
+        )
+
+    def test_validate_github_reference_checks_pull_diff_for_expected_mirror_file(self) -> None:
+        fetched_urls: list[tuple[str, bool]] = []
+
+        def github_requests_get(url: str, **kwargs) -> _FakeResponse:
+            fetched_urls.append((url, bool(kwargs.get("allow_redirects"))))
+            if url == "https://github.com/AlmaLinux/mirrors/pull/123":
+                return _FakeResponse(status_code=200)
+            if url == "https://github.com/AlmaLinux/mirrors/pull/123.diff":
+                return _FakeResponse(
+                    status_code=200,
+                    body=(
+                        b"diff --git a/mirrors.d/linuxsoft.cern.ch.yml b/mirrors.d/linuxsoft.cern.ch.yml\n"
+                        b"+++ b/mirrors.d/linuxsoft.cern.ch.yml\n"
+                    ),
+                )
+            raise AssertionError(f"unexpected URL: {url}")
+
+        with patch(
+            "core.mirror_membership_validation.requests.get",
+            side_effect=github_requests_get,
+            autospec=True,
+        ):
+            result = _validate_github_reference(
+                "https://github.com/AlmaLinux/mirrors/pull/123",
+                expected_file_path="mirrors.d/linuxsoft.cern.ch.yml",
+            )
+
+        self.assertEqual(result["status"], "valid")
+        self.assertEqual(result["expected_file_status"], "matched")
+        self.assertEqual(result["expected_file_path"], "mirrors.d/linuxsoft.cern.ch.yml")
+        self.assertEqual(result["diff_url"], "https://github.com/AlmaLinux/mirrors/pull/123.diff")
+        self.assertEqual(
+            fetched_urls,
+            [
+                ("https://github.com/AlmaLinux/mirrors/pull/123", False),
+                ("https://github.com/AlmaLinux/mirrors/pull/123.diff", True),
+            ],
+        )
+
+    def test_validate_github_reference_rejects_commit_without_expected_mirror_file_change(self) -> None:
+        def github_requests_get(url: str, **kwargs) -> _FakeResponse:
+            _ = kwargs
+            if url == "https://github.com/AlmaLinux/mirrors/commit/abc123":
+                return _FakeResponse(status_code=200)
+            if url == "https://github.com/AlmaLinux/mirrors/commit/abc123.diff":
+                return _FakeResponse(
+                    status_code=200,
+                    body=(
+                        b"diff --git a/mirrors.d/other.example.org.yml b/mirrors.d/other.example.org.yml\n"
+                        b"+++ b/mirrors.d/other.example.org.yml\n"
+                    ),
+                )
+            raise AssertionError(f"unexpected URL: {url}")
+
+        with patch(
+            "core.mirror_membership_validation.requests.get",
+            side_effect=github_requests_get,
+            autospec=True,
+        ):
+            result = _validate_github_reference(
+                "https://github.com/AlmaLinux/mirrors/commit/abc123",
+                expected_file_path="mirrors.d/mirror.example.org.yml",
+            )
+
+        self.assertEqual(result["status"], "invalid_missing_expected_file")
+        self.assertEqual(result["expected_file_status"], "missing")
+        self.assertEqual(result["expected_file_path"], "mirrors.d/mirror.example.org.yml")
+        self.assertEqual(result["diff_url"], "https://github.com/AlmaLinux/mirrors/commit/abc123.diff")
+
+    def test_validate_github_reference_marks_diff_fetch_timeout_retryable(self) -> None:
+        def github_requests_get(url: str, **kwargs) -> _FakeResponse:
+            _ = kwargs
+            if url == "https://github.com/AlmaLinux/mirrors/pull/123":
+                return _FakeResponse(status_code=200)
+            if url == "https://github.com/AlmaLinux/mirrors/pull/123.diff":
+                raise requests.exceptions.Timeout("github diff timed out")
+            raise AssertionError(f"unexpected URL: {url}")
+
+        with patch(
+            "core.mirror_membership_validation.requests.get",
+            side_effect=github_requests_get,
+            autospec=True,
+        ):
+            result = _validate_github_reference(
+                "https://github.com/AlmaLinux/mirrors/pull/123",
+                expected_file_path="mirrors.d/mirror.example.org.yml",
+            )
+
+        self.assertEqual(result["status"], "retryable_upstream_failure")
+        self.assertEqual(result["detail"], "timeout")
+        self.assertEqual(result["diff_url"], "https://github.com/AlmaLinux/mirrors/pull/123.diff")
+        self.assertEqual(result["expected_file_path"], "mirrors.d/mirror.example.org.yml")
+
     def test_command_writes_terminal_summary_note_once(self) -> None:
         membership_request = self._create_user_request()
         with self.captureOnCommitCallbacks(execute=True):
@@ -509,12 +659,117 @@ class MirrorMembershipValidationTests(TestCase):
 
         validation = MirrorMembershipValidation.objects.get(membership_request=membership_request)
         self.assertEqual(validation.status, MirrorMembershipValidation.Status.completed)
+        self.assertEqual(validation.result["almalinux_mirror_network"]["status"], "registered")
+        self.assertEqual(validation.result["github"]["expected_file_status"], "matched")
         notes = list(Note.objects.filter(membership_request=membership_request, username=CUSTOS).order_by("pk"))
         self.assertEqual(len(notes), 1)
         self.assertIn("Mirror validation summary", notes[0].content)
         self.assertIn("Domain: reachable", notes[0].content)
         self.assertIn("Mirror status: up-to-date", notes[0].content)
-        self.assertIn("GitHub pull request: valid", notes[0].content)
+        self.assertIn("AlmaLinux mirror network: registered", notes[0].content)
+        self.assertIn(
+            "GitHub pull request: valid; touches mirrors.d/mirror.example.org.yml",
+            notes[0].content,
+        )
+
+    def test_command_marks_not_registered_mirror_network_as_terminal_failure(self) -> None:
+        membership_request = self._create_user_request(
+            responses=self._mirror_responses(domain="https://not-registered.example.org"),
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            record_membership_request_created(
+                membership_request=membership_request,
+                actor_username="alice",
+                send_submitted_email=False,
+            )
+
+        def bound_http_get(url: str) -> _FakeResponse:
+            if url == "https://not-registered.example.org":
+                return _FakeResponse(status_code=200)
+            if url == "https://not-registered.example.org/timestamp.txt":
+                return _FakeResponse(status_code=404)
+            if url == "https://not-registered.example.org/almalinux/timestamp.txt":
+                return _FakeResponse(status_code=200, body=self._alma_timestamp_text(age=datetime.timedelta(hours=2)))
+            if url == "https://not-registered.example.org/almalinux-kitten/timestamp.txt":
+                return _FakeResponse(status_code=404)
+            raise AssertionError(f"unexpected bound URL: {url}")
+
+        def github_requests_get(url: str, **kwargs) -> _FakeResponse:
+            _ = kwargs
+            if url == "https://github.com/AlmaLinux/mirrors/pull/123":
+                return _FakeResponse(status_code=200)
+            if url == "https://github.com/AlmaLinux/mirrors/pull/123.diff":
+                return _FakeResponse(
+                    status_code=200,
+                    body=(
+                        b"diff --git a/mirrors.d/not-registered.example.org.yml b/mirrors.d/not-registered.example.org.yml\n"
+                        b"+++ b/mirrors.d/not-registered.example.org.yml\n"
+                    ),
+                )
+            if url == self._mirror_network_lookup_url("not-registered.example.org"):
+                return _FakeResponse(status_code=404)
+            raise AssertionError(f"unexpected URL: {url}")
+
+        with (
+            patch("core.mirror_membership_validation._bound_http_get", side_effect=bound_http_get, autospec=True),
+            patch(
+                "core.mirror_membership_validation.requests.get",
+                side_effect=github_requests_get,
+                autospec=True,
+            ),
+        ):
+            call_command("membership_mirror_validation")
+
+        validation = MirrorMembershipValidation.objects.get(membership_request=membership_request)
+        note = Note.objects.get(membership_request=membership_request, username=CUSTOS)
+        self.assertEqual(validation.status, MirrorMembershipValidation.Status.failed_terminal)
+        self.assertEqual(validation.result["almalinux_mirror_network"]["status"], "not_registered")
+        self.assertIn("AlmaLinux mirror network: not registered", note.content)
+
+    def test_command_rejects_github_reference_that_does_not_touch_expected_mirror_file(self) -> None:
+        membership_request = self._create_user_request()
+        with self.captureOnCommitCallbacks(execute=True):
+            record_membership_request_created(
+                membership_request=membership_request,
+                actor_username="alice",
+                send_submitted_email=False,
+            )
+
+        def github_requests_get(url: str, **kwargs) -> _FakeResponse:
+            _ = kwargs
+            if url == "https://github.com/AlmaLinux/mirrors/pull/123":
+                return _FakeResponse(status_code=200)
+            if url == "https://github.com/AlmaLinux/mirrors/pull/123.diff":
+                return _FakeResponse(
+                    status_code=200,
+                    body=(
+                        b"diff --git a/mirrors.d/other.example.org.yml b/mirrors.d/other.example.org.yml\n"
+                        b"+++ b/mirrors.d/other.example.org.yml\n"
+                    ),
+                )
+            if url == self._mirror_network_lookup_url("mirror.example.org"):
+                return _FakeResponse(status_code=200)
+            raise AssertionError(f"unexpected URL: {url}")
+
+        with (
+            patch("core.mirror_membership_validation._bound_http_get", side_effect=self._bound_http_get, autospec=True),
+            patch(
+                "core.mirror_membership_validation.requests.get",
+                side_effect=github_requests_get,
+                autospec=True,
+            ),
+        ):
+            call_command("membership_mirror_validation")
+
+        validation = MirrorMembershipValidation.objects.get(membership_request=membership_request)
+        note = Note.objects.get(membership_request=membership_request, username=CUSTOS)
+        self.assertEqual(validation.status, MirrorMembershipValidation.Status.failed_terminal)
+        self.assertEqual(validation.result["github"]["status"], "invalid_missing_expected_file")
+        self.assertEqual(validation.result["github"]["expected_file_status"], "missing")
+        self.assertIn(
+            "GitHub pull request: does not touch mirrors.d/mirror.example.org.yml",
+            note.content,
+        )
 
     def test_command_marks_stale_mirror_status_in_summary_note(self) -> None:
         membership_request = self._create_user_request()
@@ -528,6 +783,8 @@ class MirrorMembershipValidationTests(TestCase):
         def bound_http_get(url: str) -> _FakeResponse:
             if url == "https://mirror.example.org":
                 return _FakeResponse(status_code=200)
+            if url == "https://mirror.example.org/timestamp.txt":
+                return _FakeResponse(status_code=404)
             if url == "https://mirror.example.org/almalinux/timestamp.txt":
                 return _FakeResponse(status_code=200, body=self._alma_timestamp_text(age=datetime.timedelta(days=2)))
             if url == "https://mirror.example.org/almalinux-kitten/timestamp.txt":
@@ -562,6 +819,8 @@ class MirrorMembershipValidationTests(TestCase):
         def bound_http_get(url: str) -> _FakeResponse:
             if url == "https://mirror.example.org":
                 return _FakeResponse(status_code=200)
+            if url == "https://mirror.example.org/timestamp.txt":
+                return _FakeResponse(status_code=404)
             if url == "https://mirror.example.org/almalinux/timestamp.txt":
                 return _FakeResponse(status_code=200, body=b"not-a-real-timestamp\n")
             if url == "https://mirror.example.org/almalinux-kitten/timestamp.txt":
@@ -616,6 +875,16 @@ class MirrorMembershipValidationTests(TestCase):
             _ = kwargs
             if url == "https://github.com/AlmaLinux/mirrors/pull/123":
                 return _FakeResponse(status_code=200)
+            if url == "https://github.com/AlmaLinux/mirrors/pull/123.diff":
+                return _FakeResponse(
+                    status_code=200,
+                    body=(
+                        b"diff --git a/mirrors.d/almalinux.mirrors.itworxx.de.yml b/mirrors.d/almalinux.mirrors.itworxx.de.yml\n"
+                        b"+++ b/mirrors.d/almalinux.mirrors.itworxx.de.yml\n"
+                    ),
+                )
+            if url == self._mirror_network_lookup_url("almalinux.mirrors.itworxx.de"):
+                return _FakeResponse(status_code=200)
             raise AssertionError(f"unexpected URL: {url}")
 
         with (
@@ -663,14 +932,17 @@ class MirrorMembershipValidationTests(TestCase):
         sanitized_domain_url = "https://mirror.example.org:8443"
         sanitized_timestamp_url = "https://mirror.example.org:8443/almalinux/timestamp.txt"
         checked_domain_url = "https://mirror.example.org:8443/private/token123"
-        checked_timestamp_url = "https://mirror.example.org:8443/private/token123/almalinux/timestamp.txt"
+        checked_root_timestamp_url = "https://mirror.example.org:8443/timestamp.txt"
+        checked_timestamp_url = "https://mirror.example.org:8443/almalinux/timestamp.txt"
 
         def bound_http_get(url: str) -> _FakeResponse:
             if url == checked_domain_url:
                 return _FakeResponse(status_code=200)
+            if url == checked_root_timestamp_url:
+                return _FakeResponse(status_code=404)
             if url == checked_timestamp_url:
                 return _FakeResponse(status_code=200, body=self._alma_timestamp_text(age=datetime.timedelta(hours=2)))
-            if url == "https://mirror.example.org:8443/private/token123/almalinux-kitten/timestamp.txt":
+            if url == "https://mirror.example.org:8443/almalinux-kitten/timestamp.txt":
                 return _FakeResponse(status_code=404)
             return _FakeResponse(status_code=404)
 
@@ -690,7 +962,13 @@ class MirrorMembershipValidationTests(TestCase):
         self.assertEqual(validation.status, MirrorMembershipValidation.Status.completed)
         self.assertEqual(validation.result["domain"]["url"], sanitized_domain_url)
         self.assertEqual(validation.result["timestamp"]["url"], sanitized_timestamp_url)
-        self.assertEqual(validation.result["timestamp"]["checked_urls"], [sanitized_timestamp_url])
+        self.assertEqual(
+            validation.result["timestamp"]["checked_urls"],
+            [
+                sanitized_domain_url,
+                sanitized_timestamp_url,
+            ],
+        )
         self.assertEqual(validation.result["answers"]["domain_url"], sanitized_domain_url)
         self.assertNotIn("user:secret@", str(validation.result))
         self.assertNotIn("token=secret", str(validation.result))
@@ -780,6 +1058,16 @@ class MirrorMembershipValidationTests(TestCase):
             _ = kwargs
             if url == "https://github.com/AlmaLinux/mirrors/pull/123":
                 return _FakeResponse(status_code=200)
+            if url == "https://github.com/AlmaLinux/mirrors/pull/123.diff":
+                return _FakeResponse(
+                    status_code=200,
+                    body=(
+                        b"diff --git a/mirrors.d/rebind.example.org.yml b/mirrors.d/rebind.example.org.yml\n"
+                        b"+++ b/mirrors.d/rebind.example.org.yml\n"
+                    ),
+                )
+            if url == self._mirror_network_lookup_url("rebind.example.org"):
+                return _FakeResponse(status_code=404)
             raise AssertionError(f"mirror-domain fetch bypassed bound transport: {url}")
 
         with (
@@ -1025,6 +1313,14 @@ class MirrorMembershipValidationTests(TestCase):
             _ = kwargs
             if url == "https://github.com/AlmaLinux/mirrors/commit/abc123":
                 return _FakeResponse(status_code=200)
+            if url == "https://github.com/AlmaLinux/mirrors/commit/abc123.diff":
+                return _FakeResponse(
+                    status_code=200,
+                    body=(
+                        b"diff --git a/mirrors.d/mirror.example.org.yml b/mirrors.d/mirror.example.org.yml\n"
+                        b"+++ b/mirrors.d/mirror.example.org.yml\n"
+                    ),
+                )
             return self._requests_get(url, **kwargs)
 
         with (
@@ -1312,3 +1608,414 @@ class MirrorMembershipValidationTests(TestCase):
             call_command("membership_mirror_validation", stdout=stdout)
 
         self.assertIn(f"processed request {membership_request.pk} status=completed", stdout.getvalue())
+
+    def test_command_request_id_processes_request_without_existing_validation_row(self) -> None:
+        membership_request = self._create_user_request()
+        stdout = StringIO()
+
+        self.assertFalse(MirrorMembershipValidation.objects.filter(membership_request=membership_request).exists())
+
+        with (
+            patch("core.mirror_membership_validation._bound_http_get", side_effect=self._bound_http_get, autospec=True),
+            patch(
+                "core.mirror_membership_validation.requests.get",
+                side_effect=self._requests_get,
+                autospec=True,
+            ),
+        ):
+            call_command(
+                "membership_mirror_validation",
+                "--request-id",
+                str(membership_request.pk),
+                stdout=stdout,
+            )
+
+        validation = MirrorMembershipValidation.objects.get(membership_request=membership_request)
+        self.assertEqual(validation.status, MirrorMembershipValidation.Status.completed)
+        self.assertEqual(validation.attempt_count, 1)
+        self.assertIn(f"processing request ID {membership_request.pk} via --request-id", stdout.getvalue())
+        self.assertIn(
+            "debug: domain target=https://mirror.example.org result=reachable",
+            stdout.getvalue(),
+        )
+        self.assertIn(
+            "debug: GitHub target=https://github.com/AlmaLinux/mirrors/pull/123 diff=https://github.com/AlmaLinux/mirrors/pull/123.diff result=valid",
+            stdout.getvalue(),
+        )
+
+    def test_command_request_id_reruns_completed_validation_with_sanitized_debug_output(self) -> None:
+        membership_request = self._create_user_request(
+            responses=self._mirror_responses(
+                domain="https://user:secret@mirror.example.org:8443/private/token123/?token=secret",
+                pull_request="https://user:secret@github.com/AlmaLinux/mirrors/pull/123?token=secret",
+            ),
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            record_membership_request_created(
+                membership_request=membership_request,
+                actor_username="alice",
+                send_submitted_email=False,
+            )
+
+        validation = MirrorMembershipValidation.objects.get(membership_request=membership_request)
+        validation.status = MirrorMembershipValidation.Status.completed
+        validation.attempt_count = 2
+        validation.next_run_at = timezone.now() + datetime.timedelta(days=1)
+        validation.result = {"domain": {"status": "reachable", "url": "https://mirror.example.org:8443"}}
+        validation.save(update_fields=["status", "attempt_count", "next_run_at", "result"])
+
+        checked_domain_url = "https://mirror.example.org:8443/private/token123"
+        checked_root_timestamp_url = "https://mirror.example.org:8443/timestamp.txt"
+        checked_timestamp_url = "https://mirror.example.org:8443/almalinux/timestamp.txt"
+
+        def bound_http_get(url: str) -> _FakeResponse:
+            if url == checked_domain_url:
+                return _FakeResponse(status_code=200)
+            if url == checked_root_timestamp_url:
+                return _FakeResponse(status_code=404)
+            if url == checked_timestamp_url:
+                return _FakeResponse(status_code=200, body=self._alma_timestamp_text(age=datetime.timedelta(hours=2)))
+            if url == "https://mirror.example.org:8443/almalinux-kitten/timestamp.txt":
+                return _FakeResponse(status_code=404)
+            raise AssertionError(f"unexpected bound URL: {url}")
+
+        stdout = StringIO()
+        with (
+            patch("core.mirror_membership_validation._bound_http_get", side_effect=bound_http_get, autospec=True),
+            patch(
+                "core.mirror_membership_validation.requests.get",
+                side_effect=self._requests_get,
+                autospec=True,
+            ),
+        ):
+            call_command(
+                "membership_mirror_validation",
+                "--request-id",
+                str(membership_request.pk),
+                stdout=stdout,
+            )
+
+        validation.refresh_from_db()
+        command_output = stdout.getvalue()
+        self.assertEqual(validation.status, MirrorMembershipValidation.Status.completed)
+        self.assertEqual(validation.attempt_count, 3)
+        self.assertIn(
+            "debug: domain target=https://mirror.example.org:8443 result=reachable",
+            command_output,
+        )
+        self.assertIn(
+            "debug: mirror targets=https://mirror.example.org:8443, https://mirror.example.org:8443/almalinux/timestamp.txt result=up_to_date",
+            command_output,
+        )
+        self.assertIn(
+            "debug: AlmaLinux mirror network target=https://raw.githubusercontent.com/AlmaLinux/mirrors/refs/heads/master/mirrors.d/mirror.example.org.yml result=registered",
+            command_output,
+        )
+        self.assertIn(
+            "debug: GitHub target=https://github.com/AlmaLinux/mirrors/pull/123 diff=https://github.com/AlmaLinux/mirrors/pull/123.diff result=valid",
+            command_output,
+        )
+        self.assertNotIn("user:secret@", command_output)
+        self.assertNotIn("token=secret", command_output)
+        self.assertNotIn("/private/token123", command_output)
+
+    def test_command_request_id_deletes_closed_request_validation_without_note_or_debug_output(self) -> None:
+        membership_request = self._create_user_request()
+        with self.captureOnCommitCallbacks(execute=True):
+            record_membership_request_created(
+                membership_request=membership_request,
+                actor_username="alice",
+                send_submitted_email=False,
+            )
+
+        validation = MirrorMembershipValidation.objects.get(membership_request=membership_request)
+        membership_request.status = MembershipRequest.Status.approved
+        membership_request.save(update_fields=["status"])
+
+        stdout = StringIO()
+        with (
+            patch("core.mirror_membership_validation._bound_http_get", autospec=True) as bound_get_mock,
+            patch("core.mirror_membership_validation.requests.get", autospec=True) as get_mock,
+        ):
+            call_command(
+                "membership_mirror_validation",
+                "--request-id",
+                str(membership_request.pk),
+                stdout=stdout,
+            )
+
+        output = stdout.getvalue()
+        self.assertFalse(MirrorMembershipValidation.objects.filter(pk=validation.pk).exists())
+        self.assertFalse(Note.objects.filter(membership_request=membership_request, username=CUSTOS).exists())
+        self.assertIn(
+            f"deleted closed-request validation for request ID {membership_request.pk} via --request-id",
+            output,
+        )
+        self.assertNotIn("debug:", output)
+        bound_get_mock.assert_not_called()
+        get_mock.assert_not_called()
+
+    def test_command_request_id_closed_request_without_row_does_not_recreate_validation(self) -> None:
+        membership_request = self._create_user_request(status=MembershipRequest.Status.approved)
+
+        stdout = StringIO()
+        with (
+            patch("core.mirror_membership_validation._bound_http_get", autospec=True) as bound_get_mock,
+            patch("core.mirror_membership_validation.requests.get", autospec=True) as get_mock,
+        ):
+            call_command(
+                "membership_mirror_validation",
+                "--request-id",
+                str(membership_request.pk),
+                stdout=stdout,
+            )
+
+        output = stdout.getvalue()
+        self.assertFalse(MirrorMembershipValidation.objects.filter(membership_request=membership_request).exists())
+        self.assertFalse(Note.objects.filter(membership_request=membership_request, username=CUSTOS).exists())
+        self.assertIn(
+            f"request ID {membership_request.pk} is closed; no validation row to delete via --request-id",
+            output,
+        )
+        self.assertNotIn("debug:", output)
+        bound_get_mock.assert_not_called()
+        get_mock.assert_not_called()
+
+    def test_command_request_id_dry_run_does_not_mutate_state_or_emit_debug_output(self) -> None:
+        membership_request = self._create_user_request()
+        with self.captureOnCommitCallbacks(execute=True):
+            record_membership_request_created(
+                membership_request=membership_request,
+                actor_username="alice",
+                send_submitted_email=False,
+            )
+
+        validation = MirrorMembershipValidation.objects.get(membership_request=membership_request)
+        validation.status = MirrorMembershipValidation.Status.completed
+        validation.attempt_count = 2
+        validation.next_run_at = timezone.now() + datetime.timedelta(days=1)
+        validation.result = {"domain": {"status": "reachable", "url": "https://mirror.example.org"}}
+        validation.save(update_fields=["status", "attempt_count", "next_run_at", "result"])
+
+        stdout = StringIO()
+        with (
+            patch("core.mirror_membership_validation._bound_http_get", autospec=True) as bound_get_mock,
+            patch("core.mirror_membership_validation.requests.get", autospec=True) as get_mock,
+        ):
+            call_command(
+                "membership_mirror_validation",
+                "--request-id",
+                str(membership_request.pk),
+                "--dry-run",
+                stdout=stdout,
+            )
+
+        validation.refresh_from_db()
+        output = stdout.getvalue()
+        self.assertEqual(validation.status, MirrorMembershipValidation.Status.completed)
+        self.assertEqual(validation.attempt_count, 2)
+        self.assertFalse(Note.objects.filter(membership_request=membership_request, username=CUSTOS).exists())
+        self.assertIn(
+            f"dry-run: would validate request ID {membership_request.pk} via --request-id",
+            output,
+        )
+        self.assertNotIn("debug:", output)
+        bound_get_mock.assert_not_called()
+        get_mock.assert_not_called()
+
+    def test_command_request_id_rejects_nonexistent_request_id(self) -> None:
+        with self.assertRaisesMessage(CommandError, "membership request ID 999999 does not exist"):
+            call_command("membership_mirror_validation", "--request-id", "999999")
+
+    def test_command_request_id_rejects_non_mirror_request_id(self) -> None:
+        membership_request = self._create_user_request(
+            membership_type_id="individual",
+            responses=[{"Contributions": "Docs"}],
+        )
+
+        with self.assertRaisesMessage(
+            CommandError,
+            f"membership request ID {membership_request.pk} is not a mirror membership request",
+        ):
+            call_command("membership_mirror_validation", "--request-id", str(membership_request.pk))
+
+    def test_command_request_id_redacts_failure_path_debug_output(self) -> None:
+        membership_request = self._create_user_request(
+            responses=self._mirror_responses(
+                domain="https://user:secret@mirror.example.org:badport/private/token123/?token=secret",
+                pull_request="https://user:secret@github.com/AlmaLinux/infra/pull/123/private?token=secret",
+            ),
+        )
+        stdout = StringIO()
+
+        with (
+            patch("core.mirror_membership_validation._bound_http_get", autospec=True) as bound_get_mock,
+            patch("core.mirror_membership_validation.requests.get", autospec=True) as get_mock,
+        ):
+            call_command(
+                "membership_mirror_validation",
+                "--request-id",
+                str(membership_request.pk),
+                stdout=stdout,
+            )
+
+        output = stdout.getvalue()
+        validation = MirrorMembershipValidation.objects.get(membership_request=membership_request)
+        self.assertEqual(validation.status, MirrorMembershipValidation.Status.failed_terminal)
+        self.assertIn(
+            "debug: domain target=https://mirror.example.org result=malformed detail=invalid_http_url",
+            output,
+        )
+        self.assertIn(
+            "debug: mirror targets=none result=not_checked detail=domain status was malformed",
+            output,
+        )
+        self.assertIn(
+            "debug: AlmaLinux mirror network target=none result=not_checked detail=domain status was malformed",
+            output,
+        )
+        self.assertIn(
+            "debug: GitHub target=https://github.com result=invalid_wrong_repo detail=wrong_github_repo",
+            output,
+        )
+        self.assertNotIn("user:secret@", output)
+        self.assertNotIn("token=secret", output)
+        self.assertNotIn("/private/token123", output)
+        self.assertNotIn("/AlmaLinux/infra/pull/123/private", output)
+        bound_get_mock.assert_not_called()
+        get_mock.assert_not_called()
+
+    def test_command_request_id_redacts_unsafe_target_domain_debug_output(self) -> None:
+        membership_request = self._create_user_request(
+            responses=self._mirror_responses(
+                domain="https://user:secret@mirror.example.org/private/token123/?token=secret",
+            ),
+        )
+        stdout = StringIO()
+
+        with (
+            patch(
+                "core.mirror_membership_validation._bound_http_get",
+                side_effect=UnsafeMirrorTargetError(category="private_address"),
+                autospec=True,
+            ) as bound_get_mock,
+            patch(
+                "core.mirror_membership_validation.requests.get",
+                side_effect=self._requests_get,
+                autospec=True,
+            ),
+        ):
+            call_command(
+                "membership_mirror_validation",
+                "--request-id",
+                str(membership_request.pk),
+                stdout=stdout,
+            )
+
+        output = stdout.getvalue()
+        self.assertIn(
+            "debug: domain target=https://mirror.example.org result=unsafe_target detail=private_address",
+            output,
+        )
+        self.assertIn(
+            "debug: mirror targets=none result=not_checked detail=domain status was unsafe_target",
+            output,
+        )
+        self.assertIn(
+            "debug: AlmaLinux mirror network target=none result=not_checked detail=domain status was unsafe_target",
+            output,
+        )
+        self.assertNotIn("user:secret@", output)
+        self.assertNotIn("token=secret", output)
+        self.assertNotIn("/private/token123", output)
+        bound_get_mock.assert_called_once()
+
+    def test_command_request_id_redacts_inaccessible_domain_debug_output(self) -> None:
+        membership_request = self._create_user_request(
+            responses=self._mirror_responses(
+                domain="https://user:secret@mirror.example.org/private/token123/?token=secret",
+            ),
+        )
+        stdout = StringIO()
+
+        with (
+            patch(
+                "core.mirror_membership_validation._bound_http_get",
+                side_effect=InaccessibleMirrorTargetError(category="dns_lookup_failed"),
+                autospec=True,
+            ) as bound_get_mock,
+            patch(
+                "core.mirror_membership_validation.requests.get",
+                side_effect=self._requests_get,
+                autospec=True,
+            ),
+        ):
+            call_command(
+                "membership_mirror_validation",
+                "--request-id",
+                str(membership_request.pk),
+                stdout=stdout,
+            )
+
+        output = stdout.getvalue()
+        self.assertIn(
+            "debug: domain target=https://mirror.example.org result=inaccessible detail=dns_lookup_failed",
+            output,
+        )
+        self.assertIn(
+            "debug: mirror targets=none result=not_checked detail=domain status was inaccessible",
+            output,
+        )
+        self.assertIn(
+            "debug: AlmaLinux mirror network target=none result=not_checked detail=domain status was inaccessible",
+            output,
+        )
+        self.assertNotIn("user:secret@", output)
+        self.assertNotIn("token=secret", output)
+        self.assertNotIn("/private/token123", output)
+        bound_get_mock.assert_called_once()
+
+    def test_command_request_id_redacts_retryable_domain_debug_output(self) -> None:
+        membership_request = self._create_user_request(
+            responses=self._mirror_responses(
+                domain="https://user:secret@mirror.example.org/private/token123/?token=secret",
+            ),
+        )
+        stdout = StringIO()
+
+        with (
+            patch(
+                "core.mirror_membership_validation._bound_http_get",
+                side_effect=requests.exceptions.Timeout(),
+                autospec=True,
+            ) as bound_get_mock,
+            patch(
+                "core.mirror_membership_validation.requests.get",
+                side_effect=self._requests_get,
+                autospec=True,
+            ),
+        ):
+            call_command(
+                "membership_mirror_validation",
+                "--request-id",
+                str(membership_request.pk),
+                stdout=stdout,
+            )
+
+        output = stdout.getvalue()
+        self.assertIn(
+            "debug: domain target=https://mirror.example.org result=retryable_failure detail=timeout",
+            output,
+        )
+        self.assertIn(
+            "debug: mirror targets=none result=not_checked detail=domain status was retryable_failure",
+            output,
+        )
+        self.assertIn(
+            "debug: AlmaLinux mirror network target=none result=not_checked detail=domain status was retryable_failure",
+            output,
+        )
+        self.assertNotIn("user:secret@", output)
+        self.assertNotIn("token=secret", output)
+        self.assertNotIn("/private/token123", output)
+        bound_get_mock.assert_called_once()

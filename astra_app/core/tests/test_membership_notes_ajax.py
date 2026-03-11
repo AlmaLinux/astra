@@ -202,7 +202,8 @@ class MembershipNotesAjaxTests(TestCase):
                 "Mirror validation summary\n"
                 "Domain: reachable\n"
                 "Mirror status: up-to-date\n"
-                "GitHub pull request: valid"
+                "AlmaLinux mirror network: registered\n"
+                "GitHub pull request: valid; touches mirrors.d/mirror.example.org.yml"
             ),
             action={},
         )
@@ -235,7 +236,11 @@ class MembershipNotesAjaxTests(TestCase):
         self.assertIn("Mirror validation summary<br>", html)
         self.assertIn("Domain: <strong>reachable</strong>", html)
         self.assertIn("Mirror status: <strong>up-to-date</strong>", html)
-        self.assertIn("GitHub pull request: <strong>valid</strong>", html)
+        self.assertIn("AlmaLinux mirror network: <strong>registered</strong>", html)
+        self.assertIn(
+            "GitHub pull request: <strong>valid; touches mirrors.d/mirror.example.org.yml</strong>",
+            html,
+        )
 
     def test_regular_notes_render_safe_markdown_subset(self) -> None:
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
