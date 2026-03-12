@@ -231,3 +231,57 @@ class FreeIPAMembershipReconcileCommandTests(TestCase):
                 template__name=settings.FREEIPA_MEMBERSHIP_RECONCILE_ALERT_EMAIL_TEMPLATE_NAME,
             ).exists()
         )
+
+    def test_fix_mode_skips_missing_freeipa_users_instead_of_attempting_add(self) -> None:
+        membership_type, _ = MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        Membership.objects.create(target_username="ghost", membership_type=membership_type)
+
+        admin_group = self._group(settings.FREEIPA_ADMIN_GROUP, ["admin"])
+        target_group = self._group("almalinux-individual", [])
+        admin_user = FreeIPAUser(
+            "admin",
+            {
+                "uid": ["admin"],
+                "mail": ["admin@example.com"],
+                "memberof_group": [settings.FREEIPA_ADMIN_GROUP],
+            },
+        )
+
+        def _get_group(cn: str) -> FreeIPAGroup | None:
+            if cn == settings.FREEIPA_ADMIN_GROUP:
+                return admin_group
+            if cn == "almalinux-individual":
+                return target_group
+            return None
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "admin":
+                return admin_user
+            if username == "ghost":
+                return None
+            return None
+
+        with (
+            patch("core.management.commands.freeipa_membership_reconcile.FreeIPAGroup.get", side_effect=_get_group),
+            patch("core.management.commands.freeipa_membership_reconcile.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.management.commands.freeipa_membership_reconcile.FreeIPAGroup.add_member") as add_mock,
+            patch("core.management.commands.freeipa_membership_reconcile.FreeIPAGroup.remove_member") as remove_mock,
+            self.assertLogs("core.management.commands.freeipa_membership_reconcile", level="WARNING") as logs,
+        ):
+            call_command("freeipa_membership_reconcile", "--fix")
+
+        add_mock.assert_not_called()
+        remove_mock.assert_not_called()
+        self.assertTrue(
+            any("expected_user_missing" in line and "ghost" in line for line in logs.output),
+            f"Expected missing-user warning, got: {logs.output}",
+        )

@@ -31,8 +31,6 @@ from core.membership import (
     get_valid_memberships,
     remove_organization_representative_from_group_if_present,
     resolve_request_ids_by_membership_type,
-    rollback_organization_representative_groups,
-    sync_organization_representative_groups,
 )
 from core.membership_notes import add_note
 from core.models import (
@@ -48,6 +46,7 @@ from core.organization_claim import (
     build_organization_claim_url,
     read_organization_claim_token,
 )
+from core.organization_representative_transition import apply_organization_representative_transition
 from core.permissions import (
     ASTRA_ADD_MEMBERSHIP,
     ASTRA_ADD_SEND_MAIL,
@@ -147,29 +146,34 @@ def organization_claim(request: HttpRequest, token: str) -> HttpResponse:
             if locked_organization.claim_secret != refreshed_payload.claim_secret:
                 return _render_organization_claim_page(request, state="invalid")
 
-            locked_organization.representative = username
-            locked_organization.status = Organization.Status.active
-            locked_organization.claim_secret = secrets.token_urlsafe(32)
-            locked_organization.save(update_fields=["representative", "status", "claim_secret"])
+            rotated_claim_secret = secrets.token_urlsafe(32)
+            accepted_invitation_ids: list[int] = []
 
-            accepted_invitation_ids = list(
-                AccountInvitation.objects.filter(
-                    organization=locked_organization,
+            def persist_claimed_organization(transition_organization: Organization) -> None:
+                transition_organization.status = Organization.Status.active
+                transition_organization.claim_secret = rotated_claim_secret
+                transition_organization.save()
+
+                pending_invitations = AccountInvitation.objects.filter(
+                    organization=transition_organization,
                     dismissed_at__isnull=True,
                     accepted_at__isnull=True,
-                ).values_list("pk", flat=True)
-            )
+                )
+                accepted_invitation_ids.clear()
+                accepted_invitation_ids.extend(pending_invitations.values_list("pk", flat=True))
+                pending_invitations.update(
+                    accepted_at=claim_completed_at,
+                    accepted_username=normalized_username,
+                )
 
-            AccountInvitation.objects.filter(
-                organization=locked_organization,
-                dismissed_at__isnull=True,
-                accepted_at__isnull=True,
-            ).update(
-                accepted_at=claim_completed_at,
-                accepted_username=normalized_username,
-            )
+            committed_organization = apply_organization_representative_transition(
+                organization_id=locked_organization.pk,
+                new_representative=username,
+                caller_label="organization_claim",
+                persist_changes=persist_claimed_organization,
+            ).organization
 
-            claimed_organization_id = locked_organization.id
+            claimed_organization_id = committed_organization.id
 
             def _send_organization_claimed_signal() -> None:
                 committed_organization = Organization.objects.get(pk=claimed_organization_id)
@@ -182,6 +186,9 @@ def organization_claim(request: HttpRequest, token: str) -> HttpResponse:
                     schedule_account_invitation_accepted_signal(invitation_id=invitation_id, actor=normalized_username)
 
             transaction.on_commit(_send_organization_claimed_signal)
+    except FreeIPARepresentativeSyncError:
+        messages.error(request, "Failed to update FreeIPA group membership for the representative.")
+        return _render_organization_claim_page(request, state="ready", organization=organization)
     except IntegrityError:
         messages.error(
             request,
@@ -792,71 +799,44 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
 
         old_representative = ""
         new_representative = ""
-        representative_group_sync_journal = None
-
-        if can_select_representatives and "representative" in form.fields:
-            representative = form.cleaned_data.get("representative") or ""
-            old_representative = organization.representative
-            new_representative = representative
-            updated_org.representative = representative
-
-            # Sync FreeIPA groups for ALL active memberships when the
-            # representative changes.
-            if old_representative and old_representative != representative:
-                active_memberships = get_valid_memberships(organization=organization)
-                group_cns = [
-                    str(m.membership_type.group_cn or "").strip()
-                    for m in active_memberships
-                    if str(m.membership_type.group_cn or "").strip()
-                ]
-
-                if group_cns:
-                    try:
-                        sync_result = sync_organization_representative_groups(
-                            old_representative=old_representative,
-                            new_representative=representative,
-                            group_cns=tuple(group_cns),
-                            caller_mode=FreeIPACallerMode.raise_on_error,
-                            missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
-                        )
-                        representative_group_sync_journal = sync_result.journal
-                    except FreeIPARepresentativeSyncError as exc:
-                        logger.exception(
-                            "organization_edit: failed to sync representative groups org_id=%s old=%r new=%r",
-                            organization.pk,
-                            old_representative,
-                            representative,
-                        )
-                        rollback_organization_representative_groups(
-                            old_representative=old_representative,
-                            new_representative=representative,
-                            journal=exc.result.journal,
-                        )
-
-                        form.add_error(None, "Failed to update FreeIPA group membership for the representative.")
-                        return _render_org_form(request, form, organization=organization, is_create=False)
+        persisted_organization = updated_org
 
         try:
-            updated_org.save()
-        except IntegrityError:
-            # Race-condition safety: DB is the source of truth.
-            # Best-effort rollback if we already changed FreeIPA groups.
-            if (
-                representative_group_sync_journal is not None
-                and old_representative
-                and new_representative
-                and old_representative != new_representative
-            ):
-                rollback_organization_representative_groups(
-                    old_representative=old_representative,
-                    new_representative=new_representative,
-                    journal=representative_group_sync_journal,
-                )
+            if can_select_representatives and "representative" in form.fields:
+                representative = str(form.cleaned_data.get("representative") or "").strip()
 
+                def persist_edited_organization(locked_organization: Organization) -> None:
+                    for field_name in changed_fields:
+                        if field_name == "representative":
+                            continue
+                        setattr(locked_organization, field_name, getattr(updated_org, field_name))
+                    locked_organization.save()
+
+                transition_result = apply_organization_representative_transition(
+                    organization_id=organization.pk,
+                    new_representative=representative,
+                    caller_label="organization_edit",
+                    persist_changes=persist_edited_organization,
+                )
+                persisted_organization = transition_result.organization
+                old_representative = transition_result.old_representative
+                new_representative = transition_result.new_representative
+            else:
+                updated_org.save()
+        except IntegrityError:
             form.add_error(
                 "representative",
                 "That user is already the representative of another organization.",
             )
+            return _render_org_form(request, form, organization=organization, is_create=False)
+        except FreeIPARepresentativeSyncError:
+            logger.exception(
+                "organization_edit: failed to sync representative groups org_id=%s old=%r new=%r",
+                organization.pk,
+                organization.representative,
+                form.cleaned_data.get("representative") or "",
+            )
+            form.add_error(None, "Failed to update FreeIPA group membership for the representative.")
             return _render_org_form(request, form, organization=organization, is_create=False)
 
         actor_username = get_username(request) or ""
@@ -883,11 +863,11 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
         if "country_code" in changed_fields:
             _actor = actor_username
             _old = old_country_code
-            _new = updated_org.country_code
+            _new = persisted_organization.country_code
             transaction.on_commit(
                 lambda: astra_signals.organization_country_changed.send(
                     sender=Organization,
-                    organization=Organization.objects.get(pk=updated_org.pk),
+                    organization=Organization.objects.get(pk=persisted_organization.pk),
                     old_country=_old,
                     new_country=_new,
                     actor=_actor,

@@ -101,6 +101,15 @@ class Command(BaseCommand):
         total_extra = 0
         total_errors = 0
         mutation_budget = limit
+        freeipa_users_by_username: dict[str, FreeIPAUser | None] = {}
+
+        def get_freeipa_user(username: str) -> FreeIPAUser | None:
+            normalized = str(username or "").strip()
+            if not normalized:
+                return None
+            if normalized not in freeipa_users_by_username:
+                freeipa_users_by_username[normalized] = FreeIPAUser.get(normalized)
+            return freeipa_users_by_username[normalized]
 
         for membership_type in membership_types.order_by("code"):
             group_cn = str(membership_type.group_cn or "").strip()
@@ -159,6 +168,16 @@ class Command(BaseCommand):
             extra = sorted(actual - expected, key=str.lower)
 
             errors: list[str] = []
+            missing_freeipa_users = {
+                username for username in missing if get_freeipa_user(username) is None
+            }
+            for username in sorted(missing_freeipa_users, key=str.lower):
+                errors.append(f"expected_user_missing:{username}")
+                logger.warning(
+                    "freeipa_membership_reconcile: expected_user_missing group=%s username=%s",
+                    group_cn,
+                    username,
+                )
             total_missing += len(missing)
             total_extra += len(extra)
 
@@ -171,6 +190,8 @@ class Command(BaseCommand):
 
             if fix and (missing or extra):
                 for username in missing:
+                    if username in missing_freeipa_users:
+                        continue
                     if mutation_budget == 0 and limit > 0:
                         errors.append("limit_reached")
                         break
@@ -240,7 +261,7 @@ class Command(BaseCommand):
 
         recipients: list[str] = []
         for username in admin_group.members:
-            user = FreeIPAUser.get(username)
+            user = get_freeipa_user(username)
             if user is not None and user.email:
                 recipients.append(user.email)
 

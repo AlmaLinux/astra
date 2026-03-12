@@ -20,7 +20,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied
 from django.core.files.uploadedfile import InMemoryUploadedFile
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.http import Http404, HttpRequest, HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import redirect
 from django.template.response import TemplateResponse
@@ -62,6 +62,7 @@ from core.freeipa.user import FreeIPAUser
 from core.freeipa.utils import _invalidate_agreement_cache, _invalidate_agreements_list_cache
 from core.ipa_user_attrs import _split_lines
 from core.ipa_utils import sync_set_membership
+from core.membership import FreeIPARepresentativeSyncError
 from core.membership_csv_import import (
     _COLUMN_FIELDS,
     MembershipCSVConfirmImportForm,
@@ -88,6 +89,7 @@ from core.organization_membership_csv_import import (
     organization_membership_csv_column_specs,
     required_organization_membership_csv_columns,
 )
+from core.organization_representative_transition import apply_organization_representative_transition
 from core.protected_resources import protected_freeipa_group_cns
 from core.signals import CANONICAL_SIGNALS
 from core.user_labels import user_choice, user_choice_with_fallback, user_choices_from_users
@@ -3037,6 +3039,86 @@ class OrganizationAdmin(admin.ModelAdmin):
 
             return username
 
+        @override
+        def clean(self) -> dict[str, Any]:
+            cleaned_data = super().clean()
+
+            if self.instance.pk is None:
+                return cleaned_data
+
+            current_representative = str(self.instance.representative or "").strip()
+            new_representative = str(cleaned_data.get("representative") or "").strip()
+            if current_representative == new_representative:
+                return cleaned_data
+            try:
+                total_forms = int(str(self.data.get("memberships-TOTAL_FORMS") or "0"))
+            except ValueError:
+                return cleaned_data
+
+            current_memberships = {
+                str(membership.pk): membership
+                for membership in Membership.objects.filter(target_organization=self.instance).select_related(
+                    "membership_type"
+                )
+            }
+            expires_at_field = forms.DateTimeField(required=False)
+
+            # Admin form clean does not get parsed inline formsets, so inspect
+            # the submitted inline payload directly and only flag rows that can
+            # change sponsorship-group membership.
+            for index in range(total_forms):
+                prefix = f"memberships-{index}-"
+                membership_id = str(self.data.get(f"{prefix}id") or "").strip()
+                membership_type_id = str(self.data.get(f"{prefix}membership_type") or "").strip()
+                delete_requested = bool(self.data.get(f"{prefix}DELETE"))
+                raw_expires_at = str(self.data.get(f"{prefix}expires_at") or "").strip()
+
+                if membership_id:
+                    current_membership = current_memberships.get(membership_id)
+                    if current_membership is None:
+                        continue
+
+                    new_membership_type = current_membership.membership_type
+                    if membership_type_id:
+                        looked_up_type = MembershipType.objects.filter(pk=membership_type_id).first()
+                        if looked_up_type is not None:
+                            new_membership_type = looked_up_type
+
+                    old_group_cn = str(current_membership.membership_type.group_cn or "").strip()
+                    new_group_cn = str(new_membership_type.group_cn or "").strip()
+                    if not old_group_cn and not new_group_cn:
+                        continue
+
+                    if delete_requested or membership_type_id != current_membership.membership_type_id:
+                        raise forms.ValidationError(
+                            "Change the representative and sponsorship memberships in separate saves."
+                        )
+
+                    try:
+                        cleaned_expires_at = expires_at_field.clean(raw_expires_at) if raw_expires_at else None
+                    except forms.ValidationError:
+                        raise forms.ValidationError(
+                            "Change the representative and sponsorship memberships in separate saves."
+                        )
+                    if cleaned_expires_at != current_membership.expires_at:
+                        raise forms.ValidationError(
+                            "Change the representative and sponsorship memberships in separate saves."
+                        )
+                    continue
+
+                if not membership_type_id:
+                    continue
+
+                membership_type = MembershipType.objects.filter(pk=membership_type_id).first()
+                if membership_type is None:
+                    continue
+                if str(membership_type.group_cn or "").strip():
+                    raise forms.ValidationError(
+                        "Change the representative and sponsorship memberships in separate saves."
+                    )
+
+            return cleaned_data
+
     form = OrganizationAdminForm
 
     fieldsets = (
@@ -3101,11 +3183,65 @@ class OrganizationAdmin(admin.ModelAdmin):
     ordering = ("name", "id")
 
     @override
+    def changeform_view(self, request, object_id=None, form_url="", extra_context=None) -> HttpResponse:
+        try:
+            return super().changeform_view(request, object_id=object_id, form_url=form_url, extra_context=extra_context)
+        except FreeIPARepresentativeSyncError:
+            self.message_user(
+                request,
+                "Failed to update FreeIPA group membership for the representative.",
+                level=messages.ERROR,
+            )
+            return HttpResponseRedirect(request.path)
+        except IntegrityError:
+            self.message_user(
+                request,
+                "That user is already the representative of another organization.",
+                level=messages.ERROR,
+            )
+            return HttpResponseRedirect(request.path)
+
+    @override
     def get_readonly_fields(self, request, obj=None):
         readonly = list(super().get_readonly_fields(request, obj=obj))
         if "id" not in readonly:
             readonly.append("id")
         return tuple(readonly)
+
+    @override
+    def save_model(self, request, obj, form, change) -> None:
+        if not change or obj.pk is None or "representative" not in form.changed_data:
+            super().save_model(request, obj, form, change)
+            return
+
+        form._pending_representative_transition = {
+            "organization_id": obj.pk,
+            "new_representative": str(form.cleaned_data.get("representative") or "").strip(),
+        }
+
+        update_fields = [field_name for field_name in form.changed_data if field_name != "representative"]
+        if update_fields:
+            obj.save(update_fields=update_fields)
+
+    @override
+    def save_related(self, request, form, formsets: list[Any] | tuple[Any, ...], change) -> None:
+        super().save_related(request, form, formsets, change)
+
+        # save_model only sets this attribute for existing-organization representative edits.
+        if not hasattr(form, "_pending_representative_transition"):
+            return
+
+        transition_payload = form._pending_representative_transition
+
+        def persist_changes(locked_organization: Organization) -> None:
+            locked_organization.save(update_fields=["representative"])
+
+        apply_organization_representative_transition(
+            organization_id=transition_payload["organization_id"],
+            new_representative=transition_payload["new_representative"],
+            caller_label="organization_admin",
+            persist_changes=persist_changes,
+        )
 
     @admin.action(description="Generate claim URL")
     def generate_claim_url(self, request: HttpRequest, queryset) -> None:

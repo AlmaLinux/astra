@@ -1,11 +1,13 @@
 from unittest.mock import patch
 
 from django.contrib.messages import get_messages
+from django.db import IntegrityError
+from django.db.models.query import QuerySet
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from core.freeipa.user import FreeIPAUser
-from core.models import Organization
+from core.models import AccountInvitation, Membership, MembershipType, Organization
 from core.organization_claim import make_organization_claim_token
 from core.tests.utils_test_data import ensure_core_categories
 
@@ -72,6 +74,102 @@ class OrganizationClaimFlowTests(TestCase):
 
         messages = [message.message for message in get_messages(post_response.wsgi_request)]
         self.assertIn("You are now the representative for this organization.", messages)
+
+    def test_claim_existing_sponsorship_adds_claimant_to_group(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 1,
+                "enabled": True,
+                "group_cn": "almalinux-gold",
+            },
+        )
+
+        organization = Organization.objects.create(
+            name="Claim Sponsored Org",
+            business_contact_email="contact@sponsored.example",
+        )
+        Membership.objects.create(
+            target_organization=organization,
+            membership_type_id="gold",
+        )
+        token = make_organization_claim_token(organization)
+
+        self._login_as_freeipa_user("alice")
+        claimant = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
+
+        with (
+            patch("core.views_organizations.block_action_without_coc", return_value=None),
+            patch("core.views_organizations.block_action_without_country_code", return_value=None),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=claimant),
+            patch.object(FreeIPAUser, "add_to_group", autospec=True) as add_mock,
+        ):
+            response = self.client.post(reverse("organization-claim", args=[token]), follow=False)
+
+        self.assertEqual(response.status_code, 302)
+        add_mock.assert_called_once()
+        _, add_kwargs = add_mock.call_args
+        self.assertEqual(add_kwargs["group_name"], "almalinux-gold")
+
+    def test_claim_invitation_update_failure_rolls_back_freeipa_transition(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 1,
+                "enabled": True,
+                "group_cn": "almalinux-gold",
+            },
+        )
+
+        organization = Organization.objects.create(
+            name="Claim Rollback Org",
+            business_contact_email="contact@rollback.example",
+        )
+        Membership.objects.create(
+            target_organization=organization,
+            membership_type_id="gold",
+        )
+        invitation = AccountInvitation.objects.create(
+            email="claim-rollover@example.org",
+            organization=organization,
+            invited_by_username="staff",
+        )
+        token = make_organization_claim_token(organization)
+
+        self._login_as_freeipa_user("alice")
+        claimant = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
+        original_update = QuerySet.update
+
+        def _failing_update(queryset: QuerySet, **kwargs):
+            if queryset.model is AccountInvitation and set(kwargs) == {"accepted_at", "accepted_username"}:
+                raise IntegrityError("invitation update failed")
+            return original_update(queryset, **kwargs)
+
+        with (
+            patch("core.views_organizations.block_action_without_coc", return_value=None),
+            patch("core.views_organizations.block_action_without_country_code", return_value=None),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=claimant),
+            patch("django.db.models.query.QuerySet.update", autospec=True, side_effect=_failing_update),
+            patch.object(FreeIPAUser, "add_to_group", autospec=True) as add_mock,
+            patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_mock,
+        ):
+            response = self.client.post(reverse("organization-claim", args=[token]), follow=False)
+
+        self.assertEqual(response.status_code, 200)
+        organization.refresh_from_db()
+        invitation.refresh_from_db()
+        self.assertEqual(organization.representative, "")
+        self.assertEqual(organization.status, Organization.Status.unclaimed)
+        self.assertIsNone(invitation.accepted_at)
+        self.assertEqual(invitation.accepted_username, "")
+        add_mock.assert_called_once()
+        remove_mock.assert_called_once()
+        _, remove_kwargs = remove_mock.call_args
+        self.assertEqual(remove_kwargs["group_name"], "almalinux-gold")
 
     def test_claiming_already_claimed_org_shows_already_claimed_message(self) -> None:
         organization = Organization.objects.create(
