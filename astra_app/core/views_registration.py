@@ -17,7 +17,9 @@ from core.account_invitation_reconcile import (
     reconcile_account_invitation_for_username,
 )
 from core.email_context import system_email_context
+from core.freeipa.circuit_breaker import _is_freeipa_availability_error
 from core.freeipa.client import _build_freeipa_client, _with_freeipa_service_client_retry
+from core.freeipa.exceptions import FreeIPAUnavailableError
 from core.freeipa.user import FreeIPAUser
 from core.rate_limit import allow_request
 from core.templated_email import queue_templated_email
@@ -36,6 +38,15 @@ logger = logging.getLogger(__name__)
 REGISTRATION_TEMPORARILY_UNAVAILABLE_MESSAGE = (
     "Registration is temporarily unavailable. Please try again in a few minutes. "
     "If the problem continues, contact support."
+)
+REGISTRATION_ACTIVATION_TEMPORARY_VERIFICATION_FAILURE_MESSAGE = (
+    "We could not verify your registration right now. Please try the activation link again in a few minutes."
+)
+REGISTRATION_CONFIRM_TEMPORARY_VERIFICATION_FAILURE_MESSAGE = (
+    "We could not verify your registration right now. Please try again in a few minutes or use the link from your email again."
+)
+REGISTRATION_ACTIVATION_FOLLOW_UP_WARNING_MESSAGE = (
+    "Your account may already be ready. Please try signing in. If you cannot sign in yet, wait a few minutes and try again."
 )
 
 
@@ -85,6 +96,43 @@ def _stageuser_activate(client: ClientMeta, username: str) -> object:
         return client.stageuser_activate(username)
     except TypeError:
         return client.stageuser_activate(a_uid=username)
+
+
+def _load_registration_stage_data(
+    username: str,
+    *,
+    include_client: bool = False,
+) -> dict[str, object] | tuple[ClientMeta, dict[str, object] | None] | None:
+    not_found = object()
+    stage_client: ClientMeta | None = None
+
+    def _get_service_client() -> ClientMeta:
+        nonlocal stage_client
+
+        stage_client = FreeIPAUser.get_client()
+        return stage_client
+
+    def _load_stageuser(client: ClientMeta) -> object:
+        try:
+            return _stageuser_show(client, username)
+        except exceptions.NotFound:
+            return not_found
+
+    stage = _with_freeipa_service_client_retry(_get_service_client, _load_stageuser)
+    if stage is not_found:
+        stage_data = None
+    elif not isinstance(stage, dict):
+        stage_data = None
+    else:
+        result = stage.get("result")
+        stage_data = result if isinstance(result, dict) else None
+
+    if include_client:
+        if stage_client is None:
+            raise RuntimeError("Registration stage lookup did not return a client")
+        return stage_client, stage_data
+
+    return stage_data
 
 
 def _send_registration_email(
@@ -317,15 +365,19 @@ def confirm(request: HttpRequest) -> HttpResponse:
     if not username:
         return HttpResponse("No username provided", status=400)
 
-    client = FreeIPAUser.get_client()
     try:
-        stage = _stageuser_show(client, username)
-        stage_data = stage.get("result") if isinstance(stage, dict) else None
-    except exceptions.NotFound:
-        stage_data = None
-    except Exception:
-        logger.exception("Registration confirm failed username=%s", username)
-        messages.error(request, "Something went wrong")
+        stage_data = _load_registration_stage_data(username)
+    except Exception as exc:
+        if isinstance(exc, FreeIPAUnavailableError) or _is_freeipa_availability_error(exc):
+            raise
+
+        logger.exception(
+            "Registration confirm verification failed username=%s error_class=%s error=%s",
+            username,
+            exc.__class__.__name__,
+            exc,
+        )
+        messages.error(request, REGISTRATION_CONFIRM_TEMPORARY_VERIFICATION_FAILURE_MESSAGE)
         return redirect("register")
 
     email = None
@@ -396,11 +448,22 @@ def activate(request: HttpRequest) -> HttpResponse:
     token_email = _normalize_str(token.get("e")).lower()
     invitation_token = _normalize_str(token.get("i"))
 
-    client = FreeIPAUser.get_client()
     try:
-        stage = _stageuser_show(client, username)
-        stage_data = stage.get("result") if isinstance(stage, dict) else None
-    except exceptions.NotFound:
+        client, stage_data = _load_registration_stage_data(username, include_client=True)
+    except Exception as exc:
+        if isinstance(exc, FreeIPAUnavailableError) or _is_freeipa_availability_error(exc):
+            raise
+
+        logger.exception(
+            "Registration activation verification failed username=%s error_class=%s error=%s",
+            username,
+            exc.__class__.__name__,
+            exc,
+        )
+        messages.warning(request, REGISTRATION_ACTIVATION_TEMPORARY_VERIFICATION_FAILURE_MESSAGE)
+        return redirect("register")
+
+    if stage_data is None:
         messages.warning(request, "This user cannot be found, please register again.")
         return redirect("register")
 
@@ -464,17 +527,33 @@ def activate(request: HttpRequest) -> HttpResponse:
             else:
                 form.add_error(None, "Something went wrong while creating your account, please try again later.")
         else:
+            follow_up_warning: str | None = None
+            clear_pending_invitation_token = True
             if invitation_token:
-                invitation = load_account_invitation_from_token(invitation_token)
-                if invitation is not None:
-                    reconcile_account_invitation_for_username(
-                        invitation=invitation,
-                        username=username,
-                        now=timezone.now(),
+                try:
+                    invitation = load_account_invitation_from_token(invitation_token)
+                    if invitation is not None:
+                        reconcile_account_invitation_for_username(
+                            invitation=invitation,
+                            username=username,
+                            now=timezone.now(),
+                        )
+                except Exception as exc:
+                    logger.exception(
+                        "Registration activation post-success follow-up failed username=%s error_class=%s error=%s",
+                        username,
+                        exc.__class__.__name__,
+                        exc,
                     )
+                    follow_up_warning = REGISTRATION_ACTIVATION_FOLLOW_UP_WARNING_MESSAGE
+                    clear_pending_invitation_token = False
 
-            request.session.pop(PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY, None)
+            if clear_pending_invitation_token:
+                request.session.pop(PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY, None)
+
             messages.success(request, "Congratulations, your account has been created! Go ahead and sign in to proceed.")
+            if follow_up_warning is not None:
+                messages.warning(request, follow_up_warning)
             return redirect("login")
 
     return render(request, "core/register_activate.html", {"form": form, "username": username})

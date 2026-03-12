@@ -4,19 +4,31 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from urllib.parse import unquote
 
+import requests
 from django.contrib.messages import get_messages
 from django.test import Client, TestCase, override_settings
 from python_freeipa import exceptions
 
+from core import views_registration
+from core.freeipa.exceptions import FreeIPAUnavailableError
 from core.freeipa.user import FreeIPAUser
 from core.models import AccountInvitation
 from core.tests.utils_test_data import ensure_email_templates
-from core.tokens import read_registration_activation_token
+from core.tokens import make_registration_activation_token, read_registration_activation_token
 from core.views_auth import PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY
 
 REGISTRATION_TEMPORARILY_UNAVAILABLE_MESSAGE = (
     "Registration is temporarily unavailable. Please try again in a few minutes. "
     "If the problem continues, contact support."
+)
+REGISTRATION_ACTIVATION_TEMPORARY_VERIFICATION_FAILURE_MESSAGE = (
+    "We could not verify your registration right now. Please try the activation link again in a few minutes."
+)
+REGISTRATION_CONFIRM_TEMPORARY_VERIFICATION_FAILURE_MESSAGE = (
+    "We could not verify your registration right now. Please try again in a few minutes or use the link from your email again."
+)
+REGISTRATION_ACTIVATION_FOLLOW_UP_WARNING_MESSAGE = (
+    "Your account may already be ready. Please try signing in. If you cannot sign in yet, wait a few minutes and try again."
 )
 
 
@@ -165,6 +177,96 @@ class RegistrationFlowTests(TestCase):
         self.assertTemplateUsed(resp, "core/register_confirm.html")
         self.assertEqual(resp.context["username"], "ghost-user")
         self.assertIsNone(resp.context["email"])
+
+    def test_load_registration_stage_data_retries_service_login_unauthorized(self) -> None:
+        recovered_client = SimpleNamespace()
+        recovered_client.stageuser_show = Mock(
+            return_value={
+                "result": {
+                    "uid": ["alice"],
+                    "mail": ["alice@example.com"],
+                }
+            }
+        )
+
+        with patch(
+            "core.views_registration.FreeIPAUser.get_client",
+            autospec=True,
+            side_effect=[exceptions.Unauthorized(), recovered_client],
+        ) as get_client_mock:
+            stage_data = views_registration._load_registration_stage_data("alice")
+
+        self.assertEqual(stage_data, {"uid": ["alice"], "mail": ["alice@example.com"]})
+        self.assertEqual(get_client_mock.call_count, 2)
+
+    def test_load_registration_stage_data_retries_stage_lookup_unauthorized(self) -> None:
+        first_client = SimpleNamespace()
+        second_client = SimpleNamespace()
+        first_client.stageuser_show = Mock(side_effect=exceptions.Unauthorized())
+        second_client.stageuser_show = Mock(
+            return_value={
+                "result": {
+                    "uid": ["alice"],
+                    "mail": ["alice@example.com"],
+                }
+            }
+        )
+
+        with patch(
+            "core.views_registration.FreeIPAUser.get_client",
+            autospec=True,
+            side_effect=[first_client, second_client],
+        ) as get_client_mock:
+            stage_data = views_registration._load_registration_stage_data("alice")
+
+        self.assertEqual(stage_data, {"uid": ["alice"], "mail": ["alice@example.com"]})
+        self.assertEqual(get_client_mock.call_count, 2)
+
+    @override_settings(REGISTRATION_OPEN=True)
+    def test_confirm_get_service_login_unauthorized_redirects_with_temporary_verification_message(self) -> None:
+        client = Client()
+        lookup_error = exceptions.Unauthorized("confirm lookup boom")
+
+        with (
+            patch(
+                "core.views_registration.FreeIPAUser.get_client",
+                autospec=True,
+                side_effect=lookup_error,
+            ),
+            patch("core.views_registration.logger.exception") as exception_mock,
+        ):
+            response = client.get("/register/confirm/?username=alice", follow=False)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/register/")
+        exception_mock.assert_called_once()
+        self.assertEqual(
+            exception_mock.call_args.args,
+            (
+                "Registration confirm verification failed username=%s error_class=%s error=%s",
+                "alice",
+                "Unauthorized",
+                lookup_error,
+            ),
+        )
+
+        follow_response = client.get(response["Location"])
+        messages_list = [message.message for message in get_messages(follow_response.wsgi_request)]
+        self.assertIn(REGISTRATION_CONFIRM_TEMPORARY_VERIFICATION_FAILURE_MESSAGE, messages_list)
+
+    @override_settings(REGISTRATION_OPEN=True)
+    def test_confirm_get_freeipa_unavailable_reaches_503_middleware(self) -> None:
+        client = Client(raise_request_exception=False)
+
+        with patch(
+            "core.views_registration.FreeIPAUser.get_client",
+            autospec=True,
+            side_effect=FreeIPAUnavailableError("confirm service unavailable"),
+        ):
+            response = client.get("/register/confirm/?username=alice", follow=False)
+
+        self.assertEqual(response.status_code, 503)
+        self.assertContains(response, "temporarily unavailable", status_code=503)
 
     def test_registration_email_template_exists(self):
         from post_office.models import EmailTemplate
@@ -746,6 +848,147 @@ class RegistrationFlowTests(TestCase):
         follow = client.get(activation_post["Location"])
         msgs = [m.message for m in get_messages(follow.wsgi_request)]
         self.assertTrue(any("account" in m.lower() and "created" in m.lower() for m in msgs))
+
+    def test_activate_post_stage_lookup_unauthorized_redirects_with_temporary_verification_message(self) -> None:
+        client = Client()
+        activation_token = make_registration_activation_token({"u": "alice", "e": "alice@example.com"})
+        lookup_error = exceptions.Unauthorized("activate lookup boom")
+
+        with (
+            patch(
+                "core.views_registration.FreeIPAUser.get_client",
+                autospec=True,
+                side_effect=lookup_error,
+            ),
+            patch("core.views_registration.logger.exception") as exception_mock,
+        ):
+            response = client.post(
+                f"/register/activate/?token={activation_token}",
+                data={"password": "S3curePassword!", "password_confirm": "S3curePassword!"},
+                follow=False,
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/register/")
+        exception_mock.assert_called_once()
+        self.assertEqual(
+            exception_mock.call_args.args,
+            (
+                "Registration activation verification failed username=%s error_class=%s error=%s",
+                "alice",
+                "Unauthorized",
+                lookup_error,
+            ),
+        )
+
+        follow_response = client.get(response["Location"])
+        messages_list = [message.message for message in get_messages(follow_response.wsgi_request)]
+        self.assertIn(REGISTRATION_ACTIVATION_TEMPORARY_VERIFICATION_FAILURE_MESSAGE, messages_list)
+
+    def test_activate_post_connection_error_reaches_503_middleware(self) -> None:
+        client = Client(raise_request_exception=False)
+        activation_token = make_registration_activation_token({"u": "alice", "e": "alice@example.com"})
+
+        with patch(
+            "core.views_registration.FreeIPAUser.get_client",
+            autospec=True,
+            side_effect=requests.exceptions.ConnectionError("activate network down"),
+        ):
+            response = client.post(
+                f"/register/activate/?token={activation_token}",
+                data={"password": "S3curePassword!", "password_confirm": "S3curePassword!"},
+                follow=False,
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertContains(response, "temporarily unavailable", status_code=503)
+
+    def test_activate_post_reconcile_failure_preserves_pending_invitation_for_login_recovery(self) -> None:
+        client = Client()
+        invitation = AccountInvitation.objects.create(
+            email="alice@example.com",
+            full_name="Invitee",
+            note="",
+            invited_by_username="committee",
+        )
+        invitation_token = str(invitation.invitation_token)
+        activation_token = make_registration_activation_token(
+            {"u": "alice", "e": "alice@example.com", "i": invitation_token}
+        )
+
+        session = client.session
+        session[PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY] = invitation_token
+        session.save()
+
+        stage_client = SimpleNamespace(
+            stageuser_show=lambda *args, **kwargs: {
+                "result": {
+                    "uid": ["alice"],
+                    "mail": ["alice@example.com"],
+                }
+            },
+            stageuser_activate=lambda *args, **kwargs: {"result": {"uid": ["alice"]}},
+            user_mod=lambda *args, **kwargs: {"result": {"uid": ["alice"]}},
+        )
+        password_client = SimpleNamespace(change_password=lambda *args, **kwargs: None)
+        user = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["alice@example.com"],
+            },
+        )
+        reconcile_error = RuntimeError("reconcile boom")
+
+        with (
+            patch("core.views_registration.FreeIPAUser.get_client", autospec=True, return_value=stage_client),
+            patch("core.views_registration._build_freeipa_client", autospec=True, return_value=password_client),
+            patch("core.views_registration.load_account_invitation_from_token", return_value=invitation),
+            patch(
+                "core.views_registration.reconcile_account_invitation_for_username",
+                side_effect=reconcile_error,
+            ),
+            patch("core.views_registration.logger.exception") as registration_exception_mock,
+            patch("django.contrib.auth.forms.authenticate", return_value=user),
+            patch("core.views_auth.load_account_invitation_from_token", return_value=invitation) as auth_load_mock,
+            patch("core.views_auth.reconcile_account_invitation_for_username") as auth_reconcile_mock,
+        ):
+            response = client.post(
+                f"/register/activate/?token={activation_token}",
+                data={"password": "S3curePassword!", "password_confirm": "S3curePassword!"},
+                follow=False,
+            )
+
+            self.assertEqual(client.session.get(PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY), invitation_token)
+
+            login_response = client.post(
+                "/login/",
+                data={"username": "alice", "password": "pw"},
+                follow=False,
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/login/")
+        registration_exception_mock.assert_called_once()
+        self.assertEqual(
+            registration_exception_mock.call_args.args,
+            (
+                "Registration activation post-success follow-up failed username=%s error_class=%s error=%s",
+                "alice",
+                "RuntimeError",
+                reconcile_error,
+            ),
+        )
+        self.assertEqual(login_response.status_code, 302)
+        auth_load_mock.assert_called_once_with(invitation_token)
+        auth_reconcile_mock.assert_called_once()
+        self.assertNotIn(PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY, client.session)
+
+        follow_response = client.get(response["Location"])
+        messages_list = [message.message for message in get_messages(follow_response.wsgi_request)]
+        self.assertIn(REGISTRATION_ACTIVATION_FOLLOW_UP_WARNING_MESSAGE, messages_list)
 
     def test_login_with_invite_token_links_invitation(self) -> None:
         client = Client()
