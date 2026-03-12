@@ -153,7 +153,7 @@ class OrganizationMembershipCSVImportForm(ImportForm):
     )
     skip_existing_active_membership = forms.BooleanField(
         required=False,
-        initial=False,
+        initial=True,
         help_text=(
             "Optional: skip rows when the matched organization already has an active membership of the selected type."
         ),
@@ -298,7 +298,7 @@ class OrganizationMembershipCSVImportResource(resources.ModelResource):
         membership_start_date_column: str = "",
         membership_end_date_column: str = "",
         committee_notes_column: str = "",
-        skip_existing_active_membership: bool = False,
+        skip_existing_active_membership: bool = True,
         question_column_overrides: dict[str, str] | None = None,
     ) -> None:
         super().__init__()

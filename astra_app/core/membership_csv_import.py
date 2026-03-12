@@ -128,7 +128,7 @@ class MembershipCSVImportForm(ImportForm):
     )
     skip_existing_active_membership = forms.BooleanField(
         required=False,
-        initial=False,
+        initial=True,
         help_text=(
             "Optional: skip rows when the matched user already has an active membership of the selected type."
         ),
@@ -254,7 +254,7 @@ class MembershipCSVImportResource(resources.ModelResource):
         membership_type: MembershipType | None = None,
         actor_username: str = "",
         enable_name_matching: bool = False,
-        skip_existing_active_membership: bool = False,
+        skip_existing_active_membership: bool = True,
         email_column: str = "",
         name_column: str = "",
         active_member_column: str = "",

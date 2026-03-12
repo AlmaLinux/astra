@@ -78,14 +78,14 @@ class OrganizationMembershipCSVImportResourceTests(TestCase):
         self.assertIn(sponsorship.code, codes)
         self.assertNotIn(individual.code, codes)
 
-    def test_import_form_skip_existing_active_membership_defaults_off(self) -> None:
+    def test_import_form_skip_existing_active_membership_defaults_on(self) -> None:
         form = OrganizationMembershipCSVImportForm(
             formats=[base_formats.CSV],
             resources=[OrganizationMembershipCSVImportResource],
         )
 
         self.assertIn("skip_existing_active_membership", form.fields)
-        self.assertFalse(form.fields["skip_existing_active_membership"].initial)
+        self.assertTrue(form.fields["skip_existing_active_membership"].initial)
 
     def test_get_confirm_form_initial_preserves_skip_existing_active_membership(self) -> None:
         membership_type = self._membership_type(code="confirmskip", category_id="sponsorship")

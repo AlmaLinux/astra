@@ -123,14 +123,14 @@ class AdminImportMembershipsCSVTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
 
-    def test_import_form_skip_existing_active_membership_defaults_off(self) -> None:
+    def test_import_form_skip_existing_active_membership_defaults_on(self) -> None:
         form = MembershipCSVImportForm(
             formats=[base_formats.CSV],
             resources=[MembershipCSVImportResource],
         )
 
         self.assertIn("skip_existing_active_membership", form.fields)
-        self.assertFalse(form.fields["skip_existing_active_membership"].initial)
+        self.assertTrue(form.fields["skip_existing_active_membership"].initial)
 
     def test_apply_row_runs_only_for_non_dry_run(self) -> None:
         MembershipType.objects.update_or_create(
@@ -1259,6 +1259,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             resource = MembershipCSVImportResource(
                 membership_type=MembershipType.objects.get(code="individual"),
                 actor_username="alex",
+                skip_existing_active_membership=False,
             )
             resource.before_import(dataset)
             row_decision = resource._decision_for_row(dataset.dict[0])
@@ -1642,6 +1643,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             resource = MembershipCSVImportResource(
                 membership_type=MembershipType.objects.get(code="individual"),
                 actor_username="alex",
+                skip_existing_active_membership=False,
             )
             resource.before_import(dataset)
             row_decision = resource._decision_for_row(dataset.dict[0])
@@ -1710,6 +1712,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             resource = MembershipCSVImportResource(
                 membership_type=MembershipType.objects.get(code="individual"),
                 actor_username="alex",
+                skip_existing_active_membership=False,
             )
             resource.before_import(dataset)
             row_decision = resource._decision_for_row(dataset.dict[0])
@@ -1872,6 +1875,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             resource = MembershipCSVImportResource(
                 membership_type=MembershipType.objects.get(code="individual"),
                 actor_username="alex",
+                skip_existing_active_membership=False,
             )
             resource.before_import(dataset)
             row_decision = resource._decision_for_row(dataset.dict[0])
