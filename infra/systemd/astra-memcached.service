@@ -1,0 +1,19 @@
+[Unit]
+Description=Astra memcached container
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+StandardOutput=null
+StandardError=null
+EnvironmentFile=/etc/astra/memcached.env
+ExecStartPre=-/usr/bin/podman rm -f astra-memcached
+ExecStart=/usr/bin/podman run --rm --name astra-memcached -p 127.0.0.1:11211:11211 --log-driver=journald ${MEMCACHED_IMAGE} memcached ${MEMCACHED_ARGS}
+ExecStop=/usr/bin/podman stop -t 10 astra-memcached
+Restart=always
+RestartSec=5
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target

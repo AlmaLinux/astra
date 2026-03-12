@@ -13,6 +13,7 @@ Markdown
 django-markdownify
 Pillow
 python-freeipa==1.0.10
+pymemcache
 django-avatar
 pyotp
 qrcode
