@@ -1,12 +1,16 @@
 import csv
 import io
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
+from datetime import datetime
 
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 
+from core.account_invitation_reconcile import persist_non_org_invitation_acceptance
 from core.freeipa.user import FreeIPAUser
+from core.models import AccountInvitation
 
 logger = logging.getLogger(__name__)
 
@@ -188,3 +192,119 @@ def find_account_invitation_matches(email: str) -> list[str]:
     if not ok:
         return []
     return confirmed
+
+
+def _mark_invitation_accepted_from_email_match(
+    *,
+    invitation: AccountInvitation,
+    matched_usernames: list[str],
+    actor_username: str,
+    now: datetime,
+) -> bool:
+    return persist_non_org_invitation_acceptance(
+        invitation=invitation,
+        matched_usernames=matched_usernames,
+        actor_username=actor_username,
+        now=now,
+    )
+
+
+@dataclass(frozen=True)
+class AccountInvitationRefreshSummary:
+    pending_checked: int
+    pending_updated: int
+    accepted_checked: int
+    accepted_updated: int
+
+
+def refresh_pending_invitations(
+    *,
+    pending: Iterable[AccountInvitation],
+    actor_username: str,
+    now: datetime,
+) -> tuple[int, int]:
+    updated = 0
+    checked = 0
+    for invitation in pending:
+        checked += 1
+        matches = find_account_invitation_matches(invitation.email)
+        if matches:
+            if _mark_invitation_accepted_from_email_match(
+                invitation=invitation,
+                matched_usernames=matches,
+                actor_username=actor_username,
+                now=now,
+            ):
+                updated += 1
+        else:
+            invitation.freeipa_matched_usernames = []
+            invitation.freeipa_last_checked_at = now
+            invitation.save(update_fields=["freeipa_matched_usernames", "freeipa_last_checked_at"])
+    return updated, checked
+
+
+def refresh_accepted_invitations(
+    *,
+    accepted: Iterable[AccountInvitation],
+    now: datetime,
+) -> tuple[int, int]:
+    updated = 0
+    checked = 0
+    for invitation in accepted:
+        checked += 1
+        if not invitation.freeipa_matched_usernames:
+            continue
+        confirmed, ok = confirm_existing_usernames(invitation.freeipa_matched_usernames)
+        if not ok:
+            continue
+        if not confirmed:
+            invitation.accepted_at = None
+            invitation.freeipa_matched_usernames = []
+            invitation.freeipa_last_checked_at = now
+            invitation.save(update_fields=["accepted_at", "freeipa_matched_usernames", "freeipa_last_checked_at"])
+            updated += 1
+            continue
+        if confirmed != invitation.freeipa_matched_usernames:
+            invitation.freeipa_matched_usernames = confirmed
+            invitation.freeipa_last_checked_at = now
+            invitation.save(update_fields=["freeipa_matched_usernames", "freeipa_last_checked_at"])
+            updated += 1
+    return updated, checked
+
+
+def refresh_account_invitations(
+    *,
+    actor_username: str,
+    now: datetime,
+    pending: Iterable[AccountInvitation] | None = None,
+    accepted: Iterable[AccountInvitation] | None = None,
+) -> AccountInvitationRefreshSummary:
+    pending_source = pending
+    if pending_source is None:
+        pending_source = AccountInvitation.objects.filter(
+            dismissed_at__isnull=True,
+            accepted_at__isnull=True,
+        ).order_by("pk")
+
+    accepted_source = accepted
+    if accepted_source is None:
+        accepted_source = AccountInvitation.objects.filter(
+            dismissed_at__isnull=True,
+            accepted_at__isnull=False,
+        ).order_by("pk")
+
+    pending_updated, pending_checked = refresh_pending_invitations(
+        pending=pending_source,
+        actor_username=actor_username,
+        now=now,
+    )
+    accepted_updated, accepted_checked = refresh_accepted_invitations(
+        accepted=accepted_source,
+        now=now,
+    )
+    return AccountInvitationRefreshSummary(
+        pending_checked=pending_checked,
+        pending_updated=pending_updated,
+        accepted_checked=accepted_checked,
+        accepted_updated=accepted_updated,
+    )

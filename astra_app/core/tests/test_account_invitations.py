@@ -7,19 +7,21 @@ from urllib.parse import quote
 
 from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from post_office.models import EmailTemplate
 
-from core.account_invitations import find_account_invitation_matches, parse_invitation_csv
+from core.account_invitations import (
+    _mark_invitation_accepted_from_email_match,
+    find_account_invitation_matches,
+    parse_invitation_csv,
+)
 from core.freeipa.user import FreeIPAUser
 from core.models import AccountInvitation, AccountInvitationSend, FreeIPAPermissionGrant, Organization
 from core.permissions import ASTRA_ADD_MEMBERSHIP
-from core.views_account_invitations import (
-    _build_invitation_email_context,
-    _mark_invitation_accepted_from_email_match,
-)
+from core.views_account_invitations import ACCOUNT_INVITATIONS_PER_PAGE, _build_invitation_email_context
 
 
 class AccountInvitationFreeIPAServiceTests(TestCase):
@@ -310,6 +312,82 @@ class AccountInvitationViewsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Already exists")
         self.assertContains(resp, "accepteduser")
+
+    def test_account_invitations_page_does_not_refresh_freeipa(self) -> None:
+        self._login_as_freeipa_user("committee")
+
+        invitation = AccountInvitation.objects.create(
+            email="pending@example.com",
+            full_name="Pending User",
+            note="",
+            invited_by_username="committee",
+        )
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
+            patch("core.views_account_invitations.find_account_invitation_matches", return_value=[]),
+        ):
+            resp = self.client.get(reverse("account-invitations"))
+
+        self.assertEqual(resp.status_code, 200)
+        invitation.refresh_from_db()
+        self.assertIsNone(invitation.freeipa_last_checked_at)
+
+    def test_account_invitations_page_paginates_pending(self) -> None:
+        self._login_as_freeipa_user("committee")
+
+        for idx in range(ACCOUNT_INVITATIONS_PER_PAGE + 1):
+            AccountInvitation.objects.create(
+                email=f"pending{idx}@example.com",
+                full_name="",
+                note="",
+                invited_by_username="committee",
+            )
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
+            patch("core.views_account_invitations.find_account_invitation_matches", return_value=[]),
+        ):
+            resp = self.client.get(reverse("account-invitations"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["pending_paginator"].count, ACCOUNT_INVITATIONS_PER_PAGE + 1)
+        self.assertEqual(len(resp.context["pending_invitations"]), ACCOUNT_INVITATIONS_PER_PAGE)
+        self.assertTrue(resp.context["pending_is_paginated"])
+
+    def test_account_invitations_manual_refresh_updates_pending(self) -> None:
+        self._login_as_freeipa_user("committee")
+
+        invitation = AccountInvitation.objects.create(
+            email="pending@example.com",
+            full_name="Pending User",
+            note="",
+            invited_by_username="committee",
+        )
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
+            patch("core.account_invitations.find_account_invitation_matches", return_value=[]),
+        ):
+            resp = self.client.post(reverse("account-invitations-refresh"))
+
+        self.assertEqual(resp.status_code, 302)
+        invitation.refresh_from_db()
+        self.assertIsNotNone(invitation.freeipa_last_checked_at)
+
+    def test_account_invitations_refresh_command_updates_pending(self) -> None:
+        invitation = AccountInvitation.objects.create(
+            email="pending@example.com",
+            full_name="Pending User",
+            note="",
+            invited_by_username="committee",
+        )
+
+        with patch("core.account_invitations.find_account_invitation_matches", return_value=[]):
+            call_command("account_invitations_refresh")
+
+        invitation.refresh_from_db()
+        self.assertIsNotNone(invitation.freeipa_last_checked_at)
 
     def test_account_invitations_upload_preview_and_send(self) -> None:
         self._login_as_freeipa_user("committee")
@@ -706,7 +784,7 @@ class AccountInvitationViewsTests(TestCase):
         self.assertEqual(send.result, AccountInvitationSend.Result.failed)
         self.assertEqual(send.error_category, "send_error")
 
-    def test_account_invitations_get_refreshes_pending_acceptance(self) -> None:
+    def test_account_invitations_refreshes_pending_acceptance(self) -> None:
         self._login_as_freeipa_user("committee")
 
         invitation = AccountInvitation.objects.create(
@@ -718,16 +796,16 @@ class AccountInvitationViewsTests(TestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
-            patch("core.views_account_invitations.find_account_invitation_matches", return_value=["pendinguser"]),
+            patch("core.account_invitations.find_account_invitation_matches", return_value=["pendinguser"]),
         ):
-            resp = self.client.get(reverse("account-invitations"))
+            resp = self.client.post(reverse("account-invitations-refresh"))
 
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 302)
         invitation.refresh_from_db()
         self.assertIsNotNone(invitation.accepted_at)
         self.assertEqual(invitation.freeipa_matched_usernames, ["pendinguser"])
 
-    def test_account_invitations_get_refresh_emits_signal_only_for_first_email_match_acceptance(self) -> None:
+    def test_account_invitations_refresh_emits_signal_only_for_first_email_match_acceptance(self) -> None:
         self._login_as_freeipa_user("committee")
 
         invitation = AccountInvitation.objects.create(
@@ -740,19 +818,16 @@ class AccountInvitationViewsTests(TestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
-            patch("core.views_account_invitations.find_account_invitation_matches", return_value=["pendinguser"]),
-            patch(
-                "core.views_account_invitations.confirm_existing_usernames",
-                return_value=(["pendinguser"], True),
-            ),
+            patch("core.account_invitations.find_account_invitation_matches", return_value=["pendinguser"]),
+            patch("core.account_invitations.confirm_existing_usernames", return_value=(["pendinguser"], True)),
             patch.object(signal_module.account_invitation_accepted, "send", autospec=True) as send_mock,
             self.captureOnCommitCallbacks(execute=True),
         ):
-            first_response = self.client.get(reverse("account-invitations"))
-            second_response = self.client.get(reverse("account-invitations"))
+            first_response = self.client.post(reverse("account-invitations-refresh"))
+            second_response = self.client.post(reverse("account-invitations-refresh"))
 
-        self.assertEqual(first_response.status_code, 200)
-        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(first_response.status_code, 302)
+        self.assertEqual(second_response.status_code, 302)
         invitation.refresh_from_db()
         self.assertIsNotNone(invitation.accepted_at)
         send_mock.assert_called_once()
@@ -760,7 +835,7 @@ class AccountInvitationViewsTests(TestCase):
         self.assertEqual(kwargs.get("actor"), "committee")
         self.assertEqual(kwargs.get("account_invitation").pk, invitation.pk)
 
-    def test_account_invitations_get_does_not_accept_org_linked_invitation_from_account_match(self) -> None:
+    def test_account_invitations_refresh_does_not_accept_org_linked_invitation_from_account_match(self) -> None:
         self._login_as_freeipa_user("committee")
 
         organization = Organization.objects.create(
@@ -778,16 +853,16 @@ class AccountInvitationViewsTests(TestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
-            patch("core.views_account_invitations.find_account_invitation_matches", return_value=["pendingclaim"]),
+            patch("core.account_invitations.find_account_invitation_matches", return_value=["pendingclaim"]),
         ):
-            resp = self.client.get(reverse("account-invitations"))
+            resp = self.client.post(reverse("account-invitations-refresh"))
 
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 302)
         invitation.refresh_from_db()
         self.assertIsNone(invitation.accepted_at)
         self.assertEqual(invitation.freeipa_matched_usernames, ["pendingclaim"])
 
-    def test_account_invitations_clears_stale_accepted(self) -> None:
+    def test_account_invitations_refresh_clears_stale_accepted(self) -> None:
         self._login_as_freeipa_user("committee")
 
         invitation = AccountInvitation.objects.create(
@@ -801,16 +876,16 @@ class AccountInvitationViewsTests(TestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
-            patch("core.views_account_invitations.confirm_existing_usernames", return_value=([], True)),
+            patch("core.account_invitations.confirm_existing_usernames", return_value=([], True)),
         ):
-            resp = self.client.get(reverse("account-invitations"))
+            resp = self.client.post(reverse("account-invitations-refresh"))
 
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 302)
         invitation.refresh_from_db()
         self.assertIsNone(invitation.accepted_at)
         self.assertEqual(invitation.freeipa_matched_usernames, [])
 
-    def test_account_invitations_clears_stale_accepted_without_emitting_signal(self) -> None:
+    def test_account_invitations_refresh_clears_stale_accepted_without_emitting_signal(self) -> None:
         self._login_as_freeipa_user("committee")
 
         invitation = AccountInvitation.objects.create(
@@ -825,12 +900,12 @@ class AccountInvitationViewsTests(TestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
-            patch("core.views_account_invitations.confirm_existing_usernames", return_value=([], True)),
+            patch("core.account_invitations.confirm_existing_usernames", return_value=([], True)),
             patch.object(signal_module.account_invitation_accepted, "send", autospec=True) as send_mock,
         ):
-            response = self.client.get(reverse("account-invitations"))
+            response = self.client.post(reverse("account-invitations-refresh"))
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 302)
         invitation.refresh_from_db()
         self.assertIsNone(invitation.accepted_at)
         send_mock.assert_not_called()
@@ -987,7 +1062,7 @@ class AccountInvitationViewsTests(TestCase):
     def test_account_invitations_list_shows_accepted_username_link_for_accepted_invitation(self) -> None:
         self._login_as_freeipa_user("committee")
 
-        invitation = AccountInvitation.objects.create(
+        AccountInvitation.objects.create(
             email="accepted@example.com",
             full_name="Accepted User",
             note="",
@@ -997,13 +1072,7 @@ class AccountInvitationViewsTests(TestCase):
             freeipa_matched_usernames=["accepteduser"],
         )
 
-        with (
-            patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
-            patch(
-                "core.views_account_invitations.confirm_existing_usernames",
-                return_value=(invitation.freeipa_matched_usernames, True),
-            ),
-        ):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()):
             response = self.client.get(reverse("account-invitations"))
 
         self.assertEqual(response.status_code, 200)
@@ -1018,7 +1087,7 @@ class AccountInvitationViewsTests(TestCase):
     def test_account_invitations_list_shows_accepted_username_link_for_multiple_matches(self) -> None:
         self._login_as_freeipa_user("committee")
 
-        invitation = AccountInvitation.objects.create(
+        AccountInvitation.objects.create(
             email="multi@example.com",
             full_name="Matched User",
             note="",
@@ -1028,13 +1097,7 @@ class AccountInvitationViewsTests(TestCase):
             freeipa_matched_usernames=["alphauser", "accepteduser"],
         )
 
-        with (
-            patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
-            patch(
-                "core.views_account_invitations.confirm_existing_usernames",
-                return_value=(invitation.freeipa_matched_usernames, True),
-            ),
-        ):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()):
             response = self.client.get(reverse("account-invitations"))
 
         self.assertEqual(response.status_code, 200)

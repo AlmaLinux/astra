@@ -248,6 +248,11 @@ urlpatterns = [
         name="account-invitations",
     ),
     path(
+        "membership/account-invitations/refresh/",
+        views_account_invitations.account_invitations_refresh,
+        name="account-invitations-refresh",
+    ),
+    path(
         "membership/account-invitations/upload/",
         views_account_invitations.account_invitations_upload,
         name="account-invitations-upload",

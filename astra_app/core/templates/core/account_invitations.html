@@ -7,6 +7,10 @@
   <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
     <h1 class="m-0">Account Invitations</h1>
     <div class="d-flex gap-2">
+      <form method="post" action="{% url 'account-invitations-refresh' %}" class="m-0">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-outline-secondary" title="Refresh invitation status from FreeIPA">Refresh now</button>
+      </form>
       <a href="{% url 'account-invitations-upload' %}" class="btn btn-primary" title="Upload invitations from CSV">Upload CSV</a>
     </div>
   </div>
@@ -39,7 +43,7 @@
           </div>
         </form>
 
-        <div class="text-muted">Accepted: {{ accepted_invitations|length }}</div>
+        <div class="text-muted">Accepted: {{ accepted_paginator.count }}</div>
       </div>
     </div>
     <div class="card-body p-0">
@@ -116,6 +120,9 @@
           </tbody>
         </table>
       </div>
+      <div class="border-top p-2 clearfix">
+        {% include 'core/_pagination.html' with paginator=accepted_paginator page_obj=accepted_page_obj is_paginated=accepted_is_paginated page_numbers=accepted_page_numbers show_first=accepted_show_first show_last=accepted_show_last page_url_prefix=accepted_page_url_prefix %}
+      </div>
     </div>
   </div>
 
@@ -147,7 +154,7 @@
           </div>
         </form>
 
-        <div class="text-muted">Pending: {{ pending_invitations|length }}</div>
+        <div class="text-muted">Pending: {{ pending_paginator.count }}</div>
       </div>
     </div>
     <div class="card-body p-0">
@@ -214,6 +221,9 @@
             {% endfor %}
           </tbody>
         </table>
+      </div>
+      <div class="border-top p-2 clearfix">
+        {% include 'core/_pagination.html' with paginator=pending_paginator page_obj=pending_page_obj is_paginated=pending_is_paginated page_numbers=pending_page_numbers show_first=pending_show_first show_last=pending_show_last page_url_prefix=pending_page_url_prefix %}
       </div>
     </div>
   </div>

@@ -14,14 +14,14 @@ from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from post_office.models import EmailTemplate
 
-from core.account_invitation_reconcile import persist_non_org_invitation_acceptance
 from core.account_invitations import (
+    _mark_invitation_accepted_from_email_match,
     build_freeipa_email_lookup,
     classify_invitation_rows,
-    confirm_existing_usernames,
     find_account_invitation_matches,
     normalize_invitation_email,
     parse_invitation_csv,
+    refresh_account_invitations,
 )
 from core.email_context import membership_committee_email_context, system_email_context
 from core.forms_base import StyledForm
@@ -31,7 +31,13 @@ from core.permissions import ASTRA_ADD_MEMBERSHIP
 from core.public_urls import PublicBaseUrlConfigurationError, build_public_absolute_url
 from core.rate_limit import allow_request
 from core.templated_email import queue_templated_email
-from core.views_utils import get_username, post_only_404
+from core.views_utils import (
+    _normalize_str,
+    build_page_url_prefix,
+    get_username,
+    paginate_and_build_context,
+    post_only_404,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +45,7 @@ _PREVIEW_SESSION_KEY = "account_invitation_preview_v1"
 _INVITATION_PUBLIC_BASE_URL_ERROR_MESSAGE = (
     "Invitation email configuration error: PUBLIC_BASE_URL must be configured to build invitation links."
 )
+ACCOUNT_INVITATIONS_PER_PAGE = 50
 
 
 def _invitation_template_names() -> list[str]:
@@ -219,55 +226,6 @@ def send_organization_claim_invitation(
     return result, invitation
 
 
-def _refresh_pending_invitations(
-    *,
-    pending: list[AccountInvitation],
-    actor_username: str,
-    now: timezone.datetime,
-) -> tuple[int, int]:
-    updated = 0
-    checked = 0
-    for invitation in pending:
-        checked += 1
-        matches = find_account_invitation_matches(invitation.email)
-        if matches:
-            _mark_invitation_accepted_from_email_match(
-                invitation=invitation,
-                matched_usernames=matches,
-                actor_username=actor_username,
-                now=now,
-            )
-            updated += 1
-        else:
-            invitation.freeipa_matched_usernames = []
-            invitation.freeipa_last_checked_at = now
-            invitation.save(update_fields=["freeipa_matched_usernames", "freeipa_last_checked_at"])
-    return updated, checked
-
-
-def _refresh_accepted_invitations(*, accepted: list[AccountInvitation], now: timezone.datetime) -> int:
-    updated = 0
-    for invitation in accepted:
-        if not invitation.freeipa_matched_usernames:
-            continue
-        confirmed, ok = confirm_existing_usernames(invitation.freeipa_matched_usernames)
-        if not ok:
-            continue
-        if not confirmed:
-            invitation.accepted_at = None
-            invitation.freeipa_matched_usernames = []
-            invitation.freeipa_last_checked_at = now
-            invitation.save(update_fields=["accepted_at", "freeipa_matched_usernames", "freeipa_last_checked_at"])
-            updated += 1
-            continue
-        if confirmed != invitation.freeipa_matched_usernames:
-            invitation.freeipa_matched_usernames = confirmed
-            invitation.freeipa_last_checked_at = now
-            invitation.save(update_fields=["freeipa_matched_usernames", "freeipa_last_checked_at"])
-            updated += 1
-    return updated
-
-
 def _resend_invitation(
     *,
     invitation: AccountInvitation,
@@ -308,66 +266,84 @@ def _resend_invitation(
     )
 
 
-def _mark_invitation_accepted_from_email_match(
-    *,
-    invitation: AccountInvitation,
-    matched_usernames: list[str],
-    actor_username: str,
-    now: timezone.datetime,
-) -> bool:
-    return persist_non_org_invitation_acceptance(
-        invitation=invitation,
-        matched_usernames=matched_usernames,
-        actor_username=actor_username,
-        now=now,
-    )
-
-
 class AccountInvitationUploadForm(StyledForm):
     csv_file = forms.FileField(required=True)
 
 
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
 def account_invitations(request: HttpRequest) -> HttpResponse:
-    actor_username = get_username(request)
-    pending_invitations = list(
+    pending_qs = (
         AccountInvitation.objects.select_related("organization")
         .filter(dismissed_at__isnull=True, accepted_at__isnull=True)
         .order_by("-invited_at")
-        .all()
     )
-    if pending_invitations:
-        _refresh_pending_invitations(pending=pending_invitations, now=timezone.now(), actor_username=actor_username)
-        pending_invitations = list(
-            AccountInvitation.objects.select_related("organization")
-            .filter(dismissed_at__isnull=True, accepted_at__isnull=True)
-            .order_by("-invited_at")
-            .all()
-        )
-    accepted_invitations = (
+    accepted_qs = (
         AccountInvitation.objects.select_related("organization")
         .filter(dismissed_at__isnull=True, accepted_at__isnull=False)
         .order_by("-accepted_at", "-invited_at")
-        .all()
     )
-    accepted_list = list(accepted_invitations)
-    if accepted_list:
-        _refresh_accepted_invitations(accepted=accepted_list, now=timezone.now())
-        accepted_invitations = (
-            AccountInvitation.objects.select_related("organization")
-            .filter(dismissed_at__isnull=True, accepted_at__isnull=False)
-            .order_by("-accepted_at", "-invited_at")
-            .all()
-        )
+
+    pending_page_number = _normalize_str(request.GET.get("pending_page")) or None
+    accepted_page_number = _normalize_str(request.GET.get("accepted_page")) or None
+    _, pending_page_url_prefix = build_page_url_prefix(request.GET, page_param="pending_page")
+    _, accepted_page_url_prefix = build_page_url_prefix(request.GET, page_param="accepted_page")
+
+    pending_page_ctx = paginate_and_build_context(
+        pending_qs,
+        pending_page_number,
+        ACCOUNT_INVITATIONS_PER_PAGE,
+        page_url_prefix=pending_page_url_prefix,
+    )
+    accepted_page_ctx = paginate_and_build_context(
+        accepted_qs,
+        accepted_page_number,
+        ACCOUNT_INVITATIONS_PER_PAGE,
+        page_url_prefix=accepted_page_url_prefix,
+    )
 
     return render(
         request,
         "core/account_invitations.html",
         {
-            "pending_invitations": pending_invitations,
-            "accepted_invitations": accepted_invitations,
+            "pending_invitations": pending_page_ctx["page_obj"].object_list,
+            "pending_paginator": pending_page_ctx["paginator"],
+            "pending_page_obj": pending_page_ctx["page_obj"],
+            "pending_is_paginated": pending_page_ctx["is_paginated"],
+            "pending_page_numbers": pending_page_ctx["page_numbers"],
+            "pending_show_first": pending_page_ctx["show_first"],
+            "pending_show_last": pending_page_ctx["show_last"],
+            "pending_page_url_prefix": pending_page_ctx["page_url_prefix"],
+            "accepted_invitations": accepted_page_ctx["page_obj"].object_list,
+            "accepted_paginator": accepted_page_ctx["paginator"],
+            "accepted_page_obj": accepted_page_ctx["page_obj"],
+            "accepted_is_paginated": accepted_page_ctx["is_paginated"],
+            "accepted_page_numbers": accepted_page_ctx["page_numbers"],
+            "accepted_show_first": accepted_page_ctx["show_first"],
+            "accepted_show_last": accepted_page_ctx["show_last"],
+            "accepted_page_url_prefix": accepted_page_ctx["page_url_prefix"],
         },
     )
+
+
+@permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
+@post_only_404
+def account_invitations_refresh(request: HttpRequest) -> HttpResponse:
+    actor_username = get_username(request)
+    summary = refresh_account_invitations(actor_username=actor_username, now=timezone.now())
+    total_checked = summary.pending_checked + summary.accepted_checked
+    total_updated = summary.pending_updated + summary.accepted_updated
+    if total_checked <= 0:
+        messages.info(request, "No invitations to refresh.")
+    else:
+        messages.success(
+            request,
+            (
+                "Refreshed "
+                f"{summary.pending_checked} pending and {summary.accepted_checked} accepted invitations; "
+                f"updated {total_updated}."
+            ),
+        )
+    return redirect("account-invitations")
 
 
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
