@@ -78,6 +78,40 @@ class OrganizationMembershipCSVImportResourceTests(TestCase):
         self.assertIn(sponsorship.code, codes)
         self.assertNotIn(individual.code, codes)
 
+    def test_import_form_skip_existing_active_membership_defaults_off(self) -> None:
+        form = OrganizationMembershipCSVImportForm(
+            formats=[base_formats.CSV],
+            resources=[OrganizationMembershipCSVImportResource],
+        )
+
+        self.assertIn("skip_existing_active_membership", form.fields)
+        self.assertFalse(form.fields["skip_existing_active_membership"].initial)
+
+    def test_get_confirm_form_initial_preserves_skip_existing_active_membership(self) -> None:
+        membership_type = self._membership_type(code="confirmskip", category_id="sponsorship")
+
+        admin_instance = OrganizationMembershipCSVImportLinkAdmin(OrganizationMembershipCSVImportLink, AdminSite())
+        request = RequestFactory().post("/admin/core/organizationmembershipcsvimportlink/import/")
+        request.user = SimpleNamespace(get_username=lambda: "alex")
+
+        initial = admin_instance.get_confirm_form_initial(
+            request,
+            SimpleNamespace(
+                cleaned_data={
+                    "import_file": SimpleNamespace(
+                        tmp_storage_name="organization-membership-import.tmp",
+                        name="organization-memberships.csv",
+                    ),
+                    "format": 0,
+                    "membership_type": membership_type,
+                    "skip_existing_active_membership": True,
+                }
+            ),
+        )
+
+        self.assertEqual(initial["membership_type"], membership_type.pk)
+        self.assertEqual(initial["skip_existing_active_membership"], "on")
+
     def test_import_form_header_extract_error_does_not_crash(self) -> None:
         uploaded = SimpleUploadedFile(
             "organization-memberships.csv",
@@ -217,6 +251,42 @@ class OrganizationMembershipCSVImportResourceTests(TestCase):
             resource.before_import(dataset)
 
         self.assertGreaterEqual(resolve_header.call_count, 5)
+
+    def test_decision_skips_active_same_type_membership_when_option_enabled(self) -> None:
+        membership_type = self._membership_type(code="active-skip", category_id="sponsorship")
+
+        org = Organization.objects.create(
+            name="Active Membership Org",
+            country_code="US",
+            business_contact_name="Biz",
+            business_contact_email="biz@example.com",
+            pr_marketing_contact_name="PR",
+            pr_marketing_contact_email="pr@example.com",
+            technical_contact_name="Tech",
+            technical_contact_email="tech@example.com",
+            website="https://example.com",
+            website_logo="https://example.com/logo.png",
+        )
+        Membership.objects.create(
+            target_organization=org,
+            membership_type=membership_type,
+            expires_at=timezone.now().astimezone(datetime.UTC) + datetime.timedelta(days=30),
+        )
+
+        dataset = Dataset(headers=["organization_id", "committee_notes"])
+        dataset.append([str(org.pk), "Imported by committee"])
+
+        resource = OrganizationMembershipCSVImportResource(
+            membership_type=membership_type,
+            actor_username="alex",
+            skip_existing_active_membership=True,
+        )
+        resource.before_import(dataset)
+
+        decision, reason, _organization, _row_note, _responses, _start_at, _end_at = resource._decision_for_row(dataset.dict[0])
+
+        self.assertEqual(decision, "SKIP")
+        self.assertEqual(reason, "Skipped due to active membership")
 
     def test_before_import_resolves_question_headers_from_overrides(self) -> None:
         membership_type = self._membership_type(code="questionoverride", category_id="sponsorship")

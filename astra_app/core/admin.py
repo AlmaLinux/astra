@@ -2563,6 +2563,8 @@ class MembershipCSVImportLinkAdmin(BaseCsvImportAdmin):
 
         if import_form.cleaned_data.get("enable_name_matching"):
             initial["enable_name_matching"] = "on"
+        if import_form.cleaned_data.get("skip_existing_active_membership"):
+            initial["skip_existing_active_membership"] = "on"
         return initial
 
     @override
@@ -2597,6 +2599,12 @@ class MembershipCSVImportLinkAdmin(BaseCsvImportAdmin):
                 extra["enable_name_matching"] = raw_enable
             elif isinstance(raw_enable, str):
                 extra["enable_name_matching"] = raw_enable.strip().lower() in {"1", "y", "yes", "true", "t", "on"}
+
+            raw_skip_existing = cleaned_data.get("skip_existing_active_membership")
+            if isinstance(raw_skip_existing, bool):
+                extra["skip_existing_active_membership"] = raw_skip_existing
+            elif isinstance(raw_skip_existing, str):
+                extra["skip_existing_active_membership"] = raw_skip_existing.strip().lower() in {"1", "y", "yes", "true", "t", "on"}
 
         question_column_overrides: dict[str, str] = {}
         if isinstance(cleaned_data, dict):
@@ -2844,6 +2852,9 @@ class OrganizationMembershipCSVImportLinkAdmin(BaseCsvImportAdmin):
             ):
                 initial[key] = value
 
+        if import_form.cleaned_data.get("skip_existing_active_membership"):
+            initial["skip_existing_active_membership"] = "on"
+
         return initial
 
     @override
@@ -2870,6 +2881,12 @@ class OrganizationMembershipCSVImportLinkAdmin(BaseCsvImportAdmin):
                 value = cleaned_data.get(key, "")
                 if value:
                     extra[key] = value
+
+            raw_skip_existing = cleaned_data.get("skip_existing_active_membership")
+            if isinstance(raw_skip_existing, bool):
+                extra["skip_existing_active_membership"] = raw_skip_existing
+            elif isinstance(raw_skip_existing, str):
+                extra["skip_existing_active_membership"] = raw_skip_existing.strip().lower() in {"1", "y", "yes", "true", "t", "on"}
 
         question_column_overrides: dict[str, str] = {}
         if isinstance(cleaned_data, dict):

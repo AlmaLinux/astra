@@ -390,48 +390,48 @@ def account_invitations_upload(request: HttpRequest) -> HttpResponse:
                 try:
                     text = raw.decode("utf-8-sig")
                 except UnicodeDecodeError:
-                    text = raw.decode("utf-8", errors="replace")
-
-                try:
-                    rows = parse_invitation_csv(text, max_rows=settings.ACCOUNT_INVITATION_MAX_CSV_ROWS)
-                except ValueError as exc:
-                    form.add_error("csv_file", str(exc))
+                    form.add_error("csv_file", "CSV file must be UTF-8 encoded.")
                 else:
-                    emails = {normalize_invitation_email(row.get("email") or "") for row in rows}
-                    existing = {
-                        inv.email: inv
-                        for inv in AccountInvitation.objects.filter(email__in=[e for e in emails if e]).all()
-                    }
-                    email_map = build_freeipa_email_lookup()
+                    try:
+                        rows = parse_invitation_csv(text, max_rows=settings.ACCOUNT_INVITATION_MAX_CSV_ROWS)
+                    except ValueError as exc:
+                        form.add_error("csv_file", str(exc))
+                    else:
+                        emails = {normalize_invitation_email(row.get("email") or "") for row in rows}
+                        existing = {
+                            inv.email: inv
+                            for inv in AccountInvitation.objects.filter(email__in=[e for e in emails if e]).all()
+                        }
+                        email_map = build_freeipa_email_lookup()
 
-                    def _bulk_lookup(email: str) -> list[str]:
-                        normalized = normalize_invitation_email(email)
-                        if not normalized:
-                            return []
-                        if email_map:
-                            return sorted(email_map.get(normalized, set()))
-                        return find_account_invitation_matches(normalized)
+                        def _bulk_lookup(email: str) -> list[str]:
+                            normalized = normalize_invitation_email(email)
+                            if not normalized:
+                                return []
+                            if email_map:
+                                return sorted(email_map.get(normalized, set()))
+                            return find_account_invitation_matches(normalized)
 
-                    preview_rows, counts = classify_invitation_rows(
-                        rows,
-                        existing_invitations=existing,
-                        freeipa_lookup=_bulk_lookup,
-                    )
+                        preview_rows, counts = classify_invitation_rows(
+                            rows,
+                            existing_invitations=existing,
+                            freeipa_lookup=_bulk_lookup,
+                        )
 
-                    request.session[_PREVIEW_SESSION_KEY] = {
-                        "rows": rows,
-                    }
+                        request.session[_PREVIEW_SESSION_KEY] = {
+                            "rows": rows,
+                        }
 
-                    return render(
-                        request,
-                        "core/account_invitations_preview.html",
-                        {
-                            "preview_rows": preview_rows,
-                            "counts": counts,
-                            "email_templates": email_templates,
-                            "default_template_name": email_templates[0].name if email_templates else "",
-                        },
-                    )
+                        return render(
+                            request,
+                            "core/account_invitations_preview.html",
+                            {
+                                "preview_rows": preview_rows,
+                                "counts": counts,
+                                "email_templates": email_templates,
+                                "default_template_name": email_templates[0].name if email_templates else "",
+                            },
+                        )
     else:
         form = AccountInvitationUploadForm()
 

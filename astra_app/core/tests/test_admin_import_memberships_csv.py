@@ -123,6 +123,15 @@ class AdminImportMembershipsCSVTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
 
+    def test_import_form_skip_existing_active_membership_defaults_off(self) -> None:
+        form = MembershipCSVImportForm(
+            formats=[base_formats.CSV],
+            resources=[MembershipCSVImportResource],
+        )
+
+        self.assertIn("skip_existing_active_membership", form.fields)
+        self.assertFalse(form.fields["skip_existing_active_membership"].initial)
+
     def test_apply_row_runs_only_for_non_dry_run(self) -> None:
         MembershipType.objects.update_or_create(
             code="individual",
@@ -454,6 +463,7 @@ class AdminImportMembershipsCSVTests(TestCase):
                     "name_column": "Full Name",
                     "email_column": "Email Address",
                     "enable_name_matching": "on",
+                    "skip_existing_active_membership": "on",
                     "q_contributions_column": "Why?",
                 }
             ),
@@ -464,7 +474,43 @@ class AdminImportMembershipsCSVTests(TestCase):
         self.assertEqual(kwargs["name_column"], "Full Name")
         self.assertEqual(kwargs["email_column"], "Email Address")
         self.assertTrue(kwargs["enable_name_matching"])
+        self.assertTrue(kwargs["skip_existing_active_membership"])
         self.assertEqual(kwargs["question_column_overrides"], {"q_contributions_column": "Why?"})
+
+    def test_get_confirm_form_initial_preserves_skip_existing_active_membership(self) -> None:
+        membership_type, _ = MembershipType.objects.update_or_create(
+            code="transport",
+            defaults={
+                "name": "Transport",
+                "group_cn": "almalinux-transport",
+                "category_id": "individual",
+                "enabled": True,
+                "sort_order": 0,
+            },
+        )
+
+        site = AdminSite()
+        admin_instance = MembershipCSVImportLinkAdmin(MembershipCSVImportLink, site)
+        request = RequestFactory().post("/admin/core/membershipcsvimportlink/import/")
+        request.user = SimpleNamespace(get_username=lambda: "alex")
+
+        initial = admin_instance.get_confirm_form_initial(
+            request,
+            SimpleNamespace(
+                cleaned_data={
+                    "import_file": SimpleNamespace(
+                        tmp_storage_name="membership-import.tmp",
+                        name="membership-import.csv",
+                    ),
+                    "format": 0,
+                    "membership_type": membership_type,
+                    "skip_existing_active_membership": True,
+                }
+            ),
+        )
+
+        self.assertEqual(initial["membership_type"], membership_type.pk)
+        self.assertEqual(initial["skip_existing_active_membership"], "on")
 
     def test_import_page_includes_format_field(self) -> None:
         self._login_as_freeipa_admin("alex")
@@ -1672,6 +1718,73 @@ class AdminImportMembershipsCSVTests(TestCase):
 
         self.assertEqual(decision, "IMPORT")
         self.assertEqual(reason, "Active membership, importing updates")
+
+    def test_preview_reason_skips_active_membership_when_option_enabled(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "enabled": True,
+                "sort_order": 0,
+            },
+        )
+
+        self._login_as_freeipa_admin("alex")
+
+        now = timezone.now().astimezone(datetime.UTC)
+        Membership.objects.create(
+            target_username="alice",
+            membership_type_id="individual",
+            expires_at=now + datetime.timedelta(days=30),
+        )
+
+        dataset = Dataset(headers=["Email", "Start date", "Notes"])
+        dataset.append(["alice@example.org", "2024-01-02", "Updated note"])
+
+        admin_user = FreeIPAUser(
+            "alex",
+            {
+                "uid": ["alex"],
+                "mail": ["alex@example.org"],
+                "memberof_group": ["admins"],
+            },
+        )
+        alice_user = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.org"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "alex":
+                return admin_user
+            if username == "alice":
+                return alice_user
+            return None
+
+        with (
+            patch("core.membership_csv_import.FreeIPAUser.all", return_value=[admin_user, alice_user]),
+            patch("core.membership_csv_import.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
+        ):
+            resource = MembershipCSVImportResource(
+                membership_type=MembershipType.objects.get(code="individual"),
+                actor_username="alex",
+                skip_existing_active_membership=True,
+            )
+            resource.before_import(dataset)
+            row_decision = resource._decision_for_row(dataset.dict[0])
+            decision = row_decision.decision
+            reason = row_decision.reason
+
+        self.assertEqual(decision, "SKIP")
+        self.assertEqual(reason, "Skipped due to active membership")
 
     def test_second_import_is_marked_up_to_date(self) -> None:
         MembershipType.objects.update_or_create(

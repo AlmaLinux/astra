@@ -178,6 +178,27 @@ class AccountInvitationViewsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Invalid")
 
+    def test_account_invitations_upload_rejects_non_utf8_csv(self) -> None:
+        self._login_as_freeipa_user("committee")
+
+        upload = SimpleUploadedFile(
+            "invites.csv",
+            b"email,full_name,note\nuser@example.com,Jos\xe9 Example,Hello\n",
+            content_type="text/csv",
+        )
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()):
+            resp = self.client.post(
+                reverse("account-invitations-upload"),
+                data={
+                    "csv_file": upload,
+                },
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "CSV file must be UTF-8 encoded.")
+        self.assertNotContains(resp, "Invitation Preview")
+
     def test_account_invitations_preview_marks_existing_users(self) -> None:
         self._login_as_freeipa_user("committee")
 

@@ -151,6 +151,13 @@ class OrganizationMembershipCSVImportForm(ImportForm):
         choices=[("", "Auto-detect")],
         help_text=_column_help_text("committee_notes_column"),
     )
+    skip_existing_active_membership = forms.BooleanField(
+        required=False,
+        initial=False,
+        help_text=(
+            "Optional: skip rows when the matched organization already has an active membership of the selected type."
+        ),
+    )
 
     @override
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -233,6 +240,7 @@ class OrganizationMembershipCSVConfirmImportForm(ConfirmImportForm):
     membership_start_date_column = forms.CharField(required=False, widget=forms.HiddenInput)
     membership_end_date_column = forms.CharField(required=False, widget=forms.HiddenInput)
     committee_notes_column = forms.CharField(required=False, widget=forms.HiddenInput)
+    skip_existing_active_membership = forms.CharField(required=False, widget=forms.HiddenInput)
     selected_row_numbers = forms.CharField(required=False, widget=forms.HiddenInput)
 
     @override
@@ -290,6 +298,7 @@ class OrganizationMembershipCSVImportResource(resources.ModelResource):
         membership_start_date_column: str = "",
         membership_end_date_column: str = "",
         committee_notes_column: str = "",
+        skip_existing_active_membership: bool = False,
         question_column_overrides: dict[str, str] | None = None,
     ) -> None:
         super().__init__()
@@ -303,6 +312,7 @@ class OrganizationMembershipCSVImportResource(resources.ModelResource):
             "membership_end_date": membership_end_date_column,
             "committee_notes": committee_notes_column,
         }
+        self._skip_existing_active_membership = bool(skip_existing_active_membership)
         self._question_column_overrides = question_column_overrides or {}
 
         self._resolved_headers: dict[str, str | None] = {}
@@ -570,6 +580,16 @@ class OrganizationMembershipCSVImportResource(resources.ModelResource):
 
         if start_at is not None and end_at is not None and end_at <= start_at:
             return "SKIP", "Membership end date must be after start date", None, "", responses, None, None
+
+        if self._skip_existing_active_membership:
+            existing_membership = (
+                Membership.objects.active()
+                .filter(target_organization=organization, membership_type=membership_type)
+                .only("id")
+                .first()
+            )
+            if existing_membership is not None:
+                return "SKIP", "Skipped due to active membership", organization, "", responses, start_at, end_at
 
         row_note = self._row_value(row, "committee_notes")
         return "IMPORT", "Ready to import", organization, row_note, responses, start_at, end_at

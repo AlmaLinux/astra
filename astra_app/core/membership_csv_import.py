@@ -126,6 +126,13 @@ class MembershipCSVImportForm(ImportForm):
             "This is flakier and is best used as a second pass on the unmatched export."
         ),
     )
+    skip_existing_active_membership = forms.BooleanField(
+        required=False,
+        initial=False,
+        help_text=(
+            "Optional: skip rows when the matched user already has an active membership of the selected type."
+        ),
+    )
 
     @override
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -200,6 +207,7 @@ class MembershipCSVConfirmImportForm(ConfirmImportForm):
     membership_type_column = forms.CharField(required=False, widget=forms.HiddenInput)
 
     enable_name_matching = forms.CharField(required=False, widget=forms.HiddenInput)
+    skip_existing_active_membership = forms.CharField(required=False, widget=forms.HiddenInput)
     selected_row_numbers = forms.CharField(required=False, widget=forms.HiddenInput)
 
     @override
@@ -246,6 +254,7 @@ class MembershipCSVImportResource(resources.ModelResource):
         membership_type: MembershipType | None = None,
         actor_username: str = "",
         enable_name_matching: bool = False,
+        skip_existing_active_membership: bool = False,
         email_column: str = "",
         name_column: str = "",
         active_member_column: str = "",
@@ -260,6 +269,7 @@ class MembershipCSVImportResource(resources.ModelResource):
         self._actor_username = actor_username
 
         self._enable_name_matching = bool(enable_name_matching)
+        self._skip_existing_active_membership = bool(skip_existing_active_membership)
 
         self._column_overrides: dict[str, str] = {
             "email": email_column,
@@ -864,6 +874,13 @@ class MembershipCSVImportResource(resources.ModelResource):
             .only("created_at")
             .first()
         )
+        if existing_membership is not None and self._skip_existing_active_membership:
+            return row_decision(
+                decision="SKIP",
+                reason="Skipped due to active membership",
+                username=username,
+                match_method=match_method,
+            )
         if existing_membership is not None and start_at is not None:
             if existing_membership.created_at == start_at and not has_updates:
                 return row_decision(
