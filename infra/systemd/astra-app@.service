@@ -1,7 +1,6 @@
 [Unit]
 Description=Astra app container instance %i
-After=network-online.target astra-memcached.service
-Requires=astra-memcached.service
+After=network-online.target
 Wants=network-online.target
 
 [Service]

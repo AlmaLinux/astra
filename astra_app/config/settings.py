@@ -944,12 +944,11 @@ ACCOUNT_INVITATION_EMAIL_TEMPLATE_NAMES = _env_list(
 FREEIPA_GROUP_PERMISSIONS: dict[str, set[str]] = {}
 
 # Caching
-MEMCACHED_SERVERS = _env_list("MEMCACHED_SERVERS", default=["127.0.0.1:11211"])
 CACHES = {
-    "default": {
-        "BACKEND": "django.core.cache.backends.memcached.PyMemcacheCache",
-        "LOCATION": MEMCACHED_SERVERS,
-        "TIMEOUT": 300 if DEBUG else 3600,
+    'default': {
+        'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
+        'LOCATION': 'astra_cache',
+        'TIMEOUT': 300 if DEBUG else 3600,
     }
 }
 
