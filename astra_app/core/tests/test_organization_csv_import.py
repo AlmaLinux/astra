@@ -67,6 +67,17 @@ class OrganizationCSVImportUtilitiesTests(TestCase):
 
         self.assertEqual(headers, ["García", "Country Code"])
 
+    def test_extract_headers_supports_cr_separated_rows_with_quoted_multiline_fields(self) -> None:
+        uploaded = SimpleUploadedFile(
+            "orgs.csv",
+            b"Name,Country Code,Website\r\"Acme\rCorp\",US,https://example.com\r",
+            content_type="text/csv",
+        )
+
+        headers = extract_csv_headers_from_uploaded_file(uploaded)
+
+        self.assertEqual(headers, ["Name", "Country Code", "Website"])
+
 
 class OrganizationCSVImportResourceTests(TestCase):
     def test_decision_skips_missing_required_field(self) -> None:

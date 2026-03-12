@@ -11,7 +11,7 @@ from django.urls import reverse
 from core.freeipa.user import FreeIPAUser
 from core.models import AccountInvitation, AccountInvitationSend, FreeIPAPermissionGrant, Organization
 from core.permissions import ASTRA_ADD_SEND_MAIL
-from core.views_send_mail import _CSV_SESSION_KEY, _PREVIEW_CONTEXT_SESSION_KEY, SendMailForm
+from core.views_send_mail import _CSV_SESSION_KEY, _PREVIEW_CONTEXT_SESSION_KEY, SendMailForm, _parse_csv_upload
 
 
 class SendMailUrlHelperTests(SimpleTestCase):
@@ -56,6 +56,15 @@ class SendMailTests(TestCase):
             principal_type=FreeIPAPermissionGrant.PrincipalType.group,
             principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
         )
+
+    def test_parse_csv_upload_supports_cr_separated_rows_with_multiline_quoted_fields(self) -> None:
+        csv_file = io.BytesIO(b'Email,Display Name\ruser@example.com,"Alice\rUser"\r')
+
+        preview, recipients, header_to_var = _parse_csv_upload(csv_file)
+
+        self.assertEqual(preview.recipient_count, 1)
+        self.assertEqual(recipients, [{"email": "user@example.com", "display_name": "Alice\rUser"}])
+        self.assertEqual(header_to_var, {"Email": "email", "Display Name": "display_name"})
 
     def test_requires_permission(self) -> None:
         self._login_as_freeipa_user("alice")

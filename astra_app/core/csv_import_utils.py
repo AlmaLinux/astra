@@ -203,6 +203,6 @@ def extract_csv_headers_from_uploaded_file(uploaded: UploadedFile) -> list[str]:
     except Exception:
         dialect = csv.excel
 
-    reader = csv.reader(io.StringIO(text), dialect)
+    reader = csv.reader(io.StringIO(text, newline=""), dialect)
     headers = next(reader, [])
     return [h.strip() for h in headers if str(h).strip()]

@@ -45,7 +45,7 @@ def parse_invitation_csv(content: str, *, max_rows: int) -> list[dict[str, str]]
     except Exception:
         dialect = csv.excel
 
-    reader = csv.reader(io.StringIO(raw), dialect)
+    reader = csv.reader(io.StringIO(raw, newline=""), dialect)
     rows = [row for row in reader if any(str(cell or "").strip() for cell in row)]
     if not rows:
         raise ValueError("CSV is empty.")

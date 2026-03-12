@@ -232,7 +232,7 @@ def _parse_csv_upload(file_obj) -> tuple[RecipientPreview, list[dict[str, str]],
     except UnicodeDecodeError:
         text = raw.decode("utf-8", errors="replace")
 
-    sio = io.StringIO(text)
+    sio = io.StringIO(text, newline="")
     dict_reader = csv.DictReader(sio)
 
     if not dict_reader.fieldnames:

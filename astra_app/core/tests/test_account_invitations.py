@@ -12,7 +12,7 @@ from django.urls import reverse
 from django.utils import timezone
 from post_office.models import EmailTemplate
 
-from core.account_invitations import find_account_invitation_matches
+from core.account_invitations import find_account_invitation_matches, parse_invitation_csv
 from core.freeipa.user import FreeIPAUser
 from core.models import AccountInvitation, AccountInvitationSend, FreeIPAPermissionGrant, Organization
 from core.permissions import ASTRA_ADD_MEMBERSHIP
@@ -37,6 +37,23 @@ class AccountInvitationFreeIPAServiceTests(TestCase):
             usernames = find_account_invitation_matches("team@example.com")
 
         self.assertEqual(usernames, ["alice", "bob"])
+
+    def test_parse_invitation_csv_supports_cr_separated_rows_with_multiline_notes(self) -> None:
+        rows = parse_invitation_csv(
+            'email,full_name,note\ruser@example.com,Alice,"First line\rSecond line"\r',
+            max_rows=10,
+        )
+
+        self.assertEqual(
+            rows,
+            [
+                {
+                    "email": "user@example.com",
+                    "full_name": "Alice",
+                    "note": "First line\rSecond line",
+                }
+            ],
+        )
 
 
 class AccountInvitationViewsTests(TestCase):
