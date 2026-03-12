@@ -232,6 +232,12 @@ SELF_SERVICE_ADDRESS_COUNTRY_ATTR = _env_str("SELF_SERVICE_ADDRESS_COUNTRY_ATTR"
 VALX_PROFANITY_WORDS_FILE = Path(
     _env_str("VALX_PROFANITY_WORDS_FILE", default=str(BASE_DIR / "core" / "data" / "custom_profanity.txt"))
 )
+VALX_PROFANITY_ALLOWLIST_FILE = Path(
+    _env_str(
+        "VALX_PROFANITY_ALLOWLIST_FILE",
+        default=str(BASE_DIR / "core" / "data" / "profanity_allowlist.txt"),
+    )
+)
 
 # FreeIPA FAS agreement CN used for the Community Code of Conduct.
 COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN = "AlmaLinux Community Code of Conduct"

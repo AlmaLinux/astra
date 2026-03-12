@@ -63,6 +63,21 @@ def load_custom_profanity_words() -> list[str]:
         return []
 
 
+@lru_cache(maxsize=1)
+def load_profanity_allowlist_words() -> list[str]:
+    path = Path(settings.VALX_PROFANITY_ALLOWLIST_FILE)
+    if not str(path).strip():
+        return []
+    try:
+        return _valx_api().load_custom_profanity_from_file(str(path))
+    except FileNotFoundError:
+        logger.warning("ValX profanity allowlist file missing: %s", path)
+        return []
+    except Exception:
+        logger.exception("Failed to load ValX profanity allowlist file: %s", path)
+        return []
+
+
 def _normalize_hate_speech_outcome(outcome: object) -> list[str]:
     if isinstance(outcome, list):
         return outcome
@@ -87,6 +102,19 @@ def _detects_profanity(value: str) -> bool:
 def _profanity_keywords() -> list[str]:
     words = _valx_api().load_profanity_words(language="All", custom_words_list=load_custom_profanity_words())
     return sorted({w.strip().lower() for w in words if w and w.strip()})
+
+
+@lru_cache(maxsize=1)
+def _profanity_allowlist() -> set[str]:
+    words = load_profanity_allowlist_words()
+    return {w.strip().casefold() for w in words if w and w.strip()}
+
+
+def _is_allowlisted_value(value: str) -> bool:
+    normalized = value.casefold()
+    if not normalized:
+        return False
+    return normalized in _profanity_allowlist()
 
 
 def _detects_profanity_in_identifier(value: str) -> bool:
@@ -120,6 +148,8 @@ def validate_no_profanity_or_hate_speech(value: object, *, field_label: str) -> 
     cleaned = _normalize_str(value)
     if not cleaned:
         return ""
+    if _is_allowlisted_value(cleaned):
+        return cleaned
     try:
         if _detects_profanity(cleaned) or _detects_profanity_in_identifier(cleaned) or _detects_hate_speech(cleaned):
             raise forms.ValidationError(f"{field_label} contains disallowed language")
