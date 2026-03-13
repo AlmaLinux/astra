@@ -1,15 +1,21 @@
-
-astra.almalinux.org {
+accounts.almalinux.org {
     @blocked_health {
         path /healthz /readyz
         not remote_ip 127.0.0.1 ::1
     }
     respond @blocked_health 404
 
+    @cf header CF-Connecting-IP *
+    reverse_proxy @cf 127.0.0.1:8001 127.0.0.1:8002 {
+        lb_policy least_conn
+        lb_retries 2
+        header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
+        health_uri /readyz
+    }
+
     reverse_proxy 127.0.0.1:8001 127.0.0.1:8002 {
         lb_policy least_conn
         lb_retries 2
-
         health_uri /readyz
     }
 }
