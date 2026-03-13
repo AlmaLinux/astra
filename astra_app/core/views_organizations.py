@@ -7,6 +7,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core import signing
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -334,19 +335,58 @@ def organizations(request: HttpRequest) -> HttpResponse:
             }
             q_terms = q.split()
             matched_statuses = {status_tokens[term.lower()] for term in q_terms if term.lower() in status_tokens}
+            membership_type_tokens = {
+                term.lower().removeprefix("is:")
+                for term in q_terms
+                if term.lower().startswith("is:") and term.lower() not in status_tokens
+            }
+
+            matched_membership_type_codes = set(
+                MembershipType.objects.filter(
+                    category__is_organization=True,
+                    code__in=membership_type_tokens,
+                ).values_list("code", flat=True)
+            )
+
+            if matched_membership_type_codes:
+                now = timezone.now()
+                for membership_type_code in sorted(matched_membership_type_codes):
+                    orgs = orgs.filter(
+                        Q(
+                            memberships__membership_type_id=membership_type_code,
+                            memberships__expires_at__isnull=True,
+                        )
+                        | Q(
+                            memberships__membership_type_id=membership_type_code,
+                            memberships__expires_at__gt=now,
+                        )
+                    )
+                orgs = orgs.distinct()
+
+            recognized_tokens = {
+                *status_tokens,
+                *(f"is:{membership_type_code}" for membership_type_code in matched_membership_type_codes),
+            }
+
             if len(matched_statuses) == 1:
                 orgs = orgs.filter(status=matched_statuses.pop())
                 name_query = " ".join(
                     term
                     for term in q_terms
-                    if term.lower() not in status_tokens
+                    if term.lower() not in recognized_tokens
                 )
             elif len(matched_statuses) > 1:
                 orgs = orgs.none()
                 name_query = " ".join(
                     term
                     for term in q_terms
-                    if term.lower() not in status_tokens
+                    if term.lower() not in recognized_tokens
+                )
+            else:
+                name_query = " ".join(
+                    term
+                    for term in q_terms
+                    if term.lower() not in recognized_tokens
                 )
 
         if name_query:

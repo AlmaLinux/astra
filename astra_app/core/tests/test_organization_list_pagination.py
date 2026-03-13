@@ -1,11 +1,13 @@
+import datetime
 from unittest.mock import patch
 from urllib.parse import quote_plus
 
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from core.freeipa.user import FreeIPAUser
-from core.models import FreeIPAPermissionGrant, Organization
+from core.models import FreeIPAPermissionGrant, Membership, MembershipType, MembershipTypeCategory, Organization
 from core.permissions import ASTRA_CHANGE_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP
 
 
@@ -284,3 +286,98 @@ class OrganizationListPaginationTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(list(response.context["organizations"]), [])
+
+    def test_manager_can_filter_organizations_by_membership_type_tokens(self) -> None:
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_CHANGE_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="manager",
+        )
+        self._login_as_freeipa_user("manager")
+
+        MembershipTypeCategory.objects.update_or_create(
+            pk="mirror",
+            defaults={
+                "is_individual": False,
+                "is_organization": True,
+                "sort_order": 0,
+            },
+        )
+        MembershipTypeCategory.objects.update_or_create(
+            pk="sponsorship",
+            defaults={
+                "is_individual": False,
+                "is_organization": True,
+                "sort_order": 1,
+            },
+        )
+        MembershipTypeCategory.objects.update_or_create(
+            pk="community",
+            defaults={
+                "is_individual": False,
+                "is_organization": True,
+                "sort_order": 2,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror",
+                "category_id": "mirror",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="sponsor",
+            defaults={
+                "name": "Sponsor",
+                "category_id": "sponsorship",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold",
+                "category_id": "community",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        mirror_org = Organization.objects.create(name="Acme Mirror", representative="rep-mirror")
+        sponsor_org = Organization.objects.create(name="Acme Sponsor", representative="rep-sponsor")
+        gold_org = Organization.objects.create(name="Acme Gold", representative="rep-gold")
+        expired_org = Organization.objects.create(name="Acme Mirror Expired", representative="rep-expired")
+
+        Membership.objects.create(target_organization=mirror_org, membership_type_id="mirror")
+        Membership.objects.create(target_organization=sponsor_org, membership_type_id="sponsor")
+        Membership.objects.create(target_organization=gold_org, membership_type_id="gold")
+        Membership.objects.create(
+            target_organization=expired_org,
+            membership_type_id="mirror",
+            expires_at=timezone.now() - datetime.timedelta(days=1),
+        )
+
+        manager = FreeIPAUser(
+            "manager",
+            {"uid": ["manager"], "memberof_group": [], "c": ["US"]},
+        )
+
+        expected_results = {
+            "is:mirror acme": ["Acme Mirror"],
+            "is:sponsor acme": ["Acme Sponsor"],
+            "is:gold acme": ["Acme Gold"],
+        }
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=manager):
+            for query, expected_org_names in expected_results.items():
+                with self.subTest(query=query):
+                    response = self.client.get(reverse("organizations"), {"q": query})
+                    self.assertEqual(response.status_code, 200)
+                    self.assertEqual(
+                        [organization.name for organization in response.context["organizations"]],
+                        expected_org_names,
+                    )
