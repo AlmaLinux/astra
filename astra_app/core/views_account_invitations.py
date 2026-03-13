@@ -8,6 +8,7 @@ from django.contrib.auth.decorators import permission_required
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import UploadedFile
 from django.core.validators import validate_email
+from django.db.models.functions import Lower
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
@@ -114,6 +115,24 @@ def _build_invitation_email_context(*, invitation: AccountInvitation, actor_user
             context["claim_url"] = build_organization_claim_url(organization=organization)
 
     return context
+
+
+def _existing_invitations_by_normalized_email(emails: set[str]) -> dict[str, AccountInvitation]:
+    normalized_emails = {normalize_invitation_email(email) for email in emails if normalize_invitation_email(email)}
+    if not normalized_emails:
+        return {}
+
+    invitations = AccountInvitation.objects.annotate(normalized_email=Lower("email")).filter(
+        normalized_email__in=normalized_emails
+    )
+    existing: dict[str, AccountInvitation] = {}
+    for invitation in invitations:
+        normalized = normalize_invitation_email(invitation.email)
+        if normalized:
+            # Legacy rows may carry mixed-case emails; keep matching keyed by
+            # normalized lowercase email so CSV imports remain case-insensitive.
+            existing[normalized] = invitation
+    return existing
 
 
 def _send_account_invitation_email(
@@ -374,10 +393,7 @@ def account_invitations_upload(request: HttpRequest) -> HttpResponse:
                         form.add_error("csv_file", str(exc))
                     else:
                         emails = {normalize_invitation_email(row.get("email") or "") for row in rows}
-                        existing = {
-                            inv.email: inv
-                            for inv in AccountInvitation.objects.filter(email__in=[e for e in emails if e]).all()
-                        }
+                        existing = _existing_invitations_by_normalized_email(emails)
                         email_map = build_freeipa_email_lookup()
 
                         def _bulk_lookup(email: str) -> list[str]:
@@ -483,6 +499,12 @@ def account_invitations_send(request: HttpRequest) -> HttpResponse:
     seen: set[str] = set()
     lookup_cache: dict[str, list[str]] = {}
     email_map = build_freeipa_email_lookup()
+    row_emails = {
+        normalize_invitation_email(str(row.get("email") or ""))
+        for row in rows
+        if isinstance(row, dict)
+    }
+    existing_invitation_by_email = _existing_invitations_by_normalized_email(row_emails)
 
     for row in rows:
         if not isinstance(row, dict):
@@ -519,7 +541,7 @@ def account_invitations_send(request: HttpRequest) -> HttpResponse:
             existing += 1
             continue
 
-        invitation = AccountInvitation.objects.filter(email=normalized).first()
+        invitation = existing_invitation_by_email.get(normalized)
         if invitation is None:
             invitation = AccountInvitation.objects.create(
                 email=normalized,
@@ -528,6 +550,7 @@ def account_invitations_send(request: HttpRequest) -> HttpResponse:
                 invited_by_username=actor_username,
                 email_template_name=template_name,
             )
+            existing_invitation_by_email[normalized] = invitation
         elif invitation.organization_id is not None:
             skipped_org_linked += 1
             continue

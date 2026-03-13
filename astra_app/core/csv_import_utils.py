@@ -158,7 +158,8 @@ def normalize_csv_email(value: object) -> str:
 
 
 def normalize_csv_name(value: object) -> str:
-    raw = _normalize_str(value).lower()
+    # casefold() provides stronger Unicode-insensitive matching than lower().
+    raw = _normalize_str(value).casefold()
     return "".join(ch for ch in raw if ch.isalnum())
 
 

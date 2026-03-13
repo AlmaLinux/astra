@@ -313,6 +313,41 @@ class AccountInvitationViewsTests(TestCase):
         self.assertContains(resp, "Already exists")
         self.assertContains(resp, "accepteduser")
 
+    def test_account_invitations_preview_matches_existing_accepted_invitation_case_insensitive_email(self) -> None:
+        self._login_as_freeipa_user("committee")
+
+        invitation = AccountInvitation.objects.create(
+            email="Accepted@Example.com",
+            full_name="Accepted User",
+            note="",
+            invited_by_username="committee",
+            accepted_at=timezone.now(),
+            freeipa_matched_usernames=["accepteduser"],
+        )
+        # Simulate legacy data written before save() lowercased email values.
+        AccountInvitation.objects.filter(pk=invitation.pk).update(email="Accepted@Example.com")
+
+        upload = SimpleUploadedFile(
+            "invites.csv",
+            b"email,full_name,note\naccepted@example.com,Accepted User,Hello\n",
+            content_type="text/csv",
+        )
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
+            patch("core.views_account_invitations.find_account_invitation_matches", return_value=[]),
+        ):
+            resp = self.client.post(
+                reverse("account-invitations-upload"),
+                data={
+                    "csv_file": upload,
+                },
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Already exists")
+        self.assertContains(resp, "accepteduser")
+
     def test_account_invitations_page_does_not_refresh_freeipa(self) -> None:
         self._login_as_freeipa_user("committee")
 

@@ -11,6 +11,7 @@ from core.csv_import_utils import (
     get_result_row_errors,
     get_result_rows,
     get_result_totals,
+    normalize_csv_name,
     parse_csv_date,
     resolve_column_header,
     sanitize_csv_cell,
@@ -78,6 +79,14 @@ class SanitizeCsvCellTests(TestCase):
     def test_sanitize_csv_cell_keeps_safe_values_unchanged(self) -> None:
         self.assertEqual(sanitize_csv_cell("plain text"), "plain text")
         self.assertEqual(sanitize_csv_cell(""), "")
+
+
+class NormalizeCsvNameTests(TestCase):
+    def test_normalize_csv_name_is_case_insensitive(self) -> None:
+        self.assertEqual(normalize_csv_name("Alice Example"), normalize_csv_name("aLiCe eXample"))
+
+    def test_normalize_csv_name_uses_unicode_casefold(self) -> None:
+        self.assertEqual(normalize_csv_name("Straße"), normalize_csv_name("STRASSE"))
 
 
 class ResolveColumnHeaderTests(TestCase):
