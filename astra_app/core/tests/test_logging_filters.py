@@ -86,6 +86,17 @@ class LoggingFilterTests(SimpleTestCase):
         )
         self.assertFalse(filt.filter(login_check))
 
+        login_next_check = logging.LogRecord(
+            name="gunicorn.access",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg='- - - [27/Jan/2026:10:49:08 +0000] "GET /login/?next=/ HTTP/1.1" 200 37 "https://accounts.almalinux.org/" "HetrixTools Uptime Monitoring Bot. https://hetrix.tools/uptime-monitoring-bot.html"',
+            args=(),
+            exc_info=None,
+        )
+        self.assertFalse(filt.filter(login_next_check))
+
     def test_hetrix_access_filter_keeps_other_paths_and_agents(self) -> None:
         from config.logging_filters import HetrixAccessFilter
 

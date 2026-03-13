@@ -13,7 +13,12 @@ def _extract_request_path(message: str) -> str | None:
 
 
 def _is_root_or_login_path(path: str) -> bool:
-    return path == "/" or path == "/login" or path == "/login/" or path.startswith("/login?")
+    return (
+        path == "/"
+        or path == "/login"
+        or path.startswith("/login?")
+        or path.startswith("/login/")
+    )
 
 
 class HealthEndpointFilter(logging.Filter):
