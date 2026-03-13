@@ -15,6 +15,9 @@ logconfig_dict = {
         "health_endpoint": {
             "()": "config.logging_filters.HealthEndpointFilter",
         },
+        "hetrix_access": {
+            "()": "config.logging_filters.HetrixAccessFilter",
+        },
     },
     "formatters": {
         "access": {
@@ -44,7 +47,7 @@ logconfig_dict = {
         "gunicorn.access": {
             "handlers": ["stdout"],
             "level": "INFO",
-            "filters": ["health_endpoint"],
+            "filters": ["health_endpoint", "hetrix_access"],
             "propagate": False,
         },
     },

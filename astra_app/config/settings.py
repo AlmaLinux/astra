@@ -961,6 +961,9 @@ LOGGING = {
         'health_endpoint': {
             '()': 'config.logging_filters.HealthEndpointFilter',
         },
+        'hetrix_access': {
+            '()': 'config.logging_filters.HetrixAccessFilter',
+        },
     },
     'formatters': {
         'console': {
@@ -997,7 +1000,7 @@ LOGGING = {
         'django.server': {
             'handlers': ['console'],
             'level': 'INFO',
-            'filters': ['health_endpoint'],
+            'filters': ['health_endpoint', 'hetrix_access'],
             'propagate': False,
         },
         # Django security events

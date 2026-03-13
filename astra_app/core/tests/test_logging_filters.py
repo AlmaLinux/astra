@@ -58,3 +58,57 @@ class LoggingFilterTests(SimpleTestCase):
             exc_info=None,
         )
         self.assertFalse(filt.filter(record_ok))
+
+    def test_hetrix_access_filter_drops_root_and_login_checks(self) -> None:
+        from config.logging_filters import HetrixAccessFilter
+
+        filt = HetrixAccessFilter()
+
+        root_check = logging.LogRecord(
+            name="gunicorn.access",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg='- - - [27/Jan/2026:10:49:08 +0000] "GET / HTTP/1.1" 200 37 "-" "HetrixTools Uptime Monitoring Bot. https://hetrix.tools/uptime-monitoring-bot.html"',
+            args=(),
+            exc_info=None,
+        )
+        self.assertFalse(filt.filter(root_check))
+
+        login_check = logging.LogRecord(
+            name="gunicorn.access",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg='- - - [27/Jan/2026:10:49:08 +0000] "GET /login HTTP/1.1" 200 37 "-" "HetrixTools Uptime Monitoring Bot. https://hetrix.tools/uptime-monitoring-bot.html"',
+            args=(),
+            exc_info=None,
+        )
+        self.assertFalse(filt.filter(login_check))
+
+    def test_hetrix_access_filter_keeps_other_paths_and_agents(self) -> None:
+        from config.logging_filters import HetrixAccessFilter
+
+        filt = HetrixAccessFilter()
+
+        hetrix_other_path = logging.LogRecord(
+            name="gunicorn.access",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg='- - - [27/Jan/2026:10:49:08 +0000] "GET /register HTTP/1.1" 200 37 "-" "HetrixTools Uptime Monitoring Bot. https://hetrix.tools/uptime-monitoring-bot.html"',
+            args=(),
+            exc_info=None,
+        )
+        self.assertTrue(filt.filter(hetrix_other_path))
+
+        non_hetrix_root = logging.LogRecord(
+            name="gunicorn.access",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg='- - - [27/Jan/2026:10:49:08 +0000] "GET / HTTP/1.1" 200 37 "-" "Mozilla/5.0"',
+            args=(),
+            exc_info=None,
+        )
+        self.assertTrue(filt.filter(non_hetrix_root))
