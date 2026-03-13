@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from django.conf import settings
+from django.db.models import Case, IntegerField, Value, When
 from django.utils import timezone
 
 from core.freeipa.user import FreeIPAUser
@@ -462,6 +463,12 @@ def get_valid_memberships(
         .filter(**search)
         .active()
         .order_by(
+            Case(
+                When(membership_type__category_id="sponsorship", then=Value(0)),
+                When(membership_type__category_id="mirror", then=Value(1)),
+                default=Value(2),
+                output_field=IntegerField(),
+            ),
             "membership_type__category__sort_order",
             "membership_type__category__name",
             "membership_type__sort_order",

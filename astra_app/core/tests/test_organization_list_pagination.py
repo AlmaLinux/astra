@@ -887,3 +887,54 @@ class OrganizationListPaginationTests(TestCase):
         mirror_names = {organization.name for organization in response.context["mirror_organizations"]}
         self.assertEqual(sponsor_names, {"Sponsor Alpha", "Sponsor Beta"})
         self.assertEqual(mirror_names, {"Mirror Match"})
+
+    def test_org_widget_badges_show_sponsorship_before_mirror(self) -> None:
+        self._ensure_org_membership_types()
+        sponsor_priority = MembershipType.objects.create(
+            code="sponsor-priority",
+            name="Sponsor Priority Badge",
+            category_id="sponsorship",
+            sort_order=20,
+            enabled=True,
+        )
+        mirror_priority = MembershipType.objects.create(
+            code="mirror-priority",
+            name="Mirror Priority Badge",
+            category_id="mirror",
+            sort_order=10,
+            enabled=True,
+        )
+
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+        self._login_as_freeipa_user("reviewer")
+
+        org = Organization.objects.create(name="Badge Order Org", representative="org-rep")
+        Membership.objects.create(target_organization=org, membership_type=mirror_priority)
+        Membership.objects.create(target_organization=org, membership_type=sponsor_priority)
+
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]},
+        )
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            response = self.client.get(reverse("organizations"))
+
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode("utf-8")
+        org_position = body.find("Badge Order Org")
+        self.assertGreaterEqual(org_position, 0)
+
+        sponsor_position = body.find("Sponsor Priority Badge", org_position)
+        mirror_position = body.find("Mirror Priority Badge", org_position)
+        self.assertGreaterEqual(sponsor_position, 0)
+        self.assertGreaterEqual(mirror_position, 0)
+        self.assertLess(
+            sponsor_position,
+            mirror_position,
+            "Expected sponsorship badge to render before mirror badge.",
+        )
