@@ -123,18 +123,39 @@ def _detects_profanity_in_identifier(value: str) -> bool:
     if not tokens:
         return False
 
-    compact = "".join(tokens)
+    def _has_short_token_run_match(word: str) -> bool:
+        run: list[str] = []
+
+        def _run_matches_short_obfuscation(candidate_run: list[str]) -> bool:
+            if len(candidate_run) < 2:
+                return False
+            # Keep separator-obfuscation detection (for inputs like "f.u.c.k")
+            # without allowing matches that bridge normal word boundaries.
+            if not any(len(token) == 1 for token in candidate_run):
+                return False
+            return word in "".join(candidate_run)
+
+        for token in tokens:
+            if len(token) <= 2:
+                run.append(token)
+                continue
+            if _run_matches_short_obfuscation(run):
+                return True
+            run = []
+
+        return _run_matches_short_obfuscation(run)
+
     for word in _profanity_keywords():
         if not word:
             continue
         if len(word) < 4:
-            if word in tokens or word == compact:
+            if word in tokens:
                 return True
             continue
         for token in tokens:
             if word in token:
                 return True
-        if word in compact:
+        if _has_short_token_run_match(word):
             return True
     return False
 

@@ -1,3 +1,4 @@
 # Profanity allowlist for ValX (one word or phrase per line; '#' for comments)
 rumpelein
 jrumpelein
+collado

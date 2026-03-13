@@ -5,6 +5,7 @@ from django.conf import settings
 from django.test import SimpleTestCase, override_settings
 
 from core.profanity import (
+    _detects_profanity_in_identifier,
     load_custom_profanity_words,
     load_profanity_allowlist_words,
     validate_no_profanity_or_hate_speech,
@@ -51,3 +52,13 @@ class ProfanityAllowlistValidationTests(SimpleTestCase):
         detect_profanity.assert_not_called()
         detect_identifier.assert_not_called()
         detect_hate.assert_not_called()
+
+
+class ProfanityIdentifierDetectionTests(SimpleTestCase):
+    def test_identifier_detection_does_not_match_across_token_boundaries(self) -> None:
+        with patch("core.profanity._profanity_keywords", return_value=["kusi"]):
+            self.assertFalse(_detects_profanity_in_identifier("markus@itworxx.de"))
+
+    def test_identifier_detection_matches_single_character_token_obfuscation(self) -> None:
+        with patch("core.profanity._profanity_keywords", return_value=["fuck"]):
+            self.assertTrue(_detects_profanity_in_identifier("f.u.c.k"))
