@@ -53,6 +53,20 @@ class ProfanityAllowlistValidationTests(SimpleTestCase):
         detect_identifier.assert_not_called()
         detect_hate.assert_not_called()
 
+    @override_settings(VALX_PROFANITY_VALIDATION_ENABLED=False)
+    def test_validate_skips_all_detection_when_validation_disabled(self) -> None:
+        with (
+            patch("core.profanity._detects_profanity", autospec=True) as detect_profanity,
+            patch("core.profanity._detects_profanity_in_identifier", autospec=True) as detect_identifier,
+            patch("core.profanity._detects_hate_speech", autospec=True) as detect_hate,
+        ):
+            cleaned = validate_no_profanity_or_hate_speech("procomputers", field_label="Username")
+
+        self.assertEqual(cleaned, "procomputers")
+        detect_profanity.assert_not_called()
+        detect_identifier.assert_not_called()
+        detect_hate.assert_not_called()
+
 
 class ProfanityIdentifierDetectionTests(SimpleTestCase):
     def test_identifier_detection_does_not_match_across_token_boundaries(self) -> None:

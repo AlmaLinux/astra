@@ -169,6 +169,8 @@ def validate_no_profanity_or_hate_speech(value: object, *, field_label: str) -> 
     cleaned = _normalize_str(value)
     if not cleaned:
         return ""
+    if not settings.VALX_PROFANITY_VALIDATION_ENABLED:
+        return cleaned
     if _is_allowlisted_value(cleaned):
         return cleaned
     try:

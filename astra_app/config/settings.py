@@ -238,6 +238,7 @@ VALX_PROFANITY_ALLOWLIST_FILE = Path(
         default=str(BASE_DIR / "core" / "data" / "profanity_allowlist.txt"),
     )
 )
+VALX_PROFANITY_VALIDATION_ENABLED = _env_bool("VALX_PROFANITY_VALIDATION_ENABLED", default=False)
 
 # FreeIPA FAS agreement CN used for the Community Code of Conduct.
 COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN = "AlmaLinux Community Code of Conduct"
