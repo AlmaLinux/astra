@@ -16,6 +16,36 @@ def _normalize_groups(groups_raw: object) -> list[str]:
     return _clean_str_list(groups_raw)
 
 
+def build_user_grid_page(
+    *,
+    users_list: list[object],
+    q: str,
+    page_number: str | None,
+    per_page: int,
+) -> tuple[list[object], Any, Any, list[int], bool, bool]:
+    if q:
+        q_lower = q.lower()
+
+        def _matches(user: object) -> bool:
+            username = try_get_username_from_user(user).lower()
+            if q_lower in username:
+                return True
+            full_name = try_get_full_name(user).lower()
+            return q_lower in full_name
+
+        users_list = [u for u in users_list if _matches(u)]
+
+    users_sorted = sorted(users_list, key=lambda u: try_get_username_from_user(u).lower())
+
+    paginator, page_obj, page_numbers, show_first, show_last = paginate_grid_items(
+        users_sorted,
+        page_number=page_number,
+        per_page=per_page,
+    )
+    users_page = cast(list[object], page_obj.object_list)
+    return users_page, paginator, page_obj, page_numbers, show_first, show_last
+
+
 @register.simple_tag(takes_context=True, name="user_grid")
 def user_grid(context: Context, **kwargs: Any) -> str:
     http_request, q, page_number, base_query, page_url_prefix = resolve_grid_request(context)
@@ -96,26 +126,12 @@ def user_grid(context: Context, **kwargs: Any) -> str:
         else:
             users_list = cast(list[object], FreeIPAUser.all())
 
-        if q:
-            q_lower = q.lower()
-
-            def _matches(user: object) -> bool:
-                username = try_get_username_from_user(user).lower()
-                if q_lower in username:
-                    return True
-                full_name = try_get_full_name(user).lower()
-                return q_lower in full_name
-
-            users_list = [u for u in users_list if _matches(u)]
-
-        users_sorted = sorted(users_list, key=lambda u: try_get_username_from_user(u).lower())
-
-        paginator, page_obj, page_numbers, show_first, show_last = paginate_grid_items(
-            users_sorted,
+        users_page, paginator, page_obj, page_numbers, show_first, show_last = build_user_grid_page(
+            users_list=users_list,
+            q=q,
             page_number=page_number,
             per_page=per_page,
         )
-        users_page = cast(list[object], page_obj.object_list)
 
         empty_label = "No users found."
 

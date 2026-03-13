@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.contrib import messages
-from django.http import Http404, HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -28,7 +28,12 @@ from core.membership import (
 from core.membership_notifications import membership_extend_url
 from core.models import MembershipRequest
 from core.permissions import can_view_user_directory
-from core.views_utils import _normalize_str, agreement_settings_url, get_username, settings_url
+from avatar.templatetags.avatar_tags import avatar_url
+
+from core.templatetags._grid_tag_utils import parse_grid_query
+from core.templatetags._user_helpers import try_get_full_name
+from core.templatetags.core_user_grid import build_user_grid_page
+from core.views_utils import _normalize_str, agreement_settings_url, get_username, settings_url, try_get_username_from_user
 
 logger = logging.getLogger(__name__)
 
@@ -419,7 +424,6 @@ def users(request: HttpRequest) -> HttpResponse:
     if not can_view_user_directory(request.user):
         raise Http404
 
-    users_list = FreeIPAUser.all()
     q = _normalize_str(request.GET.get("q"))
 
     return render(
@@ -427,7 +431,62 @@ def users(request: HttpRequest) -> HttpResponse:
         "core/users.html",
         {
             "q": q,
-            # Pass the full list; `core_user_grid.user_grid` handles filtering + pagination.
-            "users": users_list,
         },
     )
+
+
+def users_grid(request: HttpRequest) -> JsonResponse:
+    if not can_view_user_directory(request.user):
+        raise Http404
+
+    q, page_number, _base_query, page_url_prefix = parse_grid_query(request)
+    users_list = FreeIPAUser.all()
+
+    users_page, paginator, page_obj, page_numbers, show_first, show_last = build_user_grid_page(
+        users_list=users_list,
+        q=q,
+        page_number=page_number,
+        per_page=28,
+    )
+
+    items: list[dict[str, str]] = []
+    for user in users_page:
+        username = try_get_username_from_user(user)
+        if not username:
+            continue
+        try:
+            user_avatar_url = str(avatar_url(user, 50, 50) or "").strip()
+        except Exception:
+            user_avatar_url = ""
+        items.append(
+            {
+                "username": username,
+                "full_name": try_get_full_name(user),
+                "avatar_url": user_avatar_url,
+            }
+        )
+
+    page_url_prefix = f"{reverse('users')}{page_url_prefix}"
+    start_index = page_obj.start_index() if paginator.count else 0
+    end_index = page_obj.end_index() if paginator.count else 0
+
+    payload = {
+        "users": items,
+        "empty_label": "No users found.",
+        "pagination": {
+            "count": paginator.count,
+            "page": page_obj.number,
+            "num_pages": paginator.num_pages,
+            "page_numbers": page_numbers,
+            "show_first": show_first,
+            "show_last": show_last,
+            "has_previous": page_obj.has_previous(),
+            "has_next": page_obj.has_next(),
+            "previous_page_number": page_obj.previous_page_number() if page_obj.has_previous() else None,
+            "next_page_number": page_obj.next_page_number() if page_obj.has_next() else None,
+            "start_index": start_index,
+            "end_index": end_index,
+            "page_url_prefix": page_url_prefix,
+        },
+    }
+    return JsonResponse(payload)

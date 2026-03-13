@@ -1,6 +1,6 @@
 {% extends 'core/base.html' %}
 
-{% load core_user_grid %}
+{% load static %}
 
 {% block title %}Users{% endblock %}
 
@@ -17,7 +17,24 @@
     </div>
 
     <div class="card-body">
-      {% user_grid users=users %}
+      <div
+        id="users-grid-root"
+        data-users-grid-url="{% url 'users-grid' %}"
+        aria-live="polite"
+      >
+        <div class="d-flex align-items-center text-muted" data-users-grid-loading>
+          <span class="spinner-border spinner-border-sm mr-2" role="status" aria-hidden="true"></span>
+          <span>Loading users...</span>
+        </div>
+      </div>
+      <noscript>
+        <div class="text-muted mt-2">This page requires JavaScript to load users.</div>
+      </noscript>
     </div>
   </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ block.super }}
+  <script src="{% static 'core/js/users_grid.js' %}"></script>
 {% endblock %}
