@@ -7,7 +7,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core import signing
 from django.db import IntegrityError, transaction
-from django.db.models import Q
+from django.db.models import Exists, OuterRef, Q, QuerySet
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -301,115 +301,230 @@ def _render_org_form(
     )
 
 
+def _filter_organization_queryset_by_search(
+    orgs: QuerySet[Organization],
+    *,
+    q: str,
+    can_manage_memberships: bool,
+) -> QuerySet[Organization]:
+    if not q:
+        return orgs
+
+    name_query = q
+    if can_manage_memberships:
+        status_tokens = {
+            "is:claimed": Organization.Status.active,
+            "is:unclaimed": Organization.Status.unclaimed,
+        }
+        q_terms = q.split()
+        matched_statuses = {status_tokens[term.lower()] for term in q_terms if term.lower() in status_tokens}
+        membership_type_tokens = {
+            term.lower().removeprefix("is:")
+            for term in q_terms
+            if term.lower().startswith("is:") and term.lower() not in status_tokens
+        }
+
+        matched_membership_type_codes = set(
+            MembershipType.objects.filter(
+                category__is_organization=True,
+                code__in=membership_type_tokens,
+            ).values_list("code", flat=True)
+        )
+
+        if matched_membership_type_codes:
+            now = timezone.now()
+            for membership_type_code in sorted(matched_membership_type_codes):
+                orgs = orgs.filter(
+                    Q(
+                        memberships__membership_type_id=membership_type_code,
+                        memberships__expires_at__isnull=True,
+                    )
+                    | Q(
+                        memberships__membership_type_id=membership_type_code,
+                        memberships__expires_at__gt=now,
+                    )
+                )
+            orgs = orgs.distinct()
+
+        recognized_tokens = {
+            *status_tokens,
+            *(f"is:{membership_type_code}" for membership_type_code in matched_membership_type_codes),
+        }
+
+        name_query = " ".join(term for term in q_terms if term.lower() not in recognized_tokens)
+        if len(matched_statuses) == 1:
+            orgs = orgs.filter(status=matched_statuses.pop())
+        elif len(matched_statuses) > 1:
+            orgs = orgs.none()
+
+    if name_query:
+        orgs = orgs.filter(name__icontains=name_query)
+    return orgs
+
+
+def _build_organization_membership_card_context(
+    *,
+    card_orgs: QuerySet[Organization],
+    request_query: object,
+    query_param_value: str,
+    page_param_value: str | None,
+    page_param_name: str,
+    can_manage_memberships: bool,
+    link_to_detail: bool,
+) -> dict[str, object]:
+    filtered_orgs = _filter_organization_queryset_by_search(
+        card_orgs,
+        q=query_param_value,
+        can_manage_memberships=can_manage_memberships,
+    )
+    _, page_url_prefix = build_page_url_prefix(request_query, page_param=page_param_name)
+    page_ctx = paginate_and_build_context(
+        filtered_orgs,
+        page_param_value,
+        25,
+        page_url_prefix=page_url_prefix,
+    )
+
+    organizations = list(page_ctx["page_obj"].object_list)
+    grid_items = [
+        {
+            "kind": "organization",
+            "organization": organization,
+            "link_to_detail": link_to_detail,
+        }
+        for organization in organizations
+    ]
+    return {
+        "organizations": organizations,
+        "grid_items": grid_items,
+        "q": query_param_value,
+        "paginator": page_ctx["paginator"],
+        "page_obj": page_ctx["page_obj"],
+        "is_paginated": page_ctx["is_paginated"],
+        "page_numbers": page_ctx["page_numbers"],
+        "show_first": page_ctx["show_first"],
+        "show_last": page_ctx["show_last"],
+        "page_url_prefix": page_ctx["page_url_prefix"],
+    }
+
+
 def organizations(request: HttpRequest) -> HttpResponse:
     username = get_username(request)
-    if not username:
+    if not username and not request.user.is_authenticated:
         raise Http404
 
     can_manage_memberships = has_any_membership_permission(request.user)
+    active_memberships = Membership.objects.filter(target_organization_id=OuterRef("pk")).active()
 
-    can_create_organization = request.user.has_perm(ASTRA_ADD_MEMBERSHIP)
+    orgs = Organization.objects.annotate(
+        has_active_memberships=Exists(active_memberships),
+        has_sponsorship_memberships=Exists(
+            active_memberships.filter(membership_type__category_id="sponsorship")
+        ),
+    ).order_by("name", "id")
+
+    my_organization = (
+        Organization.objects.filter(representative=username)
+        .order_by("name", "id")
+        .first()
+        if username
+        else None
+    )
 
     if can_manage_memberships:
-        orgs = Organization.objects.all().order_by("name", "id")
-        empty_label = "No organizations found."
+        lower_section_link_to_detail = True
+        mirror_empty_label = "No mirror sponsor members or organizations without memberships found."
     else:
-        orgs = (
-            Organization.objects.filter(representative=username)
-            .order_by("name", "id")
+        orgs = orgs.filter(
+            status=Organization.Status.active,
+            has_active_memberships=True,
         )
-        empty_label = "You don't represent any organizations yet."
+        lower_section_link_to_detail = False
+        mirror_empty_label = "No mirror sponsor members found."
 
-        if not can_create_organization:
-            can_create_organization = not Organization.objects.filter(representative=username).exists()
+    q_sponsor = _normalize_str(request.GET.get("q_sponsor"))
+    if not q_sponsor:
+        # Keep historical deep links working while new per-card params are preferred.
+        q_sponsor = _normalize_str(request.GET.get("q"))
+    q_mirror = _normalize_str(request.GET.get("q_mirror"))
 
-    q = _normalize_str(request.GET.get("q"))
-    page_number = _normalize_str(request.GET.get("page")) or None
+    page_sponsor = _normalize_str(request.GET.get("page_sponsor"))
+    if not page_sponsor:
+        # Keep historical deep links working while new per-card params are preferred.
+        page_sponsor = _normalize_str(request.GET.get("page"))
+    page_mirror = _normalize_str(request.GET.get("page_mirror")) or None
 
-    if q:
-        name_query = q
-        if can_manage_memberships:
-            status_tokens = {
-                "is:claimed": Organization.Status.active,
-                "is:unclaimed": Organization.Status.unclaimed,
-            }
-            q_terms = q.split()
-            matched_statuses = {status_tokens[term.lower()] for term in q_terms if term.lower() in status_tokens}
-            membership_type_tokens = {
-                term.lower().removeprefix("is:")
-                for term in q_terms
-                if term.lower().startswith("is:") and term.lower() not in status_tokens
-            }
+    normalized_query = request.GET.copy()
+    normalized_query.pop("q", None)
+    normalized_query.pop("page", None)
+    if q_sponsor:
+        normalized_query["q_sponsor"] = q_sponsor
+    else:
+        normalized_query.pop("q_sponsor", None)
+    if page_sponsor:
+        normalized_query["page_sponsor"] = page_sponsor
+    else:
+        normalized_query.pop("page_sponsor", None)
+    if q_mirror:
+        normalized_query["q_mirror"] = q_mirror
+    else:
+        normalized_query.pop("q_mirror", None)
+    if page_mirror:
+        normalized_query["page_mirror"] = page_mirror
+    else:
+        normalized_query.pop("page_mirror", None)
 
-            matched_membership_type_codes = set(
-                MembershipType.objects.filter(
-                    category__is_organization=True,
-                    code__in=membership_type_tokens,
-                ).values_list("code", flat=True)
-            )
-
-            if matched_membership_type_codes:
-                now = timezone.now()
-                for membership_type_code in sorted(matched_membership_type_codes):
-                    orgs = orgs.filter(
-                        Q(
-                            memberships__membership_type_id=membership_type_code,
-                            memberships__expires_at__isnull=True,
-                        )
-                        | Q(
-                            memberships__membership_type_id=membership_type_code,
-                            memberships__expires_at__gt=now,
-                        )
-                    )
-                orgs = orgs.distinct()
-
-            recognized_tokens = {
-                *status_tokens,
-                *(f"is:{membership_type_code}" for membership_type_code in matched_membership_type_codes),
-            }
-
-            if len(matched_statuses) == 1:
-                orgs = orgs.filter(status=matched_statuses.pop())
-                name_query = " ".join(
-                    term
-                    for term in q_terms
-                    if term.lower() not in recognized_tokens
-                )
-            elif len(matched_statuses) > 1:
-                orgs = orgs.none()
-                name_query = " ".join(
-                    term
-                    for term in q_terms
-                    if term.lower() not in recognized_tokens
-                )
-            else:
-                name_query = " ".join(
-                    term
-                    for term in q_terms
-                    if term.lower() not in recognized_tokens
-                )
-
-        if name_query:
-            orgs = orgs.filter(name__icontains=name_query)
-
-    _, page_url_prefix = build_page_url_prefix(request.GET, page_param="page")
-    page_ctx = paginate_and_build_context(orgs, page_number, 25, page_url_prefix=page_url_prefix)
-
-    grid_items = [
-        {"kind": "organization", "organization": organization}
-        for organization in page_ctx["page_obj"].object_list
-    ]
+    sponsor_card_context = _build_organization_membership_card_context(
+        card_orgs=orgs.filter(has_sponsorship_memberships=True),
+        request_query=normalized_query,
+        query_param_value=q_sponsor,
+        page_param_value=page_sponsor,
+        page_param_name="page_sponsor",
+        can_manage_memberships=can_manage_memberships,
+        link_to_detail=lower_section_link_to_detail,
+    )
+    mirror_card_context = _build_organization_membership_card_context(
+        card_orgs=orgs.filter(has_sponsorship_memberships=False),
+        request_query=normalized_query,
+        query_param_value=q_mirror,
+        page_param_value=page_mirror,
+        page_param_name="page_mirror",
+        can_manage_memberships=can_manage_memberships,
+        link_to_detail=lower_section_link_to_detail,
+    )
 
     return render(
         request,
         "core/organizations.html",
         {
-            "organizations": page_ctx["page_obj"].object_list,
-            **page_ctx,
-            "grid_items": grid_items,
-            "create_url": reverse("organization-create") if can_create_organization else None,
-            "q": q,
-            "empty_label": empty_label,
+            "sponsor_organizations": sponsor_card_context["organizations"],
+            "mirror_organizations": mirror_card_context["organizations"],
+            "sponsor_grid_items": sponsor_card_context["grid_items"],
+            "mirror_grid_items": mirror_card_context["grid_items"],
+            "my_organization": my_organization,
+            "my_organization_create_url": (
+                reverse("organization-create")
+                if username and my_organization is None
+                else None
+            ),
+            "q_sponsor": sponsor_card_context["q"],
+            "q_mirror": mirror_card_context["q"],
+            "sponsor_paginator": sponsor_card_context["paginator"],
+            "sponsor_page_obj": sponsor_card_context["page_obj"],
+            "sponsor_is_paginated": sponsor_card_context["is_paginated"],
+            "sponsor_page_numbers": sponsor_card_context["page_numbers"],
+            "sponsor_show_first": sponsor_card_context["show_first"],
+            "sponsor_show_last": sponsor_card_context["show_last"],
+            "sponsor_page_url_prefix": sponsor_card_context["page_url_prefix"],
+            "mirror_paginator": mirror_card_context["paginator"],
+            "mirror_page_obj": mirror_card_context["page_obj"],
+            "mirror_is_paginated": mirror_card_context["is_paginated"],
+            "mirror_page_numbers": mirror_card_context["page_numbers"],
+            "mirror_show_first": mirror_card_context["show_first"],
+            "mirror_show_last": mirror_card_context["show_last"],
+            "mirror_page_url_prefix": mirror_card_context["page_url_prefix"],
+            "sponsor_empty_label": "No AlmaLinux sponsor members found.",
+            "mirror_empty_label": mirror_empty_label,
         },
     )
 

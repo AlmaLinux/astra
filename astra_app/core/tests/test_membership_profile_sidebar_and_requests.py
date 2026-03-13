@@ -869,6 +869,19 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, reverse("organizations"))
 
+    def test_regular_user_sidebar_shows_organizations_link(self) -> None:
+        alice = self._make_user("alice", full_name="Alice User")
+        self._login_as_freeipa_user("alice")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
+            with patch("core.views_users._get_full_user", return_value=alice):
+                with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
+                    with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
+                        resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, reverse("organizations"))
+
     def test_requests_list_links_to_profile_and_shows_full_name(self) -> None:
         from core.models import MembershipRequest, MembershipType
 

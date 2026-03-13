@@ -10,7 +10,7 @@
   {% if forloop.first %}<div class="row">{% endif %}
   <div class="col-12 col-md-6 col-lg-4 col-xl-3">
     {% if item.kind == "organization" %}
-      {% organization item.organization %}
+      {% organization item.organization link_to_detail=item.link_to_detail %}
 
     {% elif item.kind == "group" %}
       {% group item.cn %}
@@ -24,6 +24,8 @@
   <div class="text-muted">{{ empty_label }}</div>
 {% endfor %}
 
-<div class="mt-2 clearfix">
-  {% include "core/_pagination.html" %}
-</div>
+{% if show_pagination != False %}
+  <div class="mt-2 clearfix">
+    {% include "core/_pagination.html" %}
+  </div>
+{% endif %}

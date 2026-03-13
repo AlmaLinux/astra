@@ -7,7 +7,6 @@ from core.models import AccountInvitation, MembershipRequest
 from core.permissions import (
     membership_review_permissions,
 )
-from core.views_utils import get_username
 
 
 def membership_review(request) -> dict[str, object]:
@@ -36,12 +35,8 @@ def membership_review(request) -> dict[str, object]:
 
 def organization_nav(request) -> dict[str, object]:
     """Navigation visibility for organizations; True for any authenticated user."""
-    try:
-        if hasattr(request, "user") and request.user.is_authenticated:
-            if get_username(request):
-                return {"has_organizations": True}
-    except Exception:
-        pass
+    if hasattr(request, "user") and request.user.is_authenticated:
+        return {"has_organizations": True}
     return {"has_organizations": False}
 
 

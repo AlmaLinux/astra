@@ -8,7 +8,9 @@
   {% endif %}
   <div class="d-flex align-items-center {{ extra_class }}"{% if extra_style %} style="{{ extra_style }}"{% endif %}>
     <div class="flex-shrink-0 ml-1 mr-3">
-      <a href="{% url 'organization-detail' organization.pk %}">
+      {% if link_to_detail %}
+        <a href="{% url 'organization-detail' organization.pk %}">
+      {% endif %}
       {% if organization.logo %}
         <img
           src="{{ organization.logo.url }}"
@@ -21,12 +23,18 @@
           <i class="fas fa-building"></i>
         </span>
       {% endif %}
-      </a>
+      {% if link_to_detail %}
+        </a>
+      {% endif %}
     </div>
 
     <div class="flex-grow-1 ms-2">
       <div class="my-0 font-weight-bold">
-        <a href="{% url 'organization-detail' organization.pk %}">{{ organization.name }}</a>
+        {% if link_to_detail %}
+          <a href="{% url 'organization-detail' organization.pk %}">{{ organization.name }}</a>
+        {% else %}
+          {{ organization.name }}
+        {% endif %}
       </div>
       <div class="mt-1">
         {% for membership in memberships %}

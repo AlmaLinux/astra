@@ -1,6 +1,7 @@
 import logging
 from zoneinfo import ZoneInfo
 
+from avatar.templatetags.avatar_tags import avatar_url
 from django.conf import settings
 from django.contrib import messages
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
@@ -28,12 +29,16 @@ from core.membership import (
 from core.membership_notifications import membership_extend_url
 from core.models import MembershipRequest
 from core.permissions import can_view_user_directory
-from avatar.templatetags.avatar_tags import avatar_url
-
 from core.templatetags._grid_tag_utils import parse_grid_query
 from core.templatetags._user_helpers import try_get_full_name
 from core.templatetags.core_user_grid import build_user_grid_page
-from core.views_utils import _normalize_str, agreement_settings_url, get_username, settings_url, try_get_username_from_user
+from core.views_utils import (
+    _normalize_str,
+    agreement_settings_url,
+    get_username,
+    settings_url,
+    try_get_username_from_user,
+)
 
 logger = logging.getLogger(__name__)
 
