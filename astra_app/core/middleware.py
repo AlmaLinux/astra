@@ -1,6 +1,7 @@
 import logging
 from zoneinfo import ZoneInfo
 
+import sentry_sdk
 from django.conf import settings
 from django.contrib.auth import get_user as django_get_user
 from django.contrib.auth.models import AnonymousUser
@@ -10,6 +11,7 @@ from django.utils import timezone
 from django.utils.deprecation import MiddlewareMixin
 from django.utils.functional import SimpleLazyObject
 
+from config.logging_context import RequestLogContext, reset_request_log_context, set_request_log_context
 from core.freeipa.circuit_breaker import _freeipa_circuit_open, _is_freeipa_availability_error
 from core.freeipa.client import (
     clear_current_viewer_username,
@@ -19,6 +21,7 @@ from core.freeipa.client import (
 from core.freeipa.exceptions import FreeIPAUnavailableError
 from core.freeipa.user import DegradedFreeIPAUser, FreeIPAUser
 from core.ipa_user_attrs import _first
+from core.logging_extras import exception_log_fields
 from core.views_utils import get_username, try_get_username_from_user
 
 logger = logging.getLogger(__name__)
@@ -42,6 +45,17 @@ def _wants_json_response(request) -> bool:
         or "application/json" in accept
         or content_type.startswith("application/json")
     )
+
+
+def _request_client_ip(request) -> str | None:
+    forwarded_for = str(request.META.get("HTTP_X_FORWARDED_FOR") or "").strip()
+    if forwarded_for:
+        first_ip = forwarded_for.split(",", maxsplit=1)[0].strip()
+        if first_ip:
+            return first_ip
+
+    remote_addr = str(request.META.get("REMOTE_ADDR") or "").strip()
+    return remote_addr or None
 
 
 def _get_freeipa_or_default_user(request):
@@ -175,6 +189,46 @@ class FreeIPAServiceClientReuseMiddleware:
                 clear_freeipa_service_client_cache()
 
 
+class SentryRequestContextMiddleware:
+    """Attach searchable per-request metadata to Sentry logs/events."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        client_ip = _request_client_ip(request)
+        request_id = str(request.META.get("HTTP_X_REQUEST_ID") or "").strip() or None
+
+        user_id: str | None = None
+        if request.user.is_authenticated:
+            user_id = try_get_username_from_user(request.user)
+            if user_id:
+                sentry_sdk.set_user({"id": user_id, "username": user_id})
+            else:
+                sentry_sdk.set_user(None)
+        else:
+            sentry_sdk.set_user(None)
+
+        if client_ip:
+            sentry_sdk.set_tag("client_ip", client_ip)
+        if request_id:
+            sentry_sdk.set_tag("request_id", request_id)
+
+        context_token = set_request_log_context(
+            RequestLogContext(
+                client_ip=client_ip,
+                user_id=user_id,
+                request_id=request_id,
+                request_path=request.path,
+                request_method=request.method,
+            )
+        )
+        try:
+            return self.get_response(request)
+        finally:
+            reset_request_log_context(context_token)
+
+
 class LoginRequiredMiddleware:
     """Require an authenticated user for most pages.
 
@@ -246,7 +300,18 @@ class FreeIPAUnavailableMiddleware(MiddlewareMixin):
         ):
             return None
 
-        logger.warning("FreeIPA unavailable during request path=%s", request.path, exc_info=False)
+        logger.warning(
+            "FreeIPA unavailable during request path=%s",
+            request.path,
+            exc_info=False,
+            extra={
+                "event": "astra.freeipa.unavailable",
+                "component": "middleware",
+                "outcome": "error",
+                "request_path": request.path,
+            }
+            | exception_log_fields(exception),
+        )
         if _wants_json_response(request):
             return JsonResponse(
                 {

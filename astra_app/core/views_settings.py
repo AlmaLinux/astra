@@ -949,17 +949,17 @@ def settings_root(request: HttpRequest) -> HttpResponse:
             logger.info("Password change rejected by policy username=%s error=%s", username, e)
             messages.error(request, "Password change rejected by policy. Please choose a stronger password.")
             return redirect(settings_url(tab="security"))
-        except exceptions.PWChangeInvalidPassword:
+        except exceptions.PWChangeInvalidPassword as error:
             # Most commonly: wrong/missing OTP for OTP-enabled accounts.
-            logger.info("Password change rejected (invalid current password/OTP) username=%s", username)
+            logger.info("Password change rejected (invalid current password/OTP) username=%s error=%s", username, error)
             messages.error(request, "Incorrect current password or OTP.")
             return redirect(settings_url(tab="security"))
         except exceptions.PasswordExpired:
             messages.error(request, "Password is expired; please change it below.")
             return redirect(settings_url(tab="security"))
-        except (exceptions.InvalidSessionPassword, exceptions.Unauthorized):
+        except (exceptions.InvalidSessionPassword, exceptions.Unauthorized) as error:
             # Treat auth failures as a normal user error, not a crash.
-            logger.info("Password change rejected (bad credentials) username=%s", username)
+            logger.info("Password change rejected (bad credentials) username=%s error=%s", username, error)
             messages.error(request, "Incorrect current password or OTP.")
             return redirect(settings_url(tab="security"))
         except exceptions.FreeIPAError as e:
@@ -1602,8 +1602,8 @@ def settings_membership_terminate(request: HttpRequest, *, membership_type_code:
             username=username,
             current_password=form.cleaned_data["current_password"],
         )
-    except Exception:
-        logger.info("Membership self-termination reauthentication failed username=%s", username)
+    except Exception as error:
+        logger.info("Membership self-termination reauthentication failed username=%s error=%s", username, error)
         messages.error(request, "Unable to verify your current password.")
         return redirect(settings_url(tab="membership"))
 
@@ -1685,8 +1685,8 @@ def settings_account_deletion_request(request: HttpRequest) -> HttpResponse:
             username=username,
             current_password=form.cleaned_data["current_password"],
         )
-    except Exception:
-        logger.info("Account deletion request reauthentication failed username=%s", username)
+    except Exception as error:
+        logger.info("Account deletion request reauthentication failed username=%s error=%s", username, error)
         messages.error(request, "Unable to verify your current password.")
         return redirect(settings_url(tab="privacy"))
 

@@ -9,10 +9,15 @@ from django.test import RequestFactory, TestCase
 from django.utils import timezone
 from django.utils.functional import SimpleLazyObject
 
+from config.logging_context import get_request_log_context
 from core.freeipa.circuit_breaker import _open_freeipa_circuit, _reset_freeipa_circuit_failures
 from core.freeipa.exceptions import FreeIPAUnavailableError
 from core.freeipa.user import DegradedFreeIPAUser
-from core.middleware import FreeIPAAuthenticationMiddleware, FreeIPAUnavailableMiddleware
+from core.middleware import (
+    FreeIPAAuthenticationMiddleware,
+    FreeIPAUnavailableMiddleware,
+    SentryRequestContextMiddleware,
+)
 from core.templatetags.core_membership_notes import _current_username_from_request
 from core.views_utils import get_username
 
@@ -183,13 +188,25 @@ class FreeIPAMiddlewareRestoreTests(TestCase):
         request = factory.get("/user/alice/")
 
         middleware = FreeIPAUnavailableMiddleware(lambda _req: HttpResponse("ok"))
-        response = middleware.process_exception(request, FreeIPAUnavailableError("open"))
+        with patch("core.middleware.logger.warning", autospec=True) as mocked_warning:
+            response = middleware.process_exception(request, FreeIPAUnavailableError("open"))
 
         self.assertEqual(response.status_code, 503)
         self.assertIn(
             b"AlmaLinux Accounts is temporarily unavailable",
             response.content,
         )
+        mocked_warning.assert_called_once()
+
+        warning_kwargs = mocked_warning.call_args.kwargs
+        self.assertEqual(warning_kwargs["extra"]["event"], "astra.freeipa.unavailable")
+        self.assertEqual(warning_kwargs["extra"]["component"], "middleware")
+        self.assertEqual(warning_kwargs["extra"]["outcome"], "error")
+        self.assertEqual(warning_kwargs["extra"]["request_path"], "/user/alice/")
+        self.assertEqual(warning_kwargs["extra"]["error_type"], "FreeIPAUnavailableError")
+        self.assertEqual(warning_kwargs["extra"]["error_message"], "open")
+        self.assertIn("open", warning_kwargs["extra"]["error_repr"])
+        self.assertEqual(warning_kwargs["extra"]["error_args"], "('open',)")
 
     def test_avoids_evaluating_lazy_user_when_circuit_open(self):
         factory = RequestFactory()
@@ -234,3 +251,47 @@ class FreeIPAMiddlewareRestoreTests(TestCase):
         self.assertEqual(get_username(request), "alice")
         self.assertEqual(_current_username_from_request(request), "alice")
         self.assertEqual(lazy_eval_count["count"], 0)
+
+    def test_sentry_request_context_middleware_sets_user_and_tags(self):
+        factory = RequestFactory()
+        request = factory.get(
+            "/organizations/",
+            HTTP_X_FORWARDED_FOR="203.0.113.8, 10.0.0.1",
+            HTTP_X_REQUEST_ID="req-42",
+        )
+        request.user = SimpleNamespace(is_authenticated=True, username="alice")
+
+        observed_context = {}
+
+        def get_response(_req):
+            observed_context.update(get_request_log_context() or {})
+            return HttpResponse("ok")
+
+        with patch("core.middleware.sentry_sdk.set_user", autospec=True) as mocked_set_user:
+            with patch("core.middleware.sentry_sdk.set_tag", autospec=True) as mocked_set_tag:
+                middleware = SentryRequestContextMiddleware(get_response)
+                response = middleware(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(observed_context["client_ip"], "203.0.113.8")
+        self.assertEqual(observed_context["user_id"], "alice")
+        self.assertEqual(observed_context["request_id"], "req-42")
+        self.assertEqual(observed_context["request_path"], "/organizations/")
+        self.assertEqual(observed_context["request_method"], "GET")
+        self.assertIsNone(get_request_log_context())
+
+        mocked_set_user.assert_called_once_with({"id": "alice", "username": "alice"})
+        mocked_set_tag.assert_any_call("client_ip", "203.0.113.8")
+        mocked_set_tag.assert_any_call("request_id", "req-42")
+
+    def test_sentry_request_context_middleware_clears_user_for_anonymous(self):
+        factory = RequestFactory()
+        request = factory.get("/login")
+        request.user = AnonymousUser()
+
+        with patch("core.middleware.sentry_sdk.set_user", autospec=True) as mocked_set_user:
+            middleware = SentryRequestContextMiddleware(lambda _req: HttpResponse("ok"))
+            response = middleware(request)
+
+        self.assertEqual(response.status_code, 200)
+        mocked_set_user.assert_called_once_with(None)

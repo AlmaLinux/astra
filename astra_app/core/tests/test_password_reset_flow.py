@@ -111,6 +111,43 @@ class PasswordResetFlowTests(TestCase):
         self.assertEqual(resp["Location"], "/login/")
         queue_email_mock.assert_not_called()
 
+    def test_password_reset_request_logs_structured_extra_when_email_send_fails(self) -> None:
+        client = Client()
+
+        user = SimpleNamespace(
+            username="alice",
+            email="alice@example.com",
+            last_password_change="",
+            first_name="Alice",
+            last_name="User",
+            full_name="Alice User",
+        )
+
+        with (
+            patch("core.views_auth.find_user_for_password_reset", autospec=True, return_value=user),
+            patch("core.views_auth.send_password_reset_email", autospec=True, side_effect=RuntimeError("boom")),
+            patch("core.views_auth.logger.exception", autospec=True) as mocked_log,
+        ):
+            resp = client.post(
+                reverse("password-reset"),
+                data={"username_or_email": "alice"},
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "/login/")
+        mocked_log.assert_called_once()
+
+        log_kwargs = mocked_log.call_args.kwargs
+        self.assertEqual(log_kwargs["extra"]["event"], "astra.auth.password_reset.email_send_failed")
+        self.assertEqual(log_kwargs["extra"]["component"], "auth")
+        self.assertEqual(log_kwargs["extra"]["outcome"], "error")
+        self.assertEqual(log_kwargs["extra"]["username"], "alice")
+        self.assertEqual(log_kwargs["extra"]["error_type"], "RuntimeError")
+        self.assertEqual(log_kwargs["extra"]["error_message"], "boom")
+        self.assertIn("boom", log_kwargs["extra"]["error_repr"])
+        self.assertEqual(log_kwargs["extra"]["error_args"], "('boom',)")
+
     @override_settings(DEFAULT_FROM_EMAIL="noreply@example.com")
     def test_password_reset_request_embeds_pending_invitation_token_in_reset_token(self) -> None:
         client = Client()

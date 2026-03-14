@@ -12,6 +12,7 @@ from python_freeipa import exceptions
 from core import views_registration
 from core.freeipa.exceptions import FreeIPAUnavailableError
 from core.freeipa.user import FreeIPAUser
+from core.logging_extras import exception_log_fields
 from core.models import AccountInvitation
 from core.tests.utils_test_data import ensure_email_templates
 from core.tokens import make_registration_activation_token, read_registration_activation_token
@@ -249,6 +250,20 @@ class RegistrationFlowTests(TestCase):
                 lookup_error,
             ),
         )
+        self.assertEqual(
+            exception_mock.call_args.kwargs["extra"],
+            {
+                "event": "astra.registration.confirm.verification_failed",
+                "component": "registration",
+                "outcome": "error",
+                "endpoint": "register-confirm",
+                "username": "alice",
+                "error_type": "Unauthorized",
+                "error_message": "confirm lookup boom",
+                "error_repr": "Unauthorized('confirm lookup boom')",
+                "error_args": "('confirm lookup boom',)",
+            },
+        )
 
         follow_response = client.get(response["Location"])
         messages_list = [message.message for message in get_messages(follow_response.wsgi_request)]
@@ -326,12 +341,13 @@ class RegistrationFlowTests(TestCase):
     @override_settings(REGISTRATION_OPEN=True, DEBUG=False)
     def test_register_post_service_login_unauthorized_shows_service_message_and_logs_metadata(self) -> None:
         client = Client()
+        unauthorized_error = exceptions.Unauthorized()
 
         with (
             patch(
                 "core.views_registration.FreeIPAUser.get_client",
                 autospec=True,
-                side_effect=exceptions.Unauthorized(),
+                side_effect=unauthorized_error,
             ),
             patch("core.views_registration.logger.warning") as warning_mock,
         ):
@@ -353,8 +369,13 @@ class RegistrationFlowTests(TestCase):
         self.assertNotContains(response, "An error occurred while creating the account, please try again.")
         warning_mock.assert_called_once()
         log_extra = warning_mock.call_args.kwargs["extra"]
+        expected_error_fields = exception_log_fields(unauthorized_error)
         self.assertEqual(log_extra["freeipa_phase"], "service_login")
         self.assertEqual(log_extra["freeipa_exception_class"], "Unauthorized")
+        self.assertEqual(log_extra["error_type"], expected_error_fields["error_type"])
+        self.assertEqual(log_extra["error_message"], expected_error_fields["error_message"])
+        self.assertEqual(log_extra["error_repr"], expected_error_fields["error_repr"])
+        self.assertEqual(log_extra["error_args"], expected_error_fields["error_args"])
         self.assertTrue(log_extra["retry_attempted"])
         self.assertEqual(log_extra["retry_outcome"], "failed")
         self.assertEqual(log_extra["request_id"], "req-169-service-login")
@@ -474,8 +495,10 @@ class RegistrationFlowTests(TestCase):
 
         first_client = SimpleNamespace()
         second_client = SimpleNamespace()
-        first_client.stageuser_add = Mock(side_effect=exceptions.Unauthorized())
-        second_client.stageuser_add = Mock(side_effect=exceptions.Unauthorized())
+        first_unauthorized_error = exceptions.Unauthorized()
+        second_unauthorized_error = exceptions.Unauthorized()
+        first_client.stageuser_add = Mock(side_effect=first_unauthorized_error)
+        second_client.stageuser_add = Mock(side_effect=second_unauthorized_error)
 
         with (
             patch(
@@ -506,8 +529,13 @@ class RegistrationFlowTests(TestCase):
         self.assertNotContains(response, "An error occurred while creating the account, please try again.")
         warning_mock.assert_called_once()
         log_extra = warning_mock.call_args.kwargs["extra"]
+        expected_error_fields = exception_log_fields(second_unauthorized_error)
         self.assertEqual(log_extra["freeipa_phase"], "stageuser_add")
         self.assertEqual(log_extra["freeipa_exception_class"], "Unauthorized")
+        self.assertEqual(log_extra["error_type"], expected_error_fields["error_type"])
+        self.assertEqual(log_extra["error_message"], expected_error_fields["error_message"])
+        self.assertEqual(log_extra["error_repr"], expected_error_fields["error_repr"])
+        self.assertEqual(log_extra["error_args"], expected_error_fields["error_args"])
         self.assertTrue(log_extra["retry_attempted"])
         self.assertEqual(log_extra["retry_outcome"], "failed")
         self.assertEqual(log_extra["request_id"], "req-169-stageuser-failed")
@@ -880,6 +908,20 @@ class RegistrationFlowTests(TestCase):
                 lookup_error,
             ),
         )
+        self.assertEqual(
+            exception_mock.call_args.kwargs["extra"],
+            {
+                "event": "astra.registration.activate.verification_failed",
+                "component": "registration",
+                "outcome": "error",
+                "endpoint": "register-activate",
+                "username": "alice",
+                "error_type": "Unauthorized",
+                "error_message": "activate lookup boom",
+                "error_repr": "Unauthorized('activate lookup boom')",
+                "error_args": "('activate lookup boom',)",
+            },
+        )
 
         follow_response = client.get(response["Location"])
         messages_list = [message.message for message in get_messages(follow_response.wsgi_request)]
@@ -980,6 +1022,20 @@ class RegistrationFlowTests(TestCase):
                 "RuntimeError",
                 reconcile_error,
             ),
+        )
+        self.assertEqual(
+            registration_exception_mock.call_args.kwargs["extra"],
+            {
+                "event": "astra.registration.activate.follow_up_failed",
+                "component": "registration",
+                "outcome": "error",
+                "endpoint": "register-activate",
+                "username": "alice",
+                "error_type": "RuntimeError",
+                "error_message": "reconcile boom",
+                "error_repr": "RuntimeError('reconcile boom')",
+                "error_args": "('reconcile boom',)",
+            },
         )
         self.assertEqual(login_response.status_code, 302)
         auth_load_mock.assert_called_once_with(invitation_token)

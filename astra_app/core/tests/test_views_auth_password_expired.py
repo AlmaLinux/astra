@@ -116,3 +116,91 @@ class PasswordExpiredViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         form = captured["form"]
         self.assertIn("current_password", form.errors)
+
+    def test_freeipa_error_logs_structured_extra(self):
+        factory = RequestFactory()
+        request = factory.post(
+            "/password-expired/",
+            data={
+                "username": "alice",
+                "current_password": "oldpw",
+                "new_password": "newpw",
+                "confirm_new_password": "newpw",
+            },
+        )
+        self._add_session_and_messages(request)
+        request.user = AnonymousUser()
+
+        captured = {}
+
+        def fake_render(req, template, context):
+            captured["form"] = context["form"]
+            from django.http import HttpResponse
+
+            return HttpResponse("ok")
+
+        with (
+            patch("core.views_auth.render", side_effect=fake_render, autospec=True),
+            patch("core.views_auth._build_freeipa_client", autospec=True) as mocked_build,
+            patch("core.views_auth.logger.warning", autospec=True) as mocked_warning,
+        ):
+            mocked_client = mocked_build.return_value
+            mocked_client.change_password.side_effect = exceptions.FreeIPAError("service down")
+            response = password_expired(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(captured["form"].errors)
+        mocked_warning.assert_called_once()
+        log_kwargs = mocked_warning.call_args.kwargs
+        self.assertEqual(log_kwargs["extra"]["event"], "astra.auth.password_expired.freeipa_error")
+        self.assertEqual(log_kwargs["extra"]["component"], "auth")
+        self.assertEqual(log_kwargs["extra"]["outcome"], "error")
+        self.assertEqual(log_kwargs["extra"]["username"], "alice")
+        self.assertEqual(log_kwargs["extra"]["error_type"], "FreeIPAError")
+        self.assertEqual(log_kwargs["extra"]["error_message"], "service down")
+        self.assertIn("service down", log_kwargs["extra"]["error_repr"])
+        self.assertEqual(log_kwargs["extra"]["error_args"], "('service down',)")
+
+    def test_unexpected_error_logs_structured_extra(self):
+        factory = RequestFactory()
+        request = factory.post(
+            "/password-expired/",
+            data={
+                "username": "alice",
+                "current_password": "oldpw",
+                "new_password": "newpw",
+                "confirm_new_password": "newpw",
+            },
+        )
+        self._add_session_and_messages(request)
+        request.user = AnonymousUser()
+
+        captured = {}
+
+        def fake_render(req, template, context):
+            captured["form"] = context["form"]
+            from django.http import HttpResponse
+
+            return HttpResponse("ok")
+
+        with (
+            patch("core.views_auth.render", side_effect=fake_render, autospec=True),
+            patch("core.views_auth._build_freeipa_client", autospec=True) as mocked_build,
+            patch("core.views_auth.logger.exception", autospec=True) as mocked_exception,
+        ):
+            mocked_client = mocked_build.return_value
+            mocked_client.change_password.side_effect = RuntimeError("boom")
+            response = password_expired(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(captured["form"].errors)
+        mocked_exception.assert_called_once()
+        log_kwargs = mocked_exception.call_args.kwargs
+        self.assertEqual(log_kwargs["extra"]["event"], "astra.auth.password_expired.unexpected_error")
+        self.assertEqual(log_kwargs["extra"]["component"], "auth")
+        self.assertEqual(log_kwargs["extra"]["outcome"], "error")
+        self.assertEqual(log_kwargs["extra"]["username"], "alice")
+        self.assertEqual(log_kwargs["extra"]["error_type"], "RuntimeError")
+        self.assertEqual(log_kwargs["extra"]["error_message"], "boom")
+        self.assertIn("boom", log_kwargs["extra"]["error_repr"])
+        self.assertEqual(log_kwargs["extra"]["error_args"], "('boom',)")

@@ -204,7 +204,11 @@ if _sentry_dsn:
                 signals_spans=True,
                 cache_spans=True,
             ),
-            LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
+            LoggingIntegration(
+                sentry_logs_level=logging.INFO,
+                level=logging.INFO,
+                event_level=logging.ERROR,
+            ),
         ],
         environment=_env_str(
             "SENTRY_ENVIRONMENT",
@@ -314,6 +318,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'core.middleware.FreeIPAServiceClientReuseMiddleware',
     'core.middleware.FreeIPAAuthenticationMiddleware',
+    'core.middleware.SentryRequestContextMiddleware',
     'core.middleware.LoginRequiredMiddleware',
     'core.middleware_admin_log.AdminShadowUserLogEntryMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
@@ -965,6 +970,9 @@ LOGGING = {
         'hetrix_access': {
             '()': 'config.logging_filters.HetrixAccessFilter',
         },
+        'request_context': {
+            '()': 'config.logging_filters.RequestContextFilter',
+        },
     },
     'formatters': {
         'console': {
@@ -983,31 +991,35 @@ LOGGING = {
         'core': {
             'handlers': ['console'],
             'level': 'DEBUG' if DEBUG else 'INFO',
+            'filters': ['request_context'],
             'propagate': False,
         },
         # FreeIPA client libs can be noisy; keep them at INFO by default.
         'python_freeipa': {
             'handlers': ['console'],
             'level': 'INFO',
+            'filters': ['request_context'],
             'propagate': False,
         },
         # Django request errors - log everything including 4xx errors
         'django.request': {
             'handlers': ['console'],
             'level': 'DEBUG',
+            'filters': ['request_context'],
             'propagate': False,
         },
         # Access logs from `runserver`.
         'django.server': {
             'handlers': ['console'],
             'level': 'INFO',
-            'filters': ['health_endpoint', 'hetrix_access'],
+            'filters': ['health_endpoint', 'hetrix_access', 'request_context'],
             'propagate': False,
         },
         # Django security events
         'django.security': {
             'handlers': ['console'],
             'level': 'INFO',
+            'filters': ['request_context'],
             'propagate': False,
         },
     },
@@ -1015,5 +1027,6 @@ LOGGING = {
     'root': {
         'handlers': ['console'],
         'level': 'INFO',
+        'filters': ['request_context'],
     },
 }

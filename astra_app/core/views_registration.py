@@ -21,6 +21,7 @@ from core.freeipa.circuit_breaker import _is_freeipa_availability_error
 from core.freeipa.client import _build_freeipa_client, _with_freeipa_service_client_retry
 from core.freeipa.exceptions import FreeIPAUnavailableError
 from core.freeipa.user import FreeIPAUser
+from core.logging_extras import exception_log_fields
 from core.rate_limit import allow_request
 from core.templated_email import queue_templated_email
 from core.views_auth import (
@@ -74,6 +75,22 @@ def _registration_freeipa_log_extra(
         log_payload["request_id"] = request_id
 
     return log_payload
+
+
+def _registration_error_log_extra(
+    *,
+    event: str,
+    endpoint: str,
+    username: str,
+    error: BaseException,
+) -> dict[str, str]:
+    return {
+        "event": event,
+        "component": "registration",
+        "outcome": "error",
+        "endpoint": endpoint,
+        "username": username,
+    } | exception_log_fields(error)
 
 
 def _stageuser_add(client: ClientMeta, username: str, **kwargs: object) -> object:
@@ -300,7 +317,8 @@ def register(request: HttpRequest) -> HttpResponse:
                     freeipa_exception_class=e.__class__.__name__,
                     retry_attempted=retry_attempted,
                     retry_outcome="failed" if retry_attempted else "not_attempted",
-                ),
+                )
+                | exception_log_fields(e),
             )
             form.add_error(None, REGISTRATION_TEMPORARILY_UNAVAILABLE_MESSAGE)
             return render(request, "core/register.html", {"form": form, "registration_open": settings.REGISTRATION_OPEN})
@@ -376,6 +394,12 @@ def confirm(request: HttpRequest) -> HttpResponse:
             username,
             exc.__class__.__name__,
             exc,
+            extra=_registration_error_log_extra(
+                event="astra.registration.confirm.verification_failed",
+                endpoint="register-confirm",
+                username=username,
+                error=exc,
+            ),
         )
         messages.error(request, REGISTRATION_CONFIRM_TEMPORARY_VERIFICATION_FAILURE_MESSAGE)
         return redirect("register")
@@ -459,6 +483,12 @@ def activate(request: HttpRequest) -> HttpResponse:
             username,
             exc.__class__.__name__,
             exc,
+            extra=_registration_error_log_extra(
+                event="astra.registration.activate.verification_failed",
+                endpoint="register-activate",
+                username=username,
+                error=exc,
+            ),
         )
         messages.warning(request, REGISTRATION_ACTIVATION_TEMPORARY_VERIFICATION_FAILURE_MESSAGE)
         return redirect("register")
@@ -544,6 +574,12 @@ def activate(request: HttpRequest) -> HttpResponse:
                         username,
                         exc.__class__.__name__,
                         exc,
+                        extra=_registration_error_log_extra(
+                            event="astra.registration.activate.follow_up_failed",
+                            endpoint="register-activate",
+                            username=username,
+                            error=exc,
+                        ),
                     )
                     follow_up_warning = REGISTRATION_ACTIVATION_FOLLOW_UP_WARNING_MESSAGE
                     clear_pending_invitation_token = False

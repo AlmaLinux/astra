@@ -1573,20 +1573,72 @@ class SelfServiceSettingsPagesTests(TestCase):
         request.user = self._auth_user("alice")
 
         fake_user = SimpleNamespace(_user_data={"fasstatusnote": ["US"]})
+        invalid_password_error = exceptions.PWChangeInvalidPassword("bad")
 
-        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
-            with patch("core.views_settings._build_freeipa_client", autospec=True) as mocked_build:
-                mocked_client = mocked_build.return_value
-                mocked_client.change_password.side_effect = exceptions.PWChangeInvalidPassword("bad")
+        with (
+            patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user),
+            patch("core.views_settings._build_freeipa_client", autospec=True) as mocked_build,
+            patch("core.views_settings.logger.info") as info_mock,
+        ):
+            mocked_client = mocked_build.return_value
+            mocked_client.change_password.side_effect = invalid_password_error
 
-                response = views_settings.settings_root(request)
+            response = views_settings.settings_root(request)
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], reverse("settings") + "?tab=security")
+        info_mock.assert_called_once_with(
+            "Password change rejected (invalid current password/OTP) username=%s error=%s",
+            "alice",
+            invalid_password_error,
+        )
         msgs = [m.message for m in get_messages(request)]
         self.assertEqual(len(msgs), 1)
         self.assertNotIn("(debug)", msgs[0])
         self.assertIn("Incorrect current password", msgs[0])
+
+    @override_settings(
+        DEBUG=True,
+        FREEIPA_HOST="ipa.test",
+        FREEIPA_VERIFY_SSL=False,
+    )
+    def test_settings_password_unauthorized_logs_exception_object_for_observability(self):
+        factory = RequestFactory()
+        request = factory.post(
+            "/settings/",
+            data={
+                "tab": "security",
+                "current_password": "wrongpw",
+                "new_password": "newpw",
+                "confirm_new_password": "newpw",
+            },
+        )
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        fake_user = SimpleNamespace(_user_data={"fasstatusnote": ["US"]})
+        auth_error = exceptions.Unauthorized("bad credentials")
+
+        with (
+            patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user),
+            patch("core.views_settings._build_freeipa_client", autospec=True) as mocked_build,
+            patch("core.views_settings.logger.info") as info_mock,
+        ):
+            mocked_client = mocked_build.return_value
+            mocked_client.change_password.side_effect = auth_error
+
+            response = views_settings.settings_root(request)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("settings") + "?tab=security")
+        info_mock.assert_called_once_with(
+            "Password change rejected (bad credentials) username=%s error=%s",
+            "alice",
+            auth_error,
+        )
+        msgs = [m.message for m in get_messages(request)]
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("Incorrect current password or OTP.", msgs[0])
 
     @override_settings(
         FREEIPA_HOST="ipa.test",

@@ -88,3 +88,38 @@ class OTPSyncViewTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "No IPA server available")
+
+    @override_settings(FREEIPA_HOST="ipa.test", FREEIPA_VERIFY_SSL=False)
+    def test_post_unexpected_error_logs_structured_extra(self):
+        django_client = Client()
+
+        with (
+            patch("core.views_auth.requests.Session", autospec=True) as session_cls,
+            patch("core.views_auth.logger.exception", autospec=True) as mocked_log,
+        ):
+            session = session_cls.return_value
+            session.post.side_effect = RuntimeError("boom")
+
+            resp = django_client.post(
+                "/otp/sync/",
+                data={
+                    "username": "alice",
+                    "password": "pw",
+                    "first_code": "123456",
+                    "second_code": "234567",
+                },
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Something went wrong")
+        mocked_log.assert_called_once()
+
+        log_kwargs = mocked_log.call_args.kwargs
+        self.assertEqual(log_kwargs["extra"]["event"], "astra.auth.otp_sync.unexpected_error")
+        self.assertEqual(log_kwargs["extra"]["component"], "auth")
+        self.assertEqual(log_kwargs["extra"]["outcome"], "error")
+        self.assertEqual(log_kwargs["extra"]["username"], "alice")
+        self.assertEqual(log_kwargs["extra"]["error_type"], "RuntimeError")
+        self.assertEqual(log_kwargs["extra"]["error_message"], "boom")
+        self.assertIn("boom", log_kwargs["extra"]["error_repr"])
+        self.assertEqual(log_kwargs["extra"]["error_args"], "('boom',)")

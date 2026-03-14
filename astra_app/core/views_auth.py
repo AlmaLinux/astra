@@ -22,6 +22,7 @@ from core.account_invitation_reconcile import (
 )
 from core.freeipa.client import _build_freeipa_client
 from core.freeipa.user import FreeIPAUser
+from core.logging_extras import exception_log_fields
 from core.rate_limit import allow_request
 from core.tokens import make_password_reset_token, read_password_reset_token
 from core.views_utils import _normalize_str, get_username
@@ -91,6 +92,28 @@ def _emit_rate_limit_denial_log(
         ).hexdigest()
 
     logger.warning("Rate limit denied", extra=log_payload)
+
+
+def _auth_log_extra(
+    *,
+    event: str,
+    outcome: str,
+    username: str | None = None,
+    endpoint: str | None = None,
+    error: BaseException | None = None,
+) -> dict[str, str]:
+    payload: dict[str, str] = {
+        "event": event,
+        "component": "auth",
+        "outcome": outcome,
+    }
+    if username:
+        payload["username"] = username
+    if endpoint:
+        payload["endpoint"] = endpoint
+    if error is not None:
+        payload.update(exception_log_fields(error))
+    return payload
 
 
 class FreeIPALoginView(auth_views.LoginView):
@@ -245,8 +268,18 @@ def password_reset_request(request: HttpRequest) -> HttpResponse:
                     )
                     if pending_invitation_token:
                         request.session.pop(PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY, None)
-                except Exception:
-                    logger.exception("Password reset email send failed username=%s", username)
+                except Exception as error:
+                    logger.exception(
+                        "Password reset email send failed username=%s",
+                        username,
+                        extra=_auth_log_extra(
+                            event="astra.auth.password_reset.email_send_failed",
+                            outcome="error",
+                            username=username,
+                            endpoint="password-reset",
+                            error=error,
+                        ),
+                    )
 
         messages.success(
             request,
@@ -371,13 +404,33 @@ def password_reset_confirm(request: HttpRequest) -> HttpResponse:
                 "core/password_reset_confirm.html",
                 {"form": form, "username": username, "token": next_token},
             )
-        except exceptions.FreeIPAError:
-            logger.exception("Password reset failed username=%s", username)
+        except exceptions.FreeIPAError as error:
+            logger.exception(
+                "Password reset failed username=%s",
+                username,
+                extra=_auth_log_extra(
+                    event="astra.auth.password_reset.freeipa_error",
+                    outcome="error",
+                    username=username,
+                    endpoint="password-reset-confirm",
+                    error=error,
+                ),
+            )
             form.add_error(None, "Unable to reset password due to a FreeIPA error.")
-        except Exception as e:
-            logger.exception("Password reset failed (unexpected) username=%s", username)
+        except Exception as error:
+            logger.exception(
+                "Password reset failed (unexpected) username=%s",
+                username,
+                extra=_auth_log_extra(
+                    event="astra.auth.password_reset.unexpected_error",
+                    outcome="error",
+                    username=username,
+                    endpoint="password-reset-confirm",
+                    error=error,
+                ),
+            )
             if settings.DEBUG:
-                form.add_error(None, f"Unable to reset password (debug): {e}")
+                form.add_error(None, f"Unable to reset password (debug): {error}")
             else:
                 form.add_error(None, "Unable to reset password due to an internal error.")
         else:
@@ -395,8 +448,18 @@ def password_reset_confirm(request: HttpRequest) -> HttpResponse:
 
             try:
                 send_password_reset_success_email(request=request, username=username, email=user_email)
-            except Exception:
-                logger.exception("Password reset success email send failed username=%s", username)
+            except Exception as error:
+                logger.exception(
+                    "Password reset success email send failed username=%s",
+                    username,
+                    extra=_auth_log_extra(
+                        event="astra.auth.password_reset.success_email_send_failed",
+                        outcome="error",
+                        username=username,
+                        endpoint="password-reset-confirm",
+                        error=error,
+                    ),
+                )
             messages.success(request, "Password updated. Please log in.")
             return redirect("login")
 
@@ -453,13 +516,34 @@ def password_expired(request: HttpRequest) -> HttpResponse:
             form.add_error(None, "Password is expired; please change it below.")
         except exceptions.Unauthorized:
             form.add_error(None, "Unable to change password. Please check your username and current password.")
-        except exceptions.FreeIPAError as e:
-            logger.warning("password_expired: FreeIPA error username=%s error=%s", username, e)
+        except exceptions.FreeIPAError as error:
+            logger.warning(
+                "password_expired: FreeIPA error username=%s error=%s",
+                username,
+                error,
+                extra=_auth_log_extra(
+                    event="astra.auth.password_expired.freeipa_error",
+                    outcome="error",
+                    username=username,
+                    endpoint="password-expired",
+                    error=error,
+                ),
+            )
             form.add_error(None, "Unable to change password due to a FreeIPA error.")
-        except Exception as e:
-            logger.exception("password_expired: unexpected error username=%s", username)
+        except Exception as error:
+            logger.exception(
+                "password_expired: unexpected error username=%s",
+                username,
+                extra=_auth_log_extra(
+                    event="astra.auth.password_expired.unexpected_error",
+                    outcome="error",
+                    username=username,
+                    endpoint="password-expired",
+                    error=error,
+                ),
+            )
             if settings.DEBUG:
-                form.add_error(None, f"Unable to change password (debug): {e}")
+                form.add_error(None, f"Unable to change password (debug): {error}")
             else:
                 form.add_error(None, "Unable to change password due to an internal error.")
 
@@ -513,10 +597,20 @@ def otp_sync(request: HttpRequest) -> HttpResponse:
             form.add_error(None, "The username, password or token codes are not correct.")
         except requests.exceptions.RequestException:
             form.add_error(None, "No IPA server available")
-        except Exception as e:
-            logger.exception("otp_sync: unexpected error username=%s", username)
+        except Exception as error:
+            logger.exception(
+                "otp_sync: unexpected error username=%s",
+                username,
+                extra=_auth_log_extra(
+                    event="astra.auth.otp_sync.unexpected_error",
+                    outcome="error",
+                    username=username,
+                    endpoint="otp-sync",
+                    error=error,
+                ),
+            )
             if settings.DEBUG:
-                form.add_error(None, f"Something went wrong (debug): {e}")
+                form.add_error(None, f"Something went wrong (debug): {error}")
             else:
                 form.add_error(None, "Something went wrong")
 

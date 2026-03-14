@@ -3,6 +3,9 @@ import logging
 
 from django.test import SimpleTestCase
 
+from config.logging_context import RequestLogContext, reset_request_log_context, set_request_log_context
+from core.logging_extras import exception_log_fields
+
 
 class LoggingFilterTests(SimpleTestCase):
     def test_health_endpoint_filter(self) -> None:
@@ -123,3 +126,153 @@ class LoggingFilterTests(SimpleTestCase):
             exc_info=None,
         )
         self.assertTrue(filt.filter(non_hetrix_root))
+
+    def test_request_context_filter_populates_searchable_log_fields(self) -> None:
+        from config.logging_filters import RequestContextFilter
+
+        token = set_request_log_context(
+            RequestLogContext(
+                client_ip="203.0.113.8",
+                user_id="alice",
+                request_id="req-42",
+                request_path="/organizations/",
+                request_method="GET",
+            )
+        )
+        self.addCleanup(reset_request_log_context, token)
+
+        filt = RequestContextFilter()
+        record = logging.LogRecord(
+            name="core.views",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg="membership lookup",
+            args=(),
+            exc_info=None,
+        )
+
+        self.assertTrue(filt.filter(record))
+        self.assertEqual(record.client_ip, "203.0.113.8")
+        self.assertEqual(record.user_id, "alice")
+        self.assertEqual(record.request_id, "req-42")
+        self.assertEqual(record.request_path, "/organizations/")
+        self.assertEqual(record.request_method, "GET")
+
+    def test_request_context_filter_keeps_existing_extra_fields(self) -> None:
+        from config.logging_filters import RequestContextFilter
+
+        token = set_request_log_context(
+            RequestLogContext(
+                client_ip="203.0.113.8",
+                user_id="alice",
+                request_id="req-42",
+                request_path="/organizations/",
+                request_method="GET",
+            )
+        )
+        self.addCleanup(reset_request_log_context, token)
+
+        filt = RequestContextFilter()
+        record = logging.LogRecord(
+            name="core.views",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg="membership lookup",
+            args=(),
+            exc_info=None,
+        )
+        record.user_id = "explicit-user"
+        record.client_ip = "198.51.100.9"
+
+        self.assertTrue(filt.filter(record))
+        self.assertEqual(record.user_id, "explicit-user")
+        self.assertEqual(record.client_ip, "198.51.100.9")
+
+    def test_request_context_filter_adds_exception_fields_from_exc_info(self) -> None:
+        from config.logging_filters import RequestContextFilter
+
+        filt = RequestContextFilter()
+        try:
+            raise ValueError("boom")
+        except ValueError as error:
+            record = logging.LogRecord(
+                name="core.views",
+                level=logging.ERROR,
+                pathname=__file__,
+                lineno=1,
+                msg="request failed",
+                args=(),
+                exc_info=(type(error), error, error.__traceback__),
+            )
+
+        self.assertTrue(filt.filter(record))
+        self.assertEqual(record.error_type, "ValueError")
+        self.assertEqual(record.error_message, "boom")
+        self.assertEqual(record.error_repr, "ValueError('boom')")
+        self.assertEqual(record.error_args, "('boom',)")
+
+    def test_request_context_filter_adds_exception_fields_from_record_args(self) -> None:
+        from config.logging_filters import RequestContextFilter
+
+        filt = RequestContextFilter()
+        error = RuntimeError("arg failure")
+        record = logging.LogRecord(
+            name="core.views",
+            level=logging.ERROR,
+            pathname=__file__,
+            lineno=1,
+            msg="request failed: %s",
+            args=(error,),
+            exc_info=None,
+        )
+
+        self.assertTrue(filt.filter(record))
+        self.assertEqual(record.error_type, "RuntimeError")
+        self.assertEqual(record.error_message, "arg failure")
+        self.assertEqual(record.error_repr, "RuntimeError('arg failure')")
+        self.assertEqual(record.error_args, "('arg failure',)")
+
+    def test_request_context_filter_keeps_explicit_exception_fields(self) -> None:
+        from config.logging_filters import RequestContextFilter
+
+        filt = RequestContextFilter()
+        error = RuntimeError("arg failure")
+        record = logging.LogRecord(
+            name="core.views",
+            level=logging.ERROR,
+            pathname=__file__,
+            lineno=1,
+            msg="request failed: %s",
+            args=(error,),
+            exc_info=None,
+        )
+        explicit = {
+            "error_type": "ExplicitError",
+            "error_message": "explicit-message",
+            "error_repr": "ExplicitError('explicit-message')",
+            "error_args": "('explicit-message',)",
+        }
+        for key, value in explicit.items():
+            setattr(record, key, value)
+
+        self.assertTrue(filt.filter(record))
+        self.assertEqual(
+            {
+                "error_type": record.error_type,
+                "error_message": record.error_message,
+                "error_repr": record.error_repr,
+                "error_args": record.error_args,
+            },
+            explicit,
+        )
+        self.assertNotEqual(
+            {
+                "error_type": record.error_type,
+                "error_message": record.error_message,
+                "error_repr": record.error_repr,
+                "error_args": record.error_args,
+            },
+            exception_log_fields(error),
+        )
