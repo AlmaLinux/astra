@@ -435,15 +435,24 @@ def membership_stats_data(request: HttpRequest) -> HttpResponse:
         active_freeipa_users = [u for u in all_freeipa_users if u.is_active]
 
         active_memberships = Membership.objects.active()
+        active_individual_usernames = list(
+            active_memberships.filter(membership_type__category__is_individual=True)
+            .exclude(target_username="")
+            .order_by()
+            .values_list("target_username", flat=True)
+            .distinct()
+        )
+        active_org_ids = list(
+            active_memberships.filter(membership_type__category__is_organization=True)
+            .filter(target_organization__isnull=False)
+            .order_by()
+            .values_list("target_organization_id", flat=True)
+            .distinct()
+        )
 
         summary: dict[str, object] = {
             "total_freeipa_users": len(all_freeipa_users),
-            "active_individual_memberships": active_memberships.filter(
-                membership_type__category__is_individual=True
-            )
-            .values("target_username")
-            .distinct()
-            .count(),
+            "active_individual_memberships": len(active_individual_usernames),
             "pending_requests": MembershipRequest.objects.filter(
                 status=MembershipRequest.Status.pending
             ).count(),
@@ -453,9 +462,7 @@ def membership_stats_data(request: HttpRequest) -> HttpResponse:
             "expiring_soon_90_days": active_memberships.filter(expires_at__lte=now + datetime.timedelta(days=90))
             .exclude(expires_at__isnull=True)
             .count(),
-            "active_org_sponsorships": Membership.objects.active()
-            .filter(target_organization__isnull=False)
-            .count(),
+            "active_org_sponsorships": len(active_org_ids),
         }
 
         approval_statuses = [
@@ -623,12 +630,7 @@ def membership_stats_data(request: HttpRequest) -> HttpResponse:
                 "counts": [v for _k, v in ordered],
             }
 
-        active_member_usernames = set(
-            active_memberships.filter(membership_type__category__is_individual=True)
-            .exclude(target_username="")
-            .values_list("target_username", flat=True)
-            .distinct()
-        )
+        active_member_usernames = set(active_individual_usernames)
         active_member_users: list[FreeIPAUser] = []
         for username in sorted(active_member_usernames):
             user = users_by_username.get(username)
@@ -646,6 +648,6 @@ def membership_stats_data(request: HttpRequest) -> HttpResponse:
             "charts": charts,
         }
 
-    cache_key = f"membership_stats:data:v5:days={days_param}"
+    cache_key = f"membership_stats:data:v6:days={days_param}"
     payload = cache.get_or_set(cache_key, compute_payload, timeout=300)
     return JsonResponse(payload)

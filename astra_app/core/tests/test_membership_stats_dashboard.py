@@ -1304,6 +1304,102 @@ class MembershipStatsDashboardTests(TestCase):
         active_counts = charts["nationality_active_members"]["counts"]
         self.assertEqual(dict(zip(active_labels, active_counts, strict=False)), {"US": 1})
 
+    def test_membership_stats_data_deduplicates_mirror_plus_other_memberships_per_target(self) -> None:
+        cache.clear()
+        Membership.objects.all().delete()
+
+        MembershipTypeCategory.objects.update_or_create(
+            name="individual",
+            defaults={
+                "is_individual": True,
+                "is_organization": False,
+                "sort_order": 0,
+            },
+        )
+        MembershipTypeCategory.objects.update_or_create(
+            name="mirror",
+            defaults={
+                "is_individual": True,
+                "is_organization": True,
+                "sort_order": 1,
+            },
+        )
+        MembershipTypeCategory.objects.update_or_create(
+            name="sponsorship",
+            defaults={
+                "is_individual": False,
+                "is_organization": True,
+                "sort_order": 2,
+            },
+        )
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror",
+                "group_cn": "almalinux-mirror",
+                "category_id": "mirror",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="sponsor-standard",
+            defaults={
+                "name": "Sponsor Standard",
+                "group_cn": "almalinux-sponsor-standard",
+                "category_id": "sponsorship",
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+
+        Membership.objects.create(
+            target_username="alice",
+            membership_type_id="individual",
+            expires_at=timezone.now() + datetime.timedelta(days=30),
+        )
+        Membership.objects.create(
+            target_username="alice",
+            membership_type_id="mirror",
+            expires_at=timezone.now() + datetime.timedelta(days=30),
+        )
+
+        org = Organization.objects.create(name="Dual Membership Org", representative="orgrep")
+        Membership.objects.create(
+            target_organization=org,
+            membership_type_id="mirror",
+            expires_at=timezone.now() + datetime.timedelta(days=30),
+        )
+        Membership.objects.create(
+            target_organization=org,
+            membership_type_id="sponsor-standard",
+            expires_at=timezone.now() + datetime.timedelta(days=30),
+        )
+
+        self._grant_membership_stats_permission()
+        self._login_as_freeipa_user("reviewer")
+        reviewer = self._reviewer_user()
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
+                resp = self.client.get(reverse("membership-stats-data"))
+
+        self.assertEqual(resp.status_code, 200)
+        summary = resp.json()["summary"]
+        self.assertEqual(summary["active_individual_memberships"], 1, summary)
+        self.assertEqual(summary["active_org_sponsorships"], 1, summary)
+
     def test_membership_stats_active_members_geo_uses_individual_population_only(self) -> None:
         cache.clear()
 
