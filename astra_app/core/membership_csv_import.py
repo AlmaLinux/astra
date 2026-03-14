@@ -75,6 +75,7 @@ def _membership_type_matches(value: str, membership_type: MembershipType) -> boo
         return True
 
     return candidate == membership_type.name.strip().lower()
+
 class MembershipCSVImportForm(ImportForm):
     membership_type = forms.ModelChoiceField(
         queryset=_USER_IMPORT_MEMBERSHIP_TYPES,

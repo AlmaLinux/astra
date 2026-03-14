@@ -4,6 +4,7 @@ import re
 import zoneinfo
 from functools import lru_cache
 from typing import override
+from urllib.parse import urlparse
 
 import pycountry
 import pyotp
@@ -29,6 +30,33 @@ _GITHUB_USERNAME_RE = re.compile(r"^(?!-)(?!.*--)[A-Za-z0-9-]{1,39}(?<!-)$")
 
 # GitLab username rules are more permissive; keep basic constraints.
 _GITLAB_USERNAME_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,253}[A-Za-z0-9])?$")
+
+
+def _normalize_profile_handle(value: object, *, expected_host: str) -> str:
+    """Normalize a profile input to a handle when a full URL is provided."""
+
+    raw = _normalize_str(value).strip()
+    if not raw:
+        return ""
+
+    candidate = raw.lstrip("@").strip()
+    if _GITHUB_USERNAME_RE.match(candidate):
+        return candidate
+
+    parsed = urlparse(candidate if "://" in candidate else f"https://{candidate}")
+    host = parsed.netloc.strip().lower()
+    if host.startswith("www."):
+        host = host[4:]
+    if host != expected_host:
+        return candidate
+
+    path = parsed.path.strip("/")
+    if not path:
+        return candidate
+
+    # Extract the first path segment from URLs like <host>/<handle>/...
+    handle = path.split("/", 1)[0].lstrip("@").strip()
+    return handle or candidate
 
 
 def normalize_locale_tag(value: object) -> str:
@@ -351,16 +379,20 @@ class ProfileForm(StyledForm):
 
     def clean_fasGitHubUsername(self):
         # Matches baseruserfas normalizer=lambda value: value.strip(), maxlength=255
-        value = _normalize_str(self.cleaned_data.get("fasGitHubUsername"))
-        value = value.lstrip("@").strip()
+        value = _normalize_profile_handle(
+            self.cleaned_data.get("fasGitHubUsername"),
+            expected_host="github.com",
+        )
         if value and not _GITHUB_USERNAME_RE.match(value):
             raise forms.ValidationError("GitHub username is not valid")
         return value
 
     def clean_fasGitLabUsername(self):
         # Matches baseruserfas normalizer=lambda value: value.strip(), maxlength=255
-        value = _normalize_str(self.cleaned_data.get("fasGitLabUsername"))
-        value = value.lstrip("@").strip()
+        value = _normalize_profile_handle(
+            self.cleaned_data.get("fasGitLabUsername"),
+            expected_host="gitlab.com",
+        )
         if value and not _GITLAB_USERNAME_RE.match(value):
             raise forms.ValidationError("GitLab username is not valid")
         return value

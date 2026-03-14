@@ -926,6 +926,358 @@ class SelfServiceSettingsPagesTests(TestCase):
         FREEIPA_VERIFY_SSL=False,
         FREEIPA_SERVICE_USER="svc",
         FREEIPA_SERVICE_PASSWORD="pw",
+        SELF_SERVICE_ADDRESS_COUNTRY_ATTR="c",
+    )
+    def test_settings_save_all_country_only_update_allows_unchanged_invalid_optional_profile_field(self):
+        factory = RequestFactory()
+
+        fake_user = SimpleNamespace(
+            username="alice",
+            email="a@example.org",
+            is_authenticated=True,
+            _user_data={
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "cn": ["Alice User"],
+                "c": ["US"],
+                # Legacy invalid value already in FreeIPA.
+                "fasTimezone": ["Legacy/InvalidTimezone"],
+                "mail": ["alice@example.org"],
+                "fasRHBZEmail": [""],
+            },
+        )
+
+        request = factory.post(
+            "/settings/",
+            data={
+                "save_all": "1",
+                "tab": "profile",
+                "givenname": "Alice",
+                "sn": "User",
+                "country_code": "CA",
+                "fasPronoun": "",
+                "fasLocale": "",
+                "fasTimezone": "Legacy/InvalidTimezone",
+                "fasWebsiteUrl": "",
+                "fasRssUrl": "",
+                "fasIRCNick": "",
+                "fasGitHubUsername": "",
+                "fasGitLabUsername": "",
+                "mail": "alice@example.org",
+                "fasRHBZEmail": "",
+                "fasGPGKeyId": "",
+                "ipasshpubkey": "",
+            },
+        )
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            with patch("core.views_settings._update_user_attrs", autospec=True, return_value=([], True)) as mocked_update:
+                response = views_settings.settings_root(request)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("settings") + "?tab=profile")
+        kwargs = mocked_update.call_args.kwargs
+        self.assertEqual(kwargs.get("direct_updates"), {"o_c": "CA"})
+        self.assertEqual(kwargs.get("addattrs"), [])
+        self.assertEqual(kwargs.get("setattrs"), [])
+        self.assertEqual(kwargs.get("delattrs"), [])
+
+    @override_settings(
+        FREEIPA_HOST="ipa.test",
+        FREEIPA_VERIFY_SSL=False,
+        FREEIPA_SERVICE_USER="svc",
+        FREEIPA_SERVICE_PASSWORD="pw",
+        SELF_SERVICE_ADDRESS_COUNTRY_ATTR="c",
+    )
+    def test_settings_profile_post_logs_invalid_profile_field_errors(self):
+        factory = RequestFactory()
+
+        fake_user = SimpleNamespace(
+            username="alice",
+            email="a@example.org",
+            is_authenticated=True,
+            _user_data={
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "cn": ["Alice User"],
+                "c": ["US"],
+            },
+        )
+
+        request = factory.post(
+            "/settings/",
+            data={
+                "tab": "profile",
+                "givenname": "Alice",
+                "sn": "User",
+                "country_code": "US",
+                "fasPronoun": "",
+                "fasLocale": "",
+                "fasTimezone": "",
+                "fasWebsiteUrl": "",
+                "fasRssUrl": "",
+                "fasIRCNick": "",
+                "fasGitHubUsername": "",
+                "fasGitLabUsername": "-bad-",
+            },
+        )
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        captured: dict[str, object] = {}
+
+        def fake_render(_request, template, context):
+            captured["template"] = template
+            captured["context"] = context
+            return HttpResponse("ok")
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            with patch("core.views_settings._update_user_attrs", autospec=True) as mocked_update:
+                with patch("core.views_settings.render", autospec=True, side_effect=fake_render):
+                    with self.assertLogs("core.views_settings", level="WARNING") as log_ctx:
+                        response = views_settings.settings_root(request)
+
+        self.assertEqual(response.status_code, 200)
+        mocked_update.assert_not_called()
+        self.assertIn("fasGitLabUsername", captured["context"]["profile_form"].errors)
+        self.assertTrue(any("Profile form validation failed" in line for line in log_ctx.output))
+        self.assertTrue(any("fasGitLabUsername" in line for line in log_ctx.output))
+        self.assertTrue(any("-bad-" in line for line in log_ctx.output))
+
+    @override_settings(
+        FREEIPA_HOST="ipa.test",
+        FREEIPA_VERIFY_SSL=False,
+        FREEIPA_SERVICE_USER="svc",
+        FREEIPA_SERVICE_PASSWORD="pw",
+        SELF_SERVICE_ADDRESS_COUNTRY_ATTR="c",
+    )
+    def test_settings_emails_post_logs_invalid_field_values(self):
+        factory = RequestFactory()
+
+        fake_user = SimpleNamespace(
+            username="alice",
+            email="a@example.org",
+            is_authenticated=True,
+            _user_data={
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "cn": ["Alice User"],
+                "c": ["US"],
+                "mail": ["alice@example.org"],
+                "fasRHBZEmail": [""],
+            },
+        )
+
+        request = factory.post(
+            "/settings/",
+            data={
+                "tab": "emails",
+                "mail": "not-an-email",
+                "fasRHBZEmail": "",
+            },
+        )
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        captured: dict[str, object] = {}
+
+        def fake_render(_request, template, context):
+            captured["template"] = template
+            captured["context"] = context
+            return HttpResponse("ok")
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            with patch("core.views_settings._update_user_attrs", autospec=True) as mocked_update:
+                with patch("core.views_settings.render", autospec=True, side_effect=fake_render):
+                    with self.assertLogs("core.views_settings", level="WARNING") as log_ctx:
+                        response = views_settings.settings_root(request)
+
+        self.assertEqual(response.status_code, 200)
+        mocked_update.assert_not_called()
+        self.assertIn("mail", captured["context"]["emails_form"].errors)
+        self.assertTrue(any("Emails form validation failed" in line for line in log_ctx.output))
+        self.assertTrue(any("not-an-email" in line for line in log_ctx.output))
+
+    @override_settings(
+        FREEIPA_HOST="ipa.test",
+        FREEIPA_VERIFY_SSL=False,
+        FREEIPA_SERVICE_USER="svc",
+        FREEIPA_SERVICE_PASSWORD="pw",
+        SELF_SERVICE_ADDRESS_COUNTRY_ATTR="c",
+    )
+    def test_settings_keys_post_logs_invalid_field_values(self):
+        factory = RequestFactory()
+
+        fake_user = SimpleNamespace(
+            username="alice",
+            email="a@example.org",
+            is_authenticated=True,
+            _user_data={
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "cn": ["Alice User"],
+                "c": ["US"],
+                "fasGPGKeyId": ["0123456789ABCDEF"],
+                "ipasshpubkey": ["ssh-ed25519 AAAA... alice@example"],
+            },
+        )
+
+        request = factory.post(
+            "/settings/",
+            data={
+                "tab": "keys",
+                "fasGPGKeyId": "short",
+                "ipasshpubkey": "ssh-ed25519 AAAA... alice@example",
+            },
+        )
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        captured: dict[str, object] = {}
+
+        def fake_render(_request, template, context):
+            captured["template"] = template
+            captured["context"] = context
+            return HttpResponse("ok")
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            with patch("core.views_settings._update_user_attrs", autospec=True) as mocked_update:
+                with patch("core.views_settings.render", autospec=True, side_effect=fake_render):
+                    with self.assertLogs("core.views_settings", level="WARNING") as log_ctx:
+                        response = views_settings.settings_root(request)
+
+        self.assertEqual(response.status_code, 200)
+        mocked_update.assert_not_called()
+        self.assertIn("fasGPGKeyId", captured["context"]["keys_form"].errors)
+        self.assertTrue(any("Keys form validation failed" in line for line in log_ctx.output))
+        self.assertTrue(any("short" in line for line in log_ctx.output))
+
+    @override_settings(
+        FREEIPA_HOST="ipa.test",
+        FREEIPA_VERIFY_SSL=False,
+        FREEIPA_SERVICE_USER="svc",
+        FREEIPA_SERVICE_PASSWORD="pw",
+        SELF_SERVICE_ADDRESS_COUNTRY_ATTR="c",
+    )
+    def test_settings_profile_post_saves_country_even_when_another_profile_field_is_invalid(self):
+        factory = RequestFactory()
+
+        fake_user = SimpleNamespace(
+            username="alice",
+            email="a@example.org",
+            is_authenticated=True,
+            _user_data={
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "cn": ["Alice User"],
+                "c": ["US"],
+                "fasGitLabUsername": ["good.name"],
+            },
+        )
+
+        request = factory.post(
+            "/settings/",
+            data={
+                "tab": "profile",
+                "givenname": "Alice",
+                "sn": "User",
+                "country_code": "CA",
+                "fasPronoun": "",
+                "fasLocale": "",
+                "fasTimezone": "",
+                "fasWebsiteUrl": "",
+                "fasRssUrl": "",
+                "fasIRCNick": "",
+                "fasGitHubUsername": "",
+                "fasGitLabUsername": "-bad-",
+            },
+        )
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        captured: dict[str, object] = {}
+
+        def fake_render(_request, template, context):
+            captured["template"] = template
+            captured["context"] = context
+            return HttpResponse("ok")
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            with patch("core.views_settings._update_user_attrs", autospec=True, return_value=([], True)) as mocked_update:
+                with patch("core.views_settings.render", autospec=True, side_effect=fake_render):
+                    response = views_settings.settings_root(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(mocked_update.call_count, 1)
+        self.assertEqual(mocked_update.call_args.kwargs.get("direct_updates"), {"o_c": "CA"})
+        self.assertIn("fasGitLabUsername", captured["context"]["profile_form"].errors)
+
+    @override_settings(
+        FREEIPA_HOST="ipa.test",
+        FREEIPA_VERIFY_SSL=False,
+        FREEIPA_SERVICE_USER="svc",
+        FREEIPA_SERVICE_PASSWORD="pw",
+        SELF_SERVICE_ADDRESS_COUNTRY_ATTR="c",
+    )
+    def test_settings_save_all_saves_country_even_when_another_profile_field_is_invalid_and_changed(self):
+        factory = RequestFactory()
+
+        fake_user = SimpleNamespace(
+            username="alice",
+            email="a@example.org",
+            is_authenticated=True,
+            _user_data={
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "cn": ["Alice User"],
+                "c": ["US"],
+                "fasGitLabUsername": ["good.name"],
+                "mail": ["alice@example.org"],
+                "fasRHBZEmail": [""],
+            },
+        )
+
+        request = factory.post(
+            "/settings/",
+            data={
+                "save_all": "1",
+                "tab": "profile",
+                "givenname": "Alice",
+                "sn": "User",
+                "country_code": "CA",
+                "fasPronoun": "",
+                "fasLocale": "",
+                "fasTimezone": "",
+                "fasWebsiteUrl": "",
+                "fasRssUrl": "",
+                "fasIRCNick": "",
+                "fasGitHubUsername": "",
+                "fasGitLabUsername": "-bad-",
+                "mail": "alice@example.org",
+                "fasRHBZEmail": "",
+                "fasGPGKeyId": "",
+                "ipasshpubkey": "",
+            },
+        )
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            with patch("core.views_settings._update_user_attrs", autospec=True, return_value=([], True)) as mocked_update:
+                response = views_settings.settings_root(request)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("settings") + "?tab=profile")
+        self.assertEqual(mocked_update.call_count, 1)
+        self.assertEqual(mocked_update.call_args.kwargs.get("direct_updates"), {"o_c": "CA"})
+
+    @override_settings(
+        FREEIPA_HOST="ipa.test",
+        FREEIPA_VERIFY_SSL=False,
+        FREEIPA_SERVICE_USER="svc",
+        FREEIPA_SERVICE_PASSWORD="pw",
         SELF_SERVICE_ADDRESS_COUNTRY_ATTR="fasstatusnote",
     )
     def test_settings_profile_post_changes_blocked_without_country_code(self):

@@ -29,6 +29,7 @@ from core import signals as astra_signals
 from core.account_deletion import get_account_deletion_blockers
 from core.agreements import has_enabled_agreements, list_agreements_for_user
 from core.avatar_storage import avatar_path_handler
+from core.country_codes import is_valid_country_alpha2, normalize_country_alpha2
 from core.email_context import system_email_context, user_email_context
 from core.forms_selfservice import (
     AccountDeletionRequestForm,
@@ -282,6 +283,109 @@ type TokenDict = dict[str, Any]
 # ---------------------------------------------------------------------------
 # Per-tab change builders — shared between save-all and single-tab paths.
 # ---------------------------------------------------------------------------
+
+
+def _form_error_map(form: object) -> dict[str, list[str]]:
+    errors: dict[str, list[str]] = {}
+    for field_name, field_errors in form.errors.items():
+        errors[str(field_name)] = [str(err) for err in field_errors]
+    return errors
+
+
+def _form_invalid_values(form: object, *, max_value_length: int = 200) -> dict[str, str]:
+    values: dict[str, str] = {}
+    data = form.data
+    for field_name in form.errors.keys():
+        name = str(field_name)
+        if name == "__all__":
+            continue
+
+        if hasattr(data, "getlist"):
+            # QueryDict-backed forms can have repeated values for a key.
+            raw_list = [str(v) for v in data.getlist(name)]
+            raw_value = "\n".join(raw_list)
+        else:
+            raw_value = str(data.get(name, "") or "")
+
+        normalized = _normalize_str(raw_value)
+        if len(normalized) > max_value_length:
+            normalized = f"{normalized[: max_value_length - 3]}..."
+        values[name] = normalized
+    return values
+
+
+def _log_invalid_form(*, form_label: str, username: str, form: object) -> None:
+    errors = _form_error_map(form)
+    if not errors:
+        return
+
+    invalid_values = _form_invalid_values(form)
+    logger.warning(
+        "%s form validation failed username=%s fields=%s errors=%s invalid_values=%s",
+        form_label,
+        username,
+        sorted(errors.keys()),
+        errors,
+        invalid_values,
+    )
+
+
+def _log_invalid_profile_form(*, username: str, profile_form: ProfileForm) -> None:
+    _log_invalid_form(form_label="Profile", username=username, form=profile_form)
+
+
+def _log_invalid_emails_form(*, username: str, emails_form: EmailsForm) -> None:
+    _log_invalid_form(form_label="Emails", username=username, form=emails_form)
+
+
+def _log_invalid_keys_form(*, username: str, keys_form: KeysForm) -> None:
+    _log_invalid_form(form_label="Keys", username=username, form=keys_form)
+
+
+def _build_country_only_profile_changes_from_invalid_form(
+    *,
+    profile_form: ProfileForm,
+    profile_initial: dict[str, object],
+    country_attr: str,
+    country_attr_lower: str,
+) -> tuple[dict[str, object], list[str], list[str], list[str], str, str] | None:
+    """Return a country-only change set when only non-required fields are invalid.
+
+    This lets users satisfy country-code requirements even when other profile
+    attributes fail validation in the same POST.
+    """
+
+    if not profile_form.errors:
+        return None
+
+    if "__all__" in profile_form.errors:
+        return None
+
+    old_country = str(profile_initial.get("country_code") or "").strip().upper()
+    new_country = normalize_country_alpha2(profile_form.data.get("country_code"))
+    if not new_country or not is_valid_country_alpha2(new_country):
+        return None
+    if new_country == old_country:
+        return None
+
+    if _normalize_str(profile_form.data.get("givenname")) != _normalize_str(profile_initial.get("givenname")):
+        return None
+    if _normalize_str(profile_form.data.get("sn")) != _normalize_str(profile_initial.get("sn")):
+        return None
+
+    required_fields = {"givenname", "sn", "country_code"}
+    for field_name in profile_form.errors.keys():
+        if field_name in required_fields:
+            return None
+
+    direct_updates: dict[str, object] = {}
+    setattrs: list[str] = []
+    if country_attr_lower in {"c", "st", "l", "postalcode"}:
+        direct_updates[f"o_{country_attr_lower}"] = new_country
+    else:
+        setattrs.append(f"{country_attr}={new_country}")
+
+    return direct_updates, [], setattrs, [], old_country, new_country
 
 
 def _build_profile_changes(
@@ -1122,6 +1226,29 @@ def settings_root(request: HttpRequest) -> HttpResponse:
         "agreements": None,
     }.get(str(context["active_tab"]))
 
+    profile_form_invalid = profile_form.is_bound and not profile_form.is_valid()
+    emails_form_invalid = emails_form.is_bound and not emails_form.is_valid()
+    keys_form_invalid = keys_form.is_bound and not keys_form.is_valid()
+    country_only_profile_fallback = None
+    if profile_form_invalid:
+        _log_invalid_profile_form(username=username, profile_form=profile_form)
+        country_only_profile_fallback = _build_country_only_profile_changes_from_invalid_form(
+            profile_form=profile_form,
+            profile_initial=profile_initial,
+            country_attr=country_attr,
+            country_attr_lower=country_attr_lower,
+        )
+        if country_only_profile_fallback is not None:
+            logger.info(
+                "Profile country-only fallback applied username=%s invalid_fields=%s",
+                username,
+                sorted(profile_form.errors.keys()),
+            )
+    if request.method == "POST" and requested_tab == "emails" and emails_form_invalid:
+        _log_invalid_emails_form(username=username, emails_form=emails_form)
+    if request.method == "POST" and requested_tab == "keys" and keys_form_invalid:
+        _log_invalid_keys_form(username=username, keys_form=keys_form)
+
     if request.method != "POST":
         return render(request, "core/settings.html", context)
 
@@ -1134,12 +1261,17 @@ def settings_root(request: HttpRequest) -> HttpResponse:
         keys_changed = keys_form.has_changed()
 
         invalid_tab: str | None = None
-        if profile_changed and not profile_form.is_valid():
+        if profile_changed and profile_form_invalid and country_only_profile_fallback is None:
             invalid_tab = "profile"
-        elif emails_changed and not emails_form.is_valid():
+        elif emails_changed and emails_form_invalid:
             invalid_tab = "emails"
-        elif keys_changed and not keys_form.is_valid():
+        elif keys_changed and keys_form_invalid:
             invalid_tab = "keys"
+
+        if emails_changed and emails_form_invalid and requested_tab != "emails":
+            _log_invalid_emails_form(username=username, emails_form=emails_form)
+        if keys_changed and keys_form_invalid and requested_tab != "keys":
+            _log_invalid_keys_form(username=username, keys_form=keys_form)
 
         if invalid_tab is not None:
             context["active_tab"] = invalid_tab
@@ -1166,13 +1298,23 @@ def settings_root(request: HttpRequest) -> HttpResponse:
         profile_setattrs: list[str] = []
         profile_delattrs: list[str] = []
         if profile_changed:
-            profile_direct_updates, profile_addattrs, profile_setattrs, profile_delattrs, old_country, new_country = (
-                _build_profile_changes(
-                    profile_form=profile_form, profile_initial=profile_initial,
-                    data=data, username=username,
-                    country_attr=country_attr, country_attr_lower=country_attr_lower,
+            if country_only_profile_fallback is not None:
+                (
+                    profile_direct_updates,
+                    profile_addattrs,
+                    profile_setattrs,
+                    profile_delattrs,
+                    old_country,
+                    new_country,
+                ) = country_only_profile_fallback
+            else:
+                profile_direct_updates, profile_addattrs, profile_setattrs, profile_delattrs, old_country, new_country = (
+                    _build_profile_changes(
+                        profile_form=profile_form, profile_initial=profile_initial,
+                        data=data, username=username,
+                        country_attr=country_attr, country_attr_lower=country_attr_lower,
+                    )
                 )
-            )
 
         emails_direct_updates: dict[str, object] = {}
         emails_setattrs: list[str] = []
@@ -1244,12 +1386,16 @@ def settings_root(request: HttpRequest) -> HttpResponse:
 
         return redirect(settings_url(tab=requested_tab))
 
-    if requested_tab == "profile" and profile_form.is_valid():
-        direct_updates, addattrs, setattrs, delattrs, old_country, new_country = _build_profile_changes(
-            profile_form=profile_form, profile_initial=profile_initial,
-            data=data, username=username,
-            country_attr=country_attr, country_attr_lower=country_attr_lower,
-        )
+    if requested_tab == "profile" and (profile_form.is_valid() or country_only_profile_fallback is not None):
+        used_country_only_fallback = country_only_profile_fallback is not None and not profile_form.is_valid()
+        if country_only_profile_fallback is not None:
+            direct_updates, addattrs, setattrs, delattrs, old_country, new_country = country_only_profile_fallback
+        else:
+            direct_updates, addattrs, setattrs, delattrs, old_country, new_country = _build_profile_changes(
+                profile_form=profile_form, profile_initial=profile_initial,
+                data=data, username=username,
+                country_attr=country_attr, country_attr_lower=country_attr_lower,
+            )
 
         if not direct_updates and not addattrs and not setattrs and not delattrs:
             messages.info(request, "No changes to save.")
@@ -1277,6 +1423,15 @@ def settings_root(request: HttpRequest) -> HttpResponse:
             return _settings_update_error_response(
                 request, context, "profile", e, tab_label="profile", username=username,
             )
+        if used_country_only_fallback:
+            messages.warning(
+                request,
+                "Country was saved, but some profile fields are still invalid. Please fix the highlighted fields.",
+            )
+            context["active_tab"] = "profile"
+            context["form"] = profile_form
+            context["force_tab"] = "profile"
+            return render(request, "core/settings.html", context)
         if safe_relative_return_target:
             return redirect(return_target)
         return redirect(settings_url(tab="profile", highlight=highlight, status="saved"))

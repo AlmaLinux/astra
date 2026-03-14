@@ -89,6 +89,18 @@ class ProfileFormValidationTests(SimpleTestCase):
         self.assertFalse(form.is_valid())
         self.assertIn("fasGitHubUsername", form.errors)
 
+    def test_github_username_accepts_profile_url_and_normalizes_handle(self):
+        form = ProfileForm(
+            data={
+                "givenname": "Alice",
+                "sn": "User",
+                "country_code": "US",
+                "fasGitHubUsername": "https://github.com/octo-cat/?tab=repositories",
+            }
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["fasGitHubUsername"], "octo-cat")
+
     def test_gitlab_username_strips_at_and_validates(self):
         form = ProfileForm(
             data={
@@ -96,6 +108,18 @@ class ProfileFormValidationTests(SimpleTestCase):
                 "sn": "User",
                 "country_code": "US",
                 "fasGitLabUsername": "@good.name",
+            }
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["fasGitLabUsername"], "good.name")
+
+    def test_gitlab_username_accepts_profile_url_and_normalizes_handle(self):
+        form = ProfileForm(
+            data={
+                "givenname": "Alice",
+                "sn": "User",
+                "country_code": "US",
+                "fasGitLabUsername": "https://gitlab.com/good.name/-/projects",
             }
         )
         self.assertTrue(form.is_valid(), form.errors)
