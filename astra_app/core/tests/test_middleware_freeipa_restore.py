@@ -320,8 +320,22 @@ class FreeIPAMiddlewareRestoreTests(TestCase):
         mocked_info.assert_called_once()
         self.assertEqual(
             mocked_info.call_args.args[0],
+            '%({x-forwarded-for}i)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s"',
+        )
+        atoms = mocked_info.call_args.args[1]
+        self.assertEqual(
+            mocked_info.call_args.args[0] % atoms,
             '198.51.100.14 - alice [14/Mar/2026:19:30:00 +0000] "GET /organizations/?q=alma HTTP/1.1" 201 2 "https://accounts.almalinux.org/" "pytest-agent"',
         )
+        self.assertEqual(atoms["m"], "GET")
+        self.assertEqual(atoms["U"], "/organizations/")
+        self.assertEqual(atoms["q"], "q=alma")
+        self.assertEqual(atoms["s"], 201)
+        self.assertEqual(atoms["b"], "2")
+        self.assertEqual(atoms["{host}i"], "testserver")
+        self.assertEqual(atoms["{user-agent}i"], "pytest-agent")
+        self.assertEqual(atoms["{http_user_agent}e"], "pytest-agent")
+        self.assertIn("{wsgi.multiprocess}e", atoms)
         extra = mocked_info.call_args.kwargs["extra"]
         self.assertEqual(extra["event"], "astra.http.access")
         self.assertEqual(extra["component"], "http")
@@ -355,8 +369,14 @@ class FreeIPAMiddlewareRestoreTests(TestCase):
         mocked_info.assert_called_once()
         self.assertEqual(
             mocked_info.call_args.args[0],
+            '%({x-forwarded-for}i)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s"',
+        )
+        atoms = mocked_info.call_args.args[1]
+        self.assertEqual(
+            mocked_info.call_args.args[0] % atoms,
             '198.51.100.15 - - [14/Mar/2026:19:31:00 +0000] "GET /settings HTTP/1.1" 500 - "-" "pytest-agent"',
         )
+        self.assertEqual(atoms["s"], 500)
         extra = mocked_info.call_args.kwargs["extra"]
         self.assertEqual(extra["http_status"], 500)
         self.assertEqual(extra["outcome"], "server_error")

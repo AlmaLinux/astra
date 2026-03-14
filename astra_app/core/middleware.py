@@ -1,4 +1,5 @@
 import logging
+import os
 import time
 from zoneinfo import ZoneInfo
 
@@ -27,6 +28,7 @@ from core.views_utils import get_username, try_get_username_from_user
 
 logger = logging.getLogger(__name__)
 access_logger = logging.getLogger("astra.access")
+_ACCESS_LOG_TEMPLATE = '%({x-forwarded-for}i)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s"'
 
 
 def _format_access_log_timestamp() -> str:
@@ -47,6 +49,85 @@ def _response_body_size(response: HttpResponse | None) -> str:
         return "-"
 
 
+def _build_access_log_atoms(
+    request,
+    *,
+    status_code: int,
+    response: HttpResponse | None,
+    client_ip: str | None,
+    user_id: str | None,
+) -> dict[str, object]:
+    query_string = str(request.META.get("QUERY_STRING") or "")
+    request_path = request.path
+    full_path = request.get_full_path()
+    request_line = f"{request.method} {full_path} HTTP/1.1"
+    referer = str(request.META.get("HTTP_REFERER") or "-")
+    user_agent = str(request.META.get("HTTP_USER_AGENT") or "-")
+    remote_host = client_ip or "-"
+    auth_user = user_id or "-"
+    timestamp = _format_access_log_timestamp()
+    bytes_sent = _response_body_size(response)
+
+    duration_seconds = float(request.META.get("astra.duration_seconds", 0.0) or 0.0)
+    duration_us = int(round(duration_seconds * 1_000_000))
+
+    atoms: dict[str, object] = {
+        "h": remote_host,
+        "l": "-",
+        "u": auth_user,
+        "t": timestamp,
+        "r": request_line,
+        "s": status_code,
+        "b": bytes_sent,
+        "B": bytes_sent,
+        "f": referer,
+        "a": user_agent,
+        "m": request.method,
+        "U": request_path,
+        "q": query_string,
+        "H": "HTTP/1.1",
+        "M": int(round(duration_seconds * 1000)),
+        "D": duration_us,
+        "L": f"{duration_seconds:.6f}",
+        "T": int(duration_seconds),
+        "p": f"<{os.getpid()}>",
+        "{x-forwarded-for}i": str(request.META.get("HTTP_X_FORWARDED_FOR") or remote_host),
+    }
+
+    for key, value in request.META.items():
+        key_str = str(key)
+        key_lower = key_str.lower()
+        atoms[f"{{{key_lower}}}e"] = value
+
+        if key_str.startswith("HTTP_"):
+            header_name = key_str[5:].lower().replace("_", "-")
+            atoms[f"{{{header_name}}}i"] = value
+
+    for meta_key, header_name in (("CONTENT_TYPE", "content-type"), ("CONTENT_LENGTH", "content-length")):
+        meta_value = request.META.get(meta_key)
+        if meta_value:
+            atoms[f"{{{header_name}}}i"] = meta_value
+
+    if "{host}i" not in atoms:
+        try:
+            host_value = request.get_host()
+        except Exception:
+            host_value = str(request.META.get("SERVER_NAME") or "")
+        if host_value:
+            atoms["{host}i"] = host_value
+            atoms.setdefault("{http_host}e", host_value)
+
+    if response is not None:
+        for header_name, header_value in response.headers.items():
+            atoms[f"{{{header_name.lower()}}}o"] = header_value
+
+    for request_attr in ("csrf_cookie_needs_update", "csrf_cookie"):
+        if hasattr(request, request_attr):
+            atoms[f"{{{request_attr}}}e"] = getattr(request, request_attr)
+
+    return atoms
+
+
 def _render_gunicorn_style_access_line(
     request,
     *,
@@ -55,15 +136,14 @@ def _render_gunicorn_style_access_line(
     client_ip: str | None,
     user_id: str | None,
 ) -> str:
-    request_line = f"{request.method} {request.get_full_path()} HTTP/1.1"
-    referer = str(request.META.get("HTTP_REFERER") or "-")
-    user_agent = str(request.META.get("HTTP_USER_AGENT") or "-")
-    remote_host = client_ip or "-"
-    auth_user = user_id or "-"
-    return (
-        f"{remote_host} - {auth_user} {_format_access_log_timestamp()} \"{request_line}\" "
-        f"{status_code} {_response_body_size(response)} \"{referer}\" \"{user_agent}\""
+    atoms = _build_access_log_atoms(
+        request,
+        status_code=status_code,
+        response=response,
+        client_ip=client_ip,
+        user_id=user_id,
     )
+    return _ACCESS_LOG_TEMPLATE % atoms
 
 
 def _get_user_timezone_name(user) -> str | None:
@@ -286,7 +366,9 @@ class StructuredAccessLogMiddleware:
             error = exc
             raise
         finally:
-            duration_ms = int(round((time.monotonic() - started_at) * 1000))
+            duration_seconds = time.monotonic() - started_at
+            duration_ms = int(round(duration_seconds * 1000))
+            request.META["astra.duration_seconds"] = duration_seconds
             status_code = response.status_code if response is not None else 500
             if status_code >= 500:
                 outcome = "server_error"
@@ -324,14 +406,14 @@ class StructuredAccessLogMiddleware:
             if error is not None:
                 extra |= exception_log_fields(error)
 
-            access_line = _render_gunicorn_style_access_line(
+            access_atoms = _build_access_log_atoms(
                 request,
                 status_code=status_code,
                 response=response,
                 client_ip=client_ip,
                 user_id=user_id,
             )
-            access_logger.info(access_line, extra=extra)
+            access_logger.info(_ACCESS_LOG_TEMPLATE, access_atoms, extra=extra)
 
 
 class LoginRequiredMiddleware:
