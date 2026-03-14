@@ -47,5 +47,5 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           build-args: |
-            ASTRA_BUILD_SHA=${{ steps.meta.outputs.version }}
+            ASTRA_BUILD_SHA=${{ github.sha }}
           labels: ${{ steps.meta.outputs.labels }}
