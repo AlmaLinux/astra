@@ -17,6 +17,7 @@ from core.middleware import (
     FreeIPAAuthenticationMiddleware,
     FreeIPAUnavailableMiddleware,
     SentryRequestContextMiddleware,
+    StructuredAccessLogMiddleware,
 )
 from core.templatetags.core_membership_notes import _current_username_from_request
 from core.views_utils import get_username
@@ -295,3 +296,69 @@ class FreeIPAMiddlewareRestoreTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         mocked_set_user.assert_called_once_with(None)
+
+    def test_structured_access_log_middleware_logs_authenticated_request(self):
+        factory = RequestFactory()
+        request = factory.get(
+            "/organizations/?q=alma",
+            HTTP_X_REQUEST_ID="req-123",
+            HTTP_USER_AGENT="pytest-agent",
+            HTTP_REFERER="https://accounts.almalinux.org/",
+            REMOTE_ADDR="198.51.100.14",
+        )
+        request.user = SimpleNamespace(is_authenticated=True, username="alice")
+
+        with (
+            patch("core.middleware.time.monotonic", side_effect=[10.0, 10.145], autospec=True),
+            patch("core.middleware._format_access_log_timestamp", return_value="[14/Mar/2026:19:30:00 +0000]"),
+            patch("core.middleware.access_logger.info", autospec=True) as mocked_info,
+        ):
+            middleware = StructuredAccessLogMiddleware(lambda _req: HttpResponse("ok", status=201))
+            response = middleware(request)
+
+        self.assertEqual(response.status_code, 201)
+        mocked_info.assert_called_once()
+        self.assertEqual(
+            mocked_info.call_args.args[0],
+            '198.51.100.14 - alice [14/Mar/2026:19:30:00 +0000] "GET /organizations/?q=alma HTTP/1.1" 201 2 "https://accounts.almalinux.org/" "pytest-agent"',
+        )
+        extra = mocked_info.call_args.kwargs["extra"]
+        self.assertEqual(extra["event"], "astra.http.access")
+        self.assertEqual(extra["component"], "http")
+        self.assertEqual(extra["outcome"], "success")
+        self.assertEqual(extra["http_status"], 201)
+        self.assertEqual(extra["request_method"], "GET")
+        self.assertEqual(extra["request_path"], "/organizations/")
+        self.assertEqual(extra["request_query"], "q=alma")
+        self.assertEqual(extra["duration_ms"], 145)
+        self.assertEqual(extra["user_id"], "alice")
+        self.assertEqual(extra["client_ip"], "198.51.100.14")
+        self.assertEqual(extra["request_id"], "req-123")
+
+    def test_structured_access_log_middleware_logs_exception_context(self):
+        factory = RequestFactory()
+        request = factory.get("/settings", HTTP_USER_AGENT="pytest-agent", REMOTE_ADDR="198.51.100.15")
+        request.user = AnonymousUser()
+
+        def _boom(_request):
+            raise RuntimeError("middleware boom")
+
+        with (
+            patch("core.middleware.time.monotonic", side_effect=[20.0, 20.200], autospec=True),
+            patch("core.middleware._format_access_log_timestamp", return_value="[14/Mar/2026:19:31:00 +0000]"),
+            patch("core.middleware.access_logger.info", autospec=True) as mocked_info,
+        ):
+            middleware = StructuredAccessLogMiddleware(_boom)
+            with self.assertRaises(RuntimeError):
+                middleware(request)
+
+        mocked_info.assert_called_once()
+        self.assertEqual(
+            mocked_info.call_args.args[0],
+            '198.51.100.15 - - [14/Mar/2026:19:31:00 +0000] "GET /settings HTTP/1.1" 500 - "-" "pytest-agent"',
+        )
+        extra = mocked_info.call_args.kwargs["extra"]
+        self.assertEqual(extra["http_status"], 500)
+        self.assertEqual(extra["outcome"], "server_error")
+        self.assertEqual(extra["error_type"], "RuntimeError")
+        self.assertEqual(extra["error_message"], "middleware boom")

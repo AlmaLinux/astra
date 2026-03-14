@@ -1,6 +1,7 @@
 
 import logging
 
+from django.conf import settings
 from django.test import SimpleTestCase
 
 from config.logging_context import RequestLogContext, reset_request_log_context, set_request_log_context
@@ -8,6 +9,16 @@ from core.logging_extras import exception_log_fields
 
 
 class LoggingFilterTests(SimpleTestCase):
+    def test_astra_access_logger_uses_access_and_context_filters(self) -> None:
+        configured_filters = settings.LOGGING["loggers"]["astra.access"]["filters"]
+        self.assertEqual(
+            configured_filters,
+            ["health_endpoint", "hetrix_access", "request_context"],
+        )
+
+    def test_django_server_logger_suppresses_info_access_lines(self) -> None:
+        self.assertEqual(settings.LOGGING["loggers"]["django.server"]["level"], "WARNING")
+
     def test_health_endpoint_filter(self) -> None:
         from config.logging_filters import HealthEndpointFilter
 

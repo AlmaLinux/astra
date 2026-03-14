@@ -1,4 +1,5 @@
 import logging
+import time
 from zoneinfo import ZoneInfo
 
 import sentry_sdk
@@ -25,6 +26,44 @@ from core.logging_extras import exception_log_fields
 from core.views_utils import get_username, try_get_username_from_user
 
 logger = logging.getLogger(__name__)
+access_logger = logging.getLogger("astra.access")
+
+
+def _format_access_log_timestamp() -> str:
+    return timezone.now().strftime("[%d/%b/%Y:%H:%M:%S %z]")
+
+
+def _response_body_size(response: HttpResponse | None) -> str:
+    if response is None:
+        return "-"
+
+    explicit_length = str(response.get("Content-Length") or "").strip()
+    if explicit_length:
+        return explicit_length
+
+    try:
+        return str(len(response.content))
+    except Exception:
+        return "-"
+
+
+def _render_gunicorn_style_access_line(
+    request,
+    *,
+    status_code: int,
+    response: HttpResponse | None,
+    client_ip: str | None,
+    user_id: str | None,
+) -> str:
+    request_line = f"{request.method} {request.get_full_path()} HTTP/1.1"
+    referer = str(request.META.get("HTTP_REFERER") or "-")
+    user_agent = str(request.META.get("HTTP_USER_AGENT") or "-")
+    remote_host = client_ip or "-"
+    auth_user = user_id or "-"
+    return (
+        f"{remote_host} - {auth_user} {_format_access_log_timestamp()} \"{request_line}\" "
+        f"{status_code} {_response_body_size(response)} \"{referer}\" \"{user_agent}\""
+    )
 
 
 def _get_user_timezone_name(user) -> str | None:
@@ -227,6 +266,72 @@ class SentryRequestContextMiddleware:
             return self.get_response(request)
         finally:
             reset_request_log_context(context_token)
+
+
+class StructuredAccessLogMiddleware:
+    """Emit structured, user-aware access logs from Django request context."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        started_at = time.monotonic()
+        response = None
+        error: Exception | None = None
+
+        try:
+            response = self.get_response(request)
+            return response
+        except Exception as exc:  # noqa: BLE001 - re-raised after observability log
+            error = exc
+            raise
+        finally:
+            duration_ms = int(round((time.monotonic() - started_at) * 1000))
+            status_code = response.status_code if response is not None else 500
+            if status_code >= 500:
+                outcome = "server_error"
+            elif status_code >= 400:
+                outcome = "client_error"
+            else:
+                outcome = "success"
+
+            extra: dict[str, int | str] = {
+                "event": "astra.http.access",
+                "component": "http",
+                "outcome": outcome,
+                "http_status": status_code,
+                "request_method": request.method,
+                "request_path": request.path,
+                "duration_ms": duration_ms,
+            }
+
+            request_query = str(request.META.get("QUERY_STRING") or "").strip()
+            if request_query:
+                extra["request_query"] = request_query
+
+            request_id = str(request.META.get("HTTP_X_REQUEST_ID") or "").strip()
+            if request_id:
+                extra["request_id"] = request_id
+
+            client_ip = _request_client_ip(request)
+            if client_ip:
+                extra["client_ip"] = client_ip
+
+            user_id = try_get_username_from_user(request.user) if request.user.is_authenticated else None
+            if user_id:
+                extra["user_id"] = user_id
+
+            if error is not None:
+                extra |= exception_log_fields(error)
+
+            access_line = _render_gunicorn_style_access_line(
+                request,
+                status_code=status_code,
+                response=response,
+                client_ip=client_ip,
+                user_id=user_id,
+            )
+            access_logger.info(access_line, extra=extra)
 
 
 class LoginRequiredMiddleware:

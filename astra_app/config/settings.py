@@ -319,6 +319,7 @@ MIDDLEWARE = [
     'core.middleware.FreeIPAServiceClientReuseMiddleware',
     'core.middleware.FreeIPAAuthenticationMiddleware',
     'core.middleware.SentryRequestContextMiddleware',
+    'core.middleware.StructuredAccessLogMiddleware',
     'core.middleware.LoginRequiredMiddleware',
     'core.middleware_admin_log.AdminShadowUserLogEntryMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
@@ -979,11 +980,19 @@ LOGGING = {
             'format': '[{asctime}] {levelname} {name}: {message}',
             'style': '{',
         },
+        'access': {
+            'format': '{message}',
+            'style': '{',
+        },
     },
     'handlers': {
         'console': {
             'class': 'logging.StreamHandler',
             'formatter': 'console',
+        },
+        'access_console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'access',
         },
     },
     'loggers': {
@@ -992,6 +1001,13 @@ LOGGING = {
             'handlers': ['console'],
             'level': 'DEBUG' if DEBUG else 'INFO',
             'filters': ['request_context'],
+            'propagate': False,
+        },
+        # Structured app-level access logs enriched with request/user context.
+        'astra.access': {
+            'handlers': ['access_console'],
+            'level': 'INFO',
+            'filters': ['health_endpoint', 'hetrix_access', 'request_context'],
             'propagate': False,
         },
         # FreeIPA client libs can be noisy; keep them at INFO by default.
@@ -1011,7 +1027,7 @@ LOGGING = {
         # Access logs from `runserver`.
         'django.server': {
             'handlers': ['console'],
-            'level': 'INFO',
+            'level': 'WARNING',
             'filters': ['health_endpoint', 'hetrix_access', 'request_context'],
             'propagate': False,
         },

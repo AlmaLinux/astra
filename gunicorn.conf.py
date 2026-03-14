@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-accesslog = "-"
+accesslog = None
 errorlog = "-"
 timeout = 120  # 2 minutes; during imports
 capture_output = True
@@ -46,7 +46,7 @@ logconfig_dict = {
         },
         "gunicorn.access": {
             "handlers": ["stdout"],
-            "level": "INFO",
+            "level": "WARNING",
             "filters": ["health_endpoint", "hetrix_access"],
             "propagate": False,
         },
