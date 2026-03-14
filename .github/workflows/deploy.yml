@@ -30,7 +30,7 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=sha,format=short,prefix=
+            type=sha,format=short,prefix=,priority=1000
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Log in to GHCR
@@ -47,5 +47,5 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           build-args: |
-            ASTRA_BUILD_SHA=${{ github.sha }}
+            ASTRA_BUILD_SHA=${{ steps.meta.outputs.version }}
           labels: ${{ steps.meta.outputs.labels }}
