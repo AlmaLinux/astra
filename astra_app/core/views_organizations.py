@@ -381,7 +381,7 @@ def _build_organization_membership_card_context(
     page_ctx = paginate_and_build_context(
         filtered_orgs,
         page_param_value,
-        25,
+        24,
         page_url_prefix=page_url_prefix,
     )
 
