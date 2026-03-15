@@ -446,6 +446,11 @@ a:hover {
   text-transform: none;
 }
 
+/* Keep organization widgets at a consistent baseline height even when no badge renders. */
+.organization-widget-memberships {
+  min-height: 1.75rem;
+}
+
 .organization-hero .card-body {
   padding: 1.25rem;
 }

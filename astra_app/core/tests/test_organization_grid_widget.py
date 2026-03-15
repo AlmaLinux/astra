@@ -112,6 +112,7 @@ class OrganizationGridTemplateTagTests(TestCase):
 
         self.assertIn("ExpiredOrg", html)
         self.assertNotIn("Silver Sponsor", html)
+        self.assertIn('class="mt-1 organization-widget-memberships"', html)
 
     def test_organization_grid_orders_membership_pills(self) -> None:
         from core.models import MembershipTypeCategory

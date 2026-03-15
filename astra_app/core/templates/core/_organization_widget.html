@@ -36,11 +36,9 @@
           {{ organization.name }}
         {% endif %}
       </div>
-      <div class="mt-1">
+      <div class="mt-1 organization-widget-memberships">
         {% for membership in memberships %}
           {% include 'core/_membership_badge.html' with membership=membership is_pill=True %}
-        {% empty %}
-          <span class="p-2"></span>
         {% endfor %}
       </div>
     </div>
