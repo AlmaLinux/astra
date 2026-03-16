@@ -401,20 +401,23 @@ def _update_user_attrs(
                 not internal_clear_fallback_used
                 and _is_internal_error(e)
                 and working_delattrs
-                and not working_addattrs
-                and not working_setattrs
-                and all(d.endswith("=") for d in working_delattrs)
             ):
-                internal_clear_fallback_used = True
-                # Some FreeIPA deployments error on ``o_delattr: ["attr="]`` clears.
-                logger.info(
-                    "FreeIPA clear via delattr hit internal error; retrying via setattr: username=%s attrs=%s",
-                    username,
-                    _attr_names_from_delattrs(working_delattrs),
-                )
-                working_setattrs = list(working_delattrs)
-                working_delattrs = []
-                continue
+                clear_delattrs = [d for d in working_delattrs if d.endswith("=")]
+                if clear_delattrs:
+                    internal_clear_fallback_used = True
+                    # Some FreeIPA deployments error on ``o_delattr: ["attr="]`` clears.
+                    # Retrying by moving clears into setattr keeps other updates intact.
+                    logger.info(
+                        "FreeIPA clear via delattr hit internal error; retrying clears via setattr: username=%s attrs=%s",
+                        username,
+                        _attr_names_from_delattrs(clear_delattrs),
+                    )
+
+                    for item in clear_delattrs:
+                        if item not in working_setattrs:
+                            working_setattrs.append(item)
+                    working_delattrs = [d for d in working_delattrs if d not in clear_delattrs]
+                    continue
 
             logger.exception(
                 "FreeIPA user_mod unexpected failure username=%s",

@@ -107,6 +107,9 @@ def _with_freeipa_service_client_retry[T](get_client: Callable[[], ClientMeta], 
     if _freeipa_circuit_open():
         raise FreeIPAUnavailableError("FreeIPA circuit breaker is open")
 
+    def _is_noop_no_modifications(exc: Exception) -> bool:
+        return isinstance(exc, exceptions.BadRequest) and "no modifications to be performed" in str(exc).lower()
+
     try:
         client = get_client()
         result = fn(client)
@@ -128,20 +131,34 @@ def _with_freeipa_service_client_retry[T](get_client: Callable[[], ClientMeta], 
                 clear_freeipa_service_client_cache()
             if _is_freeipa_availability_error(exc):
                 _record_freeipa_availability_failure()
+            if _is_noop_no_modifications(exc):
+                logger.info(
+                    "FreeIPA service account operation was a no-op: %s",
+                    exc,
+                    extra=current_exception_log_fields(),
+                )
+            else:
+                logger.exception(
+                    "FreeIPA service account operation failed: %s",
+                    exc,
+                    extra=current_exception_log_fields(),
+                )
+            raise
+    except Exception as exc:
+        if _is_freeipa_availability_error(exc):
+            _record_freeipa_availability_failure()
+        if _is_noop_no_modifications(exc):
+            logger.info(
+                "FreeIPA service account operation was a no-op: %s",
+                exc,
+                extra=current_exception_log_fields(),
+            )
+        else:
             logger.exception(
                 "FreeIPA service account operation failed: %s",
                 exc,
                 extra=current_exception_log_fields(),
             )
-            raise
-    except Exception as exc:
-        if _is_freeipa_availability_error(exc):
-            _record_freeipa_availability_failure()
-        logger.exception(
-            "FreeIPA service account operation failed: %s",
-            exc,
-            extra=current_exception_log_fields(),
-        )
         raise
 
     _reset_freeipa_circuit_failures()

@@ -96,6 +96,31 @@ class UpdateUserAttrsTests(TestCase):
         self.assertNotIn("o_delattr", kwargs)
         self.assertEqual(kwargs.get("o_setattr"), ["fasNotAllowed="])
 
+    def test_internal_error_clear_with_other_updates_falls_back_to_setattr(self):
+        client = Mock()
+        # First call triggers internal error (FreeIPA bug when clearing via delattr), second call succeeds.
+        client.user_mod.side_effect = [Exception("an internal error has occurred"), None]
+
+        with patch("core.ipa_user_attrs.FreeIPAUser.get_client", return_value=client, autospec=True):
+            with patch("core.ipa_user_attrs._invalidate_user_cache", autospec=True):
+                with patch("core.ipa_user_attrs._invalidate_users_list_cache", autospec=True):
+                    with patch("core.ipa_user_attrs.FreeIPAUser.get", autospec=True):
+                        skipped, applied = ipa_user_attrs._update_user_attrs(
+                            "alice",
+                            setattrs=["fasTimezone=UTC"],
+                            delattrs=["fasGitHubUsername="],
+                        )
+
+        self.assertEqual(skipped, [])
+        self.assertTrue(applied)
+        self.assertEqual(client.user_mod.call_count, 2)
+
+        # Second call should have converted the clear into a setattr clear, keeping the other setattr.
+        _args, kwargs = client.user_mod.call_args
+        self.assertNotIn("o_delattr", kwargs)
+        self.assertIn("o_setattr", kwargs)
+        self.assertEqual(sorted(kwargs["o_setattr"]), sorted(["fasTimezone=UTC", "fasGitHubUsername="]))
+
     def test_unexpected_user_mod_failure_logs_exception_fields(self) -> None:
         client = Mock()
         error = Exception("an internal error has occurred")
@@ -112,7 +137,7 @@ class UpdateUserAttrsTests(TestCase):
                 ipa_user_attrs._update_user_attrs(
                     "alice",
                     setattrs=["fasTimezone=UTC"],
-                    delattrs=["fasGitHubUsername="],
+                    delattrs=["fasGitHubUsername=oldhandle"],
                 )
 
         self.assertTrue(logger.warning.called)
