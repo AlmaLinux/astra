@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     libpq-dev \
     libjpeg-dev \
     zlib1g-dev \
+    tzdata-legacy \
     git \
     && rm -rf /var/lib/apt/lists/*
 
