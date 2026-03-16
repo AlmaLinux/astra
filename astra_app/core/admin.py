@@ -53,6 +53,16 @@ from core.form_validators import (
     clean_fas_irc_channels_value,
     clean_fas_mailing_list_value,
     clean_fas_url_value,
+    validate_http_urls,
+)
+from core.forms_selfservice import (
+    _GITHUB_USERNAME_RE,
+    _GITLAB_USERNAME_RE,
+    ProfileForm,
+    _get_timezones,
+    _is_valid_locale_code,
+    _normalize_profile_handle,
+    normalize_locale_tag,
 )
 from core.freeipa.agreement import FreeIPAFASAgreement
 from core.freeipa.client import clear_current_viewer_username, set_current_viewer_username
@@ -60,8 +70,19 @@ from core.freeipa.exceptions import FreeIPAOperationFailed
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import FreeIPAUser
 from core.freeipa.utils import _invalidate_agreement_cache, _invalidate_agreements_list_cache
-from core.ipa_user_attrs import _split_lines
-from core.ipa_utils import sync_set_membership
+from core.ipa_user_attrs import (
+    _add_change_list_setattr,
+    _add_change_setattr,
+    _data_get,
+    _first,
+    _form_label_for_attr,
+    _split_lines,
+    _split_list_field,
+    _update_user_attrs,
+    _value_to_csv,
+    _value_to_text,
+)
+from core.ipa_utils import bool_to_ipa, sync_set_membership
 from core.membership import FreeIPARepresentativeSyncError
 from core.membership_csv_import import (
     _COLUMN_FIELDS,
@@ -90,6 +111,7 @@ from core.organization_membership_csv_import import (
     required_organization_membership_csv_columns,
 )
 from core.organization_representative_transition import apply_organization_representative_transition
+from core.profanity import validate_no_profanity_or_hate_speech
 from core.protected_resources import protected_freeipa_group_cns
 from core.signals import CANONICAL_SIGNALS
 from core.user_labels import user_choice, user_choice_with_fallback, user_choices_from_users
@@ -829,9 +851,140 @@ class IPAUserBaseForm(FreeIPAFormMixin, forms.ModelForm):
         help_text="Select the FreeIPA groups this user should be a member of.",
     )
 
+    # Fedora freeipa-fas schema (attribute names are case-insensitive in LDAP)
+    fasPronoun = forms.CharField(
+        label="Pronouns",
+        required=False,
+        widget=forms.TextInput(attrs={"placeholder": "she / her / hers, they / them / theirs", "autocomplete": "off"}),
+        help_text="Comma-separated.",
+    )
+    fasLocale = forms.CharField(
+        label="Locale",
+        required=False,
+        help_text="Example: en-US",
+        widget=forms.TextInput(attrs={"autocomplete": "off", "placeholder": "en-US"}),
+    )
+    fasTimezone = forms.CharField(
+        label="Timezone",
+        required=False,
+        help_text="IANA timezone like Europe/Madrid",
+        widget=forms.TextInput(attrs={"autocomplete": "off", "placeholder": "Europe/Zurich"}),
+    )
+    fasWebsiteUrl = forms.CharField(
+        label="Website or Blog URL",
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 2}),
+        help_text="One per line (or comma-separated).",
+    )
+    fasRssUrl = forms.CharField(
+        label="RSS URL",
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 2}),
+        help_text="One per line (or comma-separated).",
+    )
+    fasIRCNick = forms.CharField(
+        label="Chat Nicknames",
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 3}),
+        help_text="One per line (or comma-separated).",
+    )
+    fasGitHubUsername = forms.CharField(
+        label="GitHub Username",
+        required=False,
+        max_length=255,
+        widget=forms.TextInput(attrs={"autocomplete": "username"}),
+    )
+    fasGitLabUsername = forms.CharField(
+        label="GitLab Username",
+        required=False,
+        max_length=255,
+        widget=forms.TextInput(attrs={"autocomplete": "username"}),
+    )
+    fasRHBZEmail = forms.EmailField(
+        label="Red Hat Bugzilla Email",
+        required=False,
+        max_length=255,
+    )
+    fasGPGKeyId = forms.CharField(
+        label="GPG Key IDs",
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 3}),
+        help_text="One per line (or comma-separated).",
+    )
+    fasIsPrivate = forms.BooleanField(
+        label="Hide profile details",
+        required=False,
+        help_text="Hide personal details from other signed-in users.",
+    )
+
     class Meta:
         model = IPAUser
         fields = ("username", "first_name", "last_name", "email", "is_active")
+
+    def clean_fasWebsiteUrl(self) -> str:
+        return validate_http_urls(self.cleaned_data.get("fasWebsiteUrl", ""), field_label="Website URL")
+
+    def clean_fasRssUrl(self) -> str:
+        return validate_http_urls(self.cleaned_data.get("fasRssUrl", ""), field_label="RSS URL")
+
+    def clean_fasIRCNick(self) -> str:
+        # Delegate to the same shared normalization used by self-service.
+        from core.chatnicknames import normalize_chat_nicknames_text
+
+        try:
+            return normalize_chat_nicknames_text(self.cleaned_data.get("fasIRCNick", ""), max_item_len=64)
+        except ValueError as exc:
+            raise forms.ValidationError(str(exc)) from exc
+
+    def clean_fasPronoun(self) -> str:
+        return ProfileForm._validate_multivalued_maxlen(
+            self.cleaned_data.get("fasPronoun", ""),
+            field_label="Pronouns",
+            maxlen=64,
+        )
+
+    def clean_fasLocale(self) -> str:
+        value = normalize_locale_tag(self.cleaned_data.get("fasLocale"))
+        if len(value) > 64:
+            raise forms.ValidationError("Locale must be at most 64 characters")
+        if value and not _is_valid_locale_code(value):
+            raise forms.ValidationError("Locale must be a valid locale short-code")
+        return value
+
+    def clean_fasTimezone(self) -> str:
+        value = _normalize_str(self.cleaned_data.get("fasTimezone"))
+        if len(value) > 64:
+            raise forms.ValidationError("Timezone must be at most 64 characters")
+        if value and value not in _get_timezones():
+            raise forms.ValidationError("Timezone must be a valid IANA timezone")
+        return value
+
+    def clean_fasGitHubUsername(self) -> str:
+        value = _normalize_profile_handle(
+            self.cleaned_data.get("fasGitHubUsername"),
+            expected_host="github.com",
+        )
+        if value and not _GITHUB_USERNAME_RE.match(value):
+            raise forms.ValidationError("GitHub username is not valid")
+        return value
+
+    def clean_fasGitLabUsername(self) -> str:
+        value = _normalize_profile_handle(
+            self.cleaned_data.get("fasGitLabUsername"),
+            expected_host="gitlab.com",
+        )
+        if value and not _GITLAB_USERNAME_RE.match(value):
+            raise forms.ValidationError("GitLab username is not valid")
+        return value
+
+    def clean_fasRHBZEmail(self) -> str:
+        value = _normalize_str(self.cleaned_data.get("fasRHBZEmail")).lower()
+        if not value:
+            return ""
+        return validate_no_profanity_or_hate_speech(value, field_label="Bugzilla email")
+
+    def clean_fasGPGKeyId(self) -> str:
+        return ProfileForm._validate_gpg_key_ids(self.cleaned_data.get("fasGPGKeyId", ""))
 
     @override
     def __init__(self, *args, **kwargs):
@@ -848,6 +1001,7 @@ class IPAUserBaseForm(FreeIPAFormMixin, forms.ModelForm):
         if username:
             freeipa = FreeIPAUser.get(username)
             if freeipa:
+                data = freeipa._user_data
                 self.initial.setdefault("first_name", freeipa.first_name or "")
                 self.initial.setdefault("last_name", freeipa.last_name or "")
                 self.initial.setdefault("email", freeipa.email or "")
@@ -857,6 +1011,19 @@ class IPAUserBaseForm(FreeIPAFormMixin, forms.ModelForm):
                 # keep them selectable so we don't drop memberships on save.
                 _merge_group_choices(self.fields["groups"], current, group_names)
                 self.initial.setdefault("groups", current)
+
+                # FAS attributes (only when editing an existing FreeIPA user).
+                self.initial.setdefault("fasPronoun", _value_to_csv(_data_get(data, "fasPronoun", [])))
+                self.initial.setdefault("fasLocale", _normalize_str(_first(data, "fasLocale", "")) or "")
+                self.initial.setdefault("fasTimezone", _normalize_str(_first(data, "fasTimezone", "")) or "")
+                self.initial.setdefault("fasWebsiteUrl", _value_to_text(_data_get(data, "fasWebsiteUrl", [])))
+                self.initial.setdefault("fasRssUrl", _value_to_text(_data_get(data, "fasRssUrl", [])))
+                self.initial.setdefault("fasIRCNick", _value_to_text(_data_get(data, "fasIRCNick", [])))
+                self.initial.setdefault("fasGitHubUsername", _normalize_str(_first(data, "fasGitHubUsername", "")) or "")
+                self.initial.setdefault("fasGitLabUsername", _normalize_str(_first(data, "fasGitLabUsername", "")) or "")
+                self.initial.setdefault("fasRHBZEmail", _normalize_str(_first(data, "fasRHBZEmail", "")) or "")
+                self.initial.setdefault("fasGPGKeyId", _value_to_text(_data_get(data, "fasGPGKeyId", [])))
+                self.initial.setdefault("fasIsPrivate", bool(freeipa.fas_is_private))
 
 
 class IPAUserAddForm(IPAUserBaseForm):
@@ -1340,6 +1507,116 @@ class IPAUserAdmin(FreeIPAModelAdmin):
             freeipa.email = form.cleaned_data.get("email") or ""
             freeipa.is_active = bool(form.cleaned_data.get("is_active"))
             freeipa.save()
+
+        # Persist FAS attributes via user_mod setattr/addattr/delattr.
+        try:
+            current = FreeIPAUser.get(username)
+        except Exception:
+            current = freeipa
+
+        if current is not None:
+            data = current._user_data
+            addattrs: list[str] = []
+            setattrs: list[str] = []
+            delattrs: list[str] = []
+
+            _add_change_list_setattr(
+                addattrs=addattrs,
+                setattrs=setattrs,
+                delattrs=delattrs,
+                attr="fasPronoun",
+                current_values=_data_get(data, "fasPronoun", []),
+                new_values=_split_list_field(form.cleaned_data.get("fasPronoun") or ""),
+            )
+            _add_change_setattr(
+                setattrs=setattrs,
+                delattrs=delattrs,
+                attr="fasLocale",
+                current_value=_first(data, "fasLocale", ""),
+                new_value=form.cleaned_data.get("fasLocale") or "",
+            )
+            _add_change_setattr(
+                setattrs=setattrs,
+                delattrs=delattrs,
+                attr="fasTimezone",
+                current_value=_first(data, "fasTimezone", ""),
+                new_value=form.cleaned_data.get("fasTimezone") or "",
+            )
+            _add_change_list_setattr(
+                addattrs=addattrs,
+                setattrs=setattrs,
+                delattrs=delattrs,
+                attr="fasWebsiteUrl",
+                current_values=_data_get(data, "fasWebsiteUrl", []),
+                new_values=_split_list_field(form.cleaned_data.get("fasWebsiteUrl") or ""),
+            )
+            _add_change_list_setattr(
+                addattrs=addattrs,
+                setattrs=setattrs,
+                delattrs=delattrs,
+                attr="fasRssUrl",
+                current_values=_data_get(data, "fasRssUrl", []),
+                new_values=_split_list_field(form.cleaned_data.get("fasRssUrl") or ""),
+            )
+            _add_change_list_setattr(
+                addattrs=addattrs,
+                setattrs=setattrs,
+                delattrs=delattrs,
+                attr="fasIRCNick",
+                current_values=_data_get(data, "fasIRCNick", []),
+                new_values=_split_list_field(form.cleaned_data.get("fasIRCNick") or ""),
+            )
+            _add_change_setattr(
+                setattrs=setattrs,
+                delattrs=delattrs,
+                attr="fasGitHubUsername",
+                current_value=_first(data, "fasGitHubUsername", ""),
+                new_value=form.cleaned_data.get("fasGitHubUsername") or "",
+            )
+            _add_change_setattr(
+                setattrs=setattrs,
+                delattrs=delattrs,
+                attr="fasGitLabUsername",
+                current_value=_first(data, "fasGitLabUsername", ""),
+                new_value=form.cleaned_data.get("fasGitLabUsername") or "",
+            )
+            _add_change_setattr(
+                setattrs=setattrs,
+                delattrs=delattrs,
+                attr="fasRHBZEmail",
+                current_value=_first(data, "fasRHBZEmail", ""),
+                new_value=form.cleaned_data.get("fasRHBZEmail") or "",
+            )
+            _add_change_list_setattr(
+                addattrs=addattrs,
+                setattrs=setattrs,
+                delattrs=delattrs,
+                attr="fasGPGKeyId",
+                current_values=_data_get(data, "fasGPGKeyId", []),
+                new_values=_split_list_field(form.cleaned_data.get("fasGPGKeyId") or ""),
+            )
+
+            new_private = bool(form.cleaned_data.get("fasIsPrivate"))
+            if bool(current.fas_is_private) != new_private:
+                setattrs.append(f"fasIsPrivate={bool_to_ipa(new_private)}")
+
+            if addattrs or setattrs or delattrs:
+                skipped, applied = _update_user_attrs(
+                    username,
+                    addattrs=addattrs,
+                    setattrs=setattrs,
+                    delattrs=delattrs,
+                )
+                if skipped:
+                    for attr in skipped:
+                        label = _form_label_for_attr(form, attr)
+                        self.message_user(
+                            request,
+                            f"Saved, but '{label or attr}' is not editable on this FreeIPA server.",
+                            level=messages.WARNING,
+                        )
+                if applied:
+                    self.message_user(request, "FAS attributes updated in FreeIPA.", level=messages.SUCCESS)
 
         def _check_agreements(g: str) -> None:
             missing = missing_required_agreements_for_user_in_group(username, g)
