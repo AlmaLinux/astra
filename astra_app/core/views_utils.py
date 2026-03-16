@@ -20,6 +20,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from core.agreements import has_enabled_agreements
 from core.country_codes import country_code_status_from_user_data
 from core.freeipa.agreement import FreeIPAFASAgreement
+from core.logging_extras import current_exception_log_fields
 from core.settings_tabs import (
     SETTINGS_TAB_REGISTRY,
     get_settings_tabs,
@@ -265,7 +266,7 @@ def _coc_agreement_for_user(username: str) -> FreeIPAFASAgreement | None:
     try:
         return FreeIPAFASAgreement.get(agreement_cn)
     except Exception:
-        logger.exception("Failed to load Code of Conduct agreement")
+        logger.exception("Failed to load Code of Conduct agreement", extra=current_exception_log_fields())
         return None
 
 

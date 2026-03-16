@@ -10,6 +10,7 @@ from django.core.validators import validate_email
 
 from core.account_invitation_reconcile import persist_non_org_invitation_acceptance
 from core.freeipa.user import FreeIPAUser
+from core.logging_extras import current_exception_log_fields
 from core.models import AccountInvitation
 
 logger = logging.getLogger(__name__)
@@ -167,7 +168,7 @@ def confirm_existing_usernames(usernames: list[str]) -> tuple[list[str], bool]:
         try:
             user = FreeIPAUser.get(normalized)
         except Exception:
-            logger.exception("Account invitation FreeIPA user lookup failed")
+            logger.exception("Account invitation FreeIPA user lookup failed", extra=current_exception_log_fields())
             return [], False
         if user is None:
             continue
@@ -185,7 +186,7 @@ def find_account_invitation_matches(email: str) -> list[str]:
     try:
         matches = FreeIPAUser.find_usernames_by_email(normalized)
     except Exception:
-        logger.exception("Account invitation FreeIPA email lookup failed")
+        logger.exception("Account invitation FreeIPA email lookup failed", extra=current_exception_log_fields())
         return []
 
     confirmed, ok = confirm_existing_usernames(matches)

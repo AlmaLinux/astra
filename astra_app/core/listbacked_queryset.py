@@ -1,6 +1,7 @@
 import logging
 
 from core.freeipa.group import FreeIPAGroup
+from core.logging_extras import current_exception_log_fields
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +157,11 @@ class _ListBackedQuerySet:
                     freeipa.delete()
                     deleted += 1
             except Exception:
-                logger.exception("Failed to delete FreeIPA group cn=%s", cn)
+                logger.exception(
+                    "Failed to delete FreeIPA group cn=%s",
+                    cn,
+                    extra=current_exception_log_fields(),
+                )
                 continue
         return deleted, {}
 

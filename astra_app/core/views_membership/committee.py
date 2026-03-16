@@ -18,6 +18,7 @@ from core.email_context import (
 )
 from core.forms_membership import MembershipRejectForm
 from core.freeipa.user import FreeIPAUser
+from core.logging_extras import current_exception_log_fields
 from core.membership_notes import add_note
 from core.membership_request_workflow import (
     approve_membership_request,
@@ -438,7 +439,12 @@ def membership_request_note_add(request: HttpRequest, pk: int) -> HttpResponse:
             return JsonResponse({"ok": False, "error": "Permission denied."}, status=403)
         raise
     except Exception:
-        logger.exception("Failed to add membership note request_pk=%s actor=%s", req.pk, actor_username)
+        logger.exception(
+            "Failed to add membership note request_pk=%s actor=%s",
+            req.pk,
+            actor_username,
+            extra=current_exception_log_fields(),
+        )
         if is_ajax:
             return JsonResponse({"ok": False, "error": "Failed to add note."}, status=500)
 
@@ -548,6 +554,7 @@ def membership_notes_aggregate_note_add(request: HttpRequest) -> HttpResponse:
             target_type,
             target,
             actor_username,
+            extra=current_exception_log_fields(),
         )
         if is_ajax:
             return JsonResponse({"ok": False, "error": "Failed to add note."}, status=500)
@@ -643,7 +650,11 @@ def membership_requests_bulk(request: HttpRequest) -> HttpResponse:
                     send_approved_email=True,
                 )
             except Exception:
-                logger.exception("Bulk approve failed for membership request pk=%s", req.pk)
+                logger.exception(
+                    "Bulk approve failed for membership request pk=%s",
+                    req.pk,
+                    extra=current_exception_log_fields(),
+                )
                 failures += 1
                 continue
 
@@ -660,7 +671,11 @@ def membership_requests_bulk(request: HttpRequest) -> HttpResponse:
                 if email_error is not None:
                     failures += 1
             except Exception:
-                logger.exception("Bulk reject failed for membership request pk=%s", req.pk)
+                logger.exception(
+                    "Bulk reject failed for membership request pk=%s",
+                    req.pk,
+                    extra=current_exception_log_fields(),
+                )
                 failures += 1
                 continue
 
@@ -673,7 +688,11 @@ def membership_requests_bulk(request: HttpRequest) -> HttpResponse:
                     actor_username=actor_username,
                 )
             except Exception:
-                logger.exception("Bulk ignore failed for membership request pk=%s", req.pk)
+                logger.exception(
+                    "Bulk ignore failed for membership request pk=%s",
+                    req.pk,
+                    extra=current_exception_log_fields(),
+                )
                 failures += 1
                 continue
 
@@ -721,7 +740,11 @@ def run_membership_request_action(request: HttpRequest, pk: int, *, action: str)
             messages.error(request, message)
             return redirect(redirect_to)
         except Exception:
-            logger.exception("Failed to approve membership request pk=%s", req.pk)
+            logger.exception(
+                "Failed to approve membership request pk=%s",
+                req.pk,
+                extra=current_exception_log_fields(),
+            )
             messages.error(request, "Failed to approve the request.")
             return redirect(redirect_to)
 
@@ -895,7 +918,11 @@ def membership_request_approve_on_hold(request: HttpRequest, pk: int) -> HttpRes
         messages.error(request, message)
         return redirect(redirect_to)
     except Exception:
-        logger.exception("Failed to approve on-hold membership request pk=%s", req.pk)
+        logger.exception(
+            "Failed to approve on-hold membership request pk=%s",
+            req.pk,
+            extra=current_exception_log_fields(),
+        )
         messages.error(request, "Failed to approve the on-hold request.")
         return redirect(redirect_to)
 
@@ -941,7 +968,11 @@ def membership_request_reopen(request: HttpRequest, pk: int) -> HttpResponse:
         messages.error(request, "Cannot reopen: another open request for this target already exists.")
         return redirect(redirect_to)
     except Exception:
-        logger.exception("Failed to reopen membership request pk=%s", req.pk)
+        logger.exception(
+            "Failed to reopen membership request pk=%s",
+            req.pk,
+            extra=current_exception_log_fields(),
+        )
         messages.error(request, "Failed to reopen the request.")
         return redirect(redirect_to)
 

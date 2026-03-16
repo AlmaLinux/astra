@@ -9,6 +9,7 @@ from typing import NamedTuple
 from django import forms
 from django.conf import settings
 
+from core.logging_extras import current_exception_log_fields
 from core.views_utils import _normalize_str
 
 logger = logging.getLogger(__name__)
@@ -59,7 +60,11 @@ def load_custom_profanity_words() -> list[str]:
         logger.warning("ValX custom profanity file missing: %s", path)
         return []
     except Exception:
-        logger.exception("Failed to load ValX custom profanity file: %s", path)
+        logger.exception(
+            "Failed to load ValX custom profanity file: %s",
+            path,
+            extra=current_exception_log_fields(),
+        )
         return []
 
 
@@ -74,7 +79,11 @@ def load_profanity_allowlist_words() -> list[str]:
         logger.warning("ValX profanity allowlist file missing: %s", path)
         return []
     except Exception:
-        logger.exception("Failed to load ValX profanity allowlist file: %s", path)
+        logger.exception(
+            "Failed to load ValX profanity allowlist file: %s",
+            path,
+            extra=current_exception_log_fields(),
+        )
         return []
 
 
@@ -179,6 +188,10 @@ def validate_no_profanity_or_hate_speech(value: object, *, field_label: str) -> 
     except forms.ValidationError:
         raise
     except Exception as exc:
-        logger.exception("ValX validation failed for %s", field_label)
+        logger.exception(
+            "ValX validation failed for %s",
+            field_label,
+            extra=current_exception_log_fields(),
+        )
         raise forms.ValidationError(f"Unable to validate {field_label}. Please try again later.") from exc
     return cleaned

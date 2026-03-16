@@ -26,6 +26,7 @@ from core.account_invitations import (
 )
 from core.email_context import membership_committee_email_context, system_email_context
 from core.forms_base import StyledForm
+from core.logging_extras import current_exception_log_fields
 from core.models import AccountInvitation, AccountInvitationSend, Organization
 from core.organization_claim import build_organization_claim_url
 from core.permissions import ASTRA_ADD_MEMBERSHIP
@@ -165,7 +166,7 @@ def _send_account_invitation_email(
         )
         return "config_error"
     except Exception:
-        logger.exception("Failed to queue account invitation email")
+        logger.exception("Failed to queue account invitation email", extra=current_exception_log_fields())
         AccountInvitationSend.objects.create(
             invitation=invitation,
             sent_by_username=actor_username,

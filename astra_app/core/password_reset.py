@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from core.email_context import user_email_context
 from core.freeipa.user import FreeIPAUser
+from core.logging_extras import current_exception_log_fields
 from core.templated_email import queue_templated_email
 from core.tokens import make_password_reset_token
 from core.views_utils import _normalize_str
@@ -85,13 +86,19 @@ def find_user_for_password_reset(identifier: str) -> FreeIPAUser | None:
         try:
             return FreeIPAUser.find_by_email(value)
         except Exception:
-            logger.exception("Password reset lookup by email failed")
+            logger.exception(
+                "Password reset lookup by email failed",
+                extra=current_exception_log_fields(),
+            )
             return None
 
     try:
         return FreeIPAUser.get(value)
     except Exception:
-        logger.exception("Password reset lookup by username failed")
+        logger.exception(
+            "Password reset lookup by username failed",
+            extra=current_exception_log_fields(),
+        )
         return None
 
 

@@ -13,6 +13,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from django.conf import settings
 from django.db import transaction
 
+from core.logging_extras import current_exception_log_fields
 from core.models import AuditLogEntry
 
 logger = logging.getLogger(__name__)
@@ -216,7 +217,11 @@ def schedule_attestation(entry: AuditLogEntry) -> None:
             try:
                 _attest_entry(entry)
             except Exception as exc:
-                logger.exception("Rekor attestation failed for audit entry id=%s", entry.id)
+                logger.exception(
+                    "Rekor attestation failed for audit entry id=%s",
+                    entry.id,
+                    extra=current_exception_log_fields(),
+                )
                 try:
                     _write_attestation_failed(entry_id=entry.id, error_type=type(exc).__name__)
                 except Exception:
@@ -230,4 +235,8 @@ def schedule_attestation(entry: AuditLogEntry) -> None:
         else:
             _on_commit()
     except Exception:
-        logger.exception("Rekor attestation scheduling failed for audit entry id=%s", entry.id)
+        logger.exception(
+            "Rekor attestation scheduling failed for audit entry id=%s",
+            entry.id,
+            extra=current_exception_log_fields(),
+        )

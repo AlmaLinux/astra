@@ -26,6 +26,7 @@ from core.email_context import (
     user_email_context_from_user,
 )
 from core.freeipa.user import DegradedFreeIPAUser, FreeIPAUser
+from core.logging_extras import current_exception_log_fields
 from core.models import (
     AuditLogEntry,
     Ballot,
@@ -702,6 +703,7 @@ def submit_ballot(*, election: Election, credential_public_id: str, ranking: lis
             logger.exception(
                 "Deferred quorum evaluation failed for election_id=%s",
                 election.id,
+                extra=current_exception_log_fields(),
             )
 
     transaction.on_commit(_evaluate_quorum_after_commit)

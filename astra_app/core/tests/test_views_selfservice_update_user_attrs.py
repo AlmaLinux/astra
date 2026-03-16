@@ -95,3 +95,40 @@ class UpdateUserAttrsTests(TestCase):
         _, kwargs = client.user_mod.call_args
         self.assertNotIn("o_delattr", kwargs)
         self.assertEqual(kwargs.get("o_setattr"), ["fasNotAllowed="])
+
+    def test_unexpected_user_mod_failure_logs_exception_fields(self) -> None:
+        client = Mock()
+        error = Exception("an internal error has occurred")
+        client.user_mod.side_effect = [error]
+
+        with (
+            patch("core.ipa_user_attrs.FreeIPAUser.get_client", return_value=client, autospec=True),
+            patch("core.ipa_user_attrs._invalidate_user_cache", autospec=True),
+            patch("core.ipa_user_attrs._invalidate_users_list_cache", autospec=True),
+            patch("core.ipa_user_attrs.FreeIPAUser.get", autospec=True),
+            patch("core.ipa_user_attrs.logger") as logger,
+        ):
+            with self.assertRaises(Exception):
+                ipa_user_attrs._update_user_attrs(
+                    "alice",
+                    setattrs=["fasTimezone=UTC"],
+                    delattrs=["fasGitHubUsername="],
+                )
+
+        self.assertTrue(logger.warning.called)
+        _args, warning_kwargs = logger.warning.call_args
+        self.assertIn("extra", warning_kwargs)
+        self.assertEqual(
+            warning_kwargs["extra"],
+            {
+                "error_type": "Exception",
+                "error_message": "an internal error has occurred",
+                "error_repr": "Exception('an internal error has occurred')",
+                "error_args": "('an internal error has occurred',)",
+            },
+        )
+
+        self.assertTrue(logger.exception.called)
+        _args, exception_kwargs = logger.exception.call_args
+        self.assertIn("extra", exception_kwargs)
+        self.assertEqual(exception_kwargs["extra"], warning_kwargs["extra"])

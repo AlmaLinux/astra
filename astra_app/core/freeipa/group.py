@@ -26,6 +26,7 @@ from core.freeipa.utils import (
     _invalidate_user_cache,
     _raise_if_freeipa_failed,
 )
+from core.logging_extras import current_exception_log_fields
 
 logger = logging.getLogger("core.backends")
 
@@ -58,7 +59,12 @@ def get_freeipa_group_for_elections(*, cn: str, require_fresh: bool = False) -> 
     except Exception as exc:
         if isinstance(exc, FreeIPAUnavailableError) or _is_freeipa_availability_error(exc):
             _record_elections_freeipa_availability_failure()
-            logger.exception("FreeIPA elections group lookup failed cn=%s: %s", group_cn, exc)
+            logger.exception(
+                "FreeIPA elections group lookup failed cn=%s: %s",
+                group_cn,
+                exc,
+                extra=current_exception_log_fields(),
+            )
             raise FreeIPAUnavailableError("FreeIPA group lookup failed") from exc
         raise
 
@@ -152,7 +158,10 @@ class FreeIPAGroup(_FreeIPAClientMixin):
             groups = cache.get_or_set(_groups_list_cache_key(), _fetch_groups) or []
             return [cls(g['cn'][0], g) for g in groups]
         except Exception as e:
-            logger.exception(f"Failed to list groups: {e}")
+            logger.exception(
+                f"Failed to list groups: {e}",
+                extra=current_exception_log_fields(),
+            )
             return []
 
     @classmethod
@@ -176,7 +185,10 @@ class FreeIPAGroup(_FreeIPAClientMixin):
                 cache.set(cache_key, group_data)
                 return cls(cn, group_data)
         except Exception as e:
-            logger.exception(f"Failed to get group cn={cn}: {e}")
+            logger.exception(
+                f"Failed to get group cn={cn}: {e}",
+                extra=current_exception_log_fields(),
+            )
         return None
 
     @classmethod
@@ -200,7 +212,11 @@ class FreeIPAGroup(_FreeIPAClientMixin):
             _invalidate_groups_list_cache()
             return cls.get(cn)
         except Exception:
-            logger.exception("Failed to create group cn=%s", cn)
+            logger.exception(
+                "Failed to create group cn=%s",
+                cn,
+                extra=current_exception_log_fields(),
+            )
             raise
 
     def save(self):
@@ -278,7 +294,12 @@ class FreeIPAGroup(_FreeIPAClientMixin):
             _invalidate_groups_list_cache()
             FreeIPAGroup.get(self.cn)
         except Exception as e:
-            logger.exception("Failed to update group cn=%s: %s", self.cn, e)
+            logger.exception(
+                "Failed to update group cn=%s: %s",
+                self.cn,
+                e,
+                extra=current_exception_log_fields(),
+            )
             raise
 
     def delete(self):
@@ -310,7 +331,11 @@ class FreeIPAGroup(_FreeIPAClientMixin):
             _invalidate_group_cache(self.cn)
             _invalidate_groups_list_cache()
         except Exception:
-            logger.exception("Failed to delete group cn=%s", self.cn)
+            logger.exception(
+                "Failed to delete group cn=%s",
+                self.cn,
+                extra=current_exception_log_fields(),
+            )
             raise
 
     def add_member(self, username):
@@ -338,7 +363,12 @@ class FreeIPAGroup(_FreeIPAClientMixin):
                     f"(group={self.cn} user={username} response={_compact_repr(res)})"
                 )
         except Exception:
-            logger.exception("Failed to add member username=%s group=%s", username, self.cn)
+            logger.exception(
+                "Failed to add member username=%s group=%s",
+                username,
+                self.cn,
+                extra=current_exception_log_fields(),
+            )
             raise
 
     def add_sponsor(self, username: str) -> None:
@@ -358,7 +388,12 @@ class FreeIPAGroup(_FreeIPAClientMixin):
             _invalidate_groups_list_cache()
             FreeIPAGroup.get(self.cn)
         except Exception:
-            logger.exception("Failed to add sponsor username=%s group=%s", username, self.cn)
+            logger.exception(
+                "Failed to add sponsor username=%s group=%s",
+                username,
+                self.cn,
+                extra=current_exception_log_fields(),
+            )
             raise
 
     def remove_sponsor(self, username: str) -> None:
@@ -378,7 +413,12 @@ class FreeIPAGroup(_FreeIPAClientMixin):
             _invalidate_groups_list_cache()
             FreeIPAGroup.get(self.cn)
         except Exception:
-            logger.exception("Failed to remove sponsor username=%s group=%s", username, self.cn)
+            logger.exception(
+                "Failed to remove sponsor username=%s group=%s",
+                username,
+                self.cn,
+                extra=current_exception_log_fields(),
+            )
             raise
 
     def add_sponsor_group(self, group_cn: str) -> None:
@@ -399,7 +439,12 @@ class FreeIPAGroup(_FreeIPAClientMixin):
             _invalidate_groups_list_cache()
             FreeIPAGroup.get(self.cn)
         except Exception:
-            logger.exception("Failed to add sponsor group parent=%s sponsor_group=%s", self.cn, group_cn)
+            logger.exception(
+                "Failed to add sponsor group parent=%s sponsor_group=%s",
+                self.cn,
+                group_cn,
+                extra=current_exception_log_fields(),
+            )
             raise
 
     def remove_sponsor_group(self, group_cn: str) -> None:
@@ -420,7 +465,12 @@ class FreeIPAGroup(_FreeIPAClientMixin):
             _invalidate_groups_list_cache()
             FreeIPAGroup.get(self.cn)
         except Exception:
-            logger.exception("Failed to remove sponsor group parent=%s sponsor_group=%s", self.cn, group_cn)
+            logger.exception(
+                "Failed to remove sponsor group parent=%s sponsor_group=%s",
+                self.cn,
+                group_cn,
+                extra=current_exception_log_fields(),
+            )
             raise
 
     def remove_member(self, username):
@@ -448,7 +498,12 @@ class FreeIPAGroup(_FreeIPAClientMixin):
                     f"(group={self.cn} user={username} response={_compact_repr(res)})"
                 )
         except Exception:
-            logger.exception("Failed to remove member username=%s group=%s", username, self.cn)
+            logger.exception(
+                "Failed to remove member username=%s group=%s",
+                username,
+                self.cn,
+                extra=current_exception_log_fields(),
+            )
             raise
 
     def add_member_group(self, group_cn: str) -> None:
@@ -466,7 +521,12 @@ class FreeIPAGroup(_FreeIPAClientMixin):
             FreeIPAGroup.get(self.cn)
             self._recursive_member_usernames_cache = None
         except Exception:
-            logger.exception("Failed to add member group parent=%s child=%s", self.cn, group_cn)
+            logger.exception(
+                "Failed to add member group parent=%s child=%s",
+                self.cn,
+                group_cn,
+                extra=current_exception_log_fields(),
+            )
             raise
 
     def remove_member_group(self, group_cn: str) -> None:
@@ -484,7 +544,12 @@ class FreeIPAGroup(_FreeIPAClientMixin):
             FreeIPAGroup.get(self.cn)
             self._recursive_member_usernames_cache = None
         except Exception:
-            logger.exception("Failed to remove member group parent=%s child=%s", self.cn, group_cn)
+            logger.exception(
+                "Failed to remove member group parent=%s child=%s",
+                self.cn,
+                group_cn,
+                extra=current_exception_log_fields(),
+            )
             raise
 
     def member_usernames_recursive(self, *, fas_only: bool = False) -> set[str]:
@@ -518,7 +583,12 @@ class FreeIPAGroup(_FreeIPAClientMixin):
             try:
                 users |= child._member_usernames_recursive(visited=visited, fas_only=fas_only)
             except Exception:
-                logger.exception("Failed to expand nested group members parent=%s child=%s", self.cn, child_cn)
+                logger.exception(
+                    "Failed to expand nested group members parent=%s child=%s",
+                    self.cn,
+                    child_cn,
+                    extra=current_exception_log_fields(),
+                )
                 continue
         return users
 

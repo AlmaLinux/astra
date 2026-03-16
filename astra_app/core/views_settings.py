@@ -64,6 +64,7 @@ from core.ipa_user_attrs import (
     _value_to_text,
 )
 from core.ipa_utils import bool_from_ipa, bool_to_ipa
+from core.logging_extras import current_exception_log_fields, exception_log_fields
 from core.membership import get_valid_memberships, remove_user_from_group
 from core.models import (
     AccountDeletionRequest,
@@ -583,7 +584,12 @@ def _settings_update_error_response(
     if isinstance(error, requests.exceptions.ConnectionError):
         messages.error(request, MSG_SERVICE_UNAVAILABLE)
     else:
-        logger.exception("Failed to update %s username=%s", tab_label, username)
+        logger.exception(
+            "Failed to update %s username=%s",
+            tab_label,
+            username,
+            extra=exception_log_fields(error),
+        )
         if settings.DEBUG:
             messages.error(request, f"Failed to update {tab_label} (debug): {error}")
         else:
@@ -967,7 +973,11 @@ def settings_root(request: HttpRequest) -> HttpResponse:
             messages.error(request, "Unable to change password due to a FreeIPA error.")
             return redirect(settings_url(tab="security"))
         except Exception:
-            logger.exception("Failed to change password username=%s", username)
+            logger.exception(
+                "Failed to change password username=%s",
+                username,
+                extra=current_exception_log_fields(),
+            )
             messages.error(request, "Failed to change password due to an internal error.")
             return redirect(settings_url(tab="security"))
 
@@ -1543,7 +1553,12 @@ def settings_root(request: HttpRequest) -> HttpResponse:
                 agreement_obj.add_user(username)
                 messages.success(request, "Agreement signed.")
             except Exception as e:
-                logger.exception("Failed to sign agreement username=%s agreement=%s", username, cn)
+                logger.exception(
+                    "Failed to sign agreement username=%s agreement=%s",
+                    username,
+                    cn,
+                    extra=exception_log_fields(e),
+                )
                 if settings.DEBUG:
                     messages.error(request, f"Failed to sign agreement (debug): {e}")
                 else:
@@ -1878,7 +1893,12 @@ def settings_email_validate(request: HttpRequest) -> HttpResponse:
             )
             return redirect(settings_url(tab="emails"))
         except Exception as e:
-            logger.exception("Email validation apply failed username=%s attr=%s", username, attr)
+            logger.exception(
+                "Email validation apply failed username=%s attr=%s",
+                username,
+                attr,
+                extra=exception_log_fields(e),
+            )
             if settings.DEBUG:
                 messages.error(request, f"Failed to validate email (debug): {e}")
             else:

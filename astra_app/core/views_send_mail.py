@@ -24,6 +24,7 @@ from core.email_context import system_email_context, user_email_context_from_use
 from core.forms_base import StyledForm
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import FreeIPAUser
+from core.logging_extras import current_exception_log_fields
 from core.membership_notes import add_note
 from core.models import MembershipRequest, Organization
 from core.permissions import ASTRA_ADD_SEND_MAIL, json_permission_required
@@ -866,12 +867,17 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                                     logger.exception(
                                         "Send mail email-note failed membership_request_id=%s",
                                         raw_request_id,
+                                        extra=current_exception_log_fields(),
                                     )
                         except Exception as exc:
                             if first_template_error is None:
                                 first_template_error = exc
                             failures += 1
-                            logger.exception("Send mail failed email=%s", to_email)
+                            logger.exception(
+                                "Send mail failed email=%s",
+                                to_email,
+                                extra=current_exception_log_fields(),
+                            )
 
                     if first_template_error is not None and sent == 0:
                         messages.error(request, f"Template error: {first_template_error}")

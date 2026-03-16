@@ -330,7 +330,11 @@ def register(request: HttpRequest) -> HttpResponse:
                 form.add_error(None, "An error occurred while creating the account, please try again.")
             return render(request, "core/register.html", {"form": form, "registration_open": settings.REGISTRATION_OPEN})
         except Exception as e:
-            logger.exception("Registration unexpected error username=%s", username)
+            logger.exception(
+                "Registration unexpected error username=%s",
+                username,
+                extra=exception_log_fields(e),
+            )
             if settings.DEBUG:
                 form.add_error(None, f"Unable to create account (debug): {e}")
             else:
@@ -364,7 +368,12 @@ def register(request: HttpRequest) -> HttpResponse:
             logger.error("Registration email send failed username=%s email=%s error=%s", username, email, e)
             messages.error(request, "We could not send you the address validation email, please retry later")
         except Exception as e:
-            logger.exception("Registration email send unexpected failure username=%s email=%s", username, email)
+            logger.exception(
+                "Registration email send unexpected failure username=%s email=%s",
+                username,
+                email,
+                extra=exception_log_fields(e),
+            )
             if settings.DEBUG:
                 messages.error(request, f"We could not send the validation email (debug): {e}")
             else:
@@ -427,8 +436,12 @@ def confirm(request: HttpRequest) -> HttpResponse:
                 last_name=(last_name or ""),
                 invitation_token=invitation_token,
             )
-        except Exception:
-            logger.exception("Resend registration email failed username=%s", username)
+        except Exception as e:
+            logger.exception(
+                "Resend registration email failed username=%s",
+                username,
+                extra=exception_log_fields(e),
+            )
             messages.error(request, "We could not send you the address validation email, please retry later")
         else:
             messages.success(
@@ -551,7 +564,11 @@ def activate(request: HttpRequest) -> HttpResponse:
             logger.error("Activation failed username=%s error=%s", username, e)
             form.add_error(None, "Something went wrong while creating your account, please try again later.")
         except Exception as e:
-            logger.exception("Activation failed (unexpected) username=%s", username)
+            logger.exception(
+                "Activation failed (unexpected) username=%s",
+                username,
+                extra=exception_log_fields(e),
+            )
             if settings.DEBUG:
                 form.add_error(None, f"Something went wrong (debug): {e}")
             else:

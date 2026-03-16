@@ -14,6 +14,7 @@ from post_office.models import Email as PostOfficeEmail
 from post_office.models import Log as PostOfficeLog
 from post_office.models import RecipientDeliveryStatus
 
+from core.logging_extras import current_exception_log_fields
 from core.models import SESEmailCorrelationAttempt
 
 logger = logging.getLogger(__name__)
@@ -584,7 +585,11 @@ def _handle_ses_post_office_event(
             mark_unsent_as_failed=mark_unsent_as_failed,
         )
     except Exception:
-        logger.exception("ses_signals: failed to record %s in post_office log", ses_event_type)
+        logger.exception(
+            "ses_signals: failed to record %s in post_office log",
+            ses_event_type,
+            extra=current_exception_log_fields(),
+        )
 
 
 @receiver(message_sent)
@@ -597,7 +602,10 @@ def handle_ses_message_sent(
     try:
         _persist_ses_correlation_attempt(message)
     except Exception:
-        logger.exception("ses_signals: failed to persist SES correlation attempt")
+        logger.exception(
+            "ses_signals: failed to persist SES correlation attempt",
+            extra=current_exception_log_fields(),
+        )
 
 
 @receiver(send_received)

@@ -20,6 +20,7 @@ from core.email_context import (
     user_email_context_from_user,
 )
 from core.freeipa.user import FreeIPAUser
+from core.logging_extras import current_exception_log_fields
 from core.membership import (
     FreeIPACallerMode,
     FreeIPAMissingUserPolicy,
@@ -151,7 +152,12 @@ def _try_add_note(
     try:
         add_note(membership_request=membership_request, username=username, action=action)
     except Exception:
-        logger.exception("%s: failed to record note request_id=%s", log_prefix, membership_request.pk)
+        logger.exception(
+            "%s: failed to record note request_id=%s",
+            log_prefix,
+            membership_request.pk,
+            extra=current_exception_log_fields(),
+        )
 
 
 def _try_record_email_note(
@@ -350,6 +356,7 @@ def record_membership_request_created(
                     log_prefix,
                     membership_request.pk,
                     membership_request.requested_username,
+                    extra=current_exception_log_fields(),
                 )
                 email_error = e
             else:
@@ -374,6 +381,7 @@ def record_membership_request_created(
                             log_prefix,
                             membership_request.pk,
                             membership_request.requested_username,
+                            extra=current_exception_log_fields(),
                         )
                         email_error = e
 
@@ -400,6 +408,7 @@ def record_membership_request_created(
                 actor_username,
                 membership_request.requested_username,
                 membership_type.code,
+                extra=current_exception_log_fields(),
             )
             raise
 
@@ -453,6 +462,7 @@ def record_membership_request_created(
                     log_prefix,
                     membership_request.pk,
                     organization.pk,
+                    extra=current_exception_log_fields(),
                 )
                 email_error = e
 
@@ -478,6 +488,7 @@ def record_membership_request_created(
             membership_request.pk,
             actor_username,
             membership_type.code,
+            extra=current_exception_log_fields(),
         )
         raise
 
@@ -582,6 +593,7 @@ def approve_membership_request(
                     membership_request.pk,
                     org.pk,
                     org.representative,
+                    extra=current_exception_log_fields(),
                 )
                 raise
 
@@ -634,6 +646,7 @@ def approve_membership_request(
                 log_prefix,
                 membership_request.pk,
                 membership_request.requested_username,
+                extra=current_exception_log_fields(),
             )
             raise
         if user is None:
@@ -689,6 +702,7 @@ def approve_membership_request(
                 "%s: sending approved email failed request_id=%s",
                 log_prefix,
                 membership_request.pk,
+                extra=current_exception_log_fields(),
             )
             raise
 
@@ -738,6 +752,7 @@ def approve_membership_request(
                     log_prefix,
                     membership_request.pk,
                     username_to_add,
+                    extra=current_exception_log_fields(),
                 )
                 return
 
@@ -770,6 +785,7 @@ def approve_membership_request(
                         membership_request.pk,
                         user_for_group_add.username,
                         group_cn_to_add,
+                        extra=current_exception_log_fields(),
                     )
 
         transaction.on_commit(_on_commit_add_user_to_group)
@@ -881,6 +897,7 @@ def reject_membership_request(
                 "%s: sending rejected email failed request_id=%s",
                 log_prefix,
                 membership_request.pk,
+                extra=current_exception_log_fields(),
             )
             email_error = e
 
@@ -1077,6 +1094,7 @@ def put_membership_request_on_hold(
                 "%s: sending RFI email failed request_id=%s",
                 log_prefix,
                 membership_request.pk,
+                extra=current_exception_log_fields(),
             )
             email_error = e
 

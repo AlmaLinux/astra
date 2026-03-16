@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from django.db import transaction
 
+from core.logging_extras import current_exception_log_fields
 from core.membership import (
     FreeIPACallerMode,
     FreeIPAMissingUserPolicy,
@@ -97,6 +98,7 @@ def apply_organization_representative_transition(
                 rollback_result,
                 had_active_groups,
                 len(targeted_group_cns_tuple),
+                extra=current_exception_log_fields(),
             )
             raise
 

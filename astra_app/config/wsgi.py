@@ -3,6 +3,8 @@ import os
 
 from django.core.wsgi import get_wsgi_application
 
+from core.logging_extras import current_exception_log_fields
+
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 
 application = get_wsgi_application()
@@ -18,7 +20,7 @@ try:
     try:
         send_systemd_notification("READY=1")
     except Exception:
-        logger.exception("Systemd notification failed")
+        logger.exception("Systemd notification failed", extra=current_exception_log_fields())
 except Exception:
-    logger.exception("Startup membership group sync failed")
+    logger.exception("Startup membership group sync failed", extra=current_exception_log_fields())
     raise

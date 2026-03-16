@@ -14,6 +14,7 @@ from core.freeipa.circuit_breaker import (
     _reset_freeipa_circuit_failures,
 )
 from core.freeipa.exceptions import FreeIPAUnavailableError
+from core.logging_extras import current_exception_log_fields
 
 logger = logging.getLogger("core.backends")
 
@@ -110,7 +111,11 @@ def _with_freeipa_service_client_retry[T](get_client: Callable[[], ClientMeta], 
         client = get_client()
         result = fn(client)
     except exceptions.PasswordExpired as exc:
-        logger.exception("FreeIPA service account password expired: %s", exc)
+        logger.exception(
+            "FreeIPA service account password expired: %s",
+            exc,
+            extra=current_exception_log_fields(),
+        )
         clear_freeipa_service_client_cache()
         raise
     except exceptions.Unauthorized:
@@ -123,12 +128,20 @@ def _with_freeipa_service_client_retry[T](get_client: Callable[[], ClientMeta], 
                 clear_freeipa_service_client_cache()
             if _is_freeipa_availability_error(exc):
                 _record_freeipa_availability_failure()
-            logger.exception("FreeIPA service account operation failed: %s", exc)
+            logger.exception(
+                "FreeIPA service account operation failed: %s",
+                exc,
+                extra=current_exception_log_fields(),
+            )
             raise
     except Exception as exc:
         if _is_freeipa_availability_error(exc):
             _record_freeipa_availability_failure()
-        logger.exception("FreeIPA service account operation failed: %s", exc)
+        logger.exception(
+            "FreeIPA service account operation failed: %s",
+            exc,
+            extra=current_exception_log_fields(),
+        )
         raise
 
     _reset_freeipa_circuit_failures()

@@ -6,6 +6,7 @@ from python_freeipa import exceptions
 
 from core.freeipa.client import _get_freeipa_client
 from core.freeipa.user import FreeIPAUser
+from core.logging_extras import current_exception_log_fields
 
 logger = logging.getLogger("core.backends")
 
@@ -78,7 +79,11 @@ class FreeIPAAuthBackend(BaseBackend):
                 )
             return None
         except Exception:
-            logger.exception("FreeIPA authentication error username=%s", username)
+            logger.exception(
+                "FreeIPA authentication error username=%s",
+                username,
+                extra=current_exception_log_fields(),
+            )
             if request is not None:
                 setattr(request, "_freeipa_auth_error", "Login failed due to an internal error.")
             return None

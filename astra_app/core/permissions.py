@@ -5,6 +5,8 @@ from typing import ParamSpec, TypeVar
 
 from django.http import HttpRequest, HttpResponse, JsonResponse
 
+from core.logging_extras import current_exception_log_fields
+
 ASTRA_ADD_MEMBERSHIP = "astra.add_membership"
 ASTRA_CHANGE_MEMBERSHIP = "astra.change_membership"
 ASTRA_DELETE_MEMBERSHIP = "astra.delete_membership"
@@ -122,7 +124,11 @@ def _has_permission(*, user: object, permission: str) -> bool:
         # Template context processors and tests may pass user-like stubs.
         return False
     except Exception:
-        logger.exception("Unexpected error in _has_permission for permission=%r", permission)
+        logger.exception(
+            "Unexpected error in _has_permission for permission=%r",
+            permission,
+            extra=current_exception_log_fields(),
+        )
         return False
 
 

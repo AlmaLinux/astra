@@ -83,6 +83,7 @@ from core.ipa_user_attrs import (
     _value_to_text,
 )
 from core.ipa_utils import bool_to_ipa, sync_set_membership
+from core.logging_extras import exception_log_fields
 from core.membership import FreeIPARepresentativeSyncError
 from core.membership_csv_import import (
     _COLUMN_FIELDS,
@@ -430,6 +431,7 @@ class FreeIPAModelAdmin(admin.ModelAdmin):
                 "Unhandled exception in admin changeform_view model=%s object_id=%s",
                 getattr(self.model, "__name__", "?"),
                 object_id,
+                extra=exception_log_fields(e),
             )
             self.message_user(request, str(e), level=messages.ERROR)
             return HttpResponseRedirect(request.path)
@@ -446,6 +448,7 @@ class FreeIPAModelAdmin(admin.ModelAdmin):
                 "Unhandled exception in admin delete_view model=%s object_id=%s",
                 getattr(self.model, "__name__", "?"),
                 object_id,
+                extra=exception_log_fields(e),
             )
             self.message_user(request, str(e), level=messages.ERROR)
             return HttpResponseRedirect(self._changelist_url())
@@ -518,6 +521,7 @@ class FreeIPAModelAdmin(admin.ModelAdmin):
                         "Failed to delete FreeIPA-backed object model=%s key=%s",
                         getattr(self.model, "__name__", "?"),
                         key,
+                        extra=exception_log_fields(e),
                     )
 
             # Django's log_deletions() is batch-oriented and is the supported API
@@ -533,11 +537,12 @@ class FreeIPAModelAdmin(admin.ModelAdmin):
                     log_deletions = getattr(self, "log_deletions", None)
                     if callable(log_deletions):
                         log_deletions(request, _ListBackedQuerySet(self.model, deleted_objects))
-                except Exception:
+                except Exception as e:
                     logger.exception(
                         "Failed to write admin deletion LogEntry rows model=%s count=%s",
                         getattr(self.model, "__name__", "?"),
                         len(deleted_objects),
+                        extra=exception_log_fields(e),
                     )
 
             if deleted_keys:
@@ -1400,7 +1405,11 @@ class IPAUserAdmin(FreeIPAModelAdmin):
                 last_password_change=last_password_change,
             )
         except Exception as e:
-            logger.exception("Admin password reset email send failed username=%s", username)
+            logger.exception(
+                "Admin password reset email send failed username=%s",
+                username,
+                extra=exception_log_fields(e),
+            )
             self.message_user(request, f"Failed to send password reset email: {e}", level=messages.ERROR)
         else:
             self.message_user(request, "Password reset email queued.", level=messages.SUCCESS)
@@ -1450,7 +1459,11 @@ class IPAUserAdmin(FreeIPAModelAdmin):
                 if _token_id(t)
             ]
         except Exception as e:
-            logger.exception("Admin OTP token lookup failed username=%s", username)
+            logger.exception(
+                "Admin OTP token lookup failed username=%s",
+                username,
+                extra=exception_log_fields(e),
+            )
             self.message_user(request, f"Failed to look up OTP tokens: {e}", level=messages.ERROR)
             return HttpResponseRedirect(reverse("admin:auth_ipauser_change", args=[object_id]))
 
@@ -1463,7 +1476,11 @@ class IPAUserAdmin(FreeIPAModelAdmin):
             for token in tokens:
                 client.otptoken_mod(a_ipatokenuniqueid=token["id"], o_ipatokendisabled=True)
         except Exception as e:
-            logger.exception("Admin OTP disable failed username=%s", username)
+            logger.exception(
+                "Admin OTP disable failed username=%s",
+                username,
+                extra=exception_log_fields(e),
+            )
             self.message_user(request, f"Failed to disable OTP tokens: {e}", level=messages.ERROR)
         else:
             self.message_user(
@@ -1678,8 +1695,12 @@ class IPAGroupAdmin(FreeIPAModelAdmin):
         usernames: set[str] = set()
         try:
             usernames |= set(group.member_usernames_recursive())
-        except Exception:
-            logger.exception("Failed to expand member usernames group=%s", group_cn)
+        except Exception as e:
+            logger.exception(
+                "Failed to expand member usernames group=%s",
+                group_cn,
+                extra=exception_log_fields(e),
+            )
             usernames |= set(group.members)
 
         usernames |= set(group.sponsors)
@@ -1690,11 +1711,12 @@ class IPAGroupAdmin(FreeIPAModelAdmin):
                 continue
             try:
                 usernames |= set(sponsor_group.member_usernames_recursive())
-            except Exception:
+            except Exception as e:
                 logger.exception(
                     "Failed to expand sponsor group member usernames group=%s sponsor_group=%s",
                     group_cn,
                     sponsor_group_cn,
+                    extra=exception_log_fields(e),
                 )
                 usernames |= set(sponsor_group.members)
 
@@ -1912,7 +1934,11 @@ class IPAFASAgreementAdmin(FreeIPAModelAdmin):
         except FreeIPAOperationFailed:
             raise
         except Exception as e:
-            logger.exception("Failed to save FAS agreement cn=%s", getattr(obj, "cn", None) or form.cleaned_data.get("cn"))
+            logger.exception(
+                "Failed to save FAS agreement cn=%s",
+                getattr(obj, "cn", None) or form.cleaned_data.get("cn"),
+                extra=exception_log_fields(e),
+            )
             raise FreeIPAOperationFailed(str(e))
 
 

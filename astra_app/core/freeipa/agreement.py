@@ -17,6 +17,7 @@ from core.freeipa.utils import (
     _raise_if_freeipa_failed,
 )
 from core.ipa_utils import bool_from_ipa
+from core.logging_extras import current_exception_log_fields
 
 logger = logging.getLogger("core.backends")
 
@@ -86,7 +87,10 @@ class FreeIPAFASAgreement(_FreeIPAClientMixin):
                 agreements = (result or {}).get("result", []) if isinstance(result, dict) else []
                 cache.set(cache_key, agreements)
             except Exception as e:
-                logger.exception(f"Failed to list FAS agreements: {e}")
+                logger.exception(
+                    f"Failed to list FAS agreements: {e}",
+                    extra=current_exception_log_fields(),
+                )
                 return []
 
         items: list[FreeIPAFASAgreement] = []
@@ -123,7 +127,10 @@ class FreeIPAFASAgreement(_FreeIPAClientMixin):
                 cache.set(cache_key, data)
                 return cls(cn, data)
         except Exception as e:
-            logger.exception(f"Failed to get FAS agreement cn={cn}: {e}")
+            logger.exception(
+                f"Failed to get FAS agreement cn={cn}: {e}",
+                extra=current_exception_log_fields(),
+            )
         return None
 
     @classmethod
@@ -145,7 +152,11 @@ class FreeIPAFASAgreement(_FreeIPAClientMixin):
             _invalidate_agreements_list_cache()
             return cls.get(cn) or cls(cn, {"cn": [cn], "description": [desc], "ipaenabledflag": ["TRUE"]})
         except Exception:
-            logger.exception("Failed to create FAS agreement cn=%s", cn)
+            logger.exception(
+                "Failed to create FAS agreement cn=%s",
+                cn,
+                extra=current_exception_log_fields(),
+            )
             raise
 
     def set_description(self, description: str | None) -> None:
@@ -164,7 +175,11 @@ class FreeIPAFASAgreement(_FreeIPAClientMixin):
             _invalidate_agreements_list_cache()
             self.description = desc
         except Exception:
-            logger.exception("Failed to modify FAS agreement description cn=%s", self.cn)
+            logger.exception(
+                "Failed to modify FAS agreement description cn=%s",
+                self.cn,
+                extra=current_exception_log_fields(),
+            )
             raise
 
     def set_enabled(self, enabled: bool) -> None:
@@ -183,7 +198,12 @@ class FreeIPAFASAgreement(_FreeIPAClientMixin):
             _invalidate_agreements_list_cache()
             self.enabled = bool(enabled)
         except Exception:
-            logger.exception("Failed to set FAS agreement enabled cn=%s enabled=%s", self.cn, enabled)
+            logger.exception(
+                "Failed to set FAS agreement enabled cn=%s enabled=%s",
+                self.cn,
+                enabled,
+                extra=current_exception_log_fields(),
+            )
             raise
 
     def add_group(self, group_cn: str) -> None:
@@ -207,7 +227,12 @@ class FreeIPAFASAgreement(_FreeIPAClientMixin):
 
             self.groups = list(fresh.groups)
         except Exception:
-            logger.exception("Failed to add group to FAS agreement cn=%s group=%s", self.cn, group_cn)
+            logger.exception(
+                "Failed to add group to FAS agreement cn=%s group=%s",
+                self.cn,
+                group_cn,
+                extra=current_exception_log_fields(),
+            )
             raise
 
     def remove_group(self, group_cn: str) -> None:
@@ -232,7 +257,12 @@ class FreeIPAFASAgreement(_FreeIPAClientMixin):
             if fresh:
                 self.groups = list(fresh.groups)
         except Exception:
-            logger.exception("Failed to remove group from FAS agreement cn=%s group=%s", self.cn, group_cn)
+            logger.exception(
+                "Failed to remove group from FAS agreement cn=%s group=%s",
+                self.cn,
+                group_cn,
+                extra=current_exception_log_fields(),
+            )
             raise
 
     def add_user(self, username: str) -> None:
@@ -256,7 +286,12 @@ class FreeIPAFASAgreement(_FreeIPAClientMixin):
 
             self.users = list(fresh.users)
         except Exception:
-            logger.exception("Failed to add user to FAS agreement cn=%s user=%s", self.cn, username)
+            logger.exception(
+                "Failed to add user to FAS agreement cn=%s user=%s",
+                self.cn,
+                username,
+                extra=current_exception_log_fields(),
+            )
             raise
 
     def remove_user(self, username: str) -> None:
@@ -281,7 +316,12 @@ class FreeIPAFASAgreement(_FreeIPAClientMixin):
             if fresh:
                 self.users = list(fresh.users)
         except Exception:
-            logger.exception("Failed to remove user from FAS agreement cn=%s user=%s", self.cn, username)
+            logger.exception(
+                "Failed to remove user from FAS agreement cn=%s user=%s",
+                self.cn,
+                username,
+                extra=current_exception_log_fields(),
+            )
             raise
 
     def delete(self) -> None:
@@ -295,7 +335,11 @@ class FreeIPAFASAgreement(_FreeIPAClientMixin):
         except exceptions.Denied as e:
             msg = str(e)
             if "Not allowed to delete User Agreement with linked groups" not in msg:
-                logger.exception("Failed to delete FAS agreement cn=%s", self.cn)
+                logger.exception(
+                    "Failed to delete FAS agreement cn=%s",
+                    self.cn,
+                    extra=current_exception_log_fields(),
+                )
                 raise
 
             logger.info(
@@ -317,7 +361,11 @@ class FreeIPAFASAgreement(_FreeIPAClientMixin):
             _invalidate_agreement_cache(self.cn)
             _invalidate_agreements_list_cache()
         except Exception:
-            logger.exception("Failed to delete FAS agreement cn=%s", self.cn)
+            logger.exception(
+                "Failed to delete FAS agreement cn=%s",
+                self.cn,
+                extra=current_exception_log_fields(),
+            )
             raise
 
 

@@ -12,6 +12,7 @@ from typing import Any
 
 from core.freeipa.user import FreeIPAUser
 from core.freeipa.utils import _invalidate_user_cache, _invalidate_users_list_cache
+from core.logging_extras import exception_log_fields
 from core.views_utils import _normalize_str
 
 logger = logging.getLogger(__name__)
@@ -372,6 +373,7 @@ def _update_user_attrs(
                     _attr_names_from_setattrs(working_addattrs),
                     _attr_names_from_setattrs(working_setattrs),
                     _attr_names_from_delattrs(working_delattrs),
+                    extra=exception_log_fields(e),
                 )
 
             if attr:
@@ -414,7 +416,11 @@ def _update_user_attrs(
                 working_delattrs = []
                 continue
 
-            logger.exception("FreeIPA user_mod unexpected failure username=%s", username)
+            logger.exception(
+                "FreeIPA user_mod unexpected failure username=%s",
+                username,
+                extra=exception_log_fields(e),
+            )
             raise
 
     # Invalidate caches so lists/details refresh immediately.

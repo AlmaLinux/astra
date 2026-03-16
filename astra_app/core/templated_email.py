@@ -20,6 +20,7 @@ from django.template.exceptions import TemplateSyntaxError
 from post_office.models import Email, EmailTemplate
 
 from core.email_context import system_email_context
+from core.logging_extras import current_exception_log_fields
 
 _VAR_PATTERN = re.compile(r"{{\s*([A-Za-z0-9_]+)")
 _PLURALIZE_PATTERN = re.compile(
@@ -330,7 +331,11 @@ def queue_templated_email(
         email.context = dict(context)
         email.save(update_fields=["template", "context"])
     except Exception:
-        logger.exception("Failed to persist post_office template/context metadata template=%s", template_name)
+        logger.exception(
+            "Failed to persist post_office template/context metadata template=%s",
+            template_name,
+            extra=current_exception_log_fields(),
+        )
 
     return email
 
@@ -447,7 +452,11 @@ def queue_composed_email(
             except FileNotFoundError:
                 pass
             except Exception:
-                logger.exception("Failed to delete temp inline image path=%s", path)
+                logger.exception(
+                    "Failed to delete temp inline image path=%s",
+                    path,
+                    extra=current_exception_log_fields(),
+                )
 
 
 def _iter_pluralize_vars(*sources: str) -> Iterable[str]:

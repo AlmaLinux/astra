@@ -17,6 +17,7 @@ from django.utils import timezone
 
 from core.country_codes import country_code_status_from_user_data
 from core.freeipa.user import FreeIPAUser
+from core.logging_extras import current_exception_log_fields
 from core.membership_constants import MembershipCategoryCode
 from core.models import Membership, MembershipLog, MembershipRequest
 from core.permissions import (
@@ -369,6 +370,7 @@ def membership_sponsors_list(request: HttpRequest) -> HttpResponse:
                 logger.exception(
                     "membership_sponsors_list: failed to fetch representative from FreeIPA username=%s",
                     username,
+                    extra=current_exception_log_fields(),
                 )
                 continue
 

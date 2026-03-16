@@ -23,6 +23,7 @@ from core.csv_import_utils import (
     set_form_column_field_choices,
 )
 from core.forms_membership import MembershipRequestForm
+from core.logging_extras import current_exception_log_fields
 from core.membership import (
     FreeIPACallerMode,
     FreeIPAMissingUserPolicy,
@@ -202,7 +203,10 @@ class OrganizationMembershipCSVImportForm(ImportForm):
         try:
             headers = extract_csv_headers_from_uploaded_file(uploaded)
         except Exception:
-            logger.exception("Unable to read CSV headers for organization membership import form")
+            logger.exception(
+                "Unable to read CSV headers for organization membership import form",
+                extra=current_exception_log_fields(),
+            )
             return
 
         if not headers:

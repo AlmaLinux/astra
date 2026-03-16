@@ -7,6 +7,7 @@ from django.utils import timezone
 
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import FreeIPAUser
+from core.logging_extras import current_exception_log_fields
 from core.models import Membership, MembershipType
 from core.templated_email import queue_templated_email
 
@@ -204,6 +205,7 @@ class Command(BaseCommand):
                             "freeipa_membership_reconcile: add_failed group=%s username=%s",
                             group_cn,
                             username,
+                            extra=current_exception_log_fields(),
                         )
                     else:
                         if limit > 0:
@@ -222,6 +224,7 @@ class Command(BaseCommand):
                             "freeipa_membership_reconcile: remove_failed group=%s username=%s",
                             group_cn,
                             username,
+                            extra=current_exception_log_fields(),
                         )
                     else:
                         if limit > 0:

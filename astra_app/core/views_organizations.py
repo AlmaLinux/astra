@@ -20,6 +20,7 @@ from core.account_invitation_reconcile import schedule_account_invitation_accept
 from core.forms_organizations import OrganizationEditForm
 from core.freeipa.user import FreeIPAUser
 from core.freeipa_directory import search_freeipa_users
+from core.logging_extras import current_exception_log_fields
 from core.membership import (
     FreeIPACallerMode,
     FreeIPAGroupRemovalOutcome,
@@ -990,6 +991,7 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
                 organization.pk,
                 organization.representative,
                 form.cleaned_data.get("representative") or "",
+                extra=current_exception_log_fields(),
             )
             form.add_error(None, "Failed to update FreeIPA group membership for the representative.")
             return _render_org_form(request, form, organization=organization, is_create=False)
@@ -1013,6 +1015,7 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
                     organization.pk,
                     changed_fields,
                     actor_username,
+                    extra=current_exception_log_fields(),
                 )
 
         if "country_code" in changed_fields:
@@ -1072,6 +1075,7 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
                                 actor_username,
                                 old_representative,
                                 new_representative,
+                                extra=current_exception_log_fields(),
                             )
                 else:
                     logger.warning(
@@ -1097,6 +1101,7 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
                     actor_username,
                     old_representative,
                     new_representative,
+                    extra=current_exception_log_fields(),
                 )
 
         messages.success(request, "Organization details updated.")

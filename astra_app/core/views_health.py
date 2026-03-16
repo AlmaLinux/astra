@@ -4,6 +4,8 @@ from django.db import connection
 from django.http import HttpRequest, JsonResponse
 from django.views.decorators.http import require_GET
 
+from core.logging_extras import current_exception_log_fields
+
 logger = logging.getLogger(__name__)
 
 
@@ -17,7 +19,10 @@ def readyz(_request: HttpRequest) -> JsonResponse:
     try:
         connection.ensure_connection()
     except Exception as exc:
-        logger.exception("Health check readyz failed")
+        logger.exception(
+            "Health check readyz failed",
+            extra=current_exception_log_fields(),
+        )
         return JsonResponse({"status": "not ready", "error": str(exc)}, status=503)
 
     return JsonResponse({"status": "ready", "database": "ok"})

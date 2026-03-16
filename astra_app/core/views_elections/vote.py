@@ -21,6 +21,7 @@ from core.elections_services import (
 )
 from core.freeipa.user import DegradedFreeIPAUser, FreeIPAUser
 from core.ipa_user_attrs import _get_freeipa_timezone_name
+from core.logging_extras import current_exception_log_fields
 from core.models import Candidate, Election, Membership, VotingCredential
 from core.rate_limit import allow_request
 from core.views_elections._helpers import _get_active_election, _load_candidate_users
@@ -182,6 +183,7 @@ def election_vote_submit(request, election_id: int):
                 "send_vote_receipt_email failed for election_id=%s username=%s",
                 election.id,
                 username,
+                extra=current_exception_log_fields(),
             )
 
     return JsonResponse(

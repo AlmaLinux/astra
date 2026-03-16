@@ -9,6 +9,7 @@ from django.db.models import Case, IntegerField, Value, When
 from django.utils import timezone
 
 from core.freeipa.user import FreeIPAUser
+from core.logging_extras import current_exception_log_fields
 from core.models import Membership, MembershipLog, MembershipRequest, MembershipType, Organization
 
 logger = logging.getLogger(__name__)
@@ -301,6 +302,7 @@ def sync_organization_representative_membership_groups(
                     membership_request_id,
                     normalized_representative,
                     normalized_old_group_cn,
+                    extra=current_exception_log_fields(),
                 )
         else:
             if old_outcome == FreeIPAGroupRemovalOutcome.failed:
@@ -340,6 +342,7 @@ def sync_organization_representative_membership_groups(
                 membership_request_id,
                 normalized_representative,
                 ",".join(group_cns),
+                extra=current_exception_log_fields(),
             )
 
 
@@ -365,6 +368,7 @@ def rollback_organization_representative_groups(
                 "rollback_organization_representative_groups failed to remove new representative from group new=%r group_cn=%r",
                 normalized_new,
                 group_cn,
+                extra=current_exception_log_fields(),
             )
 
     for group_cn in journal.old_removed_group_cns:
@@ -380,6 +384,7 @@ def rollback_organization_representative_groups(
                 "rollback_organization_representative_groups failed to re-add old representative to group old=%r group_cn=%r",
                 normalized_old,
                 group_cn,
+                extra=current_exception_log_fields(),
             )
 
 
@@ -441,6 +446,7 @@ def remove_organization_representative_from_group_if_present(
             "remove_organization_representative_from_group_if_present failed username=%s group_cn=%s",
             normalized_username,
             normalized_group_cn,
+            extra=current_exception_log_fields(),
         )
         return FreeIPAGroupRemovalOutcome.failed
 
@@ -502,6 +508,7 @@ def remove_user_from_group(*, username: str, group_cn: str) -> bool:
             "remove_user_from_group: failed to remove user from group username=%s group_cn=%s",
             normalized_username,
             normalized_group_cn,
+            extra=current_exception_log_fields(),
         )
         return False
 

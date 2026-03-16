@@ -2,6 +2,7 @@ import logging
 
 from django.contrib.auth import get_user_model
 
+from core.logging_extras import current_exception_log_fields
 from core.views_utils import _normalize_str
 
 logger = logging.getLogger(__name__)
@@ -63,7 +64,11 @@ def _get_or_create_shadow_user_id(username: str, *, is_staff: bool, is_superuser
         return int(user_obj.pk)
     except Exception:
         # Don't break admin pages if the auth tables aren't available or DB is down.
-        logger.exception("Failed to create/find shadow admin user username=%s", username)
+        logger.exception(
+            "Failed to create/find shadow admin user username=%s",
+            username,
+            extra=current_exception_log_fields(),
+        )
         return None
 
 
@@ -112,5 +117,8 @@ class AdminShadowUserLogEntryMiddleware:
 
             return self.get_response(request)
         except Exception:
-            logger.exception("AdminShadowUserLogEntryMiddleware failed")
+            logger.exception(
+                "AdminShadowUserLogEntryMiddleware failed",
+                extra=current_exception_log_fields(),
+            )
             return self.get_response(request)

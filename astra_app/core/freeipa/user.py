@@ -24,6 +24,7 @@ from core.freeipa.utils import (
     _users_list_cache_key,
 )
 from core.ipa_utils import bool_from_ipa
+from core.logging_extras import current_exception_log_fields
 
 logger = logging.getLogger("core.backends")
 
@@ -299,7 +300,10 @@ class FreeIPAUser(_FreeIPAClientMixin):
                 out.append(cls(username, user_data))
             return out
         except Exception as e:
-            logger.exception(f"Failed to list users: {e}")
+            logger.exception(
+                f"Failed to list users: {e}",
+                extra=current_exception_log_fields(),
+            )
             return []
 
     @classmethod
@@ -321,7 +325,12 @@ class FreeIPAUser(_FreeIPAClientMixin):
                 logger.debug("FreeIPA call failed label=%s username=%s error=%s", label, username, e)
                 return None
             except Exception:
-                logger.exception("FreeIPA call failed (unexpected) label=%s username=%s", label, username)
+                logger.exception(
+                    "FreeIPA call failed (unexpected) label=%s username=%s",
+                    label,
+                    username,
+                    extra=current_exception_log_fields(),
+                )
                 return None
 
         res = _try("user_show(username)", lambda: client.user_show(username, o_all=True, o_no_members=False))
@@ -355,7 +364,10 @@ class FreeIPAUser(_FreeIPAClientMixin):
                 cache.set(cache_key, user_data)
                 return cls(username, user_data)
         except Exception as e:
-            logger.exception(f"Failed to get user username={username}: {e}")
+            logger.exception(
+                f"Failed to get user username={username}: {e}",
+                extra=current_exception_log_fields(),
+            )
             raise
         return None
 
@@ -388,7 +400,10 @@ class FreeIPAUser(_FreeIPAClientMixin):
 
             return cls(username, first)
         except Exception as e:
-            logger.exception(f"Failed to find user by email email={email}: {e}")
+            logger.exception(
+                f"Failed to find user by email email={email}: {e}",
+                extra=current_exception_log_fields(),
+            )
             return None
 
     @classmethod
@@ -403,7 +418,10 @@ class FreeIPAUser(_FreeIPAClientMixin):
         try:
             res = _with_freeipa_service_client_retry(cls.get_client, _do)
         except Exception:
-            logger.exception("Failed to find users by email")
+            logger.exception(
+                "Failed to find users by email",
+                extra=current_exception_log_fields(),
+            )
             return []
 
         if not isinstance(res, dict) or res.get("count", 0) <= 0:
@@ -473,7 +491,11 @@ class FreeIPAUser(_FreeIPAClientMixin):
             _invalidate_users_list_cache()
             return cls.get(username)
         except Exception:
-            logger.exception("Failed to create user username=%s", username)
+            logger.exception(
+                "Failed to create user username=%s",
+                username,
+                extra=current_exception_log_fields(),
+            )
             raise
 
     def save(self, *args, **kwargs):
@@ -525,7 +547,12 @@ class FreeIPAUser(_FreeIPAClientMixin):
             _invalidate_users_list_cache()
             FreeIPAUser.get(self.username)
         except Exception as e:
-            logger.exception("Failed to update user username=%s: %s", self.username, e)
+            logger.exception(
+                "Failed to update user username=%s: %s",
+                self.username,
+                e,
+                extra=current_exception_log_fields(),
+            )
             raise
 
     def delete(self):
@@ -540,7 +567,11 @@ class FreeIPAUser(_FreeIPAClientMixin):
             _invalidate_user_cache(self.username)
             _invalidate_users_list_cache()
         except Exception:
-            logger.exception("Failed to delete user username=%s", self.username)
+            logger.exception(
+                "Failed to delete user username=%s",
+                self.username,
+                extra=current_exception_log_fields(),
+            )
             raise
 
     def get_all_permissions(self, obj=None):
@@ -643,7 +674,12 @@ class FreeIPAUser(_FreeIPAClientMixin):
                     f"(user={self.username} group={group_name} response={_compact_repr(res)})"
                 )
         except Exception:
-            logger.exception("Failed to add user to group username=%s group=%s", self.username, group_name)
+            logger.exception(
+                "Failed to add user to group username=%s group=%s",
+                self.username,
+                group_name,
+                extra=current_exception_log_fields(),
+            )
             raise
 
     def remove_from_group(self, group_name):
@@ -670,7 +706,12 @@ class FreeIPAUser(_FreeIPAClientMixin):
                     f"(user={self.username} group={group_name} response={_compact_repr(res)})"
                 )
         except Exception:
-            logger.exception("Failed to remove user from group username=%s group=%s", self.username, group_name)
+            logger.exception(
+                "Failed to remove user from group username=%s group=%s",
+                self.username,
+                group_name,
+                extra=current_exception_log_fields(),
+            )
             raise
 
 

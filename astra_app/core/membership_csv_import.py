@@ -27,6 +27,7 @@ from core.csv_import_utils import (
 )
 from core.forms_membership import MembershipRequestForm
 from core.freeipa.user import FreeIPAUser
+from core.logging_extras import current_exception_log_fields
 from core.membership_notes import add_note
 from core.membership_request_workflow import approve_membership_request, record_membership_request_created
 from core.models import Membership, MembershipLog, MembershipRequest, MembershipType, Note
@@ -178,7 +179,10 @@ class MembershipCSVImportForm(ImportForm):
         try:
             headers = extract_csv_headers_from_uploaded_file(uploaded)
         except Exception:
-            logger.exception("Unable to read CSV headers for import form dropdowns")
+            logger.exception(
+                "Unable to read CSV headers for import form dropdowns",
+                extra=current_exception_log_fields(),
+            )
             return
 
         if not headers:
@@ -434,6 +438,7 @@ class MembershipCSVImportResource(resources.ModelResource):
                 decision,
                 reason,
                 bool(kwargs.get("dry_run")),
+                extra=current_exception_log_fields(),
             )
             raise
 
@@ -1277,6 +1282,7 @@ class MembershipCSVImportResource(resources.ModelResource):
                 email,
                 username,
                 instance.membership_type_id,
+                extra=current_exception_log_fields(),
             )
             raise
 
@@ -1354,6 +1360,7 @@ class MembershipCSVImportResource(resources.ModelResource):
                 row_number,
                 email,
                 matched_username,
+                extra=current_exception_log_fields(),
             )
             decision = "UNKNOWN"
             reason = f"decision exception: {exc!r}"
