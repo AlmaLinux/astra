@@ -1,6 +1,13 @@
 from django.test import TestCase
 
-from core.fas_user_attr_audit import _canonical_iana_timezone_name, audit_fas_user_attributes
+from core.fas_user_attr_audit import (
+    _available_timezones_last_segment_map,
+    _available_timezones_lower_map,
+    _canonical_iana_timezone_name,
+    _suggest_iana_timezone,
+    _tz_abbrev_candidates,
+    audit_fas_user_attributes,
+)
 
 
 class AuditFASUserAttributesTests(TestCase):
@@ -40,6 +47,23 @@ class AuditFASUserAttributesTests(TestCase):
         tz_findings = [f for f in findings if f.attribute == "fasTimezone" and f.issue == "invalid"]
         self.assertEqual(len(tz_findings), 1)
         self.assertTrue(bool(tz_findings[0].suggested))
+
+    def test_timezone_suggestion_uses_last_segment_for_legacy_link_style_values(self) -> None:
+        from unittest.mock import patch
+
+        # Make the test independent of the container's tzdata contents.
+        fake_timezones = {"Europe/Zurich"}
+
+        _available_timezones_lower_map.cache_clear()
+        _available_timezones_last_segment_map.cache_clear()
+        _tz_abbrev_candidates.cache_clear()
+
+        with patch("core.fas_user_attr_audit.zoneinfo.available_timezones", return_value=fake_timezones):
+            _available_timezones_lower_map.cache_clear()
+            _available_timezones_last_segment_map.cache_clear()
+            suggestion = _suggest_iana_timezone("US/Zurich")
+
+        self.assertEqual(suggestion, "Europe/Zurich")
 
     def test_reports_invalid_github_username(self) -> None:
         findings = audit_fas_user_attributes(

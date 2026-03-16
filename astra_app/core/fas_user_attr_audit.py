@@ -312,7 +312,10 @@ def _suggest_iana_timezone(raw_value: str) -> str | None:
         return lower_map[squashed]
 
     # Match by last segment (e.g. "Zurich" -> "Europe/Zurich").
-    last_segment_matches = _available_timezones_last_segment_map().get(lowered, [])
+    # For legacy Link-style inputs like "US/Eastern", this checks the final
+    # component ("Eastern") rather than the whole string.
+    last_segment_key = lowered.rsplit("/", 1)[-1]
+    last_segment_matches = _available_timezones_last_segment_map().get(last_segment_key, [])
     if len(last_segment_matches) == 1:
         return last_segment_matches[0]
     if len(last_segment_matches) > 1:
