@@ -82,19 +82,23 @@ class MembershipMirrorValidationCommandTests(TestCase):
         membership_request = self._create_mirror_request(username="bob")
         self.assertFalse(MirrorMembershipValidation.objects.filter(membership_request=membership_request).exists())
 
-        out = StringIO()
-        with patch(
-            "core.management.commands.membership_mirror_validation.run_validation",
-            autospec=True,
-            return_value=self._fake_validation_outcome(),
+        with (
+            self.assertLogs("core.management.commands.membership_mirror_validation", level="INFO") as captured,
+            patch(
+                "core.management.commands.membership_mirror_validation.run_validation",
+                autospec=True,
+                return_value=self._fake_validation_outcome(),
+            ),
         ):
-            call_command("membership_mirror_validation", "--fix", stdout=out)
+            call_command("membership_mirror_validation", "--fix")
 
         self.assertTrue(MirrorMembershipValidation.objects.filter(membership_request=membership_request).exists())
-        output = out.getvalue()
-        self.assertIn(
-            f"ensured mirror validation row exists for request {membership_request.pk}",
-            output,
+        self.assertTrue(
+            any(
+                f"ensured mirror validation row exists for request {membership_request.pk}" in record.getMessage()
+                for record in captured.records
+            ),
+            "expected --fix to emit an INFO log about the ensured validation row",
         )
 
     def test_fix_does_not_modify_existing_validation_rows(self) -> None:

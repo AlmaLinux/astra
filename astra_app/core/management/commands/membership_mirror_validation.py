@@ -99,7 +99,12 @@ class Command(BaseCommand):
             validation, reclaimed = claimed
             request_id = validation.membership_request.pk
             if reclaimed:
-                self.stdout.write(f"reclaimed expired claim for request {request_id}")
+                logger.info(
+                    "mirror_validation.reclaimed",
+                    extra={
+                        "request_id": request_id,
+                    },
+                )
 
             if validation.membership_request.status in _CLOSED_MEMBERSHIP_REQUEST_STATUSES:
                 validation.delete()
@@ -111,7 +116,12 @@ class Command(BaseCommand):
                         "reclaimed": reclaimed,
                     },
                 )
-                self.stdout.write(f"deleted closed-request validation for request {request_id}")
+                logger.info(
+                    "mirror_validation.deleted_closed_request_stdout",
+                    extra={
+                        "request_id": request_id,
+                    },
+                )
                 continue
 
             outcome = run_validation(membership_request=validation.membership_request)
@@ -132,17 +142,31 @@ class Command(BaseCommand):
                     "reclaimed": reclaimed,
                 },
             )
-            self.stdout.write(
-                f"processed request {request_id} status={validation.status}",
+            logger.info(
+                "mirror_validation.processed_stdout",
+                extra={
+                    "request_id": request_id,
+                    "validation_status": validation.status,
+                },
             )
-            self._write_debug_output(result=validation.result)
+            self._write_debug_output(request_id=request_id, result=validation.result)
             if note_content is not None:
-                self.stdout.write(f"wrote note for request {request_id}")
+                logger.info(
+                    "mirror_validation.wrote_note",
+                    extra={
+                        "request_id": request_id,
+                    },
+                )
 
         if processed == 0:
-            self.stdout.write("No mirror validation rows were due.")
+            logger.info("mirror_validation.none_due")
             for request_id in self._missing_open_mirror_request_ids():
-                self.stdout.write(f"missing mirror validation row for request {request_id}")
+                logger.info(
+                    "mirror_validation.missing_row",
+                    extra={
+                        "request_id": request_id,
+                    },
+                )
 
     def _missing_open_mirror_request_ids(self) -> list[int]:
         queryset = (
@@ -170,7 +194,12 @@ class Command(BaseCommand):
             validation = schedule_mirror_membership_validation(membership_request=membership_request)
             if validation is None:
                 continue
-            self.stdout.write(f"ensured mirror validation row exists for request {membership_request.pk}")
+            logger.info(
+                f"ensured mirror validation row exists for request {membership_request.pk}",
+                extra={
+                    "request_id": membership_request.pk,
+                },
+            )
 
     def _handle_direct_request(self, *, request_id: int, dry_run: bool) -> None:
         membership_request = MembershipRequest.objects.select_related("membership_type").filter(pk=request_id).first()
@@ -202,12 +231,18 @@ class Command(BaseCommand):
                 },
             )
             if deleted_validation:
-                self.stdout.write(
-                    f"deleted closed-request validation for request ID {request_id} via --request-id",
+                logger.info(
+                    "mirror_validation.deleted_closed_request_direct_stdout",
+                    extra={
+                        "request_id": request_id,
+                    },
                 )
             else:
-                self.stdout.write(
-                    f"request ID {request_id} is closed; no validation row to delete via --request-id",
+                logger.info(
+                    "mirror_validation.no_closed_request_row_direct",
+                    extra={
+                        "request_id": request_id,
+                    },
                 )
             return
 
@@ -217,7 +252,12 @@ class Command(BaseCommand):
 
         now = timezone.now()
         validation = claim_validation_for_request(membership_request=membership_request, now=now)
-        self.stdout.write(f"processing request ID {request_id} via --request-id")
+        logger.info(
+            "mirror_validation.processing_direct",
+            extra={
+                "request_id": request_id,
+            },
+        )
         outcome = run_validation(membership_request=membership_request)
         note_content = finalize_validation(
             validation=validation,
@@ -234,11 +274,29 @@ class Command(BaseCommand):
                 "attempt_count": validation.attempt_count,
             },
         )
-        self.stdout.write(f"processed request ID {request_id} status={validation.status}")
-        self._write_debug_output(result=validation.result)
+        logger.info(
+            "mirror_validation.processed_direct_stdout",
+            extra={
+                "request_id": request_id,
+                "validation_status": validation.status,
+            },
+        )
+        self._write_debug_output(request_id=request_id, result=validation.result)
         if note_content is not None:
-            self.stdout.write(f"wrote note for request ID {request_id}")
+            logger.info(
+                "mirror_validation.wrote_note_direct",
+                extra={
+                    "request_id": request_id,
+                    "note": note_content,
+                },
+            )
 
-    def _write_debug_output(self, *, result: dict[str, object]) -> None:
+    def _write_debug_output(self, *, request_id: int, result: dict[str, object]) -> None:
         for line in build_validation_debug_lines(result=result):
-            self.stdout.write(line)
+            logger.info(
+                "mirror_validation.debug_line",
+                extra={
+                    "request_id": request_id,
+                    "line": line,
+                },
+            )
