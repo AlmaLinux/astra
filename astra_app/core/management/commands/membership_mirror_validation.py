@@ -4,6 +4,7 @@ from typing import override
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
+from core.membership_constants import MembershipCategoryCode
 from core.mirror_membership_validation import (
     _CLOSED_MEMBERSHIP_REQUEST_STATUSES,
     build_validation_debug_lines,
@@ -13,6 +14,7 @@ from core.mirror_membership_validation import (
     finalize_validation,
     is_mirror_membership_request,
     run_validation,
+    schedule_mirror_membership_validation,
 )
 from core.models import MembershipRequest, MirrorMembershipValidation
 
@@ -35,6 +37,14 @@ class Command(BaseCommand):
             help="Report due rows without mutating validation state or writing notes.",
         )
         parser.add_argument(
+            "--fix",
+            action="store_true",
+            help=(
+                "Ensure mirror validation rows exist for open mirror requests before processing due validations "
+                "in the same run (may perform outbound HTTP)."
+            ),
+        )
+        parser.add_argument(
             "--request-id",
             type=int,
             help="Run validation directly for one membership request ID for debugging.",
@@ -45,16 +55,26 @@ class Command(BaseCommand):
         now = timezone.now()
         force: bool = bool(options.get("force"))
         dry_run: bool = bool(options.get("dry_run"))
+        fix: bool = bool(options.get("fix"))
         request_id = options.get("request_id")
+
+        if dry_run and fix:
+            raise CommandError("--fix cannot be used with --dry-run")
 
         if request_id is not None:
             self._handle_direct_request(request_id=int(request_id), dry_run=dry_run)
             return
 
+        if fix:
+            self._handle_fix_missing_rows()
+
         if dry_run:
             validations = dry_run_validations(now=now, force=force)
+            missing_request_ids = self._missing_open_mirror_request_ids()
             if not validations:
                 self.stdout.write("dry-run: no mirror validation rows are due.")
+                for request_id in missing_request_ids:
+                    self.stdout.write(f"dry-run: missing mirror validation row for request {request_id}")
                 return
             for validation in validations:
                 request_id = validation.membership_request.pk
@@ -66,6 +86,8 @@ class Command(BaseCommand):
                 self.stdout.write(
                     f"dry-run: would validate request {request_id} status={validation.status}",
                 )
+            for request_id in missing_request_ids:
+                self.stdout.write(f"dry-run: missing mirror validation row for request {request_id}")
             return
 
         processed = 0
@@ -119,6 +141,36 @@ class Command(BaseCommand):
 
         if processed == 0:
             self.stdout.write("No mirror validation rows were due.")
+            for request_id in self._missing_open_mirror_request_ids():
+                self.stdout.write(f"missing mirror validation row for request {request_id}")
+
+    def _missing_open_mirror_request_ids(self) -> list[int]:
+        queryset = (
+            MembershipRequest.objects.filter(
+                membership_type__category_id=MembershipCategoryCode.mirror,
+                mirror_validation__isnull=True,
+            )
+            .exclude(status__in=_CLOSED_MEMBERSHIP_REQUEST_STATUSES)
+            .order_by("pk")
+            .values_list("pk", flat=True)
+        )
+        return list(queryset)
+
+    def _handle_fix_missing_rows(self) -> None:
+        missing_requests = (
+            MembershipRequest.objects.select_related("membership_type")
+            .filter(
+                membership_type__category_id=MembershipCategoryCode.mirror,
+                mirror_validation__isnull=True,
+            )
+            .exclude(status__in=_CLOSED_MEMBERSHIP_REQUEST_STATUSES)
+            .order_by("pk")
+        )
+        for membership_request in missing_requests:
+            validation = schedule_mirror_membership_validation(membership_request=membership_request)
+            if validation is None:
+                continue
+            self.stdout.write(f"ensured mirror validation row exists for request {membership_request.pk}")
 
     def _handle_direct_request(self, *, request_id: int, dry_run: bool) -> None:
         membership_request = MembershipRequest.objects.select_related("membership_type").filter(pk=request_id).first()

@@ -1,0 +1,138 @@
+from __future__ import annotations
+
+import datetime
+from io import StringIO
+from typing import override
+from unittest.mock import patch
+
+from django.core.management import call_command
+from django.test import TestCase
+from django.utils import timezone
+
+from core.mirror_membership_validation import ValidationOutcome
+from core.models import MembershipRequest, MembershipType, MirrorMembershipValidation
+from core.tests.utils_test_data import ensure_core_categories, ensure_email_templates
+
+
+class MembershipMirrorValidationCommandTests(TestCase):
+    @override
+    def setUp(self) -> None:
+        super().setUp()
+        ensure_core_categories()
+        ensure_email_templates()
+
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror",
+                "group_cn": "almalinux-mirror",
+                "category_id": "mirror",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+    def _mirror_responses(self) -> list[dict[str, str]]:
+        return [
+            {"Domain": "https://mirror.example.org"},
+            {"Pull request": "https://github.com/AlmaLinux/mirrors/pull/123"},
+            {"Additional information": "Primary EU mirror"},
+        ]
+
+    def _create_mirror_request(
+        self,
+        *,
+        username: str,
+        status: str = MembershipRequest.Status.pending,
+    ) -> MembershipRequest:
+        membership_type = MembershipType.objects.get(code="mirror")
+        return MembershipRequest.objects.create(
+            requested_username=username,
+            membership_type=membership_type,
+            status=status,
+            responses=self._mirror_responses(),
+        )
+
+    def _fake_validation_outcome(self) -> ValidationOutcome:
+        return ValidationOutcome(
+            overall_status=MirrorMembershipValidation.Status.completed,
+            result={
+                "domain": {"status": "not_checked", "detail": "test"},
+                "timestamp": {"status": "not_checked", "detail": "test"},
+                "almalinux_mirror_network": {"status": "not_checked", "detail": "test"},
+                "github": {"status": "not_checked", "detail": "test"},
+            },
+            should_retry=False,
+        )
+
+    def test_dry_run_reports_open_mirror_requests_missing_validation_row(self) -> None:
+        membership_request = self._create_mirror_request(username="alice")
+        self.assertFalse(MirrorMembershipValidation.objects.filter(membership_request=membership_request).exists())
+
+        out = StringIO()
+        call_command("membership_mirror_validation", "--dry-run", stdout=out)
+
+        output = out.getvalue()
+        self.assertIn(
+            f"dry-run: missing mirror validation row for request {membership_request.pk}",
+            output,
+        )
+
+    def test_fix_creates_validation_row_for_missing_open_request(self) -> None:
+        membership_request = self._create_mirror_request(username="bob")
+        self.assertFalse(MirrorMembershipValidation.objects.filter(membership_request=membership_request).exists())
+
+        out = StringIO()
+        with patch(
+            "core.management.commands.membership_mirror_validation.run_validation",
+            autospec=True,
+            return_value=self._fake_validation_outcome(),
+        ):
+            call_command("membership_mirror_validation", "--fix", stdout=out)
+
+        self.assertTrue(MirrorMembershipValidation.objects.filter(membership_request=membership_request).exists())
+        output = out.getvalue()
+        self.assertIn(
+            f"ensured mirror validation row exists for request {membership_request.pk}",
+            output,
+        )
+
+    def test_fix_does_not_modify_existing_validation_rows(self) -> None:
+        membership_request = self._create_mirror_request(username="carol")
+        validation = MirrorMembershipValidation.objects.create(
+            membership_request=membership_request,
+            status=MirrorMembershipValidation.Status.completed,
+            answer_fingerprint="existing",
+            next_run_at=timezone.now() + datetime.timedelta(days=1),
+        )
+
+        out = StringIO()
+        call_command("membership_mirror_validation", "--fix", stdout=out)
+
+        validation.refresh_from_db()
+        self.assertEqual(validation.status, MirrorMembershipValidation.Status.completed)
+        self.assertEqual(validation.answer_fingerprint, "existing")
+
+    def test_closed_requests_are_ignored_by_detection_and_fix(self) -> None:
+        closed_request = self._create_mirror_request(
+            username="dave",
+            status=MembershipRequest.Status.approved,
+        )
+        self.assertFalse(MirrorMembershipValidation.objects.filter(membership_request=closed_request).exists())
+
+        out = StringIO()
+        call_command("membership_mirror_validation", "--dry-run", stdout=out)
+        self.assertNotIn(
+            f"request {closed_request.pk}",
+            out.getvalue(),
+        )
+
+        out = StringIO()
+        with patch(
+            "core.management.commands.membership_mirror_validation.run_validation",
+            autospec=True,
+            return_value=self._fake_validation_outcome(),
+        ):
+            call_command("membership_mirror_validation", "--fix", stdout=out)
+
+        self.assertFalse(MirrorMembershipValidation.objects.filter(membership_request=closed_request).exists())

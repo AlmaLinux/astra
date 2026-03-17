@@ -4,7 +4,7 @@ from typing import Any
 from django.dispatch import Signal
 from django.test import SimpleTestCase
 
-from core.models import Organization
+from core.models import MembershipRequest, Organization
 from core.signals import CANONICAL_SIGNALS
 
 
@@ -88,7 +88,11 @@ class SafeReceiverIsolationTests(SimpleTestCase):
         signal.connect(exploding_receiver, dispatch_uid="test.safe_receiver.error.fields")
         try:
             with self.assertLogs("core.signal_receivers", level="ERROR") as captured:
-                signal.send(sender=self.__class__)
+                signal.send(
+                    sender=self.__class__,
+                    membership_request=MembershipRequest(pk=123),
+                    organization_id=77,
+                )
         finally:
             signal.disconnect(exploding_receiver, dispatch_uid="test.safe_receiver.error.fields")
 
@@ -103,6 +107,9 @@ class SafeReceiverIsolationTests(SimpleTestCase):
         self.assertIsNotNone(duration_ms, "duration_ms must be present in error log")
         self.assertIsInstance(duration_ms, float, "duration_ms must be a float")
         self.assertGreaterEqual(float(duration_ms), 0.0)
+
+        self.assertEqual(getattr(record, "membership_request_id", None), 123)
+        self.assertEqual(getattr(record, "organization_id", None), 77)
 
 
 class SignalEmissionLoggingTests(SimpleTestCase):

@@ -31,7 +31,11 @@ from core.membership_log_side_effects import apply_membership_log_side_effects
 from core.membership_notes import add_note
 from core.membership_notifications import organization_sponsor_notification_recipient_email
 from core.membership_response_normalization import normalize_membership_request_responses
-from core.mirror_membership_validation import mirror_answers_fingerprint, mirror_request_answers_from_responses
+from core.mirror_membership_validation import (
+    mirror_answers_fingerprint,
+    mirror_request_answers_from_responses,
+    schedule_mirror_membership_validation,
+)
 from core.models import (
     Membership,
     MembershipLog,
@@ -419,6 +423,23 @@ def record_membership_request_created(
             organization_signal=astra_signals.organization_membership_request_submitted,
         )
 
+        if membership_type.category_id == MembershipCategoryCode.mirror and membership_request.pk is not None:
+            request_id = membership_request.pk
+
+            def _schedule_mirror_validation_on_commit() -> None:
+                try:
+                    committed_request = MembershipRequest.objects.get(pk=request_id)
+                    schedule_mirror_membership_validation(membership_request=committed_request)
+                except Exception:
+                    logger.exception(
+                        "%s: failed to schedule mirror validation request_id=%s",
+                        log_prefix,
+                        request_id,
+                        extra=current_exception_log_fields(),
+                    )
+
+            transaction.on_commit(_schedule_mirror_validation_on_commit)
+
         if email_error is not None:
             raise email_error
         return
@@ -498,6 +519,23 @@ def record_membership_request_created(
         user_signal=astra_signals.membership_request_submitted,
         organization_signal=astra_signals.organization_membership_request_submitted,
     )
+
+    if membership_type.category_id == MembershipCategoryCode.mirror and membership_request.pk is not None:
+        request_id = membership_request.pk
+
+        def _schedule_mirror_validation_on_commit() -> None:
+            try:
+                committed_request = MembershipRequest.objects.get(pk=request_id)
+                schedule_mirror_membership_validation(membership_request=committed_request)
+            except Exception:
+                logger.exception(
+                    "%s: failed to schedule mirror validation request_id=%s",
+                    log_prefix,
+                    request_id,
+                    extra=current_exception_log_fields(),
+                )
+
+        transaction.on_commit(_schedule_mirror_validation_on_commit)
 
     if email_error is not None:
         raise email_error
@@ -1209,6 +1247,22 @@ def resubmit_membership_request(
         user_signal=astra_signals.membership_rfi_replied,
         organization_signal=astra_signals.organization_membership_rfi_replied,
     )
+
+    if membership_request.membership_type.category_id == MembershipCategoryCode.mirror and membership_request.pk is not None:
+        request_id = membership_request.pk
+
+        def _schedule_mirror_validation_on_commit() -> None:
+            try:
+                committed_request = MembershipRequest.objects.get(pk=request_id)
+                schedule_mirror_membership_validation(membership_request=committed_request)
+            except Exception:
+                logger.exception(
+                    "resubmit_membership_request: failed to schedule mirror validation request_id=%s",
+                    request_id,
+                    extra=current_exception_log_fields(),
+                )
+
+        transaction.on_commit(_schedule_mirror_validation_on_commit)
 
     return log
 

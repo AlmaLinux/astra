@@ -25,15 +25,30 @@ def safe_receiver(event_key: str) -> Callable[[Callable[..., Any]], Callable[...
                 fn(*args, **kwargs)
             except Exception as exc:
                 duration_ms = round((time.monotonic() - started_at) * 1000, 1)
+
+                extra: dict[str, object] = {
+                    "receiver": fn.__qualname__,
+                    "event_key": event_key,
+                    "exc_type": type(exc).__name__,
+                    "exc_message": str(exc),
+                    "duration_ms": duration_ms,
+                }
+                membership_request = kwargs.get("membership_request")
+                if membership_request is not None:
+                    try:
+                        membership_request_id = membership_request.pk
+                    except AttributeError:
+                        membership_request_id = None
+                    if membership_request_id is not None:
+                        extra["membership_request_id"] = membership_request_id
+
+                organization_id = kwargs.get("organization_id")
+                if organization_id is not None:
+                    extra["organization_id"] = organization_id
+
                 logger.error(
                     "receiver.error",
-                    extra={
-                        "receiver": fn.__qualname__,
-                        "event_key": event_key,
-                        "exc_type": type(exc).__name__,
-                        "exc_message": str(exc),
-                        "duration_ms": duration_ms,
-                    },
+                    extra=extra,
                     exc_info=True,
                 )
                 return

@@ -203,6 +203,38 @@ class MirrorMembershipValidationTests(TestCase):
         self.assertIsNotNone(validation.next_run_at)
         get_mock.assert_not_called()
 
+    def test_user_submission_schedules_validation_even_when_receiver_disconnected(self) -> None:
+        membership_request = self._create_user_request()
+        self.assertFalse(MirrorMembershipValidation.objects.filter(membership_request=membership_request).exists())
+
+        from core.mirror_membership_validation_receivers import schedule_mirror_validation_from_signal
+        from core.signal_receivers import safe_receiver
+
+        dispatch_uid = "core.mirror_membership_validation_receivers.membership_request_submitted"
+        astra_signals.membership_request_submitted.disconnect(dispatch_uid=dispatch_uid)
+        self.addCleanup(
+            lambda: astra_signals.membership_request_submitted.connect(
+                safe_receiver("membership_request_submitted")(schedule_mirror_validation_from_signal),
+                dispatch_uid=dispatch_uid,
+            )
+        )
+
+        with (
+            patch("core.mirror_membership_validation.requests.get", autospec=True) as get_mock,
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            record_membership_request_created(
+                membership_request=membership_request,
+                actor_username="alice",
+                send_submitted_email=False,
+            )
+
+        self.assertTrue(
+            MirrorMembershipValidation.objects.filter(membership_request=membership_request).exists(),
+            "Mirror validation should be scheduled even if signal receivers are disconnected",
+        )
+        get_mock.assert_not_called()
+
     def test_org_submission_schedules_pending_validation_without_http(self) -> None:
         membership_request = self._create_org_request()
 
@@ -216,9 +248,41 @@ class MirrorMembershipValidationTests(TestCase):
                 send_submitted_email=False,
             )
 
+        get_mock.assert_not_called()
         validation = MirrorMembershipValidation.objects.get(membership_request=membership_request)
         self.assertEqual(validation.status, MirrorMembershipValidation.Status.pending)
-        self.assertEqual(validation.membership_request_id, membership_request.pk)
+
+    def test_resubmission_schedules_validation_even_when_receiver_disconnected(self) -> None:
+        membership_request = self._create_user_request(status=MembershipRequest.Status.on_hold)
+        self.assertFalse(MirrorMembershipValidation.objects.filter(membership_request=membership_request).exists())
+
+        from core.mirror_membership_validation_receivers import schedule_mirror_validation_from_signal
+        from core.signal_receivers import safe_receiver
+
+        dispatch_uid = "core.mirror_membership_validation_receivers.membership_rfi_replied"
+        astra_signals.membership_rfi_replied.disconnect(dispatch_uid=dispatch_uid)
+        self.addCleanup(
+            lambda: astra_signals.membership_rfi_replied.connect(
+                safe_receiver("membership_rfi_replied")(schedule_mirror_validation_from_signal),
+                dispatch_uid=dispatch_uid,
+            )
+        )
+
+        updated_responses = self._mirror_responses(domain="https://mirror2.example.org")
+        with (
+            patch("core.mirror_membership_validation.requests.get", autospec=True) as get_mock,
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            resubmit_membership_request(
+                membership_request=membership_request,
+                actor_username="alice",
+                updated_responses=updated_responses,
+            )
+
+        self.assertTrue(
+            MirrorMembershipValidation.objects.filter(membership_request=membership_request).exists(),
+            "Mirror validation should be scheduled even if RFI-replied receivers are disconnected",
+        )
         get_mock.assert_not_called()
 
     def test_non_mirror_submission_does_not_schedule_validation(self) -> None:
