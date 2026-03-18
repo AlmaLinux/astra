@@ -627,8 +627,16 @@ def membership_stats_data(request: HttpRequest) -> HttpResponse:
                 counts[code] = counts.get(code, 0) + 1
 
             ordered = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+            total = sum(v for _k, v in ordered)
+            labels: list[str] = []
+            for code, count in ordered:
+                if total <= 0:
+                    labels.append(code)
+                else:
+                    pct = (count / total) * 100
+                    labels.append(f"{code} ({pct:.1f}%)")
             return {
-                "labels": [k for k, _v in ordered],
+                "labels": labels,
                 "counts": [v for _k, v in ordered],
             }
 
