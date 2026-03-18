@@ -60,9 +60,70 @@
     return canvas.getContext('2d');
   }
 
-  function renderDoughnut(canvasId, labels, data, title) {
+  function visibleTotal(chart, datasetIndex) {
+    if (!chart || !chart.data || !chart.data.datasets) return 0;
+    var dataset = chart.data.datasets[datasetIndex] || { data: [] };
+    var values = Array.isArray(dataset.data) ? dataset.data : [];
+
+    var meta = null;
+    if (typeof chart.getDatasetMeta === 'function') {
+      meta = chart.getDatasetMeta(datasetIndex);
+    }
+
+    var total = 0;
+    for (var i = 0; i < values.length; i++) {
+      var isVisible = true;
+      if (typeof chart.getDataVisibility === 'function') {
+        isVisible = chart.getDataVisibility(i);
+      } else if (meta && meta.data && meta.data[i]) {
+        // Best-effort fallback if getDataVisibility isn't available.
+        isVisible = !meta.data[i].hidden;
+      }
+
+      if (!isVisible) continue;
+
+      var numeric = Number(values[i]);
+      if (Number.isFinite(numeric)) total += numeric;
+    }
+
+    return total;
+  }
+
+  function renderDoughnut(canvasId, labels, data, title, opts) {
     var ctx = get2dContext(canvasId);
     if (!ctx || !window.Chart) return;
+    var options = opts || {};
+    var dynamicPercentTooltip = options.dynamicPercentTooltip !== false;
+
+    var chartOptions = {
+      responsive: true,
+      maintainAspectRatio: false,
+    };
+
+    if (dynamicPercentTooltip) {
+      chartOptions.plugins = {
+        tooltip: {
+          callbacks: {
+            title: function (items) {
+              if (!items || !items.length) return '';
+              return String(items[0].label || '');
+            },
+            label: function (context) {
+              var value = Number(context.parsed);
+              if (!Number.isFinite(value)) value = 0;
+
+              var total = visibleTotal(context.chart, context.datasetIndex);
+              if (total <= 0) {
+                return String(value);
+              }
+
+              var pct = (value / total) * 100;
+              return String(value) + ' (' + pct.toFixed(1) + '%)';
+            },
+          },
+        },
+      };
+    }
     new Chart(ctx, {
       type: 'doughnut',
       data: {
@@ -74,10 +135,7 @@
           },
         ],
       },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-      },
+      options: chartOptions,
     });
   }
 

@@ -1298,15 +1298,11 @@ class MembershipStatsDashboardTests(TestCase):
         all_labels = charts["nationality_all_users"]["labels"]
         all_counts = charts["nationality_all_users"]["counts"]
         # Carol is locked (inactive) and should not be counted.
-        parsed_all_labels: list[str] = [str(label).rsplit(" (", 1)[0] for label in all_labels]
-        self.assertEqual(dict(zip(parsed_all_labels, all_counts, strict=False)), {"US": 1, "CA": 1})
-        self.assertTrue(any(str(label).endswith("(50.0%)") for label in all_labels))
+        self.assertEqual(dict(zip(all_labels, all_counts, strict=False)), {"US": 1, "CA": 1})
 
         active_labels = charts["nationality_active_members"]["labels"]
         active_counts = charts["nationality_active_members"]["counts"]
-        parsed_active_labels: list[str] = [str(label).rsplit(" (", 1)[0] for label in active_labels]
-        self.assertEqual(dict(zip(parsed_active_labels, active_counts, strict=False)), {"US": 1})
-        self.assertTrue(any(str(label).endswith("(100.0%)") for label in active_labels))
+        self.assertEqual(dict(zip(active_labels, active_counts, strict=False)), {"US": 1})
 
     def test_membership_stats_data_deduplicates_mirror_plus_other_memberships_per_target(self) -> None:
         cache.clear()
@@ -1491,8 +1487,7 @@ class MembershipStatsDashboardTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
         active = payload["charts"]["nationality_active_members"]
-        parsed_active_labels: list[str] = [str(label).rsplit(" (", 1)[0] for label in active["labels"]]
-        self.assertEqual(dict(zip(parsed_active_labels, active["counts"], strict=False)), {"US": 1})
+        self.assertEqual(dict(zip(active["labels"], active["counts"], strict=False)), {"US": 1})
 
     def test_membership_stats_geo_groups_invalid_and_unset_country_codes(self) -> None:
         cache.clear()
@@ -1562,11 +1557,9 @@ class MembershipStatsDashboardTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
         all_users = payload["charts"]["nationality_all_users"]
-        parsed_all_labels: list[str] = [str(label).rsplit(" (", 1)[0] for label in all_users["labels"]]
-        all_counts = dict(zip(parsed_all_labels, all_users["counts"], strict=False))
+        all_counts = dict(zip(all_users["labels"], all_users["counts"], strict=False))
         self.assertEqual(all_counts.get("Unknown/Unset"), 2)
 
         active_members = payload["charts"]["nationality_active_members"]
-        parsed_active_labels: list[str] = [str(label).rsplit(" (", 1)[0] for label in active_members["labels"]]
-        active_counts = dict(zip(parsed_active_labels, active_members["counts"], strict=False))
+        active_counts = dict(zip(active_members["labels"], active_members["counts"], strict=False))
         self.assertEqual(active_counts.get("Unknown/Unset"), 2)
