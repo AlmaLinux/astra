@@ -148,14 +148,14 @@
 
         if (nick && server && team) {
           const isDefault = (server === defaultServer) && (team === defaultTeam);
-          if (isDefault) return `mattermost:/${nick}`;
+          if (isDefault) return `mattermost://${nick}`;
           return `mattermost://${server}/${team}/${nick}`;
         }
       }
 
       // If the user enters @nick:server (missing team), keep it as a literal
       // value and let server-side validation produce a clear error.
-      return `mattermost:/${cleaned}`;
+      return `mattermost://${cleaned}`;
     }
 
     // IRC
@@ -164,7 +164,7 @@
       const nick = raw.slice(0, idx).trim();
       const server = raw.slice(idx + 1).trim();
       if (nick && server) {
-        if (server === defaultServer) return `irc:/${nick}`;
+        if (server === defaultServer) return `irc://${nick}`;
         return `irc://${server}/${nick}`;
       }
     }
@@ -173,11 +173,11 @@
       const nick = raw.slice(0, idx).trim();
       const server = raw.slice(idx + 1).trim();
       if (nick && server) {
-        if (server === defaultServer) return `irc:/${nick}`;
+        if (server === defaultServer) return `irc://${nick}`;
         return `irc://${server}/${nick}`;
       }
     }
-    return `irc:/${raw}`;
+    return `irc://${raw}`;
   }
 
   function buildRow(rowData) {

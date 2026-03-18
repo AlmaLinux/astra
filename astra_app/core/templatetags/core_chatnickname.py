@@ -11,12 +11,12 @@ def nickname(value: str | None, scheme: str | None = None) -> str:
     """Render a chat nickname as a link (Noggin-style).
 
     Supported schemes:
-    - Mattermost: produces a mattermost:// link
+    - Mattermost: produces a https:// link
     - IRC: produces an irc:// link
     - Matrix: produces a https://matrix.to link
 
     Input formats supported (best-effort):
-    - Stored URL forms: mattermost:/nick, mattermost://server/nick, irc:/nick, irc://server/nick, matrix:/nick, matrix://server/nick
+    - Stored URL forms: mattermost://nick, mattermost://server/team/nick, irc://nick, irc://server/nick, matrix://nick, matrix://server/nick
     - Plain forms: nick, @nick, nick:server, nick@server
     """
 
@@ -48,7 +48,7 @@ def channel(value: str | None, scheme: str | None = None) -> str:
     """Render a chat channel as a link.
 
     Supported schemes:
-    - Mattermost: produces a mattermost:// channel link
+    - Mattermost: produces a https:// channel link
     - IRC: produces an ircs:// channel link
     - Matrix: produces a https://matrix.to room alias link
     """

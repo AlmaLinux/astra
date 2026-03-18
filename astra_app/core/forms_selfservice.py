@@ -255,9 +255,9 @@ class ProfileForm(StyledForm):
         help_text=(
             "One per line (or comma-separated). "
             "Use URL-style values to specify protocol: "
-            "mattermost:/nick or mattermost://server/team/nick; "
-            "irc:/nick or irc://server/nick; "
-            "matrix:/nick or matrix://server/nick. "
+            "mattermost://nick or mattermost://server/team/nick; "
+            "irc://nick or irc://server/nick; "
+            "matrix://nick or matrix://server/nick. "
             "(Tip: Matrix handles like @nick:server are accepted too.)"
         ),
     )

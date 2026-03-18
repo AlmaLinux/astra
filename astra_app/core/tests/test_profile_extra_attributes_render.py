@@ -51,7 +51,7 @@ class ProfileExtraAttributesRenderTests(TestCase):
                 "fasTimezone": ["Europe/Paris"],
                 "fasLocale": ["en_US"],
                 "fasIRCNick": [
-                    "mattermost:/alice_mm",
+                    "mattermost://alice_mm",
                     "alice_irc",
                     "matrix://example.org/alice",
                     "irc://irc.example.org/bob",
@@ -76,7 +76,7 @@ class ProfileExtraAttributesRenderTests(TestCase):
 
         # Ensure common attributes render when present.
         self.assertIn("en_US", content)
-        self.assertIn("mattermost://chat.almalinux.org/almalinux/messages/@alice_mm", content)
+        self.assertIn("https://chat.almalinux.org/almalinux/messages/@alice_mm", content)
         self.assertIn("alice_irc", content)
         self.assertIn("alice_irc2", content)
         self.assertIn("bob:irc.example.org", content)

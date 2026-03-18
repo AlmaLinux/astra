@@ -304,7 +304,7 @@ class AdminIPAGroupCRUDTests(TestCase):
         self.assertEqual(created_group.fas_url, "https://example.com/group")
         self.assertEqual(created_group.fas_mailing_list, "testgroup@example.com")
         self.assertEqual(created_group.fas_discussion_url, "https://discussion.example.com/group")
-        self.assertEqual(created_group.fas_irc_channels, ["irc:/#testgroup"])
+        self.assertEqual(created_group.fas_irc_channels, ["irc://#testgroup"])
         save_mock.assert_called_once()
 
     def test_edit_group_toggle_fasgroup(self):

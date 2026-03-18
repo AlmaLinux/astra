@@ -56,13 +56,13 @@ class FreeIPAGroupSaveFASAttrsTests(SimpleTestCase):
             "fas1",
             {
                 "cn": ["fas1"],
-                "fasircchannel": ["irc:/#old"],
+                "fasircchannel": ["irc://#old"],
                 "objectclass": ["fasGroup"],
             },
         )
 
         # Change the set of channels to force a delta update.
-        group.fas_irc_channels = ["irc:/#old", "irc:/#new"]
+        group.fas_irc_channels = ["irc://#old", "irc://#new"]
 
         class _FakeClient:
             def __init__(self) -> None:

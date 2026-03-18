@@ -90,10 +90,14 @@ def parse_chat_identity(value: str, *, scheme_override: str | None = None) -> Pa
     if parsed_scheme:
         path = (parsed.path or "").lstrip("/")
         team = ""
+        server_from_url = _normalize_str(parsed.netloc) or ""
 
         if scheme == ChatScheme.mattermost:
-            # Stored Mattermost form is mattermost://server/team/nick.
-            # Legacy values may be mattermost://server/nick.
+            # Stored Mattermost forms:
+            # - mattermost://<nick> (defaults)
+            # - mattermost://server/team/<nick>
+            # - mattermost://server/team/messages/@<nick>
+            # - mattermost://server/<nick> (legacy)
             parts = [p for p in path.split("/") if p]
             if len(parts) >= 2:
                 team = parts[0]
@@ -101,15 +105,21 @@ def parse_chat_identity(value: str, *, scheme_override: str | None = None) -> Pa
                     nick = parts[2].lstrip("@")
                 else:
                     nick = parts[1]
+                server = server_from_url or default_server
+            elif len(parts) == 1:
+                nick = parts[0]
+                server = server_from_url or default_server
             else:
-                nick = parts[0] if parts else ""
+                # Default stored form: mattermost://<nick>
+                nick = server_from_url
+                server = default_server
         else:
             nick = path
+            server = server_from_url or default_server
 
         if not nick and parsed.fragment:
             nick = parsed.fragment.lstrip("#@")
         nick = nick.lstrip("@").strip()
-        server = _normalize_str(parsed.netloc) or default_server
     else:
         cleaned = raw.lstrip("@").strip()
         team = ""
@@ -222,7 +232,7 @@ def build_chat_nickname_link(value: str, *, scheme_override: str | None = None) 
             else:
                 return None
 
-        href = f"mattermost://{server}/{team}/messages/@{nick}"
+        href = f"https://{server}/{team}/messages/@{nick}"
         title = f"Mattermost on {server} ({team})"
 
         display = f"@{nick}"
@@ -297,14 +307,20 @@ def parse_chat_channel(value: str, *, scheme_override: str | None = None) -> Par
     team: str
 
     if parsed_scheme:
-        server = _normalize_str(parsed.netloc) or default_server
+        server_from_url = _normalize_str(parsed.netloc) or ""
+        server = server_from_url or default_server
         team = ""
 
         if scheme == ChatScheme.mattermost:
+            # Default stored form for channels uses a sentinel host:
+            # mattermost://channels/<channel>
+            if server_from_url == "channels":
+                server = default_server
+
             path = (parsed.path or "").lstrip("/")
             parts = [p for p in path.split("/") if p]
             # Stored forms:
-            # - mattermost:/channels/<channel>
+            # - mattermost://channels/<channel>
             # - mattermost://server/team/channels/<channel>
             channel = ""
             if len(parts) >= 3 and parts[1] == "channels":
@@ -398,7 +414,7 @@ def build_chat_channel_link(value: str, *, scheme_override: str | None = None) -
             else:
                 return None
 
-        href = f"mattermost://{server}/{team}/channels/{channel}"
+        href = f"https://{server}/{team}/channels/{channel}"
         title = f"Mattermost channel on {server} ({team})"
 
         display = f"~{channel}"
@@ -471,7 +487,7 @@ def normalize_chat_channels_text(value: str, *, max_item_len: int = 64) -> str:
                     channel = parts[1]
                 else:
                     raise ValueError(
-                        "Mattermost channels must be like mattermost:/channels/<channel> or mattermost://server/team/channels/<channel>."
+                        "Mattermost channels must be like mattermost://channels/<channel> or mattermost://server/team/channels/<channel>."
                     )
 
                 channel = channel.strip().lstrip("~")
@@ -492,7 +508,7 @@ def normalize_chat_channels_text(value: str, *, max_item_len: int = 64) -> str:
                         raise ValueError("This does not look like a valid Mattermost team name.")
 
                 if not server or (default_server and server == default_server and team == default_team):
-                    normalized.append(f"mattermost:/channels/{channel}")
+                    normalized.append(f"mattermost://channels/{channel}")
                 else:
                     normalized.append(f"mattermost://{server}/{team}/channels/{channel}")
                 continue
@@ -510,9 +526,9 @@ def normalize_chat_channels_text(value: str, *, max_item_len: int = 64) -> str:
             _validate_channel_name(scheme=scheme, channel=channel)
 
             if not server:
-                normalized.append(f"{scheme.value}:/{channel}")
+                normalized.append(f"{scheme.value}://{channel}")
             elif default_server and server == default_server:
-                normalized.append(f"{scheme.value}:/{channel}")
+                normalized.append(f"{scheme.value}://{channel}")
             else:
                 normalized.append(f"{scheme.value}://{server}/{channel}")
             continue
@@ -553,7 +569,7 @@ def normalize_chat_channels_text(value: str, *, max_item_len: int = 64) -> str:
                     raise ValueError("This does not look like a valid Mattermost team name.")
 
             if not server or (default_server and server == default_server and team == default_team):
-                normalized.append(f"mattermost:/channels/{channel}")
+                normalized.append(f"mattermost://channels/{channel}")
             else:
                 normalized.append(f"mattermost://{server}/{team}/channels/{channel}")
             continue
@@ -572,7 +588,7 @@ def normalize_chat_channels_text(value: str, *, max_item_len: int = 64) -> str:
                 raise ValueError("This does not look like a valid IRC server name.")
 
             if not server or (default_server and server == default_server):
-                normalized.append(f"irc:/{channel}")
+                normalized.append(f"irc://{channel}")
             else:
                 normalized.append(f"irc://{server}/{channel}")
             continue
@@ -603,6 +619,7 @@ def normalize_chat_nicknames_text(value: str, *, max_item_len: int = 64, allow_i
         if scheme_raw in {s.value for s in ChatScheme}:
             scheme = ChatScheme(scheme_raw)
             path = (parsed.path or "").lstrip("/")
+            netloc = _normalize_str(parsed.netloc)
             if scheme == ChatScheme.mattermost:
                 parts = [p for p in path.split("/") if p]
                 if len(parts) >= 2:
@@ -612,13 +629,23 @@ def normalize_chat_nicknames_text(value: str, *, max_item_len: int = 64, allow_i
                     else:
                         nick = parts[1]
                 else:
-                    nick = parts[0] if parts else ""
+                    if parts:
+                        nick = parts[0]
+                    else:
+                        # Default stored form: mattermost://<nick>
+                        nick = netloc
+                        netloc = ""
             else:
-                nick = path
+                if path:
+                    nick = path
+                else:
+                    # Default stored form: scheme://<nick>
+                    nick = netloc
+                    netloc = ""
             if not nick and parsed.fragment:
                 nick = parsed.fragment.lstrip("#@")
             nick = nick.lstrip("@").strip()
-            server = _normalize_str(parsed.netloc)
+            server = netloc
         else:
             # Heuristics for common inputs:
             # - Matrix: @nick:server
@@ -682,17 +709,17 @@ def normalize_chat_nicknames_text(value: str, *, max_item_len: int = 64, allow_i
             raise ValueError(f"Unsupported chat protocol: '{scheme}'")
 
         # Normalize to stored form:
-        # - irc/matrix: scheme:/nick (no server) or scheme://server/nick
-        # - mattermost: mattermost:/nick (defaults) or mattermost://server/team/nick
+        # - irc/matrix: scheme://nick (no server) or scheme://server/nick
+        # - mattermost: mattermost://nick (defaults) or mattermost://server/team/nick
         if scheme == ChatScheme.mattermost:
             if server:
                 normalized.append(f"{scheme.value}://{server}/{team}/{nick}")
             else:
-                normalized.append(f"{scheme.value}:/{nick}")
+                normalized.append(f"{scheme.value}://{nick}")
         else:
             if server:
                 normalized.append(f"{scheme.value}://{server}/{nick}")
             else:
-                normalized.append(f"{scheme.value}:/{nick}")
+                normalized.append(f"{scheme.value}://{nick}")
 
     return "\n".join(normalized)

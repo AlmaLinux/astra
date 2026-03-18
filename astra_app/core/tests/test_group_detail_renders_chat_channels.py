@@ -25,9 +25,10 @@ class GroupDetailRendersChatChannelsTests(TestCase):
                 "membermanager_user": [],
                 "membermanager_group": [],
                 "fasircchannel": [
-                    "irc:/#dev",
+                    "irc://#dev",
                     "matrix://matrix.org/#almalinux",
                     "mattermost://chat.almalinux.org/almalinux/channels/general",
+                    "mattermost://channels/atomicsig",
                 ],
                 "objectclass": ["fasgroup"],
             },
@@ -44,5 +45,8 @@ class GroupDetailRendersChatChannelsTests(TestCase):
         self.assertContains(resp, 'href="https://matrix.to/#/#almalinux:matrix.org')
         self.assertContains(resp, ">#almalinux</a>")
 
-        self.assertContains(resp, 'href="mattermost://chat.almalinux.org/almalinux/channels/general"')
+        self.assertContains(resp, 'href="https://chat.almalinux.org/almalinux/channels/general"')
         self.assertContains(resp, ">~general</a>")
+
+        self.assertContains(resp, 'href="https://chat.almalinux.org/almalinux/channels/atomicsig"')
+        self.assertContains(resp, ">~atomicsig</a>")

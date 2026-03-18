@@ -133,7 +133,7 @@ class GroupSponsorCanEditGroupInfoTests(TestCase):
         self.assertEqual(group.description, "Updated desc")
         self.assertEqual(group.fas_url, "https://example.org/new")
         self.assertEqual(group.fas_mailing_list, "new@example.org")
-        self.assertEqual(sorted(group.fas_irc_channels), ["irc:/#new", "irc:/#new-dev"])
+        self.assertEqual(sorted(group.fas_irc_channels), ["irc://#new", "irc://#new-dev"])
         self.assertEqual(group.fas_discussion_url, "https://discussion.example.org/c/new")
         group.save.assert_called_once()
 
@@ -212,7 +212,7 @@ class GroupSponsorCanEditGroupInfoTests(TestCase):
 
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(resp["Location"], "/group/fas1/")
-        self.assertEqual(group.fas_irc_channels, ["mattermost:/channels/atomicsig"])
+        self.assertEqual(group.fas_irc_channels, ["mattermost://channels/atomicsig"])
         group.save.assert_called_once()
 
     def test_sponsor_save_connection_error_shows_unavailable_message(self) -> None:

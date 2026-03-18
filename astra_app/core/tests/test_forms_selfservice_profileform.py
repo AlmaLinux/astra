@@ -131,7 +131,7 @@ class ProfileFormValidationTests(SimpleTestCase):
                 "givenname": "Alice",
                 "sn": "User",
                 "country_code": "US",
-                "fasIRCNick": "matrix://matrix.example/alice\nmatrix:/bob",
+                "fasIRCNick": "matrix://matrix.example/alice\nmatrix://bob",
             }
         )
         self.assertTrue(form.is_valid(), form.errors)
@@ -140,7 +140,7 @@ class ProfileFormValidationTests(SimpleTestCase):
         # This ensures we can render correct links later.
         cleaned = form.cleaned_data["fasIRCNick"].splitlines()
         self.assertIn("matrix://matrix.example/alice", cleaned)
-        self.assertIn("matrix:/bob", cleaned)
+        self.assertIn("matrix://bob", cleaned)
 
     def test_chat_nick_accepts_mattermost_url_forms_and_keeps_scheme(self):
         form = ProfileForm(
@@ -148,14 +148,14 @@ class ProfileFormValidationTests(SimpleTestCase):
                 "givenname": "Alice",
                 "sn": "User",
                 "country_code": "US",
-                "fasIRCNick": "mattermost://chat.almalinux.org/almalinux/alice\nmattermost:/bob",
+                "fasIRCNick": "mattermost://chat.almalinux.org/almalinux/alice\nmattermost://bob",
             }
         )
         self.assertTrue(form.is_valid(), form.errors)
 
         cleaned = form.cleaned_data["fasIRCNick"].splitlines()
         self.assertIn("mattermost://chat.almalinux.org/almalinux/alice", cleaned)
-        self.assertIn("mattermost:/bob", cleaned)
+        self.assertIn("mattermost://bob", cleaned)
 
     def test_chat_nick_rejects_mattermost_custom_server_without_team(self):
         form = ProfileForm(

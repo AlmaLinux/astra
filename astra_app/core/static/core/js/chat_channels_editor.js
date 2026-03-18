@@ -77,7 +77,7 @@
       }
 
       if (rest.startsWith('/')) {
-        // Stored default forms: irc:/#chan, matrix:/#chan, mattermost:/channels/chan
+        // Stored default forms: irc://#chan, matrix://#chan, mattermost://channels/chan
         value = rest.slice(1);
         if (scheme === 'mattermost') {
           const parts2 = String(value || '').split('/').filter(Boolean);
@@ -157,13 +157,13 @@
 
         if (channel && server && team) {
           const isDefault = (server === defaultServer) && (team === defaultTeam);
-          if (isDefault) return `mattermost:/channels/${channel}`;
+          if (isDefault) return `mattermost://channels/${channel}`;
           return `mattermost://${server}/${team}/channels/${channel}`;
         }
       }
 
       // Default form.
-      if (cleaned) return `mattermost:/channels/${cleaned}`;
+      if (cleaned) return `mattermost://channels/${cleaned}`;
       return '';
     }
 
@@ -188,11 +188,11 @@
       const ch = raw.slice(0, idx).trim();
       const server = raw.slice(idx + 1).trim();
       if (ch && server) {
-        if (server === defaultServer) return `irc:/${ch}`;
+        if (server === defaultServer) return `irc://${ch}`;
         return `irc://${server}/${ch}`;
       }
     }
-    return `irc:/${raw}`;
+    return `irc://${raw}`;
   }
 
   function buildRow(rowData) {
