@@ -187,7 +187,7 @@ def _profile_context_for_user(
         # Mastodon instances commonly live under many different domains.
         # We special-case hostnames that contain a `mastodon` DNS label (e.g. mastodon.social,
         # www.mastodon.social, mastodon.example.org) in _social_platform_key_for_url.
-        "mastodon": ("mstdn.social", "fosstodon.org", "hachyderm.io"),
+        "mastodon": ("mstdn.social", "fosstodon.org", "hachyderm.io", "mstdn.jp", "meshed.cloud", "mas.to", "big.sound-city.dk"),
         # "X" is still commonly shared as twitter.com.
         "x": ("x.com", "twitter.com"),
         "linkedin": ("linkedin.com", "lnkd.in"),
