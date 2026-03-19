@@ -31,8 +31,11 @@
           server = withoutSlashes.slice(0, firstSlash);
           nick = withoutSlashes.slice(firstSlash + 1);
         } else {
-          server = withoutSlashes;
-          nick = '';
+          // For stored chat nicknames, scheme URLs like mattermost://<nick> are valid and
+          // common (defaults). Treat the authority component as the nick when there's no
+          // path component.
+          nick = withoutSlashes;
+          server = '';
         }
       } else if (rest.startsWith('/')) {
         nick = rest.slice(1);
@@ -96,6 +99,8 @@
       return { scheme, value };
     }
 
+    // IRC
+    const defaultServer = defaults.irc;
     const value = (server && defaultServer && server !== defaultServer) ? (nick ? `${nick}:${server}` : server) : nick;
     return { scheme, value };
   }

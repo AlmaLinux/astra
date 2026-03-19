@@ -1,4 +1,5 @@
 
+import re
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -139,6 +140,42 @@ class SelfServiceSettingsPagesTests(TestCase):
         widget_attrs = form.fields["fasTimezone"].widget.attrs
         self.assertEqual(widget_attrs.get("list"), "timezone-options")
         self.assertIn("Zurich", widget_attrs.get("placeholder", ""))
+
+    def test_settings_profile_renders_chat_nicknames_editor_once(self) -> None:
+        factory = RequestFactory()
+
+        fake_user = SimpleNamespace(
+            username="alice",
+            email="a@example.org",
+            is_authenticated=True,
+            _user_data={
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "cn": ["Alice User"],
+                "fasIRCNick": ["irc://alice"],
+            },
+        )
+
+        request = factory.get("/settings/?tab=profile")
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fake_user):
+            response = views_settings.settings_root(request)
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode("utf-8")
+
+        # The label should only render once; the textarea fallback should not repeat it.
+        self.assertIn("Chat Nicknames", content)
+        label_for_re = re.compile(r'<label\b[^>]*\bfor="id_fasIRCNick"', re.IGNORECASE)
+        self.assertEqual(len(label_for_re.findall(content)), 1)
+
+        # The progressive-enhancement widget should be present with the expected hooks.
+        self.assertIn('id="chat-nicks-widget"', content)
+        self.assertIn('js-chat-nicks-editor', content)
+        self.assertIn('data-textarea-id="id_fasIRCNick"', content)
+        self.assertIn("core/js/chat_nicknames_editor.js", content)
 
     def test_settings_privacy_get_accepts_boolean_fasisprivate(self):
         factory = RequestFactory()

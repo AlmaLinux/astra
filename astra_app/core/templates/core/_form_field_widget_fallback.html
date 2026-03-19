@@ -1,5 +1,5 @@
 <div class="form-group{% if wrapper_class %} {{ wrapper_class }}{% endif %}">
-  {% if show_label|default:True %}
+  {% if show_label != 0 %}
     {% if label_override %}
       <label for="{{ field.id_for_label }}">{{ label_override }}</label>
     {% else %}

@@ -148,7 +148,7 @@ class ProfileFormValidationTests(SimpleTestCase):
                 "givenname": "Alice",
                 "sn": "User",
                 "country_code": "US",
-                "fasIRCNick": "mattermost://chat.almalinux.org/almalinux/alice\nmattermost://bob",
+                "fasIRCNick": "mattermost://chat.almalinux.org/almalinux/alice\nmattermost://bob\nmattermost://alex.iribarren",
             }
         )
         self.assertTrue(form.is_valid(), form.errors)
@@ -156,6 +156,7 @@ class ProfileFormValidationTests(SimpleTestCase):
         cleaned = form.cleaned_data["fasIRCNick"].splitlines()
         self.assertIn("mattermost://chat.almalinux.org/almalinux/alice", cleaned)
         self.assertIn("mattermost://bob", cleaned)
+        self.assertIn("mattermost://alex.iribarren", cleaned)
 
     def test_chat_nick_rejects_mattermost_custom_server_without_team(self):
         form = ProfileForm(
