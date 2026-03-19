@@ -113,6 +113,7 @@ class ProfileExtraAttributesRenderTests(TestCase):
         bsky_url = "bsky.social./profile/alice.test"
         bsky_subdomain_url = "alice.bsky.social"
         mastodon_url = "https://mastodon.social/@alice"
+        mastodon_wildcard_url = "https://mastodon.example.org/@bob"
         x_url = "https://twitter.com/alice"
         x_protocol_relative_url = "//x.com/bob"
         x_unsafe_scheme_url = "javascript://twitter.com/evil"
@@ -139,7 +140,7 @@ class ProfileExtraAttributesRenderTests(TestCase):
                 # Some legacy FreeIPA data may store multiple URLs in a single value.
                 "fasWebsiteUrl": [
                     (
-                        f"{bsky_url}\n{bsky_subdomain_url}\n{mastodon_url}\n{x_url}\n{x_protocol_relative_url}\n{x_unsafe_scheme_url}\n"
+                        f"{bsky_url}\n{bsky_subdomain_url}\n{mastodon_url}\n{mastodon_wildcard_url}\n{x_url}\n{x_protocol_relative_url}\n{x_unsafe_scheme_url}\n"
                         f"{linkedin_url}\n{youtube_url}\n{instagram_url}\n{reddit_user_url}\n{reddit_subreddit_url}\n{tiktok_url}\n{signal_url}\n"
                         f"{normal_url}\n{schemeless_website_url}\n{unsafe_website_url}"
                     )
@@ -158,6 +159,7 @@ class ProfileExtraAttributesRenderTests(TestCase):
         self.assertIn(bsky_url, content)
         self.assertIn(bsky_subdomain_url, content)
         self.assertIn(mastodon_url, content)
+        self.assertIn(mastodon_wildcard_url, content)
         self.assertIn(x_url, content)
         self.assertIn(linkedin_url, content)
         self.assertIn(youtube_url, content)
@@ -256,6 +258,9 @@ class ProfileExtraAttributesRenderTests(TestCase):
 
         self.assertEqual(mastodon_anchors[mastodon_url], ["@alice@mastodon.social"])
         self.assertNotEqual(mastodon_anchors[mastodon_url][0], mastodon_url)
+
+        self.assertEqual(mastodon_anchors[mastodon_wildcard_url], ["@bob@mastodon.example.org"])
+        self.assertNotEqual(mastodon_anchors[mastodon_wildcard_url][0], mastodon_wildcard_url)
 
         self.assertIn('fab fa-x-twitter', x_row)
         self.assertEqual(x_anchors[x_url], ["@alice"])

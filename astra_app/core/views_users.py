@@ -184,7 +184,10 @@ def _profile_context_for_user(
     # Keep minimal and conservative; unknown domains remain in Website.
     social_platform_domains: dict[str, tuple[str, ...]] = {
         "bluesky": ("bsky.app", "bsky.social"),
-        "mastodon": ("mastodon.social", "fosstodon.org", "hachyderm.io"),
+        # Mastodon instances commonly live under many different domains.
+        # We special-case hostnames that contain a `mastodon` DNS label (e.g. mastodon.social,
+        # www.mastodon.social, mastodon.example.org) in _social_platform_key_for_url.
+        "mastodon": ("mstdn.social", "fosstodon.org", "hachyderm.io"),
         # "X" is still commonly shared as twitter.com.
         "x": ("x.com", "twitter.com"),
         "linkedin": ("linkedin.com", "lnkd.in"),
@@ -315,6 +318,12 @@ def _profile_context_for_user(
         host = _host_for_url(url)
         if not host:
             return None
+
+        # Mastodon: accept any hostname that includes a `mastodon` label (mastodon.*)
+        # without maintaining an ever-growing allowlist of `mastodon.<tld>` instances.
+        host_labels = [p for p in host.split(".") if p]
+        if any(label == "mastodon" for label in host_labels[:-1]):
+            return "mastodon"
 
         for platform_key, domains in social_platform_domains.items():
             if any(host == domain or host.endswith(f".{domain}") for domain in domains):
