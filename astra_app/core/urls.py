@@ -184,7 +184,12 @@ urlpatterns = [
     path("membership/request/", views_membership.membership_request, name="membership-request"),
     path(
         "membership/request/<int:pk>/",
-        views_membership.membership_request_self,
+        views_membership.membership_request_detail,
+        name="membership-request-detail",
+    ),
+    path(
+        "membership/request/<int:pk>/",
+        views_membership.membership_request_detail,
         name="membership-request-self",
     ),
     path(
@@ -195,8 +200,8 @@ urlpatterns = [
     path("membership/requests/", views_membership.membership_requests, name="membership-requests"),
     path(
         "membership/requests/<int:pk>/",
-        views_membership.membership_request_detail,
-        name="membership-request-detail",
+        views_membership.membership_request_detail_legacy_redirect,
+        name="membership-request-detail-legacy",
     ),
     path(
         "membership/requests/<int:pk>/notes/add/",

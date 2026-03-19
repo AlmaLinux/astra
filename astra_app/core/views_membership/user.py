@@ -24,7 +24,7 @@ from core.membership_response_normalization import (
     normalize_membership_request_responses,
 )
 from core.models import Membership, MembershipRequest, MembershipType, Organization
-from core.permissions import ASTRA_ADD_MEMBERSHIP
+from core.permissions import ASTRA_ADD_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP
 from core.views_utils import (
     _normalize_str,
     block_action_without_coc,
@@ -159,7 +159,7 @@ def membership_request(request: HttpRequest, organization_id: int | None = None)
                     .first()
                 )
                 if existing_request is not None:
-                    request_url = reverse("membership-request-self", args=[existing_request.pk])
+                    request_url = reverse("membership-request-detail", args=[existing_request.pk])
                     messages.info(
                         request,
                         format_html(
@@ -221,7 +221,7 @@ def membership_request(request: HttpRequest, organization_id: int | None = None)
                         )
                     )
                 ):
-                    request_url = reverse("membership-request-self", args=[existing_request.pk])
+                    request_url = reverse("membership-request-detail", args=[existing_request.pk])
                     messages.info(
                         request,
                         format_html(
@@ -316,19 +316,20 @@ def _user_can_access_membership_request(*, username: str, membership_request: Me
     return str(org.representative or "").strip().lower() == normalized_username
 
 
-def membership_request_self(request: HttpRequest, pk: int) -> HttpResponse:
-    username = get_username(request)
-    if not username:
-        raise Http404("User not found")
-
-    req = get_object_or_404(
+def _load_membership_request_for_detail(*, pk: int) -> MembershipRequest:
+    return get_object_or_404(
         MembershipRequest.objects.select_related("membership_type", "requested_organization"),
         pk=pk,
     )
-    if not _user_can_access_membership_request(username=username, membership_request=req):
-        # Avoid leaking that the request exists.
-        raise Http404("Not found")
 
+
+def _render_membership_request_detail_for_self(
+    *,
+    request: HttpRequest,
+    username: str,
+    membership_request: MembershipRequest,
+) -> HttpResponse:
+    req = membership_request
     organization = req.requested_organization
 
     fu = FreeIPAUser.get(username)
@@ -360,7 +361,7 @@ def membership_request_self(request: HttpRequest, pk: int) -> HttpResponse:
                 updated_responses=form.responses(),
             )
         except ValidationError as e:
-            msg = e.messages[0] if getattr(e, "messages", None) else str(e)
+            msg = e.messages[0] if e.messages else str(e)
             form.add_error(None, msg)
             return render(
                 request,
@@ -374,7 +375,7 @@ def membership_request_self(request: HttpRequest, pk: int) -> HttpResponse:
             )
 
         messages.success(request, "Your request has been resubmitted for review.")
-        return redirect("membership-request-self", pk=req.pk)
+        return redirect("membership-request-detail", pk=req.pk)
 
     form = MembershipRequestUpdateResponsesForm(membership_request=req)
     if req.status != MembershipRequest.Status.on_hold:
@@ -410,6 +411,78 @@ def membership_request_self(request: HttpRequest, pk: int) -> HttpResponse:
     )
 
 
+def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
+    """Canonical membership request detail view.
+
+    Serves both committee and self-service viewers at /membership/request/<pk>/.
+    Unauthorized viewers receive 404 to avoid request-existence leakage.
+    """
+
+    username = get_username(request)
+    if not username:
+        raise Http404("User not found")
+
+    req = _load_membership_request_for_detail(pk=pk)
+
+    can_view_as_committee, can_view_as_self = _membership_request_detail_access_flags(
+        request,
+        username=username,
+        membership_request=req,
+    )
+
+    if not can_view_as_committee and not can_view_as_self:
+        raise Http404("Not found")
+
+    if can_view_as_committee:
+        from core.views_membership.committee import render_membership_request_detail_for_committee
+
+        return render_membership_request_detail_for_committee(request=request, membership_request=req)
+
+    return _render_membership_request_detail_for_self(request=request, username=username, membership_request=req)
+
+
+def membership_request_self(request: HttpRequest, pk: int) -> HttpResponse:
+    """Back-compat alias for the canonical request detail view."""
+    return membership_request_detail(request, pk)
+
+
+def membership_request_detail_legacy_redirect(request: HttpRequest, pk: int) -> HttpResponse:
+    """Legacy detail route (/membership/requests/<pk>/) -> canonical redirect.
+
+    Redirects only for authorized viewers; otherwise returns 404 to avoid leaking
+    that a request exists.
+    """
+    if request.method != "GET":
+        raise Http404("Not found")
+
+    username = get_username(request)
+    if not username:
+        raise Http404("User not found")
+
+    req = _load_membership_request_for_detail(pk=pk)
+
+    can_view_as_committee, can_view_as_self = _membership_request_detail_access_flags(
+        request,
+        username=username,
+        membership_request=req,
+    )
+    if not can_view_as_committee and not can_view_as_self:
+        raise Http404("Not found")
+
+    return redirect("membership-request-detail", pk=req.pk)
+
+
+def _membership_request_detail_access_flags(
+    request: HttpRequest,
+    *,
+    username: str,
+    membership_request: MembershipRequest,
+) -> tuple[bool, bool]:
+    can_view_as_committee = bool(request.user.has_perm(ASTRA_VIEW_MEMBERSHIP))
+    can_view_as_self = _user_can_access_membership_request(username=username, membership_request=membership_request)
+    return can_view_as_committee, can_view_as_self
+
+
 @post_only_404
 def membership_request_rescind(request: HttpRequest, pk: int) -> HttpResponse:
     username = get_username(request)
@@ -438,6 +511,8 @@ def membership_request_rescind(request: HttpRequest, pk: int) -> HttpResponse:
 
 __all__ = [
     "membership_request",
+    "membership_request_detail",
+    "membership_request_detail_legacy_redirect",
     "membership_request_rescind",
     "membership_request_self",
 ]

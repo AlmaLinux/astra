@@ -141,11 +141,7 @@
         <div>
           <div class="font-weight-bold">{{ pending_request.membership_type.name }}</div>
           <div class="small text-muted">
-            <a href="{% if membership_is_owner %}
-              {% url 'membership-request-self' pending_request.request_id %}
-              {% else %}
-              {% url 'membership-request-detail' pending_request.request_id %}
-              {% endif %}">Request #{{ pending_request.request_id }}</a>
+            <a href="{% url 'membership-request-detail' pending_request.request_id %}">Request #{{ pending_request.request_id }}</a>
           </div>
           {% if pending_request.organization_name %}
             <div class="small text-muted">Organization: {{ pending_request.organization_name }}</div>

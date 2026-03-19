@@ -16,7 +16,7 @@ From context processors (auto-available):
 {% if request_obj %}
   {% if request_obj.status == 'on_hold' %}
     {% if is_owner %}
-      <a class="badge membership-action-required alx-status-badge alx-status-badge--action" href="{% url 'membership-request-self' request_obj.pk %}">Action required</a>
+      <a class="badge membership-action-required alx-status-badge alx-status-badge--action" href="{% url 'membership-request-detail' request_obj.pk %}">Action required</a>
     {% elif membership_can_view %}
       <a class="badge membership-action-required alx-status-badge alx-status-badge--action" href="{% url 'membership-request-detail' request_obj.pk %}">On hold</a>
     {% else %}
@@ -24,7 +24,7 @@ From context processors (auto-available):
     {% endif %}
   {% else %}
     {% if is_owner %}
-      <a class="badge membership-under-review alx-status-badge alx-status-badge--review" href="{% url 'membership-request-self' request_obj.pk %}">Under review</a>
+      <a class="badge membership-under-review alx-status-badge alx-status-badge--review" href="{% url 'membership-request-detail' request_obj.pk %}">Under review</a>
     {% elif membership_can_view %}
       <a class="badge membership-under-review alx-status-badge alx-status-badge--review" href="{% url 'membership-request-detail' request_obj.pk %}">Under review</a>
     {% else %}
@@ -35,7 +35,7 @@ From context processors (auto-available):
   {% with badge_label=membership.membership_type.name tier_class=membership.membership_type.code|default:""|membership_tier_class %}
     {% if request_id %}
       {% if is_owner %}
-        <a class="badge alx-status-badge{% if is_pill %} badge-pill p-2{% endif %} {{ tier_class }} alx-status-badge--active" href="{% url 'membership-request-self' request_id %}">{{ badge_label }}</a>
+        <a class="badge alx-status-badge{% if is_pill %} badge-pill p-2{% endif %} {{ tier_class }} alx-status-badge--active" href="{% url 'membership-request-detail' request_id %}">{{ badge_label }}</a>
       {% elif membership_can_view %}
         <a class="badge alx-status-badge{% if is_pill %} badge-pill p-2{% endif %} {{ tier_class }} alx-status-badge--active" href="{% url 'membership-request-detail' request_id %}">{{ badge_label }}</a>
       {% else %}

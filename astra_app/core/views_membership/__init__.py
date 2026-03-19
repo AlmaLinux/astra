@@ -21,7 +21,6 @@ from core.views_membership.committee import (
     membership_notes_aggregate_note_add,
     membership_request_approve,
     membership_request_approve_on_hold,
-    membership_request_detail,
     membership_request_ignore,
     membership_request_note_add,
     membership_request_reject,
@@ -33,6 +32,8 @@ from core.views_membership.committee import (
 )
 from core.views_membership.user import (
     membership_request,
+    membership_request_detail,
+    membership_request_detail_legacy_redirect,
     membership_request_rescind,
     membership_request_self,
 )
@@ -54,6 +55,7 @@ __all__ = [
     "membership_request_approve",
     "membership_request_approve_on_hold",
     "membership_request_detail",
+    "membership_request_detail_legacy_redirect",
     "membership_request_ignore",
     "membership_request_note_add",
     "membership_request_reject",

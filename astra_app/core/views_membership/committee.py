@@ -299,7 +299,20 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
 
 @permission_required(ASTRA_VIEW_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
-    req = get_object_or_404(MembershipRequest.objects.select_related("membership_type", "requested_organization"), pk=pk)
+    req = get_object_or_404(
+        MembershipRequest.objects.select_related("membership_type", "requested_organization"),
+        pk=pk,
+    )
+    return render_membership_request_detail_for_committee(request=request, membership_request=req)
+
+
+def build_membership_request_detail_committee_context(
+    *,
+    request: HttpRequest,
+    membership_request: MembershipRequest,
+) -> dict[str, object]:
+    req = membership_request
+
     show_on_hold_approve = req.status == MembershipRequest.Status.on_hold and request.user.has_perm(ASTRA_ADD_MEMBERSHIP)
 
     contact_url = ""
@@ -353,22 +366,30 @@ def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
     requested_by_username = requested_log.actor_username if requested_log is not None else ""
     requested_by_full_name, requested_by_deleted = _resolve_requested_by(requested_by_username)
 
+    return {
+        "req": req,
+        "target_user": target_user,
+        "target_full_name": target_full_name,
+        "target_deleted": target_deleted,
+        "embargoed_country_code": embargoed_country_code,
+        "embargoed_country_label": embargoed_country_label,
+        "requested_by_username": requested_by_username,
+        "requested_by_full_name": requested_by_full_name,
+        "requested_by_deleted": requested_by_deleted,
+        "contact_url": contact_url,
+        "show_on_hold_approve": show_on_hold_approve,
+    }
+
+
+def render_membership_request_detail_for_committee(
+    *,
+    request: HttpRequest,
+    membership_request: MembershipRequest,
+) -> HttpResponse:
     return render(
         request,
         "core/membership_request_detail.html",
-        {
-            "req": req,
-            "target_user": target_user,
-            "target_full_name": target_full_name,
-            "target_deleted": target_deleted,
-            "embargoed_country_code": embargoed_country_code,
-            "embargoed_country_label": embargoed_country_label,
-            "requested_by_username": requested_by_username,
-            "requested_by_full_name": requested_by_full_name,
-            "requested_by_deleted": requested_by_deleted,
-            "contact_url": contact_url,
-            "show_on_hold_approve": show_on_hold_approve,
-        },
+        build_membership_request_detail_committee_context(request=request, membership_request=membership_request),
     )
 
 
@@ -827,7 +848,7 @@ def run_membership_request_action(request: HttpRequest, pk: int, *, action: str)
         custom_email = bool(str(request.POST.get("custom_email") or "").strip())
         rfi_message = str(request.POST.get("rfi_message") or "").strip()
 
-        application_url = request.build_absolute_uri(reverse("membership-request-self", args=[req.pk]))
+        application_url = request.build_absolute_uri(reverse("membership-request-detail", args=[req.pk]))
 
         _log, email_error = put_membership_request_on_hold(
             membership_request=req,

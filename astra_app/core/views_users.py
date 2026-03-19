@@ -316,7 +316,7 @@ def _profile_context_for_user(
                 {
                     "id": "membership-action-required-alert",
                     "label": "Help us review your membership request",
-                    "url": reverse("membership-request-self", args=[request_id]),
+                    "url": reverse("membership-request-detail", args=[request_id]),
                     "url_label": "Add details",
                 }
             )
@@ -330,7 +330,7 @@ def _profile_context_for_user(
                 {
                     "id": "sponsorship-action-required-alert",
                     "label": "Help us review your sponsorship request",
-                    "url": reverse("membership-request-self", args=[request_id]),
+                    "url": reverse("membership-request-detail", args=[request_id]),
                     "url_label": "Add details",
                 }
             )
