@@ -1,4 +1,5 @@
 import logging
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from avatar.templatetags.avatar_tags import avatar_url
@@ -17,7 +18,7 @@ from core.agreements import (
 from core.country_codes import country_code_status_from_user_data
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import FreeIPAUser
-from core.ipa_user_attrs import _data_get, _first, _get_full_user, _value_to_text
+from core.ipa_user_attrs import _data_get, _first, _get_full_user, _split_list_field, _value_to_text
 from core.membership import (
     build_pending_request_context,
     compute_membership_requestability_context,
@@ -160,9 +161,214 @@ def _profile_context_for_user(
             return [s] if s else []
         return []
 
+    def _host_for_url(url: str) -> str | None:
+        """Return lowercase hostname, resilient to scheme-less inputs."""
+
+        s = url.strip()
+        if not s:
+            return None
+
+        parsed = urlsplit(s)
+        host = parsed.hostname
+        if not host:
+            parsed = urlsplit(f"//{s}")
+            host = parsed.hostname
+
+        if not host:
+            return None
+
+        host = host.lower().removesuffix(".")
+        return host
+
+    # Domain-based "clues" for common social profile URLs.
+    # Keep minimal and conservative; unknown domains remain in Website.
+    social_platform_domains: dict[str, tuple[str, ...]] = {
+        "bluesky": ("bsky.app", "bsky.social"),
+        "mastodon": ("mastodon.social", "fosstodon.org", "hachyderm.io"),
+        # "X" is still commonly shared as twitter.com.
+        "x": ("x.com", "twitter.com"),
+        "linkedin": ("linkedin.com", "lnkd.in"),
+        "facebook": ("facebook.com",),
+        "instagram": ("instagram.com", "instagr.am"),
+        "youtube": ("youtube.com", "youtu.be"),
+        "reddit": ("reddit.com",),
+        "tiktok": ("tiktok.com",),
+        "signal": ("signal.me", "signal.group"),
+    }
+
+    social_platform_specs: dict[str, dict[str, str]] = {
+        "bluesky": {"label": "Bluesky", "title": "Bluesky URLs", "icon": "fab fa-bluesky"},
+        "mastodon": {"label": "Mastodon", "title": "Mastodon URLs", "icon": "fab fa-mastodon"},
+        "x": {"label": "X (Twitter)", "title": "X (Twitter) URLs", "icon": "fab fa-x-twitter"},
+        "linkedin": {"label": "LinkedIn", "title": "LinkedIn URLs", "icon": "fab fa-linkedin"},
+        "facebook": {"label": "Facebook", "title": "Facebook URLs", "icon": "fab fa-facebook"},
+        "instagram": {"label": "Instagram", "title": "Instagram URLs", "icon": "fab fa-instagram"},
+        "youtube": {"label": "YouTube", "title": "YouTube URLs", "icon": "fab fa-youtube"},
+        "reddit": {"label": "Reddit", "title": "Reddit URLs", "icon": "fab fa-reddit"},
+        "tiktok": {"label": "TikTok", "title": "TikTok URLs", "icon": "fab fa-tiktok"},
+        "signal": {"label": "Signal", "title": "Signal URLs", "icon": "fab fa-signal-messenger"},
+    }
+
+    def _safe_external_href(url: str) -> str | None:
+        """Return a safe external href for user-provided URLs.
+
+        Security/robustness:
+        - Treat scheme-less inputs like "example.com/path" as external by normalizing to https://.
+        - Treat protocol-relative inputs like "//example.com/path" as external by normalizing to https:.
+        - Block non-http(s) schemes (mailto:, javascript:, ftp:, ...): return None so templates render
+          plain text instead of a clickable link.
+        """
+
+        s = url.strip()
+        if not s:
+            return None
+
+        if s.startswith("//"):
+            parsed = urlsplit(s)
+            return f"https:{s}" if parsed.hostname else None
+
+        parsed = urlsplit(s)
+        if parsed.scheme:
+            if parsed.scheme in {"http", "https"} and parsed.hostname:
+                return s
+            return None
+
+        parsed = urlsplit(f"//{s}")
+        return f"https://{s}" if parsed.hostname else None
+
+    def _social_display_text(platform_key: str, url: str) -> str:
+        host = _host_for_url(url)
+        fallback = host or url.strip() or ""
+
+        s = url.strip()
+        if not s:
+            return fallback
+
+        parsed = urlsplit(s)
+        if not parsed.hostname:
+            parsed = urlsplit(f"//{s}")
+
+        path = parsed.path or ""
+        segments = [seg for seg in path.split("/") if seg]
+
+        match platform_key:
+            case "bluesky":
+                # Common forms: https://bsky.app/profile/<handle> or /profile/<handle>
+                if "profile" in segments:
+                    idx = segments.index("profile")
+                    if idx + 1 < len(segments):
+                        handle = segments[idx + 1].lstrip("@").strip()
+                        if handle:
+                            return f"@{handle}"
+                if host and host.endswith(".bsky.social") and host != "bsky.social":
+                    return f"@{host}"
+                return host or fallback
+            case "x":
+                if segments:
+                    user = segments[0].lstrip("@").strip()
+                    if user:
+                        return f"@{user}"
+                return host or fallback
+            case "instagram" | "tiktok":
+                if segments:
+                    user = segments[0].lstrip("@").strip()
+                    if user:
+                        return f"@{user}"
+                return host or fallback
+            case "reddit":
+                if len(segments) >= 2 and segments[0] in {"u", "user"}:
+                    name = segments[1].strip()
+                    if name:
+                        return f"u/{name}"
+                if len(segments) >= 2 and segments[0] == "r":
+                    name = segments[1].strip()
+                    if name:
+                        return f"r/{name}"
+                return host or fallback
+            case "mastodon":
+                if host:
+                    at_segment = next((seg for seg in segments if seg.startswith("@") and seg.strip("@")), "")
+                    if at_segment:
+                        user = at_segment.lstrip("@").strip()
+                        if user:
+                            return f"@{user}@{host}"
+                return host or fallback
+            case "signal":
+                # Do not attempt to surface phone numbers or group IDs.
+                return host or "Signal link"
+            case "youtube":
+                if segments and segments[0].startswith("@"):
+                    user = segments[0].lstrip("@").strip()
+                    if user:
+                        return f"@{user}"
+                return host or fallback
+            case "linkedin":
+                if len(segments) >= 2 and segments[0] == "in":
+                    name = segments[1].strip()
+                    if name:
+                        return name
+                return host or fallback
+            case _:
+                return host or fallback
+
+    def _social_platform_key_for_url(url: str) -> str | None:
+        host = _host_for_url(url)
+        if not host:
+            return None
+
+        for platform_key, domains in social_platform_domains.items():
+            if any(host == domain or host.endswith(f".{domain}") for domain in domains):
+                return platform_key
+        return None
+
     irc_nicks = _as_list(_data_get(data, "fasIRCNick", []))
-    website_urls = _as_list(_data_get(data, "fasWebsiteUrl", []))
-    rss_urls = _as_list(_data_get(data, "fasRssUrl", []))
+    # FreeIPA generally stores `fasWebsiteUrl` as a multi-valued attribute, but some
+    # legacy/hand-edited records may contain multiple URLs in a single value.
+    fas_website_urls: list[str] = []
+    for value in _as_list(_data_get(data, "fasWebsiteUrl", [])):
+        if "\n" in value or "," in value:
+            fas_website_urls.extend(_split_list_field(value))
+        else:
+            fas_website_urls.append(value)
+    social_urls_by_platform: dict[str, list[str]] = {platform_key: [] for platform_key in social_platform_domains}
+    website_url_values: list[str] = []
+    for url in fas_website_urls:
+        platform_key = _social_platform_key_for_url(url)
+        if platform_key:
+            social_urls_by_platform[platform_key].append(url)
+        else:
+            website_url_values.append(url)
+
+    social_profiles: list[dict[str, object]] = []
+    for platform_key in social_platform_domains:
+        platform_urls = social_urls_by_platform[platform_key]
+        if not platform_urls:
+            continue
+
+        spec = social_platform_specs[platform_key]
+        urls: list[dict[str, str | None]] = [
+            {"href": _safe_external_href(url), "text": _social_display_text(platform_key, url)}
+            for url in platform_urls
+        ]
+        social_profiles.append(
+            {
+                "platform": platform_key,
+                "label": spec["label"],
+                "title": spec["title"],
+                "icon": spec["icon"],
+                "urls": urls,
+            }
+        )
+
+    website_urls: list[dict[str, str | None]] = [
+        {"href": _safe_external_href(url), "text": url.strip()} for url in website_url_values if url.strip()
+    ]
+
+    rss_urls: list[dict[str, str | None]] = [
+        {"href": _safe_external_href(url), "text": url.strip()}
+        for url in _as_list(_data_get(data, "fasRssUrl", []))
+        if url.strip()
+    ]
     gpg_keys = _as_list(_data_get(data, "fasGPGKeyId", []))
     ssh_keys = _as_list(_data_get(data, "ipasshpubkey", []))
 
@@ -383,6 +589,7 @@ def _profile_context_for_user(
         "pronouns": _value_to_text(_data_get(data, "fasPronoun", "")),
         "locale": _first(data, "fasLocale", "") or "",
         "irc_nicks": irc_nicks,
+        "social_profiles": social_profiles,
         "website_urls": website_urls,
         "rss_urls": rss_urls,
         "rhbz_email": _first(data, "fasRHBZEmail", "") or "",
