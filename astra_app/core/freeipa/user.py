@@ -131,7 +131,7 @@ class FreeIPAUser(_FreeIPAClientMixin):
     A non-persistent user object backed by FreeIPA.
     """
 
-    def __init__(self, username, user_data=None):
+    def __init__(self, username, user_data=None, *, respect_privacy: bool = True):
         self.username = str(username).strip() if username else ""
         self.backend = "core.freeipa.auth_backend.FreeIPAAuthBackend"
         self._user_data = dict(user_data) if isinstance(user_data, dict) else {}
@@ -179,7 +179,7 @@ class FreeIPAUser(_FreeIPAClientMixin):
         self.is_superuser = admin_group in self.groups_list
 
         viewer_username = _get_current_viewer_username()
-        if self.fas_is_private and viewer_username and viewer_username.lower() != self.username.lower():
+        if respect_privacy and self.fas_is_private and viewer_username and viewer_username.lower() != self.username.lower():
             self.anonymize()
 
     @property
@@ -263,7 +263,7 @@ class FreeIPAUser(_FreeIPAClientMixin):
         return salted_hmac('freeipa-user', self.username, secret=settings.SECRET_KEY).hexdigest()
 
     @classmethod
-    def all(cls):
+    def all(cls, *, respect_privacy: bool = True):
         """
         Returns a list of all users from FreeIPA.
         """
@@ -297,7 +297,7 @@ class FreeIPAUser(_FreeIPAClientMixin):
                 if username.lower() in excluded:
                     continue
 
-                out.append(cls(username, user_data))
+                out.append(cls(username, user_data, respect_privacy=respect_privacy))
             return out
         except Exception as e:
             logger.exception(

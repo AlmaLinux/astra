@@ -560,7 +560,9 @@ class MembershipCSVImportResource(resources.ModelResource):
         # back to per-email search if listing is unavailable in this deployment.
         self._email_to_usernames = {}
         self._name_to_usernames = {}
-        users = FreeIPAUser.all()
+        # Admin imports need the directory's real display names and emails;
+        # profile redaction is a user-facing concern, not an admin lookup rule.
+        users = FreeIPAUser.all(respect_privacy=False)
         if not users:
             logger.warning(
                 "Membership CSV import: FreeIPAUser.all() returned 0 users; email matching will use per-email search"

@@ -1065,6 +1065,85 @@ class AdminImportMembershipsCSVTests(TestCase):
         selected = str(confirm_form.initial.get("selected_row_numbers") or "").strip()
         self.assertTrue(selected)
 
+    def test_preview_can_match_private_profile_by_name_when_enabled(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "enabled": True,
+                "sort_order": 0,
+            },
+        )
+
+        self._login_as_freeipa_admin("alex")
+
+        csv_content = (
+            b"Name,Email,Active Member,Membership Start Date,Membership Type\n"
+            b"Bob Example,bob@unknown.example.org,Active Member,2024-01-02,individual\n"
+        )
+        uploaded = SimpleUploadedFile("members.csv", csv_content, content_type="text/csv")
+
+        admin_user = FreeIPAUser(
+            "alex",
+            {
+                "uid": ["alex"],
+                "mail": ["alex@example.org"],
+                "memberof_group": ["admins"],
+            },
+        )
+        bob_user = SimpleNamespace(
+            username="bob",
+            email="bob@example.org",
+            full_name="Bob Example",
+            is_active=True,
+            is_staff=False,
+            is_superuser=False,
+            is_authenticated=True,
+            is_anonymous=False,
+            get_username=lambda: "bob",
+        )
+
+        def _all_users(*, respect_privacy: bool = True) -> list[SimpleNamespace]:
+            self.assertFalse(respect_privacy)
+            return [admin_user, bob_user]
+
+        with (
+            patch("core.membership_csv_import.FreeIPAUser.all", side_effect=_all_users),
+            patch(
+                "core.membership_csv_import.FreeIPAUser.get",
+                side_effect=lambda username: admin_user if username == "alex" else bob_user if username == "bob" else None,
+            ),
+            patch(
+                "core.freeipa.user.FreeIPAUser.get",
+                side_effect=lambda username: admin_user if username == "alex" else bob_user if username == "bob" else None,
+            ),
+            patch("core.membership_csv_import.FreeIPAUser.find_by_email", return_value=None),
+            patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
+        ):
+            url = reverse("admin:core_membershipcsvimportlink_import")
+            resp = self.client.post(
+                url,
+                data={
+                    "resource": "0",
+                    "format": "0",
+                    "membership_type": "individual",
+                    "import_file": uploaded,
+                    "enable_name_matching": "on",
+                },
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        csv_stats = resp.context.get("csv_stats")
+        self.assertIsInstance(csv_stats, dict)
+        assert isinstance(csv_stats, dict)
+        self.assertEqual(csv_stats.get("total_records"), 1)
+        self.assertEqual(csv_stats.get("matched_by_email"), 0)
+        self.assertEqual(csv_stats.get("matched_by_name"), 1)
+        self.assertEqual(csv_stats.get("matched_total"), 1)
+
     def test_preview_groups_by_import_type_when_decision_missing(self) -> None:
         MembershipType.objects.update_or_create(
             code="individual",
