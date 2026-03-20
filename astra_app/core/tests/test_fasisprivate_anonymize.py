@@ -221,3 +221,47 @@ class FASIsPrivateAnonymizeTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode("utf-8")
         self.assertIn("Membership</strong>", html)
+
+    def test_user_profile_shows_membership_card_for_private_profile_committee_viewer_without_groups_list(self) -> None:
+        factory = RequestFactory()
+        request = factory.get("/user/bob/")
+        request.user = SimpleNamespace(
+            is_authenticated=True,
+            get_username=lambda: "reviewer",
+        )
+
+        set_current_viewer_username("reviewer")
+        try:
+            bob = FreeIPAUser(
+                "bob",
+                {
+                    "uid": ["bob"],
+                    "givenname": ["Bob"],
+                    "sn": ["User"],
+                    "mail": ["bob@example.org"],
+                    "fasIsPrivate": ["TRUE"],
+                    "memberof_group": ["packagers"],
+                },
+            )
+        finally:
+            clear_current_viewer_username()
+
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+            },
+        )
+
+        with (
+            patch("core.views_users._get_full_user", autospec=True, return_value=bob),
+            patch("core.views_users.FreeIPAUser.get", autospec=True, side_effect=lambda username: reviewer if username == "reviewer" else None),
+            patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]),
+            patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
+        ):
+            resp = views_users.user_profile(request, "bob")
+
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+        self.assertIn("Membership</strong>", html)

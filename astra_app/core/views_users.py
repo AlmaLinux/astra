@@ -53,9 +53,27 @@ def _is_membership_committee_viewer(request: HttpRequest) -> bool:
     try:
         viewer_groups = request.user.groups_list
     except AttributeError:
+        viewer_groups = None
+
+    if viewer_groups is not None:
+        return committee_group in viewer_groups
+
+    # Fall back to the authenticated FreeIPA user when the request object does
+    # not expose group metadata. That keeps committee-only profile visibility
+    # working in admin-style request doubles and other lightweight auth stubs.
+    viewer_username = get_username(request)
+    if not viewer_username:
         return False
 
-    return committee_group in viewer_groups
+    try:
+        viewer = FreeIPAUser.get(viewer_username)
+    except Exception:
+        return False
+
+    if viewer is None:
+        return False
+
+    return committee_group in viewer.groups_list
 
 
 def _profile_context_for_user(
