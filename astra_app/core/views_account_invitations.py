@@ -142,7 +142,11 @@ def _send_account_invitation_email(
     actor_username: str,
     template_name: str,
     now: timezone.datetime,
+    cc: list[str] | None = None,
+    bcc: list[str] | None = None,
+    reply_to: list[str] | None = None,
 ) -> str:
+    effective_reply_to = reply_to if reply_to else [settings.MEMBERSHIP_COMMITTEE_EMAIL]
     try:
         email = queue_templated_email(
             recipients=[invitation.email],
@@ -152,7 +156,9 @@ def _send_account_invitation_email(
                 invitation=invitation,
                 actor_username=actor_username,
             ),
-            reply_to=[settings.MEMBERSHIP_COMMITTEE_EMAIL],
+            cc=cc or None,
+            bcc=bcc or None,
+            reply_to=effective_reply_to,
         )
     except PublicBaseUrlConfigurationError as exc:
         logger.warning("Account invitation email configuration error: %s", exc)
@@ -210,6 +216,9 @@ def send_organization_claim_invitation(
     actor_username: str,
     recipient_email: str,
     now: timezone.datetime,
+    cc: list[str] | None = None,
+    bcc: list[str] | None = None,
+    reply_to: list[str] | None = None,
 ) -> tuple[str, AccountInvitation | None]:
     normalized_email = normalize_invitation_email(recipient_email)
     if not normalized_email:
@@ -241,6 +250,9 @@ def send_organization_claim_invitation(
         invitation=invitation,
         actor_username=actor_username,
         template_name=settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME,
+        cc=cc,
+        bcc=bcc,
+        reply_to=reply_to,
         now=now,
     )
     return result, invitation

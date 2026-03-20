@@ -121,6 +121,7 @@ def _extra_context_from_query(query: QueryDict) -> dict[str, str]:
         "type",
         "to",
         "cc",
+        "bcc",
         "reply_to",
         "action_status",
         "invitation_action",
@@ -496,6 +497,9 @@ def _handle_send_mail_org_claim_invitation(
     organization_id: int,
     recipient_email: str,
     actor_username: str,
+    cc: list[str] | None,
+    bcc: list[str] | None,
+    reply_to: list[str] | None,
     now: datetime,
 ) -> tuple[bool, str | None]:
     if not allow_request(
@@ -514,6 +518,9 @@ def _handle_send_mail_org_claim_invitation(
         organization=organization,
         actor_username=actor_username,
         recipient_email=recipient_email,
+        cc=cc,
+        bcc=bcc,
+        reply_to=reply_to,
         now=now,
     )
     if result == "queued":
@@ -651,6 +658,10 @@ def send_mail(request: HttpRequest) -> HttpResponse:
         cc_raw = str(request.GET.get("cc") or "").strip()
         if cc_raw:
             initial["cc"] = cc_raw
+
+        bcc_raw = str(request.GET.get("bcc") or "").strip()
+        if bcc_raw:
+            initial["bcc"] = bcc_raw
 
         reply_to_raw = str(request.GET.get("reply_to") or "").strip()
         if reply_to_raw:
@@ -798,6 +809,9 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                                     organization_id=int(invitation_org_id),
                                     recipient_email=recipient_email,
                                     actor_username=actor_username,
+                                    cc=cc or None,
+                                    bcc=bcc or None,
+                                    reply_to=reply_to or None,
                                     now=timezone.now(),
                                 )
                                 if success:

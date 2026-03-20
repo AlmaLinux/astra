@@ -1,6 +1,7 @@
 
 import io
 import json
+import re
 from unittest.mock import patch
 from urllib.parse import parse_qs, quote, urlsplit
 
@@ -289,6 +290,35 @@ class SendMailTests(TestCase):
         self.assertContains(resp, 'aria-expanded="true"')
         self.assertContains(resp, 'id="send-mail-extra-options"')
         self.assertContains(resp, 'class="collapse mt-2 show"')
+
+    def test_get_prefills_bcc_from_query_params_and_does_not_treat_bcc_as_extra_context(self) -> None:
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
+
+        bcc_raw = "bcc1@example.com"
+        url = reverse("send-mail") + f"?bcc={quote(bcc_raw)}"
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.all", return_value=[]),
+        ):
+            resp = self.client.get(url)
+
+        self.assertEqual(resp.status_code, 200)
+
+        form = resp.context["form"]
+        self.assertEqual(form["bcc"].value(), bcc_raw)
+
+        # Ensure the rendered input itself is prefilled (avoid false positives from hidden fields).
+        content = resp.content.decode("utf-8")
+        pattern = rf'<input(?=[^>]*\bname="bcc")(?=[^>]*\bid="id_bcc")(?=[^>]*\bvalue="{re.escape(bcc_raw)}")[^>]*>'
+        self.assertTrue(re.search(pattern, content), msg="Rendered BCC input is not prefilled")
+
+        extra_context_raw = str(form["extra_context_json"].value() or "").strip()
+        self.assertTrue(extra_context_raw)
+        extra_context = json.loads(extra_context_raw)
+        self.assertNotIn("bcc", extra_context)
 
     def test_empty_group_still_shows_placeholder_variable_examples(self) -> None:
         self._login_as_freeipa_user("reviewer")
@@ -1278,6 +1308,49 @@ class SendMailTests(TestCase):
         self.assertEqual(send_record.template_name, settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME)
         self.assertEqual(send_record.sent_by_username, "reviewer")
         self.assertEqual(send_record.post_office_email_id, 777)
+
+    def test_send_mail_org_claim_action_forwards_cc_bcc_reply_to_to_templated_email(self) -> None:
+        from types import SimpleNamespace
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]},
+        )
+        organization = Organization.objects.create(name="Org Claim", business_contact_email="contact@example.com")
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
+            patch("core.views_send_mail.queue_composed_email") as queue_composed_mock,
+            patch("core.views_account_invitations.queue_templated_email", return_value=SimpleNamespace(id=777)) as queue_mock,
+        ):
+            response = self.client.post(
+                reverse("send-mail"),
+                data={
+                    "recipient_mode": "manual",
+                    "manual_to": "contact@example.com",
+                    "cc": "cc1@example.com, cc2@example.com",
+                    "bcc": "bcc1@example.com",
+                    "reply_to": "reply@example.com",
+                    "subject": "Claim invitation",
+                    "text_content": "Claim {{ organization_name }}",
+                    "html_content": "<p>Claim {{ organization_name }}</p>",
+                    "action": "send",
+                    "invitation_action": "org_claim",
+                    "invitation_org_id": str(organization.pk),
+                },
+                follow=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Queued 1 email")
+        queue_composed_mock.assert_not_called()
+
+        forwarded = queue_mock.call_args.kwargs
+        self.assertEqual(forwarded.get("cc"), ["cc1@example.com", "cc2@example.com"])
+        self.assertEqual(forwarded.get("bcc"), ["bcc1@example.com"])
+        self.assertEqual(forwarded.get("reply_to"), ["reply@example.com"])
 
     def test_send_mail_org_claim_action_applies_rate_limit(self) -> None:
         self._login_as_freeipa_user("reviewer")
