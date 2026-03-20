@@ -432,7 +432,9 @@ def membership_stats_data(request: HttpRequest) -> HttpResponse:
     trend_start = now - datetime.timedelta(days=days_window) if days_window is not None else None
 
     def compute_payload() -> dict[str, object]:
-        all_freeipa_users = FreeIPAUser.all()
+        # Statistics are aggregated, so profile privacy redaction would only
+        # hide data needed for accurate counts.
+        all_freeipa_users = FreeIPAUser.all(respect_privacy=False)
         users_by_username = {u.username: u for u in all_freeipa_users if u.username}
         active_freeipa_users = [u for u in all_freeipa_users if u.is_active]
 

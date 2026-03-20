@@ -1156,6 +1156,62 @@ class MembershipStatsDashboardTests(TestCase):
         self.assertIn("summary", payload)
         self.assertIn("charts", payload)
 
+    def test_membership_stats_data_ignores_profile_privacy_for_aggregated_counts(self) -> None:
+        cache.clear()
+
+        MembershipTypeCategory.objects.update_or_create(
+            name="individual",
+            defaults={
+                "is_individual": True,
+                "is_organization": False,
+                "sort_order": 0,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        Membership.objects.update_or_create(
+            target_username="alice",
+            membership_type_id="individual",
+            defaults={"expires_at": timezone.now() + datetime.timedelta(days=30)},
+        )
+
+        self._grant_membership_stats_permission()
+        self._login_as_freeipa_user("reviewer")
+        reviewer = self._reviewer_user()
+        country_attr = str(settings.SELF_SERVICE_ADDRESS_COUNTRY_ATTR).strip()
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                country_attr: ["US"],
+                "fasIsPrivate": ["TRUE"],
+                "memberof_group": [],
+            },
+        )
+
+        def _all_users(*, respect_privacy: bool = True) -> list[FreeIPAUser]:
+            self.assertFalse(respect_privacy)
+            return [alice]
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            with patch("core.freeipa.user.FreeIPAUser.all", side_effect=_all_users):
+                resp = self.client.get(reverse("membership-stats-data"))
+
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["summary"]["total_freeipa_users"], 1)
+        self.assertEqual(payload["summary"]["active_individual_memberships"], 1)
+        active_members = payload["charts"]["nationality_active_members"]
+        self.assertEqual(dict(zip(active_members["labels"], active_members["counts"], strict=False)), {"US": 1})
+
     def test_membership_stats_expirations_chart_excludes_expiry_exactly_at_now(self) -> None:
         frozen_now = datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=datetime.UTC)
 
