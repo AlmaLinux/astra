@@ -6,8 +6,6 @@ from typing import override
 # part of migration history: if you change it, you may change the outcome of a
 # fresh install that runs migrations from scratch.
 
-_DJANGO_TEMPLATE_TAG_RE = re.compile(r"{%[\s\S]*?%}")
-
 # Normalize the standard signature block into a conventional plain-text signature.
 # Mirrors `htmlToPlainText()` in astra_app/core/static/core/js/templated_email.js.
 _SIGNATURE_BLOCK_RE = re.compile(
@@ -244,7 +242,8 @@ def text_from_html(html_content: str) -> str:
 
     Mirrors the client-side conversion used by the template editor.
 
-    - Drops Django template tags `{% ... %}` to avoid leaking directives.
+    - Preserves Django template tags `{% ... %}` so template control flow stays
+      editable in the copied text.
     - Drops `<img>` elements.
     - Keeps `{{ ... }}` variables intact.
     """
@@ -252,7 +251,6 @@ def text_from_html(html_content: str) -> str:
     raw = str(html_content or "")
 
     raw = _SIGNATURE_BLOCK_RE.sub("\n<p>-- The AlmaLinux Team</p>", raw)
-    raw = _DJANGO_TEMPLATE_TAG_RE.sub("", raw)
 
     parser = _TextFromHTMLParser()
     parser.feed(raw)

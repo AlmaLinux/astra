@@ -3,21 +3,22 @@ from django.test import SimpleTestCase
 
 
 class EmailTemplateTextFromHTMLTests(SimpleTestCase):
-    def test_strips_django_template_tags_and_drops_images(self) -> None:
+    def test_preserves_django_template_tags_and_drops_images(self) -> None:
         from core.migration_helpers.email_template_text import text_from_html
 
         html = (
-            "{% load i18n %}"
-            "<p>Hello <strong>{{ full_name }}</strong></p>"
+            "<p>{% if oldest_wait_time %} The oldest request has been waiting for "
+            "<strong>{{ oldest_wait_time }} days</strong>.{% endif %}</p>"
             "<p><img src='https://example.com/x.png' alt='X'>Should keep this.</p>"
         )
 
         text = text_from_html(html)
 
-        self.assertNotIn("{%", text)
-        self.assertNotIn("%}", text)
-        self.assertIn("Hello", text)
-        self.assertIn("{{ full_name }}", text)
+        self.assertIn("{% if oldest_wait_time %}", text)
+        self.assertIn("{% endif %}", text)
+        self.assertIn("The oldest request has been waiting for", text)
+        self.assertIn("{{ oldest_wait_time }}", text)
+        self.assertIn("**{{ oldest_wait_time }} days**", text)
         self.assertIn("Should keep this.", text)
         self.assertNotIn("example.com/x.png", text)
         self.assertNotIn("alt=", text)
