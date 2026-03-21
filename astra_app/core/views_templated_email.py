@@ -20,7 +20,7 @@ from core.templated_email import (
     render_templated_email_preview,
     render_templated_email_preview_response,
     update_email_template,
-    validate_email_subject_no_folding,
+    validate_email_subject,
 )
 
 
@@ -75,8 +75,10 @@ class EmailTemplateManageForm(StyledForm):
 
     def clean_subject(self) -> str:
         subject = str(self.cleaned_data.get("subject") or "").strip()
-        validate_email_subject_no_folding(subject)
-        return subject
+        try:
+            return validate_email_subject(subject)
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
 
 
 @require_safe
@@ -279,9 +281,8 @@ def email_template_save(request: HttpRequest) -> JsonResponse:
             html_content=str(request.POST.get("html_content") or ""),
             text_content=str(request.POST.get("text_content") or ""),
         )
-    except ValidationError as exc:
-        message = exc.messages[0] if exc.messages else str(exc)
-        return JsonResponse({"ok": False, "error": message}, status=400)
+    except ValueError as exc:
+        return JsonResponse({"ok": False, "error": str(exc)}, status=400)
 
     return JsonResponse({"ok": True, "id": template.pk, "name": template.name})
 
@@ -300,8 +301,7 @@ def email_template_save_as(request: HttpRequest) -> JsonResponse:
             html_content=str(request.POST.get("html_content") or ""),
             text_content=str(request.POST.get("text_content") or ""),
         )
-    except ValidationError as exc:
-        message = exc.messages[0] if exc.messages else str(exc)
-        return JsonResponse({"ok": False, "error": message}, status=400)
+    except ValueError as exc:
+        return JsonResponse({"ok": False, "error": str(exc)}, status=400)
 
     return JsonResponse({"ok": True, "id": template.pk, "name": template.name})

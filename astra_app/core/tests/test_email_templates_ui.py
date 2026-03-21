@@ -311,7 +311,7 @@ class EmailTemplatesUiTests(TestCase):
         self.assertEqual(tpl.name, "membership-acceptance-locked-rename")
         self.assertContains(resp, "cannot be renamed")
 
-    def test_create_rejects_subject_that_would_be_header_folded(self) -> None:
+    def test_create_allows_long_subject(self) -> None:
         from post_office.models import EmailTemplate
 
         self._login_as_freeipa_user("reviewer")
@@ -333,10 +333,34 @@ class EmailTemplatesUiTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Subject is too long")
-        self.assertFalse(EmailTemplate.objects.filter(name="created-long-subject").exists())
+        self.assertNotContains(resp, "Subject is too long")
+        tpl = EmailTemplate.objects.get(name="created-long-subject")
+        self.assertEqual(tpl.subject, too_long_subject)
 
-    def test_save_as_rejects_subject_that_would_be_header_folded(self) -> None:
+    def test_create_rejects_newline_subject(self) -> None:
+        from post_office.models import EmailTemplate
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.post(
+                reverse("email-template-create"),
+                data={
+                    "name": "created-newline-subject",
+                    "description": "Created",
+                    "subject": "Action required:\nmore information needed",
+                    "html_content": "<p>Hello</p>",
+                    "text_content": "Hello",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Email subjects cannot contain line breaks.")
+        self.assertFalse(EmailTemplate.objects.filter(name="created-newline-subject").exists())
+
+    def test_save_as_allows_long_subject(self) -> None:
         self._login_as_freeipa_user("reviewer")
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
@@ -353,10 +377,57 @@ class EmailTemplatesUiTests(TestCase):
                 },
             )
 
-        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.status_code, 200)
         payload = resp.json()
-        self.assertEqual(payload.get("ok"), False)
-        self.assertIn("Subject is too long", str(payload.get("error", "")))
+        self.assertEqual(payload.get("ok"), True)
+        self.assertEqual(payload.get("name"), "saved-as-long-subject")
+
+        from post_office.models import EmailTemplate
+
+        tpl = EmailTemplate.objects.get(name="saved-as-long-subject")
+        self.assertEqual(tpl.subject, too_long_subject)
+
+    def test_save_and_save_as_reject_newline_subject(self) -> None:
+        from post_office.models import EmailTemplate
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
+        tpl = EmailTemplate.objects.create(
+            name="saved-newline-subject",
+            description="Saved",
+            subject="Subj",
+            content="Text",
+            html_content="<p>Hello</p>",
+        )
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            save_resp = self.client.post(
+                reverse("email-template-save"),
+                data={
+                    "email_template_id": str(tpl.pk),
+                    "subject": "Action required:\r\nmore information needed",
+                    "html_content": "<p>Hello</p>",
+                    "text_content": "Hello",
+                },
+            )
+
+        self.assertEqual(save_resp.status_code, 400)
+        self.assertEqual(save_resp.json()["error"], "Email subjects cannot contain line breaks.")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            save_as_resp = self.client.post(
+                reverse("email-template-save-as"),
+                data={
+                    "name": "saved-as-newline-subject",
+                    "subject": "Action required:\nmore information needed",
+                    "html_content": "<p>Hello</p>",
+                    "text_content": "Hello",
+                },
+            )
+
+        self.assertEqual(save_as_resp.status_code, 400)
+        self.assertEqual(save_as_resp.json()["error"], "Email subjects cannot contain line breaks.")
+        self.assertFalse(EmailTemplate.objects.filter(name="saved-as-newline-subject").exists())
 
     def test_template_render_preview_endpoint(self) -> None:
         self._login_as_freeipa_user("reviewer")
