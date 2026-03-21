@@ -9,14 +9,27 @@ from post_office.models import Email, EmailTemplate
 from core.membership_notifications import (
     already_sent_today,
     membership_requests_url,
+    oldest_pending_membership_request_wait_time,
     organization_sponsor_notification_recipient_email,
     would_queue_membership_pending_requests_notification,
 )
-from core.models import Organization
+from core.models import MembershipRequest, MembershipType, Organization
 from core.public_urls import normalize_public_base_url
 
 
 class AlreadySentTodayTests(TestCase):
+    def _create_membership_type(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
     def test_returns_true_for_matching_template_recipient_context(self) -> None:
         template = EmailTemplate.objects.create(
             name="dedup-template-true",
@@ -76,21 +89,21 @@ class AlreadySentTodayTests(TestCase):
             f"{base}/membership/requests/",
         )
 
-    def test_pending_requests_dedupe_policy_is_monday_daily_otherwise_weekly(self) -> None:
+    def test_pending_requests_dedupe_policy_uses_thursday_anchor(self) -> None:
         template = EmailTemplate.objects.create(
             name="membership-committee-pending-requests-dedupe",
             subject="Pending requests",
             content="Pending requests",
         )
 
-        monday = datetime.date(2026, 1, 5)
-        tuesday = datetime.date(2026, 1, 6)
+        thursday = datetime.date(2026, 1, 8)
+        next_monday = datetime.date(2026, 1, 12)
 
         self.assertTrue(
             would_queue_membership_pending_requests_notification(
                 force=False,
                 template_name=template.name,
-                today=monday,
+                today=thursday,
             )
         )
 
@@ -105,20 +118,80 @@ class AlreadySentTodayTests(TestCase):
             created=timezone.make_aware(datetime.datetime(2026, 1, 5, 10, 0, 0)),
         )
 
+        self.assertTrue(
+            would_queue_membership_pending_requests_notification(
+                force=False,
+                template_name=template.name,
+                today=thursday,
+            )
+        )
+
+        email = Email.objects.create(
+            from_email="noreply@example.com",
+            to="committee@example.com",
+            subject="Pending requests",
+            message="Queued",
+            template=template,
+        )
+        Email.objects.filter(pk=email.pk).update(
+            created=timezone.make_aware(datetime.datetime(2026, 1, 8, 10, 0, 0)),
+        )
+
         self.assertFalse(
             would_queue_membership_pending_requests_notification(
                 force=False,
                 template_name=template.name,
-                today=monday,
+                today=next_monday,
             )
         )
-        self.assertFalse(
-            would_queue_membership_pending_requests_notification(
-                force=False,
-                template_name=template.name,
-                today=tuesday,
+
+    def test_oldest_pending_membership_request_wait_time_uses_pending_requests_only(self) -> None:
+        frozen_now = timezone.make_aware(datetime.datetime(2026, 1, 21, 12, 0, 0))
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            self._create_membership_type()
+
+            pending = MembershipRequest.objects.create(
+                requested_username="pending-user",
+                membership_type_id="individual",
             )
-        )
+            MembershipRequest.objects.filter(pk=pending.pk).update(
+                requested_at=timezone.make_aware(datetime.datetime(2026, 1, 9, 12, 0, 0)),
+            )
+
+            approved = MembershipRequest.objects.create(
+                requested_username="approved-user",
+                membership_type_id="individual",
+                status=MembershipRequest.Status.approved,
+            )
+            MembershipRequest.objects.filter(pk=approved.pk).update(
+                requested_at=timezone.make_aware(datetime.datetime(2025, 12, 22, 12, 0, 0)),
+            )
+
+            self.assertEqual(oldest_pending_membership_request_wait_time(), 12)
+
+    def test_oldest_pending_membership_request_wait_time_skips_recent_requests(self) -> None:
+        frozen_now = timezone.make_aware(datetime.datetime(2026, 1, 21, 12, 0, 0))
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            self._create_membership_type()
+
+            pending = MembershipRequest.objects.create(
+                requested_username="pending-user",
+                membership_type_id="individual",
+            )
+            MembershipRequest.objects.filter(pk=pending.pk).update(
+                requested_at=timezone.make_aware(datetime.datetime(2026, 1, 9, 13, 0, 0)),
+            )
+
+            approved = MembershipRequest.objects.create(
+                requested_username="approved-user",
+                membership_type_id="individual",
+                status=MembershipRequest.Status.approved,
+            )
+            MembershipRequest.objects.filter(pk=approved.pk).update(
+                requested_at=timezone.make_aware(datetime.datetime(2025, 12, 22, 12, 0, 0)),
+            )
+
+            self.assertIsNone(oldest_pending_membership_request_wait_time())
 
 
 class OrganizationSponsorRecipientTests(TestCase):

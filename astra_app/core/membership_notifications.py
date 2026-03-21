@@ -15,7 +15,7 @@ from core.email_context import (
 )
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import FreeIPAUser
-from core.models import FreeIPAPermissionGrant, MembershipType, Organization
+from core.models import FreeIPAPermissionGrant, MembershipRequest, MembershipType, Organization
 from core.public_urls import build_public_absolute_url
 from core.templated_email import queue_templated_email
 
@@ -77,19 +77,36 @@ def would_queue_membership_pending_requests_notification(
     from post_office.models import Email
 
     target_date = today if today is not None else timezone.localdate()
-    if target_date.weekday() == 0:
-        # Monday cadence is once per day.
+    if target_date.weekday() == 3:
+        # Thursday cadence is once per day.
         return not Email.objects.filter(
             template__name=template_name,
             created__date=target_date,
         ).exists()
 
-    this_weeks_monday = target_date - datetime.timedelta(days=target_date.weekday())
-    # Tue-Sun cadence is once since Monday.
+    this_weeks_thursday = target_date - datetime.timedelta(days=(target_date.weekday() - 3) % 7)
+    # Fri-Wed cadence is once since the most recent Thursday.
     return not Email.objects.filter(
         template__name=template_name,
-        created__date__gte=this_weeks_monday,
+        created__date__gte=this_weeks_thursday,
     ).exists()
+
+
+def oldest_pending_membership_request_wait_time() -> int | None:
+    oldest_request = (
+        MembershipRequest.objects.filter(status=MembershipRequest.Status.pending)
+        .order_by("requested_at")
+        .only("requested_at")
+        .first()
+    )
+    if oldest_request is None:
+        return None
+
+    oldest_wait_time = timezone.now() - oldest_request.requested_at
+    if oldest_wait_time < datetime.timedelta(days=12):
+        return None
+
+    return oldest_wait_time.days
 
 
 def _format_expires_at(*, expires_at: datetime.datetime | None, tz_name: str | None) -> str:

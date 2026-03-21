@@ -3,11 +3,13 @@ from typing import override
 
 from django.conf import settings
 from django.core.management.base import BaseCommand
+from django.utils import timezone
 
 from core.email_context import membership_committee_email_context
 from core.membership_notifications import (
     committee_recipient_emails_for_permission_graceful,
     membership_requests_url,
+    oldest_pending_membership_request_wait_time,
     would_queue_membership_pending_requests_notification,
 )
 from core.models import MembershipRequest
@@ -37,6 +39,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options) -> None:
         force: bool = bool(options.get("force"))
         dry_run: bool = bool(options.get("dry_run"))
+        today = timezone.localdate()
 
         pending_count = MembershipRequest.objects.filter(status=MembershipRequest.Status.pending).count()
         if pending_count <= 0:
@@ -65,12 +68,15 @@ class Command(BaseCommand):
         if not would_queue_membership_pending_requests_notification(
             force=force,
             template_name=settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME,
+            today=today,
         ):
             if dry_run:
                 logger.info("[dry-run] Would skip; email already queued this week.")
             else:
                 logger.info("Skipped; email already queued this week.")
             return
+
+        oldest_wait_time = oldest_pending_membership_request_wait_time()
 
         if dry_run:
             logger.info(
@@ -80,15 +86,19 @@ class Command(BaseCommand):
             )
             return
 
+        context = {
+            **membership_committee_email_context(),
+            "pending_count": pending_count,
+            "requests_url": membership_requests_url(base_url=settings.PUBLIC_BASE_URL),
+        }
+        if oldest_wait_time is not None:
+            context["oldest_wait_time"] = oldest_wait_time
+
         queue_templated_email(
             recipients=recipients,
             sender=settings.DEFAULT_FROM_EMAIL,
             template_name=settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME,
-            context={
-                **membership_committee_email_context(),
-                "pending_count": pending_count,
-                "requests_url": membership_requests_url(base_url=settings.PUBLIC_BASE_URL),
-            },
+            context=context,
             reply_to=[settings.MEMBERSHIP_COMMITTEE_EMAIL],
         )
 

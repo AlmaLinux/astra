@@ -240,3 +240,53 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
             ).count(),
             1,
         )
+
+    def test_command_includes_oldest_wait_time_for_stale_pending_requests(self) -> None:
+        frozen_now = datetime.datetime(2026, 1, 21, 12, tzinfo=datetime.UTC)
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            self._create_membership_type()
+            stale = MembershipRequest.objects.create(requested_username="req1", membership_type_id="individual")
+            MembershipRequest.objects.filter(pk=stale.pk).update(
+                requested_at=datetime.datetime(2026, 1, 9, 12, tzinfo=datetime.UTC),
+            )
+
+        committee_group = FreeIPAGroup(settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP, {"member_user": ["alice"]})
+        alice = FreeIPAUser(
+            "alice",
+            {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []},
+        )
+
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            with patch("core.freeipa.group.FreeIPAGroup.get", return_value=committee_group):
+                with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
+                    call_command("membership_pending_requests")
+
+        from post_office.models import Email
+
+        msg = Email.objects.get(template__name=settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME)
+        self.assertEqual(msg.context["oldest_wait_time"], 12)
+
+    def test_command_omits_oldest_wait_time_for_recent_pending_requests(self) -> None:
+        frozen_now = datetime.datetime(2026, 1, 21, 12, tzinfo=datetime.UTC)
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            self._create_membership_type()
+            recent = MembershipRequest.objects.create(requested_username="req1", membership_type_id="individual")
+            MembershipRequest.objects.filter(pk=recent.pk).update(
+                requested_at=datetime.datetime(2026, 1, 9, 13, tzinfo=datetime.UTC),
+            )
+
+        committee_group = FreeIPAGroup(settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP, {"member_user": ["alice"]})
+        alice = FreeIPAUser(
+            "alice",
+            {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []},
+        )
+
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            with patch("core.freeipa.group.FreeIPAGroup.get", return_value=committee_group):
+                with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
+                    call_command("membership_pending_requests")
+
+        from post_office.models import Email
+
+        msg = Email.objects.get(template__name=settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME)
+        self.assertNotIn("oldest_wait_time", msg.context)
