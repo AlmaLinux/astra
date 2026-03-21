@@ -1,6 +1,5 @@
 import hashlib
 from collections.abc import Mapping
-from datetime import timedelta
 from typing import Any
 
 from django.conf import settings
@@ -12,8 +11,6 @@ _REGISTRATION_ACTIVATION_TOKEN_PURPOSE = "registration-activate"
 _SETTINGS_EMAIL_VALIDATION_TOKEN_PURPOSE = "settings-email-validate"
 _ORGANIZATION_CLAIM_TOKEN_PURPOSE = "org_claim"
 _ACCOUNT_INVITATION_TOKEN_PURPOSE = "account-invitation"
-
-ORGANIZATION_CLAIM_TOKEN_TTL_SECONDS = int(timedelta(days=7).total_seconds())
 
 
 def _salt_for_purpose(*, purpose: str) -> str:
@@ -79,7 +76,7 @@ def read_organization_claim_token(token: str) -> dict[str, Any]:
     return _loads(
         purpose=_ORGANIZATION_CLAIM_TOKEN_PURPOSE,
         token=token,
-        max_age_seconds=ORGANIZATION_CLAIM_TOKEN_TTL_SECONDS,
+        max_age_seconds=settings.ORGANIZATION_CLAIM_TOKEN_TTL_SECONDS,
     )
 
 
