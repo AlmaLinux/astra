@@ -244,9 +244,12 @@ class Command(BaseCommand):
                 }
             )
 
-        self.stdout.write(
-            "Reconciliation complete: "
-            f"groups={len(group_reports)} missing={total_missing} extra={total_extra} errors={total_errors}."
+        logger.info(
+            "freeipa_membership_reconcile: Reconciliation complete groups=%s missing=%s extra=%s errors=%s",
+            len(group_reports),
+            total_missing,
+            total_extra,
+            total_errors,
         )
 
         if total_missing == 0 and total_extra == 0 and total_errors == 0:
@@ -284,9 +287,9 @@ class Command(BaseCommand):
         }
 
         if dry_run:
-            self.stdout.write(
-                "[dry-run] Would queue alert email to "
-                f"{len(unique_recipients)} recipient(s)."
+            logger.info(
+                "[dry-run] Would queue alert email to %s recipient(s).",
+                len(unique_recipients),
             )
             logger.info(
                 "freeipa_membership_reconcile: dry_run_alert_suppressed recipients=%s",

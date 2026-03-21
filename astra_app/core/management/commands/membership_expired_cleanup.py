@@ -59,6 +59,12 @@ class Command(BaseCommand):
 
         now = timezone.now()
 
+        logger.info(
+            "membership_expired_cleanup: start force=%s dry_run=%s",
+            force,
+            dry_run,
+        )
+
         expired_memberships: Iterable[Membership] = (
             Membership.objects.select_related("membership_type")
             .filter(
@@ -92,7 +98,11 @@ class Command(BaseCommand):
         for membership in expired_memberships:
             had_expired_memberships = True
             fu = FreeIPAUser.get(membership.target_username)
-            self.stdout.write(f"Processing expired membership for user {membership.target_username}...")
+            logger.info(
+                "membership_expired_cleanup: processing expired membership user=%s membership_type=%s",
+                membership.target_username,
+                membership.membership_type_id,
+            )
             if fu is None:
                 logger.debug(
                     "membership_expired_cleanup_freeipa_user_missing user=%s membership_type=%s group_cn=%s",
@@ -100,10 +110,16 @@ class Command(BaseCommand):
                     membership.membership_type_id,
                     membership.membership_type.group_cn,
                 )
+                logger.info(
+                    "membership_expired_cleanup: FreeIPA user missing for %s membership_type=%s",
+                    membership.target_username,
+                    membership.membership_type_id,
+                )
                 if dry_run:
-                    self.stdout.write(
-                        "[dry-run] Would delete membership "
-                        f"{membership.target_username}:{membership.membership_type_id}."
+                    logger.info(
+                        "[dry-run] Would delete membership %s:%s.",
+                        membership.target_username,
+                        membership.membership_type_id,
                     )
                 else:
                     membership.delete()
@@ -113,9 +129,10 @@ class Command(BaseCommand):
             group_cn = str(membership.membership_type.group_cn or "").strip()
             if group_cn:
                 if dry_run:
-                    self.stdout.write(
-                        "[dry-run] Would remove user "
-                        f"{membership.target_username} from group {group_cn}."
+                    logger.info(
+                        "[dry-run] Would remove user %s from group %s.",
+                        membership.target_username,
+                        group_cn,
                     )
                 else:
                     if not remove_user_from_group(
@@ -130,6 +147,11 @@ class Command(BaseCommand):
                             group_cn,
                         )
                         continue
+                    logger.info(
+                        "membership_expired_cleanup: removed user %s from group %s",
+                        membership.target_username,
+                        group_cn,
+                    )
 
             if fu.email:
                 tz_name = str(_first(fu._user_data, "fasTimezone", "") or "").strip() or "UTC"
@@ -142,16 +164,14 @@ class Command(BaseCommand):
                     )
 
                     if would_queue:
-                        self.stdout.write(
-                            "[dry-run] Would queue "
-                            f"{settings.MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME} to {fu.email}."
+                        logger.info(
+                            "[dry-run] Would queue %s to %s.",
+                            settings.MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
+                            fu.email,
                         )
                         emailed += 1
                     else:
-                        self.stdout.write(
-                            "[dry-run] Would skip email for "
-                            f"{fu.email}; already queued today."
-                        )
+                        logger.info("[dry-run] Would skip email for %s; already queued today.", fu.email)
                         skipped += 1
                 else:
                     did_queue = send_membership_notification(
@@ -166,18 +186,30 @@ class Command(BaseCommand):
                     )
                     if did_queue:
                         emailed += 1
+                        logger.info(
+                            "membership_expired_cleanup: queued %s to %s",
+                            settings.MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
+                            fu.email,
+                        )
                     else:
                         skipped += 1
+                        logger.info("membership_expired_cleanup: skipped email for %s; already queued today.", fu.email)
 
             if dry_run:
-                self.stdout.write(
-                    "[dry-run] Would delete membership "
-                    f"{membership.target_username}:{membership.membership_type_id}."
+                logger.info(
+                    "[dry-run] Would delete membership %s:%s.",
+                    membership.target_username,
+                    membership.membership_type_id,
                 )
                 removed += 1
             else:
                 membership.delete()
                 removed += 1
+                logger.info(
+                    "membership_expired_cleanup: deleted membership %s:%s",
+                    membership.target_username,
+                    membership.membership_type_id,
+                )
 
         for sponsorship in expired_sponsorships:
             had_expired_memberships = True
@@ -189,9 +221,11 @@ class Command(BaseCommand):
             rep_username = str(org.representative or "").strip()
             removal_failed = False
 
-            self.stdout.write(
-                "Processing expired sponsorship for org "
-                f"{org.pk} (level={membership_type.code}) rep={rep_username!r}..."
+            logger.info(
+                "membership_expired_cleanup: processing expired sponsorship org_id=%s membership_type=%s representative=%s",
+                org.pk,
+                membership_type.code,
+                rep_username,
             )
 
             rep = None
@@ -209,9 +243,10 @@ class Command(BaseCommand):
                     )
                 elif group_cn in rep.groups_list:
                     if dry_run:
-                        self.stdout.write(
-                            "[dry-run] Would remove representative "
-                            f"{rep_username} from group {group_cn}."
+                        logger.info(
+                            "[dry-run] Would remove representative %s from group %s.",
+                            rep_username,
+                            group_cn,
                         )
                     else:
                         outcome = remove_organization_representative_from_group_if_present(
@@ -230,10 +265,17 @@ class Command(BaseCommand):
                                 group_cn,
                                 rep_username,
                             )
+                        else:
+                            logger.info(
+                                "membership_expired_cleanup: removed representative %s from group %s",
+                                rep_username,
+                                group_cn,
+                            )
 
             if removal_failed:
-                self.stdout.write(
-                    f"Skipping expired sponsorship cleanup for org {org.pk}; FreeIPA removal failed."
+                logger.info(
+                    "Skipping expired sponsorship cleanup for org %s; FreeIPA removal failed.",
+                    org.pk,
                 )
                 continue
 
@@ -251,7 +293,7 @@ class Command(BaseCommand):
                 notification_kind="organization sponsorship expired-cleanup",
             )
             if recipient_warning:
-                self.stderr.write(f"Warning: {recipient_warning}")
+                logger.warning("%s", recipient_warning)
             if recipient_email:
                 request_url = organization_membership_request_url(
                     organization_id=org.pk,
@@ -269,16 +311,14 @@ class Command(BaseCommand):
                     )
 
                     if would_queue:
-                        self.stdout.write(
-                            "[dry-run] Would queue "
-                            f"{settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME} to {recipient_email}."
+                        logger.info(
+                            "[dry-run] Would queue %s to %s.",
+                            settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
+                            recipient_email,
                         )
                         sponsorship_emailed += 1
                     else:
-                        self.stdout.write(
-                            "[dry-run] Would skip email for "
-                            f"{recipient_email}; already queued today."
-                        )
+                        logger.info("[dry-run] Would skip email for %s; already queued today.", recipient_email)
                         sponsorship_skipped += 1
                 else:
                     tz_name = "UTC"
@@ -296,18 +336,33 @@ class Command(BaseCommand):
                     )
                     if did_queue:
                         sponsorship_emailed += 1
+                        logger.info(
+                            "membership_expired_cleanup: queued %s to %s",
+                            settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
+                            recipient_email,
+                        )
                     else:
                         sponsorship_skipped += 1
+                        logger.info(
+                            "membership_expired_cleanup: skipped email for %s; already queued today.",
+                            recipient_email,
+                        )
 
             if dry_run:
-                self.stdout.write(
-                    "[dry-run] Would delete sponsorship "
-                    f"org={org.pk} membership_type={membership_type.code}."
+                logger.info(
+                    "[dry-run] Would delete sponsorship org=%s membership_type=%s.",
+                    org.pk,
+                    membership_type.code,
                 )
                 sponsorship_removed += 1
             else:
                 sponsorship.delete()
                 sponsorship_removed += 1
+                logger.info(
+                    "membership_expired_cleanup: deleted sponsorship org=%s membership_type=%s",
+                    org.pk,
+                    membership_type.code,
+                )
 
         membership_summary = (
             f"Removed {removed} membership(s); queued {emailed} email(s); skipped {skipped}; failed {failed}."
@@ -318,11 +373,11 @@ class Command(BaseCommand):
             f"skipped {sponsorship_skipped}; failed {sponsorship_failed}."
         )
         if dry_run:
-            self.stdout.write(f"[dry-run] {membership_summary}")
-            self.stdout.write(f"[dry-run] {sponsorship_summary}")
+            logger.info("[dry-run] %s", membership_summary)
+            logger.info("[dry-run] %s", sponsorship_summary)
         else:
-            self.stdout.write(membership_summary)
-            self.stdout.write(sponsorship_summary)
+            logger.info(membership_summary)
+            logger.info(sponsorship_summary)
             if had_expired_memberships:
                 astra_signals.membership_expired.send(
                     sender=astra_signals.MembershipExpirationCommand,

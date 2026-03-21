@@ -58,6 +58,14 @@ class Command(BaseCommand):
         fix: bool = bool(options.get("fix"))
         request_id = options.get("request_id")
 
+        logger.info(
+            "mirror_validation.start force=%s dry_run=%s fix=%s request_id=%s",
+            force,
+            dry_run,
+            fix,
+            request_id if request_id is not None else "<none>",
+        )
+
         if dry_run and fix:
             raise CommandError("--fix cannot be used with --dry-run")
 
@@ -72,22 +80,18 @@ class Command(BaseCommand):
             validations = dry_run_validations(now=now, force=force)
             missing_request_ids = self._missing_open_mirror_request_ids()
             if not validations:
-                self.stdout.write("dry-run: no mirror validation rows are due.")
+                logger.info("dry-run: no mirror validation rows are due.")
                 for request_id in missing_request_ids:
-                    self.stdout.write(f"dry-run: missing mirror validation row for request {request_id}")
+                    logger.info("dry-run: missing mirror validation row for request %s", request_id)
                 return
             for validation in validations:
                 request_id = validation.membership_request.pk
                 if validation.membership_request.status in _CLOSED_MEMBERSHIP_REQUEST_STATUSES:
-                    self.stdout.write(
-                        f"dry-run: would delete closed-request validation for request {request_id}",
-                    )
+                    logger.info("dry-run: would delete closed-request validation for request %s", request_id)
                     continue
-                self.stdout.write(
-                    f"dry-run: would validate request {request_id} status={validation.status}",
-                )
+                logger.info("dry-run: would validate request %s status=%s", request_id, validation.status)
             for request_id in missing_request_ids:
-                self.stdout.write(f"dry-run: missing mirror validation row for request {request_id}")
+                logger.info("dry-run: missing mirror validation row for request %s", request_id)
             return
 
         processed = 0
@@ -212,12 +216,14 @@ class Command(BaseCommand):
         if membership_request.status in _CLOSED_MEMBERSHIP_REQUEST_STATUSES:
             if dry_run:
                 if closed_validation_queryset.exists():
-                    self.stdout.write(
-                        f"dry-run: would delete closed-request validation for request ID {request_id} via --request-id",
+                    logger.info(
+                        "dry-run: would delete closed-request validation for request ID %s via --request-id",
+                        request_id,
                     )
                 else:
-                    self.stdout.write(
-                        f"request ID {request_id} is closed; no validation row to delete via --request-id",
+                    logger.info(
+                        "request ID %s is closed; no validation row to delete via --request-id",
+                        request_id,
                     )
                 return
 
@@ -247,7 +253,7 @@ class Command(BaseCommand):
             return
 
         if dry_run:
-            self.stdout.write(f"dry-run: would validate request ID {request_id} via --request-id")
+            logger.info("dry-run: would validate request ID %s via --request-id", request_id)
             return
 
         now = timezone.now()

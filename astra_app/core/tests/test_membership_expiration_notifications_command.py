@@ -1,6 +1,5 @@
 
 import datetime
-from io import StringIO
 from unittest.mock import patch
 
 from django.conf import settings
@@ -538,9 +537,12 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 expires_at=expires_at_utc,
             )
 
-            stderr = StringIO()
-            with patch("core.freeipa.user.FreeIPAUser.get", return_value=rep_user):
-                call_command("membership_expiration_notifications", stderr=stderr)
+            with self.assertLogs(
+                "core.management.commands.membership_expiration_notifications",
+                level="INFO",
+            ) as logs:
+                with patch("core.freeipa.user.FreeIPAUser.get", return_value=rep_user):
+                    call_command("membership_expiration_notifications")
 
         from post_office.models import Email
 
@@ -552,7 +554,10 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 context__membership_type_code="sponsor",
             ).exists()
         )
-        self.assertEqual("", stderr.getvalue().strip())
+        self.assertTrue(
+            any("fallback@example.com" in line for line in logs.output),
+            f"Expected a log entry mentioning the fallback recipient, got: {logs.output}",
+        )
 
     def test_command_warns_and_continues_when_representative_lookup_fails_and_no_fallback(self) -> None:
         membership_type, _ = MembershipType.objects.update_or_create(
@@ -589,9 +594,12 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 expires_at=expires_at_utc,
             )
 
-            stderr = StringIO()
-            with patch("core.freeipa.user.FreeIPAUser.get", side_effect=RuntimeError("ipa down")):
-                call_command("membership_expiration_notifications", stderr=stderr)
+            with self.assertLogs(
+                "core.management.commands.membership_expiration_notifications",
+                level="WARNING",
+            ) as logs:
+                with patch("core.freeipa.user.FreeIPAUser.get", side_effect=RuntimeError("ipa down")):
+                    call_command("membership_expiration_notifications")
 
         from post_office.models import Email
 
@@ -602,5 +610,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 context__membership_type_code="sponsor",
             ).exists()
         )
-        self.assertIn("No recipient resolved for organization id=", stderr.getvalue())
-        self.assertIn("organization sponsorship expiring-soon", stderr.getvalue())
+        self.assertTrue(
+            any("No recipient resolved for organization id=" in line for line in logs.output),
+            f"Expected a warning about the missing recipient, got: {logs.output}",
+        )

@@ -86,10 +86,14 @@ class MembershipEmbargoedMembersNotificationCommandTests(TestCase):
             return {"member1": member1, "alice": alice, "bob": bob}.get(username)
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
-            with patch("core.freeipa.group.FreeIPAGroup.get", return_value=committee_group):
-                with patch("core.freeipa.user.FreeIPAUser.all", return_value=[member1, alice, bob]):
-                    with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
-                        call_command("membership_embargoed_members")
+            with self.assertLogs(
+                "core.management.commands.membership_embargoed_members",
+                level="INFO",
+            ) as logs:
+                with patch("core.freeipa.group.FreeIPAGroup.get", return_value=committee_group):
+                    with patch("core.freeipa.user.FreeIPAUser.all", return_value=[member1, alice, bob]):
+                        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
+                            call_command("membership_embargoed_members")
 
         from post_office.models import Email
 
@@ -104,6 +108,10 @@ class MembershipEmbargoedMembersNotificationCommandTests(TestCase):
         self.assertEqual(ctx.get("embargoed_count"), 1)
         self.assertEqual(len(ctx.get("embargoed_members") or []), 1)
         self.assertIn("RU", str(ctx.get("embargoed_members")))
+        self.assertTrue(
+            any("Queued 1 email" in line for line in logs.output),
+            f"Expected a summary log, got: {logs.output}",
+        )
 
     @override_settings(MEMBERSHIP_EMBARGOED_COUNTRY_CODES=["RU", "IR"])
     def test_command_sends_email_with_two_embargoed_members(self) -> None:

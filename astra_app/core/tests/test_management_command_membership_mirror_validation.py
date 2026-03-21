@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import datetime
-from io import StringIO
 from typing import override
 from unittest.mock import patch
 
@@ -69,13 +68,12 @@ class MembershipMirrorValidationCommandTests(TestCase):
         membership_request = self._create_mirror_request(username="alice")
         self.assertFalse(MirrorMembershipValidation.objects.filter(membership_request=membership_request).exists())
 
-        out = StringIO()
-        call_command("membership_mirror_validation", "--dry-run", stdout=out)
+        with self.assertLogs("core.management.commands.membership_mirror_validation", level="INFO") as logs:
+            call_command("membership_mirror_validation", "--dry-run")
 
-        output = out.getvalue()
         self.assertIn(
             f"dry-run: missing mirror validation row for request {membership_request.pk}",
-            output,
+            "\n".join(logs.output),
         )
 
     def test_fix_creates_validation_row_for_missing_open_request(self) -> None:
@@ -110,12 +108,16 @@ class MembershipMirrorValidationCommandTests(TestCase):
             next_run_at=timezone.now() + datetime.timedelta(days=1),
         )
 
-        out = StringIO()
-        call_command("membership_mirror_validation", "--fix", stdout=out)
+        with self.assertLogs("core.management.commands.membership_mirror_validation", level="INFO") as logs:
+            call_command("membership_mirror_validation", "--fix")
 
         validation.refresh_from_db()
         self.assertEqual(validation.status, MirrorMembershipValidation.Status.completed)
         self.assertEqual(validation.answer_fingerprint, "existing")
+        self.assertTrue(
+            any("mirror_validation.none_due" in line or "processed" in line for line in logs.output),
+            f"Expected fix mode to log its work, got: {logs.output}",
+        )
 
     def test_closed_requests_are_ignored_by_detection_and_fix(self) -> None:
         closed_request = self._create_mirror_request(
@@ -124,19 +126,18 @@ class MembershipMirrorValidationCommandTests(TestCase):
         )
         self.assertFalse(MirrorMembershipValidation.objects.filter(membership_request=closed_request).exists())
 
-        out = StringIO()
-        call_command("membership_mirror_validation", "--dry-run", stdout=out)
-        self.assertNotIn(
-            f"request {closed_request.pk}",
-            out.getvalue(),
+        with self.assertLogs("core.management.commands.membership_mirror_validation", level="INFO") as logs:
+            call_command("membership_mirror_validation", "--dry-run")
+        self.assertTrue(
+            any("dry-run: no mirror validation rows are due." in line for line in logs.output),
+            f"Expected a dry-run summary log, got: {logs.output}",
         )
 
-        out = StringIO()
         with patch(
             "core.management.commands.membership_mirror_validation.run_validation",
             autospec=True,
             return_value=self._fake_validation_outcome(),
         ):
-            call_command("membership_mirror_validation", "--fix", stdout=out)
+            call_command("membership_mirror_validation", "--fix")
 
         self.assertFalse(MirrorMembershipValidation.objects.filter(membership_request=closed_request).exists())

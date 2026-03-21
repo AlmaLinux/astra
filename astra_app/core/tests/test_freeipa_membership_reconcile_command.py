@@ -58,6 +58,7 @@ class FreeIPAMembershipReconcileCommandTests(TestCase):
             patch("core.management.commands.freeipa_membership_reconcile.FreeIPAUser.get", return_value=admin_user),
             patch("core.management.commands.freeipa_membership_reconcile.FreeIPAGroup.add_member") as add_mock,
             patch("core.management.commands.freeipa_membership_reconcile.FreeIPAGroup.remove_member") as remove_mock,
+            self.assertLogs("core.management.commands.freeipa_membership_reconcile", level="INFO") as logs,
         ):
             call_command("freeipa_membership_reconcile")
 
@@ -71,6 +72,10 @@ class FreeIPAMembershipReconcileCommandTests(TestCase):
                 to="admin@example.com",
                 template__name=settings.FREEIPA_MEMBERSHIP_RECONCILE_ALERT_EMAIL_TEMPLATE_NAME,
             ).exists()
+        )
+        self.assertTrue(
+            any("Reconciliation complete" in line for line in logs.output),
+            f"Expected a reconciliation summary log, got: {logs.output}",
         )
 
     def test_fix_mode_applies_changes(self) -> None:

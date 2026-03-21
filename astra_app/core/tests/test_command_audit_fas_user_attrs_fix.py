@@ -1,4 +1,3 @@
-import io
 from unittest.mock import patch
 
 from django.core.management import call_command
@@ -30,20 +29,22 @@ class AuditFasUserAttrsFixCommandTests(TestCase):
         ]
         dummy_client = _DummyFreeIPAClient(users=users)
 
-        stdout = io.StringIO()
-        stderr = io.StringIO()
-
         with (
+            self.assertLogs("core_commands.management.commands.audit_fas_user_attrs", level="INFO") as logs,
             patch(
                 "core_commands.management.commands.audit_fas_user_attrs.FreeIPAUser.get_client",
                 return_value=dummy_client,
+            ),
+            patch(
+                "core_commands.management.commands.audit_fas_user_attrs._is_high_confidence_timezone_suggestion",
+                side_effect=lambda *, suggested, valid_timezones: suggested == "UTC",
             ),
             patch(
                 "core_commands.management.commands.audit_fas_user_attrs._update_user_attrs",
                 return_value=([], True),
             ) as update_mock,
         ):
-            call_command("audit_fas_user_attrs", "--fix", stdout=stdout, stderr=stderr)
+            call_command("audit_fas_user_attrs", "--fix")
 
         update_mock.assert_called_once()
         args, kwargs = update_mock.call_args
@@ -62,7 +63,10 @@ class AuditFasUserAttrsFixCommandTests(TestCase):
             ),
         )
 
-        self.assertIn("Applied fixes for 1 user(s)", stdout.getvalue())
+        self.assertTrue(
+            any("Applied fixes for 1 user(s)" in line for line in logs.output),
+            f"Expected a summary log, got: {logs.output}",
+        )
 
     def test_fix_does_not_write_when_no_high_confidence_suggestion(self) -> None:
         users: list[dict[str, object]] = [
@@ -73,20 +77,25 @@ class AuditFasUserAttrsFixCommandTests(TestCase):
         ]
         dummy_client = _DummyFreeIPAClient(users=users)
 
-        stdout = io.StringIO()
-        stderr = io.StringIO()
-
         with (
+            self.assertLogs("core_commands.management.commands.audit_fas_user_attrs", level="INFO") as logs,
             patch(
                 "core_commands.management.commands.audit_fas_user_attrs.FreeIPAUser.get_client",
                 return_value=dummy_client,
+            ),
+            patch(
+                "core_commands.management.commands.audit_fas_user_attrs._is_high_confidence_timezone_suggestion",
+                return_value=False,
             ),
             patch(
                 "core_commands.management.commands.audit_fas_user_attrs._update_user_attrs",
                 return_value=([], True),
             ) as update_mock,
         ):
-            call_command("audit_fas_user_attrs", "--fix", stdout=stdout, stderr=stderr)
+            call_command("audit_fas_user_attrs", "--fix")
 
         update_mock.assert_not_called()
-        self.assertIn("Applied fixes for 0 user(s)", stdout.getvalue())
+        self.assertTrue(
+            any("Applied fixes for 0 user(s)" in line for line in logs.output),
+            f"Expected a summary log, got: {logs.output}",
+        )

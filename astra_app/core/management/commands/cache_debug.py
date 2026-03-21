@@ -1,8 +1,11 @@
 import json
+import logging
 from typing import Any
 
 from django.core.cache import cache, caches
 from django.core.management.base import BaseCommand
+
+logger = logging.getLogger(__name__)
 
 
 def _try_locmem_keys() -> list[str] | None:
@@ -70,39 +73,43 @@ class Command(BaseCommand):
         delete_keys = options.get("delete_keys") or []
         for key in delete_keys:
             cache.delete(key)
-            self.stdout.write(f"deleted: {key}")
+            logger.info("deleted: %s", key)
 
         get_keys = options.get("get_keys") or []
         for key in get_keys:
             val = cache.get(key)
-            self.stdout.write(f"{key} = {_safe_serialize(val, max_chars=max_chars, pretty=pretty)}")
+            logger.info("%s = %s", key, _safe_serialize(val, max_chars=max_chars, pretty=pretty))
 
         if options.get("list"):
             # These are the keys used by core/backends.py.
-            self.stdout.write("Known FreeIPA keys:")
-            self.stdout.write("- freeipa_users_all")
-            self.stdout.write("- freeipa_groups_all")
-            self.stdout.write("- freeipa_user_<username>")
-            self.stdout.write("- freeipa_group_<cn>")
+            logger.info("Known FreeIPA keys:")
+            logger.info("- freeipa_users_all")
+            logger.info("- freeipa_groups_all")
+            logger.info("- freeipa_user_<username>")
+            logger.info("- freeipa_group_<cn>")
 
         if options.get("keys"):
             keys = _try_locmem_keys()
             if keys is None:
-                self.stdout.write("This cache backend does not expose keys (try LocMemCache or switch to Redis for inspectability).")
+                logger.info(
+                    "This cache backend does not expose keys (try LocMemCache or switch to Redis for inspectability)."
+                )
             elif not keys:
                 backend = caches["default"]
                 backend_path = f"{backend.__class__.__module__}.{backend.__class__.__name__}"
-                self.stdout.write("<no keys>")
-                self.stdout.write(f"cache backend: {backend_path}")
-                self.stdout.write(
+                logger.info("<no keys>")
+                logger.info("cache backend: %s", backend_path)
+                logger.info(
                     "Note: LocMemCache is per-process. Running `manage.py` in `podman-compose exec` starts a new Python process,"
                     " so it will NOT see the runserver/gunicorn process's in-memory cache."
                 )
-                self.stdout.write("If you need to inspect live keys, use a shared cache backend (e.g., Redis) or add an in-app debug view.")
+                logger.info(
+                    "If you need to inspect live keys, use a shared cache backend (e.g., Redis) or add an in-app debug view."
+                )
             else:
                 for k in keys:
-                    self.stdout.write(k)
+                    logger.info(k)
 
         # Default behavior if no flags: show a tiny hint.
         if not (delete_keys or get_keys or options.get("list") or options.get("keys")):
-            self.stdout.write("Use --list, --keys, --get <key>, or --delete <key>.")
+            logger.info("Use --list, --keys, --get <key>, or --delete <key>.")

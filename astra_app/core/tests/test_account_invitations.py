@@ -418,11 +418,16 @@ class AccountInvitationViewsTests(TestCase):
             invited_by_username="committee",
         )
 
-        with patch("core.account_invitations.find_account_invitation_matches", return_value=[]):
-            call_command("account_invitations_refresh")
+        with self.assertLogs("core.management.commands.account_invitations_refresh", level="INFO") as logs:
+            with patch("core.account_invitations.find_account_invitation_matches", return_value=[]):
+                call_command("account_invitations_refresh")
 
         invitation.refresh_from_db()
         self.assertIsNotNone(invitation.freeipa_last_checked_at)
+        self.assertTrue(
+            any("Checked" in line and "Updated" in line for line in logs.output),
+            f"Expected a summary log, got: {logs.output}",
+        )
 
     def test_account_invitations_upload_preview_and_send(self) -> None:
         self._login_as_freeipa_user("committee")

@@ -1,9 +1,12 @@
+import logging
 from typing import Any, override
 
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from core.account_invitations import refresh_account_invitations
+
+logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
@@ -24,8 +27,10 @@ class Command(BaseCommand):
         summary = refresh_account_invitations(actor_username=actor, now=timezone.now())
         total_checked = summary.pending_checked + summary.accepted_checked
         total_updated = summary.pending_updated + summary.accepted_updated
-        self.stdout.write(
-            "Checked "
-            f"{total_checked} invitations (pending={summary.pending_checked}, accepted={summary.accepted_checked})."
+        logger.info(
+            "Checked %s invitations (pending=%s, accepted=%s). Updated %s invitations.",
+            total_checked,
+            summary.pending_checked,
+            summary.accepted_checked,
+            total_updated,
         )
-        self.stdout.write(f"Updated {total_updated} invitations.")

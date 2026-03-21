@@ -652,7 +652,8 @@ class SelfServiceMembershipPrivacyTests(TestCase):
             reason_cleanup_due_at=timezone.now() - datetime.timedelta(hours=1),
         )
 
-        call_command("selfservice_lifecycle_cleanup")
+        with self.assertLogs("core.management.commands.selfservice_lifecycle_cleanup", level="INFO") as logs:
+            call_command("selfservice_lifecycle_cleanup")
 
         feedback.refresh_from_db()
         deletion_request.refresh_from_db()
@@ -660,3 +661,7 @@ class SelfServiceMembershipPrivacyTests(TestCase):
         self.assertIsNotNone(feedback.reason_text_cleared_at)
         self.assertEqual(deletion_request.reason_text, "")
         self.assertIsNotNone(deletion_request.reason_text_cleared_at)
+        self.assertTrue(
+            any("Cleared" in line for line in logs.output),
+            f"Expected a cleanup summary log, got: {logs.output}",
+        )

@@ -45,8 +45,15 @@ class Command(BaseCommand):
 
         embargoed_codes = embargoed_country_codes_from_settings()
         if not embargoed_codes:
-            self.stdout.write("No embargoed country codes configured.")
+            logger.info("No embargoed country codes configured.")
             return
+
+        logger.info(
+            "membership_embargoed_members: start embargoed_codes=%s force=%s dry_run=%s",
+            len(embargoed_codes),
+            force,
+            dry_run,
+        )
 
         now = timezone.now()
         memberships = (
@@ -91,19 +98,19 @@ class Command(BaseCommand):
             )
 
         if not embargoed_members:
-            self.stdout.write("No active members from embargoed countries.")
+            logger.info("No active members from embargoed countries.")
             return
 
         recipients, recipient_warnings = committee_recipient_emails_for_permission_graceful(
             permission=ASTRA_ADD_MEMBERSHIP,
         )
         for warning in recipient_warnings:
-            self.stderr.write(f"Warning: {warning}")
+            logger.warning("%s", warning)
         if not recipients:
             if dry_run:
-                self.stdout.write("[dry-run] Would skip; no recipients resolved.")
+                logger.info("[dry-run] Would skip; no recipients resolved.")
             else:
-                self.stdout.write("Skipped; no recipients resolved.")
+                logger.info("Skipped; no recipients resolved.")
             return
 
         if not force:
@@ -112,21 +119,20 @@ class Command(BaseCommand):
             )
             if already_sent:
                 if dry_run:
-                    self.stdout.write("[dry-run] Would skip; email already queued today.")
+                    logger.info("[dry-run] Would skip; email already queued today.")
                 else:
-                    self.stdout.write("Skipped; email already queued today.")
+                    logger.info("Skipped; email already queued today.")
                 return
 
         embargoed_members.sort(key=lambda row: (row.get("country_code") or "", row.get("username") or ""))
 
         if dry_run:
-            self.stdout.write(
-                "[dry-run] Would queue 1 email to "
-                f"{len(recipients)} recipient(s): {', '.join(recipients)}."
+            logger.info(
+                "[dry-run] Would queue 1 email to %s recipient(s): %s.",
+                len(recipients),
+                ", ".join(recipients),
             )
-            self.stdout.write(
-                f"[dry-run] Would include {len(embargoed_members)} embargoed member(s)."
-            )
+            logger.info("[dry-run] Would include %s embargoed member(s).", len(embargoed_members))
             return
 
         queue_templated_email(
@@ -141,4 +147,5 @@ class Command(BaseCommand):
             reply_to=[settings.MEMBERSHIP_COMMITTEE_EMAIL],
         )
 
-        self.stdout.write(f"Queued 1 email to {len(recipients)} recipient(s).")
+        logger.info("Queued 1 email to %s recipient(s).", len(recipients))
+        logger.info("Included %s embargoed member(s).", len(embargoed_members))

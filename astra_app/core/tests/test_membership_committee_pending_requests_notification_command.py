@@ -61,9 +61,13 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
             return {"alice": alice, "bob": bob}.get(username)
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
-            with patch("core.freeipa.group.FreeIPAGroup.get", return_value=committee_group):
-                with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
-                    call_command("membership_pending_requests")
+            with self.assertLogs(
+                "core.management.commands.membership_pending_requests",
+                level="INFO",
+            ) as logs:
+                with patch("core.freeipa.group.FreeIPAGroup.get", return_value=committee_group):
+                    with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
+                        call_command("membership_pending_requests")
 
         from post_office.models import Email
 
@@ -76,6 +80,10 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
         self.assertIn("alice@example.com", msg.to)
         self.assertIn("bob@example.com", msg.to)
         self.assertIn("/membership/requests/", str(msg.context))
+        self.assertTrue(
+            any("Queued 1 email" in line for line in logs.output),
+            f"Expected a summary log, got: {logs.output}",
+        )
 
     def test_command_does_not_send_when_no_pending(self) -> None:
         frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)

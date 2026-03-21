@@ -1,3 +1,4 @@
+import logging
 from typing import override
 
 from django.conf import settings
@@ -12,6 +13,8 @@ from core.membership_notifications import (
 from core.models import MembershipRequest
 from core.permissions import ASTRA_ADD_MEMBERSHIP
 from core.templated_email import queue_templated_email
+
+logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
@@ -37,19 +40,26 @@ class Command(BaseCommand):
 
         pending_count = MembershipRequest.objects.filter(status=MembershipRequest.Status.pending).count()
         if pending_count <= 0:
-            self.stdout.write("No pending membership requests.")
+            logger.info("No pending membership requests.")
             return
+
+        logger.info(
+            "membership_pending_requests: start pending_count=%s force=%s dry_run=%s",
+            pending_count,
+            force,
+            dry_run,
+        )
 
         recipients, recipient_warnings = committee_recipient_emails_for_permission_graceful(
             permission=ASTRA_ADD_MEMBERSHIP,
         )
         for warning in recipient_warnings:
-            self.stderr.write(f"Warning: {warning}")
+            logger.warning("%s", warning)
         if not recipients:
             if dry_run:
-                self.stdout.write("[dry-run] Would skip; no recipients resolved.")
+                logger.info("[dry-run] Would skip; no recipients resolved.")
             else:
-                self.stdout.write("Skipped; no recipients resolved.")
+                logger.info("Skipped; no recipients resolved.")
             return
 
         if not would_queue_membership_pending_requests_notification(
@@ -57,15 +67,16 @@ class Command(BaseCommand):
             template_name=settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME,
         ):
             if dry_run:
-                self.stdout.write("[dry-run] Would skip; email already queued this week.")
+                logger.info("[dry-run] Would skip; email already queued this week.")
             else:
-                self.stdout.write("Skipped; email already queued this week.")
+                logger.info("Skipped; email already queued this week.")
             return
 
         if dry_run:
-            self.stdout.write(
-                "[dry-run] Would queue 1 email to "
-                f"{len(recipients)} recipient(s): {', '.join(recipients)}."
+            logger.info(
+                "[dry-run] Would queue 1 email to %s recipient(s): %s.",
+                len(recipients),
+                ", ".join(recipients),
             )
             return
 
@@ -81,4 +92,4 @@ class Command(BaseCommand):
             reply_to=[settings.MEMBERSHIP_COMMITTEE_EMAIL],
         )
 
-        self.stdout.write(f"Queued 1 email to {len(recipients)} recipient(s).")
+        logger.info("Queued 1 email to %s recipient(s).", len(recipients))

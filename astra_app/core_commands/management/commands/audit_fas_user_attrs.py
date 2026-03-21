@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import csv
+import io
+import logging
 from typing import Any, override
 
 from django.conf import settings
@@ -18,6 +20,8 @@ from core.ipa_user_attrs import (
     _update_user_attrs,
 )
 from core.views_utils import _normalize_str
+
+logger = logging.getLogger(__name__)
 
 
 def _is_high_confidence_timezone_suggestion(*, suggested: str, valid_timezones: set[str]) -> bool:
@@ -39,6 +43,12 @@ _MULTI_VALUED_FAS_ATTRS: frozenset[str] = frozenset(
         "fasGPGKeyId",
     }
 )
+
+
+def _csv_line(values: list[str]) -> str:
+    buffer = io.StringIO()
+    csv.writer(buffer).writerow(values)
+    return buffer.getvalue().rstrip("\r\n")
 
 
 class Command(BaseCommand):
@@ -205,34 +215,41 @@ class Command(BaseCommand):
                             fixed_users += 1
                             fixed_attributes += len(desired_by_attr)
 
-                            if as_csv:
-                                # Keep CSV output stable; write fix logs to stderr.
-                                self.stderr.write(
-                                    f"Fixed {username}: add={len(addattrs)} set={len(setattrs)} del={len(delattrs)}"
-                                )
-                            else:
-                                self.stdout.write(
-                                    f"Fixed {username}: add={len(addattrs)} set={len(setattrs)} del={len(delattrs)}"
-                                )
+                            logger.info(
+                                "Fixed %s: add=%s set=%s del=%s",
+                                username,
+                                len(addattrs),
+                                len(setattrs),
+                                len(delattrs),
+                            )
 
                         if skipped_attrs:
-                            self.stderr.write(
-                                f"FreeIPA rejected attributes for {username}: {', '.join(sorted(skipped_attrs))}"
+                            logger.warning(
+                                "FreeIPA rejected attributes for %s: %s",
+                                username,
+                                ", ".join(sorted(skipped_attrs)),
                             )
 
         if as_csv:
-            writer = csv.writer(self.stdout)
-            writer.writerow(["username", "attribute", "issue", "value", "suggested", "message"])
-            writer.writerows(all_findings)
+            logger.info(_csv_line(["username", "attribute", "issue", "value", "suggested", "message"]))
+            for row in all_findings:
+                logger.info(_csv_line(list(row)))
         else:
             for username, attribute, issue, value, suggested, message in all_findings:
                 suggestion_text = f" -> {suggested}" if suggested else ""
-                self.stdout.write(f"{username}: {attribute} [{issue}] {value!r}{suggestion_text} ({message})")
+                logger.info("%s: %s [%s] %r%s (%s)", username, attribute, issue, value, suggestion_text, message)
 
-            self.stdout.write("")
-            self.stdout.write(
-                f"Audited {total_users} user(s); {total_users_with_findings} user(s) with findings; {len(all_findings)} finding(s)."
+            logger.info("")
+            logger.info(
+                "Audited %s user(s); %s user(s) with findings; %s finding(s).",
+                total_users,
+                total_users_with_findings,
+                len(all_findings),
             )
 
-            if fix:
-                self.stdout.write(f"Applied fixes for {fixed_users} user(s); {fixed_attributes} attribute(s) updated.")
+        if fix:
+            logger.info(
+                "Applied fixes for %s user(s); %s attribute(s) updated.",
+                fixed_users,
+                fixed_attributes,
+            )

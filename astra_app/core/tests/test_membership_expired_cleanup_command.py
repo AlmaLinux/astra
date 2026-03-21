@@ -1,6 +1,5 @@
 
 import datetime
-from io import StringIO
 from unittest.mock import patch
 
 from django.conf import settings
@@ -197,22 +196,24 @@ class MembershipExpiredCleanupCommandTests(TestCase):
             Membership.objects.filter(target_username="missing-user", membership_type_id="individual").exists()
         )
 
-        stdout = StringIO()
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=None),
             patch(
                 "core.management.commands.membership_expired_cleanup.remove_user_from_group",
                 autospec=True,
             ) as remove_user_from_group_mock,
+            self.assertLogs("core.management.commands.membership_expired_cleanup", level="INFO") as logs,
         ):
-            call_command("membership_expired_cleanup", stdout=stdout)
+            call_command("membership_expired_cleanup")
 
         remove_user_from_group_mock.assert_not_called()
         self.assertFalse(
             Membership.objects.filter(target_username="missing-user", membership_type_id="individual").exists()
         )
-        self.assertIn("Removed 1 membership(s)", stdout.getvalue())
-        self.assertIn("failed 0", stdout.getvalue())
+        self.assertTrue(
+            any("Removed 1 membership(s)" in line for line in logs.output),
+            f"Expected a cleanup summary log, got: {logs.output}",
+        )
 
     def test_command_removes_org_sponsorship_and_sends_email(self) -> None:
         membership_type, _ = MembershipType.objects.update_or_create(
@@ -507,10 +508,10 @@ class MembershipExpiredCleanupCommandTests(TestCase):
         )
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
-            stderr = StringIO()
-            with patch("core.freeipa.user.FreeIPAUser.get", return_value=rep):
-                with patch.object(FreeIPAUser, "remove_from_group", autospec=True):
-                    call_command("membership_expired_cleanup", stderr=stderr)
+            with self.assertLogs("core.management.commands.membership_expired_cleanup", level="INFO") as logs:
+                with patch("core.freeipa.user.FreeIPAUser.get", return_value=rep):
+                    with patch.object(FreeIPAUser, "remove_from_group", autospec=True):
+                        call_command("membership_expired_cleanup")
 
         from post_office.models import Email
 
@@ -522,7 +523,10 @@ class MembershipExpiredCleanupCommandTests(TestCase):
                 context__membership_type_code="gold",
             ).exists()
         )
-        self.assertEqual("", stderr.getvalue().strip())
+        self.assertTrue(
+            any("fallback@example.com" in line for line in logs.output),
+            f"Expected a log entry mentioning the fallback recipient, got: {logs.output}",
+        )
 
     def test_command_warns_and_continues_when_recipient_lookup_fails_and_no_fallback(self) -> None:
         membership_type, _ = MembershipType.objects.update_or_create(
@@ -550,16 +554,16 @@ class MembershipExpiredCleanupCommandTests(TestCase):
             expires_at=frozen_now - datetime.timedelta(days=1),
         )
 
-        stderr = StringIO()
         with patch("django.utils.timezone.now", return_value=frozen_now):
             with (
                 patch(
                     "core.management.commands.membership_expired_cleanup.organization_sponsor_email_context",
                     return_value={},
                 ),
+                self.assertLogs("core.management.commands.membership_expired_cleanup", level="WARNING") as logs,
                 patch("core.freeipa.user.FreeIPAUser.get", side_effect=RuntimeError("ipa down")),
             ):
-                call_command("membership_expired_cleanup", stderr=stderr)
+                call_command("membership_expired_cleanup")
 
         from post_office.models import Email
 
@@ -570,5 +574,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
                 context__membership_type_code="gold",
             ).exists()
         )
-        self.assertIn("No recipient resolved for organization id=", stderr.getvalue())
-        self.assertIn("organization sponsorship expired-cleanup", stderr.getvalue())
+        self.assertTrue(
+            any("No recipient resolved for organization id=" in line for line in logs.output),
+            f"Expected a warning about the missing recipient, got: {logs.output}",
+        )

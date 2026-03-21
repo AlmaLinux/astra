@@ -1,4 +1,5 @@
 import datetime
+import logging
 import math
 from collections.abc import Iterable
 from typing import override
@@ -21,6 +22,8 @@ from core.membership_notifications import (
 )
 from core.models import Membership
 
+logger = logging.getLogger(__name__)
+
 
 class Command(BaseCommand):
     help = "Send membership expiration warning emails via django-post-office."
@@ -42,6 +45,12 @@ class Command(BaseCommand):
     def handle(self, *args, **options) -> None:
         force: bool = bool(options.get("force"))
         dry_run: bool = bool(options.get("dry_run"))
+
+        logger.info(
+            "membership_expiration_notifications: start force=%s dry_run=%s",
+            force,
+            dry_run,
+        )
 
         now = timezone.now()
         today_utc = now.astimezone(datetime.UTC).date()
@@ -103,12 +112,10 @@ class Command(BaseCommand):
                 )
 
                 if would_queue:
-                    self.stdout.write(f"[dry-run] Would queue {template} to {fu.email}.")
+                    logger.info("[dry-run] Would queue %s to %s.", template, fu.email)
                     queued += 1
                 else:
-                    self.stdout.write(
-                        f"[dry-run] Would skip {template} to {fu.email}; already queued today."
-                    )
+                    logger.info("[dry-run] Would skip %s to %s; already queued today.", template, fu.email)
                     skipped += 1
             else:
                 did_queue = send_membership_notification(
@@ -124,8 +131,10 @@ class Command(BaseCommand):
                 )
                 if did_queue:
                     queued += 1
+                    logger.info("Queued %s to %s.", template, fu.email)
                 else:
                     skipped += 1
+                    logger.info("Skipped %s to %s; already queued today.", template, fu.email)
 
         for sponsorship in sponsorships:
             if not sponsorship.expires_at:
@@ -150,7 +159,7 @@ class Command(BaseCommand):
                 notification_kind="organization sponsorship expiring-soon",
             )
             if recipient_warning:
-                self.stderr.write(f"Warning: {recipient_warning}")
+                logger.warning("%s", recipient_warning)
             if not recipient_email:
                 continue
 
@@ -170,11 +179,13 @@ class Command(BaseCommand):
                 )
 
                 if would_queue:
-                    self.stdout.write(f"[dry-run] Would queue {template} to {recipient_email}.")
+                    logger.info("[dry-run] Would queue %s to %s.", template, recipient_email)
                     queued += 1
                 else:
-                    self.stdout.write(
-                        f"[dry-run] Would skip {template} to {recipient_email}; already queued today."
+                    logger.info(
+                        "[dry-run] Would skip %s to %s; already queued today.",
+                        template,
+                        recipient_email,
                     )
                     skipped += 1
             else:
@@ -207,14 +218,16 @@ class Command(BaseCommand):
                 )
                 if did_queue:
                     queued += 1
+                    logger.info("Queued %s to %s.", template, recipient_email)
                 else:
                     skipped += 1
+                    logger.info("Skipped %s to %s; already queued today.", template, recipient_email)
 
         summary = f"Queued {queued} email(s); skipped {skipped}."
         if dry_run:
-            self.stdout.write(f"[dry-run] {summary}")
+            logger.info("[dry-run] %s", summary)
         else:
-            self.stdout.write(summary)
+            logger.info(summary)
             if had_expiring_memberships:
                 astra_signals.membership_expiring_soon.send(
                     sender=astra_signals.MembershipExpirationCommand,

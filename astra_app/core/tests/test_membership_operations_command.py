@@ -7,9 +7,10 @@ from django.test import TestCase
 
 class MembershipOperationsCommandTests(TestCase):
     def test_command_runs_all_membership_jobs(self) -> None:
-        with patch(
-            "core.management.commands.membership_operations.call_command",
-        ) as cc:
+        with (
+            patch("core.management.commands.membership_operations.call_command") as cc,
+            self.assertLogs("core.management.commands.membership_operations", level="INFO") as logs,
+        ):
             call_command("membership_operations")
 
         self.assertEqual(
@@ -22,7 +23,12 @@ class MembershipOperationsCommandTests(TestCase):
                 call("membership_embargoed_members", force=False, dry_run=False),
                 call("membership_mirror_validation", force=False, dry_run=False),
                 call("selfservice_lifecycle_cleanup", dry_run=False),
+                call("account_invitations_refresh"),
             ],
+        )
+        self.assertTrue(
+            any("membership_operations" in line for line in logs.output),
+            f"Expected membership operations logs, got: {logs.output}",
         )
 
     def test_force_is_passed_through(self) -> None:
@@ -41,6 +47,7 @@ class MembershipOperationsCommandTests(TestCase):
                 call("membership_embargoed_members", force=True, dry_run=False),
                 call("membership_mirror_validation", force=True, dry_run=False),
                 call("selfservice_lifecycle_cleanup", dry_run=False),
+                call("account_invitations_refresh"),
             ],
         )
 
@@ -60,5 +67,6 @@ class MembershipOperationsCommandTests(TestCase):
                 call("membership_embargoed_members", force=False, dry_run=True),
                 call("membership_mirror_validation", force=False, dry_run=True),
                 call("selfservice_lifecycle_cleanup", dry_run=True),
+                call("account_invitations_refresh"),
             ],
         )
