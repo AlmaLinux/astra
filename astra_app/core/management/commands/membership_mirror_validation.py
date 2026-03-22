@@ -104,7 +104,7 @@ class Command(BaseCommand):
             request_id = validation.membership_request.pk
             if reclaimed:
                 logger.info(
-                    "mirror_validation.reclaimed",
+                    f"mirror_validation.reclaimed: {request_id}",
                     extra={
                         "request_id": request_id,
                     },
@@ -114,16 +114,10 @@ class Command(BaseCommand):
                 validation.delete()
                 processed += 1
                 logger.info(
-                    "mirror_validation.deleted_closed_request",
+                    f"mirror_validation.deleted_closed_request: {request_id}",
                     extra={
                         "request_id": request_id,
                         "reclaimed": reclaimed,
-                    },
-                )
-                logger.info(
-                    "mirror_validation.deleted_closed_request_stdout",
-                    extra={
-                        "request_id": request_id,
                     },
                 )
                 continue
@@ -138,7 +132,7 @@ class Command(BaseCommand):
             processed += 1
 
             logger.info(
-                "mirror_validation.processed",
+                f"mirror_validation.processed: {request_id}",
                 extra={
                     "request_id": request_id,
                     "validation_status": validation.status,
@@ -147,7 +141,7 @@ class Command(BaseCommand):
                 },
             )
             logger.info(
-                "mirror_validation.processed_stdout",
+                f"mirror_validation.processed_stdout: {request_id}",
                 extra={
                     "request_id": request_id,
                     "validation_status": validation.status,
@@ -156,7 +150,7 @@ class Command(BaseCommand):
             self._write_debug_output(request_id=request_id, result=validation.result)
             if note_content is not None:
                 logger.info(
-                    "mirror_validation.wrote_note",
+                    f"mirror_validation.wrote_note: {request_id}",
                     extra={
                         "request_id": request_id,
                     },
@@ -166,7 +160,7 @@ class Command(BaseCommand):
             logger.info("mirror_validation.none_due")
             for request_id in self._missing_open_mirror_request_ids():
                 logger.info(
-                    "mirror_validation.missing_row",
+                    f"mirror_validation.missing_row: {request_id}",
                     extra={
                         "request_id": request_id,
                     },
@@ -230,7 +224,7 @@ class Command(BaseCommand):
             deleted_count, _deleted_detail = closed_validation_queryset.delete()
             deleted_validation = deleted_count > 0
             logger.info(
-                "mirror_validation.deleted_closed_request_direct",
+                f"mirror_validation.deleted_closed_request_direct: {request_id}",
                 extra={
                     "request_id": request_id,
                     "deleted_validation": deleted_validation,
@@ -238,14 +232,14 @@ class Command(BaseCommand):
             )
             if deleted_validation:
                 logger.info(
-                    "mirror_validation.deleted_closed_request_direct_stdout",
+                    f"mirror_validation.deleted_closed_request_direct_stdout: {request_id}",
                     extra={
                         "request_id": request_id,
                     },
                 )
             else:
                 logger.info(
-                    "mirror_validation.no_closed_request_row_direct",
+                    f"mirror_validation.no_closed_request_row_direct: {request_id}",
                     extra={
                         "request_id": request_id,
                     },
@@ -259,7 +253,7 @@ class Command(BaseCommand):
         now = timezone.now()
         validation = claim_validation_for_request(membership_request=membership_request, now=now)
         logger.info(
-            "mirror_validation.processing_direct",
+            f"mirror_validation.processing_direct: {request_id}",
             extra={
                 "request_id": request_id,
             },
@@ -273,7 +267,7 @@ class Command(BaseCommand):
         validation.refresh_from_db()
 
         logger.info(
-            "mirror_validation.processed_direct",
+            f"mirror_validation.processed_direct: {request_id}",
             extra={
                 "request_id": request_id,
                 "validation_status": validation.status,
@@ -281,7 +275,7 @@ class Command(BaseCommand):
             },
         )
         logger.info(
-            "mirror_validation.processed_direct_stdout",
+            f"mirror_validation.processed_direct_stdout: {request_id}",
             extra={
                 "request_id": request_id,
                 "validation_status": validation.status,
@@ -290,7 +284,7 @@ class Command(BaseCommand):
         self._write_debug_output(request_id=request_id, result=validation.result)
         if note_content is not None:
             logger.info(
-                "mirror_validation.wrote_note_direct",
+                f"mirror_validation.wrote_note_direct: {request_id} note_length={len(note_content)}",
                 extra={
                     "request_id": request_id,
                     "note": note_content,
@@ -300,7 +294,7 @@ class Command(BaseCommand):
     def _write_debug_output(self, *, request_id: int, result: dict[str, object]) -> None:
         for line in build_validation_debug_lines(result=result):
             logger.info(
-                "mirror_validation.debug_line",
+                f"mirror_validation.debug_line: {request_id} {line}",
                 extra={
                     "request_id": request_id,
                     "line": line,
