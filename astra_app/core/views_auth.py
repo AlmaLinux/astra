@@ -167,6 +167,10 @@ class FreeIPALoginView(auth_views.LoginView):
 
     @override
     def get_success_url(self) -> str:
+        next_url = self.get_redirect_url()
+        if next_url:
+            return next_url
+
         username = get_username(self.request)
         if username:
             return reverse("user-profile", kwargs={"username": username})

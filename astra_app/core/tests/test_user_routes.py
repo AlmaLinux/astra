@@ -122,6 +122,48 @@ class UserRoutesTests(TestCase):
 
 
 class LoginRedirectTests(TestCase):
+    def test_freeipa_login_post_honors_safe_next_redirect(self) -> None:
+        with patch(
+            "core.freeipa.auth_backend._get_freeipa_client",
+            autospec=True,
+            return_value=SimpleNamespace(),
+        ), patch("core.freeipa.user.FreeIPAUser._fetch_full_user", autospec=True) as mocked_fetch_full_user:
+            mocked_fetch_full_user.return_value = {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["alice@example.org"],
+            }
+
+            response = self.client.post(
+                "/login/?next=/organization/13/",
+                data={"username": "alice", "password": "pw"},
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/organization/13/")
+
+    def test_freeipa_login_post_ignores_unsafe_external_next_redirect(self) -> None:
+        with patch(
+            "core.freeipa.auth_backend._get_freeipa_client",
+            autospec=True,
+            return_value=SimpleNamespace(),
+        ), patch("core.freeipa.user.FreeIPAUser._fetch_full_user", autospec=True) as mocked_fetch_full_user:
+            mocked_fetch_full_user.return_value = {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["alice@example.org"],
+            }
+
+            response = self.client.post(
+                "/login/?next=https://evil.example/phish/",
+                data={"username": "alice", "password": "pw"},
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/user/alice/")
+
     def test_freeipa_login_view_redirects_to_canonical_user_profile_url(self) -> None:
         factory = RequestFactory()
         request = factory.get("/login/")
