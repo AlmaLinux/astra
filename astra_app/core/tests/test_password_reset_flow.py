@@ -1,10 +1,12 @@
 
 import re
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from urllib.parse import unquote
 
 from django.contrib.messages import get_messages
+from django.contrib.staticfiles import finders
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from python_freeipa import exceptions
@@ -795,6 +797,14 @@ class AdminPasswordResetEmailTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Reset user's password")
         self.assertNotContains(resp, "Disable user's OTP tokens")
+
+    def test_admin_custom_css_overrides_jazzmin_modal_wrapper_blur(self) -> None:
+        css_path = finders.find("core/css/admin.css")
+
+        self.assertIsNotNone(css_path)
+        css_content = Path(str(css_path)).read_text(encoding="utf-8")
+        self.assertIn(".modal-open .wrapper", css_content)
+        self.assertIn("filter: none !important;", css_content)
 
     def test_admin_disable_otp_tokens(self):
         self._login_as_freeipa_admin("alice")

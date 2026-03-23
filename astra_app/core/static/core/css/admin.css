@@ -3,3 +3,8 @@
   padding-left: 5px !important;
   color: var(--dark) !important;
 }
+
+/* Jazzmin wrapper blur can make in-wrapper modals non-interactive on admin change forms. */
+.modal-open .wrapper {
+  filter: none !important;
+}
