@@ -4,6 +4,7 @@ from unittest.mock import patch
 import requests
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.test import Client, RequestFactory, TestCase
+from python_freeipa import exceptions
 
 from core.freeipa.auth_backend import FreeIPAAuthBackend
 from core.freeipa.client import _build_freeipa_client, _FreeIPATimeoutSession
@@ -111,6 +112,45 @@ class FreeIPABackendBehaviorTests(TestCase):
             "Please enter a correct username and password. Note that both fields may be case-sensitive.",
             errors,
         )
+
+    def test_login_invalid_credentials_emits_warning_with_username(self) -> None:
+        client = Client()
+
+        with (
+            patch(
+                "core.freeipa.auth_backend._get_freeipa_client",
+                autospec=True,
+                side_effect=exceptions.InvalidSessionPassword,
+            ),
+            self.assertLogs("core.views_auth", level="WARNING") as captured,
+        ):
+            response = client.post(
+                "/login/",
+                data={"username": "alice", "password": "wrong-password"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        combined = "\n".join(captured.output)
+        self.assertIn("Login failed", combined)
+        self.assertIn("reason=invalid_credentials", combined)
+        self.assertIn("username=alice", combined)
+
+    def test_login_rate_limited_emits_rate_limited_reason_not_invalid_credentials(self) -> None:
+        client = Client()
+
+        with (
+            patch("core.views_auth.allow_request", return_value=False, create=True),
+            self.assertLogs("core.views_auth", level="INFO") as captured,
+        ):
+            response = client.post(
+                "/login/",
+                data={"username": "alice", "password": "wrong-password"},
+            )
+
+        self.assertEqual(response.status_code, 429)
+        combined = "\n".join(captured.output)
+        self.assertIn("reason=rate_limited", combined)
+        self.assertNotIn("reason=invalid_credentials", combined)
 
     def test_add_to_group_is_idempotent_when_already_member(self) -> None:
         alice = FreeIPAUser(

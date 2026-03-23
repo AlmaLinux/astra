@@ -1,5 +1,6 @@
 import datetime
 import logging
+import re
 from urllib.parse import quote
 
 from django.conf import settings
@@ -15,6 +16,37 @@ from core.tokens import make_password_reset_token
 from core.views_utils import _normalize_str
 
 logger = logging.getLogger(__name__)
+
+_DATETIME_MARKER_DICT_REPR_PATTERN = re.compile(
+    r"""\{\s*(?P<key_quote>['\"])__datetime__(?P=key_quote)\s*:\s*(?P<value_quote>['\"])(?P<value>[^'\"]+)(?P=value_quote)\s*\}\s*"""
+)
+
+
+def normalize_last_password_change(value: object) -> str:
+    """Return a stable string form for FreeIPA password-change timestamps."""
+    if value is None:
+        return ""
+
+    if isinstance(value, dict):
+        normalized_dict_dt = _normalize_str(value.get("__datetime__"))
+        if normalized_dict_dt:
+            return normalized_dict_dt
+        return _normalize_str(value)
+
+    normalized_value = _normalize_str(value)
+    if not normalized_value:
+        return ""
+
+    if "__datetime__" not in normalized_value or not normalized_value.startswith("{"):
+        return normalized_value
+
+    marker_match = _DATETIME_MARKER_DICT_REPR_PATTERN.fullmatch(normalized_value)
+    if marker_match is not None:
+        normalized_marker_value = _normalize_str(marker_match.group("value"))
+        if normalized_marker_value:
+            return normalized_marker_value
+
+    return normalized_value
 
 
 def password_reset_confirm_url(*, request: HttpRequest, token: str) -> str:
@@ -33,10 +65,12 @@ def send_password_reset_email(
     last_password_change: str,
     invitation_token: str | None = None,
 ) -> None:
+    canonical_last_password_change = normalize_last_password_change(last_password_change)
+
     token_payload: dict[str, str] = {
         "u": username,
         "e": email,
-        "lpc": last_password_change,
+        "lpc": canonical_last_password_change,
     }
     normalized_invitation_token = _normalize_str(invitation_token)
     if normalized_invitation_token:

@@ -12,11 +12,16 @@ from django.urls import reverse
 from python_freeipa import exceptions
 
 from core.models import AccountInvitation
+from core.password_reset import normalize_last_password_change
 from core.tokens import make_password_reset_token, read_password_reset_token
 from core.views_auth import PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY
 
 
 class PasswordResetFlowTests(TestCase):
+    def test_normalize_last_password_change_noncanonical_dict_repr_returns_original(self) -> None:
+        noncanonical_repr = "{'__datetime__': '20260323074752Z',}"
+        self.assertEqual(normalize_last_password_change(noncanonical_repr), noncanonical_repr)
+
     def test_password_reset_email_template_exists(self):
         from post_office.models import EmailTemplate
 
@@ -414,6 +419,86 @@ class PasswordResetFlowTests(TestCase):
         self.assertIn("user_email=alice@example.com", combined_logs)
         self.assertIn("token_lpc=20260323090000Z", combined_logs)
         self.assertIn("user_lpc=20260323100000Z", combined_logs)
+
+    @override_settings(PASSWORD_RESET_TOKEN_TTL_SECONDS=60 * 60)
+    def test_password_reset_confirm_accepts_dict_repr_lpc_when_user_lpc_matches(self) -> None:
+        client = Client()
+        token = make_password_reset_token(
+            {
+                "u": "alice",
+                "e": "alice@example.com",
+                "lpc": "{'__datetime__': '20260323074752Z'}",
+            }
+        )
+        current_user = SimpleNamespace(
+            username="alice",
+            email="alice@example.com",
+            last_password_change="20260323074752Z",
+            first_name="Alice",
+            last_name="User",
+            full_name="Alice User",
+        )
+        otp_lookup_client = SimpleNamespace(otptoken_find=lambda **_kwargs: {"result": []})
+
+        with (
+            patch("core.views_auth.find_user_for_password_reset", autospec=True, return_value=current_user),
+            patch("core.views_auth.FreeIPAUser.get_client", autospec=True, return_value=otp_lookup_client),
+        ):
+            resp = client.get(reverse("password-reset-confirm") + f"?token={token}", follow=False)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Set a new password")
+
+    @override_settings(PASSWORD_RESET_TOKEN_TTL_SECONDS=60 * 60)
+    def test_password_reset_confirm_logs_info_for_token_parse_accept_and_completion(self) -> None:
+        client = Client()
+        token = make_password_reset_token(
+            {
+                "u": "alice",
+                "e": "alice@example.com",
+                "lpc": "20260323074752Z",
+            }
+        )
+        current_user = SimpleNamespace(
+            username="alice",
+            email="alice@example.com",
+            last_password_change="20260323074752Z",
+            first_name="Alice",
+            last_name="User",
+            full_name="Alice User",
+        )
+        svc_client = SimpleNamespace(
+            user_mod=lambda *_args, **_kwargs: {"result": {"uid": ["alice"]}},
+            otptoken_find=lambda **_kwargs: {"result": []},
+        )
+        pw_client = SimpleNamespace(change_password=lambda *_args, **_kwargs: True)
+
+        with (
+            patch("core.views_auth.find_user_for_password_reset", autospec=True, return_value=current_user),
+            patch("core.views_auth.FreeIPAUser.get_client", autospec=True, return_value=svc_client),
+            patch("core.views_auth._build_freeipa_client", autospec=True, return_value=pw_client),
+            patch("core.views_auth.send_password_reset_success_email", autospec=True),
+            self.assertLogs("core.views_auth", level="INFO") as log_capture,
+        ):
+            post_resp = client.post(
+                reverse("password-reset-confirm"),
+                data={
+                    "token": token,
+                    "password": "S3curePassword!",
+                    "password_confirm": "S3curePassword!",
+                    "otp": "",
+                },
+                follow=False,
+            )
+
+        self.assertEqual(post_resp.status_code, 302)
+        self.assertEqual(post_resp["Location"], "/login/")
+
+        combined_logs = "\n".join(log_capture.output)
+        self.assertIn("Password reset confirm token parsed", combined_logs)
+        self.assertIn("Password reset confirm accepted", combined_logs)
+        self.assertIn("Password reset confirm completed", combined_logs)
+        self.assertIn("username=alice", combined_logs)
 
     def test_password_reset_request_by_email_logs_warning_when_canonical_lookup_returns_none(self) -> None:
         client = Client()

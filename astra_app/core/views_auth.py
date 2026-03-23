@@ -2,7 +2,7 @@ import hashlib
 import hmac
 import logging
 import secrets
-from typing import override
+from typing import cast, override
 
 import requests
 from django.conf import settings
@@ -36,6 +36,7 @@ from .forms_auth import (
 )
 from .password_reset import (
     find_user_for_password_reset,
+    normalize_last_password_change,
     send_password_reset_email,
     send_password_reset_success_email,
 )
@@ -159,7 +160,21 @@ class FreeIPALoginView(auth_views.LoginView):
                 subject=submitted_username,
             )
 
-            response = self.form_invalid(form)
+            logger.info(
+                "Login failed username=%s reason=rate_limited",
+                submitted_username,
+                extra=_auth_log_extra(
+                    event="astra.auth.login.failed",
+                    outcome="rate_limited",
+                    username=submitted_username or None,
+                    endpoint="login",
+                ),
+            )
+
+            # Bypass FreeIPALoginView.form_invalid() so 429 throttling does not emit
+            # invalid-credentials warnings.
+            typed_form = cast(FreeIPAAuthenticationForm, form)
+            response = auth_views.LoginView.form_invalid(self, typed_form)
             response.status_code = 429
             return response
 
@@ -179,14 +194,48 @@ class FreeIPALoginView(auth_views.LoginView):
 
     def form_invalid(self, form) -> HttpResponse:
         request: HttpRequest = self.request
+        submitted_username = _normalize_str(request.POST.get("username")).lower()
 
         if getattr(request, "_freeipa_password_expired", False):
+            logger.info(
+                "Login failed username=%s reason=password_expired",
+                submitted_username,
+                extra=_auth_log_extra(
+                    event="astra.auth.login.failed",
+                    outcome="password_expired",
+                    username=submitted_username or None,
+                    endpoint="login",
+                ),
+            )
             return redirect("password-expired")
 
         msg = getattr(request, "_freeipa_auth_error", None)
         if msg:
+            outcome = "invalid_credentials" if msg == "Invalid username or password." else "backend_auth_error"
+            logger.warning(
+                "Login failed username=%s reason=%s",
+                submitted_username,
+                outcome,
+                extra=_auth_log_extra(
+                    event="astra.auth.login.failed",
+                    outcome=outcome,
+                    username=submitted_username or None,
+                    endpoint="login",
+                ),
+            )
             form.errors.pop(NON_FIELD_ERRORS, None)
             form.add_error(None, msg)
+        elif request.method == "POST":
+            logger.warning(
+                "Login failed username=%s reason=invalid_credentials",
+                submitted_username,
+                extra=_auth_log_extra(
+                    event="astra.auth.login.failed",
+                    outcome="invalid_credentials",
+                    username=submitted_username or None,
+                    endpoint="login",
+                ),
+            )
 
         return super().form_invalid(form)
 
@@ -255,7 +304,7 @@ def password_reset_request(request: HttpRequest) -> HttpResponse:
         if user is not None:
             username = _normalize_str(user.username)
             email = _normalize_str(user.email)
-            last_password_change = _normalize_str(user.last_password_change)
+            last_password_change = normalize_last_password_change(user.last_password_change)
             pending_invitation_token = _normalize_str(
                 request.session.get(PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY)
             )
@@ -317,8 +366,8 @@ def password_reset_confirm(request: HttpRequest) -> HttpResponse:
 
     username = _normalize_str(token.get("u"))
     token_email = _normalize_str(token.get("e")).lower()
-    token_lpc = _normalize_str(token.get("lpc"))
-    logger.debug(
+    token_lpc = normalize_last_password_change(token.get("lpc"))
+    logger.info(
         "Password reset confirm token parsed username=%s token_email=%s has_lpc=%s",
         username,
         token_email,
@@ -353,7 +402,7 @@ def password_reset_confirm(request: HttpRequest) -> HttpResponse:
         messages.warning(request, "This password reset link is no longer valid. Please request a new one.")
         return redirect("password-reset")
 
-    user_lpc = _normalize_str(user.last_password_change)
+    user_lpc = normalize_last_password_change(user.last_password_change)
     if token_lpc != user_lpc:
         logger.warning(
             "Password reset confirm rejected: token/user lpc mismatch "
@@ -369,6 +418,13 @@ def password_reset_confirm(request: HttpRequest) -> HttpResponse:
             "Your password has changed since you requested this link. Please request a new password reset email.",
         )
         return redirect("password-reset")
+
+    logger.info(
+        "Password reset confirm accepted username=%s method=%s has_lpc=%s",
+        username,
+        request.method,
+        bool(token_lpc),
+    )
 
     def _user_has_otp_tokens() -> bool:
         try:
@@ -498,6 +554,7 @@ def password_reset_confirm(request: HttpRequest) -> HttpResponse:
                     ),
                 )
             messages.success(request, "Password updated. Please log in.")
+            logger.info("Password reset confirm completed username=%s", username)
             return redirect("login")
 
     return render(

@@ -9,6 +9,7 @@ from core.forms_security import (
     make_password_confirmation_field,
     make_password_field,
 )
+from core.freeipa.user import FreeIPAUser
 from core.views_utils import _normalize_str
 
 
@@ -26,12 +27,51 @@ class FreeIPAAuthenticationForm(_StyledFormMixin, AuthenticationForm):
         self._apply_css_classes()
 
     def clean(self):
-        # Ensure the OTP is applied before AuthenticationForm runs authenticate().
+        username = _normalize_str(self.cleaned_data.get("username"))
         password = (self.cleaned_data.get("password") or "")
         otp = _normalize_str(self.cleaned_data.get("otp"))
-        if password and otp:
-            self.cleaned_data["password"] = f"{password}{otp}"
-        return super().clean()
+        resolved_username = username
+
+        if username and "@" in username:
+            resolved_username = ""
+            try:
+                user = FreeIPAUser.find_by_email(username)
+            except Exception:
+                user = None
+
+            if user is not None:
+                resolved_username = _normalize_str(user.username)
+                if resolved_username:
+                    self.cleaned_data["username"] = resolved_username
+
+        if not password or not otp:
+            return super().clean()
+
+        # Fail closed unless token lookup explicitly proves this account has no OTP tokens.
+        self.cleaned_data["password"] = f"{password}{otp}"
+        try:
+            return super().clean()
+        except forms.ValidationError as invalid_login_error:
+            if not resolved_username:
+                raise invalid_login_error
+
+            try:
+                otp_lookup = FreeIPAUser.get_client().otptoken_find(
+                    o_ipatokenowner=resolved_username,
+                    o_all=True,
+                )
+            except Exception:
+                raise invalid_login_error
+
+            if not isinstance(otp_lookup, dict):
+                raise invalid_login_error
+
+            tokens = otp_lookup.get("result")
+            if not isinstance(tokens, list) or tokens:
+                raise invalid_login_error
+
+            self.cleaned_data["password"] = password
+            return super().clean()
 
 
 class ExpiredPasswordChangeForm(PasswordConfirmationMixin, StyledForm):
