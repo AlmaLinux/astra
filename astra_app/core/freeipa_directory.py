@@ -3,13 +3,34 @@ from collections.abc import Collection
 from core.freeipa.user import FreeIPAUser
 
 
+def normalize_user_search_query(query: str) -> str:
+    return str(query or "").strip().lower()
+
+
+def user_matches_search_query(
+    *,
+    normalized_query: str,
+    username: str,
+    full_name: str,
+) -> bool:
+    if not normalized_query:
+        return False
+
+    normalized_username = str(username or "").strip().lower()
+    if normalized_query in normalized_username:
+        return True
+
+    normalized_full_name = str(full_name or "").strip().lower()
+    return normalized_query in normalized_full_name
+
+
 def search_freeipa_users(
     *,
     query: str,
     limit: int,
     exclude_usernames: Collection[str] | None = None,
 ) -> list[FreeIPAUser]:
-    normalized_query = str(query or "").strip().lower()
+    normalized_query = normalize_user_search_query(query)
     if not normalized_query:
         return []
 
@@ -54,6 +75,13 @@ def search_freeipa_users(
             continue
 
         user = FreeIPAUser(username, user_data)
+        if not user_matches_search_query(
+            normalized_query=normalized_query,
+            username=str(user.username),
+            full_name=str(user.full_name),
+        ):
+            continue
+
         matches.append(user)
         if len(matches) >= limit:
             break

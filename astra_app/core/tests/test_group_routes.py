@@ -219,3 +219,61 @@ class GroupDetailRouteTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'href="/user/alice/"')
         self.assertNotContains(resp, 'href="/user/bob/"')
+
+    def test_group_detail_members_search_matches_display_name(self) -> None:
+        self._login_as_freeipa("admin")
+
+        group = FreeIPAGroup(
+            "fas1",
+            {
+                "cn": ["fas1"],
+                "description": [""],
+                "member_user": ["alice", "bob"],
+                "member_group": [],
+                "membermanager_user": [],
+                "membermanager_group": [],
+                "objectclass": ["fasgroup"],
+            },
+        )
+
+        def _fake_user_get(username: str) -> FreeIPAUser:
+            if username == "alice":
+                return FreeIPAUser(
+                    "alice",
+                    {
+                        "uid": ["alice"],
+                        "displayname": ["Alice Example"],
+                        "mail": ["alice@example.org"],
+                    },
+                )
+            return FreeIPAUser(
+                username,
+                {
+                    "uid": [username],
+                    "displayname": [f"{username.title()} User"],
+                    "mail": [f"{username}@example.org"],
+                },
+            )
+
+        with (
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
+            patch("core.templatetags.core_user_widget.FreeIPAUser.get", side_effect=_fake_user_get),
+            patch(
+                "core.templatetags.core_user_grid.search_freeipa_users",
+                return_value=[
+                    FreeIPAUser(
+                        "alice",
+                        {
+                            "uid": ["alice"],
+                            "displayname": ["Alice Example"],
+                            "mail": ["alice@example.org"],
+                        },
+                    )
+                ],
+            ),
+        ):
+            resp = self.client.get("/group/fas1/?q=Example")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'href="/user/alice/"')
+        self.assertNotContains(resp, 'href="/user/bob/"')

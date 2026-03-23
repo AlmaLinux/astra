@@ -115,6 +115,49 @@ class GlobalSearchTests(TestCase):
         self.assertEqual([o["name"] for o in data["orgs"]], ["AlmaLinux Foundation"])
         self.assertNotIn("Other Corp", {o["name"] for o in data["orgs"]})
 
+    def test_search_matches_groups_and_orgs_by_user_display_name(self) -> None:
+        self._login_as_freeipa("admin")
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_VIEW_USER_DIRECTORY,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+        )
+
+        Organization.objects.create(name="Unrelated Org", representative="")
+        Organization.objects.create(name="Infra Services", representative="alice")
+
+        users = [
+            SimpleNamespace(username="alice", full_name="Alice Example"),
+        ]
+        groups = [
+            SimpleNamespace(
+                cn="infra-team",
+                description="Core infra",
+                fas_group=True,
+                members=["alice"],
+                sponsors=[],
+            ),
+            SimpleNamespace(
+                cn="docs-team",
+                description="Documentation",
+                fas_group=True,
+                members=["bob"],
+                sponsors=[],
+            ),
+        ]
+
+        with (
+            patch("core.views_search.search_freeipa_users", return_value=users),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=groups),
+        ):
+            resp = self.client.get("/search/?q=Example")
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertIn("alice", {u["username"] for u in data["users"]})
+        self.assertEqual([g["cn"] for g in data["groups"]], ["infra-team"])
+        self.assertEqual([o["name"] for o in data["orgs"]], ["Infra Services"])
+
     def test_search_orgs_result_includes_id_and_name(self) -> None:
         self._login_as_freeipa("admin")
         FreeIPAPermissionGrant.objects.create(

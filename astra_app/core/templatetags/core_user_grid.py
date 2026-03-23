@@ -5,6 +5,7 @@ from django.template import Context, Library
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import FreeIPAUser
 from core.freeipa.utils import _clean_str_list
+from core.freeipa_directory import normalize_user_search_query, search_freeipa_users, user_matches_search_query
 from core.templatetags._grid_tag_utils import paginate_grid_items, render_widget_grid, resolve_grid_request
 from core.templatetags._user_helpers import try_get_full_name
 from core.views_utils import _normalize_str, try_get_username_from_user
@@ -24,14 +25,14 @@ def build_user_grid_page(
     per_page: int,
 ) -> tuple[list[object], Any, Any, list[int], bool, bool]:
     if q:
-        q_lower = q.lower()
+        normalized_query = normalize_user_search_query(q)
 
         def _matches(user: object) -> bool:
-            username = try_get_username_from_user(user).lower()
-            if q_lower in username:
-                return True
-            full_name = try_get_full_name(user).lower()
-            return q_lower in full_name
+            return user_matches_search_query(
+                normalized_query=normalized_query,
+                username=try_get_username_from_user(user),
+                full_name=try_get_full_name(user),
+            )
 
         users_list = [u for u in users_list if _matches(u)]
 
@@ -94,9 +95,40 @@ def user_grid(context: Context, **kwargs: Any) -> str:
         members = _clean_str_list(cast(Any, group_obj).members)
 
         if q:
-            q_lower = q.lower()
-            member_groups = [g for g in member_groups if q_lower in g.lower()]
-            members = [m for m in members if q_lower in m.lower()]
+            normalized_query = normalize_user_search_query(q)
+            member_groups = [g for g in member_groups if normalized_query in g.lower()]
+
+            members_by_username = {
+                username.strip()
+                for username in members
+                if username.strip()
+            }
+            display_name_match_usernames: set[str] = set()
+            if members_by_username:
+                directory_matches = search_freeipa_users(
+                    query=q,
+                    limit=max(100, len(members_by_username)),
+                )
+                display_name_match_usernames = {
+                    str(user.username).strip()
+                    for user in directory_matches
+                    if str(user.username).strip() in members_by_username
+                }
+
+            members_matching_query: list[str] = []
+            for username in members:
+                if user_matches_search_query(
+                    normalized_query=normalized_query,
+                    username=username,
+                    full_name="",
+                ):
+                    members_matching_query.append(username)
+                    continue
+
+                if username in display_name_match_usernames:
+                    members_matching_query.append(username)
+
+            members = members_matching_query
 
         def _is_fas_group(cn: str) -> bool:
             obj = FreeIPAGroup.get(cn)

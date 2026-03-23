@@ -1,5 +1,6 @@
 import logging
 import secrets
+from collections.abc import Collection
 from urllib.parse import urlencode
 
 from django.conf import settings
@@ -55,6 +56,7 @@ from core.permissions import (
     ASTRA_CHANGE_MEMBERSHIP,
     ASTRA_DELETE_MEMBERSHIP,
     ASTRA_VIEW_MEMBERSHIP,
+    can_view_user_directory,
     has_any_membership_manage_permission,
     has_any_membership_permission,
     json_permission_required_any,
@@ -307,6 +309,7 @@ def _filter_organization_queryset_by_search(
     *,
     q: str,
     can_manage_memberships: bool,
+    matched_representative_usernames: Collection[str] | None = None,
 ) -> QuerySet[Organization]:
     if not q:
         return orgs
@@ -359,7 +362,17 @@ def _filter_organization_queryset_by_search(
             orgs = orgs.none()
 
     if name_query:
-        orgs = orgs.filter(name__icontains=name_query)
+        matched_representatives = {
+            str(username).strip()
+            for username in (matched_representative_usernames or ())
+            if str(username).strip()
+        }
+
+        name_or_representative_filter = Q(name__icontains=name_query)
+        if matched_representatives:
+            name_or_representative_filter |= Q(representative__in=matched_representatives)
+
+        orgs = orgs.filter(name_or_representative_filter)
     return orgs
 
 
@@ -372,11 +385,13 @@ def _build_organization_membership_card_context(
     page_param_name: str,
     can_manage_memberships: bool,
     link_to_detail: bool,
+    matched_representative_usernames: Collection[str] | None = None,
 ) -> dict[str, object]:
     filtered_orgs = _filter_organization_queryset_by_search(
         card_orgs,
         q=query_param_value,
         can_manage_memberships=can_manage_memberships,
+        matched_representative_usernames=matched_representative_usernames,
     )
     _, page_url_prefix = build_page_url_prefix(request_query, page_param=page_param_name)
     page_ctx = paginate_and_build_context(
@@ -475,6 +490,20 @@ def organizations(request: HttpRequest) -> HttpResponse:
     else:
         normalized_query.pop("page_mirror", None)
 
+    representative_matches_by_query: dict[str, set[str]] = {}
+    if can_view_user_directory(request.user):
+        search_queries = {
+            search_query
+            for search_query in (q_sponsor, q_mirror)
+            if search_query
+        }
+        for search_query in search_queries:
+            representative_matches_by_query[search_query] = {
+                str(user.username).strip()
+                for user in search_freeipa_users(query=search_query, limit=100)
+                if str(user.username).strip()
+            }
+
     sponsor_card_context = _build_organization_membership_card_context(
         card_orgs=orgs.filter(has_sponsorship_memberships=True),
         request_query=normalized_query,
@@ -483,6 +512,7 @@ def organizations(request: HttpRequest) -> HttpResponse:
         page_param_name="page_sponsor",
         can_manage_memberships=can_manage_memberships,
         link_to_detail=lower_section_link_to_detail,
+        matched_representative_usernames=representative_matches_by_query.get(q_sponsor, set()),
     )
     mirror_card_context = _build_organization_membership_card_context(
         card_orgs=orgs.filter(has_sponsorship_memberships=False),
@@ -492,6 +522,7 @@ def organizations(request: HttpRequest) -> HttpResponse:
         page_param_name="page_mirror",
         can_manage_memberships=can_manage_memberships,
         link_to_detail=lower_section_link_to_detail,
+        matched_representative_usernames=representative_matches_by_query.get(q_mirror, set()),
     )
 
     return render(

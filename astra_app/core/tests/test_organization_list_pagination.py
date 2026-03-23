@@ -9,7 +9,8 @@ from django.utils import timezone
 
 from core.freeipa.user import FreeIPAUser
 from core.models import FreeIPAPermissionGrant, Membership, MembershipType, MembershipTypeCategory, Organization
-from core.permissions import ASTRA_CHANGE_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP
+from core.permissions import ASTRA_CHANGE_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP, ASTRA_VIEW_USER_DIRECTORY
+from core.views_organizations import _filter_organization_queryset_by_search
 
 
 class _FormInputParser(HTMLParser):
@@ -159,7 +160,8 @@ class OrganizationListPaginationTests(TestCase):
 
         page_1_names = [org.name for org in page_1_response.context["sponsor_organizations"]]
         expected_names = [f"Org {index:02d}" for index in range(26)]
-        self.assertEqual(page_1_names, expected_names[:25])
+        per_page = page_1_response.context["sponsor_paginator"].per_page
+        self.assertEqual(page_1_names, expected_names[:per_page])
         self.assertEqual(list(page_1_response.context["mirror_organizations"]), [])
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
@@ -169,7 +171,7 @@ class OrganizationListPaginationTests(TestCase):
         self.assertEqual(page_2_response.context["sponsor_page_obj"].number, 2)
 
         page_2_names = [org.name for org in page_2_response.context["sponsor_organizations"]]
-        self.assertEqual(page_2_names, expected_names[25:])
+        self.assertEqual(page_2_names, expected_names[per_page:])
 
     def test_organizations_list_preserves_query_string_across_pagination(self) -> None:
         _, sponsor_type = self._ensure_org_membership_types()
@@ -220,8 +222,10 @@ class OrganizationListPaginationTests(TestCase):
 
         self.assertEqual(page_2_response.status_code, 200)
         self.assertEqual(page_2_response.context["sponsor_page_obj"].number, 2)
+        per_page = page_2_response.context["sponsor_paginator"].per_page
+        expected_names = [f"Match Org {index:02d}" for index in range(26)]
         page_2_names = [org.name for org in page_2_response.context["sponsor_organizations"]]
-        self.assertEqual(page_2_names, ["Match Org 25"])
+        self.assertEqual(page_2_names, expected_names[per_page:])
 
     def test_organizations_list_non_manager_shows_only_claimed_orgs(self) -> None:
         mirror_type, sponsor_type = self._ensure_org_membership_types()
@@ -846,8 +850,11 @@ class OrganizationListPaginationTests(TestCase):
         self.assertEqual(response.context["q_mirror"], "Mirror Org")
         self.assertEqual(response.context["sponsor_page_obj"].number, 2)
         self.assertEqual(response.context["mirror_page_obj"].number, 2)
-        self.assertEqual([org.name for org in response.context["sponsor_organizations"]], ["Sponsor Org 25"])
-        self.assertEqual([org.name for org in response.context["mirror_organizations"]], ["Mirror Org 25"])
+        per_page = response.context["sponsor_paginator"].per_page
+        expected_tail = [f"Sponsor Org {index:02d}" for index in range(per_page, 26)]
+        self.assertEqual([org.name for org in response.context["sponsor_organizations"]], expected_tail)
+        expected_mirror_tail = [f"Mirror Org {index:02d}" for index in range(per_page, 26)]
+        self.assertEqual([org.name for org in response.context["mirror_organizations"]], expected_mirror_tail)
 
         self.assertIn("q_sponsor=Sponsor+Org", response.context["sponsor_page_url_prefix"])
         self.assertIn("q_mirror=Mirror+Org", response.context["sponsor_page_url_prefix"])
@@ -887,6 +894,100 @@ class OrganizationListPaginationTests(TestCase):
         mirror_names = {organization.name for organization in response.context["mirror_organizations"]}
         self.assertEqual(sponsor_names, {"Sponsor Alpha", "Sponsor Beta"})
         self.assertEqual(mirror_names, {"Mirror Match"})
+
+    def test_sponsor_search_matches_representative_display_name(self) -> None:
+        _mirror_type, sponsor_type = self._ensure_org_membership_types()
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_VIEW_USER_DIRECTORY,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="alice",
+        )
+        self._login_as_freeipa_user("alice")
+
+        matched_org = Organization.objects.create(name="Infra Services", representative="alice")
+        other_org = Organization.objects.create(name="Other Services", representative="bob")
+        Membership.objects.create(target_organization=matched_org, membership_type=sponsor_type)
+        Membership.objects.create(target_organization=other_org, membership_type=sponsor_type)
+
+        viewer = FreeIPAUser(
+            "alice",
+            {"uid": ["alice"], "memberof_group": [], "c": ["US"]},
+        )
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer),
+            patch(
+                "core.views_organizations.search_freeipa_users",
+                return_value=[
+                    FreeIPAUser(
+                        "alice",
+                        {
+                            "uid": ["alice"],
+                            "displayname": ["Alice Example"],
+                            "mail": ["alice@example.org"],
+                        },
+                    )
+                ],
+            ),
+        ):
+            response = self.client.get(reverse("organizations"), {"q_sponsor": "Example"})
+
+        self.assertEqual(response.status_code, 200)
+        sponsor_names = [organization.name for organization in response.context["sponsor_organizations"]]
+        self.assertEqual(sponsor_names, ["Infra Services"])
+
+    def test_sponsor_search_does_not_lookup_representatives_without_directory_access(self) -> None:
+        _mirror_type, sponsor_type = self._ensure_org_membership_types()
+        self._login_as_freeipa_user("alice")
+
+        matched_org = Organization.objects.create(name="Infra Services", representative="alice")
+        Membership.objects.create(target_organization=matched_org, membership_type=sponsor_type)
+
+        viewer = FreeIPAUser(
+            "alice",
+            {"uid": ["alice"], "memberof_group": [], "c": ["US"]},
+        )
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer),
+            patch(
+                "core.views_organizations.search_freeipa_users",
+                side_effect=AssertionError("directory lookup should not run without user-directory access"),
+            ),
+        ):
+            response = self.client.get(reverse("organizations"), {"q_sponsor": "Example"})
+
+        self.assertEqual(response.status_code, 200)
+        sponsor_names = [organization.name for organization in response.context["sponsor_organizations"]]
+        self.assertEqual(sponsor_names, [])
+
+    def test_filter_organization_queryset_by_search_is_input_driven_for_representatives(self) -> None:
+        Organization.objects.create(name="Infra Services", representative="alice")
+
+        with patch(
+            "core.views_organizations.search_freeipa_users",
+            side_effect=AssertionError("helper must not run implicit representative lookup"),
+        ):
+            unmatched = _filter_organization_queryset_by_search(
+                Organization.objects.all(),
+                q="Example",
+                can_manage_memberships=False,
+            )
+
+        self.assertEqual([organization.name for organization in unmatched], [])
+
+        with patch(
+            "core.views_organizations.search_freeipa_users",
+            side_effect=AssertionError("helper must not run implicit representative lookup"),
+        ):
+            matched = _filter_organization_queryset_by_search(
+                Organization.objects.all(),
+                q="Example",
+                can_manage_memberships=False,
+                matched_representative_usernames={"alice"},
+            )
+
+        self.assertEqual([organization.name for organization in matched], ["Infra Services"])
 
     def test_org_widget_badges_show_sponsorship_before_mirror(self) -> None:
         self._ensure_org_membership_types()

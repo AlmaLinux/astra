@@ -71,7 +71,7 @@ class FreeIPADirectoryPerformanceTests(TestCase):
         self.assertEqual([user.username for user in users], ["alice"])
         self.assertEqual(len(client.calls), 1)
 
-    def test_search_trusts_server_matches_from_non_name_attributes(self) -> None:
+    def test_search_filters_out_server_matches_from_non_name_attributes(self) -> None:
         client = _DummyUserFindClient(
             {
                 "result": [
@@ -93,5 +93,5 @@ class FreeIPADirectoryPerformanceTests(TestCase):
         ):
             users = search_freeipa_users(query="smith", limit=10)
 
-        self.assertEqual([user.username for user in users], ["john"])
+        self.assertEqual([user.username for user in users], [])
         self.assertEqual(len(client.calls), 1)
