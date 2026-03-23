@@ -80,23 +80,98 @@ def send_password_reset_success_email(*, request: HttpRequest, username: str, em
 def find_user_for_password_reset(identifier: str) -> FreeIPAUser | None:
     value = _normalize_str(identifier)
     if not value:
+        logger.debug("Password reset lookup skipped: empty identifier")
         return None
 
     if "@" in value:
+        logger.debug(
+            "Password reset lookup attempt identifier_type=email identifier=%s",
+            value,
+        )
         try:
-            return FreeIPAUser.find_by_email(value)
+            user = FreeIPAUser.find_by_email(value)
+            if user is None:
+                logger.debug(
+                    "Password reset lookup result identifier_type=email identifier=%s result=not_found",
+                    value,
+                )
+                return None
+
+            # Canonicalize through username lookup so request-time lpc matches
+            # the confirm-time source used by password_reset_confirm().
+            username = _normalize_str(user.username)
+            resolved_email = _normalize_str(user.email).lower()
+            logger.debug(
+                "Password reset lookup email result identifier=%s resolved_username=%s resolved_email=%s",
+                value,
+                username,
+                resolved_email,
+            )
+            if not username:
+                logger.warning(
+                    "Password reset lookup canonicalization failed "
+                    "identifier_type=email identifier=%s reason=missing_username",
+                    value,
+                )
+                return None
+
+            canonical_user = FreeIPAUser.get(username)
+            if canonical_user is None:
+                logger.warning(
+                    "Password reset lookup canonicalization failed "
+                    "identifier_type=email identifier=%s resolved_username=%s reason=canonical_user_missing",
+                    value,
+                    username,
+                )
+                return None
+
+            canonical_username = _normalize_str(canonical_user.username)
+            canonical_email = _normalize_str(canonical_user.email).lower()
+            logger.debug(
+                "Password reset lookup success identifier_type=email identifier=%s "
+                "resolved_username=%s resolved_email=%s canonical_username=%s canonical_email=%s",
+                value,
+                username,
+                resolved_email,
+                canonical_username,
+                canonical_email,
+            )
+            return canonical_user
         except Exception:
             logger.exception(
-                "Password reset lookup by email failed",
+                "Password reset lookup by email failed identifier=%s",
+                value,
                 extra=current_exception_log_fields(),
             )
             return None
 
+    logger.debug(
+        "Password reset lookup attempt identifier_type=username identifier=%s",
+        value,
+    )
     try:
-        return FreeIPAUser.get(value)
+        user = FreeIPAUser.get(value)
+        if user is None:
+            logger.debug(
+                "Password reset lookup result identifier_type=username identifier=%s result=not_found",
+                value,
+            )
+            return None
+
+        resolved_username = _normalize_str(user.username)
+        resolved_email = _normalize_str(user.email).lower()
+        logger.debug(
+            "Password reset lookup success identifier_type=username identifier=%s "
+            "resolved_username=%s resolved_email=%s",
+            value,
+            resolved_username,
+            resolved_email,
+        )
+        return user
     except Exception:
         logger.exception(
-            "Password reset lookup by username failed",
+            "Password reset lookup by username failed identifier=%s",
+            value,
             extra=current_exception_log_fields(),
         )
         return None

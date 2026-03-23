@@ -227,6 +227,259 @@ class PasswordResetFlowTests(TestCase):
         self.assertNotIn("i", payload)
 
     @override_settings(PASSWORD_RESET_TOKEN_TTL_SECONDS=60 * 60)
+    def test_password_reset_confirm_email_request_uses_canonical_lpc_source(self) -> None:
+        client = Client()
+
+        email_lookup_user = SimpleNamespace(
+            username="alice",
+            email="alice@example.com",
+            last_password_change="",
+            first_name="Alice",
+            last_name="User",
+            full_name="Alice User",
+        )
+        canonical_user = SimpleNamespace(
+            username="alice",
+            email="alice@example.com",
+            last_password_change="20260323090000Z",
+            first_name="Alice",
+            last_name="User",
+            full_name="Alice User",
+        )
+        otp_lookup_client = SimpleNamespace(otptoken_find=lambda **_kwargs: {"result": []})
+
+        with (
+            patch("core.password_reset.FreeIPAUser.find_by_email", autospec=True, return_value=email_lookup_user),
+            patch("core.password_reset.FreeIPAUser.get", autospec=True, return_value=canonical_user),
+            patch("core.password_reset.queue_templated_email", autospec=True) as queue_email_mock,
+            patch("core.views_auth.FreeIPAUser.get_client", autospec=True, return_value=otp_lookup_client),
+        ):
+            request_resp = client.post(
+                reverse("password-reset"),
+                data={"username_or_email": "alice@example.com"},
+                follow=False,
+            )
+
+            self.assertEqual(request_resp.status_code, 302)
+            self.assertEqual(request_resp["Location"], "/login/")
+
+            reset_url = queue_email_mock.call_args.kwargs.get("context", {}).get("reset_url", "")
+            token_match = re.search(r"token=([^\s&]+)", reset_url)
+            self.assertIsNotNone(token_match)
+            assert token_match is not None
+            token = unquote(token_match.group(1))
+
+            confirm_resp = client.get(reverse("password-reset-confirm") + f"?token={token}", follow=False)
+
+        self.assertEqual(confirm_resp.status_code, 200)
+        self.assertContains(confirm_resp, "Set a new password")
+
+    def test_password_reset_request_by_email_does_not_send_when_canonical_user_lookup_returns_none(self) -> None:
+        client = Client()
+
+        email_lookup_user = SimpleNamespace(
+            username="alice",
+            email="alice@example.com",
+            last_password_change="",
+            first_name="Alice",
+            last_name="User",
+            full_name="Alice User",
+        )
+
+        with (
+            patch("core.password_reset.FreeIPAUser.find_by_email", autospec=True, return_value=email_lookup_user),
+            patch("core.password_reset.FreeIPAUser.get", autospec=True, return_value=None),
+            patch("core.password_reset.queue_templated_email", autospec=True) as queue_email_mock,
+        ):
+            resp = client.post(
+                reverse("password-reset"),
+                data={"username_or_email": "alice@example.com"},
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "/login/")
+        queue_email_mock.assert_not_called()
+
+    def test_password_reset_request_by_email_does_not_send_when_canonical_user_lookup_raises(self) -> None:
+        client = Client()
+
+        email_lookup_user = SimpleNamespace(
+            username="alice",
+            email="alice@example.com",
+            last_password_change="",
+            first_name="Alice",
+            last_name="User",
+            full_name="Alice User",
+        )
+
+        with (
+            patch("core.password_reset.FreeIPAUser.find_by_email", autospec=True, return_value=email_lookup_user),
+            patch("core.password_reset.FreeIPAUser.get", autospec=True, side_effect=RuntimeError("ipa unavailable")),
+            patch("core.password_reset.queue_templated_email", autospec=True) as queue_email_mock,
+        ):
+            resp = client.post(
+                reverse("password-reset"),
+                data={"username_or_email": "alice@example.com"},
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "/login/")
+        queue_email_mock.assert_not_called()
+
+    @override_settings(PASSWORD_RESET_TOKEN_TTL_SECONDS=60 * 60)
+    def test_password_reset_confirm_repeated_email_resets_do_not_false_fail_on_lpc_drift(self) -> None:
+        client = Client()
+
+        email_lookup_user = SimpleNamespace(
+            username="alice",
+            email="alice@example.com",
+            last_password_change="",
+            first_name="Alice",
+            last_name="User",
+            full_name="Alice User",
+        )
+        canonical_user = SimpleNamespace(
+            username="alice",
+            email="alice@example.com",
+            last_password_change="20260323090000Z",
+            first_name="Alice",
+            last_name="User",
+            full_name="Alice User",
+        )
+        otp_lookup_client = SimpleNamespace(otptoken_find=lambda **_kwargs: {"result": []})
+
+        with (
+            patch("core.password_reset.FreeIPAUser.find_by_email", autospec=True, return_value=email_lookup_user),
+            patch("core.password_reset.FreeIPAUser.get", autospec=True, return_value=canonical_user),
+            patch("core.password_reset.queue_templated_email", autospec=True) as queue_email_mock,
+            patch("core.views_auth.FreeIPAUser.get_client", autospec=True, return_value=otp_lookup_client),
+        ):
+            for _ in range(2):
+                request_resp = client.post(
+                    reverse("password-reset"),
+                    data={"username_or_email": "alice@example.com"},
+                    follow=False,
+                )
+                self.assertEqual(request_resp.status_code, 302)
+                self.assertEqual(request_resp["Location"], "/login/")
+
+                reset_url = queue_email_mock.call_args.kwargs.get("context", {}).get("reset_url", "")
+                token_match = re.search(r"token=([^\s&]+)", reset_url)
+                self.assertIsNotNone(token_match)
+                assert token_match is not None
+                token = unquote(token_match.group(1))
+
+                confirm_resp = client.get(reverse("password-reset-confirm") + f"?token={token}", follow=False)
+                self.assertEqual(confirm_resp.status_code, 200)
+                self.assertContains(confirm_resp, "Set a new password")
+
+        self.assertEqual(queue_email_mock.call_count, 2)
+
+    @override_settings(PASSWORD_RESET_TOKEN_TTL_SECONDS=60 * 60)
+    def test_password_reset_confirm_lpc_mismatch_logs_warning_with_identifiers(self) -> None:
+        client = Client()
+        token = make_password_reset_token(
+            {
+                "u": "alice",
+                "e": "alice@example.com",
+                "lpc": "20260323090000Z",
+            }
+        )
+        current_user = SimpleNamespace(
+            username="alice",
+            email="alice@example.com",
+            last_password_change="20260323100000Z",
+            first_name="Alice",
+            last_name="User",
+            full_name="Alice User",
+        )
+
+        with (
+            patch("core.views_auth.find_user_for_password_reset", autospec=True, return_value=current_user),
+            self.assertLogs("core.views_auth", level="WARNING") as log_capture,
+        ):
+            resp = client.get(reverse("password-reset-confirm") + f"?token={token}", follow=False)
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "/password-reset/")
+
+        combined_logs = "\n".join(log_capture.output)
+        self.assertIn("Password reset confirm rejected: token/user lpc mismatch", combined_logs)
+        self.assertIn("username=alice", combined_logs)
+        self.assertIn("token_email=alice@example.com", combined_logs)
+        self.assertIn("user_email=alice@example.com", combined_logs)
+        self.assertIn("token_lpc=20260323090000Z", combined_logs)
+        self.assertIn("user_lpc=20260323100000Z", combined_logs)
+
+    def test_password_reset_request_by_email_logs_warning_when_canonical_lookup_returns_none(self) -> None:
+        client = Client()
+
+        email_lookup_user = SimpleNamespace(
+            username="alice",
+            email="alice@example.com",
+            last_password_change="",
+            first_name="Alice",
+            last_name="User",
+            full_name="Alice User",
+        )
+
+        with (
+            patch("core.password_reset.FreeIPAUser.find_by_email", autospec=True, return_value=email_lookup_user),
+            patch("core.password_reset.FreeIPAUser.get", autospec=True, return_value=None),
+            patch("core.password_reset.queue_templated_email", autospec=True) as queue_email_mock,
+            self.assertLogs("core.password_reset", level="WARNING") as log_capture,
+        ):
+            resp = client.post(
+                reverse("password-reset"),
+                data={"username_or_email": "alice@example.com"},
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "/login/")
+        queue_email_mock.assert_not_called()
+
+        combined_logs = "\n".join(log_capture.output)
+        self.assertIn("Password reset lookup canonicalization failed", combined_logs)
+        self.assertIn("identifier_type=email", combined_logs)
+        self.assertIn("identifier=alice@example.com", combined_logs)
+        self.assertIn("resolved_username=alice", combined_logs)
+
+    @override_settings(PASSWORD_RESET_TOKEN_TTL_SECONDS=60 * 60)
+    def test_password_reset_confirm_rejects_when_token_lpc_differs_from_current_user_lpc(self) -> None:
+        client = Client()
+        token = make_password_reset_token(
+            {
+                "u": "alice",
+                "e": "alice@example.com",
+                "lpc": "20260323090000Z",
+            }
+        )
+        current_user = SimpleNamespace(
+            username="alice",
+            email="alice@example.com",
+            last_password_change="20260323100000Z",
+            first_name="Alice",
+            last_name="User",
+            full_name="Alice User",
+        )
+
+        with patch("core.views_auth.find_user_for_password_reset", autospec=True, return_value=current_user):
+            resp = client.get(reverse("password-reset-confirm") + f"?token={token}", follow=False)
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "/password-reset/")
+
+        follow = client.get(resp["Location"])
+        msgs = [message.message for message in get_messages(follow.wsgi_request)]
+        self.assertIn(
+            "Your password has changed since you requested this link. Please request a new password reset email.",
+            msgs,
+        )
+
+    @override_settings(PASSWORD_RESET_TOKEN_TTL_SECONDS=60 * 60)
     def test_password_reset_confirm_sets_new_password(self):
         client = Client()
 

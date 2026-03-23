@@ -300,37 +300,70 @@ def password_reset_confirm(request: HttpRequest) -> HttpResponse:
 
     token_string = _normalize_str(request.POST.get("token") or request.GET.get("token"))
     if not token_string:
+        logger.warning("Password reset confirm rejected: missing token")
         messages.warning(request, "No token provided.")
         return redirect("login")
 
     try:
         token = read_password_reset_token(token_string)
     except signing.SignatureExpired:
+        logger.warning("Password reset confirm rejected: token expired")
         messages.warning(request, "This password reset link has expired. Please request a new one.")
         return redirect("password-reset")
     except signing.BadSignature:
+        logger.warning("Password reset confirm rejected: invalid token signature")
         messages.warning(request, "This password reset link is invalid. Please request a new one.")
         return redirect("password-reset")
 
     username = _normalize_str(token.get("u"))
     token_email = _normalize_str(token.get("e")).lower()
     token_lpc = _normalize_str(token.get("lpc"))
+    logger.debug(
+        "Password reset confirm token parsed username=%s token_email=%s has_lpc=%s",
+        username,
+        token_email,
+        bool(token_lpc),
+    )
     if not username:
+        logger.warning(
+            "Password reset confirm rejected: token missing username token_email=%s",
+            token_email,
+        )
         messages.warning(request, "This password reset link is invalid. Please request a new one.")
         return redirect("password-reset")
 
     user = find_user_for_password_reset(username)
     if user is None:
+        logger.warning(
+            "Password reset confirm rejected: user lookup failed username=%s token_email=%s",
+            username,
+            token_email,
+        )
         messages.warning(request, "This password reset link is invalid. Please request a new one.")
         return redirect("password-reset")
 
     user_email = _normalize_str(user.email).lower()
     if token_email and user_email and token_email != user_email:
+        logger.warning(
+            "Password reset confirm rejected: token/user email mismatch username=%s token_email=%s user_email=%s",
+            username,
+            token_email,
+            user_email,
+        )
         messages.warning(request, "This password reset link is no longer valid. Please request a new one.")
         return redirect("password-reset")
 
     user_lpc = _normalize_str(user.last_password_change)
     if token_lpc != user_lpc:
+        logger.warning(
+            "Password reset confirm rejected: token/user lpc mismatch "
+            "username=%s token_email=%s user_email=%s token_lpc=%s user_lpc=%s",
+            username,
+            token_email,
+            user_email,
+            token_lpc,
+            user_lpc,
+        )
         messages.warning(
             request,
             "Your password has changed since you requested this link. Please request a new password reset email.",
