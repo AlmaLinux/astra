@@ -11,6 +11,54 @@ from core.models import FreeIPAPermissionGrant, Organization
 from core.permissions import ASTRA_VIEW_USER_DIRECTORY
 
 
+class _DummyUserFindClient:
+    def __init__(self, result: dict[str, object], user_show_result: dict[str, object] | None = None) -> None:
+        self.result = result
+        self.user_show_result = dict(user_show_result) if isinstance(user_show_result, dict) else None
+
+    def user_find(self, *args: object, **kwargs: object) -> dict[str, object]:
+        del args
+        del kwargs
+        return self.result
+
+    def user_show(self, username: str, *args: object, **kwargs: object) -> dict[str, object]:
+        del args
+        del kwargs
+        if self.user_show_result is not None:
+            return {"result": self.user_show_result}
+        return {
+            "result": {
+                "uid": [str(username)],
+                "givenname": [str(username).title()],
+                "sn": ["User"],
+                "mail": [f"{username}@example.org"],
+            }
+        }
+
+
+class _BranchingUserFindClient:
+    def __init__(self, results_by_criteria: dict[str, dict[str, object]]) -> None:
+        self.results_by_criteria = results_by_criteria
+        self.calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def user_find(self, *args: object, **kwargs: object) -> dict[str, object]:
+        self.calls.append((args, kwargs))
+        criteria = str(kwargs.get("a_criteria") or "")
+        return self.results_by_criteria.get(criteria, {"result": []})
+
+    def user_show(self, username: str, *args: object, **kwargs: object) -> dict[str, object]:
+        del args
+        del kwargs
+        return {
+            "result": {
+                "uid": [str(username)],
+                "givenname": [str(username).title()],
+                "sn": ["User"],
+                "mail": [f"{username}@example.org"],
+            }
+        }
+
+
 class GlobalSearchTests(TestCase):
     def _login_as_freeipa(self, username: str) -> None:
         session = self.client.session
@@ -239,6 +287,116 @@ class GlobalSearchTests(TestCase):
         data = resp.json()
         self.assertIn("alice", {u["username"] for u in data["users"]})
         self.assertNotIn("bob", {u["username"] for u in data["users"]})
+
+    def test_search_matches_groups_and_orgs_by_multiword_display_name(self) -> None:
+        self._login_as_freeipa("admin")
+
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_VIEW_USER_DIRECTORY,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+        )
+
+        Organization.objects.create(name="Unrelated Org", representative="")
+        Organization.objects.create(name="Infra Services", representative="alice")
+
+        groups = [
+            SimpleNamespace(
+                cn="infra-team",
+                description="Core infra",
+                fas_group=True,
+                members=["alice"],
+                sponsors=[],
+            ),
+            SimpleNamespace(
+                cn="docs-team",
+                description="Documentation",
+                fas_group=True,
+                members=["bob"],
+                sponsors=[],
+            ),
+        ]
+
+        client = _DummyUserFindClient(
+            {
+                "result": [
+                    {
+                        "uid": ["alice"],
+                        "displayname": ["Alex Ivan Ramirez"],
+                        "mail": ["alice@example.org"],
+                    }
+                ]
+            }
+        )
+
+        with (
+            patch("core.freeipa_directory.FreeIPAUser.get_client", return_value=client),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=groups),
+        ):
+            resp = self.client.get("/search/?q=alex ir")
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertIn("alice", {u["username"] for u in data["users"]})
+        self.assertEqual([g["cn"] for g in data["groups"]], ["infra-team"])
+        self.assertEqual([o["name"] for o in data["orgs"]], ["Infra Services"])
+
+    def test_search_alex_ir_recovers_user_group_org_when_phrase_lookup_is_empty(self) -> None:
+        self._login_as_freeipa("admin")
+
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_VIEW_USER_DIRECTORY,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+        )
+
+        Organization.objects.create(name="Unrelated Org", representative="")
+        Organization.objects.create(name="Infra Services", representative="alice")
+
+        groups = [
+            SimpleNamespace(
+                cn="infra-team",
+                description="Core infra",
+                fas_group=True,
+                members=["alice"],
+                sponsors=[],
+            ),
+            SimpleNamespace(
+                cn="docs-team",
+                description="Documentation",
+                fas_group=True,
+                members=["bob"],
+                sponsors=[],
+            ),
+        ]
+
+        client = _BranchingUserFindClient(
+            {
+                "alex ir": {"result": []},
+                "alex": {
+                    "result": [
+                        {
+                            "uid": ["alice"],
+                            "displayname": ["Alex Ivan Ramirez"],
+                            "mail": ["alice@example.org"],
+                        }
+                    ]
+                },
+            }
+        )
+
+        with (
+            patch("core.freeipa_directory.FreeIPAUser.get_client", return_value=client),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=groups),
+        ):
+            resp = self.client.get("/search/?q=alex ir")
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertIn("alice", {u["username"] for u in data["users"]})
+        self.assertEqual([g["cn"] for g in data["groups"]], ["infra-team"])
+        self.assertEqual([o["name"] for o in data["orgs"]], ["Infra Services"])
+        self.assertEqual([call[1].get("a_criteria") for call in client.calls], ["alex ir", "alex"])
 
 
 class GlobalSearchTemplateCopyTests(TestCase):
