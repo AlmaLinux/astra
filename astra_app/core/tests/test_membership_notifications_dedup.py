@@ -6,6 +6,7 @@ from django.test import TestCase
 from django.utils import timezone
 from post_office.models import Email, EmailTemplate
 
+from core.freeipa.user import FreeIPAUser
 from core.membership_notifications import (
     already_sent_today,
     membership_requests_url,
@@ -167,7 +168,8 @@ class AlreadySentTodayTests(TestCase):
                 requested_at=timezone.make_aware(datetime.datetime(2025, 12, 22, 12, 0, 0)),
             )
 
-            self.assertEqual(oldest_pending_membership_request_wait_time(), 12)
+            with patch("core.freeipa.user.FreeIPAUser.all", return_value=[FreeIPAUser("pending-user", {"uid": ["pending-user"], "mail": ["pending-user@example.com"], "memberof_group": []})]):
+                self.assertEqual(oldest_pending_membership_request_wait_time(), 12)
 
     def test_oldest_pending_membership_request_wait_time_skips_recent_requests(self) -> None:
         frozen_now = timezone.make_aware(datetime.datetime(2026, 1, 21, 12, 0, 0))
@@ -191,7 +193,32 @@ class AlreadySentTodayTests(TestCase):
                 requested_at=timezone.make_aware(datetime.datetime(2025, 12, 22, 12, 0, 0)),
             )
 
-            self.assertIsNone(oldest_pending_membership_request_wait_time())
+            with patch("core.freeipa.user.FreeIPAUser.all", return_value=[FreeIPAUser("pending-user", {"uid": ["pending-user"], "mail": ["pending-user@example.com"], "memberof_group": []})]):
+                self.assertIsNone(oldest_pending_membership_request_wait_time())
+
+    def test_oldest_pending_membership_request_wait_time_excludes_orphaned_requests(self) -> None:
+        frozen_now = timezone.make_aware(datetime.datetime(2026, 1, 21, 12, 0, 0))
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            self._create_membership_type()
+
+            orphan = MembershipRequest.objects.create(
+                requested_username="orphan-user",
+                membership_type_id="individual",
+            )
+            MembershipRequest.objects.filter(pk=orphan.pk).update(
+                requested_at=timezone.make_aware(datetime.datetime(2026, 1, 1, 12, 0, 0)),
+            )
+
+            live = MembershipRequest.objects.create(
+                requested_username="live-user",
+                membership_type_id="individual",
+            )
+            MembershipRequest.objects.filter(pk=live.pk).update(
+                requested_at=timezone.make_aware(datetime.datetime(2026, 1, 9, 12, 0, 0)),
+            )
+
+            with patch("core.freeipa.user.FreeIPAUser.all", return_value=[FreeIPAUser("live-user", {"uid": ["live-user"], "mail": ["live-user@example.com"], "memberof_group": []})]):
+                self.assertEqual(oldest_pending_membership_request_wait_time(), 12)
 
 
 class OrganizationSponsorRecipientTests(TestCase):

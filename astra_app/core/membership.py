@@ -1,6 +1,6 @@
 import datetime
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -639,6 +639,44 @@ def build_pending_request_context(
         by_category=by_category,
         category_ids=set(by_category),
     )
+
+
+def _normalize_live_usernames(
+    live_usernames: Iterable[str] | None,
+    *,
+    live_users_by_username: Mapping[str, FreeIPAUser] | None = None,
+) -> set[str]:
+    if live_users_by_username is not None:
+        live_usernames = live_users_by_username.keys()
+    elif live_usernames is None:
+        live_usernames = (user.username for user in FreeIPAUser.all())
+
+    return {normalized for normalized in (str(username).strip() for username in live_usernames) if normalized}
+
+
+def visible_committee_membership_requests(
+    pending_requests: Iterable[MembershipRequest],
+    *,
+    live_usernames: Iterable[str] | None = None,
+    live_users_by_username: Mapping[str, FreeIPAUser] | None = None,
+) -> list[MembershipRequest]:
+    """Return only the pending/on-hold requests the committee can still act on."""
+
+    live_username_set = _normalize_live_usernames(
+        live_usernames,
+        live_users_by_username=live_users_by_username,
+    )
+    visible_requests: list[MembershipRequest] = []
+    for pending_request in pending_requests:
+        if pending_request.is_organization_target:
+            if pending_request.requested_organization is None:
+                continue
+        elif str(pending_request.requested_username or "").strip() not in live_username_set:
+            continue
+
+        visible_requests.append(pending_request)
+
+    return visible_requests
 
 
 def expiring_soon_cutoff(*, now: datetime.datetime | None = None) -> datetime.datetime:

@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Mapping
 
 from django.conf import settings
 from django.contrib import messages
@@ -19,6 +20,7 @@ from core.email_context import (
 from core.forms_membership import MembershipRejectForm
 from core.freeipa.user import FreeIPAUser
 from core.logging_extras import current_exception_log_fields
+from core.membership import visible_committee_membership_requests
 from core.membership_notes import add_note
 from core.membership_request_workflow import (
     approve_membership_request,
@@ -183,11 +185,18 @@ def _load_membership_request_for_action(
     return req, redirect_to
 
 
-def _resolve_requested_by(username: str) -> tuple[str, bool]:
+def _resolve_requested_by(
+    username: str,
+    *,
+    users_by_username: Mapping[str, FreeIPAUser] | None = None,
+) -> tuple[str, bool]:
     """Return ``(full_name, is_deleted)`` for a username."""
     if not username:
         return "", False
-    user = FreeIPAUser.get(username)
+    if users_by_username is not None:
+        user = users_by_username.get(username)
+    else:
+        user = FreeIPAUser.get(username)
     if user is None:
         return "", True
     return user.full_name, False
@@ -195,37 +204,36 @@ def _resolve_requested_by(username: str) -> tuple[str, bool]:
 
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_requests(request: HttpRequest) -> HttpResponse:
+    all_freeipa_users = FreeIPAUser.all()
+    users_by_username = {user.username: user for user in all_freeipa_users if user.username}
+
     def _build_rows(reqs: list[MembershipRequest]) -> tuple[list[MembershipRequest], list[dict[str, object]]]:
+        visible_requests = visible_committee_membership_requests(
+            reqs,
+            live_users_by_username=users_by_username,
+        )
         rows: list[dict[str, object]] = []
-        visible: list[MembershipRequest] = []
-        for r in reqs:
+        for r in visible_requests:
             requested_log = r.requested_logs[0] if r.requested_logs else None
             requested_by_username = requested_log.actor_username if requested_log is not None else ""
-            requested_by_full_name, requested_by_deleted = _resolve_requested_by(requested_by_username)
+            requested_by_full_name, requested_by_deleted = _resolve_requested_by(
+                requested_by_username,
+                users_by_username=users_by_username,
+            )
 
             if r.is_organization_target:
-                org = r.requested_organization
-                if org is None:
-                    # If the org is gone, the committee can't take action on it.
-                    continue
-
-                visible.append(r)
                 rows.append(
                     {
                         "r": r,
-                        "organization": org,
+                        "organization": r.requested_organization,
                         "requested_by_username": requested_by_username,
                         "requested_by_full_name": requested_by_full_name,
                         "requested_by_deleted": requested_by_deleted,
                     }
                 )
             else:
-                fu = FreeIPAUser.get(r.requested_username)
-                if fu is None:
-                    # If the user is gone, the committee can't take action on them.
-                    continue
+                fu = users_by_username[r.requested_username]
 
-                visible.append(r)
                 rows.append(
                     {
                         "r": r,
@@ -235,7 +243,7 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
                         "requested_by_deleted": requested_by_deleted,
                     }
                 )
-        return visible, rows
+        return visible_requests, rows
 
     base = MembershipRequest.objects.select_related("membership_type", "requested_organization").prefetch_related(
         Prefetch(

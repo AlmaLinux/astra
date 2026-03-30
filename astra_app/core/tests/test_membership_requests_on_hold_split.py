@@ -29,6 +29,21 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
         session["_freeipa_username"] = username
         session.save()
 
+    def _make_freeipa_user(
+        self,
+        username: str,
+        *,
+        email: str | None = None,
+        groups: list[str] | None = None,
+    ) -> FreeIPAUser:
+        user_data: dict[str, list[str]] = {
+            "uid": [username],
+            "memberof_group": list(groups or []),
+        }
+        if email is not None:
+            user_data["mail"] = [email]
+        return FreeIPAUser(username, user_data)
+
     def test_requests_list_shows_pending_and_on_hold_sections(self) -> None:
         MembershipType.objects.update_or_create(
             code="individual",
@@ -53,29 +68,20 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
             on_hold_at=timezone.now() - datetime.timedelta(days=3),
         )
 
-        reviewer = FreeIPAUser(
+        reviewer = self._make_freeipa_user(
             "reviewer",
-            {
-                "uid": ["reviewer"],
-                "mail": ["reviewer@example.com"],
-                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
-            },
+            email="reviewer@example.com",
+            groups=[settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
         )
-        alice = FreeIPAUser("alice", {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []})
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "mail": ["bob@example.com"], "memberof_group": []})
-
-        def _get_user(username: str) -> FreeIPAUser | None:
-            if username == "reviewer":
-                return reviewer
-            if username == "alice":
-                return alice
-            if username == "bob":
-                return bob
-            return None
+        alice = self._make_freeipa_user("alice", email="alice@example.com")
+        bob = self._make_freeipa_user("bob", email="bob@example.com")
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.user.FreeIPAUser.all", return_value=[reviewer, alice, bob]),
+        ):
             resp = self.client.get(reverse("membership-requests"))
 
         self.assertEqual(resp.status_code, 200)
@@ -102,26 +108,19 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
             status=MembershipRequest.Status.pending,
         )
 
-        reviewer = FreeIPAUser(
+        reviewer = self._make_freeipa_user(
             "reviewer",
-            {
-                "uid": ["reviewer"],
-                "mail": ["reviewer@example.com"],
-                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
-            },
+            email="reviewer@example.com",
+            groups=[settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
         )
-        alice = FreeIPAUser("alice", {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []})
-
-        def _get_user(username: str) -> FreeIPAUser | None:
-            if username == "reviewer":
-                return reviewer
-            if username == "alice":
-                return alice
-            return None
+        alice = self._make_freeipa_user("alice", email="alice@example.com")
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.user.FreeIPAUser.all", return_value=[reviewer, alice]),
+        ):
             resp = self.client.get(reverse("membership-requests"))
 
         self.assertEqual(resp.status_code, 200)
@@ -163,29 +162,20 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
             on_hold_at=on_hold_at,
         )
 
-        reviewer = FreeIPAUser(
+        reviewer = self._make_freeipa_user(
             "reviewer",
-            {
-                "uid": ["reviewer"],
-                "mail": ["reviewer@example.com"],
-                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
-            },
+            email="reviewer@example.com",
+            groups=[settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
         )
-        alice = FreeIPAUser("alice", {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []})
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "mail": ["bob@example.com"], "memberof_group": []})
-
-        def _get_user(username: str) -> FreeIPAUser | None:
-            if username == "reviewer":
-                return reviewer
-            if username == "alice":
-                return alice
-            if username == "bob":
-                return bob
-            return None
+        alice = self._make_freeipa_user("alice", email="alice@example.com")
+        bob = self._make_freeipa_user("bob", email="bob@example.com")
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.user.FreeIPAUser.all", return_value=[reviewer, alice, bob]),
+        ):
             resp = self.client.get(reverse("membership-requests"))
 
         self.assertEqual(resp.status_code, 200)
@@ -252,30 +242,21 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
             action=MembershipLog.Action.requested,
         )
 
-        reviewer = FreeIPAUser(
+        reviewer = self._make_freeipa_user(
             "reviewer",
-            {
-                "uid": ["reviewer"],
-                "mail": ["reviewer@example.com"],
-                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
-            },
+            email="reviewer@example.com",
+            groups=[settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
         )
-        alice = FreeIPAUser("alice", {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []})
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "mail": ["bob@example.com"], "memberof_group": []})
-
-        def _get_user(username: str) -> FreeIPAUser | None:
-            if username == "reviewer":
-                return reviewer
-            if username == "alice":
-                return alice
-            if username == "bob":
-                return bob
-            # Leave requesters (e.g. charlie) unresolved; the UI should still show them as "(deleted)".
-            return None
+        alice = self._make_freeipa_user("alice", email="alice@example.com")
+        bob = self._make_freeipa_user("bob", email="bob@example.com")
+        charlie = self._make_freeipa_user("charlie", email="charlie@example.com")
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.user.FreeIPAUser.all", return_value=[reviewer, alice, bob, charlie]),
+        ):
             resp = self.client.get(reverse("membership-requests"))
 
         self.assertEqual(resp.status_code, 200)
@@ -314,32 +295,25 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
                 status=MembershipRequest.Status.pending,
             )
 
-        reviewer = FreeIPAUser(
+        reviewer = self._make_freeipa_user(
             "reviewer",
-            {
-                "uid": ["reviewer"],
-                "mail": ["reviewer@example.com"],
-                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
-            },
+            email="reviewer@example.com",
+            groups=[settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
         )
-
-        def _get_user(username: str) -> FreeIPAUser | None:
-            if username == "reviewer":
-                return reviewer
-            if username.startswith("user"):
-                return FreeIPAUser(
-                    username,
-                    {
-                        "uid": [username],
-                        "mail": [f"{username}@example.com"],
-                        "memberof_group": [],
-                    },
-                )
-            return None
+        all_users = [
+            reviewer,
+            *[
+                self._make_freeipa_user(f"user{idx}", email=f"user{idx}@example.com")
+                for idx in range(55)
+            ],
+        ]
 
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.user.FreeIPAUser.all", return_value=all_users),
+        ):
             page_1 = self.client.get(f"{reverse('membership-requests')}?scope=all")
             page_2 = self.client.get(f"{reverse('membership-requests')}?scope=all&pending_page=2")
 

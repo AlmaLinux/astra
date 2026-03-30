@@ -2345,7 +2345,10 @@ class AccountDeletionRequestAdmin(admin.ModelAdmin):
                 # Keep the row locked across execution so concurrent confirm posts cannot
                 # run the same destructive request twice before the final status lands.
                 try:
-                    invalidated_sessions = execute_account_deletion_request(deletion_request)
+                    invalidated_sessions = execute_account_deletion_request(
+                        deletion_request,
+                        actor_username=actor,
+                    )
                 except Exception as exc:
                     blocker_codes, _warnings = get_account_deletion_blockers(deletion_request.username)
                     failure_message = str(exc)

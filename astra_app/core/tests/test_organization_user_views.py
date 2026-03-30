@@ -3734,6 +3734,16 @@ class OrganizationUserViewsTests(TestCase):
                 "group_cn": "sponsor-group",
             },
         )
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 3,
+                "enabled": True,
+                "group_cn": "sponsor-group-2",
+            },
+        )
 
         gold = MembershipType.objects.get(code="gold")
 
@@ -3787,6 +3797,61 @@ class OrganizationUserViewsTests(TestCase):
             ).exists()
         )
         remove_from_group.assert_called_once_with(bob, group_name="sponsor-group")
+
+    def test_delete_org_rolls_back_open_request_cleanup_when_delete_fails(self) -> None:
+        from core.models import MembershipRequest, MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 2,
+                "enabled": True,
+                "group_cn": "sponsor-group",
+            },
+        )
+
+        org = Organization.objects.create(
+            name="Rollback Org",
+            representative="bob",
+        )
+        pending_req = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="gold",
+            status=MembershipRequest.Status.pending,
+        )
+        on_hold_req = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="silver",
+            status=MembershipRequest.Status.on_hold,
+        )
+
+        bob = FreeIPAUser(
+            "bob",
+            {
+                "uid": ["bob"],
+                "mail": ["bob@example.com"],
+                "memberof_group": [],
+                "c": ["US"],
+            },
+        )
+        self._login_as_freeipa_user("bob")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
+            with patch("core.views_organizations.Organization.delete", side_effect=RuntimeError("delete failed")):
+                with self.assertRaises(RuntimeError):
+                    self.client.post(reverse("organization-delete", args=[org.pk]), follow=False)
+
+        org.refresh_from_db()
+        pending_req.refresh_from_db()
+        on_hold_req.refresh_from_db()
+
+        self.assertTrue(Organization.objects.filter(pk=org.pk).exists())
+        self.assertEqual(pending_req.status, MembershipRequest.Status.pending)
+        self.assertEqual(on_hold_req.status, MembershipRequest.Status.on_hold)
 
     def test_non_representative_cannot_delete_org(self) -> None:
         from core.models import Organization
@@ -4115,7 +4180,7 @@ class OrganizationUserViewsTests(TestCase):
         self.assertEqual(organization.representative, "")
         self.assertEqual(organization.status, Organization.Status.unclaimed)
 
-    def test_deleting_organization_does_not_delete_membership_requests_or_audit_logs(self) -> None:
+    def test_deleting_organization_ignores_open_membership_requests_and_keeps_audit_logs(self) -> None:
         from core.models import MembershipLog, MembershipRequest, MembershipType, Organization
 
         membership_type, _ = MembershipType.objects.update_or_create(
@@ -4124,6 +4189,15 @@ class OrganizationUserViewsTests(TestCase):
                 "name": "Gold Sponsor Member",
                 "category_id": "sponsorship",
                 "sort_order": 2,
+                "enabled": True,
+            },
+        )
+        on_hold_type, _ = MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 3,
                 "enabled": True,
             },
         )
@@ -4139,24 +4213,52 @@ class OrganizationUserViewsTests(TestCase):
             representative="bob",
         )
 
-        req = MembershipRequest.objects.create(
+        pending_req = MembershipRequest.objects.create(
             requested_username="",
             requested_organization=org,
             membership_type_id="gold",
             status=MembershipRequest.Status.pending,
             responses=[{"Additional Information": "Please consider our updated sponsorship level."}],
         )
+        on_hold_req = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id=on_hold_type.pk,
+            status=MembershipRequest.Status.on_hold,
+            responses=[{"Additional Information": "Please consider our updated sponsorship level."}],
+        )
         MembershipLog.create_for_request(
             actor_username="bob",
             target_organization=org,
             membership_type=membership_type,
-            membership_request=req,
+            membership_request=pending_req,
         )
 
-        org.delete()
+        bob = FreeIPAUser(
+            "bob",
+            {
+                "uid": ["bob"],
+                "mail": ["bob@example.com"],
+                "memberof_group": [],
+                "c": ["US"],
+            },
+        )
+        self._login_as_freeipa_user("bob")
 
-        self.assertTrue(MembershipRequest.objects.filter(pk=req.pk).exists())
-        self.assertTrue(MembershipLog.objects.filter(membership_request_id=req.pk).exists())
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
+            resp = self.client.post(reverse("organization-delete", args=[org.pk]), follow=False)
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], reverse("organizations"))
+
+        pending_req.refresh_from_db()
+        on_hold_req.refresh_from_db()
+
+        self.assertEqual(pending_req.status, MembershipRequest.Status.ignored)
+        self.assertEqual(on_hold_req.status, MembershipRequest.Status.ignored)
+        self.assertIsNone(pending_req.requested_organization_id)
+        self.assertIsNone(on_hold_req.requested_organization_id)
+        self.assertTrue(MembershipLog.objects.filter(membership_request_id=pending_req.pk).exists())
 
     def test_user_can_create_organization_and_becomes_representative(self) -> None:
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})

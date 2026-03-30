@@ -18,6 +18,7 @@ from django.utils import timezone
 from core.country_codes import country_code_status_from_user_data
 from core.freeipa.user import FreeIPAUser
 from core.logging_extras import current_exception_log_fields
+from core.membership import visible_committee_membership_requests
 from core.membership_constants import MembershipCategoryCode
 from core.models import Membership, MembershipLog, MembershipRequest
 from core.permissions import (
@@ -457,12 +458,22 @@ def membership_stats_data(request: HttpRequest) -> HttpResponse:
         summary: dict[str, object] = {
             "total_freeipa_users": len(all_freeipa_users),
             "active_individual_memberships": len(active_individual_usernames),
-            "pending_requests": MembershipRequest.objects.filter(
-                status=MembershipRequest.Status.pending
-            ).count(),
-            "on_hold_requests": MembershipRequest.objects.filter(
-                status=MembershipRequest.Status.on_hold
-            ).count(),
+            "pending_requests": len(
+                visible_committee_membership_requests(
+                    MembershipRequest.objects.select_related("requested_organization")
+                    .filter(status=MembershipRequest.Status.pending)
+                    .order_by("requested_at", "pk"),
+                    live_users_by_username=users_by_username,
+                )
+            ),
+            "on_hold_requests": len(
+                visible_committee_membership_requests(
+                    MembershipRequest.objects.select_related("requested_organization")
+                    .filter(status=MembershipRequest.Status.on_hold)
+                    .order_by("on_hold_at", "requested_at", "pk"),
+                    live_users_by_username=users_by_username,
+                )
+            ),
             "expiring_soon_90_days": active_memberships.filter(expires_at__lte=now + datetime.timedelta(days=90))
             .exclude(expires_at__isnull=True)
             .count(),

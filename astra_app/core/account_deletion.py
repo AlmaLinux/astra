@@ -6,6 +6,7 @@ from django.utils import timezone
 from python_freeipa import exceptions
 
 from core.freeipa.user import FreeIPAUser
+from core.membership_request_workflow import ignore_open_membership_requests_for_target
 from core.models import AccountDeletionRequest, Election, Organization, VotingCredential
 from core.signals import CANONICAL_SIGNALS
 
@@ -66,7 +67,11 @@ def invalidate_sessions_for_freeipa_username(username: str) -> int:
     return invalidated
 
 
-def execute_account_deletion_request(account_deletion_request: AccountDeletionRequest) -> int:
+def execute_account_deletion_request(
+    account_deletion_request: AccountDeletionRequest,
+    *,
+    actor_username: str | None = None,
+) -> int:
     username = str(account_deletion_request.username or "").strip()
     blocker_codes, warnings = get_account_deletion_blockers(username)
     if blocker_codes:
@@ -84,6 +89,11 @@ def execute_account_deletion_request(account_deletion_request: AccountDeletionRe
             username,
             account_deletion_request.pk,
         )
+
+    ignore_open_membership_requests_for_target(
+        username=username,
+        actor_username=actor_username,
+    )
 
     return invalidated_sessions
 

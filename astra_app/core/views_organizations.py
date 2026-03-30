@@ -36,6 +36,7 @@ from core.membership import (
     resolve_request_ids_by_membership_type,
 )
 from core.membership_notes import add_note
+from core.membership_request_workflow import ignore_open_membership_requests_for_target
 from core.models import (
     AccountInvitation,
     AuditLogEntry,
@@ -931,14 +932,20 @@ def organization_delete(request: HttpRequest, organization_id: int) -> HttpRespo
                         return redirect("organization-detail", organization_id=organization.pk)
 
     actor_username = get_username(request)
-    for membership in active_memberships:
-        MembershipLog.create_for_termination(
+    with transaction.atomic():
+        for membership in active_memberships:
+            MembershipLog.create_for_termination(
+                actor_username=actor_username,
+                target_organization=organization,
+                membership_type=membership.membership_type,
+            )
+
+        ignore_open_membership_requests_for_target(
+            organization=organization,
             actor_username=actor_username,
-            target_organization=organization,
-            membership_type=membership.membership_type,
         )
 
-    organization.delete()
+        organization.delete()
     messages.success(request, "Organization deleted.")
     return redirect("organizations")
 

@@ -124,6 +124,55 @@ class AdminAccountDeletionRequestTests(TestCase):
         self.assertEqual(invalidated, 1)
         self.assertFalse(Session.objects.filter(session_key=target_session).exists())
 
+    def test_execute_account_deletion_request_closes_open_membership_requests_as_ignored(self) -> None:
+        from core.models import MembershipRequest, MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="individual-2",
+            defaults={
+                "name": "Individual 2",
+                "group_cn": "almalinux-individual-2",
+                "category_id": "individual",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        deletion_request = self._create_request(
+            username="bob",
+            manual_review_required=False,
+            blocker_codes=[],
+        )
+        pending_request = MembershipRequest.objects.create(
+            requested_username="bob",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.pending,
+        )
+        on_hold_request = MembershipRequest.objects.create(
+            requested_username="bob",
+            membership_type_id="individual-2",
+            status=MembershipRequest.Status.on_hold,
+        )
+
+        with patch("core.account_deletion.FreeIPAUser.delete", autospec=True, return_value=None):
+            execute_account_deletion_request(deletion_request)
+
+        pending_request.refresh_from_db()
+        on_hold_request.refresh_from_db()
+
+        self.assertEqual(pending_request.status, MembershipRequest.Status.ignored)
+        self.assertEqual(on_hold_request.status, MembershipRequest.Status.ignored)
+
     def test_admin_changelist_requires_admin_session(self) -> None:
         response = self.client.get(reverse("admin:core_accountdeletionrequest_changelist"), follow=False)
 

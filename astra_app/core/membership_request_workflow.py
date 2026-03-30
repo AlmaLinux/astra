@@ -28,7 +28,7 @@ from core.membership import (
 )
 from core.membership_constants import MembershipCategoryCode
 from core.membership_log_side_effects import apply_membership_log_side_effects
-from core.membership_notes import add_note
+from core.membership_notes import CUSTOS, add_note
 from core.membership_notifications import organization_sponsor_notification_recipient_email
 from core.membership_response_normalization import normalize_membership_request_responses
 from core.mirror_membership_validation import (
@@ -93,6 +93,53 @@ def _build_membership_target(membership_request: MembershipRequest) -> Membershi
         target_username="",
         target_organization=None,
     )
+
+
+@transaction.atomic
+def ignore_open_membership_requests_for_target(
+    *,
+    actor_username: str | None = None,
+    username: str | None = None,
+    organization: Organization | None = None,
+) -> int:
+    """Ignore any pending or on-hold requests for a target that is being deleted."""
+
+    normalized_actor_username = str(actor_username or "").strip() or CUSTOS
+
+    if (username is None) == (organization is None):
+        raise ValueError("Provide exactly one of username or organization.")
+
+    if username is not None:
+        normalized_username = str(username or "").strip()
+        if not normalized_username:
+            return 0
+        open_requests = (
+            MembershipRequest.objects.select_related("membership_type", "requested_organization")
+            .filter(
+                requested_username=normalized_username,
+                status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
+            )
+            .order_by("pk")
+        )
+    else:
+        open_requests = (
+            MembershipRequest.objects.select_related("membership_type", "requested_organization")
+            .filter(
+                requested_organization=organization,
+                status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
+            )
+            .order_by("pk")
+        )
+
+    ignored_count = 0
+    for membership_request in open_requests:
+        ignore_membership_request(
+            membership_request=membership_request,
+            actor_username=normalized_actor_username,
+        )
+        ignored_count += 1
+
+    return ignored_count
 
 
 def _ensure_configured_email_template_exists(*, template_name: str) -> None:

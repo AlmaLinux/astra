@@ -1,5 +1,5 @@
 import datetime
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
@@ -15,6 +15,7 @@ from core.email_context import (
 )
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import FreeIPAUser
+from core.membership import visible_committee_membership_requests
 from core.models import FreeIPAPermissionGrant, MembershipRequest, MembershipType, Organization
 from core.public_urls import build_public_absolute_url
 from core.templated_email import queue_templated_email
@@ -92,15 +93,22 @@ def would_queue_membership_pending_requests_notification(
     ).exists()
 
 
-def oldest_pending_membership_request_wait_time() -> int | None:
-    oldest_request = (
-        MembershipRequest.objects.filter(status=MembershipRequest.Status.pending)
-        .order_by("requested_at")
-        .only("requested_at")
-        .first()
+def oldest_pending_membership_request_wait_time(
+    *,
+    live_usernames: Iterable[str] | None = None,
+    live_users_by_username: Mapping[str, FreeIPAUser] | None = None,
+) -> int | None:
+    oldest_request = visible_committee_membership_requests(
+        MembershipRequest.objects.select_related("requested_organization")
+        .filter(status=MembershipRequest.Status.pending)
+        .order_by("requested_at"),
+        live_usernames=live_usernames,
+        live_users_by_username=live_users_by_username,
     )
-    if oldest_request is None:
+    if not oldest_request:
         return None
+
+    oldest_request = oldest_request[0]
 
     oldest_wait_time = timezone.now() - oldest_request.requested_at
     if oldest_wait_time < datetime.timedelta(days=12):

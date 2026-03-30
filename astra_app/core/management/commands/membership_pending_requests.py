@@ -6,6 +6,8 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from core.email_context import membership_committee_email_context
+from core.freeipa.user import FreeIPAUser
+from core.membership import visible_committee_membership_requests
 from core.membership_notifications import (
     committee_recipient_emails_for_permission_graceful,
     membership_requests_url,
@@ -41,7 +43,17 @@ class Command(BaseCommand):
         dry_run: bool = bool(options.get("dry_run"))
         today = timezone.localdate()
 
-        pending_count = MembershipRequest.objects.filter(status=MembershipRequest.Status.pending).count()
+        all_freeipa_users = FreeIPAUser.all()
+        live_users_by_username = {freeipa_user.username: freeipa_user for freeipa_user in all_freeipa_users if freeipa_user.username}
+
+        pending_count = len(
+            visible_committee_membership_requests(
+                MembershipRequest.objects.select_related("requested_organization")
+                .filter(status=MembershipRequest.Status.pending)
+                .order_by("requested_at", "pk"),
+                live_users_by_username=live_users_by_username,
+            )
+        )
         if pending_count <= 0:
             logger.info("No pending membership requests.")
             return
@@ -76,7 +88,9 @@ class Command(BaseCommand):
                 logger.info("Skipped; email already queued this week.")
             return
 
-        oldest_wait_time = oldest_pending_membership_request_wait_time()
+        oldest_wait_time = oldest_pending_membership_request_wait_time(
+            live_users_by_username=live_users_by_username,
+        )
 
         if dry_run:
             logger.info(
