@@ -381,7 +381,7 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
     on_hold_page_ctx = paginate_and_build_context(
         on_hold_rows,
         on_hold_page_number,
-        50,
+        10,
         page_url_prefix=on_hold_page_url_prefix,
     )
 
