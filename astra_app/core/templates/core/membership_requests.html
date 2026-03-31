@@ -101,6 +101,10 @@
                 <td>
                   {{ r.membership_type.name }}
 
+                  {% if row.is_renewal %}
+                    <span class="badge badge-primary">Renewal</span>
+                  {% endif %}
+
                   {% include 'core/_membership_request_responses.html' with request_obj=r organization=row.organization as_details=True %}
 
                 </td>
@@ -204,8 +208,12 @@
                   <td>
                     {% include 'core/_membership_request_requester_cell.html' %}
                   </td>
-
-                  <td>{{ r.membership_type.name }}</td>
+                  <td>
+                    {{ r.membership_type.name }}
+                    {% if row.is_renewal %}
+                      <span class="badge badge-primary">Renewal</span>
+                    {% endif %}
+                  </td>
                   <td class="text-nowrap">
                     {% if r.on_hold_at %}
                       {{ r.on_hold_at }}

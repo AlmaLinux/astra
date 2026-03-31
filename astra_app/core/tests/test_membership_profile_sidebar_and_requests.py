@@ -1080,6 +1080,79 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         _assert_modal_next("shared-rfi-modal")
         _assert_modal_next("shared-ignore-modal")
 
+    def test_membership_requests_show_renewal_badge_for_active_memberships(self) -> None:
+        from core.models import Membership, MembershipRequest, MembershipType, Organization
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor",
+                "group_cn": "almalinux-gold",
+                "category_id": "sponsorship",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        req_user = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+        MembershipRequest.objects.create(requested_username="bob", membership_type_id="individual")
+        org = Organization.objects.create(name="Acme", representative="rep1")
+        req_org = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="gold",
+            status=MembershipRequest.Status.on_hold,
+            on_hold_at=timezone.now(),
+        )
+
+        Membership.objects.create(
+            target_username="alice",
+            membership_type_id="individual",
+            expires_at=timezone.now() + datetime.timedelta(days=30),
+        )
+        Membership.objects.create(
+            target_organization=org,
+            membership_type_id="gold",
+            expires_at=timezone.now() + datetime.timedelta(days=30),
+        )
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
+        alice = self._make_user("alice", full_name="Alice User")
+        bob = self._make_user("bob", full_name="Bob User")
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "alice":
+                return alice
+            if username == "bob":
+                return bob
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.freeipa.user.FreeIPAUser.all", autospec=True, return_value=[reviewer, alice, bob]),
+        ):
+            resp = self.client.get(reverse("membership-requests"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, f"Request #{req_user.pk}")
+        self.assertContains(resp, f"Request #{req_org.pk}")
+        self.assertContains(resp, '<span class="badge badge-primary">Renewal</span>', count=2)
+
     def test_membership_requests_filter_empty_state_message(self) -> None:
         from core.models import MembershipRequest, MembershipType, Organization
 

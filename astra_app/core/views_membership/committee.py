@@ -275,18 +275,19 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
     active_org_memberships: set[tuple[int, str]] = set()
     is_renewal_by_id: dict[int, bool] = {}
 
-    if pending_visible:
+    renewal_candidates = pending_visible + on_hold_visible
+    if renewal_candidates:
         target_usernames = {
             req.requested_username
-            for req in pending_visible
+            for req in renewal_candidates
             if req.is_user_target and req.requested_username
         }
         target_org_ids = {
             req.requested_organization_id
-            for req in pending_visible
+            for req in renewal_candidates
             if req.is_organization_target and req.requested_organization_id is not None
         }
-        membership_type_ids = {req.membership_type_id for req in pending_visible if req.membership_type_id}
+        membership_type_ids = {req.membership_type_id for req in renewal_candidates if req.membership_type_id}
 
         if membership_type_ids and (target_usernames or target_org_ids):
             active_memberships = Membership.objects.active().filter(membership_type_id__in=membership_type_ids)
@@ -305,7 +306,7 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
                 elif membership.target_organization_id is not None:
                     active_org_memberships.add((membership.target_organization_id, membership.membership_type_id))
 
-        for req in pending_visible:
+        for req in renewal_candidates:
             if req.is_user_target:
                 is_renewal_by_id[req.pk] = (
                     req.requested_username,
@@ -316,6 +317,9 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
                 is_renewal_by_id[req.pk] = bool(
                     org_id and (org_id, req.membership_type_id) in active_org_memberships
                 )
+
+    for row in pending_rows_all + on_hold_rows_all:
+        row["is_renewal"] = is_renewal_by_id.get(row["r"].pk, False)
 
     filter_counts = {
         "all": len(pending_visible),
