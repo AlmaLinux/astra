@@ -883,6 +883,71 @@ class MembershipRequestsFlowTests(TestCase):
         self.assertEqual(kwargs["recipients"], ["alice@example.com"])
         self.assertEqual(kwargs["template_name"], "membership-request-approved-individual")
 
+    @override_settings(MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME="membership-renewal-approved")
+    def test_committee_approve_user_renewal_sends_renewal_template(self) -> None:
+        from core.models import Membership, MembershipRequest, MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        Membership.objects.create(
+            target_username="alice",
+            membership_type_id="individual",
+            expires_at=timezone.now() + datetime.timedelta(days=30),
+        )
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [committee_cn],
+            },
+        )
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "alice":
+                return alice
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
+            with patch.object(FreeIPAUser, "add_to_group", autospec=True):
+                with patch("core.membership_request_workflow.queue_templated_email", autospec=True) as send_mock:
+                    with self.captureOnCommitCallbacks(execute=True):
+                        resp = self.client.post(
+                            reverse("membership-request-approve", args=[req.pk]),
+                            follow=False,
+                        )
+
+        self.assertEqual(resp.status_code, 302)
+        send_mock.assert_called_once()
+        _, kwargs = send_mock.call_args
+        self.assertEqual(
+            kwargs["template_name"],
+            settings.MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME,
+        )
+
     def test_committee_approve_is_blocked_if_configured_template_is_missing(self) -> None:
         import uuid
 
@@ -960,6 +1025,127 @@ class MembershipRequestsFlowTests(TestCase):
             ).exists()
         )
 
+    def test_committee_approve_renewal_is_blocked_if_configured_renewal_template_is_missing(self) -> None:
+        import uuid
+
+        from post_office.models import EmailTemplate
+
+        from core.models import Membership, MembershipLog, MembershipRequest, MembershipType
+
+        missing_name = f"missing-renewal-template-{uuid.uuid4()}"
+        EmailTemplate.objects.filter(name=missing_name).delete()
+        self.assertFalse(EmailTemplate.objects.filter(name=missing_name).exists())
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "acceptance_template": None,
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        membership_type = MembershipType.objects.get(code="individual")
+        self.assertIsNone(membership_type.acceptance_template_id)
+        Membership.objects.create(
+            target_username="alice",
+            membership_type_id="individual",
+            expires_at=timezone.now() + datetime.timedelta(days=30),
+        )
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [committee_cn],
+            },
+        )
+
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "alice":
+                return alice
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        with override_settings(MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME=missing_name):
+            self.assertEqual(settings.MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME, missing_name)
+            with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
+                with patch.object(FreeIPAUser, "add_to_group", autospec=True) as add_mock:
+                    resp = self.client.post(reverse("membership-request-approve", args=[req.pk]), follow=True)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Configured email template")
+        self.assertContains(resp, missing_name)
+        self.assertContains(resp, "was not found")
+
+        req.refresh_from_db()
+        self.assertEqual(req.status, MembershipRequest.Status.pending)
+        add_mock.assert_not_called()
+        self.assertFalse(
+            MembershipLog.objects.filter(
+                actor_username="reviewer",
+                target_username="alice",
+                membership_type_id="individual",
+                action=MembershipLog.Action.approved,
+            ).exists()
+        )
+
+    @override_settings(MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME="membership-renewal-approved-contract")
+    def test_resolve_approval_template_name_prefers_renewal_over_override_and_acceptance_template(self) -> None:
+        from post_office.models import EmailTemplate
+
+        from core.membership_request_workflow import _resolve_approval_template_name
+        from core.models import MembershipType
+
+        template, _created = EmailTemplate.objects.update_or_create(
+            name="membership-request-approved-individual",
+            defaults={
+                "subject": "Approved",
+                "content": "Approved",
+                "html_content": "<p>Approved</p>",
+                "description": "Approved",
+            },
+        )
+        membership_type, _created = MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "acceptance_template": template,
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        resolved_template = _resolve_approval_template_name(
+            membership_type=membership_type,
+            override="manual-override-template",
+            previous_expires_at=timezone.now(),
+        )
+
+        self.assertEqual(
+            resolved_template,
+            settings.MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME,
+        )
+
     def test_committee_can_approve_request_with_custom_email_redirects_to_send_mail(self) -> None:
         from core.models import MembershipLog, MembershipRequest, MembershipType
 
@@ -1032,6 +1218,88 @@ class MembershipRequestsFlowTests(TestCase):
         self.assertEqual(qs.get("type"), ["users"])
         self.assertEqual(qs.get("to"), ["alice"])
         self.assertEqual(qs.get("template"), [settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME])
+
+    @override_settings(MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME="membership-renewal-approved")
+    def test_committee_approve_user_renewal_custom_email_preselects_renewal_template(self) -> None:
+        from core.models import Membership, MembershipLog, MembershipRequest, MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        Membership.objects.create(
+            target_username="alice",
+            membership_type_id="individual",
+            expires_at=timezone.now() + datetime.timedelta(days=30),
+        )
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [committee_cn],
+            },
+        )
+
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "alice":
+                return alice
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
+            with patch.object(FreeIPAUser, "add_to_group", autospec=True):
+                with patch("post_office.mail.send", autospec=True) as send_mock:
+                    resp = self.client.post(
+                        reverse("membership-request-approve", args=[req.pk]),
+                        data={"custom_email": "1"},
+                        follow=False,
+                    )
+
+        self.assertEqual(resp.status_code, 302)
+        send_mock.assert_not_called()
+
+        req.refresh_from_db()
+        self.assertEqual(req.status, MembershipRequest.Status.approved)
+        self.assertTrue(
+            MembershipLog.objects.filter(
+                actor_username="reviewer",
+                target_username="alice",
+                membership_type_id="individual",
+                action=MembershipLog.Action.approved,
+            ).exists()
+        )
+
+        redirect_url = str(resp["Location"])
+        self.assertTrue(redirect_url.startswith(reverse("send-mail") + "?"))
+        qs = parse_qs(urlsplit(redirect_url).query)
+        self.assertEqual(qs.get("type"), ["users"])
+        self.assertEqual(qs.get("to"), ["alice"])
+        self.assertEqual(
+            qs.get("template"),
+            [settings.MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME],
+        )
 
 
     def test_committee_can_approve_org_request_sends_email_using_membership_type_template(self) -> None:
@@ -1119,6 +1387,95 @@ class MembershipRequestsFlowTests(TestCase):
         self.assertEqual(kwargs["recipients"], ["bob@example.com"])
         self.assertEqual(kwargs["template_name"], "membership-request-approved-silver")
 
+    @override_settings(MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME="membership-renewal-approved")
+    def test_committee_approve_org_renewal_sends_renewal_template(self) -> None:
+        from post_office.models import EmailTemplate
+
+        from core.models import Membership, MembershipRequest, MembershipType, Organization
+
+        template, _ = EmailTemplate.objects.update_or_create(
+            name="membership-request-approved-silver",
+            defaults={
+                "subject": "Approved",
+                "content": "Approved",
+                "html_content": "<p>Approved</p>",
+                "description": "Org approval template",
+            },
+        )
+
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor",
+                "group_cn": "almalinux-sponsor-silver",
+                "acceptance_template": template,
+                "category_id": "sponsorship",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(
+            name="CERN",
+            business_contact_email="cern@example.com",
+            representative="bob",
+        )
+        Membership.objects.create(
+            target_organization=org,
+            membership_type_id="silver",
+            expires_at=timezone.now() + datetime.timedelta(days=30),
+        )
+        req = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="silver",
+        )
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [committee_cn],
+            },
+        )
+
+        bob = FreeIPAUser(
+            "bob",
+            {
+                "uid": ["bob"],
+                "mail": ["bob@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "bob":
+                return bob
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
+            with patch.object(FreeIPAUser, "add_to_group", autospec=True):
+                with patch("core.membership_request_workflow.queue_templated_email", autospec=True) as send_mock:
+                    with self.captureOnCommitCallbacks(execute=True):
+                        resp = self.client.post(
+                            reverse("membership-request-approve", args=[req.pk]),
+                            follow=False,
+                        )
+
+        self.assertEqual(resp.status_code, 302)
+        send_mock.assert_called_once()
+        _, kwargs = send_mock.call_args
+        self.assertEqual(
+            kwargs["template_name"],
+            settings.MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME,
+        )
+
     def test_committee_can_approve_org_request_with_custom_email_redirects_to_send_mail(self) -> None:
         from post_office.models import EmailTemplate
 
@@ -1203,6 +1560,201 @@ class MembershipRequestsFlowTests(TestCase):
         self.assertEqual(qs.get("type"), ["users"])
         self.assertEqual(qs.get("to"), ["bob"])
         self.assertEqual(qs.get("template"), ["membership-request-approved-silver"])
+
+    @override_settings(MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME="membership-renewal-approved")
+    def test_committee_approve_org_renewal_custom_email_preselects_renewal_template(self) -> None:
+        from post_office.models import EmailTemplate
+
+        from core.models import Membership, MembershipRequest, MembershipType, Organization
+
+        template, _ = EmailTemplate.objects.update_or_create(
+            name="membership-request-approved-silver",
+            defaults={
+                "subject": "Approved",
+                "content": "Approved",
+                "html_content": "<p>Approved</p>",
+                "description": "Org approval template",
+            },
+        )
+
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor",
+                "group_cn": "almalinux-sponsor-silver",
+                "acceptance_template": template,
+                "category_id": "sponsorship",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(
+            name="CERN",
+            business_contact_email="cern@example.com",
+            representative="bob",
+        )
+        Membership.objects.create(
+            target_organization=org,
+            membership_type_id="silver",
+            expires_at=timezone.now() + datetime.timedelta(days=30),
+        )
+        req = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="silver",
+        )
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [committee_cn],
+            },
+        )
+        bob = FreeIPAUser(
+            "bob",
+            {
+                "uid": ["bob"],
+                "mail": ["bob@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "bob":
+                return bob
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
+            with patch.object(FreeIPAUser, "add_to_group", autospec=True):
+                with patch("post_office.mail.send", autospec=True) as send_mock:
+                    resp = self.client.post(
+                        reverse("membership-request-approve", args=[req.pk]),
+                        data={"custom_email": "1"},
+                        follow=False,
+                    )
+
+        self.assertEqual(resp.status_code, 302)
+        send_mock.assert_not_called()
+
+        redirect_url = str(resp["Location"])
+        self.assertTrue(redirect_url.startswith(reverse("send-mail") + "?"))
+        qs = parse_qs(urlsplit(redirect_url).query)
+        self.assertEqual(qs.get("type"), ["users"])
+        self.assertEqual(qs.get("to"), ["bob"])
+        self.assertEqual(
+            qs.get("template"),
+            [settings.MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME],
+        )
+
+    @override_settings(MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME="membership-renewal-approved")
+    def test_committee_approve_org_renewal_custom_email_falls_back_when_rep_lookup_errors(self) -> None:
+        import inspect
+
+        from post_office.models import EmailTemplate
+
+        from core.models import Membership, MembershipRequest, MembershipType, Organization
+
+        template, _ = EmailTemplate.objects.update_or_create(
+            name="membership-request-approved-silver",
+            defaults={
+                "subject": "Approved",
+                "content": "Approved",
+                "html_content": "<p>Approved</p>",
+                "description": "Org approval template",
+            },
+        )
+
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor",
+                "group_cn": "almalinux-sponsor-silver",
+                "acceptance_template": template,
+                "category_id": "sponsorship",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(
+            name="CERN",
+            business_contact_email="cern@example.com",
+            representative="bob",
+        )
+        Membership.objects.create(
+            target_organization=org,
+            membership_type_id="silver",
+            expires_at=timezone.now() + datetime.timedelta(days=30),
+        )
+        req = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="silver",
+        )
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [committee_cn],
+            },
+        )
+        bob = FreeIPAUser(
+            "bob",
+            {
+                "uid": ["bob"],
+                "mail": ["bob@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "bob":
+                in_custom_email_resolver = any(
+                    frame.function == "_custom_email_recipient_for_request"
+                    and frame.frame.f_globals.get("__name__") == "core.views_membership.committee"
+                    for frame in inspect.stack()
+                )
+                if in_custom_email_resolver:
+                    raise RuntimeError("transient FreeIPA failure")
+                return bob
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
+            with patch("core.views_membership.committee.approve_membership_request", autospec=True):
+                with patch("post_office.mail.send", autospec=True) as send_mock:
+                    resp = self.client.post(
+                        reverse("membership-request-approve", args=[req.pk]),
+                        data={"custom_email": "1"},
+                        follow=False,
+                    )
+
+        self.assertEqual(resp.status_code, 302)
+        send_mock.assert_not_called()
+
+        redirect_url = str(resp["Location"])
+        self.assertTrue(redirect_url.startswith(reverse("send-mail") + "?"))
+        qs = parse_qs(urlsplit(redirect_url).query)
+        self.assertEqual(qs.get("type"), ["manual"])
+        self.assertEqual(qs.get("to"), ["cern@example.com"])
+        self.assertEqual(
+            qs.get("template"),
+            [settings.MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME],
+        )
 
 
     def test_committee_can_approve_org_request_email_includes_org_contacts_and_representative_context(self) -> None:

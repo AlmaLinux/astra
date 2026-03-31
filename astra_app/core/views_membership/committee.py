@@ -23,10 +23,13 @@ from core.logging_extras import current_exception_log_fields
 from core.membership import visible_committee_membership_requests
 from core.membership_constants import MembershipCategoryCode
 from core.membership_notes import add_note
+from core.membership_notifications import organization_sponsor_notification_recipient_email
 from core.membership_request_workflow import (
+    _resolve_approval_template_name,
     approve_membership_request,
     approve_on_hold_membership_request,
     ignore_membership_request,
+    previous_expires_at_for_extension,
     put_membership_request_on_hold,
     reject_membership_request,
     reopen_ignored_membership_request,
@@ -70,13 +73,19 @@ def _custom_email_recipient_for_request(membership_request: MembershipRequest) -
 
     representative_username = org.representative
     if representative_username:
-        representative = FreeIPAUser.get(representative_username)
+        try:
+            representative = FreeIPAUser.get(representative_username)
+        except Exception:
+            representative = None
         if representative is not None and representative.email:
             return ("users", representative_username)
 
-    org_email = org.primary_contact_email()
-    if org_email:
-        return ("manual", org_email)
+    recipient_email, _recipient_warning = organization_sponsor_notification_recipient_email(
+        organization=org,
+        notification_kind="organization workflow notification",
+    )
+    if recipient_email:
+        return ("manual", recipient_email)
 
     return None
 
@@ -872,6 +881,10 @@ def run_membership_request_action(request: HttpRequest, pk: int, *, action: str)
         req, redirect_to = result
         membership_type = req.membership_type
         custom_email = bool(str(request.POST.get("custom_email") or "").strip())
+        previous_expires_at = previous_expires_at_for_extension(
+            membership_request=req,
+            membership_type=membership_type,
+        )
 
         try:
             approve_membership_request(
@@ -895,9 +908,11 @@ def run_membership_request_action(request: HttpRequest, pk: int, *, action: str)
 
         target_label = req.requested_username if req.is_user_target else (req.organization_display_name or "organization")
 
-        template_name = settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME
-        if membership_type.acceptance_template_id is not None:
-            template_name = membership_type.acceptance_template.name
+        template_name = _resolve_approval_template_name(
+            membership_type=membership_type,
+            override=None,
+            previous_expires_at=previous_expires_at,
+        )
 
         messages.success(request, f"Approved request for {target_label}.")
 

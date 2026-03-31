@@ -1,4 +1,4 @@
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from post_office.models import EmailTemplate
 
 from core.models import MembershipType, MembershipTypeCategory
@@ -35,4 +35,11 @@ class UtilsTestDataTests(TestCase):
         self.assertEqual(
             EmailTemplate.objects.filter(name__in=configured_names).count(),
             len(configured_names),
+        )
+
+    @override_settings(MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME="membership-renewal-approved-test")
+    def test_configured_template_names_include_renewal_approval_template(self) -> None:
+        self.assertIn(
+            "membership-renewal-approved-test",
+            configured_email_template_names(),
         )

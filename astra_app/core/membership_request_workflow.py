@@ -182,9 +182,14 @@ def _organization_notification_email(organization: Organization) -> str:
 
 
 def _resolve_approval_template_name(
-    *, membership_type: MembershipType, override: str | None,
+    *,
+    membership_type: MembershipType,
+    override: str | None,
+    previous_expires_at: datetime.datetime | None,
 ) -> str:
     """Resolve the email template for an approval notification."""
+    if previous_expires_at is not None:
+        return settings.MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME
     if override:
         return override
     if membership_type.acceptance_template_id is not None:
@@ -645,17 +650,19 @@ def approve_membership_request(
 
         email_recipient = _organization_notification_email(org)
 
-        template_name: str | None = None
-        if send_approved_email and email_recipient:
-            template_name = _resolve_approval_template_name(
-                membership_type=membership_type, override=approved_email_template_name,
-            )
-            _ensure_configured_email_template_exists(template_name=template_name)
-
         previous_expires_at = previous_expires_at_for_extension(
             membership_request=membership_request,
             membership_type=membership_type,
         )
+
+        template_name: str | None = None
+        if send_approved_email and email_recipient:
+            template_name = _resolve_approval_template_name(
+                membership_type=membership_type,
+                override=approved_email_template_name,
+                previous_expires_at=previous_expires_at,
+            )
+            _ensure_configured_email_template_exists(template_name=template_name)
 
         old_membership = (
             Membership.objects.select_related("membership_type")
@@ -739,17 +746,19 @@ def approve_membership_request(
 
         email_recipient = user.email
 
-        template_name = None
-        if send_approved_email and email_recipient:
-            template_name = _resolve_approval_template_name(
-                membership_type=membership_type, override=approved_email_template_name,
-            )
-            _ensure_configured_email_template_exists(template_name=template_name)
-
         previous_expires_at = previous_expires_at_for_extension(
             membership_request=membership_request,
             membership_type=membership_type,
         )
+
+        template_name = None
+        if send_approved_email and email_recipient:
+            template_name = _resolve_approval_template_name(
+                membership_type=membership_type,
+                override=approved_email_template_name,
+                previous_expires_at=previous_expires_at,
+            )
+            _ensure_configured_email_template_exists(template_name=template_name)
         group_add_payload = (membership_request.requested_username, membership_type.group_cn)
 
         email_context = (
