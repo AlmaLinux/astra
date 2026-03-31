@@ -92,6 +92,7 @@ _ACTION_DISPLAY: dict[str, tuple[str, str]] = {
     "request_on_hold": ("Request on hold", "fa-circle-pause"),
     "request_resubmitted": ("Request resubmitted", "fa-rotate-right"),
     "request_rescinded": ("Request rescinded", "fa-ban"),
+    "on_hold_override_approved": ("Request approved (on hold override)", "fa-circle-check"),
     "contacted": ("User contacted", "fa-envelope"),
 }
 

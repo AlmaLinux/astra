@@ -402,3 +402,14 @@ class MembershipReopenNoteTests(TestCase):
         icon = note_action_icon(action)
         self.assertIn("reopen", label.lower())
         self.assertNotEqual(icon, "fa-bolt")  # should be a specific icon, not the fallback
+
+    def test_on_hold_override_approved_action_has_human_display_label(self) -> None:
+        from core.membership_notes import note_action_icon, note_action_label
+
+        action = {"type": "on_hold_override_approved", "by": "reviewer"}
+        label = note_action_label(action)
+        icon = note_action_icon(action)
+
+        self.assertNotEqual(label, "on_hold_override_approved")
+        self.assertIn("on hold", label.lower())
+        self.assertNotEqual(icon, "fa-bolt")
