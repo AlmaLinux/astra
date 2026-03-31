@@ -2206,6 +2206,22 @@ class MembershipRequestsFlowTests(TestCase):
                 "memberof_group": [committee_cn],
             },
         )
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.com"],
+                "memberof_group": [],
+            },
+        )
+        bob = FreeIPAUser(
+            "bob",
+            {
+                "uid": ["bob"],
+                "mail": ["bob@example.com"],
+                "memberof_group": [],
+            },
+        )
 
         FreeIPAPermissionGrant.objects.update_or_create(
             permission=ASTRA_VIEW_USER_DIRECTORY,
@@ -2215,7 +2231,7 @@ class MembershipRequestsFlowTests(TestCase):
 
         self._login_as_freeipa_user("reviewer")
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
-            with patch("core.views_users.FreeIPAUser.all", autospec=True, return_value=[]):
+            with patch("core.freeipa.user.FreeIPAUser.all", autospec=True, return_value=[reviewer, alice, bob]):
                 resp = self.client.get(reverse("users"))
 
         self.assertEqual(resp.status_code, 200)
@@ -2398,6 +2414,48 @@ class MembershipRequestsFlowTests(TestCase):
         send_mock.assert_not_called()
         self.assertTrue(MembershipLog.objects.filter(target_username="alice", action=MembershipLog.Action.ignored).exists())
         self.assertTrue(MembershipLog.objects.filter(target_username="bob", action=MembershipLog.Action.ignored).exists())
+
+    def test_bulk_actions_respect_next_redirect(self) -> None:
+        from core.models import MembershipRequest, MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [committee_cn],
+            },
+        )
+
+        self._login_as_freeipa_user("reviewer")
+        next_url = f"{reverse('membership-requests')}?filter=renewals&pending_page=2"
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.post(
+                reverse("membership-requests-bulk"),
+                data={
+                    "bulk_action": "ignore",
+                    "selected": [str(req.pk)],
+                    "next": next_url,
+                },
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], next_url)
 
     def test_committee_can_bulk_reject_requests(self) -> None:
         from core.models import MembershipLog, MembershipRequest, MembershipType

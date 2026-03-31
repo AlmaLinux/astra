@@ -15,31 +15,51 @@
   <div class="card">
     <div class="card-header">
       <div class="d-flex align-items-center justify-content-between flex-wrap" style="gap: 0.5rem;">
-        <form
-          id="bulk-action-form"
-          method="post"
-          action="{% url 'membership-requests-bulk' %}"
-          class="form-inline"
-          data-bulk-table-form
-          data-bulk-select-all-id="select-all-requests"
-          data-bulk-checkbox-selector=".request-checkbox--pending"
-          data-bulk-apply-id="bulk-apply"
-        >
-          {% csrf_token %}
-          <div class="input-group input-group-sm">
-            <select name="bulk_action" class="custom-select custom-select-sm" aria-label="Bulk action">
-              <option value="">Bulk action…</option>
-              <option value="accept">Accept</option>
-              <option value="reject">Reject</option>
-              <option value="ignore">Ignore</option>
-            </select>
-            <div class="input-group-append">
-              <button type="submit" class="btn btn-default" id="bulk-apply" title="Apply selected action to checked requests" disabled>Apply</button>
+        <div class="d-flex align-items-center flex-wrap" style="gap: 0.5rem;">
+          <form
+            id="bulk-action-form"
+            method="post"
+            action="{% url 'membership-requests-bulk' %}"
+            class="form-inline"
+            data-bulk-table-form
+            data-bulk-select-all-id="select-all-requests"
+            data-bulk-checkbox-selector=".request-checkbox--pending"
+            data-bulk-apply-id="bulk-apply"
+          >
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ next_url }}" />
+            <div class="input-group input-group-sm">
+              <select name="bulk_action" class="custom-select custom-select-sm" aria-label="Bulk action">
+                <option value="">Bulk action…</option>
+                <option value="accept">Accept</option>
+                <option value="reject">Reject</option>
+                <option value="ignore">Ignore</option>
+              </select>
+              <div class="input-group-append">
+                <button type="submit" class="btn btn-default" id="bulk-apply" title="Apply selected action to checked requests" disabled>Apply</button>
+              </div>
             </div>
-          </div>
-        </form>
+          </form>
 
-          <div class="text-muted">Pending: {{ pending_requests|length }}</div>
+          <form method="get" class="form-inline" aria-label="Filter membership requests">
+            <label for="requests-filter" class="text-muted small mb-0 ml-2">Filter</label>
+            <select
+              id="requests-filter"
+              name="filter"
+              class="custom-select custom-select-sm ml-2"
+              aria-label="Filter requests"
+              onchange="this.form.submit()"
+            >
+              {% for option in filter_options %}
+                <option value="{{ option.value }}"{% if option.value == selected_filter %} selected{% endif %}>
+                  {{ option.label }} ({{ option.count }})
+                </option>
+              {% endfor %}
+            </select>
+          </form>
+        </div>
+
+        <div class="text-muted">Pending: {{ pending_requests|length }}</div>
       </div>
     </div>
 
@@ -93,7 +113,13 @@
               {% endwith %}
             {% empty %}
               <tr>
-                <td colspan="5" class="p-3 text-muted">No pending requests.</td>
+                <td colspan="5" class="p-3 text-muted">
+                  {% if filter_empty %}
+                    No requests match this filter. <a href="{{ clear_filter_url }}">Clear filter</a>
+                  {% else %}
+                    No pending requests.
+                  {% endif %}
+                </td>
               </tr>
             {% endfor %}
           </tbody>
@@ -124,6 +150,7 @@
             data-bulk-apply-id="bulk-apply-on-hold"
           >
             {% csrf_token %}
+            <input type="hidden" name="next" value="{{ next_url }}" />
             <input type="hidden" name="bulk_scope" value="on_hold" />
             <div class="input-group input-group-sm">
               <select name="bulk_action" class="custom-select custom-select-sm" aria-label="Bulk action">
@@ -210,7 +237,7 @@
         {% endif %}
       </div>
     </div>
-  {% include 'core/_membership_request_shared_modals.html' %}
+  {% include 'core/_membership_request_shared_modals.html' with next_url=next_url %}
 {% endblock %}
 
 {% block scripts %}

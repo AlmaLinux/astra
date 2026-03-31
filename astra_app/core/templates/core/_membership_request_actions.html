@@ -4,8 +4,8 @@ Reusable actions (Approve / Reject / Ignore) for a MembershipRequest.
 Expected context:
 - request: MembershipRequest
 
-Note: we intentionally don't pass a `next` field here; the POST endpoints already
-support safe redirects using Referer when `next` isn't provided.
+Note: shared modals add a `next` field when one is available in the parent
+context, so list actions can return to filtered views after POSTs.
 {% endcomment %}
 
 {% with membership_request=request %}

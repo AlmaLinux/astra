@@ -6,7 +6,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import permission_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Q
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
@@ -21,6 +21,7 @@ from core.forms_membership import MembershipRejectForm
 from core.freeipa.user import FreeIPAUser
 from core.logging_extras import current_exception_log_fields
 from core.membership import visible_committee_membership_requests
+from core.membership_constants import MembershipCategoryCode
 from core.membership_notes import add_note
 from core.membership_request_workflow import (
     approve_membership_request,
@@ -30,7 +31,7 @@ from core.membership_request_workflow import (
     reject_membership_request,
     reopen_ignored_membership_request,
 )
-from core.models import MembershipLog, MembershipRequest
+from core.models import Membership, MembershipLog, MembershipRequest
 from core.permissions import (
     ASTRA_ADD_MEMBERSHIP,
     ASTRA_ADD_SEND_MAIL,
@@ -258,8 +259,109 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
     pending_requests_all = list(base.filter(status=MembershipRequest.Status.pending).order_by("requested_at"))
     on_hold_requests_all = list(base.filter(status=MembershipRequest.Status.on_hold).order_by("on_hold_at", "requested_at"))
 
-    pending_requests, pending_rows = _build_rows(pending_requests_all)
-    on_hold_requests, on_hold_rows = _build_rows(on_hold_requests_all)
+    pending_visible, pending_rows_all = _build_rows(pending_requests_all)
+    on_hold_visible, on_hold_rows_all = _build_rows(on_hold_requests_all)
+
+    raw_filter = _normalize_str(request.GET.get("filter")).lower()
+    allowed_filters = {"all", "renewals", "sponsorships", "individuals", "mirrors"}
+    selected_filter = raw_filter if raw_filter in allowed_filters else "all"
+    category_filters = {
+        "individuals": MembershipCategoryCode.individual,
+        "mirrors": MembershipCategoryCode.mirror,
+        "sponsorships": MembershipCategoryCode.sponsorship,
+    }
+
+    active_user_memberships: set[tuple[str, str]] = set()
+    active_org_memberships: set[tuple[int, str]] = set()
+    is_renewal_by_id: dict[int, bool] = {}
+
+    if pending_visible:
+        target_usernames = {
+            req.requested_username
+            for req in pending_visible
+            if req.is_user_target and req.requested_username
+        }
+        target_org_ids = {
+            req.requested_organization_id
+            for req in pending_visible
+            if req.is_organization_target and req.requested_organization_id is not None
+        }
+        membership_type_ids = {req.membership_type_id for req in pending_visible if req.membership_type_id}
+
+        if membership_type_ids and (target_usernames or target_org_ids):
+            active_memberships = Membership.objects.active().filter(membership_type_id__in=membership_type_ids)
+            if target_usernames and target_org_ids:
+                active_memberships = active_memberships.filter(
+                    Q(target_username__in=target_usernames) | Q(target_organization_id__in=target_org_ids)
+                )
+            elif target_usernames:
+                active_memberships = active_memberships.filter(target_username__in=target_usernames)
+            else:
+                active_memberships = active_memberships.filter(target_organization_id__in=target_org_ids)
+
+            for membership in active_memberships.only("target_username", "target_organization_id", "membership_type_id"):
+                if membership.target_username:
+                    active_user_memberships.add((membership.target_username, membership.membership_type_id))
+                elif membership.target_organization_id is not None:
+                    active_org_memberships.add((membership.target_organization_id, membership.membership_type_id))
+
+        for req in pending_visible:
+            if req.is_user_target:
+                is_renewal_by_id[req.pk] = (
+                    req.requested_username,
+                    req.membership_type_id,
+                ) in active_user_memberships
+            else:
+                org_id = req.requested_organization_id
+                is_renewal_by_id[req.pk] = bool(
+                    org_id and (org_id, req.membership_type_id) in active_org_memberships
+                )
+
+    filter_counts = {
+        "all": len(pending_visible),
+        "renewals": 0,
+        "sponsorships": 0,
+        "individuals": 0,
+        "mirrors": 0,
+    }
+
+    for req in pending_visible:
+        if is_renewal_by_id.get(req.pk, False):
+            filter_counts["renewals"] += 1
+
+        category_id = req.membership_type.category_id
+        if category_id == MembershipCategoryCode.individual:
+            filter_counts["individuals"] += 1
+        elif category_id == MembershipCategoryCode.mirror:
+            filter_counts["mirrors"] += 1
+        elif category_id == MembershipCategoryCode.sponsorship:
+            filter_counts["sponsorships"] += 1
+
+    if selected_filter == "all":
+        pending_requests = pending_visible
+        pending_rows = pending_rows_all
+    else:
+        if selected_filter == "renewals":
+            match_ids = {req.pk for req in pending_visible if is_renewal_by_id.get(req.pk, False)}
+        else:
+            category = category_filters.get(selected_filter)
+            match_ids = {req.pk for req in pending_visible if req.membership_type.category_id == category}
+
+        pending_requests = [req for req in pending_visible if req.pk in match_ids]
+        pending_rows = [row for row in pending_rows_all if row["r"].pk in match_ids]
+
+    on_hold_requests = on_hold_visible
+    on_hold_rows = on_hold_rows_all
+
+    filter_options = [
+        {"value": "all", "label": "All", "count": filter_counts["all"]},
+        {"value": "renewals", "label": "Renewals", "count": filter_counts["renewals"]},
+        {"value": "sponsorships", "label": "Sponsorships", "count": filter_counts["sponsorships"]},
+        {"value": "individuals", "label": "Individuals", "count": filter_counts["individuals"]},
+        {"value": "mirrors", "label": "Mirrors", "count": filter_counts["mirrors"]},
+    ]
+    filter_empty = selected_filter != "all" and not pending_requests
+    next_url = request.get_full_path()
 
     pending_page_number = request.GET.get("pending_page")
     _, pending_page_url_prefix = build_page_url_prefix(request.GET, page_param="pending_page")
@@ -301,6 +403,11 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
             "on_hold_show_first": on_hold_page_ctx["show_first"],
             "on_hold_show_last": on_hold_page_ctx["show_last"],
             "on_hold_page_url_prefix": on_hold_page_ctx["page_url_prefix"],
+            "filter_options": filter_options,
+            "selected_filter": selected_filter,
+            "filter_empty": filter_empty,
+            "clear_filter_url": reverse("membership-requests"),
+            "next_url": next_url,
         },
     )
 
@@ -594,6 +701,11 @@ def membership_notes_aggregate_note_add(request: HttpRequest) -> HttpResponse:
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
 @post_only_404
 def membership_requests_bulk(request: HttpRequest) -> HttpResponse:
+    redirect_to = _resolve_post_redirect(
+        request,
+        default=reverse("membership-requests"),
+        use_referer=True,
+    )
     bulk_scope = _normalize_str(request.POST.get("bulk_scope")).lower() or "pending"
 
     allowed_statuses: set[str]
@@ -622,14 +734,14 @@ def membership_requests_bulk(request: HttpRequest) -> HttpResponse:
 
     if not selected_ids:
         messages.error(request, "Select one or more requests first.")
-        return redirect("membership-requests")
+        return redirect(redirect_to)
 
     if action not in allowed_actions:
         if bulk_scope == "on_hold":
             messages.error(request, "Choose a valid bulk action for on-hold requests.")
         else:
             messages.error(request, "Choose a valid bulk action.")
-        return redirect("membership-requests")
+        return redirect(redirect_to)
 
     actor_username = get_username(request)
     reqs_all = list(
@@ -639,7 +751,7 @@ def membership_requests_bulk(request: HttpRequest) -> HttpResponse:
     )
     if not reqs_all:
         messages.error(request, "No matching requests were found.")
-        return redirect("membership-requests")
+        return redirect(redirect_to)
 
     target_status = None
     if action == "approve":
@@ -658,12 +770,12 @@ def membership_requests_bulk(request: HttpRequest) -> HttpResponse:
         if already_in_target:
             status_label = str(target_status).replace("_", " ")
             messages.info(request, f"Selected request(s) already {status_label}.")
-            return redirect("membership-requests")
+            return redirect(redirect_to)
         if bulk_scope == "on_hold":
             messages.error(request, "No matching on-hold requests were found.")
         else:
             messages.error(request, "No matching pending requests were found.")
-        return redirect("membership-requests")
+        return redirect(redirect_to)
 
     approved = 0
     rejected = 0
@@ -739,7 +851,7 @@ def membership_requests_bulk(request: HttpRequest) -> HttpResponse:
         status_label = str(target_status).replace("_", " ") if target_status is not None else "processed"
         messages.info(request, f"Selected request(s) already {status_label}.")
 
-    return redirect("membership-requests")
+    return redirect(redirect_to)
 
 
 def run_membership_request_action(request: HttpRequest, pk: int, *, action: str) -> HttpResponse:
