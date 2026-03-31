@@ -1219,6 +1219,63 @@ class MembershipRequestsFlowTests(TestCase):
         self.assertEqual(qs.get("to"), ["alice"])
         self.assertEqual(qs.get("template"), [settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME])
 
+    def test_committee_approve_custom_email_send_mail_shows_only_action_notice(self) -> None:
+        from core.models import MembershipRequest, MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [committee_cn],
+            },
+        )
+
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "alice":
+                return alice
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
+            with patch.object(FreeIPAUser, "add_to_group", autospec=True):
+                with patch("post_office.mail.send", autospec=True):
+                    resp = self.client.post(
+                        reverse("membership-request-approve", args=[req.pk]),
+                        data={"custom_email": "1"},
+                        follow=True,
+                    )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "This request has already been approved")
+        self.assertContains(resp, "No email has been sent yet")
+        self.assertNotContains(resp, "Approved request for alice.")
+
     @override_settings(MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME="membership-renewal-approved")
     def test_committee_approve_user_renewal_custom_email_preselects_renewal_template(self) -> None:
         from core.models import Membership, MembershipLog, MembershipRequest, MembershipType

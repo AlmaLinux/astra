@@ -914,13 +914,11 @@ def run_membership_request_action(request: HttpRequest, pk: int, *, action: str)
             previous_expires_at=previous_expires_at,
         )
 
-        messages.success(request, f"Approved request for {target_label}.")
-
         approve_extras: dict[str, str] = {}
         if req.is_user_target:
             approve_extras["group_cn"] = membership_type.group_cn
 
-        return _maybe_custom_email_redirect(
+        custom_email_redirect = _maybe_custom_email_redirect(
             request=request,
             membership_request=req,
             custom_email=custom_email,
@@ -928,7 +926,12 @@ def run_membership_request_action(request: HttpRequest, pk: int, *, action: str)
             extra_context=approve_extras,
             redirect_to=redirect_to,
             action_status="approved",
-        ) or redirect(redirect_to)
+        )
+        if custom_email_redirect is not None:
+            return custom_email_redirect
+
+        messages.success(request, f"Approved request for {target_label}.")
+        return redirect(redirect_to)
 
     if action == "reject":
         result = _load_membership_request_for_action(
