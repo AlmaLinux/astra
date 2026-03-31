@@ -1651,6 +1651,10 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertContains(resp, "Request responses")
         self.assertContains(resp, "Contributions")
         self.assertContains(resp, "I did docs and CI.")
+        self.assertRegex(
+            resp.content.decode("utf-8"),
+            r"<details[^>]*\bopen\b[^>]*>",
+        )
 
     def test_membership_request_note_add_creates_message_note(self) -> None:
         from core.models import MembershipRequest, MembershipType, Note
