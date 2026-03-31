@@ -459,3 +459,82 @@ class MembershipNotesAjaxTests(TestCase):
                 action={"type": "vote", "value": "approve"},
             ).exists()
         )
+
+    def test_vote_badges_highlight_reviewers_latest_vote(self) -> None:
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+            },
+        )
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            first = self.client.post(
+                reverse("membership-request-note-add", args=[req.pk]),
+                data={
+                    "note_action": "vote_approve",
+                    "message": "",
+                    "next": reverse("membership-requests"),
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+
+        self.assertEqual(first.status_code, 200)
+        first_payload = json.loads(first.content)
+        self.assertTrue(first_payload.get("ok"))
+        first_html = first_payload.get("html", "")
+        first_approvals = re.search(
+            rf'<span[^>]*data-membership-notes-approvals="{req.pk}"[^>]*>',
+            first_html,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(first_approvals)
+        assert first_approvals is not None
+        self.assertIn("badge-warning", first_approvals.group(0))
+
+        first_disapprovals = re.search(
+            rf'<span[^>]*data-membership-notes-disapprovals="{req.pk}"[^>]*>',
+            first_html,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(first_disapprovals)
+        assert first_disapprovals is not None
+        self.assertIn("badge-danger", first_disapprovals.group(0))
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            second = self.client.post(
+                reverse("membership-request-note-add", args=[req.pk]),
+                data={
+                    "note_action": "vote_disapprove",
+                    "message": "",
+                    "next": reverse("membership-requests"),
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+
+        self.assertEqual(second.status_code, 200)
+        second_payload = json.loads(second.content)
+        self.assertTrue(second_payload.get("ok"))
+        second_html = second_payload.get("html", "")
+        second_approvals = re.search(
+            rf'<span[^>]*data-membership-notes-approvals="{req.pk}"[^>]*>',
+            second_html,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(second_approvals)
+        assert second_approvals is not None
+        self.assertIn("badge-success", second_approvals.group(0))
+
+        second_disapprovals = re.search(
+            rf'<span[^>]*data-membership-notes-disapprovals="{req.pk}"[^>]*>',
+            second_html,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(second_disapprovals)
+        assert second_disapprovals is not None
+        self.assertIn("badge-warning", second_disapprovals.group(0))

@@ -13,7 +13,7 @@ from markdownify.templatetags.markdownify import markdownify as render_markdown
 from post_office.models import Email
 
 from core.freeipa.user import FreeIPAUser
-from core.membership_notes import CUSTOS, note_action_icon, note_action_label, tally_last_votes
+from core.membership_notes import CUSTOS, last_votes, note_action_icon, note_action_label
 from core.models import MembershipRequest, Note
 from core.views_utils import get_username
 
@@ -410,7 +410,9 @@ def _render_membership_notes_aggregate(
     request = context.get("request")
     http_request = request if isinstance(request, HttpRequest) else None
 
-    approvals, disapprovals = tally_last_votes(notes)
+    votes_by_user = last_votes(notes)
+    approvals = sum(1 for vote in votes_by_user.values() if vote == "approve")
+    disapprovals = sum(1 for vote in votes_by_user.values() if vote == "disapprove")
     dummy_request = SimpleNamespace(pk=_timeline_dom_id(dom_key))
 
     resolved_next_url = next_url
@@ -436,6 +438,7 @@ def _render_membership_notes_aggregate(
             "note_count": len(notes),
             "approvals": approvals,
             "disapprovals": disapprovals,
+            "current_user_vote": None,
             "can_vote": False,
             "post_url": post_url,
             "aggregate_target_type": aggregate_target_type,
@@ -540,13 +543,16 @@ def membership_notes(
         return ""
 
     notes = list(Note.objects.filter(membership_request_id=mr.pk).order_by("timestamp", "pk"))
-    approvals, disapprovals = tally_last_votes(notes)
+    votes_by_user = last_votes(notes)
+    approvals = sum(1 for vote in votes_by_user.values() if vote == "approve")
+    disapprovals = sum(1 for vote in votes_by_user.values() if vote == "disapprove")
 
     resolved_next_url = next_url
     if resolved_next_url is None:
         resolved_next_url = http_request.get_full_path() if http_request is not None else ""
 
     current_username = _current_username_from_request(http_request)
+    current_user_vote = votes_by_user.get(current_username.lower()) if current_username else None
 
     membership_can_add = bool(context.get("membership_can_add", False))
     membership_can_change = bool(context.get("membership_can_change", False))
@@ -573,6 +579,7 @@ def membership_notes(
             "note_count": len(notes),
             "approvals": approvals,
             "disapprovals": disapprovals,
+            "current_user_vote": current_user_vote,
             "can_vote": can_vote,
             "post_url": post_url,
             "next_url": resolved_next_url,

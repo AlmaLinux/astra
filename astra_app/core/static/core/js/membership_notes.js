@@ -183,6 +183,8 @@
           if (newApprovals && curApprovals && curApprovals.length) {
             for (var aIdx = 0; aIdx < curApprovals.length; aIdx++) {
               curApprovals[aIdx].innerHTML = newApprovals.innerHTML;
+              curApprovals[aIdx].className = newApprovals.className;
+              curApprovals[aIdx].setAttribute('title', newApprovals.getAttribute('title') || '');
             }
           }
 
@@ -191,6 +193,8 @@
           if (newDisapprovals && curDisapprovals && curDisapprovals.length) {
             for (var dIdx = 0; dIdx < curDisapprovals.length; dIdx++) {
               curDisapprovals[dIdx].innerHTML = newDisapprovals.innerHTML;
+              curDisapprovals[dIdx].className = newDisapprovals.className;
+              curDisapprovals[dIdx].setAttribute('title', newDisapprovals.getAttribute('title') || '');
             }
           }
 

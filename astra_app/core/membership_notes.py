@@ -30,14 +30,8 @@ def add_note(
     return note
 
 
-def tally_last_votes(notes: Iterable[Note]) -> tuple[int, int]:
-    """Return (approvals, disapprovals) counting only each user's last vote.
-
-    Votes are represented as Note.action dicts like:
-    {"type": "vote", "value": "approve"|"disapprove"}
-
-    If a user votes multiple times, only their last vote counts.
-    """
+def last_votes(notes: Iterable[Note]) -> dict[str, str]:
+    """Return each reviewer's latest normalized vote keyed by lowercase username."""
 
     ordered = sorted(
         notes,
@@ -68,6 +62,20 @@ def tally_last_votes(notes: Iterable[Note]) -> tuple[int, int]:
             continue
 
         last_vote_by_user[username.lower()] = value_norm
+
+    return last_vote_by_user
+
+
+def tally_last_votes(notes: Iterable[Note]) -> tuple[int, int]:
+    """Return (approvals, disapprovals) counting only each user's last vote.
+
+    Votes are represented as Note.action dicts like:
+    {"type": "vote", "value": "approve"|"disapprove"}
+
+    If a user votes multiple times, only their last vote counts.
+    """
+
+    last_vote_by_user = last_votes(notes)
 
     approvals = sum(1 for v in last_vote_by_user.values() if v == "approve")
     disapprovals = sum(1 for v in last_vote_by_user.values() if v == "disapprove")

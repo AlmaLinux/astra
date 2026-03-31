@@ -35,10 +35,18 @@
             class="badge badge-primary"
             data-membership-notes-count="{{ membership_request.pk }}"
           >{{ note_count }}</span>
-          <span class="badge badge-success" title="Approvals" data-membership-notes-approvals="{{ membership_request.pk }}">
+          <span
+            class="badge {% if current_user_vote == 'approve' %}badge-warning{% else %}badge-success{% endif %}"
+            title="Approvals"
+            data-membership-notes-approvals="{{ membership_request.pk }}"
+          >
             <i class="fas fa-thumbs-up"></i> {{ approvals }}
           </span>
-          <span class="badge badge-danger" title="Disapprovals" data-membership-notes-disapprovals="{{ membership_request.pk }}">
+          <span
+            class="badge {% if current_user_vote == 'disapprove' %}badge-warning{% else %}badge-danger{% endif %}"
+            title="Disapprovals"
+            data-membership-notes-disapprovals="{{ membership_request.pk }}"
+          >
             <i class="fas fa-thumbs-down"></i> {{ disapprovals }}
           </span>
           <button
