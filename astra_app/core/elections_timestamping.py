@@ -36,6 +36,10 @@ def get_public_payload(entry: AuditLogEntry) -> Any:
     if isinstance(payload, dict):
         public_payload = dict(payload)
         public_payload.pop("actor", None)
+        if entry.event_type == "election_closed":
+            # Keep final chain head public while withholding sensitive close counters.
+            public_payload.pop("credentials_affected", None)
+            public_payload.pop("emails_scrubbed", None)
         return public_payload
     return {"data": payload}
 

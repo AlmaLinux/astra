@@ -968,6 +968,12 @@ class ElectionPublicExportTests(TestCase):
             payload={"round": 1},
             is_public=True,
         )
+        AuditLogEntry.objects.create(
+            election=election,
+            event_type="quorum_reached",
+            payload={"quorum_percent": 50},
+            is_public=True,
+        )
 
         url = reverse("election-public-audit", args=[election.id])
         response = self.client.get(url)
@@ -1038,6 +1044,38 @@ class ElectionPublicExportTests(TestCase):
         event_types = [entry.get("event_type") for entry in audit_log if isinstance(entry, dict)]
         self.assertIn("tally_round", event_types)
         self.assertNotIn("election_anonymized", event_types)
+
+    def test_public_audit_export_keeps_chain_head_but_hides_sensitive_close_counts(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Audit export election_closed redaction election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=10),
+            end_datetime=now - datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.tallied,
+        )
+
+        AuditLogEntry.objects.create(
+            election=election,
+            event_type="election_closed",
+            payload={
+                "chain_head": "c" * 64,
+                "credentials_affected": 11,
+                "emails_scrubbed": 7,
+            },
+            is_public=True,
+        )
+
+        response = self.client.get(reverse("election-public-audit", args=[election.id]))
+        self.assertEqual(response.status_code, 200)
+
+        data = response.json()
+        event = data["audit_log"][0]
+        self.assertEqual(event["event_type"], "election_closed")
+        self.assertEqual(event["payload"].get("chain_head"), "c" * 64)
+        self.assertNotIn("credentials_affected", event["payload"])
+        self.assertNotIn("emails_scrubbed", event["payload"])
 
 
 class ElectionCloseAndTallyTests(TestCase):

@@ -408,9 +408,138 @@ class ElectionAuditLogPageTests(TestCase):
         self.assertContains(resp, "Voter credentials anonymized and sensitive emails scrubbed")
         self.assertContains(resp, "Credentials anonymized")
         self.assertContains(resp, "Emails scrubbed")
-        self.assertContains(resp, "5")  # credentials count
-        self.assertContains(resp, "10")  # emails count
+        self.assertContains(resp, "<dd class=\"col-sm-6\">5</dd>", html=True)
+        self.assertContains(resp, "<dd class=\"col-sm-6\">10</dd>", html=True)
+        self.assertContains(resp, "Credentials anonymized:</strong>")
+        self.assertContains(resp, "Emails scrubbed:</strong>")
+        self.assertContains(resp, "false")
 
         # Verify raw payload is not shown
         self.assertNotContains(resp, "&#x27;chain_head&#x27;:")
         self.assertNotContains(resp, "&#x27;credentials_affected&#x27;:")
+
+    def test_audit_log_hides_quorum_reached_for_non_managers(self) -> None:
+        self._login_as_freeipa_user("viewer")
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Quorum privacy election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=2),
+            end_datetime=now - datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.closed,
+        )
+
+        AuditLogEntry.objects.create(
+            election=election,
+            event_type="quorum_reached",
+            payload={"quorum_percent": 50},
+            is_public=True,
+        )
+        AuditLogEntry.objects.create(
+            election=election,
+            event_type="election_closed",
+            payload={
+                "chain_head": "b" * 64,
+                "credentials_affected": 9,
+                "emails_scrubbed": 8,
+            },
+            is_public=True,
+        )
+
+        viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "memberof_group": []})
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
+            resp = self.client.get(reverse("election-audit-log", args=[election.id]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Election closed")
+        self.assertContains(resp, "Final chain head:")
+        self.assertContains(resp, "bbbbbbbbbbbbbbbb")
+        self.assertContains(resp, "Credentials anonymized:")
+        self.assertContains(resp, "Emails scrubbed:")
+        self.assertContains(resp, "true")
+        self.assertNotContains(resp, "Credentials anonymized:</strong> 9")
+        self.assertNotContains(resp, "Emails scrubbed:</strong> 8")
+        self.assertNotContains(resp, "Quorum reached")
+
+    def test_audit_log_shows_election_anonymized_counts_for_managers(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Anonymized manager visibility election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=2),
+            end_datetime=now - datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.closed,
+        )
+
+        AuditLogEntry.objects.create(
+            election=election,
+            event_type="election_anonymized",
+            payload={"credentials_affected": 5, "emails_scrubbed": 10},
+            is_public=False,
+        )
+
+        admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin):
+            resp = self.client.get(reverse("election-audit-log", args=[election.id]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Election anonymized")
+        self.assertContains(resp, "Voter credentials anonymized and sensitive emails scrubbed")
+        self.assertContains(resp, "<dd class=\"col-sm-6\">5</dd>", html=True)
+        self.assertContains(resp, "<dd class=\"col-sm-6\">10</dd>", html=True)
+        self.assertNotContains(resp, "<dd class=\"col-sm-6\">true</dd>", html=True)
+
+    def test_audit_log_shows_quorum_reached_for_election_managers(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Quorum manager visibility election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=2),
+            end_datetime=now - datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.closed,
+        )
+
+        AuditLogEntry.objects.create(
+            election=election,
+            event_type="quorum_reached",
+            payload={"quorum_percent": 50},
+            is_public=True,
+        )
+        AuditLogEntry.objects.create(
+            election=election,
+            event_type="election_closed",
+            payload={
+                "chain_head": "e" * 64,
+                "credentials_affected": 12,
+                "emails_scrubbed": 10,
+            },
+            is_public=True,
+        )
+
+        admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin):
+            resp = self.client.get(reverse("election-audit-log", args=[election.id]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Quorum reached")
+        self.assertContains(resp, "Final chain head:")
+        self.assertNotContains(resp, "Credentials anonymized:")
+        self.assertNotContains(resp, "Emails scrubbed:")

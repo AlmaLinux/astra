@@ -84,7 +84,7 @@ def election_audit_log(request, election_id: int):
     audit_qs = AuditLogEntry.objects.filter(election=election)
     can_manage_elections = request.user.has_perm(ASTRA_ADD_ELECTION)
     if not can_manage_elections:
-        audit_qs = audit_qs.filter(is_public=True)
+        audit_qs = audit_qs.filter(is_public=True).exclude(event_type="quorum_reached")
 
     timeline_items: list[AuditLogEntry | dict[str, object]] = []
     non_ballot_entries = list(

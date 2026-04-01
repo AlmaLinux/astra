@@ -257,6 +257,7 @@ def build_public_ballots_export(*, election: Election) -> dict[str, object]:
 def build_public_audit_export(*, election: Election) -> dict[str, object]:
     entries = (
         AuditLogEntry.objects.filter(election=election, is_public=True)
+        .exclude(event_type="quorum_reached")
         .only(
             "timestamp",
             "event_type",

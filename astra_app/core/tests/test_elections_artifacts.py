@@ -1,12 +1,13 @@
 
 import datetime
+import json
 
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
 from core import elections_services
-from core.models import Ballot, Candidate, Election
+from core.models import AuditLogEntry, Ballot, Candidate, Election
 from core.tests.ballot_chain import compute_chain_hash
 from core.tokens import election_genesis_chain_hash
 
@@ -139,3 +140,36 @@ class ElectionArtifactGenerationTests(TestCase):
         audit_resp = self.client.get(reverse("election-public-audit", args=[election.id]))
         self.assertEqual(audit_resp.status_code, 302)
         self.assertIn(f"/elections/{election.id}/", str(audit_resp["Location"]))
+
+    def test_persisted_public_audit_artifact_hides_sensitive_close_counts(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Artifact redaction election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=2),
+            end_datetime=now - datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.tallied,
+        )
+
+        AuditLogEntry.objects.create(
+            election=election,
+            event_type="election_closed",
+            payload={
+                "chain_head": "d" * 64,
+                "credentials_affected": 5,
+                "emails_scrubbed": 4,
+            },
+            is_public=True,
+        )
+
+        elections_services.persist_public_election_artifacts(election=election)
+        election.refresh_from_db()
+
+        with election.public_audit_file.open("rb") as fh:
+            payload = json.loads(fh.read().decode("utf-8"))
+
+        self.assertEqual(payload["audit_log"][0]["event_type"], "election_closed")
+        self.assertEqual(payload["audit_log"][0]["payload"].get("chain_head"), "d" * 64)
+        self.assertNotIn("credentials_affected", payload["audit_log"][0]["payload"])
+        self.assertNotIn("emails_scrubbed", payload["audit_log"][0]["payload"])
