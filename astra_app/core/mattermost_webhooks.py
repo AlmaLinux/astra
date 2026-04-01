@@ -14,7 +14,6 @@ from core.elections_services import election_vote_url
 from core.membership_notifications import (
     membership_extend_url,
     membership_requests_url,
-    organization_membership_request_url,
 )
 from core.models import Ballot, MattermostWebhookEndpoint
 from core.public_urls import build_public_absolute_url
@@ -75,6 +74,21 @@ _ACCOUNT_DELETION_EVENTS = {
     "account_deletion_rejected",
     "account_deletion_cancelled",
     "account_deletion_completed",
+}
+
+_MEMBERSHIP_REQUEST_DETAIL_EVENTS = {
+    "membership_request_submitted",
+    "membership_request_approved",
+    "membership_request_rejected",
+    "membership_request_rescinded",
+    "membership_rfi_sent",
+    "membership_rfi_replied",
+    "organization_membership_request_submitted",
+    "organization_membership_request_approved",
+    "organization_membership_request_rejected",
+    "organization_membership_request_rescinded",
+    "organization_membership_rfi_sent",
+    "organization_membership_rfi_replied",
 }
 
 _ACCOUNT_DELETION_TEMPLATE_VARIABLES = {
@@ -401,16 +415,6 @@ def _event_link(event_key: str, kwargs: dict[str, object]) -> str:
                 return build_public_absolute_url(reverse("elections"), on_missing="relative")
         return build_public_absolute_url(reverse("elections"), on_missing="relative")
 
-    if event_key.startswith("organization_membership_"):
-        organization_id_obj = kwargs.get("organization_id")
-        try:
-            organization_id = int(organization_id_obj) if organization_id_obj is not None else 0
-        except Exception:
-            organization_id = 0
-        if organization_id > 0:
-            return organization_membership_request_url(organization_id=organization_id)
-        return membership_requests_url()
-
     if event_key in {"organization_claimed", "organization_created"}:
         organization = kwargs.get("organization")
         if organization is not None:
@@ -434,6 +438,15 @@ def _event_link(event_key: str, kwargs: dict[str, object]) -> str:
 
     if event_key in _ACCOUNT_DELETION_EVENTS:
         return build_public_absolute_url(f"{reverse('settings')}?tab=privacy", on_missing="relative")
+
+    if event_key in _MEMBERSHIP_REQUEST_DETAIL_EVENTS:
+        membership_request = kwargs.get("membership_request")
+        if membership_request is None:
+            raise ValueError("membership_request is required for membership-request Mattermost events")
+        return build_public_absolute_url(
+            reverse("membership-request-detail", kwargs={"pk": membership_request.pk}),
+            on_missing="relative",
+        )
 
     membership_request = kwargs.get("membership_request")
     if membership_request is not None:
@@ -1076,11 +1089,24 @@ def _apply_endpoint_overrides(
 
 def _build_payload(endpoint: MattermostWebhookEndpoint, event_key: str, kwargs: dict[str, object]) -> dict[str, object]:
     template_context = _build_template_context(event_key, kwargs)
-    return _apply_endpoint_overrides(
+    payload = _apply_endpoint_overrides(
         endpoint=endpoint,
         base_payload=_default_payload(event_key, template_context),
         context=template_context,
     )
+
+    if event_key in _MEMBERSHIP_REQUEST_DETAIL_EVENTS:
+        detail_link = _event_link(event_key, template_context)
+        attachments = payload.get("attachments")
+        if not isinstance(attachments, list) or not attachments:
+            payload["attachments"] = [{"title": _event_title(event_key), "title_link": detail_link, "fields": []}]
+            return payload
+
+        for attachment in attachments:
+            if isinstance(attachment, dict):
+                attachment["title_link"] = detail_link
+
+    return payload
 
 
 def build_admin_test_payload(
@@ -1204,6 +1230,10 @@ def dispatch_mattermost_event(event_key: str, **kwargs: object) -> None:
     try:
         if event_key not in CANONICAL_SIGNALS:
             logger.warning("mattermost.unknown_event_key", extra={"event_key": event_key})
+            return
+
+        if event_key in _MEMBERSHIP_REQUEST_DETAIL_EVENTS and kwargs.get("membership_request") is None:
+            logger.warning("mattermost.membership_request_missing_context", extra={"event_key": event_key})
             return
 
         endpoints = MattermostWebhookEndpoint.objects.filter(enabled=True)

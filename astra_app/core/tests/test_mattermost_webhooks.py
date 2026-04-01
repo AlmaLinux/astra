@@ -113,7 +113,18 @@ class MattermostWebhookTemplateAndPayloadTests(SimpleTestCase):
         self.assertEqual(payload["icon_url"], "https://example.invalid/icon.png")
 
     def test_default_payload_uses_expected_color_for_event_family(self) -> None:
-        payload = _default_payload("membership_request_approved", {"actor": "alice"})
+        payload = _default_payload(
+            "membership_request_approved",
+            {
+                "actor": "alice",
+                "membership_request": SimpleNamespace(
+                    pk=1,
+                    membership_type_id="sponsorship",
+                    requested_username="alice",
+                    organization_display_name="",
+                ),
+            },
+        )
         self.assertEqual(payload["attachments"][0]["color"], "#36a64f")
 
     def test_build_payload_falls_back_on_bad_template(self) -> None:
@@ -152,6 +163,106 @@ class MattermostWebhookTemplateAndPayloadTests(SimpleTestCase):
         )
 
         self.assertEqual(payload["text"], "type=sponsorship name=Sponsorship target=user")
+
+    def test_membership_request_related_events_link_to_request_detail_page(self) -> None:
+        membership_request = SimpleNamespace(
+            pk=42,
+            membership_type_id="sponsorship",
+            requested_username="carol",
+            organization_display_name="Example Org",
+        )
+        expected_suffix = reverse("membership-request-detail", kwargs={"pk": membership_request.pk})
+        event_keys = [
+            "membership_request_submitted",
+            "membership_request_approved",
+            "membership_request_rejected",
+            "membership_request_rescinded",
+            "membership_rfi_sent",
+            "membership_rfi_replied",
+            "organization_membership_request_submitted",
+            "organization_membership_request_approved",
+            "organization_membership_request_rejected",
+            "organization_membership_request_rescinded",
+            "organization_membership_rfi_sent",
+            "organization_membership_rfi_replied",
+        ]
+
+        for event_key in event_keys:
+            kwargs: dict[str, object] = {
+                "membership_request": membership_request,
+                "actor": "alice",
+            }
+            if event_key.startswith("organization_membership_"):
+                kwargs.update({
+                    "organization_id": 123,
+                    "organization_display_name": "Example Org",
+                })
+
+            with self.subTest(event_key=event_key):
+                payload = _default_payload(event_key, kwargs)
+                self.assertTrue(str(payload["attachments"][0]["title_link"]).endswith(expected_suffix))
+
+    def test_membership_request_payload_attachments_override_cannot_change_detail_link(self) -> None:
+        membership_request = SimpleNamespace(
+            pk=42,
+            membership_type_id="sponsorship",
+            requested_username="carol",
+            organization_display_name="Example Org",
+        )
+        endpoint = MattermostWebhookEndpoint(
+            label="Ops",
+            url="https://hooks.example.invalid/abc",
+            events=["membership_request_submitted"],
+            attachments=[
+                {
+                    "title": "Custom attachment",
+                    "title_link": "https://hooks.example.invalid/not-detail",
+                }
+            ],
+        )
+
+        payload = _build_payload(
+            endpoint=endpoint,
+            event_key="membership_request_submitted",
+            kwargs={"membership_request": membership_request, "actor": "alice"},
+        )
+
+        expected_suffix = reverse("membership-request-detail", kwargs={"pk": membership_request.pk})
+        self.assertTrue(str(payload["attachments"][0]["title_link"]).endswith(expected_suffix))
+
+    def test_membership_request_payload_multi_attachments_override_all_keep_detail_link(self) -> None:
+        membership_request = SimpleNamespace(
+            pk=42,
+            membership_type_id="sponsorship",
+            requested_username="carol",
+            organization_display_name="Example Org",
+        )
+        endpoint = MattermostWebhookEndpoint(
+            label="Ops",
+            url="https://hooks.example.invalid/abc",
+            events=["membership_request_submitted"],
+            attachments=[
+                {
+                    "title": "Custom attachment one",
+                    "title_link": "https://hooks.example.invalid/not-detail-1",
+                },
+                {
+                    "title": "Custom attachment two",
+                    "title_link": "https://hooks.example.invalid/not-detail-2",
+                },
+            ],
+        )
+
+        payload = _build_payload(
+            endpoint=endpoint,
+            event_key="membership_request_submitted",
+            kwargs={"membership_request": membership_request, "actor": "alice"},
+        )
+
+        expected_suffix = reverse("membership-request-detail", kwargs={"pk": membership_request.pk})
+        self.assertEqual(len(payload["attachments"]), 2)
+        for attachment in payload["attachments"]:
+            self.assertTrue(str(attachment["title_link"]).endswith(expected_suffix))
 
     def test_build_payload_exposes_election_opened_genesis_and_end_datetime(self) -> None:
         election = SimpleNamespace(
@@ -509,6 +620,45 @@ class MattermostWebhookPostTests(SimpleTestCase):
 
 
 class MattermostWebhookDispatchTests(TestCase):
+    def test_dispatch_skips_membership_request_event_when_membership_request_missing(self) -> None:
+        MattermostWebhookEndpoint.objects.create(
+            label="Membership",
+            url="https://hooks.example.invalid/membership",
+            enabled=True,
+            events=["membership_request_submitted"],
+        )
+
+        with (
+            patch("core.mattermost_webhooks._post_to_endpoint") as post_mock,
+            self.assertLogs("core.mattermost_webhooks", level="WARNING") as captured,
+        ):
+            dispatch_mattermost_event("membership_request_submitted", actor="alice")
+
+        post_mock.assert_not_called()
+        self.assertTrue(any(record.getMessage() == "mattermost.membership_request_missing_context" for record in captured.records))
+
+    def test_dispatch_skips_org_membership_event_when_membership_request_missing(self) -> None:
+        MattermostWebhookEndpoint.objects.create(
+            label="Org membership",
+            url="https://hooks.example.invalid/org-membership",
+            enabled=True,
+            events=["organization_membership_request_submitted"],
+        )
+
+        with (
+            patch("core.mattermost_webhooks._post_to_endpoint") as post_mock,
+            self.assertLogs("core.mattermost_webhooks", level="WARNING") as captured,
+        ):
+            dispatch_mattermost_event(
+                "organization_membership_request_submitted",
+                actor="alice",
+                organization_id=123,
+                organization_display_name="Example Org",
+            )
+
+        post_mock.assert_not_called()
+        self.assertTrue(any(record.getMessage() == "mattermost.membership_request_missing_context" for record in captured.records))
+
     def test_dispatch_only_posts_for_enabled_matching_event(self) -> None:
         enabled_match = MattermostWebhookEndpoint.objects.create(
             label="Enabled match",
