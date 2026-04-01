@@ -106,6 +106,10 @@ class SharedModalScriptDeferredTests(TestCase):
         content = resp.content.decode()
         self.assertIn("membership-request-rejected-custom", content)
         self.assertIn("membership-request-rfi-custom", content)
+        self.assertIn("<code>membership-request-rejected-custom</code>", content)
+        self.assertIn("<code>membership-request-rfi-custom</code>", content)
+        self.assertNotIn("&lt;code&gt;membership-request-rejected-custom&lt;/code&gt;", content)
+        self.assertNotIn("&lt;code&gt;membership-request-rfi-custom&lt;/code&gt;", content)
 
     @override_settings(
         MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME="membership-request-rejected-custom",
@@ -133,6 +137,8 @@ class SharedModalScriptDeferredTests(TestCase):
         content = resp.content.decode()
         self.assertIn("membership-request-rejected-custom", content)
         self.assertIn("membership-request-rfi-custom", content)
+        self.assertIn("<code>membership-request-rejected-custom</code>", content)
+        self.assertIn("<code>membership-request-rfi-custom</code>", content)
 
 
 class GroupDetailModalScriptDeferredTests(TestCase):
