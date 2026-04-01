@@ -11,12 +11,12 @@ undefined and the show.bs.modal handler never fires → blank modal title/body.
 from unittest.mock import patch
 
 from django.conf import settings
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from core.freeipa.user import FreeIPAUser
 from core.models import FreeIPAPermissionGrant, MembershipRequest, MembershipType
-from core.permissions import ASTRA_ADD_MEMBERSHIP
+from core.permissions import ASTRA_ADD_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP
 from core.tests.utils_test_data import ensure_core_categories
 
 
@@ -28,6 +28,11 @@ class SharedModalScriptDeferredTests(TestCase):
         ensure_core_categories()
         FreeIPAPermissionGrant.objects.get_or_create(
             permission=ASTRA_ADD_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.group,
+            principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
+        )
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
             principal_type=FreeIPAPermissionGrant.PrincipalType.group,
             principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
         )
@@ -77,6 +82,57 @@ class SharedModalScriptDeferredTests(TestCase):
 
         # The shared-modal binding must be loaded as a dedicated static module.
         self.assertIn('src="/static/core/js/membership_request_shared_modals.js"', content)
+
+    @override_settings(
+        MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME="membership-request-rejected-custom",
+        MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME="membership-request-rfi-custom",
+    )
+    def test_membership_requests_page_shared_modals_use_settings_template_names(self) -> None:
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+            },
+        )
+
+        self._login_as_committee()
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.get(reverse("membership-requests"))
+
+        self.assertEqual(resp.status_code, 200)
+        content = resp.content.decode()
+        self.assertIn("membership-request-rejected-custom", content)
+        self.assertIn("membership-request-rfi-custom", content)
+
+    @override_settings(
+        MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME="membership-request-rejected-custom",
+        MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME="membership-request-rfi-custom",
+    )
+    def test_membership_request_detail_shared_modals_use_settings_template_names(self) -> None:
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+            },
+        )
+
+        membership_request = MembershipRequest.objects.first()
+        assert membership_request is not None
+
+        self._login_as_committee()
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.get(reverse("membership-request-detail", args=[membership_request.pk]))
+
+        self.assertEqual(resp.status_code, 200)
+        content = resp.content.decode()
+        self.assertIn("membership-request-rejected-custom", content)
+        self.assertIn("membership-request-rfi-custom", content)
 
 
 class GroupDetailModalScriptDeferredTests(TestCase):

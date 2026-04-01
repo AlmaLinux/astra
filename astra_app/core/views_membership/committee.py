@@ -421,6 +421,8 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
             "filter_empty": filter_empty,
             "clear_filter_url": reverse("membership-requests"),
             "next_url": next_url,
+            "membership_request_rejected_email_template_name": settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME,
+            "membership_request_rfi_email_template_name": settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME,
         },
     )
 
@@ -506,6 +508,8 @@ def build_membership_request_detail_committee_context(
         "requested_by_deleted": requested_by_deleted,
         "contact_url": contact_url,
         "show_on_hold_approve": show_on_hold_approve,
+        "membership_request_rejected_email_template_name": settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME,
+        "membership_request_rfi_email_template_name": settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME,
     }
 
 
