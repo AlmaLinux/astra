@@ -1,6 +1,7 @@
 
 from unittest.mock import patch
 
+from django.conf import settings
 from django.test import TestCase
 from django.urls import reverse
 
@@ -205,3 +206,130 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
         self.assertContains(resp, '/settings/?tab=agreements')
         self.assertContains(resp, 'return=profile')
         self.assertContains(resp, 'href="/settings/?tab=profile&amp;highlight=country_code"')
+
+    def test_committee_viewer_sees_country_row_first_with_human_readable_name(self) -> None:
+        alex_data = {
+            "uid": ["alex"],
+            "mail": ["alex@example.com"],
+            "memberof_group": [],
+            "givenname": ["Alex"],
+            "sn": ["User"],
+            "fasPronoun": ["they/them"],
+        }
+        alex_data[settings.SELF_SERVICE_ADDRESS_COUNTRY_ATTR] = ["US"]
+        alex = FreeIPAUser(
+            "alex",
+            alex_data,
+        )
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+                "givenname": ["Review"],
+                "sn": ["Er"],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            return {"alex": alex, "reviewer": reviewer}.get(username)
+
+        self._login_as_freeipa_user("reviewer")
+        with (
+            patch("core.views_users.has_enabled_agreements", return_value=False),
+            patch("core.views_users.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+        ):
+            resp = self.client.get(reverse("user-profile", kwargs={"username": "alex"}))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Country")
+        self.assertContains(resp, "United States")
+
+        html = resp.content.decode("utf-8")
+        self.assertRegex(
+            html,
+            r'id="user_attributes">\s*<li[^>]*>\s*<strong[^>]*>\s*(?:<i[^>]*></i>\s*)?Country</strong>',
+        )
+        self.assertLess(
+            html.find("Country</strong>"),
+            html.find("Pronouns</strong>"),
+        )
+
+    def test_committee_viewer_sees_not_provided_when_country_missing(self) -> None:
+        alex = FreeIPAUser(
+            "alex",
+            {
+                "uid": ["alex"],
+                "mail": ["alex@example.com"],
+                "memberof_group": [],
+                "givenname": ["Alex"],
+                "sn": ["User"],
+            },
+        )
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+                "givenname": ["Review"],
+                "sn": ["Er"],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            return {"alex": alex, "reviewer": reviewer}.get(username)
+
+        self._login_as_freeipa_user("reviewer")
+        with (
+            patch("core.views_users.has_enabled_agreements", return_value=False),
+            patch("core.views_users.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+        ):
+            resp = self.client.get(reverse("user-profile", kwargs={"username": "alex"}))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Country")
+        self.assertContains(resp, "Not provided")
+
+    def test_non_committee_viewer_does_not_see_country_row(self) -> None:
+        alex_data = {
+            "uid": ["alex"],
+            "mail": ["alex@example.com"],
+            "memberof_group": [],
+            "givenname": ["Alex"],
+            "sn": ["User"],
+            "fasPronoun": ["they/them"],
+        }
+        alex_data[settings.SELF_SERVICE_ADDRESS_COUNTRY_ATTR] = ["US"]
+        alex = FreeIPAUser(
+            "alex",
+            alex_data,
+        )
+        bob = FreeIPAUser(
+            "bob",
+            {
+                "uid": ["bob"],
+                "mail": ["bob@example.com"],
+                "memberof_group": [],
+                "givenname": ["Bob"],
+                "sn": ["Viewer"],
+            },
+        )
+
+        def _get_user(username: str) -> FreeIPAUser | None:
+            return {"alex": alex, "bob": bob}.get(username)
+
+        self._login_as_freeipa_user("bob")
+        with (
+            patch("core.views_users.has_enabled_agreements", return_value=False),
+            patch("core.views_users.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+        ):
+            resp = self.client.get(reverse("user-profile", kwargs={"username": "alex"}))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Pronouns")
+        self.assertNotContains(resp, "Country</strong>")

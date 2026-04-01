@@ -15,7 +15,7 @@ from core.agreements import (
     list_agreements_for_user,
     missing_required_agreements_for_user_in_group,
 )
-from core.country_codes import country_code_status_from_user_data
+from core.country_codes import country_code_status_from_user_data, country_name_from_code
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import FreeIPAUser
 from core.ipa_user_attrs import _data_get, _first, _get_full_user, _split_list_field, _value_to_text
@@ -499,6 +499,9 @@ def _profile_context_for_user(
         email_is_blacklisted = BlacklistedEmail.objects.filter(email__iexact=fu.email).exists()
 
     country_status = country_code_status_from_user_data(data)
+    profile_country = "Not provided"
+    if country_status.is_valid and country_status.code:
+        profile_country = country_name_from_code(country_status.code)
 
     account_setup_required_actions: list[dict[str, str]] = []
     account_setup_recommended_actions: list[dict[str, str]] = []
@@ -604,6 +607,8 @@ def _profile_context_for_user(
         "account_setup_recommended_actions": account_setup_recommended_actions,
         "membership_request_url": membership_request_url,
         "show_membership_card": show_membership_card,
+        "viewer_is_membership_committee": viewer_is_membership_committee,
+        "profile_country": profile_country,
         "membership_can_request_any": membership_can_request_any,
         "memberships": memberships,
         "membership_pending_requests": pending_requests,

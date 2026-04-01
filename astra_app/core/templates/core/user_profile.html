@@ -82,6 +82,13 @@
         </div>
 
         <ul class="list-group list-group-flush" id="user_attributes">
+          {% if viewer_is_membership_committee %}
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+              <strong class="profile-attr-label" title="Country"><i class="fas fa-flag"></i> Country</strong>
+              <div class="profile-attr-value text-end">{{ profile_country }}</div>
+            </li>
+          {% endif %}
+
           {% if pronouns %}
             <li class="list-group-item d-flex justify-content-between align-items-center">
               <strong class="profile-attr-label" title="Pronouns"><i class="fas fa-user-tag"></i> Pronouns</strong>
