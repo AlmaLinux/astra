@@ -521,6 +521,20 @@ class MembershipStatsDashboardTests(TestCase):
         self.assertContains(resp, "Country Code Distribution (All Active FreeIPA Users)")
         self.assertContains(resp, "Country Code Distribution (Active Individual Members)")
 
+    def test_membership_stats_page_wraps_summary_card_labels(self) -> None:
+        self._grant_membership_stats_permission()
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = self._reviewer_user()
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.get(reverse("membership-stats"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "#membership-stats-root .info-box-text")
+        self.assertContains(resp, "white-space: normal")
+        self.assertContains(resp, "overflow-wrap: anywhere")
+
     def test_membership_stats_page_forwards_days_query_to_json_data_url(self) -> None:
         self._grant_membership_stats_permission()
 

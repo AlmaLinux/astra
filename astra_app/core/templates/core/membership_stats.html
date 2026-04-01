@@ -17,6 +17,19 @@
         max-width: 20%;
       }
     }
+
+    #membership-stats-root .info-box-content {
+      min-width: 0;
+    }
+
+    /* Long translated/custom labels should wrap instead of overflowing the card. */
+    #membership-stats-root .info-box-text {
+      white-space: normal;
+      overflow: visible;
+      text-overflow: initial;
+      overflow-wrap: anywhere;
+      line-height: 1.25;
+    }
   </style>
 {% endblock %}
 
