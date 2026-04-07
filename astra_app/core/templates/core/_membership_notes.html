@@ -124,6 +124,20 @@
                             aria-label="View email"
                           >View email</button>
                         {% endif %}
+
+                        {% if entry.request_resubmitted_diff_rows %}
+                          <div class="mt-2" data-request-resubmitted-note-id="{{ entry.note.pk }}">
+                            {% for row in entry.request_resubmitted_diff_rows %}
+                              <details class="mt-1" data-request-resubmitted-question="{{ row.question }}">
+                                <summary>{{ row.question }}</summary>
+                                <div class="small text-muted mt-2">Previous response</div>
+                                <div data-request-resubmitted-old>{{ row.old_value|linebreaksbr }}</div>
+                                <div class="small text-muted mt-2">Updated response</div>
+                                <div data-request-resubmitted-new>{{ row.new_value|linebreaksbr }}</div>
+                              </details>
+                            {% endfor %}
+                          </div>
+                        {% endif %}
                       </div>
                     {% else %}
                       {% if not entry.is_self and entry.bubble_style %}

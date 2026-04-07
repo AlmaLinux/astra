@@ -1293,7 +1293,7 @@ def resubmit_membership_request(
     _try_add_note(
         membership_request=membership_request,
         username=actor_username,
-        action={"type": "request_resubmitted"},
+        action={"type": "request_resubmitted", "old_responses": normalized_existing_response_list},
         log_prefix="resubmit_membership_request",
     )
 

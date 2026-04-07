@@ -1253,6 +1253,60 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
             ).exists()
         )
 
+    def test_resubmitted_note_action_stores_full_old_responses_only(self) -> None:
+        from core.models import MembershipType, Note
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        long_old_text = "Legacy details " + ("x" * 4096)
+        old_responses = [
+            {"Contributions": "Old"},
+            {"Additional info": long_old_text},
+        ]
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.on_hold,
+            on_hold_at=timezone.now(),
+            responses=old_responses,
+        )
+
+        self._add_freeipa_user(username="alice", email="alice@example.com")
+        self._login_as_freeipa_user("alice")
+
+        resp_post = self.client.post(
+            reverse("membership-request-self", args=[req.pk]),
+            data={
+                "q_contributions": "Updated",
+                "q_additional_information": "Updated details",
+            },
+            follow=False,
+        )
+
+        self.assertEqual(resp_post.status_code, 302)
+
+        note = Note.objects.get(
+            membership_request=req,
+            username="alice",
+            action__type="request_resubmitted",
+        )
+        assert isinstance(note.action, dict)
+        self.assertEqual(set(note.action.keys()), {"type", "old_responses"})
+        self.assertEqual(note.action["type"], "request_resubmitted")
+        old_snapshot = note.action["old_responses"]
+        self.assertEqual(old_snapshot[0]["Contributions"], "Old")
+        self.assertEqual(old_snapshot[1]["Additional information"], long_old_text)
+        self.assertNotIn("new_responses", note.action)
+        self.assertNotIn("schema_version", note.action)
+
     def test_user_cannot_resubmit_on_hold_request_without_changes(self) -> None:
         from core.models import MembershipType
 

@@ -5,7 +5,7 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from django.conf import settings
-from django.test import TestCase
+from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -47,6 +47,33 @@ class MembershipNotesAjaxTests(TestCase):
         session = self.client.session
         session["_freeipa_username"] = username
         session.save()
+
+    def _reviewer_user(self) -> FreeIPAUser:
+        return FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+            },
+        )
+
+    def _render_notes_html_via_ajax(self, membership_request_id: int) -> str:
+        self._login_as_freeipa_user("reviewer")
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer_user()):
+            resp = self.client.post(
+                reverse("membership-request-note-add", args=[membership_request_id]),
+                data={
+                    "note_action": "message",
+                    "message": "render",
+                    "next": reverse("membership-requests"),
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+        self.assertEqual(resp.status_code, 200)
+        payload = json.loads(resp.content)
+        self.assertTrue(payload.get("ok"))
+        return str(payload.get("html", ""))
 
     def test_note_add_returns_json_and_updated_html_for_ajax(self) -> None:
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
@@ -538,3 +565,178 @@ class MembershipNotesAjaxTests(TestCase):
         self.assertIsNotNone(second_disapprovals)
         assert second_disapprovals is not None
         self.assertIn("badge-warning", second_disapprovals.group(0))
+
+    def test_request_resubmitted_diff_is_stable_across_multi_cycle_history(self) -> None:
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            responses=[
+                {"Contributions": "Cycle 3"},
+                {"Additional info": "Same"},
+            ],
+        )
+        note_1 = Note.objects.create(
+            membership_request=req,
+            username="alice",
+            action={
+                "type": "request_resubmitted",
+                "old_responses": [
+                    {"Contributions": "Cycle 1"},
+                    {"Additional info": "Same"},
+                ],
+            },
+        )
+        note_2 = Note.objects.create(
+            membership_request=req,
+            username="alice",
+            action={
+                "type": "request_resubmitted",
+                "old_responses": [
+                    {"Contributions": "Cycle 2"},
+                    {"Additional info": "Same"},
+                ],
+            },
+        )
+
+        html = self._render_notes_html_via_ajax(req.pk)
+
+        marker_1 = f'data-request-resubmitted-note-id="{note_1.pk}"'
+        marker_2 = f'data-request-resubmitted-note-id="{note_2.pk}"'
+        start_1 = html.find(marker_1)
+        start_2 = html.find(marker_2)
+        self.assertNotEqual(start_1, -1)
+        self.assertNotEqual(start_2, -1)
+        note_1_html = html[start_1:start_2]
+        note_2_html = html[start_2:]
+
+        self.assertIn("Cycle 1", note_1_html)
+        self.assertIn("Cycle 2", note_1_html)
+        self.assertNotIn("Cycle 3", note_1_html)
+
+        self.assertIn("Cycle 2", note_2_html)
+        self.assertIn("Cycle 3", note_2_html)
+
+    def test_request_resubmitted_diff_uses_pk_tiebreak_for_equal_timestamps(self) -> None:
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            responses=[
+                {"Contributions": "Cycle 3"},
+                {"Additional info": "Same"},
+            ],
+        )
+        note_1 = Note.objects.create(
+            membership_request=req,
+            username="alice",
+            action={
+                "type": "request_resubmitted",
+                "old_responses": [
+                    {"Contributions": "Cycle 1"},
+                    {"Additional info": "Same"},
+                ],
+            },
+        )
+        note_2 = Note.objects.create(
+            membership_request=req,
+            username="alice",
+            action={
+                "type": "request_resubmitted",
+                "old_responses": [
+                    {"Contributions": "Cycle 2"},
+                    {"Additional info": "Same"},
+                ],
+            },
+        )
+        tie_timestamp = timezone.now() - timedelta(minutes=5)
+        Note.objects.filter(pk=note_1.pk).update(timestamp=tie_timestamp)
+        Note.objects.filter(pk=note_2.pk).update(timestamp=tie_timestamp)
+
+        html = self._render_notes_html_via_ajax(req.pk)
+
+        marker_1 = f'data-request-resubmitted-note-id="{note_1.pk}"'
+        marker_2 = f'data-request-resubmitted-note-id="{note_2.pk}"'
+        start_1 = html.find(marker_1)
+        start_2 = html.find(marker_2)
+        self.assertNotEqual(start_1, -1)
+        self.assertNotEqual(start_2, -1)
+        self.assertLess(start_1, start_2)
+
+        note_1_html = html[start_1:start_2]
+        note_2_html = html[start_2:]
+
+        self.assertIn("Cycle 1", note_1_html)
+        self.assertIn("Cycle 2", note_1_html)
+        self.assertNotIn("Cycle 3", note_1_html)
+
+        self.assertIn("Cycle 2", note_2_html)
+        self.assertIn("Cycle 3", note_2_html)
+
+    def test_request_resubmitted_diff_renders_changed_questions_as_collapsed_details_only(self) -> None:
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            responses=[
+                {"Changed question": "Updated value"},
+                {"Unchanged question": "Same value"},
+            ],
+        )
+        note = Note.objects.create(
+            membership_request=req,
+            username="alice",
+            action={
+                "type": "request_resubmitted",
+                "old_responses": [
+                    {"Changed question": "Old value"},
+                    {"Unchanged question": "Same value"},
+                ],
+            },
+        )
+
+        html = self._render_notes_html_via_ajax(req.pk)
+        marker = f'data-request-resubmitted-note-id="{note.pk}"'
+        start = html.find(marker)
+        self.assertNotEqual(start, -1)
+        note_html = html[start:]
+
+        self.assertIn('data-request-resubmitted-question="Changed question"', note_html)
+        self.assertIn("<details", note_html)
+        self.assertNotIn("<details open", note_html)
+        self.assertNotIn('data-request-resubmitted-question="Unchanged question"', note_html)
+
+    @override_settings(MEMBERSHIP_NOTES_RESUBMITTED_DIFFS_ENABLED=False)
+    def test_request_resubmitted_diff_can_be_disabled_without_hiding_notes(self) -> None:
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            responses=[{"Contributions": "Updated"}],
+        )
+        Note.objects.create(
+            membership_request=req,
+            username="alice",
+            action={
+                "type": "request_resubmitted",
+                "old_responses": [{"Contributions": "Original"}],
+            },
+        )
+
+        detail_html = self._render_notes_html_via_ajax(req.pk)
+        self.assertIn("Request resubmitted", detail_html)
+        self.assertNotIn("data-request-resubmitted-note-id", detail_html)
+
+        request = RequestFactory().get("/")
+        request.session = {"_freeipa_username": "reviewer"}
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer_user()):
+            from core.templatetags.core_membership_notes import membership_notes_aggregate_for_user
+
+            aggregate_html = str(
+                membership_notes_aggregate_for_user(
+                    {"request": request, "membership_can_view": True},
+                    "alice",
+                    compact=True,
+                    next_url="/",
+                )
+            )
+
+        self.assertIn("Request resubmitted", aggregate_html)
+        self.assertNotIn("data-request-resubmitted-note-id", aggregate_html)

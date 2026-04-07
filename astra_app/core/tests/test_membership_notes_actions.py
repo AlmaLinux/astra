@@ -2,7 +2,7 @@
 from unittest.mock import patch
 
 from django.conf import settings
-from django.test import TestCase
+from django.test import RequestFactory, TestCase
 from post_office.models import Email
 
 from core.membership_request_workflow import (
@@ -101,6 +101,43 @@ class MembershipNotesActionTests(TestCase):
             note_action_label({"type": "request_created"}),
             "Request created",
         )
+
+    def test_request_resubmitted_legacy_and_old_responses_payload_render_safely(self) -> None:
+        from core.templatetags.core_membership_notes import membership_notes
+
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            responses=[{"Contributions": "Updated"}],
+        )
+        legacy_note = Note.objects.create(
+            membership_request=req,
+            username="reviewer",
+            action={"type": "request_resubmitted"},
+        )
+        new_note = Note.objects.create(
+            membership_request=req,
+            username="reviewer",
+            action={
+                "type": "request_resubmitted",
+                "old_responses": [{"Contributions": "Original"}],
+            },
+        )
+
+        request = RequestFactory().get("/")
+        request.session = {"_freeipa_username": "reviewer"}
+        html = str(
+            membership_notes(
+                {"request": request},
+                req,
+                compact=False,
+                next_url="/",
+            )
+        )
+
+        self.assertIn("Request resubmitted", html)
+        self.assertIn(f'data-request-resubmitted-note-id="{new_note.pk}"', html)
+        self.assertNotIn(f'data-request-resubmitted-note-id="{legacy_note.pk}"', html)
 
     def test_request_approved_records_action_note(self) -> None:
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")

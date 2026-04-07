@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from django import template
+from django.conf import settings
 from django.http import HttpRequest
 from django.template.loader import render_to_string
 from django.urls import reverse
@@ -264,11 +265,126 @@ def _render_note_content(note: Note) -> SafeString | str:
     return format_html_join(mark_safe("<br>"), "{}", ((line,) for line in rendered_lines))
 
 
+def _normalize_response_snapshot(snapshot: object) -> list[dict[str, str]]:
+    if not isinstance(snapshot, list):
+        return []
+
+    normalized: list[dict[str, str]] = []
+    for row in snapshot:
+        if not isinstance(row, dict):
+            continue
+
+        normalized_row: dict[str, str] = {}
+        for key, value in row.items():
+            question = str(key).strip()
+            if not question:
+                continue
+            normalized_row[question] = "" if value is None else str(value)
+
+        if normalized_row:
+            normalized.append(normalized_row)
+
+    return normalized
+
+
+def _old_responses_snapshot_from_action(action: object) -> list[dict[str, str]] | None:
+    if not isinstance(action, dict):
+        return None
+    if "old_responses" not in action:
+        return None
+    return _normalize_response_snapshot(action.get("old_responses"))
+
+
+def _response_snapshot_value_map(snapshot: list[dict[str, str]]) -> tuple[list[str], dict[str, str]]:
+    order: list[str] = []
+    values_by_question: dict[str, str] = {}
+    for row in snapshot:
+        for question, value in row.items():
+            if question not in values_by_question:
+                order.append(question)
+            values_by_question[question] = value
+    return order, values_by_question
+
+
+def _request_resubmitted_diff_rows(
+    *,
+    old_snapshot: list[dict[str, str]],
+    new_snapshot: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    old_order, old_values = _response_snapshot_value_map(old_snapshot)
+    new_order, new_values = _response_snapshot_value_map(new_snapshot)
+
+    merged_order = old_order + [question for question in new_order if question not in old_values]
+    rows: list[dict[str, str]] = []
+    for question in merged_order:
+        old_value = old_values.get(question, "")
+        new_value = new_values.get(question, "")
+        if old_value == new_value:
+            continue
+        rows.append(
+            {
+                "question": question,
+                "old_value": old_value,
+                "new_value": new_value,
+            }
+        )
+    return rows
+
+
+def _membership_request_responses_by_id(notes: list[Note]) -> dict[int, list[dict[str, str]]]:
+    request_ids = sorted({int(n.membership_request_id) for n in notes if n.membership_request_id is not None})
+    if not request_ids:
+        return {}
+
+    responses_by_id: dict[int, list[dict[str, str]]] = {}
+    for membership_request_id, responses in MembershipRequest.objects.filter(pk__in=request_ids).values_list("pk", "responses"):
+        responses_by_id[int(membership_request_id)] = _normalize_response_snapshot(responses)
+    return responses_by_id
+
+
+def _request_resubmitted_new_snapshots_by_note_id(
+    notes: list[Note],
+    *,
+    current_responses_by_request_id: dict[int, list[dict[str, str]]],
+) -> dict[int, list[dict[str, str]]]:
+    notes_by_request_id: dict[int, list[Note]] = {}
+    for note in notes:
+        if note.membership_request_id is None:
+            continue
+        action = note.action
+        if not isinstance(action, dict):
+            continue
+        if action.get("type") != "request_resubmitted":
+            continue
+        if _old_responses_snapshot_from_action(action) is None:
+            continue
+        notes_by_request_id.setdefault(int(note.membership_request_id), []).append(note)
+
+    snapshots_by_note_id: dict[int, list[dict[str, str]]] = {}
+    for membership_request_id, request_notes in notes_by_request_id.items():
+        for index, note in enumerate(request_notes):
+            if note.pk is None:
+                continue
+
+            next_note = request_notes[index + 1] if index + 1 < len(request_notes) else None
+            if next_note is not None:
+                next_snapshot = _old_responses_snapshot_from_action(next_note.action)
+                if next_snapshot is None:
+                    continue
+                snapshots_by_note_id[int(note.pk)] = next_snapshot
+                continue
+
+            snapshots_by_note_id[int(note.pk)] = current_responses_by_request_id.get(membership_request_id, [])
+
+    return snapshots_by_note_id
+
+
 def _timeline_entries_for_notes(
     notes: list[Note],
     *,
     current_username: str,
     email_modal_ids: dict[int, str] | None = None,
+    request_resubmitted_new_snapshots_by_note_id: dict[int, list[dict[str, str]]] | None = None,
 ) -> list[dict[str, Any]]:
     avatar_users_by_username = _avatar_users_by_username(notes)
     entries: list[dict[str, Any]] = []
@@ -282,8 +398,9 @@ def _timeline_entries_for_notes(
         membership_request_url = reverse("membership-request-detail", args=[membership_request_id])
 
         if isinstance(n.action, dict) and n.action:
-            label = note_action_label(n.action)
-            icon = note_action_icon(n.action)
+            action = n.action
+            label = note_action_label(action)
+            icon = note_action_icon(action)
             entry: dict[str, Any] = {
                 "kind": "action",
                 "note": n,
@@ -298,7 +415,23 @@ def _timeline_entries_for_notes(
                 "membership_request_url": membership_request_url,
             }
 
-            email_id = _email_id_from_action(n.action)
+            if (
+                settings.MEMBERSHIP_NOTES_RESUBMITTED_DIFFS_ENABLED
+                and action.get("type") == "request_resubmitted"
+                and n.pk is not None
+                and request_resubmitted_new_snapshots_by_note_id is not None
+            ):
+                old_snapshot = _old_responses_snapshot_from_action(action)
+                new_snapshot = request_resubmitted_new_snapshots_by_note_id.get(int(n.pk))
+                if old_snapshot is not None and new_snapshot is not None:
+                    diff_rows = _request_resubmitted_diff_rows(
+                        old_snapshot=old_snapshot,
+                        new_snapshot=new_snapshot,
+                    )
+                    if diff_rows:
+                        entry["request_resubmitted_diff_rows"] = diff_rows
+
+            email_id = _email_id_from_action(action)
             if email_id is not None and email_modal_ids is not None:
                 modal_id = email_modal_ids.get(email_id)
                 if modal_id:
@@ -422,6 +555,11 @@ def _render_membership_notes_aggregate(
     post_url = reverse("membership-notes-aggregate-note-add")
     email_modals = _email_modals_for_notes(notes)
     email_modal_ids = {m["email_id"]: m["modal_id"] for m in email_modals}
+    current_responses_by_request_id = _membership_request_responses_by_id(notes)
+    request_resubmitted_new_snapshots_by_note_id = _request_resubmitted_new_snapshots_by_note_id(
+        notes,
+        current_responses_by_request_id=current_responses_by_request_id,
+    )
 
     html = render_to_string(
         "core/_membership_notes.html",
@@ -433,6 +571,7 @@ def _render_membership_notes_aggregate(
                     notes,
                     current_username=_current_username_from_request(http_request),
                     email_modal_ids=email_modal_ids,
+                    request_resubmitted_new_snapshots_by_note_id=request_resubmitted_new_snapshots_by_note_id,
                 )
             ),
             "note_count": len(notes),
@@ -563,11 +702,16 @@ def membership_notes(
 
     email_modals = _email_modals_for_notes(notes)
     email_modal_ids = {m["email_id"]: m["modal_id"] for m in email_modals}
+    request_resubmitted_new_snapshots_by_note_id = _request_resubmitted_new_snapshots_by_note_id(
+        notes,
+        current_responses_by_request_id={int(mr.pk): _normalize_response_snapshot(mr.responses)},
+    )
 
     entries = _timeline_entries_for_notes(
         notes,
         current_username=current_username,
         email_modal_ids=email_modal_ids,
+        request_resubmitted_new_snapshots_by_note_id=request_resubmitted_new_snapshots_by_note_id,
     )
 
     html = render_to_string(
