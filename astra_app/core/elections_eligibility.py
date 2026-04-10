@@ -7,6 +7,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone
 
+from core.election_nominators import organization_nominator_identifier, parse_nominator_identifier
 from core.freeipa.exceptions import FreeIPAMisconfiguredError, FreeIPAUnavailableError
 from core.freeipa.group import FreeIPAGroup, get_freeipa_group_for_elections
 from core.freeipa.user import FreeIPAUser
@@ -543,6 +544,42 @@ def eligible_nominator_usernames(*, election: Election, require_fresh: bool = Fa
     )
 
 
+def eligible_nominator_organization_ids(*, election: Election, require_fresh: bool = False) -> set[int]:
+    reference_datetime = _election_reference_datetime(election=election)
+    cutoff = reference_datetime - datetime.timedelta(days=settings.ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS)
+
+    org_memberships = Membership.objects.filter(
+        target_organization__isnull=False,
+        membership_type__enabled=True,
+        membership_type__votes__gt=0,
+        membership_type__category__is_organization=True,
+    ).values("target_organization_id", "created_at", "expires_at")
+
+    organization_ids: set[int] = set()
+    for membership in org_memberships:
+        organization_id_raw = membership.get("target_organization_id")
+        if not isinstance(organization_id_raw, int) or organization_id_raw <= 0:
+            continue
+
+        is_active = _membership_is_active_at_reference(
+            expires_at=membership.get("expires_at"),
+            reference_datetime=reference_datetime,
+        )
+        if not is_active:
+            continue
+
+        created_at = membership.get("created_at")
+        if not isinstance(created_at, datetime.datetime):
+            continue
+
+        if not _membership_is_old_enough(created_at=created_at, cutoff=cutoff):
+            continue
+
+        organization_ids.add(organization_id_raw)
+
+    return organization_ids
+
+
 def validate_candidates_for_election(
     *,
     election: Election,
@@ -554,19 +591,36 @@ def validate_candidates_for_election(
     candidates = _normalized_usernames(candidate_usernames)
     nominators = _normalized_usernames(nominator_usernames)
 
+    user_nominators: list[str] = []
+    for nominator in nominators:
+        parsed = parse_nominator_identifier(nominator)
+        if parsed.organization_id is not None:
+            continue
+        if parsed.username:
+            user_nominators.append(parsed.username)
+
     eligible_candidates = eligible_candidate_usernames(
         election=election,
         eligible_group_cn=eligible_group_cn,
         require_fresh=require_fresh,
     )
-    eligible_nominators = eligible_nominator_usernames(
+    eligible_user_nominators = eligible_nominator_usernames(
         election=election,
         require_fresh=require_fresh,
     )
+    eligible_org_nominator_ids = eligible_nominator_organization_ids(
+        election=election,
+        require_fresh=require_fresh,
+    )
+    eligible_org_nominators = {
+        organization_nominator_identifier(organization_id=organization_id)
+        for organization_id in eligible_org_nominator_ids
+    }
+    eligible_nominators = eligible_user_nominators | eligible_org_nominators
 
     disqualified_candidates, disqualified_nominators = election_committee_disqualification(
         candidate_usernames=candidates,
-        nominator_usernames=nominators,
+        nominator_usernames=user_nominators,
         require_fresh=require_fresh,
     )
 

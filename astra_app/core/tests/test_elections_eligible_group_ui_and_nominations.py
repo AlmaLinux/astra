@@ -9,8 +9,9 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.freeipa.exceptions import FreeIPAMisconfiguredError
-from core.models import Candidate, Election, FreeIPAPermissionGrant, Membership, MembershipType
+from core.models import Candidate, Election, FreeIPAPermissionGrant, Membership, MembershipType, Organization
 from core.permissions import ASTRA_ADD_ELECTION
+from core.tests.utils_test_data import ensure_core_categories
 
 
 def _group_lookup_by_cn(*groups: SimpleNamespace):
@@ -27,6 +28,10 @@ def _group_lookup_by_cn(*groups: SimpleNamespace):
 
 @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=1)
 class ElectionEligibleGroupUiAndNominationTests(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        ensure_core_categories()
+
     def _login_as_freeipa_user(self, username: str) -> None:
         session = self.client.session
         session["_freeipa_username"] = username
@@ -54,6 +59,24 @@ class ElectionEligibleGroupUiAndNominationTests(TestCase):
         )
         created_at = election.start_datetime - datetime.timedelta(days=10)
         Membership.objects.filter(pk=m.pk).update(created_at=created_at)
+
+    def _make_org_membership(self, *, election: Election, name: str, expires_at: datetime.datetime | None) -> Organization:
+        mt = MembershipType.objects.create(
+            code=f"org_{name.lower().replace(' ', '_')}",
+            name=f"Org {name}",
+            votes=1,
+            category_id="sponsorship",
+            enabled=True,
+        )
+        organization = Organization.objects.create(name=name, representative="")
+        membership = Membership.objects.create(
+            target_organization=organization,
+            membership_type=mt,
+            expires_at=expires_at,
+        )
+        created_at = election.start_datetime - datetime.timedelta(days=10)
+        Membership.objects.filter(pk=membership.pk).update(created_at=created_at)
+        return organization
 
     def test_eligible_users_search_count_only_respects_eligible_group_override(self) -> None:
         self._login_as_freeipa_user("admin")
@@ -218,4 +241,153 @@ class ElectionEligibleGroupUiAndNominationTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         self.assertTrue(
             Candidate.objects.filter(election=election, freeipa_username="alice", nominated_by="bob").exists()
+        )
+
+    def test_save_draft_accepts_valid_organization_nominator_identifier(self) -> None:
+        self._login_as_freeipa_user("admin")
+        self._grant_election_manager("admin")
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Draft election",
+            description="",
+            start_datetime=now + datetime.timedelta(days=10),
+            end_datetime=now + datetime.timedelta(days=11),
+            number_of_seats=1,
+            quorum=0,
+            status=Election.Status.draft,
+            eligible_group_cn="",
+        )
+
+        self._make_membership(election=election, username="alice")
+        org = self._make_org_membership(
+            election=election,
+            name="Infra Foundation",
+            expires_at=election.start_datetime + datetime.timedelta(days=10),
+        )
+
+        committee_group = SimpleNamespace(
+            cn=settings.FREEIPA_ELECTION_COMMITTEE_GROUP,
+            description="",
+            members=[],
+            member_groups=[],
+            fas_group=False,
+        )
+
+        start_local = timezone.localtime(election.start_datetime).replace(tzinfo=None)
+        end_local = timezone.localtime(election.end_datetime).replace(tzinfo=None)
+
+        organization_nominator_id = f"org:{org.id}"
+        post_data: dict[str, str] = {
+            "action": "save_draft",
+            "name": election.name,
+            "description": "",
+            "url": "",
+            "start_datetime": start_local.strftime("%Y-%m-%dT%H:%M"),
+            "end_datetime": end_local.strftime("%Y-%m-%dT%H:%M"),
+            "number_of_seats": "1",
+            "quorum": "0",
+            "eligible_group_cn": "",
+            "subject": "",
+            "html_content": "",
+            "text_content": "",
+            "candidates-TOTAL_FORMS": "1",
+            "candidates-INITIAL_FORMS": "0",
+            "candidates-MIN_NUM_FORMS": "0",
+            "candidates-MAX_NUM_FORMS": "1000",
+            "candidates-0-freeipa_username": "alice",
+            "candidates-0-nominated_by": organization_nominator_id,
+            "candidates-0-description": "",
+            "candidates-0-url": "",
+            "groups-TOTAL_FORMS": "0",
+            "groups-INITIAL_FORMS": "0",
+            "groups-MIN_NUM_FORMS": "0",
+            "groups-MAX_NUM_FORMS": "1000",
+        }
+
+        with patch(
+            "core.elections_eligibility.get_freeipa_group_for_elections",
+            side_effect=_group_lookup_by_cn(committee_group),
+        ):
+            resp = self.client.post(reverse("election-edit", args=[election.id]), data=post_data)
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(
+            Candidate.objects.filter(
+                election=election,
+                freeipa_username="alice",
+                nominated_by=organization_nominator_id,
+            ).exists()
+        )
+
+    def test_save_draft_rejects_invalid_organization_nominator_identifier(self) -> None:
+        self._login_as_freeipa_user("admin")
+        self._grant_election_manager("admin")
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Draft election",
+            description="",
+            start_datetime=now + datetime.timedelta(days=10),
+            end_datetime=now + datetime.timedelta(days=11),
+            number_of_seats=1,
+            quorum=0,
+            status=Election.Status.draft,
+            eligible_group_cn="",
+        )
+
+        self._make_membership(election=election, username="alice")
+
+        committee_group = SimpleNamespace(
+            cn=settings.FREEIPA_ELECTION_COMMITTEE_GROUP,
+            description="",
+            members=[],
+            member_groups=[],
+            fas_group=False,
+        )
+
+        start_local = timezone.localtime(election.start_datetime).replace(tzinfo=None)
+        end_local = timezone.localtime(election.end_datetime).replace(tzinfo=None)
+
+        invalid_organization_nominator_id = "org:999999"
+        post_data: dict[str, str] = {
+            "action": "save_draft",
+            "name": election.name,
+            "description": "",
+            "url": "",
+            "start_datetime": start_local.strftime("%Y-%m-%dT%H:%M"),
+            "end_datetime": end_local.strftime("%Y-%m-%dT%H:%M"),
+            "number_of_seats": "1",
+            "quorum": "0",
+            "eligible_group_cn": "",
+            "subject": "",
+            "html_content": "",
+            "text_content": "",
+            "candidates-TOTAL_FORMS": "1",
+            "candidates-INITIAL_FORMS": "0",
+            "candidates-MIN_NUM_FORMS": "0",
+            "candidates-MAX_NUM_FORMS": "1000",
+            "candidates-0-freeipa_username": "alice",
+            "candidates-0-nominated_by": invalid_organization_nominator_id,
+            "candidates-0-description": "",
+            "candidates-0-url": "",
+            "groups-TOTAL_FORMS": "0",
+            "groups-INITIAL_FORMS": "0",
+            "groups-MIN_NUM_FORMS": "0",
+            "groups-MAX_NUM_FORMS": "1000",
+        }
+
+        with patch(
+            "core.elections_eligibility.get_freeipa_group_for_elections",
+            side_effect=_group_lookup_by_cn(committee_group),
+        ):
+            resp = self.client.post(reverse("election-edit", args=[election.id]), data=post_data)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Selected nominator is not eligible for this election.")
+        self.assertFalse(
+            Candidate.objects.filter(
+                election=election,
+                freeipa_username="alice",
+            ).exists()
         )

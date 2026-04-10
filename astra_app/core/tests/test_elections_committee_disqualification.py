@@ -11,7 +11,7 @@ from core.elections_eligibility import ElectionEligibilityError, election_commit
 from core.freeipa.exceptions import FreeIPAMisconfiguredError, FreeIPAUnavailableError
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import FreeIPAUser
-from core.models import Election, FreeIPAPermissionGrant, Membership, MembershipType
+from core.models import Election, FreeIPAPermissionGrant, Membership, MembershipType, Organization
 from core.permissions import ASTRA_ADD_ELECTION
 from core.tests.utils_test_data import ensure_core_categories
 
@@ -127,6 +127,33 @@ class ElectionCommitteeDisqualificationSearchTests(_CoreCategoriesTestCase):
         )
         Membership.objects.filter(pk=membership.pk).update(created_at=now - datetime.timedelta(days=30))
 
+    def _create_organization_membership(
+        self,
+        *,
+        name: str,
+        now: datetime.datetime,
+        created_at: datetime.datetime,
+        expires_at: datetime.datetime | None,
+        representative: str = "",
+    ) -> Organization:
+        mt, _created = MembershipType.objects.update_or_create(
+            code="org-voter",
+            defaults={
+                "name": "Org Voter",
+                "votes": 1,
+                "category_id": "sponsorship",
+                "enabled": True,
+            },
+        )
+        organization = Organization.objects.create(name=name, representative=representative)
+        membership = Membership.objects.create(
+            target_organization=organization,
+            membership_type=mt,
+            expires_at=expires_at,
+        )
+        Membership.objects.filter(pk=membership.pk).update(created_at=created_at)
+        return organization
+
     def test_candidate_search_excludes_committee_members(self) -> None:
         now = timezone.now()
         self._create_membership(username="alice", now=now)
@@ -205,7 +232,130 @@ class ElectionCommitteeDisqualificationSearchTests(_CoreCategoriesTestCase):
             patch("core.elections_eligibility.get_freeipa_group_for_elections", side_effect=_get_group),
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
         ):
-            self.client.get(reverse("election-nomination-users-search", args=[election.id]))
+            resp = self.client.get(reverse("election-nomination-users-search", args=[election.id]))
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        results = [r.get("id") for r in data.get("results", [])]
+        self.assertIn("bob", results)
+        self.assertNotIn("alice", results)
+
+    def test_nomination_search_includes_valid_organization_nominators(self) -> None:
+        now = timezone.now()
+        self._create_membership(username="alice", now=now)
+        self._create_membership(username="bob", now=now)
+
+        election = Election.objects.create(
+            name="Draft election",
+            description="",
+            url="",
+            start_datetime=now + datetime.timedelta(days=5),
+            end_datetime=now + datetime.timedelta(days=6),
+            number_of_seats=1,
+            status=Election.Status.draft,
+        )
+
+        valid_org = self._create_organization_membership(
+            name="Infra Foundation",
+            now=now,
+            created_at=now - datetime.timedelta(days=30),
+            expires_at=now + datetime.timedelta(days=365),
+            representative="",
+        )
+
+        self._login_as_freeipa_user("admin")
+        self._grant_manage_permission("admin")
+
+        committee_group = FreeIPAGroup(
+            settings.FREEIPA_ELECTION_COMMITTEE_GROUP,
+            {"member_user": ["alice"]},
+        )
+
+        def _get_group(*, cn: str, require_fresh: bool = False) -> FreeIPAGroup:
+            if cn != committee_group.cn:
+                raise FreeIPAMisconfiguredError("Unknown group")
+            return committee_group
+
+        def _get_user(username: str) -> FreeIPAUser:
+            return FreeIPAUser(username, {"uid": [username], "memberof_group": []})
+
+        with (
+            patch("core.elections_eligibility.get_freeipa_group_for_elections", side_effect=_get_group),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+        ):
+            resp = self.client.get(reverse("election-nomination-users-search", args=[election.id]))
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        results = {str(r.get("id") or ""): str(r.get("text") or "") for r in data.get("results", [])}
+
+        self.assertIn("bob", results)
+        self.assertNotIn("alice", results)
+        self.assertIn(f"org:{valid_org.id}", results)
+        self.assertIn("Infra Foundation", results[f"org:{valid_org.id}"])
+
+    def test_nomination_search_excludes_expired_or_too_new_organization_nominators(self) -> None:
+        now = timezone.now()
+        self._create_membership(username="bob", now=now)
+
+        election = Election.objects.create(
+            name="Draft election",
+            description="",
+            url="",
+            start_datetime=now + datetime.timedelta(days=10),
+            end_datetime=now + datetime.timedelta(days=11),
+            number_of_seats=1,
+            status=Election.Status.draft,
+        )
+
+        valid_org = self._create_organization_membership(
+            name="Valid Org",
+            now=now,
+            created_at=now - datetime.timedelta(days=30),
+            expires_at=now + datetime.timedelta(days=365),
+        )
+        expired_org = self._create_organization_membership(
+            name="Expired Org",
+            now=now,
+            created_at=now - datetime.timedelta(days=30),
+            expires_at=now + datetime.timedelta(days=2),
+        )
+        too_new_org = self._create_organization_membership(
+            name="Too New Org",
+            now=now,
+            created_at=now + datetime.timedelta(days=10),
+            expires_at=now + datetime.timedelta(days=365),
+        )
+
+        self._login_as_freeipa_user("admin")
+        self._grant_manage_permission("admin")
+
+        committee_group = FreeIPAGroup(
+            settings.FREEIPA_ELECTION_COMMITTEE_GROUP,
+            {"member_user": []},
+        )
+
+        def _get_group(*, cn: str, require_fresh: bool = False) -> FreeIPAGroup:
+            if cn != committee_group.cn:
+                raise FreeIPAMisconfiguredError("Unknown group")
+            return committee_group
+
+        def _get_user(username: str) -> FreeIPAUser:
+            return FreeIPAUser(username, {"uid": [username], "memberof_group": []})
+
+        with (
+            patch("core.elections_eligibility.get_freeipa_group_for_elections", side_effect=_get_group),
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+        ):
+            resp = self.client.get(reverse("election-nomination-users-search", args=[election.id]))
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        result_ids = {str(r.get("id") or "") for r in data.get("results", [])}
+
+        self.assertIn(f"org:{valid_org.id}", result_ids)
+        self.assertNotIn(f"org:{expired_org.id}", result_ids)
+        self.assertNotIn(f"org:{too_new_org.id}", result_ids)
 
     def test_candidate_search_blocks_when_freeipa_unavailable(self) -> None:
         now = timezone.now()

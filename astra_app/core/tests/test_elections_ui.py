@@ -9,7 +9,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.freeipa.user import FreeIPAUser
-from core.models import Candidate, Election
+from core.models import Candidate, Election, Organization
 
 
 class ElectionsSidebarLinkTests(TestCase):
@@ -213,3 +213,54 @@ class ElectionsDetailCandidateCardsTests(TestCase):
         self.assertContains(resp, "class=\"candidate-card-divider\"")
         self.assertContains(resp, ".candidate-card-divider")
         self.assertContains(resp, "clear: both;")
+
+    def test_election_detail_renders_organization_nominator_without_profile_link(self) -> None:
+        self._login_as_freeipa_user("viewer")
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Board election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=2,
+            status=Election.Status.open,
+        )
+
+        org = Organization.objects.create(name="Infra Foundation", representative="")
+        organization_nominator_id = f"org:{org.id}"
+
+        Candidate.objects.create(
+            election=election,
+            freeipa_username="alice",
+            nominated_by=organization_nominator_id,
+            description="",
+            url="",
+        )
+
+        viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "memberof_group": []})
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "displayname": ["Alice User"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str):
+            if username == "viewer":
+                return viewer
+            if username == "alice":
+                return alice
+            return None
+
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
+            resp = self.client.get(reverse("election-detail", args=[election.id]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Nominated by")
+        self.assertContains(resp, "Infra Foundation")
+        self.assertNotContains(resp, reverse("user-profile", args=[organization_nominator_id]))

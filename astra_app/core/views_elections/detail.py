@@ -12,6 +12,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_GET
 
 from core import elections_eligibility
+from core.election_nominators import parse_nominator_identifier
 from core.elections_eligibility import ElectionEligibilityError
 from core.elections_services import candidate_username_by_id_map, election_quorum_status
 from core.models import (
@@ -19,6 +20,7 @@ from core.models import (
     Candidate,
     Election,
     ExclusionGroup,
+    Organization,
     VotingCredential,
 )
 from core.permissions import ASTRA_ADD_ELECTION
@@ -83,19 +85,52 @@ def election_detail(request, election_id: int):
         raise Http404
 
     candidates = list(Candidate.objects.filter(election=election).order_by("freeipa_username", "id"))
+
+    nominator_usernames: set[str] = set()
+    nominator_organization_ids: set[int] = set()
+    for candidate in candidates:
+        parsed_nominator = parse_nominator_identifier(str(candidate.nominated_by or ""))
+        if parsed_nominator.organization_id is not None:
+            nominator_organization_ids.add(parsed_nominator.organization_id)
+        elif parsed_nominator.username:
+            nominator_usernames.add(parsed_nominator.username)
+
     users_by_username = _load_candidate_users(
-        _candidate_usernames(candidates, include_nominators=True),
+        _candidate_usernames(candidates) | nominator_usernames,
     )
+    organizations_by_id = {
+        organization.id: organization
+        for organization in Organization.objects.filter(pk__in=nominator_organization_ids).only("id", "name")
+    }
 
     candidate_cards: list[dict[str, object]] = []
     for c in candidates:
         candidate_user = users_by_username.get(c.freeipa_username)
-        nominator_user = users_by_username.get(c.nominated_by) if c.nominated_by else None
+
+        nominator_display_name = ""
+        nominator_profile_username = ""
+        parsed_nominator = parse_nominator_identifier(str(c.nominated_by or ""))
+        if parsed_nominator.organization_id is not None:
+            organization = organizations_by_id.get(parsed_nominator.organization_id)
+            if organization is not None:
+                nominator_display_name = organization.name
+            else:
+                nominator_display_name = str(c.nominated_by or "")
+        elif parsed_nominator.username:
+            nominator_user = users_by_username.get(parsed_nominator.username)
+            if nominator_user is not None:
+                nominator_display_name = nominator_user.get_full_name()
+                nominator_profile_username = nominator_user.username
+            else:
+                nominator_display_name = parsed_nominator.username
+                nominator_profile_username = parsed_nominator.username
+
         candidate_cards.append(
             {
                 "candidate": c,
                 "candidate_user": candidate_user,
-                "nominator_user": nominator_user,
+                "nominator_display_name": nominator_display_name,
+                "nominator_profile_username": nominator_profile_username,
             }
         )
 

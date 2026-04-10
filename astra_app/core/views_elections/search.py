@@ -7,10 +7,11 @@ from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 
 from core import elections_eligibility
+from core.election_nominators import organization_nominator_identifier, organization_nominator_label
 from core.elections_eligibility import ElectionEligibilityError
 from core.email_context import election_committee_email_context
 from core.freeipa.user import FreeIPAUser
-from core.models import Election
+from core.models import Election, Organization
 from core.permissions import ASTRA_ADD_ELECTION, json_permission_required
 from core.templated_email import render_templated_email_preview_response
 from core.user_labels import user_label
@@ -51,6 +52,36 @@ def _build_user_search_results(
         results.append({"id": username, "text": user_label(username, user=user)})
         if len(results) >= limit:
             break
+    return results
+
+
+def _build_organization_search_results(
+    eligible_organization_ids: set[int], q: str, *, limit: int = 20,
+) -> list[dict[str, str]]:
+    q_lower = q.lower()
+    organizations = (
+        Organization.objects.filter(pk__in=eligible_organization_ids)
+        .only("id", "name")
+        .order_by("name", "id")
+    )
+
+    results: list[dict[str, str]] = []
+    for organization in organizations:
+        organization_name = str(organization.name or "").strip()
+        organization_identifier = organization_nominator_identifier(organization_id=organization.id)
+
+        if q_lower and q_lower not in organization_name.lower() and q_lower not in organization_identifier.lower():
+            continue
+
+        results.append(
+            {
+                "id": organization_identifier,
+                "text": organization_nominator_label(organization_name=organization_name),
+            }
+        )
+        if len(results) >= limit:
+            break
+
     return results
 
 
@@ -211,8 +242,11 @@ def election_nomination_users_search(request, election_id: int):
 
     try:
         eligible_usernames = elections_eligibility.eligible_nominator_usernames(election=election)
+        eligible_organization_ids = elections_eligibility.eligible_nominator_organization_ids(election=election)
     except ElectionEligibilityError as exc:
         return JsonResponse({"error": str(exc)}, status=exc.status_code)
 
     q = str(request.GET.get("q") or "").strip()
-    return JsonResponse({"results": _build_user_search_results(eligible_usernames, q)})
+    user_results = _build_user_search_results(eligible_usernames, q)
+    organization_results = _build_organization_search_results(eligible_organization_ids, q)
+    return JsonResponse({"results": [*user_results, *organization_results]})

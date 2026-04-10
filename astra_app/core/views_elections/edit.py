@@ -14,6 +14,7 @@ from post_office.models import EmailTemplate
 
 from core import elections_eligibility, elections_services
 from core import signals as astra_signals
+from core.election_nominators import parse_nominator_identifier
 from core.elections_eligibility import ElectionEligibilityError
 from core.elections_services import (
     election_genesis_chain_hash,
@@ -29,7 +30,7 @@ from core.forms_elections import (
 )
 from core.freeipa.user import FreeIPAUser
 from core.ipa_user_attrs import _get_freeipa_timezone_name
-from core.models import AuditLogEntry, Candidate, Election, ExclusionGroup, ExclusionGroupCandidate
+from core.models import AuditLogEntry, Candidate, Election, ExclusionGroup, ExclusionGroupCandidate, Organization
 from core.permissions import ASTRA_ADD_ELECTION
 from core.templated_email import placeholderize_empty_values, render_templated_email_preview
 from core.user_labels import user_choice_from_freeipa
@@ -119,7 +120,19 @@ def _configure_candidate_choices(
             or ""
         ).strip()
         if nominated_value:
-            form.fields["nominated_by"].choices = [user_choice_from_freeipa(nominated_value)]
+            parsed_nominator = parse_nominator_identifier(nominated_value)
+            if parsed_nominator.organization_id is None:
+                form.fields["nominated_by"].choices = [user_choice_from_freeipa(nominated_value)]
+            else:
+                organization = (
+                    Organization.objects.filter(pk=parsed_nominator.organization_id)
+                    .only("name")
+                    .first()
+                )
+                organization_name = organization.name if organization is not None else nominated_value
+                form.fields["nominated_by"].choices = [
+                    (nominated_value, f"{organization_name} (organization)")
+                ]
         form.fields["nominated_by"].widget.attrs["data-ajax-url"] = ajax_url_nominator
         form.fields["nominated_by"].widget.attrs["data-start-datetime-source"] = "id_start_datetime"
 
@@ -443,8 +456,29 @@ def _handle_start_election(
             names = ", ".join(sorted(validation.ineligible_candidates, key=str.lower))
             messages.error(request, "Candidate is not eligible: " + names)
         if validation.ineligible_nominators:
-            names = ", ".join(sorted(validation.ineligible_nominators, key=str.lower))
-            messages.error(request, "Nominator is not eligible: " + names)
+            sorted_nominators = sorted(validation.ineligible_nominators, key=str.lower)
+            organization_nominator_ids: set[int] = set()
+            parsed_nominators: list[tuple[str, int | None]] = []
+            for nominator in sorted_nominators:
+                parsed_nominator = parse_nominator_identifier(nominator)
+                parsed_nominators.append((nominator, parsed_nominator.organization_id))
+                if parsed_nominator.organization_id is not None:
+                    organization_nominator_ids.add(parsed_nominator.organization_id)
+
+            organizations_by_id = {
+                organization.id: organization.name
+                for organization in Organization.objects.filter(pk__in=organization_nominator_ids).only("id", "name")
+            }
+
+            display_nominators: list[str] = []
+            for nominator, organization_id in parsed_nominators:
+                if organization_id is None:
+                    display_nominators.append(nominator)
+                else:
+                    display_nominators.append(organizations_by_id.get(organization_id, "organization nominator"))
+
+            names = ", ".join(display_nominators)
+            messages.error(request, "One or more nominators are not eligible for this election: " + names)
         if no_eligible_voters:
             messages.error(request, "No eligible voters were found for this election.")
         return None
@@ -737,7 +771,10 @@ def election_edit(request, election_id: int):
                         )
                         formsets_ok = False
                     elif nominator and nominator in validation.ineligible_nominators:
-                        form.add_error("nominated_by", "User is not eligible.")
+                        form.add_error(
+                            "nominated_by",
+                            "Selected nominator is not eligible for this election.",
+                        )
                         formsets_ok = False
 
             if formsets_ok:

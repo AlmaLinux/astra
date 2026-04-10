@@ -256,8 +256,10 @@
                       <p class="mb-0">
                         <strong>Nominated by</strong>
                           —
-                          {{ item.nominator_user.get_full_name }}
-                          (<a href="{% url 'user-profile' item.nominator_user.username %}">{{ item.nominator_user.username }}</a>)
+                          {{ item.nominator_display_name }}
+                          {% if item.nominator_profile_username %}
+                            (<a href="{% url 'user-profile' item.nominator_profile_username %}">{{ item.nominator_profile_username }}</a>)
+                          {% endif %}
                       </p>
                     </div>
                   </div>

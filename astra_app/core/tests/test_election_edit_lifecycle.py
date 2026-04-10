@@ -3,6 +3,7 @@ import datetime
 from unittest.mock import patch
 
 from django.conf import settings
+from django.contrib.messages import get_messages
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -17,6 +18,7 @@ from core.models import (
     FreeIPAPermissionGrant,
     Membership,
     MembershipType,
+    Organization,
     VotingCredential,
 )
 from core.permissions import ASTRA_ADD_ELECTION
@@ -764,3 +766,232 @@ class ElectionEditLifecycleTests(TestCase):
         election.refresh_from_db()
         self.assertEqual(election.status, Election.Status.draft)
         self.assertContains(resp, "Candidate is not eligible")
+
+    def test_start_election_accepts_valid_organization_nominator_identifier(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Draft election",
+            description="",
+            url="",
+            start_datetime=now + datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=2),
+            number_of_seats=1,
+            status=Election.Status.draft,
+            voting_email_subject="Hello {{ username }}",
+            voting_email_html="<p>Hi {{ username }}</p>",
+            voting_email_text="Hi {{ username }}",
+        )
+
+        organization = Organization.objects.create(name="Infra Foundation", representative="")
+        organization_nominator_id = f"org:{organization.id}"
+        Candidate.objects.create(
+            election=election,
+            freeipa_username="alice",
+            nominated_by=organization_nominator_id,
+        )
+
+        individual_type = MembershipType.objects.create(
+            code="voter",
+            name="Voter",
+            description="",
+            category_id="individual",
+            sort_order=1,
+            enabled=True,
+            votes=1,
+        )
+        sponsor_type = MembershipType.objects.create(
+            code="sponsor",
+            name="Sponsor",
+            description="",
+            category_id="sponsorship",
+            sort_order=1,
+            enabled=True,
+            votes=1,
+        )
+
+        voter_membership = Membership.objects.create(
+            target_username="voter1",
+            membership_type=individual_type,
+            expires_at=None,
+        )
+        Membership.objects.filter(pk=voter_membership.pk).update(created_at=now - datetime.timedelta(days=200))
+
+        candidate_membership = Membership.objects.create(
+            target_username="alice",
+            membership_type=individual_type,
+            expires_at=None,
+        )
+        Membership.objects.filter(pk=candidate_membership.pk).update(created_at=now - datetime.timedelta(days=200))
+
+        org_membership = Membership.objects.create(
+            target_organization=organization,
+            membership_type=sponsor_type,
+            expires_at=None,
+        )
+        Membership.objects.filter(pk=org_membership.pk).update(created_at=now - datetime.timedelta(days=200))
+
+        self._login_as_freeipa_user("admin")
+        self._grant_manage_elections("admin")
+
+        committee_group = FreeIPAGroup(
+            settings.FREEIPA_ELECTION_COMMITTEE_GROUP,
+            {"member_user": []},
+        )
+
+        def _get_group(*, cn: str, require_fresh: bool = False) -> FreeIPAGroup:
+            if str(cn) != committee_group.cn:
+                raise FreeIPAMisconfiguredError("Unknown group")
+            return committee_group
+
+        start_str = (now + datetime.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
+        end_str = (now + datetime.timedelta(days=2)).strftime("%Y-%m-%dT%H:%M")
+
+        admin_user = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+
+        with (
+            patch("core.elections_eligibility.get_freeipa_group_for_elections", side_effect=_get_group),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
+            patch(
+                "core.views_elections.edit._issue_and_email_credentials",
+                return_value=(1, 1, 0, 0),
+            ),
+        ):
+            resp = self.client.post(
+                reverse("election-edit", args=[election.id]),
+                data={
+                    "action": "start_election",
+                    "name": election.name,
+                    "description": election.description,
+                    "url": election.url,
+                    "start_datetime": start_str,
+                    "end_datetime": end_str,
+                    "number_of_seats": str(election.number_of_seats),
+                    "quorum": str(election.quorum),
+                    "email_template_id": "",
+                    "subject": election.voting_email_subject,
+                    "html_content": election.voting_email_html,
+                    "text_content": election.voting_email_text,
+                },
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 302)
+        election.refresh_from_db()
+        self.assertEqual(election.status, Election.Status.open)
+
+    def test_start_election_rejects_invalid_organization_nominator_without_raw_identifier_leakage(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Draft election",
+            description="",
+            url="",
+            start_datetime=now + datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=2),
+            number_of_seats=1,
+            status=Election.Status.draft,
+            voting_email_subject="Hello {{ username }}",
+            voting_email_html="<p>Hi {{ username }}</p>",
+            voting_email_text="Hi {{ username }}",
+        )
+
+        organization = Organization.objects.create(name="Infra Foundation", representative="")
+        organization_nominator_id = f"org:{organization.id}"
+        Candidate.objects.create(
+            election=election,
+            freeipa_username="alice",
+            nominated_by=organization_nominator_id,
+        )
+
+        individual_type = MembershipType.objects.create(
+            code="voter",
+            name="Voter",
+            description="",
+            category_id="individual",
+            sort_order=1,
+            enabled=True,
+            votes=1,
+        )
+        sponsor_type = MembershipType.objects.create(
+            code="sponsor",
+            name="Sponsor",
+            description="",
+            category_id="sponsorship",
+            sort_order=1,
+            enabled=True,
+            votes=1,
+        )
+
+        voter_membership = Membership.objects.create(
+            target_username="voter1",
+            membership_type=individual_type,
+            expires_at=None,
+        )
+        Membership.objects.filter(pk=voter_membership.pk).update(created_at=now - datetime.timedelta(days=200))
+
+        candidate_membership = Membership.objects.create(
+            target_username="alice",
+            membership_type=individual_type,
+            expires_at=None,
+        )
+        Membership.objects.filter(pk=candidate_membership.pk).update(created_at=now - datetime.timedelta(days=200))
+
+        org_membership = Membership.objects.create(
+            target_organization=organization,
+            membership_type=sponsor_type,
+            expires_at=now,
+        )
+        Membership.objects.filter(pk=org_membership.pk).update(created_at=now - datetime.timedelta(days=200))
+
+        self._login_as_freeipa_user("admin")
+        self._grant_manage_elections("admin")
+
+        committee_group = FreeIPAGroup(
+            settings.FREEIPA_ELECTION_COMMITTEE_GROUP,
+            {"member_user": []},
+        )
+
+        def _get_group(*, cn: str, require_fresh: bool = False) -> FreeIPAGroup:
+            if str(cn) != committee_group.cn:
+                raise FreeIPAMisconfiguredError("Unknown group")
+            return committee_group
+
+        start_str = (now + datetime.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
+        end_str = (now + datetime.timedelta(days=2)).strftime("%Y-%m-%dT%H:%M")
+
+        admin_user = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+
+        with (
+            patch("core.elections_eligibility.get_freeipa_group_for_elections", side_effect=_get_group),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
+        ):
+            resp = self.client.post(
+                reverse("election-edit", args=[election.id]),
+                data={
+                    "action": "start_election",
+                    "name": election.name,
+                    "description": election.description,
+                    "url": election.url,
+                    "start_datetime": start_str,
+                    "end_datetime": end_str,
+                    "number_of_seats": str(election.number_of_seats),
+                    "quorum": str(election.quorum),
+                    "email_template_id": "",
+                    "subject": election.voting_email_subject,
+                    "html_content": election.voting_email_html,
+                    "text_content": election.voting_email_text,
+                },
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        election.refresh_from_db()
+        self.assertEqual(election.status, Election.Status.draft)
+
+        message_texts = [str(message.message) for message in get_messages(resp.wsgi_request)]
+        ineligible_nominator_messages = [
+            text
+            for text in message_texts
+            if text.startswith("One or more nominators are not eligible for this election:")
+        ]
+        self.assertEqual(len(ineligible_nominator_messages), 1)
+        self.assertNotIn(organization_nominator_id, ineligible_nominator_messages[0])
