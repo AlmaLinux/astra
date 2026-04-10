@@ -180,7 +180,9 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
             ).exists()
         )
 
-    def test_command_skips_expiring_soon_email_when_active_request_exists_for_same_type(self) -> None:
+    def test_command_extends_membership_by_one_day_when_expiring_tomorrow_and_active_request_exists_for_same_type(
+        self,
+    ) -> None:
         MembershipType.objects.update_or_create(
             code="individual",
             defaults={
@@ -206,7 +208,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
             today_utc = timezone.now().astimezone(datetime.UTC).date()
-            expires_in_days = settings.MEMBERSHIP_EXPIRING_SOON_DAYS // 2
+            expires_in_days = 1
             expires_on_utc = today_utc + datetime.timedelta(days=expires_in_days)
             expires_at_utc = datetime.datetime.combine(
                 expires_on_utc, datetime.time(23, 59, 59), tzinfo=datetime.UTC
@@ -228,6 +230,9 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
 
             with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
                 call_command("membership_expiration_notifications")
+
+        membership = Membership.objects.get(target_username="alice", membership_type_id="individual")
+        self.assertEqual(membership.expires_at, expires_at_utc + datetime.timedelta(days=1))
 
         from post_office.models import Email
 
@@ -334,7 +339,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
             today_utc = timezone.now().astimezone(datetime.UTC).date()
-            expires_in_days = settings.MEMBERSHIP_EXPIRING_SOON_DAYS // 2
+            expires_in_days = 1
             expires_on_utc = today_utc + datetime.timedelta(days=expires_in_days)
             expires_at_utc = datetime.datetime.combine(
                 expires_on_utc, datetime.time(23, 59, 59), tzinfo=datetime.UTC
@@ -356,6 +361,9 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
 
             with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
                 call_command("membership_expiration_notifications")
+
+        membership = Membership.objects.get(target_username="alice", membership_type_id="individual")
+        self.assertEqual(membership.expires_at, expires_at_utc)
 
         from post_office.models import Email
 

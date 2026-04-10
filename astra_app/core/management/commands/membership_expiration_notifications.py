@@ -122,7 +122,23 @@ class Command(BaseCommand):
 
             membership_target_username = str(membership.target_username or "").strip()
             membership_type_code = str(membership.membership_type.code or "").strip()
-            if (membership_target_username, membership_type_code) in open_request_keys:
+            membership_request_key = (membership_target_username, membership_type_code)
+            if membership_request_key in open_request_keys:
+                if days_until == 1:
+                    if dry_run:
+                        logger.info(
+                            "[dry-run] Would extend membership expiration for %s/%s by 1 day due to open membership request.",
+                            membership_target_username,
+                            membership_type_code,
+                        )
+                    else:
+                        membership.expires_at = membership.expires_at + datetime.timedelta(days=1)
+                        membership.save(update_fields=["expires_at"])
+                        logger.info(
+                            "Extended membership expiration for %s/%s by 1 day due to open membership request.",
+                            membership_target_username,
+                            membership_type_code,
+                        )
                 logger.info(
                     "Skipped %s for %s; open membership request exists for %s.",
                     template,
