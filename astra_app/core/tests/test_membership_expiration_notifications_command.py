@@ -13,6 +13,7 @@ from core.membership_log_side_effects import apply_membership_log_side_effects
 from core.models import (
     Membership,
     MembershipLog,
+    MembershipRequest,
     MembershipType,
     MembershipTypeCategory,
     Organization,
@@ -172,6 +173,193 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
         from post_office.models import Email
 
         self.assertFalse(
+            Email.objects.filter(
+                to="alice@example.com",
+                template__name=settings.MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+                context__membership_type_code="individual",
+            ).exists()
+        )
+
+    def test_command_skips_expiring_soon_email_when_active_request_exists_for_same_type(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["alice@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            today_utc = timezone.now().astimezone(datetime.UTC).date()
+            expires_in_days = settings.MEMBERSHIP_EXPIRING_SOON_DAYS // 2
+            expires_on_utc = today_utc + datetime.timedelta(days=expires_in_days)
+            expires_at_utc = datetime.datetime.combine(
+                expires_on_utc, datetime.time(23, 59, 59), tzinfo=datetime.UTC
+            )
+
+            self._create_membership_log_with_side_effects(
+                actor_username="reviewer",
+                target_username="alice",
+                membership_type_id="individual",
+                requested_group_cn="almalinux-individual",
+                action=MembershipLog.Action.approved,
+                expires_at=expires_at_utc,
+            )
+            MembershipRequest.objects.create(
+                requested_username="alice",
+                membership_type_id="individual",
+                status=MembershipRequest.Status.pending,
+            )
+
+            with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
+                call_command("membership_expiration_notifications")
+
+        from post_office.models import Email
+
+        self.assertFalse(
+            Email.objects.filter(
+                to="alice@example.com",
+                template__name=settings.MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+                context__membership_type_code="individual",
+            ).exists()
+        )
+
+    def test_command_skips_expiring_soon_email_when_on_hold_request_exists_for_same_type(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["alice@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            today_utc = timezone.now().astimezone(datetime.UTC).date()
+            expires_in_days = settings.MEMBERSHIP_EXPIRING_SOON_DAYS // 2
+            expires_on_utc = today_utc + datetime.timedelta(days=expires_in_days)
+            expires_at_utc = datetime.datetime.combine(
+                expires_on_utc, datetime.time(23, 59, 59), tzinfo=datetime.UTC
+            )
+
+            self._create_membership_log_with_side_effects(
+                actor_username="reviewer",
+                target_username="alice",
+                membership_type_id="individual",
+                requested_group_cn="almalinux-individual",
+                action=MembershipLog.Action.approved,
+                expires_at=expires_at_utc,
+            )
+            MembershipRequest.objects.create(
+                requested_username="alice",
+                membership_type_id="individual",
+                status=MembershipRequest.Status.on_hold,
+            )
+
+            with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
+                call_command("membership_expiration_notifications")
+
+        from post_office.models import Email
+
+        self.assertFalse(
+            Email.objects.filter(
+                to="alice@example.com",
+                template__name=settings.MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+                context__membership_type_code="individual",
+            ).exists()
+        )
+
+    def test_command_sends_expiring_soon_email_when_active_request_is_for_different_type(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="associate",
+            defaults={
+                "name": "Associate",
+                "group_cn": "almalinux-associate",
+                "category_id": "individual",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["alice@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            today_utc = timezone.now().astimezone(datetime.UTC).date()
+            expires_in_days = settings.MEMBERSHIP_EXPIRING_SOON_DAYS // 2
+            expires_on_utc = today_utc + datetime.timedelta(days=expires_in_days)
+            expires_at_utc = datetime.datetime.combine(
+                expires_on_utc, datetime.time(23, 59, 59), tzinfo=datetime.UTC
+            )
+
+            self._create_membership_log_with_side_effects(
+                actor_username="reviewer",
+                target_username="alice",
+                membership_type_id="individual",
+                requested_group_cn="almalinux-individual",
+                action=MembershipLog.Action.approved,
+                expires_at=expires_at_utc,
+            )
+            MembershipRequest.objects.create(
+                requested_username="alice",
+                membership_type_id="associate",
+                status=MembershipRequest.Status.pending,
+            )
+
+            with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
+                call_command("membership_expiration_notifications")
+
+        from post_office.models import Email
+
+        self.assertTrue(
             Email.objects.filter(
                 to="alice@example.com",
                 template__name=settings.MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,

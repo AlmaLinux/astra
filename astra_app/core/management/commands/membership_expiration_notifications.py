@@ -20,7 +20,7 @@ from core.membership_notifications import (
     send_membership_notification,
     would_queue_membership_notification,
 )
-from core.models import Membership
+from core.models import Membership, MembershipRequest
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +81,28 @@ class Command(BaseCommand):
         skipped = 0
         had_expiring_memberships = False
 
+        membership_usernames: set[str] = {
+            str(membership.target_username or "").strip()
+            for membership in memberships
+            if str(membership.target_username or "").strip()
+        }
+        membership_type_codes: set[str] = {
+            str(membership.membership_type.code or "").strip()
+            for membership in memberships
+            if str(membership.membership_type.code or "").strip()
+        }
+        open_request_keys: set[tuple[str, str]] = set()
+        if membership_usernames and membership_type_codes:
+            open_request_keys = {
+                (requested_username, membership_type_id)
+                for requested_username, membership_type_id in MembershipRequest.objects.filter(
+                    requested_username__in=membership_usernames,
+                    requested_organization__isnull=True,
+                    membership_type_id__in=membership_type_codes,
+                    status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
+                ).values_list("requested_username", "membership_type_id")
+            }
+
         for membership in memberships:
             if not membership.expires_at:
                 continue
@@ -97,6 +119,17 @@ class Command(BaseCommand):
             had_expiring_memberships = True
 
             template = settings.MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME
+
+            membership_target_username = str(membership.target_username or "").strip()
+            membership_type_code = str(membership.membership_type.code or "").strip()
+            if (membership_target_username, membership_type_code) in open_request_keys:
+                logger.info(
+                    "Skipped %s for %s; open membership request exists for %s.",
+                    template,
+                    membership_target_username,
+                    membership_type_code,
+                )
+                continue
 
             fu = FreeIPAUser.get(membership.target_username)
             if fu is None or not fu.email:
