@@ -542,6 +542,10 @@ def _render_membership_notes_aggregate(
 ) -> SafeString:
     request = context.get("request")
     http_request = request if isinstance(request, HttpRequest) else None
+    membership_can_add = bool(context.get("membership_can_add", False))
+    membership_can_change = bool(context.get("membership_can_change", False))
+    membership_can_delete = bool(context.get("membership_can_delete", False))
+    can_write = membership_can_add or membership_can_change or membership_can_delete
 
     votes_by_user = last_votes(notes)
     approvals = sum(1 for vote in votes_by_user.values() if vote == "approve")
@@ -579,6 +583,7 @@ def _render_membership_notes_aggregate(
             "disapprovals": disapprovals,
             "current_user_vote": None,
             "can_vote": False,
+            "can_write": can_write,
             "post_url": post_url,
             "aggregate_target_type": aggregate_target_type,
             "aggregate_target": aggregate_target,
@@ -697,6 +702,7 @@ def membership_notes(
     membership_can_change = bool(context.get("membership_can_change", False))
     membership_can_delete = bool(context.get("membership_can_delete", False))
     can_vote = membership_can_add or membership_can_change or membership_can_delete
+    can_write = can_vote
 
     post_url = reverse("membership-request-note-add", args=[mr.pk])
 
@@ -725,6 +731,7 @@ def membership_notes(
             "disapprovals": disapprovals,
             "current_user_vote": current_user_vote,
             "can_vote": can_vote,
+            "can_write": can_write,
             "post_url": post_url,
             "next_url": resolved_next_url,
             "email_modals": email_modals,

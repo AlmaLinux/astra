@@ -3060,7 +3060,7 @@ class OrganizationUserViewsTests(TestCase):
         self.assertContains(resp, "Gold Sponsor Member")
         self.assertNotContains(resp, "Mirror Member")
 
-    def test_organization_aggregate_notes_allows_posting_but_hides_vote_buttons(self) -> None:
+    def test_organization_aggregate_notes_read_only_hides_compose_and_denies_post(self) -> None:
         from core.models import MembershipRequest, MembershipType, Note, Organization
 
         MembershipType.objects.update_or_create(
@@ -3119,7 +3119,8 @@ class OrganizationUserViewsTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Membership Committee Notes")
-        self.assertContains(resp, 'placeholder="Type a note..."')
+        self.assertNotContains(resp, 'data-membership-notes-form="')
+        self.assertNotContains(resp, 'placeholder="Type a note..."')
         self.assertNotContains(resp, 'data-note-action="vote_approve"')
         self.assertNotContains(resp, 'data-note-action="vote_disapprove"')
 
@@ -3137,12 +3138,11 @@ class OrganizationUserViewsTests(TestCase):
                 HTTP_X_REQUESTED_WITH="XMLHttpRequest",
             )
 
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 403)
         payload = resp.json()
-        self.assertTrue(payload.get("ok"))
-        self.assertIn("Hello org aggregate", payload.get("html") or "")
+        self.assertEqual(payload, {"ok": False, "error": "Permission denied."})
 
-        self.assertTrue(
+        self.assertFalse(
             Note.objects.filter(
                 membership_request=req2,
                 username="reviewer",

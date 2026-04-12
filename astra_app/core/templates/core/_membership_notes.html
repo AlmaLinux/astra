@@ -183,95 +183,97 @@
             </button>
           </div>
         </div>
-        <form
-          id="membership-notes-form-{{ membership_request.pk }}"
-          method="post"
-          action="{{ post_url }}"
-          data-membership-notes-form="{{ membership_request.pk }}"
-        >
-          {% csrf_token %}
-          <input type="hidden" name="next" value="{{ next_url }}">
-          {% if aggregate_target_type and aggregate_target %}
-            <input type="hidden" name="aggregate_target_type" value="{{ aggregate_target_type }}">
-            <input type="hidden" name="aggregate_target" value="{{ aggregate_target }}">
-          {% endif %}
-          <input type="hidden" name="note_action" value="message">
-          <div class="input-group">
-            <textarea
-              id="membership-notes-message-{{ membership_request.pk }}"
-              name="message"
-              placeholder="Type a note..."
-              class="form-control"
-              rows="2"
-            ></textarea>
-            <div class="input-group-append">
-              {% if compact %}
-                <button
-                  type="submit"
-                  class="btn btn-light border"
-                  title="Send (Ctrl+Enter)"
-                  aria-label="Send note"
-                >
-                  <i class="fas fa-paper-plane"></i>
-                </button>
-              {% else %}
-                <div class="btn-group" role="group" aria-label="Note actions">
+        {% if can_write %}
+          <form
+            id="membership-notes-form-{{ membership_request.pk }}"
+            method="post"
+            action="{{ post_url }}"
+            data-membership-notes-form="{{ membership_request.pk }}"
+          >
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ next_url }}">
+            {% if aggregate_target_type and aggregate_target %}
+              <input type="hidden" name="aggregate_target_type" value="{{ aggregate_target_type }}">
+              <input type="hidden" name="aggregate_target" value="{{ aggregate_target }}">
+            {% endif %}
+            <input type="hidden" name="note_action" value="message">
+            <div class="input-group">
+              <textarea
+                id="membership-notes-message-{{ membership_request.pk }}"
+                name="message"
+                placeholder="Type a note..."
+                class="form-control"
+                rows="2"
+              ></textarea>
+              <div class="input-group-append">
+                {% if compact %}
                   <button
                     type="submit"
                     class="btn btn-light border"
                     title="Send (Ctrl+Enter)"
                     aria-label="Send note"
                   >
-                    <i class="fas fa-paper-plane mr-1"></i> Send
+                    <i class="fas fa-paper-plane"></i>
                   </button>
-                  {% if can_vote %}
+                {% else %}
+                  <div class="btn-group" role="group" aria-label="Note actions">
                     <button
-                      type="button"
+                      type="submit"
                       class="btn btn-light border"
-                      data-note-action="vote_approve"
-                      title="Vote to approve"
-                      aria-label="Vote approve"
+                      title="Send (Ctrl+Enter)"
+                      aria-label="Send note"
                     >
-                      <i class="fas fa-thumbs-up text-success"></i>
+                      <i class="fas fa-paper-plane mr-1"></i> Send
                     </button>
-                    <button
-                      type="button"
-                      class="btn btn-light border"
-                      data-note-action="vote_disapprove"
-                      title="Vote to disapprove"
-                      aria-label="Vote disapprove"
-                    >
-                      <i class="fas fa-thumbs-down text-danger"></i>
-                    </button>
-                  {% endif %}
+                    {% if can_vote %}
+                      <button
+                        type="button"
+                        class="btn btn-light border"
+                        data-note-action="vote_approve"
+                        title="Vote to approve"
+                        aria-label="Vote approve"
+                      >
+                        <i class="fas fa-thumbs-up text-success"></i>
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn-light border"
+                        data-note-action="vote_disapprove"
+                        title="Vote to disapprove"
+                        aria-label="Vote disapprove"
+                      >
+                        <i class="fas fa-thumbs-down text-danger"></i>
+                      </button>
+                    {% endif %}
+                  </div>
+                {% endif %}
+              </div>
+            </div>
+
+              {% if compact and can_vote %}
+                <div class="d-flex w-100 mt-1" role="group" aria-label="Vote actions">
+                  <button
+                    type="button"
+                    class="btn btn-light border btn-sm flex-fill py-1"
+                    data-note-action="vote_approve"
+                    title="Vote to approve"
+                    aria-label="Vote approve"
+                  >
+                    <i class="fas fa-thumbs-up text-success"></i>
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-light border btn-sm flex-fill py-1"
+                    data-note-action="vote_disapprove"
+                    title="Vote to disapprove"
+                    aria-label="Vote disapprove"
+                  >
+                    <i class="fas fa-thumbs-down text-danger"></i>
+                  </button>
                 </div>
               {% endif %}
-            </div>
-          </div>
-
-            {% if compact and can_vote %}
-              <div class="d-flex w-100 mt-1" role="group" aria-label="Vote actions">
-                <button
-                  type="button"
-                  class="btn btn-light border btn-sm flex-fill py-1"
-                  data-note-action="vote_approve"
-                  title="Vote to approve"
-                  aria-label="Vote approve"
-                >
-                  <i class="fas fa-thumbs-up text-success"></i>
-                </button>
-                <button
-                  type="button"
-                  class="btn btn-light border btn-sm flex-fill py-1"
-                  data-note-action="vote_disapprove"
-                  title="Vote to disapprove"
-                  aria-label="Vote disapprove"
-                >
-                  <i class="fas fa-thumbs-down text-danger"></i>
-                </button>
-              </div>
-            {% endif %}
-        </form>
+          </form>
+        {% endif %}
       </div>
     </div>
 

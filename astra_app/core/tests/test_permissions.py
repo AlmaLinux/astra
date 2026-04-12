@@ -1,6 +1,12 @@
 from django.test import SimpleTestCase
 
-from core.permissions import _has_permission
+from core.permissions import (
+    ASTRA_ADD_MEMBERSHIP,
+    ASTRA_CHANGE_MEMBERSHIP,
+    ASTRA_DELETE_MEMBERSHIP,
+    _has_permission,
+    membership_review_permissions,
+)
 
 
 class _RaisesRuntimeErrorUser:
@@ -10,6 +16,14 @@ class _RaisesRuntimeErrorUser:
 
 class _NoHasPermUser:
     pass
+
+
+class _GrantedPermissionUser:
+    def __init__(self, granted_permissions: set[str]) -> None:
+        self.granted_permissions = granted_permissions
+
+    def has_perm(self, permission: str) -> bool:
+        return permission in self.granted_permissions
 
 
 class PermissionHelpersTests(SimpleTestCase):
@@ -29,3 +43,9 @@ class PermissionHelpersTests(SimpleTestCase):
             allowed = _has_permission(user=user, permission="astra.view_membership")
 
         self.assertEqual(allowed, False)
+
+    def test_membership_review_permissions_manage_permission_implies_membership_can_view(self) -> None:
+        for permission in (ASTRA_ADD_MEMBERSHIP, ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP):
+            permissions = membership_review_permissions(user=_GrantedPermissionUser({permission}))
+
+            self.assertTrue(permissions["membership_can_view"], msg=permission)

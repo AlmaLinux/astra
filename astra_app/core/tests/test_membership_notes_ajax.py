@@ -12,7 +12,12 @@ from django.utils import timezone
 from core.freeipa.user import FreeIPAUser
 from core.membership_notes import CUSTOS
 from core.models import FreeIPAPermissionGrant, MembershipRequest, MembershipType, Note
-from core.permissions import ASTRA_ADD_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP
+from core.permissions import (
+    ASTRA_ADD_MEMBERSHIP,
+    ASTRA_CHANGE_MEMBERSHIP,
+    ASTRA_DELETE_MEMBERSHIP,
+    ASTRA_VIEW_MEMBERSHIP,
+)
 from core.tests.utils_test_data import ensure_core_categories
 
 
@@ -451,6 +456,473 @@ class MembershipNotesAjaxTests(TestCase):
                 action={"type": "vote", "value": "approve"},
             ).exists()
         )
+
+    def test_view_only_user_cannot_submit_plain_message_notes_with_deterministic_403(self) -> None:
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="viewer",
+        )
+
+        self._login_as_freeipa_user("viewer")
+        viewer = FreeIPAUser(
+            "viewer",
+            {
+                "uid": ["viewer"],
+                "mail": ["viewer@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
+            resp = self.client.post(
+                reverse("membership-request-note-add", args=[req.pk]),
+                data={
+                    "note_action": "message",
+                    "message": "plain note",
+                    "next": reverse("membership-requests"),
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json(), {"ok": False, "error": "Permission denied."})
+        self.assertFalse(
+            Note.objects.filter(
+                membership_request=req,
+                username="viewer",
+                content="plain note",
+            ).exists()
+        )
+
+    def test_view_only_user_cannot_submit_plain_aggregate_notes_with_deterministic_403(self) -> None:
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="viewer",
+        )
+
+        self._login_as_freeipa_user("viewer")
+        viewer = FreeIPAUser(
+            "viewer",
+            {
+                "uid": ["viewer"],
+                "mail": ["viewer@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
+            resp = self.client.post(
+                reverse("membership-notes-aggregate-note-add"),
+                data={
+                    "aggregate_target_type": "user",
+                    "aggregate_target": "alice",
+                    "note_action": "message",
+                    "message": "aggregate note",
+                    "compact": "1",
+                    "next": reverse("membership-requests"),
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json(), {"ok": False, "error": "Permission denied."})
+        self.assertFalse(
+            Note.objects.filter(
+                membership_request=req,
+                username="viewer",
+                content="aggregate note",
+            ).exists()
+        )
+
+    def test_manage_user_forged_aggregate_action_returns_deterministic_ajax_deny(self) -> None:
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = self._reviewer_user()
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.post(
+                reverse("membership-notes-aggregate-note-add"),
+                data={
+                    "aggregate_target_type": "user",
+                    "aggregate_target": "alice",
+                    "note_action": "vote_approve",
+                    "message": "forged aggregate action",
+                    "compact": "1",
+                    "next": reverse("membership-requests"),
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json(), {"ok": False, "error": "Permission denied."})
+        self.assertFalse(
+            Note.objects.filter(
+                membership_request=req,
+                username="reviewer",
+                content="forged aggregate action",
+            ).exists()
+        )
+
+    def test_no_membership_permissions_user_cannot_submit_plain_detail_notes_with_deterministic_403(self) -> None:
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        self._login_as_freeipa_user("no_permissions")
+        no_permissions_user = FreeIPAUser(
+            "no_permissions",
+            {
+                "uid": ["no_permissions"],
+                "mail": ["no-permissions@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=no_permissions_user):
+            resp = self.client.post(
+                reverse("membership-request-note-add", args=[req.pk]),
+                data={
+                    "note_action": "message",
+                    "message": "detail note denied",
+                    "next": reverse("membership-requests"),
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json(), {"ok": False, "error": "Permission denied."})
+        self.assertFalse(
+            Note.objects.filter(
+                membership_request=req,
+                username="no_permissions",
+                content="detail note denied",
+            ).exists()
+        )
+
+    def test_no_membership_permissions_user_cannot_submit_plain_aggregate_notes_with_deterministic_403(self) -> None:
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        self._login_as_freeipa_user("no_permissions")
+        no_permissions_user = FreeIPAUser(
+            "no_permissions",
+            {
+                "uid": ["no_permissions"],
+                "mail": ["no-permissions@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=no_permissions_user):
+            resp = self.client.post(
+                reverse("membership-notes-aggregate-note-add"),
+                data={
+                    "aggregate_target_type": "user",
+                    "aggregate_target": "alice",
+                    "note_action": "message",
+                    "message": "aggregate note denied",
+                    "compact": "1",
+                    "next": reverse("membership-requests"),
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json(), {"ok": False, "error": "Permission denied."})
+        self.assertFalse(
+            Note.objects.filter(
+                membership_request=req,
+                username="no_permissions",
+                content="aggregate note denied",
+            ).exists()
+        )
+
+    def test_no_membership_permissions_detail_ajax_does_not_leak_request_existence(self) -> None:
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+        missing_pk = req.pk + 999
+
+        self._login_as_freeipa_user("no_permissions")
+        no_permissions_user = FreeIPAUser(
+            "no_permissions",
+            {
+                "uid": ["no_permissions"],
+                "mail": ["no-permissions@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=no_permissions_user):
+            existing_resp = self.client.post(
+                reverse("membership-request-note-add", args=[req.pk]),
+                data={
+                    "note_action": "message",
+                    "message": "probe note",
+                    "next": reverse("membership-requests"),
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+            missing_resp = self.client.post(
+                reverse("membership-request-note-add", args=[missing_pk]),
+                data={
+                    "note_action": "message",
+                    "message": "probe note",
+                    "next": reverse("membership-requests"),
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+
+        self.assertEqual(existing_resp.status_code, 403)
+        self.assertEqual(existing_resp.json(), {"ok": False, "error": "Permission denied."})
+        self.assertEqual(missing_resp.status_code, 403)
+        self.assertEqual(missing_resp.json(), {"ok": False, "error": "Permission denied."})
+        self.assertFalse(
+            Note.objects.filter(
+                membership_request=req,
+                username="no_permissions",
+                content="probe note",
+            ).exists()
+        )
+
+    def test_any_single_manage_permission_can_submit_plain_detail_note_without_view_permission(self) -> None:
+        for index, permission in enumerate(
+            (ASTRA_ADD_MEMBERSHIP, ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP),
+            start=1,
+        ):
+            username = f"manager{index}"
+            request_username = f"alice-manage-{index}"
+            req = MembershipRequest.objects.create(requested_username=request_username, membership_type_id="individual")
+
+            FreeIPAPermissionGrant.objects.get_or_create(
+                permission=permission,
+                principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+                principal_name=username,
+            )
+
+            self._login_as_freeipa_user(username)
+            manager = FreeIPAUser(
+                username,
+                {
+                    "uid": [username],
+                    "mail": [f"{username}@example.com"],
+                    "memberof_group": [],
+                },
+            )
+
+            content = f"detail note {permission}"
+            with patch("core.freeipa.user.FreeIPAUser.get", return_value=manager):
+                resp = self.client.post(
+                    reverse("membership-request-note-add", args=[req.pk]),
+                    data={
+                        "note_action": "message",
+                        "message": content,
+                        "next": reverse("membership-requests"),
+                    },
+                    HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+                )
+
+            self.assertEqual(resp.status_code, 200, msg=permission)
+            self.assertTrue(resp.json().get("ok"), msg=permission)
+            self.assertTrue(
+                Note.objects.filter(
+                    membership_request=req,
+                    username=username,
+                    content=content,
+                ).exists(),
+                msg=permission,
+            )
+
+    def test_any_single_manage_permission_can_submit_plain_aggregate_note_without_view_permission(self) -> None:
+        for index, permission in enumerate(
+            (ASTRA_ADD_MEMBERSHIP, ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP),
+            start=1,
+        ):
+            username = f"aggregate_manager{index}"
+            target_username = f"aggregate-target-{index}"
+            req = MembershipRequest.objects.create(requested_username=target_username, membership_type_id="individual")
+
+            FreeIPAPermissionGrant.objects.get_or_create(
+                permission=permission,
+                principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+                principal_name=username,
+            )
+
+            self._login_as_freeipa_user(username)
+            manager = FreeIPAUser(
+                username,
+                {
+                    "uid": [username],
+                    "mail": [f"{username}@example.com"],
+                    "memberof_group": [],
+                },
+            )
+
+            content = f"aggregate note {permission}"
+            with patch("core.freeipa.user.FreeIPAUser.get", return_value=manager):
+                resp = self.client.post(
+                    reverse("membership-notes-aggregate-note-add"),
+                    data={
+                        "aggregate_target_type": "user",
+                        "aggregate_target": target_username,
+                        "note_action": "message",
+                        "message": content,
+                        "compact": "1",
+                        "next": reverse("membership-requests"),
+                    },
+                    HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+                )
+
+            self.assertEqual(resp.status_code, 200, msg=permission)
+            self.assertTrue(resp.json().get("ok"), msg=permission)
+            self.assertTrue(
+                Note.objects.filter(
+                    membership_request=req,
+                    username=username,
+                    content=content,
+                ).exists(),
+                msg=permission,
+            )
+
+    def test_aggregate_ajax_context_does_not_force_membership_can_view(self) -> None:
+        req = MembershipRequest.objects.create(requested_username="aggregate-target", membership_type_id="individual")
+
+        manager_username = "aggregate_context_manager"
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_CHANGE_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name=manager_username,
+        )
+
+        self._login_as_freeipa_user(manager_username)
+        manager = FreeIPAUser(
+            manager_username,
+            {
+                "uid": [manager_username],
+                "mail": [f"{manager_username}@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        captured_context: dict[str, object] = {}
+
+        def _capture_context(context: dict[str, object], username: str, *, compact: bool, next_url: str) -> str:
+            del username
+            del compact
+            del next_url
+            captured_context.update(context)
+            return "<div>captured aggregate widget</div>"
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=manager),
+            patch(
+                "core.views_membership.committee.membership_review_permissions",
+                return_value={
+                    "membership_can_add": False,
+                    "membership_can_change": True,
+                    "membership_can_delete": False,
+                    "membership_can_view": False,
+                    "send_mail_can_add": False,
+                },
+            ),
+            patch(
+                "core.templatetags.core_membership_notes.membership_notes_aggregate_for_user",
+                side_effect=_capture_context,
+            ),
+        ):
+            resp = self.client.post(
+                reverse("membership-notes-aggregate-note-add"),
+                data={
+                    "aggregate_target_type": "user",
+                    "aggregate_target": req.requested_username,
+                    "note_action": "message",
+                    "message": "context probe note",
+                    "compact": "1",
+                    "next": reverse("membership-requests"),
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload.get("ok"), True)
+        self.assertEqual(captured_context.get("membership_can_view"), False)
+        self.assertEqual(captured_context.get("membership_can_change"), True)
+        self.assertTrue(
+            Note.objects.filter(
+                membership_request=req,
+                username=manager_username,
+                content="context probe note",
+            ).exists()
+        )
+
+    def test_aggregate_malformed_org_target_returns_deterministic_400_without_persistence(self) -> None:
+        self._login_as_freeipa_user("reviewer")
+        reviewer = self._reviewer_user()
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.post(
+                reverse("membership-notes-aggregate-note-add"),
+                data={
+                    "aggregate_target_type": "org",
+                    "aggregate_target": "not-an-int",
+                    "note_action": "message",
+                    "message": "bad org target",
+                    "compact": "1",
+                    "next": reverse("membership-requests"),
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json(), {"ok": False, "error": "Invalid target."})
+        self.assertFalse(
+            Note.objects.filter(
+                username="reviewer",
+                content="bad org target",
+            ).exists()
+        )
+
+    def test_membership_notes_template_hides_compose_for_read_only_viewers(self) -> None:
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+        Note.objects.create(membership_request=req, username="reviewer", content="Visible note")
+
+        request = RequestFactory().get("/membership-requests")
+        request.session = {"_freeipa_username": "viewer"}
+
+        viewer = FreeIPAUser(
+            "viewer",
+            {
+                "uid": ["viewer"],
+                "mail": ["viewer@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
+            from core.templatetags.core_membership_notes import membership_notes
+
+            html = str(
+                membership_notes(
+                    {
+                        "request": request,
+                        "membership_can_view": True,
+                        "membership_can_add": False,
+                        "membership_can_change": False,
+                        "membership_can_delete": False,
+                    },
+                    req,
+                    compact=False,
+                    next_url="/membership-requests",
+                )
+            )
+
+        self.assertIn("Membership Committee Notes", html)
+        self.assertIn("Visible note", html)
+        self.assertNotIn('data-membership-notes-form="', html)
+        self.assertNotIn('placeholder="Type a note..."', html)
 
     def test_manage_user_can_submit_vote_actions(self) -> None:
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")

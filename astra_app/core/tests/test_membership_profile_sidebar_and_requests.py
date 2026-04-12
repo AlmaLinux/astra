@@ -1475,7 +1475,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertNotContains(resp, "Membership Committee Notes")
         self.assertNotContains(resp, "Hidden note")
 
-    def test_profile_aggregate_notes_allows_posting_but_hides_vote_buttons(self) -> None:
+    def test_profile_aggregate_notes_read_only_hides_compose_and_denies_post(self) -> None:
         from core.models import MembershipRequest, MembershipType, Note
 
         MembershipType.objects.update_or_create(
@@ -1504,8 +1504,18 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         req2 = MembershipRequest.objects.create(requested_username="alice", membership_type_id="mirror")
         Note.objects.create(membership_request=req1, username="reviewer", content="Older note")
 
-        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
-        reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_VIEW_USER_DIRECTORY,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+
+        reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[])
         alice = FreeIPAUser(
             "alice",
             {
@@ -1535,7 +1545,8 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Membership Committee Notes")
-        self.assertContains(resp, 'placeholder="Type a note..."')
+        self.assertNotContains(resp, 'data-membership-notes-form="')
+        self.assertNotContains(resp, 'placeholder="Type a note..."')
         self.assertNotContains(resp, 'data-note-action="vote_approve"')
         self.assertNotContains(resp, 'data-note-action="vote_disapprove"')
 
@@ -1553,12 +1564,11 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
                 HTTP_X_REQUESTED_WITH="XMLHttpRequest",
             )
 
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 403)
         payload = resp.json()
-        self.assertTrue(payload.get("ok"))
-        self.assertIn("Hello from aggregate", payload.get("html") or "")
+        self.assertEqual(payload, {"ok": False, "error": "Permission denied."})
 
-        self.assertTrue(
+        self.assertFalse(
             Note.objects.filter(
                 membership_request=req2,
                 username="reviewer",

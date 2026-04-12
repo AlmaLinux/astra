@@ -3,7 +3,7 @@ from collections.abc import Mapping
 
 from django.conf import settings
 from django.contrib import messages
-from django.contrib.auth.decorators import permission_required
+from django.contrib.auth.decorators import login_required, permission_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError
 from django.db.models import Prefetch, Q
@@ -525,10 +525,15 @@ def render_membership_request_detail_for_committee(
     )
 
 
-@permission_required(ASTRA_VIEW_MEMBERSHIP, login_url=reverse_lazy("users"))
+@login_required(login_url=reverse_lazy("users"))
 @post_only_404
 def membership_request_note_add(request: HttpRequest, pk: int) -> HttpResponse:
-    can_vote = has_any_membership_manage_permission(request.user)
+    is_ajax = str(request.headers.get("X-Requested-With") or "").lower() == "xmlhttprequest"
+    can_write = has_any_membership_manage_permission(request.user)
+    if not can_write:
+        if is_ajax:
+            return JsonResponse({"ok": False, "error": "Permission denied."}, status=403)
+        raise PermissionDenied
 
     req = get_object_or_404(
         MembershipRequest.objects.select_related("membership_type", "requested_organization"),
@@ -541,13 +546,9 @@ def membership_request_note_add(request: HttpRequest, pk: int) -> HttpResponse:
     note_action = _normalize_str(request.POST.get("note_action")).lower()
     message = str(request.POST.get("message") or "")
 
-    is_ajax = str(request.headers.get("X-Requested-With") or "").lower() == "xmlhttprequest"
-
     try:
         user_message = ""
         if note_action == "vote_approve":
-            if not can_vote:
-                raise PermissionDenied
             add_note(
                 membership_request=req,
                 username=actor_username,
@@ -556,8 +557,6 @@ def membership_request_note_add(request: HttpRequest, pk: int) -> HttpResponse:
             )
             user_message = "Recorded approve vote."
         elif note_action == "vote_disapprove":
-            if not can_vote:
-                raise PermissionDenied
             add_note(
                 membership_request=req,
                 username=actor_username,
@@ -605,7 +604,7 @@ def membership_request_note_add(request: HttpRequest, pk: int) -> HttpResponse:
         return redirect(redirect_to)
 
 
-@permission_required(ASTRA_VIEW_MEMBERSHIP, login_url=reverse_lazy("users"))
+@login_required(login_url=reverse_lazy("users"))
 @post_only_404
 def membership_notes_aggregate_note_add(request: HttpRequest) -> HttpResponse:
     redirect_to = _resolve_post_redirect(request, default=reverse("users"))
@@ -616,8 +615,11 @@ def membership_notes_aggregate_note_add(request: HttpRequest) -> HttpResponse:
     compact = _normalize_str(request.POST.get("compact")) in {"1", "true", "yes"}
 
     is_ajax = str(request.headers.get("X-Requested-With") or "").lower() == "xmlhttprequest"
+    can_write = has_any_membership_manage_permission(request.user)
 
-    if note_action not in {"", "message"}:
+    if not can_write:
+        if is_ajax:
+            return JsonResponse({"ok": False, "error": "Permission denied."}, status=403)
         raise PermissionDenied
 
     target_type = _normalize_str(request.POST.get("aggregate_target_type")).lower()
@@ -629,6 +631,9 @@ def membership_notes_aggregate_note_add(request: HttpRequest) -> HttpResponse:
         return redirect(redirect_to)
 
     try:
+        if note_action not in {"", "message"}:
+            raise PermissionDenied
+
         latest: MembershipRequest | None
         if target_type == "user":
             latest = (
@@ -643,7 +648,14 @@ def membership_notes_aggregate_note_add(request: HttpRequest) -> HttpResponse:
                 ).first()
 
         elif target_type == "org":
-            org_id = int(target)
+            try:
+                org_id = int(target)
+            except (TypeError, ValueError):
+                if is_ajax:
+                    return JsonResponse({"ok": False, "error": "Invalid target."}, status=400)
+                messages.error(request, "Invalid target.")
+                return redirect(redirect_to)
+
             latest = (
                 MembershipRequest.objects.filter(requested_organization_id=org_id)
                 .filter(status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold])
@@ -679,7 +691,10 @@ def membership_notes_aggregate_note_add(request: HttpRequest) -> HttpResponse:
                 membership_notes_aggregate_for_user,
             )
 
-            tag_context = {"request": request, "membership_can_view": True}
+            tag_context = {
+                "request": request,
+                **membership_review_permissions(request.user),
+            }
             if target_type == "user":
                 html = membership_notes_aggregate_for_user(
                     tag_context,
@@ -700,6 +715,8 @@ def membership_notes_aggregate_note_add(request: HttpRequest) -> HttpResponse:
         messages.success(request, "Note added.")
         return redirect(redirect_to)
     except PermissionDenied:
+        if is_ajax:
+            return JsonResponse({"ok": False, "error": "Permission denied."}, status=403)
         raise
     except Exception:
         logger.exception(

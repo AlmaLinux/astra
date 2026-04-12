@@ -111,10 +111,20 @@ def can_view_user_directory(user: object) -> bool:
 
 
 def membership_review_permissions(user: object) -> dict[str, bool]:
-    return {
+    permissions = {
         key: _has_permission(user=user, permission=perm)
         for key, perm in MEMBERSHIP_REVIEW_PERMISSION_MAP.items()
     }
+
+    # Manage grants are treated as effective view grants for membership review surfaces.
+    if not permissions["membership_can_view"]:
+        permissions["membership_can_view"] = (
+            permissions["membership_can_add"]
+            or permissions["membership_can_change"]
+            or permissions["membership_can_delete"]
+        )
+
+    return permissions
 
 
 def _has_permission(*, user: object, permission: str) -> bool:
