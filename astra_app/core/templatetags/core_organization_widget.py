@@ -4,7 +4,7 @@ from django.template import Context, Library
 from django.template.loader import render_to_string
 from django.utils.safestring import mark_safe
 
-from core.membership import get_valid_memberships
+from core.models import Membership, Organization
 
 register = Library()
 
@@ -20,11 +20,19 @@ def _should_link_to_detail(value: object) -> bool:
 
 
 @register.simple_tag(takes_context=True, name="organization")
-def organization_widget(context: Context, organization: object, **kwargs: Any) -> str:
+def organization_widget(context: Context, organization: Organization, **kwargs: Any) -> str:
     extra_class = kwargs.get("class", "") or ""
     extra_style = kwargs.get("style", "") or ""
     link_to_detail = _should_link_to_detail(kwargs.get("link_to_detail", True))
-    memberships = get_valid_memberships(organization=organization)
+    if "organization_memberships_by_id" not in context:
+        raise RuntimeError("organization widget requires organization_memberships_by_id in template context")
+
+    memberships_by_id = context["organization_memberships_by_id"]
+    if organization.pk not in memberships_by_id:
+        raise RuntimeError(
+            "organization widget requires organization_memberships_by_id entry for each rendered organization"
+        )
+    memberships: list[Membership] = memberships_by_id[organization.pk]
 
     html = render_to_string(
         "core/_organization_widget.html",
@@ -35,6 +43,5 @@ def organization_widget(context: Context, organization: object, **kwargs: Any) -
             "extra_style": extra_style,
             "link_to_detail": link_to_detail,
         },
-        request=context.get("request"),
     )
     return mark_safe(html)

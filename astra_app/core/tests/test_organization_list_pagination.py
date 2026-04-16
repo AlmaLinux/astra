@@ -1,15 +1,31 @@
 import datetime
+import re
 from html.parser import HTMLParser
 from unittest.mock import patch
 from urllib.parse import quote_plus
 
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
 from core.freeipa.user import FreeIPAUser
-from core.models import FreeIPAPermissionGrant, Membership, MembershipType, MembershipTypeCategory, Organization
-from core.permissions import ASTRA_CHANGE_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP, ASTRA_VIEW_USER_DIRECTORY
+from core.models import (
+    AccountInvitation,
+    FreeIPAPermissionGrant,
+    Membership,
+    MembershipRequest,
+    MembershipType,
+    MembershipTypeCategory,
+    Organization,
+)
+from core.permissions import (
+    ASTRA_ADD_MEMBERSHIP,
+    ASTRA_CHANGE_MEMBERSHIP,
+    ASTRA_VIEW_MEMBERSHIP,
+    ASTRA_VIEW_USER_DIRECTORY,
+)
 from core.views_organizations import _filter_organization_queryset_by_search
 
 
@@ -60,6 +76,99 @@ class _FormInputParser(HTMLParser):
 
 
 class OrganizationListPaginationTests(TestCase):
+    _membership_table_pattern = re.compile(
+        r"(?:from|join)\s+(?:\"|`|\[)?core_membership(?:\"|`|\])?(?:\s+(?:as\s+)?(?P<alias>[a-z_][a-z0-9_]*))?"
+    )
+    _membership_type_join_pattern = re.compile(
+        r"\bjoin\s+(?:\"|`|\[)?core_membershiptype(?:\"|`|\])?\b"
+    )
+    def _query_count_for_table(self, queries: list[dict[str, str]], table_name: str) -> int:
+        escaped_table_name = re.escape(table_name.lower())
+        table_pattern = re.compile(
+            rf"(?<![a-z0-9_])(?:\"|`|\[)?{escaped_table_name}(?:\"|`|\])?(?![a-z0-9_])"
+        )
+        return sum(1 for query in queries if table_pattern.search(query["sql"].lower()))
+
+    def _query_count_for_pattern(self, queries: list[dict[str, str]], pattern: re.Pattern[str]) -> int:
+        return sum(1 for query in queries if pattern.search(query["sql"].lower()))
+
+    def _is_membership_family_c_query(self, sql: str) -> bool:
+        normalized_sql = sql.lower()
+        if self._membership_type_join_pattern.search(normalized_sql) is None:
+            return False
+
+        membership_match = self._membership_table_pattern.search(normalized_sql)
+        if membership_match is None:
+            return False
+
+        alias = membership_match.group("alias")
+        has_target_org_in_filter = re.search(
+            r"target_organization_id(?:\"|`|\])?\s+in\s*\(",
+            normalized_sql,
+        ) is not None
+        if not has_target_org_in_filter:
+            return False
+
+        if alias:
+            alias_target_pattern = re.compile(
+                rf"\b{re.escape(alias)}\.(?:\"|`|\[)?target_organization_id(?:\"|`|\])?\b"
+            )
+            if alias_target_pattern.search(normalized_sql):
+                return True
+
+        return re.search(
+            r"(?:\"|`|\[)?core_membership(?:\"|`|\])?\.(?:\"|`|\[)?target_organization_id(?:\"|`|\])?",
+            normalized_sql,
+        ) is not None
+
+    def _query_count_for_membership_family_c(self, queries: list[dict[str, str]]) -> int:
+        return sum(1 for query in queries if self._is_membership_family_c_query(query["sql"]))
+
+    def test_query_count_for_table_matches_common_sql_table_quoting_styles(self) -> None:
+        queries = [
+            {"sql": 'SELECT * FROM "core_membershiprequest"'},
+            {"sql": "SELECT * FROM core_membershiprequest"},
+            {"sql": "SELECT * FROM `core_membershiprequest`"},
+            {"sql": "SELECT * FROM [core_membershiprequest]"},
+            {"sql": "SELECT * FROM core_membershiprequest_archive"},
+        ]
+
+        self.assertEqual(self._query_count_for_table(queries, "core_membershiprequest"), 4)
+
+    def test_query_count_for_membership_family_c_detects_join_shape_variants(self) -> None:
+        queries = [
+            {
+                "sql": (
+                    'SELECT "core_membership"."id" FROM "core_membership" '
+                    'INNER JOIN "core_membershiptype" '
+                    'ON ("core_membership"."membership_type_id" = "core_membershiptype"."code") '
+                    "WHERE \"core_membership\".\"target_organization_id\" IN (1,2)"
+                )
+            },
+            {
+                "sql": (
+                    "SELECT cm.id FROM core_membership cm "
+                    "JOIN core_membershiptype mt ON (cm.membership_type_id = mt.code) "
+                    "WHERE cm.target_organization_id IN (3,4)"
+                )
+            },
+            {
+                "sql": 'SELECT * FROM "core_membership" WHERE "core_membership"."target_organization_id" = 1'
+            },
+            {
+                "sql": "SELECT * FROM core_membershiptype JOIN core_membershiptypecategory ON (1=1)",
+            },
+            {
+                "sql": (
+                    "SELECT mr.id FROM core_membershiprequest mr "
+                    "JOIN core_membershiptype mt ON (mr.membership_type_id = mt.code) "
+                    "WHERE mr.target_organization_id IN (7,8)"
+                )
+            },
+        ]
+
+        self.assertEqual(self._query_count_for_membership_family_c(queries), 2)
+
     def _login_as_freeipa_user(self, username: str) -> None:
         session = self.client.session
         session["_freeipa_username"] = username
@@ -1039,3 +1148,81 @@ class OrganizationListPaginationTests(TestCase):
             mirror_position,
             "Expected sponsorship badge to render before mirror badge.",
         )
+
+    def test_organizations_page_keeps_membership_review_query_families_constant(self) -> None:
+        mirror_type, sponsor_type = self._ensure_org_membership_types()
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_ADD_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="reviewer",
+        )
+        self._login_as_freeipa_user("reviewer")
+
+        MembershipRequest.objects.create(
+            requested_username="pending-user",
+            membership_type_id="mirror",
+            status=MembershipRequest.Status.pending,
+        )
+        MembershipRequest.objects.create(
+            requested_username="on-hold-user",
+            membership_type_id="sponsor",
+            status=MembershipRequest.Status.on_hold,
+        )
+        AccountInvitation.objects.create(
+            email="accepted@example.com",
+            full_name="Accepted User",
+            invited_by_username="reviewer",
+            accepted_at=timezone.now(),
+        )
+
+        def query_family_counts_for_org_pair_count(org_pair_count: int) -> tuple[int, int, int]:
+            Organization.objects.all().delete()
+            Membership.objects.all().delete()
+
+            for index in range(org_pair_count):
+                sponsor_org = Organization.objects.create(
+                    name=f"Sponsor {index:02d}",
+                    representative=f"s-{index:02d}",
+                )
+                mirror_org = Organization.objects.create(
+                    name=f"Mirror {index:02d}",
+                    representative=f"m-{index:02d}",
+                )
+                Membership.objects.create(target_organization=sponsor_org, membership_type=sponsor_type)
+                Membership.objects.create(target_organization=mirror_org, membership_type=mirror_type)
+
+            reviewer = FreeIPAUser(
+                "reviewer",
+                {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]},
+            )
+
+            with (
+                patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+                patch("core.freeipa.user.FreeIPAUser.all", return_value=[]),
+                CaptureQueriesContext(connection) as query_context,
+            ):
+                response = self.client.get(reverse("organizations"))
+
+            self.assertEqual(response.status_code, 200)
+            executed_queries = [
+                query
+                for query in query_context.captured_queries
+                if query["sql"].strip().lower().startswith("select")
+            ]
+            return (
+                self._query_count_for_table(executed_queries, "core_membershiprequest"),
+                self._query_count_for_table(executed_queries, "core_accountinvitation"),
+                self._query_count_for_membership_family_c(executed_queries),
+            )
+
+        small_counts = query_family_counts_for_org_pair_count(4)
+        large_counts = query_family_counts_for_org_pair_count(40)
+
+        self.assertEqual(
+            small_counts,
+            large_counts,
+            "Membership review query families should remain constant across small and large organization sets.",
+        )
+        self.assertLessEqual(small_counts[0], 2)
+        self.assertLessEqual(small_counts[1], 1)
+        self.assertLessEqual(small_counts[2], 3)

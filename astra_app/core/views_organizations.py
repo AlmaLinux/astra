@@ -32,6 +32,7 @@ from core.membership import (
     expiring_soon_cutoff,
     get_membership_request_eligibility,
     get_valid_memberships,
+    get_valid_memberships_by_organization_ids,
     remove_organization_representative_from_group_if_present,
     resolve_request_ids_by_membership_type,
 )
@@ -526,6 +527,18 @@ def organizations(request: HttpRequest) -> HttpResponse:
         matched_representative_usernames=representative_matches_by_query.get(q_mirror, set()),
     )
 
+    visible_org_ids = {
+        organization.pk
+        for organization in (
+            list(sponsor_card_context["organizations"])
+            + list(mirror_card_context["organizations"])
+            + ([my_organization] if my_organization is not None else [])
+        )
+    }
+    organization_memberships_by_id = get_valid_memberships_by_organization_ids(
+        organization_ids=visible_org_ids,
+    )
+
     return render(
         request,
         "core/organizations.html",
@@ -558,6 +571,7 @@ def organizations(request: HttpRequest) -> HttpResponse:
             "mirror_page_url_prefix": mirror_card_context["page_url_prefix"],
             "sponsor_empty_label": "No AlmaLinux sponsor members found.",
             "mirror_empty_label": mirror_empty_label,
+            "organization_memberships_by_id": organization_memberships_by_id,
         },
     )
 

@@ -52,22 +52,27 @@ def render_widget_grid(
     show_first: bool,
     show_last: bool,
     grid_items: list[dict[str, object]],
+    extra_context: dict[str, object] | None = None,
 ) -> str:
+    template_context = {
+        "title": title,
+        "empty_label": empty_label,
+        "base_query": base_query,
+        "page_url_prefix": page_url_prefix,
+        "paginator": paginator,
+        "page_obj": page_obj,
+        "is_paginated": paginator.num_pages > 1,
+        "page_numbers": page_numbers,
+        "show_first": show_first,
+        "show_last": show_last,
+        "grid_items": grid_items,
+    }
+    if extra_context:
+        template_context.update(extra_context)
+
     html = render_to_string(
         "core/_widget_grid.html",
-        {
-            "title": title,
-            "empty_label": empty_label,
-            "base_query": base_query,
-            "page_url_prefix": page_url_prefix,
-            "paginator": paginator,
-            "page_obj": page_obj,
-            "is_paginated": paginator.num_pages > 1,
-            "page_numbers": page_numbers,
-            "show_first": show_first,
-            "show_last": show_last,
-            "grid_items": grid_items,
-        },
+        template_context,
         request=http_request,
     )
     return mark_safe(html)

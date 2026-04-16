@@ -57,3 +57,4 @@ terraform.rc
 .vscode/
 agent-output/
 rekor-signing-key.pem
+memories/

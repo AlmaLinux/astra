@@ -2,6 +2,7 @@ from typing import Any, cast
 
 from django.template import Context, Library
 
+from core.membership import get_valid_memberships_by_organization_ids
 from core.templatetags._grid_tag_utils import paginate_grid_items, render_widget_grid, resolve_grid_request
 from core.views_utils import _normalize_str
 
@@ -55,6 +56,9 @@ def organization_grid(context: Context, **kwargs: Any) -> str:
     orgs_page = cast(list[object], page_obj.object_list)
 
     grid_items = [{"kind": "organization", "organization": org} for org in orgs_page]
+    organization_memberships_by_id = get_valid_memberships_by_organization_ids(
+        organization_ids=[int(cast(Any, org).pk) for org in orgs_page if hasattr(org, "pk")],
+    )
 
     return render_widget_grid(
         http_request=http_request,
@@ -68,4 +72,5 @@ def organization_grid(context: Context, **kwargs: Any) -> str:
         show_first=show_first,
         show_last=show_last,
         grid_items=cast(list[dict[str, object]], grid_items),
+        extra_context={"organization_memberships_by_id": organization_memberships_by_id},
     )

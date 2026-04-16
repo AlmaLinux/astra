@@ -8,6 +8,51 @@ from core.models import Membership, MembershipType, Organization
 
 
 class OrganizationGridTemplateTagTests(TestCase):
+    def test_organization_widget_requires_precomputed_memberships_mapping(self) -> None:
+        org = Organization.objects.create(
+            name="ContractOrg",
+            business_contact_name="Biz",
+            business_contact_email="biz@example.com",
+            pr_marketing_contact_name="PR",
+            pr_marketing_contact_email="pr@example.com",
+            technical_contact_name="Tech",
+            technical_contact_email="tech@example.com",
+            website_logo="https://example.com/logo",
+            website="https://example.com/",
+            representative="alice",
+        )
+
+        tpl = Template("""{% load core_organization_widget %}{% organization organization %}""")
+
+        with self.assertRaisesMessage(RuntimeError, "organization_memberships_by_id"):
+            tpl.render(Context({"organization": org}))
+
+    def test_organization_widget_requires_explicit_membership_entry_for_organization(self) -> None:
+        org = Organization.objects.create(
+            name="ContractOrg",
+            business_contact_name="Biz",
+            business_contact_email="biz@example.com",
+            pr_marketing_contact_name="PR",
+            pr_marketing_contact_email="pr@example.com",
+            technical_contact_name="Tech",
+            technical_contact_email="tech@example.com",
+            website_logo="https://example.com/logo",
+            website="https://example.com/",
+            representative="alice",
+        )
+
+        tpl = Template("""{% load core_organization_widget %}{% organization organization %}""")
+
+        with self.assertRaisesMessage(RuntimeError, "organization_memberships_by_id"):
+            tpl.render(
+                Context(
+                    {
+                        "organization": org,
+                        "organization_memberships_by_id": {},
+                    }
+                )
+            )
+
     def test_organization_grid_renders_building_fallback_and_sponsorship_label(self) -> None:
         MembershipType.objects.update_or_create(
             code="silver",
@@ -179,4 +224,4 @@ class OrganizationGridTemplateTagTests(TestCase):
         gold_idx = html.find("Gold Sponsor Member")
         self.assertGreater(mirror_idx, -1)
         self.assertGreater(gold_idx, -1)
-        self.assertLess(mirror_idx, gold_idx)
+        self.assertLess(gold_idx, mirror_idx)

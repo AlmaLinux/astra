@@ -1,5 +1,6 @@
 import datetime
 import logging
+from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -484,6 +485,43 @@ def get_valid_memberships(
     )
 
     return list(memberships)
+
+
+def get_valid_memberships_by_organization_ids(*, organization_ids: Iterable[int]) -> dict[int, list[Membership]]:
+    """Return active memberships grouped by target organization for the provided IDs."""
+
+    normalized_org_ids = {int(organization_id) for organization_id in organization_ids}
+    if not normalized_org_ids:
+        return {}
+
+    memberships = (
+        Membership.objects.select_related("membership_type", "membership_type__category")
+        .filter(target_organization_id__in=normalized_org_ids)
+        .active()
+        .order_by(
+            "target_organization_id",
+            Case(
+                When(membership_type__category_id="sponsorship", then=Value(0)),
+                When(membership_type__category_id="mirror", then=Value(1)),
+                default=Value(2),
+                output_field=IntegerField(),
+            ),
+            "membership_type__category__sort_order",
+            "membership_type__category__name",
+            "membership_type__sort_order",
+            "membership_type__code",
+            "membership_type__pk",
+        )
+    )
+
+    memberships_by_organization_id: dict[int, list[Membership]] = defaultdict(list)
+    for membership in memberships:
+        memberships_by_organization_id[membership.target_organization_id].append(membership)
+
+    return {
+        organization_id: list(memberships_by_organization_id[organization_id])
+        for organization_id in normalized_org_ids
+    }
 
 
 def remove_user_from_group(*, username: str, group_cn: str) -> bool:
