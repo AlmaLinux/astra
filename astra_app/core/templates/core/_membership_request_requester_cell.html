@@ -34,5 +34,5 @@ Expected context (inherited from parent via {% include %}):
 {% endif %}
 
 <div class="mt-2">
-  {% membership_notes r compact=True %}
+  {% membership_notes r compact=True next_url=next_url preloaded_notes=row.preloaded_notes fail_on_query_fallback=True %}
 </div>

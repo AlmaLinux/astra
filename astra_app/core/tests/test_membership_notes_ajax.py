@@ -924,6 +924,40 @@ class MembershipNotesAjaxTests(TestCase):
         self.assertNotIn('data-membership-notes-form="', html)
         self.assertNotIn('placeholder="Type a note..."', html)
 
+    def test_membership_notes_fail_fast_rejects_invalid_preloaded_notes(self) -> None:
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        request = RequestFactory().get("/membership-requests")
+        request.session = {"_freeipa_username": "viewer"}
+
+        viewer = FreeIPAUser(
+            "viewer",
+            {
+                "uid": ["viewer"],
+                "mail": ["viewer@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
+            from core.templatetags.core_membership_notes import membership_notes
+
+            with self.assertRaisesRegex(RuntimeError, "requires a valid preloaded notes list"):
+                membership_notes(
+                    {
+                        "request": request,
+                        "membership_can_view": True,
+                        "membership_can_add": False,
+                        "membership_can_change": False,
+                        "membership_can_delete": False,
+                    },
+                    req,
+                    compact=True,
+                    next_url="/membership-requests",
+                    preloaded_notes=[{"bad": "value"}],
+                    fail_on_query_fallback=True,
+                )
+
     def test_manage_user_can_submit_vote_actions(self) -> None:
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
 

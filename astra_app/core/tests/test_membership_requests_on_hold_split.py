@@ -1,10 +1,13 @@
 
 import datetime
 import re
+from collections.abc import Sequence
 from unittest.mock import patch
 
 from django.conf import settings
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
@@ -330,3 +333,240 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
 
         self.assertContains(page_1, "?scope=all&amp;pending_page=2")
         self.assertContains(page_2, "?scope=all&amp;pending_page=1")
+
+    def test_membership_requests_list_limits_note_query_family_to_group_loads(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        pending_requests = [
+            MembershipRequest.objects.create(
+                requested_username=f"pending-user-{idx}",
+                membership_type_id="individual",
+                status=MembershipRequest.Status.pending,
+            )
+            for idx in range(4)
+        ]
+        on_hold_requests = [
+            MembershipRequest.objects.create(
+                requested_username=f"onhold-user-{idx}",
+                membership_type_id="individual",
+                status=MembershipRequest.Status.on_hold,
+                on_hold_at=timezone.now() - datetime.timedelta(days=idx + 1),
+            )
+            for idx in range(3)
+        ]
+
+        for membership_request in [*pending_requests, *on_hold_requests]:
+            MembershipLog.objects.create(
+                actor_username="reviewer",
+                target_username=membership_request.requested_username,
+                membership_type_id="individual",
+                membership_request=membership_request,
+                action=MembershipLog.Action.requested,
+            )
+
+        from post_office.models import STATUS, Email, Log
+
+        from core.models import Note
+
+        for membership_request in pending_requests[:2]:
+            email = Email.objects.create(
+                from_email="noreply@example.com",
+                to=f"{membership_request.requested_username}@example.com",
+                subject=f"Pending contact for {membership_request.requested_username}",
+                message="Pending contact message",
+                html_message="",
+            )
+            Log.objects.create(
+                email=email,
+                status=STATUS.sent,
+                message="sent",
+                exception_type="",
+            )
+            Note.objects.create(
+                membership_request=membership_request,
+                username="reviewer",
+                content=f"pending note for {membership_request.requested_username}",
+                action={"type": "contacted", "kind": "pending", "email_id": email.id},
+            )
+        for membership_request in on_hold_requests[:2]:
+            email = Email.objects.create(
+                from_email="noreply@example.com",
+                to=f"{membership_request.requested_username}@example.com",
+                subject=f"On-hold contact for {membership_request.requested_username}",
+                message="On-hold contact message",
+                html_message="",
+            )
+            Log.objects.create(
+                email=email,
+                status=STATUS.sent,
+                message="sent",
+                exception_type="",
+            )
+            Note.objects.create(
+                membership_request=membership_request,
+                username="reviewer",
+                content=f"on-hold note for {membership_request.requested_username}",
+                action={"type": "contacted", "kind": "on_hold", "email_id": email.id},
+            )
+
+        reviewer = self._make_freeipa_user(
+            "reviewer",
+            email="reviewer@example.com",
+            groups=[settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+        )
+        all_users = [
+            reviewer,
+            *[
+                self._make_freeipa_user(f"pending-user-{idx}", email=f"pending-user-{idx}@example.com")
+                for idx in range(4)
+            ],
+            *[
+                self._make_freeipa_user(f"onhold-user-{idx}", email=f"onhold-user-{idx}@example.com")
+                for idx in range(3)
+            ],
+        ]
+
+        self._login_as_freeipa_user("reviewer")
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.user.FreeIPAUser.all", return_value=all_users),
+            CaptureQueriesContext(connection) as query_context,
+        ):
+            response = self.client.get(reverse("membership-requests"))
+
+        self.assertEqual(response.status_code, 200)
+
+        note_queries = [
+            query
+            for query in query_context.captured_queries
+            if "core_note" in query["sql"].lower() and "select" in query["sql"].lower()
+        ]
+        self.assertLessEqual(
+            len(note_queries),
+            2,
+            msg=(
+                "Membership requests list should use at most two grouped note queries "
+                "(pending + on-hold), not per-row note lookups."
+            ),
+        )
+
+        note_related_queries = [
+            query
+            for query in query_context.captured_queries
+            if (
+                "select" in query["sql"].lower()
+                and (
+                    "core_note" in query["sql"].lower()
+                    or "post_office_email" in query["sql"].lower()
+                    or "post_office_log" in query["sql"].lower()
+                )
+            )
+        ]
+        self.assertLessEqual(
+            len(note_related_queries),
+            2,
+            msg=(
+                "Membership requests list should avoid hidden per-row note-related query amplification "
+                "across note and outbound-email tables."
+            ),
+        )
+
+    def test_membership_requests_view_imports_notes_preload_helper_from_app_layer(self) -> None:
+        from core.views_membership import committee as committee_module
+
+        self.assertEqual(
+            "core.membership_notes_preload",
+            committee_module.build_notes_by_membership_request_id.__module__,
+            msg="membership requests view must depend on app-layer note preloading, not template tags.",
+        )
+
+    def test_membership_requests_list_preloads_notes_for_rendered_page_rows_only(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        pending_count = 55
+        on_hold_count = 12
+
+        for idx in range(pending_count):
+            MembershipRequest.objects.create(
+                requested_username=f"pending-page-user-{idx}",
+                membership_type_id="individual",
+                status=MembershipRequest.Status.pending,
+            )
+
+        for idx in range(on_hold_count):
+            MembershipRequest.objects.create(
+                requested_username=f"onhold-page-user-{idx}",
+                membership_type_id="individual",
+                status=MembershipRequest.Status.on_hold,
+                on_hold_at=timezone.now() - datetime.timedelta(days=idx + 1),
+            )
+
+        reviewer = self._make_freeipa_user(
+            "reviewer",
+            email="reviewer@example.com",
+            groups=[settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+        )
+        all_users = [
+            reviewer,
+            *[
+                self._make_freeipa_user(
+                    f"pending-page-user-{idx}",
+                    email=f"pending-page-user-{idx}@example.com",
+                )
+                for idx in range(pending_count)
+            ],
+            *[
+                self._make_freeipa_user(
+                    f"onhold-page-user-{idx}",
+                    email=f"onhold-page-user-{idx}@example.com",
+                )
+                for idx in range(on_hold_count)
+            ],
+        ]
+
+        call_request_id_counts: list[int] = []
+
+        def _capture_preload_ids(membership_request_ids: Sequence[int]) -> dict[int, list[object]]:
+            call_request_id_counts.append(len(list(membership_request_ids)))
+            return {}
+
+        self._login_as_freeipa_user("reviewer")
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.user.FreeIPAUser.all", return_value=all_users),
+            patch(
+                "core.views_membership.committee.build_notes_by_membership_request_id",
+                side_effect=_capture_preload_ids,
+            ),
+        ):
+            response = self.client.get(reverse("membership-requests"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [50, 10],
+            call_request_id_counts,
+            msg=(
+                "Membership requests list should preload notes only for rendered page rows "
+                "(pending page size 50, on-hold page size 10)."
+            ),
+        )

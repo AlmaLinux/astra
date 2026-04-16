@@ -673,6 +673,8 @@ def membership_notes(
     *,
     compact: bool = False,
     next_url: str | None = None,
+    preloaded_notes: list[Note] | None = None,
+    fail_on_query_fallback: bool = False,
 ) -> SafeString | str:
     request = context.get("request")
     http_request = request if isinstance(request, HttpRequest) else None
@@ -686,7 +688,17 @@ def membership_notes(
     if mr is None:
         return ""
 
-    notes = list(Note.objects.filter(membership_request_id=mr.pk).order_by("timestamp", "pk"))
+    fallback_error = "membership_notes requires a valid preloaded notes list for this rendering path"
+    if preloaded_notes is None:
+        if fail_on_query_fallback:
+            raise RuntimeError(fallback_error)
+        notes = list(Note.objects.filter(membership_request_id=mr.pk).order_by("timestamp", "pk"))
+    elif not isinstance(preloaded_notes, list) or any(not isinstance(note, Note) for note in preloaded_notes):
+        if fail_on_query_fallback:
+            raise RuntimeError(fallback_error)
+        notes = list(Note.objects.filter(membership_request_id=mr.pk).order_by("timestamp", "pk"))
+    else:
+        notes = list(preloaded_notes)
     votes_by_user = last_votes(notes)
     approvals = sum(1 for vote in votes_by_user.values() if vote == "approve")
     disapprovals = sum(1 for vote in votes_by_user.values() if vote == "disapprove")
@@ -706,8 +718,11 @@ def membership_notes(
 
     post_url = reverse("membership-request-note-add", args=[mr.pk])
 
-    email_modals = _email_modals_for_notes(notes)
-    email_modal_ids = {m["email_id"]: m["modal_id"] for m in email_modals}
+    email_modals: list[dict[str, Any]] = []
+    email_modal_ids: dict[int, str] | None = None
+    if not compact:
+        email_modals = _email_modals_for_notes(notes)
+        email_modal_ids = {m["email_id"]: m["modal_id"] for m in email_modals}
     request_resubmitted_new_snapshots_by_note_id = _request_resubmitted_new_snapshots_by_note_id(
         notes,
         current_responses_by_request_id={int(mr.pk): _normalize_response_snapshot(mr.responses)},

@@ -23,6 +23,11 @@ from core.logging_extras import current_exception_log_fields
 from core.membership import visible_committee_membership_requests
 from core.membership_constants import MembershipCategoryCode
 from core.membership_notes import add_note
+from core.membership_notes_preload import build_notes_by_membership_request_id
+from core.membership_notes_render import (
+    render_membership_notes_aggregate_widget,
+    render_membership_notes_widget,
+)
 from core.membership_notifications import organization_sponsor_notification_recipient_email
 from core.membership_request_workflow import (
     _resolve_approval_template_name,
@@ -394,6 +399,20 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
         page_url_prefix=on_hold_page_url_prefix,
     )
 
+    pending_page_rows = list(pending_page_ctx["page_obj"].object_list)
+    pending_notes_by_request_id = build_notes_by_membership_request_id(
+        [int(row["r"].pk) for row in pending_page_rows]
+    )
+    for row in pending_page_rows:
+        row["preloaded_notes"] = pending_notes_by_request_id.get(int(row["r"].pk), [])
+
+    on_hold_page_rows = list(on_hold_page_ctx["page_obj"].object_list)
+    on_hold_notes_by_request_id = build_notes_by_membership_request_id(
+        [int(row["r"].pk) for row in on_hold_page_rows]
+    )
+    for row in on_hold_page_rows:
+        row["preloaded_notes"] = on_hold_notes_by_request_id.get(int(row["r"].pk), [])
+
     return render(
         request,
         "core/membership_requests.html",
@@ -574,11 +593,10 @@ def membership_request_note_add(request: HttpRequest, pk: int) -> HttpResponse:
             user_message = "Note added."
 
         if is_ajax:
-            from core.templatetags.core_membership_notes import membership_notes
-
-            html = membership_notes(
-                {"request": request, **membership_review_permissions(request.user)},
-                req,
+            html = render_membership_notes_widget(
+                request=request,
+                review_permissions=membership_review_permissions(request.user),
+                membership_request=req,
                 compact=False,
                 next_url=redirect_to,
             )
@@ -686,29 +704,14 @@ def membership_notes_aggregate_note_add(request: HttpRequest) -> HttpResponse:
         )
 
         if is_ajax:
-            from core.templatetags.core_membership_notes import (
-                membership_notes_aggregate_for_organization,
-                membership_notes_aggregate_for_user,
+            html = render_membership_notes_aggregate_widget(
+                request=request,
+                review_permissions=membership_review_permissions(request.user),
+                target_type=target_type,
+                target=target,
+                compact=compact,
+                next_url=redirect_to,
             )
-
-            tag_context = {
-                "request": request,
-                **membership_review_permissions(request.user),
-            }
-            if target_type == "user":
-                html = membership_notes_aggregate_for_user(
-                    tag_context,
-                    target,
-                    compact=compact,
-                    next_url=redirect_to,
-                )
-            else:
-                html = membership_notes_aggregate_for_organization(
-                    tag_context,
-                    int(target),
-                    compact=compact,
-                    next_url=redirect_to,
-                )
 
             return JsonResponse({"ok": True, "html": str(html), "message": "Note added."})
 

@@ -2,7 +2,6 @@ import logging
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
-from avatar.templatetags.avatar_tags import avatar_url
 from django.conf import settings
 from django.contrib import messages
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
@@ -15,6 +14,7 @@ from core.agreements import (
     list_agreements_for_user,
     missing_required_agreements_for_user_in_group,
 )
+from core.avatar_providers import resolve_avatar_urls_for_users
 from core.country_codes import country_code_status_from_user_data, country_name_from_code
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import FreeIPAUser
@@ -693,15 +693,19 @@ def users_grid(request: HttpRequest) -> JsonResponse:
         per_page=28,
     )
 
+    users_page_list = list(users_page)
+    avatar_url_by_username, avatar_resolution_count, avatar_fallback_count = resolve_avatar_urls_for_users(
+        users_page_list,
+        width=50,
+        height=50,
+    )
+
     items: list[dict[str, str]] = []
-    for user in users_page:
+    for user in users_page_list:
         username = try_get_username_from_user(user)
         if not username:
             continue
-        try:
-            user_avatar_url = str(avatar_url(user, 50, 50) or "").strip()
-        except Exception:
-            user_avatar_url = ""
+        user_avatar_url = avatar_url_by_username.get(username, "")
         items.append(
             {
                 "username": username,
@@ -709,6 +713,13 @@ def users_grid(request: HttpRequest) -> JsonResponse:
                 "avatar_url": user_avatar_url,
             }
         )
+
+    logger.info(
+        "users_grid_metrics route=/users/grid page_size=%s avatar_resolution_count=%s avatar_fallback_count=%s",
+        len(items),
+        avatar_resolution_count,
+        avatar_fallback_count,
+    )
 
     page_url_prefix = f"{reverse('users')}{page_url_prefix}"
     start_index = page_obj.start_index() if paginator.count else 0

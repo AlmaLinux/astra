@@ -120,6 +120,41 @@ class UserRoutesTests(TestCase):
         self.assertEqual("Alice User", items[0]["full_name"])
         self.assertIn("gravatar.com/avatar", items[0]["avatar_url"])
 
+    def test_users_grid_resolves_avatar_once_per_unique_username_within_request(self) -> None:
+        self._login_as_freeipa("admin")
+
+        users = [
+            self._user_stub("alice", full_name="Alice One", email="alice@example.org"),
+            self._user_stub("Alice", full_name="Alice Two", email="alice@example.org"),
+            self._user_stub("bob", full_name="Bob User", email="bob@example.org"),
+        ]
+
+        avatar_calls: list[str] = []
+
+        def _fake_avatar_url(user: object, width: int, height: int) -> str:
+            del width
+            del height
+            username = str(user.username).strip()
+            avatar_calls.append(username)
+            return f"https://avatar.example/{username}.png"
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.all", return_value=users),
+            patch("core.avatar_providers.avatar_url", side_effect=_fake_avatar_url),
+        ):
+            response = self.client.get("/users/grid/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        items = payload.get("users", [])
+        self.assertEqual(["alice", "Alice", "bob"], [item["username"] for item in items])
+        self.assertEqual(2, len(set(avatar_calls)))
+        self.assertEqual(
+            2,
+            len(avatar_calls),
+            msg="Users grid should resolve avatar URLs once per unique identity per request, ignoring username case.",
+        )
+
 
 class LoginRedirectTests(TestCase):
     def test_freeipa_login_post_honors_safe_next_redirect(self) -> None:
