@@ -136,8 +136,6 @@ if _sentry_dsn:
         "ballot_hash",
         # Vote metadata (reveals voter privilege level = PII in small elections)
         "weight",
-        # Voter identity linkage (directly identifies who voted)
-        "freeipa_username",
         # --- MEDIUM-RISK: Ballot chaining & aggregate structures ---
         # Ballot chaining/blockchain-like commitments
         "chain_hash",
