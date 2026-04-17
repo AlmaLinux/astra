@@ -1,3 +1,4 @@
+import json
 import logging
 import threading
 from collections.abc import Callable
@@ -23,10 +24,72 @@ _viewer_username_local = threading.local()
 
 _FREEIPA_REQUEST_TIMEOUT_SECONDS: int = settings.FREEIPA_REQUEST_TIMEOUT_SECONDS
 
+
+def _freeipa_rpc_span_data_from_body(body: object) -> dict[str, object] | None:
+    if isinstance(body, bytes):
+        try:
+            body_text = body.decode("utf-8")
+        except UnicodeDecodeError:
+            return None
+    elif isinstance(body, str):
+        body_text = body
+    else:
+        return None
+
+    try:
+        payload = json.loads(body_text)
+    except (TypeError, ValueError):
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+
+    method = payload.get("method")
+    if not isinstance(method, str):
+        return None
+
+    normalized_method = method.strip()
+    if not normalized_method:
+        return None
+
+    span_data: dict[str, object] = {"freeipa.rpc_method": normalized_method}
+    params = payload.get("params")
+    if isinstance(params, list):
+        if params and isinstance(params[0], list):
+            span_data["freeipa.rpc_arg_count"] = len(params[0])
+        if len(params) > 1 and isinstance(params[1], dict):
+            span_data["freeipa.rpc_option_keys"] = sorted(str(key) for key in params[1])
+
+    return span_data
+
+
+def _annotate_freeipa_response_span(response: requests.Response, *_args: object, **_kwargs: object) -> requests.Response:
+    raw_response = response.raw
+    connection = getattr(raw_response, "connection", None) or getattr(raw_response, "_connection", None)
+    span = getattr(connection, "_sentrysdk_span", None)
+    if span is None:
+        return response
+
+    request_body = response.request.body if response.request is not None else None
+    span_data = _freeipa_rpc_span_data_from_body(request_body)
+    if span_data is None:
+        return response
+
+    rpc_method = span_data["freeipa.rpc_method"]
+    if isinstance(span.description, str) and span.description:
+        suffix = f"[{rpc_method}]"
+        if suffix not in span.description:
+            span.description = f"{span.description} {suffix}"
+
+    span.set_tag("freeipa.rpc_method", rpc_method)
+    span.update_data(span_data)
+    return response
+
 class _FreeIPATimeoutSession(requests.Session):
     def __init__(self, default_timeout: float) -> None:
         super().__init__()
         self.default_timeout = default_timeout
+        self.hooks["response"].append(_annotate_freeipa_response_span)
 
     @override
     def request(self, method: str, url: str, **kwargs: object) -> requests.Response:
@@ -166,8 +229,10 @@ def _with_freeipa_service_client_retry[T](get_client: Callable[[], ClientMeta], 
 
 
 __all__ = [
+    "_annotate_freeipa_response_span",
     "_FreeIPATimeoutSession",
     "_build_freeipa_client",
+    "_freeipa_rpc_span_data_from_body",
     "_get_freeipa_client",
     "_get_freeipa_service_client_cached",
     "clear_freeipa_service_client_cache",

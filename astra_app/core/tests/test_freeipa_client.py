@@ -3,10 +3,46 @@ from unittest.mock import Mock, patch
 
 from django.test import SimpleTestCase
 
-from core.freeipa.client import clear_freeipa_service_client_cache
+from core.freeipa.client import (
+    _annotate_freeipa_response_span,
+    _FreeIPATimeoutSession,
+    clear_freeipa_service_client_cache,
+)
 
 
 class FreeIPAClientTests(SimpleTestCase):
+    def test_timeout_session_registers_sentry_response_hook(self) -> None:
+        session = _FreeIPATimeoutSession(default_timeout=10.0)
+
+        self.assertIn(_annotate_freeipa_response_span, session.hooks["response"])
+
+    def test_response_hook_adds_freeipa_rpc_method_to_sentry_span(self) -> None:
+        span = Mock()
+        span.description = "POST https://ipa02.awsuseast1.ipa.almalinux.org/ipa/session/json"
+        connection = Mock()
+        connection._sentrysdk_span = span
+        response = Mock()
+        response.raw.connection = connection
+        response.request.body = (
+            b'{"method": "user_show", "params": [["alice"], {"all": true, "raw": false}], "id": 0}'
+        )
+
+        returned = _annotate_freeipa_response_span(response)
+
+        self.assertIs(returned, response)
+        self.assertEqual(
+            span.description,
+            "POST https://ipa02.awsuseast1.ipa.almalinux.org/ipa/session/json [user_show]",
+        )
+        span.set_tag.assert_called_once_with("freeipa.rpc_method", "user_show")
+        span.update_data.assert_called_once_with(
+            {
+                "freeipa.rpc_method": "user_show",
+                "freeipa.rpc_arg_count": 1,
+                "freeipa.rpc_option_keys": ["all", "raw"],
+            }
+        )
+
     def test_reset_freeipa_client_clears_thread_local_service_client(self) -> None:
         clear_freeipa_service_client_cache()
 
