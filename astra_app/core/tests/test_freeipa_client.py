@@ -40,7 +40,9 @@ class FreeIPAClientTests(SimpleTestCase):
             {
                 "freeipa.rpc_method": "user_show",
                 "freeipa.rpc_arg_count": 1,
+                "freeipa.rpc_args": ["alice"],
                 "freeipa.rpc_option_keys": ["all", "raw"],
+                "freeipa.rpc_options": {"all": True, "raw": False},
                 "freeipa.rpc_response_bytes": 321,
             }
         )
@@ -64,7 +66,9 @@ class FreeIPAClientTests(SimpleTestCase):
             {
                 "freeipa.rpc_method": "user_find",
                 "freeipa.rpc_arg_count": 0,
+                "freeipa.rpc_args": [],
                 "freeipa.rpc_option_keys": ["uid"],
+                "freeipa.rpc_options": {"uid": "alice"},
                 "freeipa.rpc_response_bytes": len(response._content),
             }
         )

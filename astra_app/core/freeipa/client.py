@@ -57,8 +57,10 @@ def _freeipa_rpc_span_data_from_body(body: object) -> dict[str, object] | None:
     if isinstance(params, list):
         if params and isinstance(params[0], list):
             span_data["freeipa.rpc_arg_count"] = len(params[0])
+            span_data["freeipa.rpc_args"] = params[0]
         if len(params) > 1 and isinstance(params[1], dict):
             span_data["freeipa.rpc_option_keys"] = sorted(str(key) for key in params[1])
+            span_data["freeipa.rpc_options"] = params[1]
 
     return span_data
 
