@@ -1,8 +1,9 @@
 from unittest.mock import patch
 
+from django.core.cache import cache
 from django.test import TestCase
 
-from core.freeipa_directory import search_freeipa_users
+from core.freeipa_directory import search_freeipa_users, snapshot_freeipa_users
 
 
 class _DummyUserFindClient:
@@ -27,6 +28,98 @@ class _BranchingUserFindClient:
 
 
 class FreeIPADirectoryPerformanceTests(TestCase):
+    def test_snapshot_uses_lightweight_full_directory_shape_and_normalizes_rows(self) -> None:
+        client = _DummyUserFindClient(
+            {
+                "result": [
+                    {
+                        "uid": ["Bob"],
+                        "gecos": ["Bob Example"],
+                        "mail": ["bob@example.org"],
+                        "fasIsPrivate": ["TRUE"],
+                    },
+                    {
+                        "uid": ["alice"],
+                        "displayname": ["Alice Example"],
+                        "mail": ["alice@example.org"],
+                        "memberof_group": ["packagers"],
+                    },
+                    {
+                        "uid": ["skipme"],
+                        "displayname": ["Skip Me"],
+                    },
+                    {
+                        "uid": [""],
+                        "displayname": ["Missing Username"],
+                    },
+                    {
+                        "cn": ["No Username"],
+                    },
+                    {
+                        "uid": ["carol"],
+                        "cn": ["Carol Common"],
+                    },
+                    {
+                        "uid": ["dave"],
+                        "givenname": ["Dave"],
+                        "sn": ["User"],
+                    },
+                ]
+            }
+        )
+
+        with (
+            patch("core.freeipa_directory.FreeIPAUser.get_client", return_value=client),
+            patch(
+                "core.freeipa_directory.FreeIPAUser.all",
+                side_effect=AssertionError("Shape E must not fall back to FreeIPAUser.all()"),
+            ),
+            self.settings(FREEIPA_FILTERED_USERNAMES=("skipme",)),
+        ):
+            users = snapshot_freeipa_users()
+
+        self.assertEqual([user.username for user in users], ["alice", "Bob", "carol", "dave"])
+        self.assertEqual(users[0].full_name, "Alice Example")
+        self.assertEqual(users[0].email, "alice@example.org")
+        self.assertEqual(users[0].groups_list, [])
+        self.assertEqual(users[1].full_name, "Bob Example")
+        self.assertTrue(users[1].fas_is_private)
+        self.assertEqual(users[2].full_name, "Carol Common")
+        self.assertEqual(users[3].full_name, "Dave User")
+        self.assertEqual(len(client.calls), 1)
+        self.assertEqual(
+            client.calls[0][1],
+            {
+                "o_all": False,
+                "o_no_members": True,
+                "o_sizelimit": 0,
+                "o_timelimit": 0,
+            },
+        )
+
+    def test_snapshot_does_not_touch_full_detail_cache(self) -> None:
+        client = _DummyUserFindClient(
+            {
+                "result": [
+                    {
+                        "uid": ["alice"],
+                        "displayname": ["Alice Example"],
+                    }
+                ]
+            }
+        )
+
+        with (
+            patch("core.freeipa_directory.FreeIPAUser.get_client", return_value=client),
+            patch.object(cache, "get", side_effect=AssertionError("Shape E must not read the full-detail cache")),
+            patch.object(cache, "set", side_effect=AssertionError("Shape E must not write the full-detail cache")),
+            patch.object(cache, "get_or_set", side_effect=AssertionError("Shape E must not prime cache aliases")),
+            patch.object(cache, "delete", side_effect=AssertionError("Shape E must not invalidate the full-detail cache")),
+        ):
+            users = snapshot_freeipa_users()
+
+        self.assertEqual([user.username for user in users], ["alice"])
+
     def test_search_uses_server_side_user_find_not_full_directory_scan(self) -> None:
         client = _DummyUserFindClient(
             {
@@ -53,6 +146,16 @@ class FreeIPADirectoryPerformanceTests(TestCase):
 
         self.assertEqual([user.username for user in users], ["alice"])
         self.assertEqual(len(client.calls), 1)
+        self.assertEqual(
+            client.calls[0][1],
+            {
+                "a_criteria": "alice",
+                "o_all": False,
+                "o_no_members": True,
+                "o_sizelimit": 10,
+                "o_timelimit": 0,
+            },
+        )
 
     def test_search_applies_exclusions_without_fallback_to_all(self) -> None:
         client = _DummyUserFindClient(
@@ -81,6 +184,16 @@ class FreeIPADirectoryPerformanceTests(TestCase):
 
         self.assertEqual([user.username for user in users], ["alice"])
         self.assertEqual(len(client.calls), 1)
+        self.assertEqual(
+            client.calls[0][1],
+            {
+                "a_criteria": "user",
+                "o_all": False,
+                "o_no_members": True,
+                "o_sizelimit": 11,
+                "o_timelimit": 0,
+            },
+        )
 
     def test_search_filters_out_server_matches_from_non_name_attributes(self) -> None:
         client = _DummyUserFindClient(
@@ -106,6 +219,16 @@ class FreeIPADirectoryPerformanceTests(TestCase):
 
         self.assertEqual([user.username for user in users], [])
         self.assertEqual(len(client.calls), 1)
+        self.assertEqual(
+            client.calls[0][1],
+            {
+                "a_criteria": "smith",
+                "o_all": False,
+                "o_no_members": True,
+                "o_sizelimit": 10,
+                "o_timelimit": 0,
+            },
+        )
 
     def test_search_matches_multiword_display_name_query_with_middle_name_gap(self) -> None:
         client = _DummyUserFindClient(
@@ -167,3 +290,24 @@ class FreeIPADirectoryPerformanceTests(TestCase):
 
         self.assertEqual([user.username for user in users], ["alice"])
         self.assertEqual([call[1].get("a_criteria") for call in client.calls], ["alex ir", "alex"])
+        self.assertEqual(len(client.calls), 2)
+        self.assertEqual(
+            client.calls[0][1],
+            {
+                "a_criteria": "alex ir",
+                "o_all": False,
+                "o_no_members": True,
+                "o_sizelimit": 10,
+                "o_timelimit": 0,
+            },
+        )
+        self.assertEqual(
+            client.calls[1][1],
+            {
+                "a_criteria": "alex",
+                "o_all": False,
+                "o_no_members": True,
+                "o_sizelimit": 10,
+                "o_timelimit": 0,
+            },
+        )

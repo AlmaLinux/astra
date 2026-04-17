@@ -39,6 +39,7 @@ class FreeIPAAuthenticationFormTests(TestCase):
 
         with (
             patch("core.forms_auth.FreeIPAUser.find_by_email", autospec=True) as find_by_email,
+            patch("core.forms_auth.FreeIPAUser.get", side_effect=AssertionError("login form should not do a second caller-local lookup")),
             patch("django.contrib.auth.forms.authenticate", autospec=True) as authenticate,
         ):
             find_by_email.return_value = SimpleNamespace(username="alice")
@@ -54,6 +55,8 @@ class FreeIPAAuthenticationFormTests(TestCase):
             )
 
             self.assertTrue(form.is_valid())
+            self.assertEqual(find_by_email.call_count, 1)
+            self.assertEqual(find_by_email.call_args.args[-1], "alice@example.com")
             authenticate.assert_called_once_with(request, username="alice", password="pw")
 
     def test_otp_retry_falls_back_to_plain_password_when_combined_fails(self) -> None:

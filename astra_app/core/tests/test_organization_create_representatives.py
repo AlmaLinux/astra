@@ -108,8 +108,9 @@ class OrganizationCreateRepresentativesTests(TestCase):
         )
         self._login_as_freeipa_user("reviewer")
 
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "displayname": ["Bob Example"], "memberof_group": []})
         bobby = FreeIPAUser("bobby", {"uid": ["bobby"], "memberof_group": []})
+        helper_calls: list[dict[str, object]] = []
 
         def fake_search_freeipa_users(
             *,
@@ -117,7 +118,13 @@ class OrganizationCreateRepresentativesTests(TestCase):
             limit: int,
             exclude_usernames=None,
         ) -> list[FreeIPAUser]:
-            _ = (query, limit, exclude_usernames)
+            helper_calls.append(
+                {
+                    "query": query,
+                    "limit": limit,
+                    "exclude_usernames": set(exclude_usernames or set()),
+                }
+            )
             return [bob, bobby]
 
         with (
@@ -129,6 +136,21 @@ class OrganizationCreateRepresentativesTests(TestCase):
             self.assertIn("results", resp.json())
             ids = [r.get("id") for r in resp.json().get("results")]
             self.assertEqual(ids, ["bob", "bobby"])
+            self.assertEqual(
+                [r.get("text") for r in resp.json().get("results")],
+                ["Bob Example (bob)", "bobby"],
+            )
+
+        self.assertEqual(
+            helper_calls,
+            [
+                {
+                    "query": "bo",
+                    "limit": 20,
+                    "exclude_usernames": set(),
+                }
+            ],
+        )
 
     def test_organization_edit_prefills_representative_with_full_name(self) -> None:
         FreeIPAPermissionGrant.objects.create(

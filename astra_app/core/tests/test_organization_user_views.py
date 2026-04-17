@@ -409,6 +409,7 @@ class OrganizationUserViewsTests(TestCase):
 
         bob_user = FreeIPAUser("bob", {"uid": ["bob"], "displayname": ["Bob Example"], "memberof_group": [], "c": ["US"]})
         bobby_user = FreeIPAUser("bobby", {"uid": ["bobby"], "displayname": ["Bobby Example"], "memberof_group": [], "c": ["US"]})
+        helper_calls: list[dict[str, object]] = []
 
         def fake_search_freeipa_users(
             *,
@@ -416,7 +417,13 @@ class OrganizationUserViewsTests(TestCase):
             limit: int,
             exclude_usernames=None,
         ) -> list[FreeIPAUser]:
-            _ = (query, limit)
+            helper_calls.append(
+                {
+                    "query": query,
+                    "limit": limit,
+                    "exclude_usernames": set(exclude_usernames or set()),
+                }
+            )
             excluded = set(exclude_usernames or set())
             ordered = [bob_user, bobby_user]
             return [user for user in ordered if user.username not in excluded]
@@ -430,11 +437,35 @@ class OrganizationUserViewsTests(TestCase):
             self.assertEqual(resp.status_code, 200)
             ids = [r.get("id") for r in resp.json().get("results")]
             self.assertEqual(ids, ["bobby"])
+            self.assertEqual(
+                [r.get("text") for r in resp.json().get("results")],
+                ["Bobby Example (bobby)"],
+            )
 
             resp = self.client.get(url, {"q": "bo", "organization_id": str(org.pk)})
             self.assertEqual(resp.status_code, 200)
             ids = [r.get("id") for r in resp.json().get("results")]
             self.assertEqual(ids, ["bob", "bobby"])
+            self.assertEqual(
+                [r.get("text") for r in resp.json().get("results")],
+                ["Bob Example (bob)", "Bobby Example (bobby)"],
+            )
+
+        self.assertEqual(
+            helper_calls,
+            [
+                {
+                    "query": "bo",
+                    "limit": 20,
+                    "exclude_usernames": {"bob"},
+                },
+                {
+                    "query": "bo",
+                    "limit": 20,
+                    "exclude_usernames": set(),
+                },
+            ],
+        )
 
     def test_committee_cannot_set_representative_to_user_already_representing_other_org(self) -> None:
         from core.models import Organization

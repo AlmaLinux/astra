@@ -10,7 +10,7 @@ from django.utils import timezone
 from core.election_nominators import organization_nominator_identifier, parse_nominator_identifier
 from core.freeipa.exceptions import FreeIPAMisconfiguredError, FreeIPAUnavailableError
 from core.freeipa.group import FreeIPAGroup, get_freeipa_group_for_elections
-from core.freeipa.user import FreeIPAUser
+from core.freeipa_directory import snapshot_freeipa_users
 from core.models import Election, Membership
 
 FREEIPA_UNAVAILABLE_MESSAGE = "FreeIPA is currently unavailable. Try again later."
@@ -668,7 +668,7 @@ def ineligible_voters_with_reasons(*, election: Election) -> list[dict[str, obje
     else:
         electorate = {
             str(u.username).strip().lower()
-            for u in FreeIPAUser.all()
+            for u in snapshot_freeipa_users()
             if str(u.username).strip()
         }
 

@@ -83,7 +83,10 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
-            patch("core.freeipa.user.FreeIPAUser.all", return_value=[reviewer, alice, bob]),
+            patch(
+                "core.freeipa.user.FreeIPAUser.find_lightweight_by_usernames",
+                return_value={user.username: user for user in [reviewer, alice, bob] if user.username},
+            ),
         ):
             resp = self.client.get(reverse("membership-requests"))
 
@@ -122,7 +125,10 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
-            patch("core.freeipa.user.FreeIPAUser.all", return_value=[reviewer, alice]),
+            patch(
+                "core.freeipa.user.FreeIPAUser.find_lightweight_by_usernames",
+                return_value={user.username: user for user in [reviewer, alice] if user.username},
+            ),
         ):
             resp = self.client.get(reverse("membership-requests"))
 
@@ -177,7 +183,10 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
-            patch("core.freeipa.user.FreeIPAUser.all", return_value=[reviewer, alice, bob]),
+            patch(
+                "core.freeipa.user.FreeIPAUser.find_lightweight_by_usernames",
+                return_value={user.username: user for user in [reviewer, alice, bob] if user.username},
+            ),
         ):
             resp = self.client.get(reverse("membership-requests"))
 
@@ -258,7 +267,10 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
-            patch("core.freeipa.user.FreeIPAUser.all", return_value=[reviewer, alice, bob, charlie]),
+            patch(
+                "core.freeipa.user.FreeIPAUser.find_lightweight_by_usernames",
+                return_value={user.username: user for user in [reviewer, alice, bob, charlie] if user.username},
+            ),
         ):
             resp = self.client.get(reverse("membership-requests"))
 
@@ -315,7 +327,10 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
-            patch("core.freeipa.user.FreeIPAUser.all", return_value=all_users),
+            patch(
+                "core.freeipa.user.FreeIPAUser.find_lightweight_by_usernames",
+                return_value={user.username: user for user in all_users if getattr(user, "username", "")},
+            ),
         ):
             page_1 = self.client.get(f"{reverse('membership-requests')}?scope=all")
             page_2 = self.client.get(f"{reverse('membership-requests')}?scope=all&pending_page=2")
@@ -439,7 +454,10 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
-            patch("core.freeipa.user.FreeIPAUser.all", return_value=all_users),
+            patch(
+                "core.freeipa.user.FreeIPAUser.find_lightweight_by_usernames",
+                return_value={user.username: user for user in all_users if getattr(user, "username", "")},
+            ),
             CaptureQueriesContext(connection) as query_context,
         ):
             response = self.client.get(reverse("membership-requests"))
@@ -553,7 +571,10 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
-            patch("core.freeipa.user.FreeIPAUser.all", return_value=all_users),
+            patch(
+                "core.freeipa.user.FreeIPAUser.find_lightweight_by_usernames",
+                return_value={user.username: user for user in all_users if getattr(user, "username", "")},
+            ),
             patch(
                 "core.views_membership.committee.build_notes_by_membership_request_id",
                 side_effect=_capture_preload_ids,

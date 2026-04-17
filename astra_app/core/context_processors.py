@@ -21,22 +21,32 @@ def membership_review(request) -> dict[str, object]:
 
     # Requests UI + approve/reject/ignore is guarded by "add".
     if perms["membership_can_add"]:
-        all_freeipa_users = FreeIPAUser.all()
-        live_users_by_username = {freeipa_user.username: freeipa_user for freeipa_user in all_freeipa_users if freeipa_user.username}
+        pending_requests = list(
+            MembershipRequest.objects.select_related("requested_organization")
+            .filter(status=MembershipRequest.Status.pending)
+            .order_by("requested_at", "pk")
+        )
+        on_hold_requests = list(
+            MembershipRequest.objects.select_related("requested_organization")
+            .filter(status=MembershipRequest.Status.on_hold)
+            .order_by("on_hold_at", "requested_at", "pk")
+        )
+        lookup_usernames = {
+            str(membership_request.requested_username or "").strip().lower()
+            for membership_request in pending_requests + on_hold_requests
+            if membership_request.is_user_target and str(membership_request.requested_username or "").strip()
+        }
+        live_users_by_username = FreeIPAUser.find_lightweight_by_usernames(lookup_usernames)
         perms["membership_requests_pending_count"] = len(
             visible_committee_membership_requests(
-                MembershipRequest.objects.select_related("requested_organization")
-                .filter(status=MembershipRequest.Status.pending)
-                .order_by("requested_at", "pk"),
-                live_users_by_username=live_users_by_username,
+                pending_requests,
+                live_usernames=live_users_by_username.keys(),
             )
         )
         perms["membership_requests_on_hold_count"] = len(
             visible_committee_membership_requests(
-                MembershipRequest.objects.select_related("requested_organization")
-                .filter(status=MembershipRequest.Status.on_hold)
-                .order_by("on_hold_at", "requested_at", "pk"),
-                live_users_by_username=live_users_by_username,
+                on_hold_requests,
+                live_usernames=live_users_by_username.keys(),
             )
         )
         perms["account_invitations_accepted_count"] = AccountInvitation.objects.filter(

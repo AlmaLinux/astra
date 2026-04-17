@@ -65,14 +65,22 @@ class MembershipReviewBadgeLogicTests(TestCase):
         rf = RequestFactory()
         request = rf.get("/")
 
-        with patch("core.freeipa.user.FreeIPAUser.all", return_value=[alice, bob]) as all_mock:
+        with (
+            patch("core.context_processors.FreeIPAUser.all", side_effect=AssertionError("membership_review should use the shared lightweight username helper")),
+            patch(
+                "core.context_processors.FreeIPAUser.find_lightweight_by_usernames",
+                create=True,
+                return_value={alice.username: alice, bob.username: bob},
+            ) as find_lightweight_mock,
+        ):
             request.user = reviewer
             ctx = membership_review(request)
 
         self.assertEqual(ctx["membership_requests_pending_count"], 0)
         self.assertEqual(ctx["membership_requests_on_hold_count"], 2)
         self.assertEqual(ctx["account_invitations_accepted_count"], 1)
-        all_mock.assert_called_once()
+        self.assertEqual(find_lightweight_mock.call_count, 1)
+        self.assertEqual(set(find_lightweight_mock.call_args.args[0]), {"alice", "bob"})
 
     def test_context_processor_counts_exclude_orphaned_user_and_org_requests(self) -> None:
         from core.models import Organization
@@ -117,14 +125,22 @@ class MembershipReviewBadgeLogicTests(TestCase):
         rf = RequestFactory()
         request = rf.get("/")
 
-        with patch("core.freeipa.user.FreeIPAUser.all", return_value=[live_target_user]) as all_mock:
+        with (
+            patch("core.context_processors.FreeIPAUser.all", side_effect=AssertionError("membership_review should use the shared lightweight username helper")),
+            patch(
+                "core.context_processors.FreeIPAUser.find_lightweight_by_usernames",
+                create=True,
+                return_value={live_target_user.username: live_target_user},
+            ) as find_lightweight_mock,
+        ):
             request.user = reviewer
             ctx = membership_review(request)
 
         self.assertEqual(ctx["membership_requests_pending_count"], 1)
         self.assertEqual(ctx["membership_requests_on_hold_count"], 0)
         self.assertEqual(ctx["account_invitations_accepted_count"], 0)
-        all_mock.assert_called_once()
+        self.assertEqual(find_lightweight_mock.call_count, 1)
+        self.assertEqual(set(find_lightweight_mock.call_args.args[0]), {"live-user", "orphan-user"})
 
     def test_context_processor_hides_counts_for_view_only_user(self) -> None:
         MembershipRequest.objects.create(

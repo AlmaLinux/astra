@@ -689,7 +689,11 @@ def _normalize_live_usernames(
     elif live_usernames is None:
         live_usernames = (user.username for user in FreeIPAUser.all())
 
-    return {normalized for normalized in (str(username).strip() for username in live_usernames) if normalized}
+    return {
+        normalized
+        for normalized in (str(username).strip().lower() for username in live_usernames)
+        if normalized
+    }
 
 
 def visible_committee_membership_requests(
@@ -709,7 +713,7 @@ def visible_committee_membership_requests(
         if pending_request.is_organization_target:
             if pending_request.requested_organization is None:
                 continue
-        elif str(pending_request.requested_username or "").strip() not in live_username_set:
+        elif str(pending_request.requested_username or "").strip().lower() not in live_username_set:
             continue
 
         visible_requests.append(pending_request)

@@ -1,9 +1,20 @@
 import re
 from collections.abc import Collection
 
+from django.conf import settings
+
 from core.freeipa.user import FreeIPAUser
 
 _NAME_SEARCH_SEPARATOR_RE = re.compile(r"[^0-9a-z]+")
+_SNAPSHOT_USER_ATTRS = (
+    "displayname",
+    "gecos",
+    "cn",
+    "givenname",
+    "sn",
+    "mail",
+    "fasIsPrivate",
+)
 
 
 def normalize_user_search_query(query: str) -> str:
@@ -61,6 +72,75 @@ def user_matches_search_query(
     return trailing_initials.startswith(trailing_initials_query)
 
 
+def _snapshot_username_from_uid(uid: object) -> str:
+    if isinstance(uid, list):
+        return str(uid[0] if uid else "").strip()
+    return str(uid or "").strip()
+
+
+def _snapshot_user_data(*, username: str, user_data: dict[str, object]) -> dict[str, object]:
+    snapshot_data: dict[str, object] = {"uid": [username]}
+    for key in _SNAPSHOT_USER_ATTRS:
+        if key in user_data:
+            value = user_data[key]
+        elif key == "fasIsPrivate" and "fasisprivate" in user_data:
+            value = user_data["fasisprivate"]
+        else:
+            continue
+
+        snapshot_data[key] = list(value) if isinstance(value, list) else value
+    return snapshot_data
+
+
+def snapshot_freeipa_users(*, respect_privacy: bool = True) -> list[FreeIPAUser]:
+    try:
+        client = FreeIPAUser.get_client()
+        result = client.user_find(
+            o_all=False,
+            o_no_members=True,
+            o_sizelimit=0,
+            o_timelimit=0,
+        )
+    except Exception:
+        return []
+
+    if not isinstance(result, dict):
+        return []
+
+    raw_matches = result.get("result")
+    if not isinstance(raw_matches, list):
+        return []
+
+    filtered_usernames = {
+        str(username).strip().lower()
+        for username in settings.FREEIPA_FILTERED_USERNAMES
+        if str(username).strip()
+    }
+
+    users: list[FreeIPAUser] = []
+    for user_data in raw_matches:
+        if not isinstance(user_data, dict):
+            continue
+
+        username = _snapshot_username_from_uid(user_data.get("uid"))
+        if not username:
+            continue
+
+        if username.lower() in filtered_usernames:
+            continue
+
+        users.append(
+            FreeIPAUser(
+                username,
+                _snapshot_user_data(username=username, user_data=user_data),
+                respect_privacy=respect_privacy,
+            )
+        )
+
+    users.sort(key=lambda user: str(user.username).strip().lower())
+    return users
+
+
 def search_freeipa_users(
     *,
     query: str,
@@ -80,8 +160,8 @@ def search_freeipa_users(
         client = FreeIPAUser.get_client()
         result = client.user_find(
             a_criteria=normalized_query,
-            o_all=True,
-            o_no_members=False,
+            o_all=False,
+            o_no_members=True,
             o_sizelimit=fetch_limit,
             o_timelimit=0,
         )
@@ -98,36 +178,23 @@ def search_freeipa_users(
     candidate_rows: list[dict[str, object]] = list(raw_matches)
     query_tokens = [token for token in normalized_query.split(" ") if token]
     if not candidate_rows and len(query_tokens) > 1:
-        fallback_criteria = [query_tokens[0]]
-        if query_tokens[-1] != query_tokens[0]:
-            fallback_criteria.append(query_tokens[-1])
+        try:
+            fallback_result = client.user_find(
+                a_criteria=query_tokens[0],
+                o_all=False,
+                o_no_members=True,
+                o_sizelimit=fetch_limit,
+                o_timelimit=0,
+            )
+        except Exception:
+            fallback_result = None
 
-        for criteria in fallback_criteria:
-            try:
-                fallback_result = client.user_find(
-                    a_criteria=criteria,
-                    o_all=True,
-                    o_no_members=False,
-                    o_sizelimit=fetch_limit,
-                    o_timelimit=0,
-                )
-            except Exception:
-                continue
-
-            if not isinstance(fallback_result, dict):
-                continue
-
+        if isinstance(fallback_result, dict):
             fallback_raw_matches = fallback_result.get("result")
-            if not isinstance(fallback_raw_matches, list):
-                continue
-
-            for user_data in fallback_raw_matches:
-                if isinstance(user_data, dict):
-                    candidate_rows.append(user_data)
-
-            # Keep fallback bounded: stop after first retrieval that yields candidates.
-            if fallback_raw_matches:
-                break
+            if isinstance(fallback_raw_matches, list):
+                for user_data in fallback_raw_matches:
+                    if isinstance(user_data, dict):
+                        candidate_rows.append(user_data)
 
     matches: list[FreeIPAUser] = []
     matched_usernames: set[str] = set()

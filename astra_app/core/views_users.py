@@ -18,6 +18,7 @@ from core.avatar_providers import resolve_avatar_urls_for_users
 from core.country_codes import country_code_status_from_user_data, country_name_from_code
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import FreeIPAUser
+from core.freeipa_directory import snapshot_freeipa_users
 from core.ipa_user_attrs import _data_get, _first, _get_full_user, _split_list_field, _value_to_text
 from core.membership import (
     build_pending_request_context,
@@ -684,7 +685,7 @@ def users_grid(request: HttpRequest) -> JsonResponse:
         raise Http404
 
     q, page_number, _base_query, page_url_prefix = parse_grid_query(request)
-    users_list = FreeIPAUser.all()
+    users_list = snapshot_freeipa_users()
 
     users_page, paginator, page_obj, page_numbers, show_first, show_last = build_user_grid_page(
         users_list=users_list,

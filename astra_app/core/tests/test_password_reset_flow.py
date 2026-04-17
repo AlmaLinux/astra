@@ -256,8 +256,8 @@ class PasswordResetFlowTests(TestCase):
         otp_lookup_client = SimpleNamespace(otptoken_find=lambda **_kwargs: {"result": []})
 
         with (
-            patch("core.password_reset.FreeIPAUser.find_by_email", autospec=True, return_value=email_lookup_user),
-            patch("core.password_reset.FreeIPAUser.get", autospec=True, return_value=canonical_user),
+            patch("core.password_reset.FreeIPAUser.find_by_email", autospec=True, return_value=email_lookup_user) as find_by_email,
+            patch("core.password_reset.FreeIPAUser.get", autospec=True, return_value=canonical_user) as get_user,
             patch("core.password_reset.queue_templated_email", autospec=True) as queue_email_mock,
             patch("core.views_auth.FreeIPAUser.get_client", autospec=True, return_value=otp_lookup_client),
         ):
@@ -280,6 +280,10 @@ class PasswordResetFlowTests(TestCase):
 
         self.assertEqual(confirm_resp.status_code, 200)
         self.assertContains(confirm_resp, "Set a new password")
+        self.assertEqual(find_by_email.call_count, 1)
+        self.assertEqual(find_by_email.call_args.args[-1], "alice@example.com")
+        self.assertGreaterEqual(get_user.call_count, 1)
+        self.assertIn("alice", [call.args[-1] for call in get_user.call_args_list])
 
     def test_password_reset_request_by_email_does_not_send_when_canonical_user_lookup_returns_none(self) -> None:
         client = Client()

@@ -206,12 +206,13 @@ def _resolve_requested_by(
     users_by_username: Mapping[str, FreeIPAUser] | None = None,
 ) -> tuple[str, bool]:
     """Return ``(full_name, is_deleted)`` for a username."""
-    if not username:
+    normalized_username = _normalize_str(username).lower()
+    if not normalized_username:
         return "", False
     if users_by_username is not None:
-        user = users_by_username.get(username)
+        user = users_by_username.get(normalized_username)
     else:
-        user = FreeIPAUser.get(username)
+        user = FreeIPAUser.get(normalized_username)
     if user is None:
         return "", True
     return user.full_name, False
@@ -219,13 +220,10 @@ def _resolve_requested_by(
 
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_requests(request: HttpRequest) -> HttpResponse:
-    all_freeipa_users = FreeIPAUser.all()
-    users_by_username = {user.username: user for user in all_freeipa_users if user.username}
-
     def _build_rows(reqs: list[MembershipRequest]) -> tuple[list[MembershipRequest], list[dict[str, object]]]:
         visible_requests = visible_committee_membership_requests(
             reqs,
-            live_users_by_username=users_by_username,
+            live_usernames=users_by_username.keys(),
         )
         rows: list[dict[str, object]] = []
         for r in visible_requests:
@@ -247,7 +245,10 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
                     }
                 )
             else:
-                fu = users_by_username[r.requested_username]
+                normalized_requested_username = _normalize_str(r.requested_username).lower()
+                fu = users_by_username.get(normalized_requested_username)
+                if fu is None:
+                    continue
 
                 rows.append(
                     {
@@ -272,6 +273,19 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
 
     pending_requests_all = list(base.filter(status=MembershipRequest.Status.pending).order_by("requested_at"))
     on_hold_requests_all = list(base.filter(status=MembershipRequest.Status.on_hold).order_by("on_hold_at", "requested_at"))
+
+    lookup_usernames: set[str] = set()
+    for membership_request in pending_requests_all + on_hold_requests_all:
+        normalized_requested_username = _normalize_str(membership_request.requested_username).lower()
+        if membership_request.is_user_target and normalized_requested_username:
+            lookup_usernames.add(normalized_requested_username)
+
+        requested_log = membership_request.requested_logs[0] if membership_request.requested_logs else None
+        requested_by_username = _normalize_str(requested_log.actor_username).lower() if requested_log is not None else ""
+        if requested_by_username:
+            lookup_usernames.add(requested_by_username)
+
+    users_by_username = FreeIPAUser.find_lightweight_by_usernames(lookup_usernames)
 
     pending_visible, pending_rows_all = _build_rows(pending_requests_all)
     on_hold_visible, on_hold_rows_all = _build_rows(on_hold_requests_all)

@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Collection
 
 from django.conf import settings
 from django.utils.crypto import salted_hmac
@@ -378,7 +379,13 @@ class FreeIPAUser(_FreeIPAClientMixin):
             return None
 
         def _do(client: ClientMeta):
-            return client.user_find(o_mail=email, o_all=True, o_no_members=False)
+            return client.user_find(
+                o_mail=email,
+                o_all=False,
+                o_no_members=True,
+                o_sizelimit=1,
+                o_timelimit=0,
+            )
 
         try:
             res = _with_freeipa_service_client_retry(cls.get_client, _do)
@@ -394,7 +401,7 @@ class FreeIPAUser(_FreeIPAClientMixin):
                 username = (uid[0] if uid else "") or ""
             else:
                 username = uid or ""
-            username = str(username).strip()
+            username = str(username).strip().lower()
             if not username:
                 return None
 
@@ -405,6 +412,55 @@ class FreeIPAUser(_FreeIPAClientMixin):
                 extra=current_exception_log_fields(),
             )
             return None
+
+    @classmethod
+    def find_lightweight_by_usernames(cls, usernames: Collection[str]) -> dict[str, FreeIPAUser]:
+        normalized_usernames = sorted({
+            str(username or "").strip().lower()
+            for username in usernames
+            if str(username or "").strip()
+        })
+        if not normalized_usernames:
+            return {}
+
+        def _do(client: ClientMeta) -> dict[str, FreeIPAUser]:
+            users_by_username: dict[str, FreeIPAUser] = {}
+            for username in normalized_usernames:
+                result = client.user_find(
+                    o_uid=username,
+                    o_all=False,
+                    o_no_members=True,
+                    o_sizelimit=1,
+                    o_timelimit=0,
+                )
+                if not isinstance(result, dict) or result.get("count", 0) <= 0:
+                    continue
+
+                first = (result.get("result") or [None])[0]
+                if not isinstance(first, dict):
+                    continue
+
+                uid = first.get("uid")
+                if isinstance(uid, list):
+                    resolved_username = (uid[0] if uid else "") or ""
+                else:
+                    resolved_username = uid or ""
+                resolved_username = str(resolved_username).strip().lower()
+                if not resolved_username:
+                    continue
+
+                users_by_username[resolved_username] = cls(resolved_username, first)
+
+            return users_by_username
+
+        try:
+            return _with_freeipa_service_client_retry(cls.get_client, _do)
+        except Exception as e:
+            logger.exception(
+                f"Failed to find lightweight users usernames={normalized_usernames}: {e}",
+                extra=current_exception_log_fields(),
+            )
+            return {}
 
     @classmethod
     def find_usernames_by_email(cls, email: str) -> list[str]:
