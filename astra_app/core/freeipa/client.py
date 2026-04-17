@@ -63,6 +63,25 @@ def _freeipa_rpc_span_data_from_body(body: object) -> dict[str, object] | None:
     return span_data
 
 
+def _freeipa_response_size_bytes(response: requests.Response) -> int | None:
+    content_length = response.headers.get("Content-Length") if response.headers is not None else None
+    if isinstance(content_length, str):
+        normalized_content_length = content_length.strip()
+        if normalized_content_length:
+            try:
+                parsed_content_length = int(normalized_content_length)
+            except ValueError:
+                parsed_content_length = None
+            if parsed_content_length is not None and parsed_content_length >= 0:
+                return parsed_content_length
+
+    buffered_content = getattr(response, "_content", None)
+    if isinstance(buffered_content, bytes):
+        return len(buffered_content)
+
+    return None
+
+
 def _annotate_freeipa_response_span(response: requests.Response, *_args: object, **_kwargs: object) -> requests.Response:
     raw_response = response.raw
     connection = getattr(raw_response, "connection", None) or getattr(raw_response, "_connection", None)
@@ -74,6 +93,10 @@ def _annotate_freeipa_response_span(response: requests.Response, *_args: object,
     span_data = _freeipa_rpc_span_data_from_body(request_body)
     if span_data is None:
         return response
+
+    response_size_bytes = _freeipa_response_size_bytes(response)
+    if response_size_bytes is not None:
+        span_data["freeipa.rpc_response_bytes"] = response_size_bytes
 
     rpc_method = span_data["freeipa.rpc_method"]
     if isinstance(span.description, str) and span.description:
