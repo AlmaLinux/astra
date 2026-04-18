@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from django.conf import settings
+from django.core.cache import cache
 from django.db.models import Case, IntegerField, Value, When
 from django.utils import timezone
 
@@ -14,6 +15,10 @@ from core.logging_extras import current_exception_log_fields
 from core.models import Membership, MembershipLog, MembershipRequest, MembershipType, Organization
 
 logger = logging.getLogger(__name__)
+
+
+_MEMBERSHIP_REVIEW_BADGE_COUNTS_CACHE_KEY = "membership_review_badge_counts:v1"
+_MEMBERSHIP_REVIEW_BADGE_COUNTS_TTL_SECONDS = 60
 
 
 @dataclass(frozen=True, slots=True)
@@ -719,6 +724,40 @@ def visible_committee_membership_requests(
         visible_requests.append(pending_request)
 
     return visible_requests
+
+
+def get_membership_review_badge_counts() -> dict[str, int]:
+    try:
+        cached_counts = cache.get(_MEMBERSHIP_REVIEW_BADGE_COUNTS_CACHE_KEY)
+    except Exception:
+        cached_counts = None
+
+    if isinstance(cached_counts, dict) and {"pending_count", "on_hold_count"}.issubset(cached_counts):
+        pending_count = cached_counts["pending_count"]
+        on_hold_count = cached_counts["on_hold_count"]
+        if isinstance(pending_count, int) and isinstance(on_hold_count, int):
+            return {
+                "pending_count": pending_count,
+                "on_hold_count": on_hold_count,
+            }
+
+    # Badge counts are intentionally DB-only so cold, expired, and cache-failure
+    # recomputes cannot fall back into request-time FreeIPA fan-out.
+    counts = {
+        "pending_count": MembershipRequest.objects.filter(status=MembershipRequest.Status.pending).count(),
+        "on_hold_count": MembershipRequest.objects.filter(status=MembershipRequest.Status.on_hold).count(),
+    }
+
+    try:
+        cache.set(
+            _MEMBERSHIP_REVIEW_BADGE_COUNTS_CACHE_KEY,
+            counts,
+            timeout=_MEMBERSHIP_REVIEW_BADGE_COUNTS_TTL_SECONDS,
+        )
+    except Exception:
+        pass
+
+    return counts
 
 
 def expiring_soon_cutoff(*, now: datetime.datetime | None = None) -> datetime.datetime:

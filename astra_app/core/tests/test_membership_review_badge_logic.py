@@ -2,6 +2,7 @@
 from unittest.mock import patch
 
 from django.conf import settings
+from django.core.cache import cache
 from django.test import TestCase
 from django.test.client import RequestFactory
 from django.utils import timezone
@@ -32,17 +33,11 @@ class MembershipReviewBadgeLogicTests(TestCase):
             },
         )
 
-    def test_context_processor_counts_pending_and_on_hold(self) -> None:
-        MembershipRequest.objects.create(
-            requested_username="alice",
-            membership_type_id="individual",
-            status=MembershipRequest.Status.on_hold,
-        )
-        MembershipRequest.objects.create(
-            requested_username="bob",
-            membership_type_id="individual",
-            status=MembershipRequest.Status.on_hold,
-        )
+    def tearDown(self) -> None:
+        cache.clear()
+        super().tearDown()
+
+    def test_context_processor_uses_shared_badge_count_owner(self) -> None:
         AccountInvitation.objects.create(
             email="accepted@example.com",
             full_name="Accepted User",
@@ -59,30 +54,27 @@ class MembershipReviewBadgeLogicTests(TestCase):
                 "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
             },
         )
-        alice = FreeIPAUser("alice", {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []})
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "mail": ["bob@example.com"], "memberof_group": []})
 
         rf = RequestFactory()
         request = rf.get("/")
+        request.session = {"_freeipa_username": reviewer.username}
 
         with (
-            patch("core.context_processors.FreeIPAUser.all", side_effect=AssertionError("membership_review should use the shared lightweight username helper")),
             patch(
-                "core.context_processors.FreeIPAUser.find_lightweight_by_usernames",
-                create=True,
-                return_value={alice.username: alice, bob.username: bob},
-            ) as find_lightweight_mock,
+                "core.context_processors.get_membership_review_badge_counts",
+                return_value={"pending_count": 1, "on_hold_count": 2},
+            ) as badge_counts_mock,
         ):
             request.user = reviewer
             ctx = membership_review(request)
 
-        self.assertEqual(ctx["membership_requests_pending_count"], 0)
+        self.assertEqual(ctx["membership_requests_pending_count"], 1)
         self.assertEqual(ctx["membership_requests_on_hold_count"], 2)
         self.assertEqual(ctx["account_invitations_accepted_count"], 1)
-        self.assertEqual(find_lightweight_mock.call_count, 1)
-        self.assertEqual(set(find_lightweight_mock.call_args.args[0]), {"alice", "bob"})
+        badge_counts_mock.assert_called_once_with()
 
-    def test_context_processor_counts_exclude_orphaned_user_and_org_requests(self) -> None:
+    def test_shared_badge_count_owner_counts_workflow_state_rows_and_caches_without_freeipa_lookups(self) -> None:
+        from core.membership import get_membership_review_badge_counts
         from core.models import Organization
 
         MembershipRequest.objects.create(
@@ -95,6 +87,11 @@ class MembershipReviewBadgeLogicTests(TestCase):
             membership_type_id="individual",
             status=MembershipRequest.Status.pending,
         )
+        MembershipRequest.objects.create(
+            requested_username="hold-user",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.on_hold,
+        )
 
         org = Organization.objects.create(name="Orphan Org", representative="reviewer")
         MembershipRequest.objects.create(
@@ -104,43 +101,88 @@ class MembershipReviewBadgeLogicTests(TestCase):
             status=MembershipRequest.Status.on_hold,
         )
         org.delete()
+        with (
+            patch(
+                "core.membership.FreeIPAUser.find_lightweight_by_usernames",
+                side_effect=AssertionError("badge counts must stay DB-only on cold-cache recompute"),
+            ),
+            patch(
+                "core.membership.FreeIPAUser.get",
+                side_effect=AssertionError("badge counts must stay DB-only on cold-cache recompute"),
+            ),
+            patch(
+                "core.membership.FreeIPAUser.all",
+                side_effect=AssertionError("badge counts must stay DB-only on cold-cache recompute"),
+            ),
+        ):
+            counts_one = get_membership_review_badge_counts()
+            counts_two = get_membership_review_badge_counts()
 
-        reviewer = FreeIPAUser(
-            "reviewer",
-            {
-                "uid": ["reviewer"],
-                "mail": ["reviewer@example.com"],
-                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
-            },
-        )
-        live_target_user = FreeIPAUser(
-            "live-user",
-            {
-                "uid": ["live-user"],
-                "mail": ["live-user@example.com"],
-                "memberof_group": [],
-            },
-        )
+        self.assertEqual(counts_one, {"pending_count": 2, "on_hold_count": 2})
+        self.assertEqual(counts_two, counts_one)
 
-        rf = RequestFactory()
-        request = rf.get("/")
+    def test_shared_badge_count_owner_recomputes_when_cache_backend_fails(self) -> None:
+        from core.membership import get_membership_review_badge_counts
+
+        MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.pending,
+        )
 
         with (
-            patch("core.context_processors.FreeIPAUser.all", side_effect=AssertionError("membership_review should use the shared lightweight username helper")),
+            patch("core.membership.cache.get", side_effect=RuntimeError("cache down")),
+            patch("core.membership.cache.set", side_effect=RuntimeError("cache down")),
             patch(
-                "core.context_processors.FreeIPAUser.find_lightweight_by_usernames",
-                create=True,
-                return_value={live_target_user.username: live_target_user},
-            ) as find_lightweight_mock,
+                "core.membership.FreeIPAUser.find_lightweight_by_usernames",
+                side_effect=AssertionError("cache-failure recompute must stay DB-only"),
+            ),
+            patch(
+                "core.membership.FreeIPAUser.get",
+                side_effect=AssertionError("cache-failure recompute must stay DB-only"),
+            ),
+            patch(
+                "core.membership.FreeIPAUser.all",
+                side_effect=AssertionError("cache-failure recompute must stay DB-only"),
+            ),
         ):
-            request.user = reviewer
-            ctx = membership_review(request)
+            counts = get_membership_review_badge_counts()
 
-        self.assertEqual(ctx["membership_requests_pending_count"], 1)
-        self.assertEqual(ctx["membership_requests_on_hold_count"], 0)
-        self.assertEqual(ctx["account_invitations_accepted_count"], 0)
-        self.assertEqual(find_lightweight_mock.call_count, 1)
-        self.assertEqual(set(find_lightweight_mock.call_args.args[0]), {"live-user", "orphan-user"})
+        self.assertEqual(counts, {"pending_count": 1, "on_hold_count": 0})
+
+    def test_shared_badge_count_owner_recomputes_db_only_after_cache_expiry(self) -> None:
+        from core.membership import get_membership_review_badge_counts
+
+        MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.pending,
+        )
+
+        cache.set(
+            "membership_review_badge_counts:v1",
+            {"pending_count": 99, "on_hold_count": 77},
+            timeout=60,
+        )
+        cache.delete("membership_review_badge_counts:v1")
+
+        with (
+            patch(
+                "core.membership.FreeIPAUser.find_lightweight_by_usernames",
+                side_effect=AssertionError("expired-cache recompute must stay DB-only"),
+            ),
+            patch(
+                "core.membership.FreeIPAUser.get",
+                side_effect=AssertionError("expired-cache recompute must stay DB-only"),
+            ),
+            patch(
+                "core.membership.FreeIPAUser.all",
+                side_effect=AssertionError("expired-cache recompute must stay DB-only"),
+            ),
+        ):
+            counts = get_membership_review_badge_counts()
+
+        self.assertEqual(counts, {"pending_count": 1, "on_hold_count": 0})
 
     def test_context_processor_hides_counts_for_view_only_user(self) -> None:
         MembershipRequest.objects.create(

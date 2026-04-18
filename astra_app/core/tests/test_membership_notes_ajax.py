@@ -1246,3 +1246,139 @@ class MembershipNotesAjaxTests(TestCase):
 
         self.assertIn("Request resubmitted", aggregate_html)
         self.assertNotIn("data-request-resubmitted-note-id", aggregate_html)
+
+    def test_aggregate_profile_notes_preserve_resolved_and_unresolved_author_rendering(self) -> None:
+        first_request = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+        )
+        second_request = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.approved,
+        )
+        Note.objects.create(
+            membership_request=first_request,
+            username="committee2",
+            content="First note",
+            action={},
+        )
+        Note.objects.create(
+            membership_request=second_request,
+            username="ghost-user",
+            content="Second note",
+            action={},
+        )
+
+        request = RequestFactory().get("/")
+        request.session = {"_freeipa_username": "reviewer"}
+
+        with (
+            patch(
+                "core.templatetags.core_membership_notes.FreeIPAUser.find_lightweight_by_usernames",
+                return_value={
+                    "committee2": FreeIPAUser(
+                        "committee2",
+                        {
+                            "uid": ["committee2"],
+                            "displayname": ["Committee Two"],
+                            "mail": ["committee2@example.com"],
+                        },
+                    ),
+                },
+            ) as lightweight_lookup_mock,
+            patch(
+                "core.templatetags.core_membership_notes.FreeIPAUser.get",
+                side_effect=AssertionError("aggregate profile notes must not use full-detail FreeIPAUser.get for author hydration"),
+            ),
+        ):
+            from core.templatetags.core_membership_notes import membership_notes_aggregate_for_user
+
+            html = str(
+                membership_notes_aggregate_for_user(
+                    {"request": request, "membership_can_view": True},
+                    "alice",
+                    compact=True,
+                    next_url="/",
+                )
+            )
+
+        self.assertIn("First note", html)
+        self.assertIn("Second note", html)
+        self.assertEqual(lightweight_lookup_mock.call_count, 1)
+        self.assertEqual(set(lightweight_lookup_mock.call_args.args[0]), {"committee2", "ghost-user"})
+
+        committee_marker = 'data-membership-notes-group-username="committee2"'
+        committee_start = html.find(committee_marker)
+        self.assertNotEqual(committee_start, -1)
+        ghost_start = html.find('data-membership-notes-group-username="ghost-user"')
+        self.assertNotEqual(ghost_start, -1)
+
+        committee_group_html = html[committee_start:ghost_start]
+        ghost_group_html = html[ghost_start:]
+
+        self.assertIn("committee2", committee_group_html)
+        self.assertIn('class="direct-chat-img img-circle"', committee_group_html)
+        self.assertIn('alt="User Avatar"', committee_group_html)
+        self.assertNotIn('alt="user image"', committee_group_html)
+
+        self.assertIn("ghost-user", ghost_group_html)
+        self.assertIn('alt="user image"', ghost_group_html)
+        self.assertNotIn('class="direct-chat-img img-circle"', ghost_group_html)
+
+    def test_detail_notes_do_not_switch_to_aggregate_lightweight_author_lookup(self) -> None:
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+        )
+        Note.objects.create(
+            membership_request=req,
+            username="committee2",
+            content="Detail note",
+            action={},
+        )
+
+        request = RequestFactory().get("/")
+        request.session = {"_freeipa_username": "reviewer"}
+
+        reviewer = self._reviewer_user()
+        committee2 = FreeIPAUser(
+            "committee2",
+            {
+                "uid": ["committee2"],
+                "displayname": ["Committee Two"],
+                "mail": ["committee2@example.com"],
+            },
+        )
+
+        def _fake_get(username: str) -> FreeIPAUser | None:
+            if username == "committee2":
+                return committee2
+            if username == "reviewer":
+                return reviewer
+            return None
+
+        with (
+            patch(
+                "core.templatetags.core_membership_notes.FreeIPAUser.find_lightweight_by_usernames",
+                side_effect=AssertionError("detail notes must stay on the existing full-detail author path"),
+            ),
+            patch("core.templatetags.core_membership_notes.FreeIPAUser.get", side_effect=_fake_get),
+        ):
+            from core.templatetags.core_membership_notes import membership_notes
+
+            html = str(
+                membership_notes(
+                    {
+                        "request": request,
+                        "membership_can_add": True,
+                        "membership_can_change": True,
+                        "membership_can_delete": True,
+                    },
+                    req,
+                    compact=True,
+                    next_url="/",
+                )
+            )
+
+        self.assertIn("Detail note", html)

@@ -3,9 +3,8 @@ from email.utils import parseaddr
 from django.conf import settings
 
 from core.build_info import get_build_sha
-from core.freeipa.user import FreeIPAUser
-from core.membership import visible_committee_membership_requests
-from core.models import AccountInvitation, MembershipRequest
+from core.membership import get_membership_review_badge_counts
+from core.models import AccountInvitation
 from core.permissions import (
     membership_review_permissions,
 )
@@ -21,34 +20,9 @@ def membership_review(request) -> dict[str, object]:
 
     # Requests UI + approve/reject/ignore is guarded by "add".
     if perms["membership_can_add"]:
-        pending_requests = list(
-            MembershipRequest.objects.select_related("requested_organization")
-            .filter(status=MembershipRequest.Status.pending)
-            .order_by("requested_at", "pk")
-        )
-        on_hold_requests = list(
-            MembershipRequest.objects.select_related("requested_organization")
-            .filter(status=MembershipRequest.Status.on_hold)
-            .order_by("on_hold_at", "requested_at", "pk")
-        )
-        lookup_usernames = {
-            str(membership_request.requested_username or "").strip().lower()
-            for membership_request in pending_requests + on_hold_requests
-            if membership_request.is_user_target and str(membership_request.requested_username or "").strip()
-        }
-        live_users_by_username = FreeIPAUser.find_lightweight_by_usernames(lookup_usernames)
-        perms["membership_requests_pending_count"] = len(
-            visible_committee_membership_requests(
-                pending_requests,
-                live_usernames=live_users_by_username.keys(),
-            )
-        )
-        perms["membership_requests_on_hold_count"] = len(
-            visible_committee_membership_requests(
-                on_hold_requests,
-                live_usernames=live_users_by_username.keys(),
-            )
-        )
+        badge_counts = get_membership_review_badge_counts()
+        perms["membership_requests_pending_count"] = badge_counts["pending_count"]
+        perms["membership_requests_on_hold_count"] = badge_counts["on_hold_count"]
         perms["account_invitations_accepted_count"] = AccountInvitation.objects.filter(
             dismissed_at__isnull=True,
             accepted_at__isnull=False,

@@ -221,11 +221,22 @@ def _current_username_from_request(http_request: HttpRequest | None) -> str:
 
 def _avatar_users_by_username(notes: list[Note]) -> dict[str, object]:
     avatar_users_by_username: dict[str, object] = {}
-    for username in {n.username for n in notes if n.username and n.username != CUSTOS}:
+    for username in {str(n.username or "").strip() for n in notes if n.username and n.username != CUSTOS}:
         user_obj = FreeIPAUser.get(username)
         if user_obj is not None:
-            avatar_users_by_username[username] = user_obj
+            avatar_users_by_username[username.lower()] = user_obj
     return avatar_users_by_username
+
+
+def _aggregate_avatar_users_by_username(notes: list[Note]) -> dict[str, object]:
+    lookup_usernames = {
+        str(note.username or "").strip().lower()
+        for note in notes
+        if note.username and note.username != CUSTOS and str(note.username or "").strip()
+    }
+    if not lookup_usernames:
+        return {}
+    return FreeIPAUser.find_lightweight_by_usernames(lookup_usernames)
 
 
 def _note_display_username(note: Note) -> str:
@@ -385,12 +396,14 @@ def _timeline_entries_for_notes(
     current_username: str,
     email_modal_ids: dict[int, str] | None = None,
     request_resubmitted_new_snapshots_by_note_id: dict[int, list[dict[str, str]]] | None = None,
+    avatar_users_by_username: dict[str, object] | None = None,
 ) -> list[dict[str, Any]]:
-    avatar_users_by_username = _avatar_users_by_username(notes)
+    if avatar_users_by_username is None:
+        avatar_users_by_username = _avatar_users_by_username(notes)
     entries: list[dict[str, Any]] = []
     for n in notes:
         is_self = current_username and n.username.lower() == current_username.lower()
-        avatar_user = avatar_users_by_username.get(n.username)
+        avatar_user = avatar_users_by_username.get(str(n.username or "").strip().lower())
         is_custos = n.username == CUSTOS
         display_username = _note_display_username(n)
 
@@ -576,6 +589,7 @@ def _render_membership_notes_aggregate(
                     current_username=_current_username_from_request(http_request),
                     email_modal_ids=email_modal_ids,
                     request_resubmitted_new_snapshots_by_note_id=request_resubmitted_new_snapshots_by_note_id,
+                    avatar_users_by_username=_aggregate_avatar_users_by_username(notes),
                 )
             ),
             "note_count": len(notes),
