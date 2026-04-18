@@ -435,6 +435,7 @@ class LoginRequiredMiddleware:
         self._allowed_prefixes: tuple[str, ...] = (
             settings.STATIC_URL,
             settings.MEDIA_URL,
+            "/_ci/",
             "/register",
             "/password-reset",
             "/admin/",

@@ -1,7 +1,8 @@
 from email.utils import parseaddr
-from urllib.parse import urlsplit
 
 from django.conf import settings
+from django.contrib.staticfiles.storage import staticfiles_storage
+from django.urls import reverse
 
 from core.build_info import get_build_sha
 from core.membership import get_membership_review_badge_counts
@@ -43,33 +44,23 @@ def chat_networks(_request) -> dict[str, object]:
     return {"chat_networks": settings.CHAT_NETWORKS}
 
 
-def _sentry_browser_loader_src(dsn: str) -> str:
-    parsed = urlsplit(dsn)
-    public_key = parsed.username or ""
-    if not public_key:
-        return ""
-
-    # Use Sentry's loader script because this repo does not have a JS package build.
-    return f"https://js.sentry-cdn.com/{public_key}.min.js"
-
-
 def build_info(_request) -> dict[str, object]:
-    sentry_browser_loader_src = ""
+    sentry_browser_bundle_src = ""
     sentry_browser_config: dict[str, object] | None = None
     if settings.SENTRY_DSN:
-        sentry_browser_loader_src = _sentry_browser_loader_src(settings.SENTRY_DSN)
-        if sentry_browser_loader_src:
-            sentry_browser_config = {
-                "dsn": settings.SENTRY_DSN,
-                "environment": settings.SENTRY_ENVIRONMENT,
-                "release": settings.SENTRY_RELEASE,
-                "tracesSampleRate": settings.SENTRY_TRACES_SAMPLE_RATE,
-            }
+        sentry_browser_bundle_src = staticfiles_storage.url("core/vendor/sentry/bundle.tracing.min.js")
+        sentry_browser_config = {
+            "dsn": settings.SENTRY_DSN,
+            "environment": settings.SENTRY_ENVIRONMENT,
+            "release": settings.SENTRY_RELEASE,
+            "tracesSampleRate": settings.SENTRY_TRACES_SAMPLE_RATE,
+            "tunnel": reverse("sentry-browser-tunnel"),
+        }
 
     return {
         "build_sha": get_build_sha(),
         "default_from_email_address": parseaddr(settings.DEFAULT_FROM_EMAIL)[1].strip(),
-        "sentry_browser_loader_src": sentry_browser_loader_src,
+        "sentry_browser_bundle_src": sentry_browser_bundle_src,
         "sentry_browser_config": sentry_browser_config,
     }
 

@@ -18,26 +18,27 @@
   {% if not request.user.is_authenticated %}
     <link rel="stylesheet" href="{% static 'core/css/login.css' %}" />
   {% endif %}
-  {% if sentry_browser_loader_src and sentry_browser_config %}
+  {% if sentry_browser_bundle_src and sentry_browser_config %}
     {{ sentry_browser_config|json_script:"sentry-browser-config" }}
+    <script src="{{ sentry_browser_bundle_src }}"></script>
     <script>
-      window.sentryOnLoad = function () {
+      (function () {
         var configElement = document.getElementById("sentry-browser-config");
-        if (!configElement) {
+        if (!configElement || !(window.Sentry && window.Sentry.init)) {
           return;
         }
 
         var config = JSON.parse(configElement.textContent);
-        Sentry.init({
+        window.Sentry.init({
           dsn: config.dsn,
           environment: config.environment,
           release: config.release || undefined,
-          integrations: [Sentry.browserTracingIntegration()],
+          tunnel: config.tunnel,
+          integrations: [window.Sentry.browserTracingIntegration()],
           tracesSampleRate: config.tracesSampleRate
         });
-      };
+      })();
     </script>
-    <script src="{{ sentry_browser_loader_src }}" crossorigin="anonymous" data-lazy="no"></script>
   {% endif %}
   {% block extra_head %}{% endblock %}
 </head>

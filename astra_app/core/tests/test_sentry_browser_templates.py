@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from django.contrib.staticfiles.storage import staticfiles_storage
 from django.test import SimpleTestCase, TestCase, override_settings
 
 from core.context_processors import build_info
@@ -14,12 +15,12 @@ class SentryBrowserContextTests(SimpleTestCase):
         SENTRY_RELEASE="build-123",
         SENTRY_TRACES_SAMPLE_RATE=0.25,
     )
-    def test_build_info_exposes_sentry_browser_loader_and_config(self) -> None:
+    def test_build_info_exposes_sentry_browser_bundle_and_config(self) -> None:
         context = build_info(SimpleNamespace())
 
         self.assertEqual(
-            context["sentry_browser_loader_src"],
-            "https://js.sentry-cdn.com/public.min.js",
+            context["sentry_browser_bundle_src"],
+            staticfiles_storage.url("core/vendor/sentry/bundle.tracing.min.js"),
         )
         self.assertEqual(
             context["sentry_browser_config"],
@@ -28,6 +29,7 @@ class SentryBrowserContextTests(SimpleTestCase):
                 "environment": "staging",
                 "release": "build-123",
                 "tracesSampleRate": 0.25,
+                "tunnel": "/_ci/envelope/",
             },
         )
 
@@ -35,7 +37,7 @@ class SentryBrowserContextTests(SimpleTestCase):
     def test_build_info_omits_sentry_browser_config_without_dsn(self) -> None:
         context = build_info(SimpleNamespace())
 
-        self.assertEqual(context["sentry_browser_loader_src"], "")
+        self.assertEqual(context["sentry_browser_bundle_src"], "")
         self.assertIsNone(context["sentry_browser_config"])
 
 
@@ -51,7 +53,7 @@ class SentryBrowserTemplateTests(TestCase):
         SENTRY_RELEASE="build-123",
         SENTRY_TRACES_SAMPLE_RATE=0.25,
     )
-    def test_profile_page_includes_sentry_browser_loader_and_config(self) -> None:
+    def test_profile_page_includes_sentry_browser_bundle_and_tunnel_config(self) -> None:
         username = "admin"
         self._login_as_freeipa(username)
 
@@ -71,10 +73,11 @@ class SentryBrowserTemplateTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(
             response,
-            'src="https://js.sentry-cdn.com/public.min.js"',
+            'src="/static/core/vendor/sentry/bundle.tracing.min.js"',
         )
         self.assertContains(response, 'id="sentry-browser-config"')
-        self.assertContains(response, "window.sentryOnLoad")
+        self.assertContains(response, "window.Sentry && window.Sentry.init")
         self.assertContains(response, '"environment": "staging"')
         self.assertContains(response, '"release": "build-123"')
         self.assertContains(response, '"tracesSampleRate": 0.25')
+        self.assertContains(response, '"tunnel": "/_ci/envelope/"')
