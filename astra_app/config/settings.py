@@ -110,6 +110,15 @@ def _parse_email_url(email_url: str) -> dict[str, Any]:
 DEBUG = _env_bool("DEBUG", default=False)
 
 _sentry_dsn = (_env_str("SENTRY_DSN", default=None) or "").strip()
+SENTRY_DSN = _sentry_dsn
+SENTRY_ENVIRONMENT = _env_str(
+    "SENTRY_ENVIRONMENT",
+    default="development" if DEBUG else "production",
+)
+SENTRY_RELEASE = _env_str("ASTRA_BUILD_SHA", default=None)
+SENTRY_SEND_DEFAULT_PII = _env_bool("SENTRY_SEND_DEFAULT_PII", default=True)
+SENTRY_TRACES_SAMPLE_RATE = None
+SENTRY_PROFILES_SAMPLE_RATE = None
 if _sentry_dsn:
     try:
         import sentry_sdk
@@ -181,14 +190,14 @@ if _sentry_dsn:
     _sentry_traces_sample_rate_raw = _env_str("SENTRY_TRACES_SAMPLE_RATE", default="1.0")
     _sentry_profiles_sample_rate_raw = _env_str("SENTRY_PROFILES_SAMPLE_RATE", default="1.0")
     try:
-        _sentry_traces_sample_rate = float(_sentry_traces_sample_rate_raw)
+        SENTRY_TRACES_SAMPLE_RATE = float(_sentry_traces_sample_rate_raw)
     except (TypeError, ValueError) as e:
         raise ImproperlyConfigured(
             f"SENTRY_TRACES_SAMPLE_RATE must be a float env var, got {_sentry_traces_sample_rate_raw!r}."
         ) from e
 
     try:
-        _sentry_profiles_sample_rate = float(_sentry_profiles_sample_rate_raw)
+        SENTRY_PROFILES_SAMPLE_RATE = float(_sentry_profiles_sample_rate_raw)
     except (TypeError, ValueError) as e:
         raise ImproperlyConfigured(
             f"SENTRY_PROFILES_SAMPLE_RATE must be a float env var, got {_sentry_profiles_sample_rate_raw!r}."
@@ -208,12 +217,9 @@ if _sentry_dsn:
                 event_level=logging.ERROR,
             ),
         ],
-        environment=_env_str(
-            "SENTRY_ENVIRONMENT",
-            default="development" if DEBUG else "production",
-        ),
-        release=_env_str("ASTRA_BUILD_SHA", default=None),
-        send_default_pii=_env_bool("SENTRY_SEND_DEFAULT_PII", default=True),
+        environment=SENTRY_ENVIRONMENT,
+        release=SENTRY_RELEASE,
+        send_default_pii=SENTRY_SEND_DEFAULT_PII,
         before_send=_sentry_before_send,
         event_scrubber=EventScrubber(
             denylist=_sentry_denylist,
@@ -221,8 +227,8 @@ if _sentry_dsn:
         ),
         max_request_body_size="always",
         enable_logs=True,
-        traces_sample_rate=_sentry_traces_sample_rate,
-        profile_session_sample_rate=_sentry_profiles_sample_rate,
+        traces_sample_rate=SENTRY_TRACES_SAMPLE_RATE,
+        profile_session_sample_rate=SENTRY_PROFILES_SAMPLE_RATE,
         profile_lifecycle="trace",
     )
 
