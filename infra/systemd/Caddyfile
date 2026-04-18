@@ -10,12 +10,16 @@ accounts.almalinux.org {
         lb_policy least_conn
         lb_retries 2
         header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
+        header_up sentry-trace {http.request.header.sentry-trace}
+        header_up baggage {http.request.header.baggage}
         health_uri /readyz
     }
 
     reverse_proxy 127.0.0.1:8001 127.0.0.1:8002 {
         lb_policy least_conn
         lb_retries 2
+        header_up sentry-trace {http.request.header.sentry-trace}
+        header_up baggage {http.request.header.baggage}
         health_uri /readyz
     }
 }

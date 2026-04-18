@@ -20,7 +20,10 @@
     # Clients must trust Caddy's internal CA (or use curl -k).
     tls internal
 
-    reverse_proxy 127.0.0.1:8001 127.0.0.1:8002
+    reverse_proxy 127.0.0.1:8001 127.0.0.1:8002 {
+        header_up sentry-trace {http.request.header.sentry-trace}
+        header_up baggage {http.request.header.baggage}
+    }
 }
 {% else %}
 :80 {
@@ -32,6 +35,9 @@
     # Clients must trust Caddy's internal CA (or use curl -k).
     tls internal
 
-    reverse_proxy 127.0.0.1:8001 127.0.0.1:8002
+    reverse_proxy 127.0.0.1:8001 127.0.0.1:8002 {
+        header_up sentry-trace {http.request.header.sentry-trace}
+        header_up baggage {http.request.header.baggage}
+    }
 }
 {% endif %}

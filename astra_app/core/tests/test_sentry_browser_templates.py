@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -20,7 +21,11 @@ class SentryBrowserContextTests(SimpleTestCase):
         SENTRY_TRACES_SAMPLE_RATE=0.25,
     )
     def test_build_info_exposes_sentry_browser_bundle_and_config(self) -> None:
-        context = build_info(SimpleNamespace())
+        with patch("core.context_processors.sentry_sdk.get_traceparent", return_value="trace-parent"), patch(
+            "core.context_processors.sentry_sdk.get_baggage",
+            return_value="sentry-sample=value",
+        ):
+            context = build_info(SimpleNamespace())
 
         self.assertEqual(
             context["sentry_browser_bundle_src"],
@@ -36,6 +41,8 @@ class SentryBrowserContextTests(SimpleTestCase):
                 "tunnel": "/_ci/envelope/",
             },
         )
+        self.assertEqual(context["sentry_trace"], "trace-parent")
+        self.assertEqual(context["sentry_baggage"], "sentry-sample=value")
 
     @override_settings(SENTRY_DSN="")
     def test_build_info_omits_sentry_browser_config_without_dsn(self) -> None:
@@ -43,6 +50,8 @@ class SentryBrowserContextTests(SimpleTestCase):
 
         self.assertEqual(context["sentry_browser_bundle_src"], "")
         self.assertIsNone(context["sentry_browser_config"])
+        self.assertEqual(context["sentry_trace"], "")
+        self.assertEqual(context["sentry_baggage"], "")
 
 
 class SentryBrowserTemplateTests(TestCase):
@@ -71,7 +80,13 @@ class SentryBrowserTemplateTests(TestCase):
             },
         )
 
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=freeipa_user):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=freeipa_user), patch(
+            "core.context_processors.sentry_sdk.get_traceparent",
+            return_value="trace-parent",
+        ), patch(
+            "core.context_processors.sentry_sdk.get_baggage",
+            return_value="sentry-sample=value",
+        ):
             response = self.client.get(f"/user/{username}/")
 
         self.assertEqual(response.status_code, 200)
@@ -80,8 +95,19 @@ class SentryBrowserTemplateTests(TestCase):
             'src="/static/core/vendor/sentry/bundle.tracing.min.js"',
         )
         self.assertContains(response, 'id="sentry-browser-config"')
+        self.assertContains(response, '<meta name="sentry-trace" content="trace-parent">', html=True)
+        self.assertContains(response, '<meta name="baggage" content="sentry-sample=value">', html=True)
         self.assertContains(response, "window.Sentry && window.Sentry.init")
         self.assertContains(response, '"environment": "staging"')
         self.assertContains(response, '"release": "build-123"')
         self.assertContains(response, '"tracesSampleRate": 0.25')
         self.assertContains(response, '"tunnel": "/_ci/envelope/"')
+
+
+class SentryCaddyConfigTests(SimpleTestCase):
+    def test_caddy_configs_forward_sentry_trace_headers(self) -> None:
+        repo_root = Path(__file__).resolve().parents[3]
+        for relative_path in ("infra/systemd/Caddyfile", "infra/systemd/Caddyfile.j2"):
+            source = (repo_root / relative_path).read_text(encoding="utf-8")
+            self.assertIn("header_up sentry-trace", source)
+            self.assertIn("header_up baggage", source)

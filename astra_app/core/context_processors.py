@@ -1,5 +1,6 @@
 from email.utils import parseaddr
 
+import sentry_sdk
 from django.conf import settings
 from django.contrib.staticfiles.storage import staticfiles_storage
 from django.urls import reverse
@@ -47,6 +48,8 @@ def chat_networks(_request) -> dict[str, object]:
 def build_info(_request) -> dict[str, object]:
     sentry_browser_bundle_src = ""
     sentry_browser_config: dict[str, object] | None = None
+    sentry_trace = ""
+    sentry_baggage = ""
     if settings.SENTRY_DSN:
         sentry_browser_bundle_src = staticfiles_storage.url("core/vendor/sentry/bundle.tracing.min.js")
         sentry_browser_config = {
@@ -56,12 +59,16 @@ def build_info(_request) -> dict[str, object]:
             "tracesSampleRate": settings.SENTRY_TRACES_SAMPLE_RATE,
             "tunnel": reverse("sentry-browser-tunnel"),
         }
+        sentry_trace = sentry_sdk.get_traceparent() or ""
+        sentry_baggage = sentry_sdk.get_baggage() or ""
 
     return {
         "build_sha": get_build_sha(),
         "default_from_email_address": parseaddr(settings.DEFAULT_FROM_EMAIL)[1].strip(),
         "sentry_browser_bundle_src": sentry_browser_bundle_src,
         "sentry_browser_config": sentry_browser_config,
+        "sentry_trace": sentry_trace,
+        "sentry_baggage": sentry_baggage,
     }
 
 

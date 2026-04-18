@@ -19,6 +19,8 @@
     <link rel="stylesheet" href="{% static 'core/css/login.css' %}" />
   {% endif %}
   {% if sentry_browser_bundle_src and sentry_browser_config %}
+    {% if sentry_trace %}<meta name="sentry-trace" content="{{ sentry_trace }}">{% endif %}
+    {% if sentry_baggage %}<meta name="baggage" content="{{ sentry_baggage }}">{% endif %}
     {{ sentry_browser_config|json_script:"sentry-browser-config" }}
     <script src="{{ sentry_browser_bundle_src }}"></script>
     <script>
