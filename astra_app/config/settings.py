@@ -987,6 +987,9 @@ LOGGING = {
         'hetrix_access': {
             '()': 'config.logging_filters.HetrixAccessFilter',
         },
+        'quiet_request_paths': {
+            '()': 'config.logging_filters.QuietRequestPathFilter',
+        },
         'request_context': {
             '()': 'config.logging_filters.RequestContextFilter',
         },
@@ -1016,14 +1019,14 @@ LOGGING = {
         'core': {
             'handlers': ['console'],
             'level': 'DEBUG' if DEBUG else 'INFO',
-            'filters': ['request_context'],
+            'filters': ['request_context', 'quiet_request_paths'],
             'propagate': False,
         },
         # Structured app-level access logs enriched with request/user context.
         'astra.access': {
             'handlers': ['access_console'],
             'level': 'INFO',
-            'filters': ['health_endpoint', 'hetrix_access', 'request_context'],
+            'filters': ['health_endpoint', 'hetrix_access', 'request_context', 'quiet_request_paths'],
             'propagate': False,
         },
         # FreeIPA client libs can be noisy; keep them at INFO by default.
@@ -1037,14 +1040,14 @@ LOGGING = {
         'django.request': {
             'handlers': ['console'],
             'level': 'DEBUG',
-            'filters': ['request_context'],
+            'filters': ['request_context', 'quiet_request_paths'],
             'propagate': False,
         },
         # Access logs from `runserver`.
         'django.server': {
             'handlers': ['console'],
             'level': 'WARNING',
-            'filters': ['health_endpoint', 'hetrix_access', 'request_context'],
+            'filters': ['health_endpoint', 'hetrix_access', 'request_context', 'quiet_request_paths'],
             'propagate': False,
         },
         # Django security events

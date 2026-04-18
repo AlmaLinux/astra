@@ -24,6 +24,10 @@ def _is_root_or_login_path(path: str) -> bool:
     )
 
 
+def _is_quiet_request_path(path: str) -> bool:
+    return path == "/_ci" or path.startswith("/_ci/")
+
+
 def _extract_exception_from_args(args: object) -> BaseException | None:
     if isinstance(args, BaseException):
         return args
@@ -75,6 +79,20 @@ class HetrixAccessFilter(logging.Filter):
             return True
 
         return not _is_root_or_login_path(request_path)
+
+
+class QuietRequestPathFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        request_path: str | None = None
+        if hasattr(record, "request_path"):
+            request_path = str(record.request_path)
+        else:
+            request_path = _extract_request_path(record.getMessage())
+
+        if request_path is None:
+            return True
+
+        return not _is_quiet_request_path(request_path)
 
 
 class RequestContextFilter(logging.Filter):

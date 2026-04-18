@@ -31,6 +31,10 @@ access_logger = logging.getLogger("astra.access")
 _ACCESS_LOG_TEMPLATE = '%({x-forwarded-for}i)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s"'
 
 
+def _should_skip_access_log(request_path: str) -> bool:
+    return request_path == "/_ci" or request_path.startswith("/_ci/")
+
+
 def _format_access_log_timestamp() -> str:
     return timezone.now().strftime("[%d/%b/%Y:%H:%M:%S %z]")
 
@@ -369,51 +373,52 @@ class StructuredAccessLogMiddleware:
             duration_seconds = time.monotonic() - started_at
             duration_ms = int(round(duration_seconds * 1000))
             request.META["astra.duration_seconds"] = duration_seconds
-            status_code = response.status_code if response is not None else 500
-            if status_code >= 500:
-                outcome = "server_error"
-            elif status_code >= 400:
-                outcome = "client_error"
-            else:
-                outcome = "success"
+            if not _should_skip_access_log(request.path):
+                status_code = response.status_code if response is not None else 500
+                if status_code >= 500:
+                    outcome = "server_error"
+                elif status_code >= 400:
+                    outcome = "client_error"
+                else:
+                    outcome = "success"
 
-            extra: dict[str, int | str] = {
-                "event": "astra.http.access",
-                "component": "http",
-                "outcome": outcome,
-                "http_status": status_code,
-                "request_method": request.method,
-                "request_path": request.path,
-                "duration_ms": duration_ms,
-            }
+                extra: dict[str, int | str] = {
+                    "event": "astra.http.access",
+                    "component": "http",
+                    "outcome": outcome,
+                    "http_status": status_code,
+                    "request_method": request.method,
+                    "request_path": request.path,
+                    "duration_ms": duration_ms,
+                }
 
-            request_query = str(request.META.get("QUERY_STRING") or "").strip()
-            if request_query:
-                extra["request_query"] = request_query
+                request_query = str(request.META.get("QUERY_STRING") or "").strip()
+                if request_query:
+                    extra["request_query"] = request_query
 
-            request_id = str(request.META.get("HTTP_X_REQUEST_ID") or "").strip()
-            if request_id:
-                extra["request_id"] = request_id
+                request_id = str(request.META.get("HTTP_X_REQUEST_ID") or "").strip()
+                if request_id:
+                    extra["request_id"] = request_id
 
-            client_ip = _request_client_ip(request)
-            if client_ip:
-                extra["client_ip"] = client_ip
+                client_ip = _request_client_ip(request)
+                if client_ip:
+                    extra["client_ip"] = client_ip
 
-            user_id = try_get_username_from_user(request.user) if request.user.is_authenticated else None
-            if user_id:
-                extra["user_id"] = user_id
+                user_id = try_get_username_from_user(request.user) if request.user.is_authenticated else None
+                if user_id:
+                    extra["user_id"] = user_id
 
-            if error is not None:
-                extra |= exception_log_fields(error)
+                if error is not None:
+                    extra |= exception_log_fields(error)
 
-            access_atoms = _build_access_log_atoms(
-                request,
-                status_code=status_code,
-                response=response,
-                client_ip=client_ip,
-                user_id=user_id,
-            )
-            access_logger.info(_ACCESS_LOG_TEMPLATE, access_atoms, extra=extra)
+                access_atoms = _build_access_log_atoms(
+                    request,
+                    status_code=status_code,
+                    response=response,
+                    client_ip=client_ip,
+                    user_id=user_id,
+                )
+                access_logger.info(_ACCESS_LOG_TEMPLATE, access_atoms, extra=extra)
 
 
 class LoginRequiredMiddleware:

@@ -382,3 +382,15 @@ class FreeIPAMiddlewareRestoreTests(TestCase):
         self.assertEqual(extra["outcome"], "server_error")
         self.assertEqual(extra["error_type"], "RuntimeError")
         self.assertEqual(extra["error_message"], "middleware boom")
+
+    def test_structured_access_log_middleware_skips_sentry_tunnel_requests(self):
+        factory = RequestFactory()
+        request = factory.post("/_ci/envelope/", data=b"{}", content_type="application/x-sentry-envelope")
+        request.user = AnonymousUser()
+
+        with patch("core.middleware.access_logger.info", autospec=True) as mocked_info:
+            middleware = StructuredAccessLogMiddleware(lambda _req: HttpResponse(status=200))
+            response = middleware(request)
+
+        self.assertEqual(response.status_code, 200)
+        mocked_info.assert_not_called()

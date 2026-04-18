@@ -13,8 +13,13 @@ class LoggingFilterTests(SimpleTestCase):
         configured_filters = settings.LOGGING["loggers"]["astra.access"]["filters"]
         self.assertEqual(
             configured_filters,
-            ["health_endpoint", "hetrix_access", "request_context"],
+            ["health_endpoint", "hetrix_access", "request_context", "quiet_request_paths"],
         )
+
+    def test_core_and_django_request_loggers_use_quiet_request_path_filter(self) -> None:
+        self.assertIn("quiet_request_paths", settings.LOGGING["loggers"]["core"]["filters"])
+        self.assertIn("quiet_request_paths", settings.LOGGING["loggers"]["django.request"]["filters"])
+        self.assertIn("quiet_request_paths", settings.LOGGING["loggers"]["django.server"]["filters"])
 
     def test_django_server_logger_suppresses_info_access_lines(self) -> None:
         self.assertEqual(settings.LOGGING["loggers"]["django.server"]["level"], "WARNING")
@@ -137,6 +142,50 @@ class LoggingFilterTests(SimpleTestCase):
             exc_info=None,
         )
         self.assertTrue(filt.filter(non_hetrix_root))
+
+    def test_quiet_request_path_filter_drops_ci_tunnel_logs_from_message(self) -> None:
+        from config.logging_filters import QuietRequestPathFilter
+
+        filt = QuietRequestPathFilter()
+
+        record_tunnel = logging.LogRecord(
+            name="django.server",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg='- - - [27/Jan/2026:10:49:08 +0000] "POST /_ci/envelope/ HTTP/1.1" 200 0 "-" "sentry"',
+            args=(),
+            exc_info=None,
+        )
+        self.assertFalse(filt.filter(record_tunnel))
+
+        record_other = logging.LogRecord(
+            name="django.server",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg='- - - [27/Jan/2026:10:49:08 +0000] "POST /users/ HTTP/1.1" 200 0 "-" "browser"',
+            args=(),
+            exc_info=None,
+        )
+        self.assertTrue(filt.filter(record_other))
+
+    def test_quiet_request_path_filter_drops_ci_tunnel_logs_from_request_context(self) -> None:
+        from config.logging_filters import QuietRequestPathFilter
+
+        filt = QuietRequestPathFilter()
+        record = logging.LogRecord(
+            name="core.views_sentry",
+            level=logging.WARNING,
+            pathname=__file__,
+            lineno=1,
+            msg="Failed to forward Sentry envelope",
+            args=(),
+            exc_info=None,
+        )
+        record.request_path = "/_ci/envelope/"
+
+        self.assertFalse(filt.filter(record))
 
     def test_request_context_filter_populates_searchable_log_fields(self) -> None:
         from config.logging_filters import RequestContextFilter
