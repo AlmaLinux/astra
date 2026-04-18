@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from django.contrib.staticfiles import finders
 from django.contrib.staticfiles.storage import staticfiles_storage
 from django.test import SimpleTestCase, TestCase, override_settings
 
@@ -9,6 +10,9 @@ from core.freeipa.user import FreeIPAUser
 
 
 class SentryBrowserContextTests(SimpleTestCase):
+    def test_vendored_sentry_bundle_sourcemap_exists(self) -> None:
+        self.assertIsNotNone(finders.find("core/vendor/sentry/bundle.tracing.min.js.map"))
+
     @override_settings(
         SENTRY_DSN="https://public@example.ingest.sentry.io/1",
         SENTRY_ENVIRONMENT="staging",
