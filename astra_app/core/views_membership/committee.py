@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
+from django.core import signing
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError
 from django.db.models import Prefetch, Q
@@ -47,6 +48,7 @@ from core.permissions import (
     has_any_membership_manage_permission,
     membership_review_permissions,
 )
+from core.tokens import read_membership_notes_aggregate_target_token
 from core.views_utils import (
     _normalize_str,
     _resolve_post_redirect,
@@ -656,6 +658,7 @@ def membership_notes_aggregate_note_add(request: HttpRequest) -> HttpResponse:
 
     target_type = _normalize_str(request.POST.get("aggregate_target_type")).lower()
     target = _normalize_str(request.POST.get("aggregate_target"))
+    aggregate_preloaded_target_user: object | None = None
     if not target_type or not target:
         if is_ajax:
             return JsonResponse({"ok": False, "error": "Missing target."}, status=400)
@@ -668,6 +671,27 @@ def membership_notes_aggregate_note_add(request: HttpRequest) -> HttpResponse:
 
         latest: MembershipRequest | None
         if target_type == "user":
+            preloaded_target_token = _normalize_str(request.POST.get("aggregate_preloaded_target_token"))
+            if preloaded_target_token:
+                try:
+                    preloaded_target_payload = read_membership_notes_aggregate_target_token(preloaded_target_token)
+                except signing.BadSignature:
+                    preloaded_target_payload = None
+
+                if preloaded_target_payload is not None:
+                    token_target_type = _normalize_str(preloaded_target_payload.get("target_type")).lower()
+                    token_target = _normalize_str(preloaded_target_payload.get("target"))
+                    token_email = _normalize_str(preloaded_target_payload.get("email"))
+                    if token_target_type == "user" and token_target.casefold() == target.casefold():
+                        aggregate_preloaded_target_user = FreeIPAUser(
+                            token_target,
+                            {
+                                "uid": [token_target],
+                                "mail": [token_email] if token_email else [],
+                            },
+                            respect_privacy=False,
+                        )
+
             latest = (
                 MembershipRequest.objects.filter(requested_username=target)
                 .filter(status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold])
@@ -725,6 +749,7 @@ def membership_notes_aggregate_note_add(request: HttpRequest) -> HttpResponse:
                 target=target,
                 compact=compact,
                 next_url=redirect_to,
+                aggregate_preloaded_target_user=aggregate_preloaded_target_user,
             )
 
             return JsonResponse({"ok": True, "html": str(html), "message": "Note added."})

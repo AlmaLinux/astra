@@ -1,13 +1,14 @@
 import hashlib
 from datetime import timedelta
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 from django import template
 from django.conf import settings
 from django.http import HttpRequest
 from django.template.loader import render_to_string
 from django.urls import reverse
+from django.utils.functional import SimpleLazyObject, empty
 from django.utils.html import escape, format_html, format_html_join
 from django.utils.safestring import SafeString, mark_safe
 from markdownify.templatetags.markdownify import markdownify as render_markdown
@@ -16,7 +17,8 @@ from post_office.models import Email
 from core.freeipa.user import FreeIPAUser
 from core.membership_notes import CUSTOS, last_votes, note_action_icon, note_action_label
 from core.models import MembershipRequest, Note
-from core.views_utils import get_username
+from core.tokens import make_membership_notes_aggregate_target_token
+from core.views_utils import get_username, try_get_username_from_user
 
 register = template.Library()
 
@@ -219,6 +221,110 @@ def _current_username_from_request(http_request: HttpRequest | None) -> str:
     return get_username(http_request, allow_user_fallback=False)
 
 
+def _normalize_username(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
+def _aggregate_author_usernames(notes: list[Note]) -> set[str]:
+    return {
+        _normalize_username(note.username)
+        for note in notes
+        if note.username and note.username != CUSTOS and _normalize_username(note.username)
+    }
+
+
+def _avatar_safe_aggregate_user(user_obj: object | None) -> object | None:
+    if user_obj is None:
+        return None
+
+    if isinstance(user_obj, SimpleLazyObject):
+        # Only reuse an already-evaluated lazy user so this optimization never forces a new fetch.
+        wrapped_user = user_obj._wrapped
+        if wrapped_user is empty or wrapped_user is user_obj:
+            return None
+        if isinstance(wrapped_user, FreeIPAUser):
+            return wrapped_user
+        return None
+
+    if isinstance(user_obj, FreeIPAUser):
+        return user_obj
+
+    candidate_user = cast(Any, user_obj)
+    if not hasattr(candidate_user, "is_authenticated") or not bool(candidate_user.is_authenticated):
+        return None
+    if not hasattr(candidate_user, "username") or not hasattr(candidate_user, "email"):
+        return None
+    if not hasattr(candidate_user, "get_username") or not callable(candidate_user.get_username):
+        return None
+
+    username = _normalize_username(try_get_username_from_user(candidate_user))
+    email = str(candidate_user.email or "").strip()
+    request_get_username = _normalize_username(candidate_user.get_username())
+    if not username or not email or request_get_username != username:
+        return None
+
+    return candidate_user
+
+
+def _avatar_safe_request_user_for_aggregate_notes(http_request: HttpRequest | None) -> object | None:
+    if http_request is None or not hasattr(http_request, "user"):
+        return None
+
+    return _avatar_safe_aggregate_user(http_request.user)
+
+
+def _aggregate_preloaded_target_user(
+    *,
+    context: dict[str, Any],
+    aggregate_target_type: str,
+    aggregate_target: str,
+) -> object | None:
+    if aggregate_target_type != "user":
+        return None
+
+    normalized_target = _normalize_username(aggregate_target)
+    if not normalized_target:
+        return None
+
+    for candidate in (context.get("fu"), context.get("aggregate_preloaded_target_user")):
+        safe_candidate = _avatar_safe_aggregate_user(candidate)
+        if safe_candidate is None:
+            continue
+        candidate_username = _normalize_username(try_get_username_from_user(safe_candidate))
+        if candidate_username == normalized_target:
+            return safe_candidate
+
+    return None
+
+
+def _preloaded_aggregate_avatar_users_by_username(
+    *,
+    context: dict[str, Any],
+    notes: list[Note],
+    http_request: HttpRequest | None,
+    aggregate_target_user: object | None,
+) -> dict[str, object]:
+    aggregate_author_usernames = _aggregate_author_usernames(notes)
+    if not aggregate_author_usernames:
+        return {}
+
+    preloaded_users_by_username: dict[str, object] = {}
+
+    target_user = _avatar_safe_aggregate_user(aggregate_target_user)
+    if target_user is not None:
+        target_username = _normalize_username(try_get_username_from_user(target_user))
+        if target_username in aggregate_author_usernames:
+            preloaded_users_by_username[target_username] = target_user
+
+    request_user = _avatar_safe_request_user_for_aggregate_notes(http_request)
+    if request_user is not None:
+        request_username = _normalize_username(try_get_username_from_user(request_user))
+        if request_username in aggregate_author_usernames and request_username not in preloaded_users_by_username:
+            preloaded_users_by_username[request_username] = request_user
+
+    return preloaded_users_by_username
+
+
 def _avatar_users_by_username(notes: list[Note]) -> dict[str, object]:
     avatar_users_by_username: dict[str, object] = {}
     for username in {str(n.username or "").strip() for n in notes if n.username and n.username != CUSTOS}:
@@ -228,15 +334,20 @@ def _avatar_users_by_username(notes: list[Note]) -> dict[str, object]:
     return avatar_users_by_username
 
 
-def _aggregate_avatar_users_by_username(notes: list[Note]) -> dict[str, object]:
-    lookup_usernames = {
-        str(note.username or "").strip().lower()
-        for note in notes
-        if note.username and note.username != CUSTOS and str(note.username or "").strip()
-    }
+def _aggregate_avatar_users_by_username(
+    notes: list[Note],
+    *,
+    preloaded_users_by_username: dict[str, object] | None = None,
+) -> dict[str, object]:
+    lookup_usernames = _aggregate_author_usernames(notes)
     if not lookup_usernames:
         return {}
-    return FreeIPAUser.find_lightweight_by_usernames(lookup_usernames)
+
+    resolved_users_by_username = dict(preloaded_users_by_username or {})
+    unresolved_usernames = lookup_usernames - set(resolved_users_by_username)
+    if unresolved_usernames:
+        resolved_users_by_username.update(FreeIPAUser.find_lightweight_by_usernames(unresolved_usernames))
+    return resolved_users_by_username
 
 
 def _note_display_username(note: Note) -> str:
@@ -577,6 +688,29 @@ def _render_membership_notes_aggregate(
         notes,
         current_responses_by_request_id=current_responses_by_request_id,
     )
+    aggregate_target_user = _aggregate_preloaded_target_user(
+        context=context,
+        aggregate_target_type=aggregate_target_type,
+        aggregate_target=aggregate_target,
+    )
+    preloaded_users_by_username = _preloaded_aggregate_avatar_users_by_username(
+        context=context,
+        notes=notes,
+        http_request=http_request,
+        aggregate_target_user=aggregate_target_user,
+    )
+    aggregate_preloaded_target_token = ""
+    if aggregate_target_user is not None:
+        safe_target_user = cast(Any, aggregate_target_user)
+        aggregate_preloaded_target_username = str(try_get_username_from_user(aggregate_target_user) or "").strip()
+        if aggregate_preloaded_target_username:
+            aggregate_preloaded_target_token = make_membership_notes_aggregate_target_token(
+                {
+                    "target_type": aggregate_target_type,
+                    "target": aggregate_preloaded_target_username,
+                    "email": str(safe_target_user.email or "").strip(),
+                }
+            )
 
     html = render_to_string(
         "core/_membership_notes.html",
@@ -589,7 +723,10 @@ def _render_membership_notes_aggregate(
                     current_username=_current_username_from_request(http_request),
                     email_modal_ids=email_modal_ids,
                     request_resubmitted_new_snapshots_by_note_id=request_resubmitted_new_snapshots_by_note_id,
-                    avatar_users_by_username=_aggregate_avatar_users_by_username(notes),
+                    avatar_users_by_username=_aggregate_avatar_users_by_username(
+                        notes,
+                        preloaded_users_by_username=preloaded_users_by_username,
+                    ),
                 )
             ),
             "note_count": len(notes),
@@ -601,6 +738,7 @@ def _render_membership_notes_aggregate(
             "post_url": post_url,
             "aggregate_target_type": aggregate_target_type,
             "aggregate_target": aggregate_target,
+            "aggregate_preloaded_target_token": aggregate_preloaded_target_token,
             "next_url": resolved_next_url,
             "email_modals": email_modals,
         },

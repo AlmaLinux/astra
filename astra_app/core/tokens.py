@@ -11,6 +11,7 @@ _REGISTRATION_ACTIVATION_TOKEN_PURPOSE = "registration-activate"
 _SETTINGS_EMAIL_VALIDATION_TOKEN_PURPOSE = "settings-email-validate"
 _ORGANIZATION_CLAIM_TOKEN_PURPOSE = "org_claim"
 _ACCOUNT_INVITATION_TOKEN_PURPOSE = "account-invitation"
+_MEMBERSHIP_NOTES_AGGREGATE_TARGET_TOKEN_PURPOSE = "membership-notes-aggregate-target"
 
 
 def _salt_for_purpose(*, purpose: str) -> str:
@@ -87,6 +88,18 @@ def make_account_invitation_token(payload: Mapping[str, Any]) -> str:
 def read_account_invitation_token_unbounded(token: str) -> dict[str, Any]:
     return _loads(
         purpose=_ACCOUNT_INVITATION_TOKEN_PURPOSE,
+        token=token,
+        max_age_seconds=None,
+    )
+
+
+def make_membership_notes_aggregate_target_token(payload: Mapping[str, Any]) -> str:
+    return _dumps(purpose=_MEMBERSHIP_NOTES_AGGREGATE_TARGET_TOKEN_PURPOSE, payload=payload)
+
+
+def read_membership_notes_aggregate_target_token(token: str) -> dict[str, Any]:
+    return _loads(
+        purpose=_MEMBERSHIP_NOTES_AGGREGATE_TARGET_TOKEN_PURPOSE,
         token=token,
         max_age_seconds=None,
     )

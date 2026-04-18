@@ -2,12 +2,14 @@
 import json
 import re
 from datetime import timedelta
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.conf import settings
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.functional import SimpleLazyObject
 
 from core.freeipa.user import FreeIPAUser
 from core.membership_notes import CUSTOS
@@ -62,6 +64,38 @@ class MembershipNotesAjaxTests(TestCase):
                 "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
             },
         )
+
+    def _aggregate_target_token(self, *, username: str, email: str = "") -> str:
+        from core.tokens import make_membership_notes_aggregate_target_token
+
+        return make_membership_notes_aggregate_target_token(
+            {
+                "target_type": "user",
+                "target": username,
+                "email": email,
+            }
+        )
+
+    def _aggregate_request(self, user: object):
+        request = RequestFactory().get("/")
+        request.user = user
+        viewer_username = ""
+        if hasattr(user, "username"):
+            viewer_username = str(user.username or "").strip()
+        request.session = {"_freeipa_username": viewer_username}
+        return request
+
+    def _group_html(self, html: str, username: str, *, next_username: str | None = None) -> str:
+        start_marker = f'data-membership-notes-group-username="{username}"'
+        start_index = html.find(start_marker)
+        self.assertNotEqual(start_index, -1)
+        if next_username is None:
+            return html[start_index:]
+
+        end_marker = f'data-membership-notes-group-username="{next_username}"'
+        end_index = html.find(end_marker, start_index + len(start_marker))
+        self.assertNotEqual(end_index, -1)
+        return html[start_index:end_index]
 
     def _render_notes_html_via_ajax(self, membership_request_id: int) -> str:
         self._login_as_freeipa_user("reviewer")
@@ -1325,6 +1359,439 @@ class MembershipNotesAjaxTests(TestCase):
         self.assertIn("ghost-user", ghost_group_html)
         self.assertIn('alt="user image"', ghost_group_html)
         self.assertNotIn('class="direct-chat-img img-circle"', ghost_group_html)
+
+    def test_aggregate_profile_notes_reuse_preloaded_target_and_avatar_safe_viewer(self) -> None:
+        membership_request = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+        )
+        Note.objects.create(
+            membership_request=membership_request,
+            username="alice",
+            content="Target note",
+            action={},
+        )
+        Note.objects.create(
+            membership_request=membership_request,
+            username="viewer",
+            content="Viewer note",
+            action={},
+        )
+        Note.objects.create(
+            membership_request=membership_request,
+            username="ghost-user",
+            content="Ghost note",
+            action={},
+        )
+
+        target_user = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "displayname": ["Alice Example"],
+                "mail": ["alice@example.com"],
+            },
+        )
+        viewer_user = SimpleNamespace(
+            username="viewer",
+            email="viewer@example.com",
+            is_authenticated=True,
+            get_username=lambda: "viewer",
+        )
+        request = self._aggregate_request(viewer_user)
+
+        with (
+            patch(
+                "core.templatetags.core_membership_notes.FreeIPAUser.find_lightweight_by_usernames",
+                return_value={},
+            ) as lightweight_lookup_mock,
+            patch(
+                "core.templatetags.core_membership_notes.FreeIPAUser.get",
+                side_effect=AssertionError("aggregate profile notes must keep route-known reuse inside the shared lightweight helper path"),
+            ),
+        ):
+            from core.templatetags.core_membership_notes import membership_notes_aggregate_for_user
+
+            html = str(
+                membership_notes_aggregate_for_user(
+                    {
+                        "request": request,
+                        "membership_can_view": True,
+                        "membership_can_add": True,
+                        "fu": target_user,
+                    },
+                    "alice",
+                    compact=True,
+                    next_url="/",
+                )
+            )
+
+        self.assertEqual(lightweight_lookup_mock.call_count, 1)
+        self.assertEqual(set(lightweight_lookup_mock.call_args.args[0]), {"ghost-user"})
+        self.assertIn('name="aggregate_preloaded_target_token"', html)
+        self.assertNotIn('aggregate_preloaded_target_username', html)
+        self.assertNotIn('aggregate_preloaded_target_email', html)
+
+        target_group_html = self._group_html(html, "alice", next_username="viewer")
+        viewer_group_html = self._group_html(html, "viewer", next_username="ghost-user")
+        ghost_group_html = self._group_html(html, "ghost-user")
+
+        self.assertIn('class="direct-chat-img img-circle"', target_group_html)
+        self.assertNotIn('alt="user image"', target_group_html)
+        self.assertIn('class="direct-chat-img img-circle"', viewer_group_html)
+        self.assertNotIn('alt="user image"', viewer_group_html)
+        self.assertIn('alt="user image"', ghost_group_html)
+        self.assertNotIn('class="direct-chat-img img-circle"', ghost_group_html)
+
+    def test_aggregate_profile_notes_skip_username_only_viewer_reuse(self) -> None:
+        membership_request = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+        )
+        Note.objects.create(
+            membership_request=membership_request,
+            username="alice",
+            content="Target note",
+            action={},
+        )
+        Note.objects.create(
+            membership_request=membership_request,
+            username="viewer",
+            content="Viewer note",
+            action={},
+        )
+        Note.objects.create(
+            membership_request=membership_request,
+            username="ghost-user",
+            content="Ghost note",
+            action={},
+        )
+
+        target_user = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "displayname": ["Alice Example"],
+                "mail": ["alice@example.com"],
+            },
+        )
+        viewer_from_lookup = FreeIPAUser(
+            "viewer",
+            {
+                "uid": ["viewer"],
+                "displayname": ["Viewer Example"],
+                "mail": ["viewer@example.com"],
+            },
+        )
+        request = self._aggregate_request(
+            SimpleNamespace(
+                username="viewer",
+                is_authenticated=True,
+                get_username=lambda: "viewer",
+            )
+        )
+
+        with (
+            patch(
+                "core.templatetags.core_membership_notes.FreeIPAUser.find_lightweight_by_usernames",
+                return_value={"viewer": viewer_from_lookup},
+            ) as lightweight_lookup_mock,
+            patch(
+                "core.templatetags.core_membership_notes.FreeIPAUser.get",
+                side_effect=AssertionError(
+                    "aggregate profile notes must not widen request.user reuse with full-detail author fetches"
+                ),
+            ),
+        ):
+            from core.templatetags.core_membership_notes import membership_notes_aggregate_for_user
+
+            html = str(
+                membership_notes_aggregate_for_user(
+                    {"request": request, "membership_can_view": True, "fu": target_user},
+                    "alice",
+                    compact=True,
+                    next_url="/",
+                )
+            )
+
+        self.assertEqual(lightweight_lookup_mock.call_count, 1)
+        self.assertEqual(set(lightweight_lookup_mock.call_args.args[0]), {"ghost-user", "viewer"})
+
+        target_group_html = self._group_html(html, "alice", next_username="viewer")
+        viewer_group_html = self._group_html(html, "viewer", next_username="ghost-user")
+        ghost_group_html = self._group_html(html, "ghost-user")
+
+        self.assertIn('class="direct-chat-img img-circle"', target_group_html)
+        self.assertNotIn('alt="user image"', target_group_html)
+        self.assertIn('class="direct-chat-img img-circle"', viewer_group_html)
+        self.assertNotIn('alt="user image"', viewer_group_html)
+        self.assertIn('alt="user image"', ghost_group_html)
+        self.assertNotIn('class="direct-chat-img img-circle"', ghost_group_html)
+
+    def test_aggregate_profile_notes_reuse_evaluated_lazy_freeipa_viewer(self) -> None:
+        membership_request = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+        )
+        Note.objects.create(
+            membership_request=membership_request,
+            username="alice",
+            content="Target note",
+            action={},
+        )
+        Note.objects.create(
+            membership_request=membership_request,
+            username="viewer",
+            content="Viewer note",
+            action={},
+        )
+        Note.objects.create(
+            membership_request=membership_request,
+            username="ghost-user",
+            content="Ghost note",
+            action={},
+        )
+
+        target_user = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "displayname": ["Alice Example"],
+                "mail": ["alice@example.com"],
+            },
+        )
+        viewer_user = FreeIPAUser(
+            "viewer",
+            {
+                "uid": ["viewer"],
+                "displayname": ["Viewer Example"],
+                "mail": ["viewer@example.com"],
+            },
+        )
+        lazy_viewer_user = SimpleLazyObject(lambda: viewer_user)
+        _ = lazy_viewer_user.username
+        request = self._aggregate_request(lazy_viewer_user)
+
+        with (
+            patch(
+                "core.templatetags.core_membership_notes.FreeIPAUser.find_lightweight_by_usernames",
+                return_value={},
+            ) as lightweight_lookup_mock,
+            patch(
+                "core.templatetags.core_membership_notes.FreeIPAUser.get",
+                side_effect=AssertionError(
+                    "aggregate profile notes must keep evaluated lazy FreeIPA viewers on the shared lightweight helper path"
+                ),
+            ),
+        ):
+            from core.templatetags.core_membership_notes import membership_notes_aggregate_for_user
+
+            html = str(
+                membership_notes_aggregate_for_user(
+                    {"request": request, "membership_can_view": True, "fu": target_user},
+                    "alice",
+                    compact=True,
+                    next_url="/",
+                )
+            )
+
+        self.assertEqual(lightweight_lookup_mock.call_count, 1)
+        self.assertEqual(set(lightweight_lookup_mock.call_args.args[0]), {"ghost-user"})
+
+        target_group_html = self._group_html(html, "alice", next_username="viewer")
+        viewer_group_html = self._group_html(html, "viewer", next_username="ghost-user")
+        ghost_group_html = self._group_html(html, "ghost-user")
+
+        self.assertIn('class="direct-chat-img img-circle"', target_group_html)
+        self.assertNotIn('alt="user image"', target_group_html)
+        self.assertIn('class="direct-chat-img img-circle"', viewer_group_html)
+        self.assertNotIn('alt="user image"', viewer_group_html)
+        self.assertIn('alt="user image"', ghost_group_html)
+        self.assertNotIn('class="direct-chat-img img-circle"', ghost_group_html)
+
+    def test_aggregate_note_ajax_rerender_reuses_profile_target_user(self) -> None:
+        membership_request = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+        )
+        Note.objects.create(
+            membership_request=membership_request,
+            username="alice",
+            content="Target note",
+            action={},
+        )
+        Note.objects.create(
+            membership_request=membership_request,
+            username="ghost-user",
+            content="Ghost note",
+            action={},
+        )
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = self._reviewer_user()
+        lightweight_lookup_usernames: list[tuple[str, ...]] = []
+
+        def _record_lightweight_lookup(usernames: set[str]) -> dict[str, FreeIPAUser]:
+            lightweight_lookup_usernames.append(tuple(sorted(usernames)))
+            return {}
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch(
+                "core.templatetags.core_membership_notes.FreeIPAUser.find_lightweight_by_usernames",
+                side_effect=_record_lightweight_lookup,
+            ),
+        ):
+            response = self.client.post(
+                reverse("membership-notes-aggregate-note-add"),
+                data={
+                    "aggregate_target_type": "user",
+                    "aggregate_target": "alice",
+                    "aggregate_preloaded_target_token": self._aggregate_target_token(
+                        username="alice",
+                        email="alice@example.com",
+                    ),
+                    "note_action": "message",
+                    "message": "Ajax note",
+                    "compact": "1",
+                    "next": "/user/alice/",
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload.get("ok"), True)
+        self.assertEqual(lightweight_lookup_usernames, [("ghost-user",)])
+
+        html = str(payload.get("html", ""))
+        target_group_html = self._group_html(html, "alice", next_username="ghost-user")
+        ghost_group_html = self._group_html(html, "ghost-user", next_username="reviewer")
+
+        self.assertIn('class="direct-chat-img img-circle"', target_group_html)
+        self.assertNotIn('alt="user image"', target_group_html)
+        self.assertIn('alt="user image"', ghost_group_html)
+        self.assertIn('name="aggregate_preloaded_target_token"', html)
+        self.assertNotIn('aggregate_preloaded_target_username', html)
+        self.assertNotIn('aggregate_preloaded_target_email', html)
+
+    def test_aggregate_note_ajax_rerender_reuses_no_email_profile_target_from_signed_token(self) -> None:
+        membership_request = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+        )
+        Note.objects.create(
+            membership_request=membership_request,
+            username="alice",
+            content="Target note",
+            action={},
+        )
+        Note.objects.create(
+            membership_request=membership_request,
+            username="ghost-user",
+            content="Ghost note",
+            action={},
+        )
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = self._reviewer_user()
+        lightweight_lookup_usernames: list[tuple[str, ...]] = []
+
+        def _record_lightweight_lookup(usernames: set[str]) -> dict[str, FreeIPAUser]:
+            lightweight_lookup_usernames.append(tuple(sorted(usernames)))
+            return {}
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch(
+                "core.templatetags.core_membership_notes.FreeIPAUser.find_lightweight_by_usernames",
+                side_effect=_record_lightweight_lookup,
+            ),
+        ):
+            response = self.client.post(
+                reverse("membership-notes-aggregate-note-add"),
+                data={
+                    "aggregate_target_type": "user",
+                    "aggregate_target": "alice",
+                    "aggregate_preloaded_target_token": self._aggregate_target_token(username="alice"),
+                    "note_action": "message",
+                    "message": "Ajax note",
+                    "compact": "1",
+                    "next": "/user/alice/",
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload.get("ok"), True)
+        self.assertEqual(lightweight_lookup_usernames, [("ghost-user",)])
+
+        html = str(payload.get("html", ""))
+        self.assertIn('data-membership-notes-group-username="alice"', html)
+        self.assertIn('name="aggregate_preloaded_target_token"', html)
+        self.assertNotIn('aggregate_preloaded_target_username', html)
+        self.assertNotIn('aggregate_preloaded_target_email', html)
+
+    def test_aggregate_note_ajax_rerender_ignores_untrusted_raw_target_identity_fields(self) -> None:
+        membership_request = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+        )
+        Note.objects.create(
+            membership_request=membership_request,
+            username="alice",
+            content="Target note",
+            action={},
+        )
+        Note.objects.create(
+            membership_request=membership_request,
+            username="ghost-user",
+            content="Ghost note",
+            action={},
+        )
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = self._reviewer_user()
+        lightweight_lookup_usernames: list[tuple[str, ...]] = []
+
+        def _record_lightweight_lookup(usernames: set[str]) -> dict[str, FreeIPAUser]:
+            lightweight_lookup_usernames.append(tuple(sorted(usernames)))
+            return {}
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch(
+                "core.templatetags.core_membership_notes.FreeIPAUser.find_lightweight_by_usernames",
+                side_effect=_record_lightweight_lookup,
+            ),
+        ):
+            response = self.client.post(
+                reverse("membership-notes-aggregate-note-add"),
+                data={
+                    "aggregate_target_type": "user",
+                    "aggregate_target": "alice",
+                    "aggregate_preloaded_target_username": "alice",
+                    "aggregate_preloaded_target_email": "attacker@example.com",
+                    "note_action": "message",
+                    "message": "Ajax note",
+                    "compact": "1",
+                    "next": "/user/alice/",
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload.get("ok"), True)
+        self.assertEqual(lightweight_lookup_usernames, [("alice", "ghost-user")])
+
+        html = str(payload.get("html", ""))
+        target_group_html = self._group_html(html, "alice", next_username="ghost-user")
+        self.assertIn('alt="user image"', target_group_html)
+        self.assertNotIn('class="direct-chat-img img-circle"', target_group_html)
+        self.assertNotIn('aggregate_preloaded_target_username', html)
+        self.assertNotIn('aggregate_preloaded_target_email', html)
 
     def test_detail_notes_do_not_switch_to_aggregate_lightweight_author_lookup(self) -> None:
         req = MembershipRequest.objects.create(

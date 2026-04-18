@@ -29,8 +29,11 @@ def render_membership_notes_aggregate_widget(
     target: str,
     compact: bool,
     next_url: str,
+    aggregate_preloaded_target_user: object | None = None,
 ) -> str:
     context = {"request": request, **review_permissions}
+    if aggregate_preloaded_target_user is not None:
+        context["aggregate_preloaded_target_user"] = aggregate_preloaded_target_user
     if target_type == "user":
         html = core_membership_notes.membership_notes_aggregate_for_user(
             context,

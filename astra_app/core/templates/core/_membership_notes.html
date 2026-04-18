@@ -195,6 +195,9 @@
             {% if aggregate_target_type and aggregate_target %}
               <input type="hidden" name="aggregate_target_type" value="{{ aggregate_target_type }}">
               <input type="hidden" name="aggregate_target" value="{{ aggregate_target }}">
+              {% if aggregate_preloaded_target_token %}
+                <input type="hidden" name="aggregate_preloaded_target_token" value="{{ aggregate_preloaded_target_token }}">
+              {% endif %}
             {% endif %}
             <input type="hidden" name="note_action" value="message">
             <div class="input-group">
