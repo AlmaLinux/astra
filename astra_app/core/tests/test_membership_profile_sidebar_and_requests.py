@@ -972,6 +972,8 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             resp,
             reverse("api-membership-notes-aggregate") + f"?target_type=user&amp;target={alice.username}",
         )
+        self.assertContains(resp, 'data-membership-notes-has-fallback-content="0"')
+        self.assertContains(resp, "Loading notes...")
         self.assertNotContains(resp, "Needs manual review")
         self.assertNotContains(resp, f"(req. #{req.pk})")
 
@@ -1096,11 +1098,13 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             resp,
             reverse("api-membership-notes-aggregate") + "?target_type=user&amp;target=alice",
         )
+        self.assertContains(resp, 'data-membership-notes-has-fallback-content="0"')
+        self.assertContains(resp, "Loading notes...")
         self.assertNotContains(resp, 'data-membership-notes-form="')
         self.assertNotContains(resp, 'placeholder="Type a note..."')
         self.assertNotContains(resp, 'data-note-action="vote_approve"')
         self.assertNotContains(resp, 'data-note-action="vote_disapprove"')
-        self.assertContains(resp, "Older note")
+        self.assertNotContains(resp, "Older note")
 
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.post(

@@ -449,6 +449,10 @@
     return document.getElementById(section === 'pending' ? 'membership-requests-pending-pager' : 'membership-requests-on-hold-pager');
   }
 
+  function sectionCountElement(section) {
+    return document.getElementById(section === 'pending' ? 'membership-requests-pending-count' : 'membership-requests-on-hold-count');
+  }
+
   function tableBodyElement(tableSelector) {
     return document.querySelector(tableSelector + ' tbody');
   }
@@ -465,6 +469,31 @@
     }
     if (pagerElement) {
       pagerElement.innerHTML = '';
+    }
+  }
+
+  function updateSectionCount(section, count) {
+    var countElement = sectionCountElement(section);
+    if (!countElement) {
+      return;
+    }
+    countElement.innerHTML = (section === 'pending' ? 'Pending: ' : 'On hold: ') + String(count);
+  }
+
+  function updatePendingFilterOptions(filterMetadata) {
+    var filterSelect = document.getElementById('requests-filter');
+    if (!filterSelect || !filterMetadata || !Array.isArray(filterMetadata.options)) {
+      return;
+    }
+
+    filterSelect.innerHTML = filterMetadata.options.map(function (option) {
+      var selected = option && option.value === filterMetadata.selected ? ' selected' : '';
+      return '<option value="' + escapeHtml(option.value || '') + '"' + selected + '>' +
+        escapeHtml(option.label || '') + ' (' + escapeHtml(option.count || 0) + ')</option>';
+    }).join('');
+
+    if (filterMetadata.selected) {
+      filterSelect.value = String(filterMetadata.selected);
     }
   }
 
@@ -898,6 +927,10 @@
                 throw new Error((result.payload && result.payload.error) || 'Failed to load membership requests.');
               }
               callback(result.payload);
+              updateSectionCount(section, Number(result.payload.recordsFiltered || 0));
+              if (section === 'pending') {
+                updatePendingFilterOptions(result.payload.pending_filter);
+              }
               var tbody = tableBodyElement(tableSelector);
               if (!tbody) return;
               var rows = result.payload.data || [];

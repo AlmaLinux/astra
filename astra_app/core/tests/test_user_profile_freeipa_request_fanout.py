@@ -78,18 +78,6 @@ class UserProfileFreeIPARequestFanoutTests(TestCase):
         request.session = {"_freeipa_username": viewer_username}
         return request
 
-    def _group_html(self, html: str, username: str, *, next_username: str | None = None) -> str:
-        start_marker = f'data-membership-notes-group-username="{username}"'
-        start_index = html.find(start_marker)
-        self.assertNotEqual(start_index, -1)
-        if next_username is None:
-            return html[start_index:]
-
-        end_marker = f'data-membership-notes-group-username="{next_username}"'
-        end_index = html.find(end_marker, start_index + len(start_marker))
-        self.assertNotEqual(end_index, -1)
-        return html[start_index:end_index]
-
     def _viewer_request_user(self, *, include_email: bool) -> SimpleNamespace:
         viewer = SimpleNamespace(
             username="viewer",
@@ -351,18 +339,12 @@ class UserProfileFreeIPARequestFanoutTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(target_fetches, ["alice"])
-        self.assertEqual(aggregate_lookup_usernames, [("ghost-user",)])
-
-        target_group_html = self._group_html(html, "alice", next_username="viewer")
-        viewer_group_html = self._group_html(html, "viewer", next_username="ghost-user")
-        ghost_group_html = self._group_html(html, "ghost-user")
-
-        self.assertIn('class="direct-chat-img img-circle"', target_group_html)
-        self.assertNotIn('alt="user image"', target_group_html)
-        self.assertIn('class="direct-chat-img img-circle"', viewer_group_html)
-        self.assertNotIn('alt="user image"', viewer_group_html)
-        self.assertIn('alt="user image"', ghost_group_html)
-        self.assertNotIn('class="direct-chat-img img-circle"', ghost_group_html)
+        self.assertEqual(aggregate_lookup_usernames, [])
+        self.assertIn('data-membership-notes-has-fallback-content="0"', html)
+        self.assertIn("Loading notes...", html)
+        self.assertNotIn("Target note", html)
+        self.assertNotIn("Viewer note", html)
+        self.assertNotIn("Ghost note", html)
 
     def test_profile_route_skips_username_only_viewer_reuse_for_aggregate_notes(self) -> None:
         self._create_aggregate_profile_notes()
@@ -382,15 +364,9 @@ class UserProfileFreeIPARequestFanoutTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(target_fetches, ["alice"])
-        self.assertEqual(aggregate_lookup_usernames, [("ghost-user", "viewer")])
-
-        target_group_html = self._group_html(html, "alice", next_username="viewer")
-        viewer_group_html = self._group_html(html, "viewer", next_username="ghost-user")
-        ghost_group_html = self._group_html(html, "ghost-user")
-
-        self.assertIn('class="direct-chat-img img-circle"', target_group_html)
-        self.assertNotIn('alt="user image"', target_group_html)
-        self.assertIn('class="direct-chat-img img-circle"', viewer_group_html)
-        self.assertNotIn('alt="user image"', viewer_group_html)
-        self.assertIn('alt="user image"', ghost_group_html)
-        self.assertNotIn('class="direct-chat-img img-circle"', ghost_group_html)
+        self.assertEqual(aggregate_lookup_usernames, [])
+        self.assertIn('data-membership-notes-has-fallback-content="0"', html)
+        self.assertIn("Loading notes...", html)
+        self.assertNotIn("Target note", html)
+        self.assertNotIn("Viewer note", html)
+        self.assertNotIn("Ghost note", html)

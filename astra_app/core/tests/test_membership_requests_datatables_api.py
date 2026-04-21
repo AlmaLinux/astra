@@ -78,7 +78,7 @@ class MembershipRequestsDataTablesApiTests(TestCase):
             "columns[0][search][regex]": "false",
         }
 
-    def test_enabled_page_uses_shell_summary_boundary_and_not_legacy_queue_summary(self) -> None:
+    def test_enabled_page_shell_skips_shell_summary_and_lightweight_lookup(self) -> None:
         MembershipRequest.objects.create(
             requested_username="alice",
             membership_type_id="individual",
@@ -99,19 +99,6 @@ class MembershipRequestsDataTablesApiTests(TestCase):
 
         self._login_as_committee()
 
-        shell_summary = {
-            "pending_count": 7,
-            "on_hold_count": 3,
-            "filter_options": [
-                {"value": "all", "label": "All", "count": 7},
-                {"value": "renewals", "label": "Renewals", "count": 2},
-                {"value": "sponsorships", "label": "Sponsorships", "count": 1},
-                {"value": "individuals", "label": "Individuals", "count": 4},
-                {"value": "mirrors", "label": "Mirrors", "count": 0},
-            ],
-            "filter_empty": False,
-        }
-
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
             patch(
@@ -120,25 +107,28 @@ class MembershipRequestsDataTablesApiTests(TestCase):
             ),
             patch(
                 "core.views_membership.committee.build_membership_request_shell_summary",
-                return_value=shell_summary,
-            ) as build_shell_summary,
+                side_effect=AssertionError("membership requests shell must not build the shell summary during page render"),
+                create=True,
+            ),
+            patch(
+                "core.views_membership.committee.FreeIPAUser.find_lightweight_by_usernames",
+                side_effect=AssertionError("membership requests shell must not issue lightweight FreeIPA lookups during page render"),
+            ),
             patch(
                 "core.views_membership.committee.build_notes_by_membership_request_id",
                 side_effect=AssertionError("membership requests shell must not preload SSR note widgets"),
             ),
         ):
-            response = self.client.get(reverse("membership-requests"))
+            response = self.client.get(f"{reverse('membership-requests')}?filter=renewals")
 
-        build_shell_summary.assert_called_once_with(
-            selected_filter="all",
-            lookup_users=FreeIPAUser.find_lightweight_by_usernames,
-        )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'data-membership-requests-root')
-        self.assertContains(response, "Pending: 7")
-        self.assertContains(response, "On hold: 3")
-        self.assertContains(response, "All (7)")
-        self.assertContains(response, "Renewals (2)")
+        self.assertContains(response, "Pending: --")
+        self.assertContains(response, "On hold: --")
+        self.assertContains(response, "All")
+        self.assertContains(response, "Renewals")
+        self.assertContains(response, 'option value="renewals" selected')
+        self.assertNotContains(response, "All (2)")
 
     def test_pending_endpoint_does_not_query_on_hold_queue(self) -> None:
         MembershipRequest.objects.create(
@@ -286,7 +276,19 @@ class MembershipRequestsDataTablesApiTests(TestCase):
         self.assertEqual(payload["draw"], 3)
         self.assertEqual(payload["recordsTotal"], 1)
         self.assertEqual(payload["recordsFiltered"], 1)
-        self.assertNotIn("pending_filter", payload)
+        self.assertEqual(
+            payload["pending_filter"],
+            {
+                "selected": "all",
+                "options": [
+                    {"value": "all", "label": "All", "count": 1},
+                    {"value": "renewals", "label": "Renewals", "count": 0},
+                    {"value": "sponsorships", "label": "Sponsorships", "count": 0},
+                    {"value": "individuals", "label": "Individuals", "count": 1},
+                    {"value": "mirrors", "label": "Mirrors", "count": 0},
+                ],
+            },
+        )
         self.assertEqual(len(payload["data"]), 1)
         row = payload["data"][0]
 
@@ -1165,6 +1167,8 @@ class MembershipRequestsDataTablesJsExecutionTests(SimpleTestCase):
                         const pendingApply = registerElement({{ id: 'bulk-apply', tagName: 'button', disabled: true }});
                         const onHoldApply = registerElement({{ id: 'bulk-apply-on-hold', tagName: 'button', disabled: true }});
                         const filterSelect = registerElement({{ id: 'requests-filter', tagName: 'select', value: 'all' }});
+                        const pendingCount = registerElement({{ id: 'membership-requests-pending-count', tagName: 'div' }});
+                        const onHoldCount = registerElement({{ id: 'membership-requests-on-hold-count', tagName: 'div' }});
 
                         function buildForm(id, nextValue) {{
                             const form = registerElement({{ id, tagName: 'form' }});
@@ -1459,6 +1463,57 @@ class MembershipRequestsDataTablesJsExecutionTests(SimpleTestCase):
                         assert(
                             tableRegistry['#membership-requests-on-hold-table'].table.reloadCalls.length === 0,
                             'Posting a pending-row note must not reload the on-hold table.',
+                        );
+                        process.exit(0);
+                        """
+                )
+
+        def test_script_updates_shell_counts_and_filter_labels_from_api_results(self) -> None:
+                self._run_node_scenario(
+                        """
+                        await loadTable('#membership-requests-pending-table', {
+                            draw: 1,
+                            recordsTotal: 6,
+                            recordsFiltered: 2,
+                            pending_filter: {
+                                selected: 'renewals',
+                                options: [
+                                    { value: 'all', label: 'All', count: 6 },
+                                    { value: 'renewals', label: 'Renewals', count: 2 },
+                                    { value: 'sponsorships', label: 'Sponsorships', count: 1 },
+                                    { value: 'individuals', label: 'Individuals', count: 3 },
+                                    { value: 'mirrors', label: 'Mirrors', count: 0 },
+                                ],
+                            },
+                            data: [pendingRow(101), pendingRow(102)],
+                        }, 1);
+
+                        await loadTable('#membership-requests-on-hold-table', {
+                            draw: 1,
+                            recordsTotal: 4,
+                            recordsFiltered: 4,
+                            data: [onHoldRow(201)],
+                        }, 1);
+
+                        assert(
+                            pendingCount.innerHTML === 'Pending: 2',
+                            'Pending header count should be populated from the pending API response.',
+                        );
+                        assert(
+                            onHoldCount.innerHTML === 'On hold: 4',
+                            'On-hold header count should be populated from the on-hold API response.',
+                        );
+                        assert(
+                            filterSelect.innerHTML.includes('All (6)'),
+                            'Filter labels should be updated from the pending API filter metadata.',
+                        );
+                        assert(
+                            filterSelect.innerHTML.includes('Renewals (2)'),
+                            'Selected filter count should be updated from the pending API filter metadata.',
+                        );
+                        assert(
+                            filterSelect.value === 'renewals',
+                            'Client-side filter sync should preserve the currently selected filter.',
                         );
                         process.exit(0);
                         """

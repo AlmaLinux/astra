@@ -77,14 +77,14 @@
             >
               {% for option in filter_options %}
                 <option value="{{ option.value }}"{% if option.value == selected_filter %} selected{% endif %}>
-                  {{ option.label }} ({{ option.count }})
+                  {{ option.label }}{% if option.count != '' %} ({{ option.count }}){% endif %}
                 </option>
               {% endfor %}
             </select>
           </form>
         </div>
 
-        <div class="text-muted">Pending: {{ pending_count }}</div>
+        <div class="text-muted" id="membership-requests-pending-count">Pending: {{ pending_count }}</div>
       </div>
     </div>
 
@@ -150,7 +150,7 @@
             </div>
           </form>
 
-          <div class="text-muted">On hold: {{ on_hold_count }}</div>
+          <div class="text-muted" id="membership-requests-on-hold-count">On hold: {{ on_hold_count }}</div>
         </div>
       </div>
 

@@ -1950,10 +1950,12 @@ class MembershipNotesAjaxTests(TestCase):
                 )
             )
 
-        self.assertIn("Request resubmitted", aggregate_html)
+        self.assertNotIn("Request resubmitted", aggregate_html)
         self.assertNotIn("data-request-resubmitted-note-id", aggregate_html)
+        self.assertIn('data-membership-notes-has-fallback-content="0"', aggregate_html)
+        self.assertIn("Loading notes...", aggregate_html)
 
-    def test_aggregate_profile_notes_preserve_resolved_and_unresolved_author_rendering(self) -> None:
+    def test_aggregate_profile_notes_do_not_render_authors_or_lookup_avatars_server_side(self) -> None:
         first_request = MembershipRequest.objects.create(
             requested_username="alice",
             membership_type_id="individual",
@@ -2009,30 +2011,15 @@ class MembershipNotesAjaxTests(TestCase):
                 )
             )
 
-        self.assertIn("First note", html)
-        self.assertIn("Second note", html)
-        self.assertEqual(lightweight_lookup_mock.call_count, 1)
-        self.assertEqual(set(lightweight_lookup_mock.call_args.args[0]), {"committee2", "ghost-user"})
+        self.assertNotIn("First note", html)
+        self.assertNotIn("Second note", html)
+        self.assertNotIn('data-membership-notes-group-username="committee2"', html)
+        self.assertNotIn('data-membership-notes-group-username="ghost-user"', html)
+        self.assertEqual(lightweight_lookup_mock.call_count, 0)
+        self.assertIn('data-membership-notes-has-fallback-content="0"', html)
+        self.assertIn("Loading notes...", html)
 
-        committee_marker = 'data-membership-notes-group-username="committee2"'
-        committee_start = html.find(committee_marker)
-        self.assertNotEqual(committee_start, -1)
-        ghost_start = html.find('data-membership-notes-group-username="ghost-user"')
-        self.assertNotEqual(ghost_start, -1)
-
-        committee_group_html = html[committee_start:ghost_start]
-        ghost_group_html = html[ghost_start:]
-
-        self.assertIn("committee2", committee_group_html)
-        self.assertIn('class="direct-chat-img img-circle"', committee_group_html)
-        self.assertIn('alt="User Avatar"', committee_group_html)
-        self.assertNotIn('alt="user image"', committee_group_html)
-
-        self.assertIn("ghost-user", ghost_group_html)
-        self.assertIn('alt="user image"', ghost_group_html)
-        self.assertNotIn('class="direct-chat-img img-circle"', ghost_group_html)
-
-    def test_aggregate_profile_notes_default_to_api_backed_read_with_fallback_content(self) -> None:
+    def test_aggregate_profile_notes_default_to_api_backed_shell_without_fallback_content(self) -> None:
         membership_request = MembershipRequest.objects.create(
             requested_username="alice",
             membership_type_id="individual",
@@ -2047,7 +2034,13 @@ class MembershipNotesAjaxTests(TestCase):
         request = RequestFactory().get("/")
         request.session = {"_freeipa_username": "reviewer"}
 
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer_user()):
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer_user()),
+            patch(
+                "core.templatetags.core_membership_notes.Note.objects.filter",
+                side_effect=AssertionError("aggregate profile note shell must not query Note rows during render"),
+            ),
+        ):
             from core.templatetags.core_membership_notes import membership_notes_aggregate_for_user
 
             html = str(
@@ -2067,9 +2060,10 @@ class MembershipNotesAjaxTests(TestCase):
             reverse("api-membership-notes-aggregate") + "?target_type=user&amp;target=alice",
             html,
         )
-        self.assertIn('data-membership-notes-has-fallback-content="1"', html)
+        self.assertIn('data-membership-notes-has-fallback-content="0"', html)
         self.assertIn('data-membership-notes-details-loaded="false"', html)
-        self.assertIn("Aggregate note", html)
+        self.assertIn("Loading notes...", html)
+        self.assertNotIn("Aggregate note", html)
 
     def test_aggregate_profile_notes_reuse_preloaded_target_and_avatar_safe_viewer(self) -> None:
         membership_request = MembershipRequest.objects.create(
@@ -2137,22 +2131,29 @@ class MembershipNotesAjaxTests(TestCase):
                 )
             )
 
-        self.assertEqual(lightweight_lookup_mock.call_count, 1)
-        self.assertEqual(set(lightweight_lookup_mock.call_args.args[0]), {"ghost-user"})
+        self.assertEqual(lightweight_lookup_mock.call_count, 0)
         self.assertIn('name="aggregate_preloaded_target_token"', html)
         self.assertNotIn('aggregate_preloaded_target_username', html)
         self.assertNotIn('aggregate_preloaded_target_email', html)
-
-        target_group_html = self._group_html(html, "alice", next_username="viewer")
-        viewer_group_html = self._group_html(html, "viewer", next_username="ghost-user")
-        ghost_group_html = self._group_html(html, "ghost-user")
-
-        self.assertIn('class="direct-chat-img img-circle"', target_group_html)
-        self.assertNotIn('alt="user image"', target_group_html)
-        self.assertIn('class="direct-chat-img img-circle"', viewer_group_html)
-        self.assertNotIn('alt="user image"', viewer_group_html)
-        self.assertIn('alt="user image"', ghost_group_html)
-        self.assertNotIn('class="direct-chat-img img-circle"', ghost_group_html)
+        self.assertIn('data-membership-notes-has-fallback-content="0"', html)
+        self.assertIn('data-membership-notes-details-loaded="false"', html)
+        self.assertIn(
+            reverse("api-membership-notes-aggregate-summary") + "?target_type=user&amp;target=alice",
+            html,
+        )
+        self.assertIn(
+            reverse("api-membership-notes-aggregate") + "?target_type=user&amp;target=alice",
+            html,
+        )
+        self.assertIn("Loading notes...", html)
+        self.assertNotIn("Target note", html)
+        self.assertNotIn("Viewer note", html)
+        self.assertNotIn("Ghost note", html)
+        self.assertNotIn('data-membership-notes-group-username="alice"', html)
+        self.assertNotIn('data-membership-notes-group-username="viewer"', html)
+        self.assertNotIn('data-membership-notes-group-username="ghost-user"', html)
+        self.assertNotIn('class="direct-chat-img img-circle"', html)
+        self.assertNotIn('alt="user image"', html)
 
     def test_aggregate_profile_notes_skip_username_only_viewer_reuse(self) -> None:
         membership_request = MembershipRequest.objects.create(
@@ -2225,19 +2226,19 @@ class MembershipNotesAjaxTests(TestCase):
                 )
             )
 
-        self.assertEqual(lightweight_lookup_mock.call_count, 1)
-        self.assertEqual(set(lightweight_lookup_mock.call_args.args[0]), {"ghost-user", "viewer"})
-
-        target_group_html = self._group_html(html, "alice", next_username="viewer")
-        viewer_group_html = self._group_html(html, "viewer", next_username="ghost-user")
-        ghost_group_html = self._group_html(html, "ghost-user")
-
-        self.assertIn('class="direct-chat-img img-circle"', target_group_html)
-        self.assertNotIn('alt="user image"', target_group_html)
-        self.assertIn('class="direct-chat-img img-circle"', viewer_group_html)
-        self.assertNotIn('alt="user image"', viewer_group_html)
-        self.assertIn('alt="user image"', ghost_group_html)
-        self.assertNotIn('class="direct-chat-img img-circle"', ghost_group_html)
+        self.assertEqual(lightweight_lookup_mock.call_count, 0)
+        self.assertIn('data-membership-notes-has-fallback-content="0"', html)
+        self.assertIn('data-membership-notes-details-loaded="false"', html)
+        self.assertIn("Loading notes...", html)
+        self.assertNotIn("Target note", html)
+        self.assertNotIn("Viewer note", html)
+        self.assertNotIn("Ghost note", html)
+        self.assertNotIn('data-membership-notes-form="', html)
+        self.assertNotIn('data-membership-notes-group-username="alice"', html)
+        self.assertNotIn('data-membership-notes-group-username="viewer"', html)
+        self.assertNotIn('data-membership-notes-group-username="ghost-user"', html)
+        self.assertNotIn('class="direct-chat-img img-circle"', html)
+        self.assertNotIn('alt="user image"', html)
 
     def test_aggregate_profile_notes_reuse_evaluated_lazy_freeipa_viewer(self) -> None:
         membership_request = MembershipRequest.objects.create(
@@ -2306,19 +2307,19 @@ class MembershipNotesAjaxTests(TestCase):
                 )
             )
 
-        self.assertEqual(lightweight_lookup_mock.call_count, 1)
-        self.assertEqual(set(lightweight_lookup_mock.call_args.args[0]), {"ghost-user"})
-
-        target_group_html = self._group_html(html, "alice", next_username="viewer")
-        viewer_group_html = self._group_html(html, "viewer", next_username="ghost-user")
-        ghost_group_html = self._group_html(html, "ghost-user")
-
-        self.assertIn('class="direct-chat-img img-circle"', target_group_html)
-        self.assertNotIn('alt="user image"', target_group_html)
-        self.assertIn('class="direct-chat-img img-circle"', viewer_group_html)
-        self.assertNotIn('alt="user image"', viewer_group_html)
-        self.assertIn('alt="user image"', ghost_group_html)
-        self.assertNotIn('class="direct-chat-img img-circle"', ghost_group_html)
+        self.assertEqual(lightweight_lookup_mock.call_count, 0)
+        self.assertIn('data-membership-notes-has-fallback-content="0"', html)
+        self.assertIn('data-membership-notes-details-loaded="false"', html)
+        self.assertIn("Loading notes...", html)
+        self.assertNotIn("Target note", html)
+        self.assertNotIn("Viewer note", html)
+        self.assertNotIn("Ghost note", html)
+        self.assertNotIn('data-membership-notes-form="', html)
+        self.assertNotIn('data-membership-notes-group-username="alice"', html)
+        self.assertNotIn('data-membership-notes-group-username="viewer"', html)
+        self.assertNotIn('data-membership-notes-group-username="ghost-user"', html)
+        self.assertNotIn('class="direct-chat-img img-circle"', html)
+        self.assertNotIn('alt="user image"', html)
 
     def test_aggregate_note_ajax_rerender_reuses_profile_target_user(self) -> None:
         membership_request = MembershipRequest.objects.create(
@@ -2373,15 +2374,20 @@ class MembershipNotesAjaxTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload.get("ok"), True)
-        self.assertEqual(lightweight_lookup_usernames, [("ghost-user",)])
+        self.assertEqual(lightweight_lookup_usernames, [])
 
         html = str(payload.get("html", ""))
-        target_group_html = self._group_html(html, "alice", next_username="ghost-user")
-        ghost_group_html = self._group_html(html, "ghost-user", next_username="reviewer")
-
-        self.assertIn('class="direct-chat-img img-circle"', target_group_html)
-        self.assertNotIn('alt="user image"', target_group_html)
-        self.assertIn('alt="user image"', ghost_group_html)
+        self.assertIn('data-membership-notes-has-fallback-content="0"', html)
+        self.assertIn('data-membership-notes-details-loaded="false"', html)
+        self.assertIn("Loading notes...", html)
+        self.assertNotIn("Target note", html)
+        self.assertNotIn("Ghost note", html)
+        self.assertNotIn("Ajax note", html)
+        self.assertNotIn('data-membership-notes-group-username="alice"', html)
+        self.assertNotIn('data-membership-notes-group-username="ghost-user"', html)
+        self.assertNotIn('data-membership-notes-group-username="reviewer"', html)
+        self.assertNotIn('class="direct-chat-img img-circle"', html)
+        self.assertNotIn('alt="user image"', html)
         self.assertIn('name="aggregate_preloaded_target_token"', html)
         self.assertNotIn('aggregate_preloaded_target_username', html)
         self.assertNotIn('aggregate_preloaded_target_email', html)
@@ -2436,10 +2442,20 @@ class MembershipNotesAjaxTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload.get("ok"), True)
-        self.assertEqual(lightweight_lookup_usernames, [("ghost-user",)])
+        self.assertEqual(lightweight_lookup_usernames, [])
 
         html = str(payload.get("html", ""))
-        self.assertIn('data-membership-notes-group-username="alice"', html)
+        self.assertIn('data-membership-notes-has-fallback-content="0"', html)
+        self.assertIn('data-membership-notes-details-loaded="false"', html)
+        self.assertIn("Loading notes...", html)
+        self.assertNotIn("Target note", html)
+        self.assertNotIn("Ghost note", html)
+        self.assertNotIn("Ajax note", html)
+        self.assertNotIn('data-membership-notes-group-username="alice"', html)
+        self.assertNotIn('data-membership-notes-group-username="ghost-user"', html)
+        self.assertNotIn('data-membership-notes-group-username="reviewer"', html)
+        self.assertNotIn('class="direct-chat-img img-circle"', html)
+        self.assertNotIn('alt="user image"', html)
         self.assertIn('name="aggregate_preloaded_target_token"', html)
         self.assertNotIn('aggregate_preloaded_target_username', html)
         self.assertNotIn('aggregate_preloaded_target_email', html)
@@ -2495,12 +2511,21 @@ class MembershipNotesAjaxTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload.get("ok"), True)
-        self.assertEqual(lightweight_lookup_usernames, [("alice", "ghost-user")])
+        self.assertEqual(lightweight_lookup_usernames, [])
 
         html = str(payload.get("html", ""))
-        target_group_html = self._group_html(html, "alice", next_username="ghost-user")
-        self.assertIn('alt="user image"', target_group_html)
-        self.assertNotIn('class="direct-chat-img img-circle"', target_group_html)
+        self.assertIn('data-membership-notes-has-fallback-content="0"', html)
+        self.assertIn('data-membership-notes-details-loaded="false"', html)
+        self.assertIn("Loading notes...", html)
+        self.assertNotIn("Target note", html)
+        self.assertNotIn("Ghost note", html)
+        self.assertNotIn("Ajax note", html)
+        self.assertNotIn('data-membership-notes-group-username="alice"', html)
+        self.assertNotIn('data-membership-notes-group-username="ghost-user"', html)
+        self.assertNotIn('data-membership-notes-group-username="reviewer"', html)
+        self.assertNotIn('class="direct-chat-img img-circle"', html)
+        self.assertNotIn('alt="user image"', html)
+        self.assertNotIn('name="aggregate_preloaded_target_token"', html)
         self.assertNotIn('aggregate_preloaded_target_username', html)
         self.assertNotIn('aggregate_preloaded_target_email', html)
 

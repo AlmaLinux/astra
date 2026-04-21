@@ -2858,8 +2858,10 @@ class OrganizationUserViewsTests(TestCase):
             resp,
             reverse("api-membership-notes-aggregate") + f"?target_type=org&amp;target={org.pk}",
         )
-        self.assertContains(resp, "Org note")
-        self.assertContains(resp, f"(req. #{req.pk})")
+        self.assertContains(resp, 'data-membership-notes-has-fallback-content="0"')
+        self.assertContains(resp, "Loading notes...")
+        self.assertNotContains(resp, "Org note")
+        self.assertNotContains(resp, f"(req. #{req.pk})")
         self.assertContains(resp, "<div class=\"font-weight-bold\">Gold Sponsor Member</div>", html=True)
         self.assertContains(resp, f"Request #{req.pk}")
         self.assertNotContains(
@@ -3167,11 +3169,13 @@ class OrganizationUserViewsTests(TestCase):
             resp,
             reverse("api-membership-notes-aggregate") + f"?target_type=org&amp;target={org.pk}",
         )
+        self.assertContains(resp, 'data-membership-notes-has-fallback-content="0"')
+        self.assertContains(resp, "Loading notes...")
         self.assertNotContains(resp, 'data-membership-notes-form="')
         self.assertNotContains(resp, 'placeholder="Type a note..."')
         self.assertNotContains(resp, 'data-note-action="vote_approve"')
         self.assertNotContains(resp, 'data-note-action="vote_disapprove"')
-        self.assertContains(resp, "Older org note")
+        self.assertNotContains(resp, "Older org note")
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(

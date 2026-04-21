@@ -40,7 +40,6 @@ from core.membership_request_workflow import (
 )
 from core.membership_requests_datatables import (
     build_datatables_payload,
-    build_membership_request_shell_summary,
     build_note_details,
     build_note_summary,
     build_on_hold_membership_request_queue,
@@ -237,20 +236,22 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
     request_id_sentinel = 123456789
 
     review_permissions = membership_review_permissions(request.user)
-    snapshot = build_membership_request_shell_summary(
-        selected_filter=selected_filter,
-        lookup_users=FreeIPAUser.find_lightweight_by_usernames,
-    )
+    filter_options = [
+        {"value": "all", "label": "All", "count": ""},
+        {"value": "renewals", "label": "Renewals", "count": ""},
+        {"value": "sponsorships", "label": "Sponsorships", "count": ""},
+        {"value": "individuals", "label": "Individuals", "count": ""},
+        {"value": "mirrors", "label": "Mirrors", "count": ""},
+    ]
 
     return render(
         request,
         "core/membership_requests.html",
         {
-            "pending_count": snapshot["pending_count"],
-            "on_hold_count": snapshot["on_hold_count"],
-            "filter_options": snapshot["filter_options"],
+            "pending_count": "--",
+            "on_hold_count": "--",
+            "filter_options": filter_options,
             "selected_filter": selected_filter,
-            "filter_empty": bool(snapshot["filter_empty"]),
             "clear_filter_url": reverse("membership-requests"),
             "next_url": next_url,
             "membership_request_id_sentinel": request_id_sentinel,
@@ -398,6 +399,10 @@ def membership_requests_pending_api(request: HttpRequest) -> JsonResponse:
         draw=draw,
     )
     payload["recordsFiltered"] = len(pending_rows)
+    payload["pending_filter"] = {
+        "selected": selected_filter,
+        "options": snapshot["filter_options"],
+    }
     return JsonResponse(payload)
 
 

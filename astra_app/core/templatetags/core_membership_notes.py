@@ -671,7 +671,7 @@ def _render_membership_notes_aggregate(
     membership_can_change = bool(context.get("membership_can_change", False))
     membership_can_delete = bool(context.get("membership_can_delete", False))
     can_write = membership_can_add or membership_can_change or membership_can_delete
-    resolved_notes = list(notes or [])
+    resolved_notes = None if notes is None else list(notes)
 
     dummy_request = SimpleNamespace(pk=_timeline_dom_id(dom_key))
 
@@ -713,32 +713,34 @@ def _render_membership_notes_aggregate(
     note_summary_url = reverse("api-membership-notes-aggregate-summary") + "?" + aggregate_note_query
     note_detail_url = reverse("api-membership-notes-aggregate") + "?" + aggregate_note_query
 
-    votes_by_user = last_votes(resolved_notes)
-    approvals = sum(1 for vote in votes_by_user.values() if vote == "approve")
-    disapprovals = sum(1 for vote in votes_by_user.values() if vote == "disapprove")
-    current_responses_by_request_id = _membership_request_responses_by_id(resolved_notes)
-    request_resubmitted_new_snapshots_by_note_id = _request_resubmitted_new_snapshots_by_note_id(
-        resolved_notes,
-        current_responses_by_request_id=current_responses_by_request_id,
-    )
-    preloaded_users_by_username = _preloaded_aggregate_avatar_users_by_username(
-        context=context,
-        notes=resolved_notes,
-        http_request=http_request,
-        aggregate_target_user=aggregate_target_user,
-    )
-    groups = _group_timeline_entries(
-        _timeline_entries_for_notes(
+    has_fallback_content = resolved_notes is not None
+    if resolved_notes is not None:
+        votes_by_user = last_votes(resolved_notes)
+        approvals = sum(1 for vote in votes_by_user.values() if vote == "approve")
+        disapprovals = sum(1 for vote in votes_by_user.values() if vote == "disapprove")
+        current_responses_by_request_id = _membership_request_responses_by_id(resolved_notes)
+        request_resubmitted_new_snapshots_by_note_id = _request_resubmitted_new_snapshots_by_note_id(
             resolved_notes,
-            current_username=_current_username_from_request(http_request),
-            request_resubmitted_new_snapshots_by_note_id=request_resubmitted_new_snapshots_by_note_id,
-            avatar_users_by_username=_aggregate_avatar_users_by_username(
-                resolved_notes,
-                preloaded_users_by_username=preloaded_users_by_username,
-            ),
+            current_responses_by_request_id=current_responses_by_request_id,
         )
-    )
-    note_count = len(resolved_notes)
+        preloaded_users_by_username = _preloaded_aggregate_avatar_users_by_username(
+            context=context,
+            notes=resolved_notes,
+            http_request=http_request,
+            aggregate_target_user=aggregate_target_user,
+        )
+        groups = _group_timeline_entries(
+            _timeline_entries_for_notes(
+                resolved_notes,
+                current_username=_current_username_from_request(http_request),
+                request_resubmitted_new_snapshots_by_note_id=request_resubmitted_new_snapshots_by_note_id,
+                avatar_users_by_username=_aggregate_avatar_users_by_username(
+                    resolved_notes,
+                    preloaded_users_by_username=preloaded_users_by_username,
+                ),
+            )
+        )
+        note_count = len(resolved_notes)
 
     html = render_to_string(
         "core/_membership_notes.html",
@@ -752,7 +754,7 @@ def _render_membership_notes_aggregate(
             "current_user_vote": None,
             "can_vote": False,
             "can_write": can_write,
-            "has_fallback_content": True,
+            "has_fallback_content": has_fallback_content,
             "details_loaded": False,
             "post_url": post_url,
             "aggregate_target_type": aggregate_target_type,
@@ -781,10 +783,9 @@ def _membership_notes_aggregate_for_target(
     if not membership_can_view:
         return ""
 
-    notes = list(Note.objects.filter(**notes_filter).order_by("timestamp", "pk"))
     return _render_membership_notes_aggregate(
         context=context,
-        notes=notes,
+        notes=None,
         dom_key=dom_key,
         compact=compact,
         next_url=next_url,
