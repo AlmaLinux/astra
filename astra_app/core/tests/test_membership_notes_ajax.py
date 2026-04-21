@@ -1,7 +1,11 @@
 
+import inspect
 import json
 import re
+import subprocess
+import textwrap
 from datetime import timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -113,6 +117,314 @@ class MembershipNotesAjaxTests(TestCase):
         payload = json.loads(resp.content)
         self.assertTrue(payload.get("ok"))
         return str(payload.get("html", ""))
+
+    def _run_membership_notes_node_scenario(self, test_body: str) -> None:
+        script_path = Path(settings.BASE_DIR) / "core/static/core/js/membership_notes.js"
+        source = script_path.read_text(encoding="utf-8")
+        node_script = textwrap.dedent(
+            f"""
+                        const vm = require('vm');
+
+                        class EventTargetStub {{
+                            constructor() {{
+                                this._handlers = Object.create(null);
+                            }}
+
+                            addEventListener(type, handler) {{
+                                this._handlers[type] = this._handlers[type] || [];
+                                this._handlers[type].push(handler);
+                            }}
+
+                            dispatchEvent(event) {{
+                                event.target = event.target || this;
+                                event.currentTarget = this;
+                                (this._handlers[event.type] || []).forEach((handler) => handler.call(this, event));
+                                return !event.defaultPrevented;
+                            }}
+                        }}
+
+                        class ClassListStub {{
+                            constructor(element) {{
+                                this.element = element;
+                            }}
+
+                            _tokens() {{
+                                return String(this.element.className || '').split(/\s+/).filter(Boolean);
+                            }}
+
+                            contains(token) {{
+                                return this._tokens().includes(token);
+                            }}
+
+                            add(token) {{
+                                if (!this.contains(token)) {{
+                                    this.element.className = this._tokens().concat([token]).join(' ');
+                                }}
+                            }}
+
+                            remove(token) {{
+                                this.element.className = this._tokens().filter((item) => item !== token).join(' ');
+                            }}
+                        }}
+
+                        class ElementStub extends EventTargetStub {{
+                            constructor(document, options = {{}}) {{
+                                super();
+                                this.ownerDocument = document;
+                                this.id = options.id || '';
+                                this.tagName = String(options.tagName || 'div').toUpperCase();
+                                this.attributes = Object.assign({{}}, options.attributes || {{}});
+                                this.className = options.className || '';
+                                this.children = [];
+                                this.parentNode = null;
+                                this.innerHTML = options.innerHTML || '';
+                                this.textContent = options.textContent || '';
+                                this.value = options.value || '';
+                                this.disabled = !!options.disabled;
+                                this.style = {{}};
+                                this.dataset = {{}};
+                                Object.keys(this.attributes).forEach((key) => {{
+                                    if (key.startsWith('data-')) {{
+                                        const dataKey = key.slice(5).replace(/-([a-z])/g, (_m, chr) => chr.toUpperCase());
+                                        this.dataset[dataKey] = this.attributes[key];
+                                    }}
+                                }});
+                                this.classList = new ClassListStub(this);
+                            }}
+
+                            appendChild(child) {{
+                                child.parentNode = this;
+                                this.children.push(child);
+                                return child;
+                            }}
+
+                            setAttribute(name, value) {{
+                                this.attributes[name] = String(value);
+                                if (name === 'id') this.id = String(value);
+                                if (name === 'class') this.className = String(value);
+                                if (name.startsWith('data-')) {{
+                                    const dataKey = name.slice(5).replace(/-([a-z])/g, (_m, chr) => chr.toUpperCase());
+                                    this.dataset[dataKey] = String(value);
+                                }}
+                            }}
+
+                            getAttribute(name) {{
+                                if (name === 'id') return this.id;
+                                if (name === 'class') return this.className;
+                                return Object.prototype.hasOwnProperty.call(this.attributes, name) ? this.attributes[name] : null;
+                            }}
+
+                            querySelector(selector) {{
+                                return this.querySelectorAll(selector)[0] || null;
+                            }}
+
+                            querySelectorAll(selector) {{
+                                const results = [];
+                                const attrMatch = selector.match(/^\[([^=]+)=\"([^\"]+)\"\]$/);
+                                const nameMatch = selector.match(/^input\[name=\"([^\"]+)\"\]$/);
+                                const tagMatch = selector.match(/^[a-z]+$/i);
+
+                                function visit(node) {{
+                                    let matched = false;
+                                    if (selector.startsWith('#')) {{
+                                        matched = node.id === selector.slice(1);
+                                    }} else if (attrMatch) {{
+                                        matched = node.getAttribute(attrMatch[1]) === attrMatch[2];
+                                    }} else if (nameMatch) {{
+                                        matched = node.tagName === 'INPUT' && node.getAttribute('name') === nameMatch[1];
+                                    }} else if (tagMatch) {{
+                                        matched = node.tagName === selector.toUpperCase();
+                                    }}
+                                    if (matched) results.push(node);
+                                    node.children.forEach(visit);
+                                }}
+
+                                this.children.forEach(visit);
+                                return results;
+                            }}
+
+                            closest(selector) {{
+                                let node = this;
+                                while (node) {{
+                                    if (selector === '.card-tools' && String(node.className || '').split(/\s+/).includes('card-tools')) {{
+                                        return node;
+                                    }}
+                                    node = node.parentNode;
+                                }}
+                                return null;
+                            }}
+                        }}
+
+                        class DocumentStub extends EventTargetStub {{
+                            constructor() {{
+                                super();
+                                this._elementsById = Object.create(null);
+                            }}
+
+                            register(element) {{
+                                if (element.id) this._elementsById[element.id] = element;
+                                return element;
+                            }}
+
+                            getElementById(id) {{
+                                return this._elementsById[id] || null;
+                            }}
+
+                            createElement(tagName) {{
+                                return new ElementStub(this, {{ tagName }});
+                            }}
+                        }}
+
+                        function makeEvent(type, overrides = {{}}) {{
+                            return Object.assign({{
+                                type,
+                                bubbles: true,
+                                cancelable: true,
+                                defaultPrevented: false,
+                                preventDefault() {{ this.defaultPrevented = true; }},
+                            }}, overrides);
+                        }}
+
+                        function assert(condition, message) {{
+                            if (!condition) throw new Error(message);
+                        }}
+
+                        const document = new DocumentStub();
+                        const container = document.register(new ElementStub(document, {{
+                            id: 'membership-notes-container-77',
+                            attributes: {{
+                                'data-membership-notes-container': '77',
+                                'data-membership-notes-default-open': '1',
+                                'data-membership-notes-summary-url': '/summary',
+                                'data-membership-notes-detail-url': '/detail',
+                                'data-membership-notes-details-loaded': 'false',
+                            }},
+                        }}));
+                        const card = document.register(new ElementStub(document, {{
+                            id: 'membership-notes-card-77',
+                            className: 'card card-primary card-outline direct-chat direct-chat-primary mb-0',
+                        }}));
+                        const header = document.register(new ElementStub(document, {{
+                            id: 'membership-notes-header-77',
+                            className: 'card-header',
+                            attributes: {{ 'data-membership-notes-header': '77' }},
+                        }}));
+                        const cardTools = new ElementStub(document, {{ className: 'card-tools' }});
+                        const collapseBtn = new ElementStub(document, {{
+                            tagName: 'button',
+                            attributes: {{ 'data-membership-notes-collapse': '77' }},
+                        }});
+                        const countBadge = new ElementStub(document, {{ tagName: 'span', attributes: {{ 'data-membership-notes-count': '77' }} }});
+                        const approvalsBadge = new ElementStub(document, {{ tagName: 'span', attributes: {{ 'data-membership-notes-approvals': '77' }} }});
+                        const disapprovalsBadge = new ElementStub(document, {{ tagName: 'span', attributes: {{ 'data-membership-notes-disapprovals': '77' }} }});
+                        const messages = new ElementStub(document, {{ tagName: 'div', attributes: {{ 'data-membership-notes-messages': '77' }}, innerHTML: '<div class="text-muted small">Loading notes...</div>' }});
+                        const modals = new ElementStub(document, {{ tagName: 'div', attributes: {{ 'data-membership-notes-modals': '77' }} }});
+                        const footer = new ElementStub(document, {{ tagName: 'div' }});
+                        const form = document.register(new ElementStub(document, {{
+                            id: 'membership-notes-form-77',
+                            tagName: 'form',
+                            attributes: {{ 'data-membership-notes-form': '77' }},
+                        }}));
+                        const nextInput = new ElementStub(document, {{ tagName: 'input', attributes: {{ name: 'next' }}, value: '/membership/request/77/' }});
+                        const actionInput = new ElementStub(document, {{ tagName: 'input', attributes: {{ name: 'note_action' }}, value: 'message' }});
+                        const textarea = document.register(new ElementStub(document, {{ id: 'membership-notes-message-77', tagName: 'textarea' }}));
+                        const submitButton = new ElementStub(document, {{ tagName: 'button' }});
+                        const errorBox = document.register(new ElementStub(document, {{ id: 'membership-notes-error-77', className: 'd-none' }}));
+                        const errorText = document.register(new ElementStub(document, {{ id: 'membership-notes-error-text-77' }}));
+                        const errorClose = new ElementStub(document, {{ tagName: 'button', attributes: {{ 'data-membership-notes-error-close': '77' }} }});
+
+                        container.appendChild(card);
+                        card.appendChild(header);
+                        header.appendChild(cardTools);
+                        cardTools.appendChild(countBadge);
+                        cardTools.appendChild(approvalsBadge);
+                        cardTools.appendChild(disapprovalsBadge);
+                        cardTools.appendChild(collapseBtn);
+                        card.appendChild(messages);
+                        card.appendChild(footer);
+                        footer.appendChild(errorBox);
+                        footer.appendChild(errorText);
+                        footer.appendChild(errorClose);
+                        footer.appendChild(form);
+                        form.appendChild(nextInput);
+                        form.appendChild(actionInput);
+                        form.appendChild(textarea);
+                        form.appendChild(submitButton);
+                        container.appendChild(modals);
+
+                        collapseBtn.addEventListener('click', function () {{
+                            if (card.classList.contains('collapsed-card')) {{
+                                card.classList.remove('collapsed-card');
+                                card.dispatchEvent(makeEvent('expanded.lte.cardwidget'));
+                                return;
+                            }}
+                            card.classList.add('collapsed-card');
+                            card.dispatchEvent(makeEvent('collapsed.lte.cardwidget'));
+                        }});
+
+                        const localStorageData = Object.create(null);
+                        const window = {{
+                            document,
+                            localStorage: {{
+                                getItem(key) {{ return Object.prototype.hasOwnProperty.call(localStorageData, key) ? localStorageData[key] : null; }},
+                                setItem(key, value) {{ localStorageData[key] = String(value); }},
+                            }},
+                            fetchQueue: [],
+                            fetchCalls: [],
+                            fetch(url) {{
+                                window.fetchCalls.push({{ url }});
+                                if (!window.fetchQueue.length) throw new Error('Missing fetch payload for ' + url);
+                                const nextPayload = window.fetchQueue.shift();
+                                if (nextPayload && nextPayload.__fetchError) {{
+                                    return Promise.reject(new Error(String(nextPayload.__fetchError)));
+                                }}
+                                if (nextPayload && Object.prototype.hasOwnProperty.call(nextPayload, 'ok')) {{
+                                    return Promise.resolve({{
+                                        ok: !!nextPayload.ok,
+                                        json() {{
+                                            return Promise.resolve(nextPayload.payload || {{}});
+                                        }},
+                                    }});
+                                }}
+                                return Promise.resolve({{ ok: true, json() {{ return Promise.resolve(nextPayload); }} }});
+                            }},
+                            setTimeout,
+                            clearTimeout,
+                            Date,
+                            CustomEvent: function CustomEvent(type, init) {{ return makeEvent(type, init || {{}}); }},
+                        }};
+
+                        const context = vm.createContext({{ window, document, console, setTimeout, clearTimeout }});
+                        vm.runInContext({json.dumps(source)}, context);
+
+                        async function flushAsync() {{
+                            await Promise.resolve();
+                            await new Promise((resolve) => setTimeout(resolve, 0));
+                            await new Promise((resolve) => setTimeout(resolve, 0));
+                        }}
+
+                        async function runScenario() {{
+                            {test_body}
+                        }}
+
+                        runScenario().catch((error) => {{
+                            console.error(error && error.stack ? error.stack : String(error));
+                            process.exit(1);
+                        }});
+                        """
+        )
+
+        result = subprocess.run(
+            ["node"],
+            input=node_script,
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=str(settings.BASE_DIR),
+        )
+        if result.returncode != 0:
+            message = result.stderr.strip() or result.stdout.strip() or "membership_notes.js scenario failed"
+            self.fail(message)
 
     def test_note_add_returns_json_and_updated_html_for_ajax(self) -> None:
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
@@ -919,6 +1231,324 @@ class MembershipNotesAjaxTests(TestCase):
             ).exists()
         )
 
+    def test_aggregate_notes_summary_api_returns_counts_for_user_target(self) -> None:
+        first_request = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+        second_request = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.approved,
+        )
+        Note.objects.create(membership_request=first_request, username="reviewer", action={"type": "vote", "value": "approve"})
+        Note.objects.create(membership_request=second_request, username="reviewer", content="Aggregate note", action={})
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer_user()):
+            response = self.client.get(
+                reverse("api-membership-notes-aggregate-summary") + "?target_type=user&target=alice",
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "note_count": 2,
+                "approvals": 1,
+                "disapprovals": 0,
+                "current_user_vote": "approve",
+            },
+        )
+
+    def test_aggregate_notes_summary_api_does_not_use_detail_read_context(self) -> None:
+        first_request = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+        second_request = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.approved,
+        )
+        Note.objects.create(
+            membership_request=first_request,
+            username="reviewer",
+            action={"type": "vote", "value": "disapprove"},
+        )
+        Note.objects.create(
+            membership_request=first_request,
+            username="reviewer",
+            content="Need another look",
+        )
+        Note.objects.create(
+            membership_request=second_request,
+            username="reviewer",
+            action={"type": "vote", "value": "approve"},
+        )
+        Note.objects.create(
+            membership_request=second_request,
+            username="other-reviewer",
+            action={"type": "vote", "value": "disapprove"},
+        )
+
+        self._login_as_freeipa_user("reviewer")
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer_user()),
+            patch(
+                "core.views_membership.committee._membership_notes_read_context",
+                side_effect=AssertionError("aggregate notes summary must not use the detail read context"),
+            ),
+            patch(
+                "core.views_membership.committee.build_note_details",
+                side_effect=AssertionError("aggregate notes summary must not use detail builders"),
+            ),
+        ):
+            response = self.client.get(
+                reverse("api-membership-notes-aggregate-summary") + "?target_type=user&target=alice",
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "note_count": 4,
+                "approvals": 1,
+                "disapprovals": 1,
+                "current_user_vote": "approve",
+            },
+        )
+
+    def test_aggregate_notes_api_returns_grouped_json_with_request_links(self) -> None:
+        first_request = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+        second_request = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.approved,
+        )
+        Note.objects.create(membership_request=first_request, username="reviewer", content="First aggregate note", action={})
+        Note.objects.create(membership_request=second_request, username="reviewer", content="Second aggregate note", action={})
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer_user()):
+            response = self.client.get(
+                reverse("api-membership-notes-aggregate") + "?target_type=user&target=alice",
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload["groups"]), 2)
+        self.assertEqual(payload["groups"][0]["membership_request_id"], first_request.pk)
+        self.assertEqual(
+            payload["groups"][0]["membership_request_url"],
+            reverse("membership-request-detail", args=[first_request.pk]),
+        )
+        self.assertEqual(payload["groups"][1]["membership_request_id"], second_request.pk)
+        self.assertEqual(
+            payload["groups"][1]["entries"][0]["rendered_html"],
+            "Second aggregate note",
+        )
+
+    def test_aggregate_notes_api_rejects_invalid_org_target_with_json_400(self) -> None:
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer_user()):
+            response = self.client.get(
+                reverse("api-membership-notes-aggregate") + "?target_type=org&target=not-an-int",
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"error": "Invalid target."})
+
+    def test_membership_notes_script_auto_loads_default_open_widget_details_on_init(self) -> None:
+        self._run_membership_notes_node_scenario(
+            """
+            window.fetchQueue.push({
+              note_count: 1,
+              approvals: 1,
+              disapprovals: 0,
+              current_user_vote: 'approve',
+            });
+            window.fetchQueue.push({
+              groups: [{
+                username: 'reviewer',
+                display_username: 'reviewer',
+                is_self: false,
+                is_custos: false,
+                avatar_kind: 'default',
+                avatar_url: '',
+                timestamp_display: '2026-04-20 09:00',
+                entries: [{
+                  kind: 'message',
+                  rendered_html: 'Loaded on init.',
+                  is_self: false,
+                  is_custos: false,
+                  bubble_style: '',
+                }],
+              }],
+            });
+
+            window.AstraMembershipNotes.init('77');
+            await flushAsync();
+
+            assert(window.fetchCalls.length === 2, 'Default-open widget should fetch summary and details during init.');
+            assert(window.fetchCalls[0].url === '/summary', 'Init should fetch note summary first.');
+            assert(window.fetchCalls[1].url === '/detail', 'Init should fetch note details without waiting for a click.');
+            assert(messages.innerHTML.includes('Loaded on init.'), 'Detail payload should hydrate the open widget on init.');
+            process.exit(0);
+            """
+        )
+
+    def test_membership_notes_script_loads_details_when_widget_reopens_after_init_without_transition(self) -> None:
+        self._run_membership_notes_node_scenario(
+            """
+            card.classList.add('collapsed-card');
+            container.setAttribute('data-membership-notes-default-open', '0');
+
+                        window.fetchQueue.push({
+                            note_count: 1,
+                            approvals: 0,
+                            disapprovals: 0,
+                            current_user_vote: '',
+                        });
+                        window.fetchQueue.push({
+                            groups: [{
+                                username: 'reviewer',
+                                display_username: 'reviewer',
+                                is_self: false,
+                                is_custos: false,
+                                avatar_kind: 'default',
+                                avatar_url: '',
+                                timestamp_display: '2026-04-21 09:00',
+                                entries: [{
+                                    kind: 'message',
+                                    rendered_html: 'Loaded after browser restore.',
+                                    is_self: false,
+                                    is_custos: false,
+                                    bubble_style: '',
+                                }],
+                            }],
+                        });
+
+                        window.AstraMembershipNotes.init('77');
+                        setTimeout(function () {
+                            card.classList.remove('collapsed-card');
+                        }, 0);
+                        await new Promise((resolve) => setTimeout(resolve, 75));
+                        await flushAsync();
+
+                        assert(window.fetchCalls.length === 2, 'An already-open widget should fetch summary and details even without an expand transition event.');
+                        assert(window.fetchCalls[0].url === '/summary', 'The widget should still fetch summary first.');
+                        assert(window.fetchCalls[1].url === '/detail', 'Open widget recovery should fetch details once the card is open.');
+                        assert(messages.innerHTML.includes('Loaded after browser restore.'), 'Recovered open widgets should hydrate detail content.');
+                        process.exit(0);
+                        """
+                )
+
+    def test_request_resubmitted_diff_values_are_escaped_and_preserve_linebreaks_in_notes_js(self) -> None:
+        self._run_membership_notes_node_scenario(
+            """
+                        const rendered = window.AstraMembershipNotes.buildNotesGroupsHtml([
+                            {
+                                username: 'reviewer',
+                                display_username: 'reviewer',
+                                is_self: false,
+                                is_custos: false,
+                                avatar_kind: 'default',
+                                avatar_url: '',
+                                timestamp_display: '2026-04-20 09:00',
+                                entries: [{
+                                    kind: 'action',
+                                    label: 'Request resubmitted',
+                                    bubble_style: '',
+                                    icon: 'fa-rotate-right',
+                                    note_id: 91,
+                                    request_resubmitted_diff_rows: [{
+                                        question: 'Why join?',
+                                        old_value: '<img src=x onerror="alert(1)">\\nOld line 2',
+                                        new_value: '<script>alert(2)</script>\\nNew line 2',
+                                    }],
+                                }],
+                            },
+                        ], '77');
+
+                        assert(rendered.groupsHtml.includes('&lt;img src=x onerror=&quot;alert(1)&quot;&gt;<br>Old line 2'), 'Old diff value should be escaped and preserve line breaks.');
+                        assert(rendered.groupsHtml.includes('&lt;script&gt;alert(2)&lt;/script&gt;<br>New line 2'), 'New diff value should be escaped and preserve line breaks.');
+                        assert(!rendered.groupsHtml.includes('<img src=x onerror="alert(1)">'), 'Old diff value must not render raw HTML.');
+                        assert(!rendered.groupsHtml.includes('<script>alert(2)</script>'), 'New diff value must not render raw HTML.');
+            process.exit(0);
+            """
+        )
+
+    def test_membership_notes_script_preserves_server_rendered_details_when_default_open_detail_fetch_fails(self) -> None:
+        self._run_membership_notes_node_scenario(
+            """
+                        messages.innerHTML = '<div class="direct-chat-msg" data-membership-notes-group-username="reviewer">Existing SSR note</div>';
+                        countBadge.textContent = '1';
+                        countBadge.setAttribute('title', '1 Messages');
+
+                        window.fetchQueue.push({
+                            note_count: 1,
+                            approvals: 0,
+                            disapprovals: 0,
+                            current_user_vote: '',
+                        });
+                        window.fetchQueue.push({
+                            __fetchError: 'detail refresh failed',
+                        });
+
+                        window.AstraMembershipNotes.init('77');
+                        await flushAsync();
+
+                        assert(messages.innerHTML.includes('Existing SSR note'), 'Detail fetch failure should preserve the initial server-rendered note history.');
+                        assert(!messages.innerHTML.includes('Loading notes...'), 'Detail fetch failure should not replace fallback history with a loading placeholder.');
+                        assert(!document.getElementById('membership-notes-error-77').classList.contains('d-none'), 'Detail fetch failure should surface a degraded state.');
+                        assert(document.getElementById('membership-notes-error-text-77').textContent.includes('Could not refresh note history'), 'Detail fetch failure should report degraded history refresh.');
+            process.exit(0);
+            """
+        )
+
+    def test_membership_notes_script_marks_summary_failure_as_degraded_without_zeroing_counts(self) -> None:
+        self._run_membership_notes_node_scenario(
+            """
+                        countBadge.textContent = '4';
+                        countBadge.className = 'badge badge-primary';
+                        countBadge.setAttribute('title', '4 Messages');
+
+                        window.fetchQueue.push({
+                            ok: false,
+                            payload: { error: 'summary refresh failed' },
+                        });
+                        window.fetchQueue.push({
+                            groups: [{
+                                username: 'reviewer',
+                                display_username: 'reviewer',
+                                is_self: false,
+                                is_custos: false,
+                                avatar_kind: 'default',
+                                avatar_url: '',
+                                timestamp_display: '2026-04-20 09:00',
+                                entries: [{
+                                    kind: 'message',
+                                    rendered_html: 'Loaded on init.',
+                                    is_self: false,
+                                    is_custos: false,
+                                    bubble_style: '',
+                                }],
+                            }],
+                        });
+
+                        window.AstraMembershipNotes.init('77');
+                        await flushAsync();
+
+                        assert(countBadge.textContent === '4', 'Summary failure should keep the server-rendered count instead of zeroing it.');
+                        assert(countBadge.getAttribute('title') === 'Note summary unavailable', 'Summary failure should expose a truthful degraded title.');
+                        assert(countBadge.className.includes('badge-warning'), 'Summary failure should visibly mark the count badge as degraded.');
+            process.exit(0);
+            """
+        )
+
     def test_membership_notes_template_hides_compose_for_read_only_viewers(self) -> None:
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
         Note.objects.create(membership_request=req, username="reviewer", content="Visible note")
@@ -954,12 +1584,17 @@ class MembershipNotesAjaxTests(TestCase):
             )
 
         self.assertIn("Membership Committee Notes", html)
-        self.assertIn("Visible note", html)
+        self.assertIn(reverse("api-membership-request-notes-summary", args=[req.pk]), html)
+        self.assertIn(reverse("api-membership-request-notes", args=[req.pk]), html)
+        self.assertIn('data-membership-notes-has-fallback-content="0"', html)
+        self.assertIn("Loading notes...", html)
+        self.assertNotIn("Visible note", html)
         self.assertNotIn('data-membership-notes-form="', html)
         self.assertNotIn('placeholder="Type a note..."', html)
 
-    def test_membership_notes_fail_fast_rejects_invalid_preloaded_notes(self) -> None:
+    def test_membership_notes_defaults_to_api_shell_without_direct_query_fallback(self) -> None:
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+        Note.objects.create(membership_request=req, username="reviewer", content="Visible note")
 
         request = RequestFactory().get("/membership-requests")
         request.session = {"_freeipa_username": "viewer"}
@@ -973,10 +1608,16 @@ class MembershipNotesAjaxTests(TestCase):
             },
         )
 
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer),
+            patch(
+                "core.templatetags.core_membership_notes.Note.objects.filter",
+                side_effect=AssertionError("legacy direct note read should not run"),
+            ),
+        ):
             from core.templatetags.core_membership_notes import membership_notes
 
-            with self.assertRaisesRegex(RuntimeError, "requires a valid preloaded notes list"):
+            html = str(
                 membership_notes(
                     {
                         "request": request,
@@ -986,11 +1627,42 @@ class MembershipNotesAjaxTests(TestCase):
                         "membership_can_delete": False,
                     },
                     req,
-                    compact=True,
+                    compact=False,
                     next_url="/membership-requests",
-                    preloaded_notes=[{"bad": "value"}],
-                    fail_on_query_fallback=True,
                 )
+            )
+
+        self.assertIn(reverse("api-membership-request-notes-summary", args=[req.pk]), html)
+        self.assertIn(reverse("api-membership-request-notes", args=[req.pk]), html)
+        self.assertIn('data-membership-notes-has-fallback-content="0"', html)
+        self.assertIn('data-membership-notes-details-loaded="false"', html)
+        self.assertIn("Loading notes...", html)
+        self.assertNotIn("Visible note", html)
+        self.assertNotIn('data-membership-notes-group-username="reviewer"', html)
+
+    def test_membership_note_tags_remove_api_backed_parameter(self) -> None:
+        from core.templatetags import core_membership_notes
+
+        self.assertNotIn(
+            "api_backed_read",
+            inspect.signature(core_membership_notes.membership_notes).parameters,
+        )
+        self.assertNotIn(
+            "preloaded_notes",
+            inspect.signature(core_membership_notes.membership_notes).parameters,
+        )
+        self.assertNotIn(
+            "fail_on_query_fallback",
+            inspect.signature(core_membership_notes.membership_notes).parameters,
+        )
+        self.assertNotIn(
+            "api_backed_read",
+            inspect.signature(core_membership_notes.membership_notes_aggregate_for_user).parameters,
+        )
+        self.assertNotIn(
+            "api_backed_read",
+            inspect.signature(core_membership_notes.membership_notes_aggregate_for_organization).parameters,
+        )
 
     def test_manage_user_can_submit_vote_actions(self) -> None:
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
@@ -1359,6 +2031,45 @@ class MembershipNotesAjaxTests(TestCase):
         self.assertIn("ghost-user", ghost_group_html)
         self.assertIn('alt="user image"', ghost_group_html)
         self.assertNotIn('class="direct-chat-img img-circle"', ghost_group_html)
+
+    def test_aggregate_profile_notes_default_to_api_backed_read_with_fallback_content(self) -> None:
+        membership_request = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+        )
+        Note.objects.create(
+            membership_request=membership_request,
+            username="reviewer",
+            content="Aggregate note",
+            action={},
+        )
+
+        request = RequestFactory().get("/")
+        request.session = {"_freeipa_username": "reviewer"}
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer_user()):
+            from core.templatetags.core_membership_notes import membership_notes_aggregate_for_user
+
+            html = str(
+                membership_notes_aggregate_for_user(
+                    {"request": request, "membership_can_view": True},
+                    "alice",
+                    compact=True,
+                    next_url="/",
+                )
+            )
+
+        self.assertIn(
+            reverse("api-membership-notes-aggregate-summary") + "?target_type=user&amp;target=alice",
+            html,
+        )
+        self.assertIn(
+            reverse("api-membership-notes-aggregate") + "?target_type=user&amp;target=alice",
+            html,
+        )
+        self.assertIn('data-membership-notes-has-fallback-content="1"', html)
+        self.assertIn('data-membership-notes-details-loaded="false"', html)
+        self.assertIn("Aggregate note", html)
 
     def test_aggregate_profile_notes_reuse_preloaded_target_and_avatar_safe_viewer(self) -> None:
         membership_request = MembershipRequest.objects.create(
@@ -1827,25 +2538,16 @@ class MembershipNotesAjaxTests(TestCase):
 
         with (
             patch(
-                "core.templatetags.core_membership_notes.FreeIPAUser.find_lightweight_by_usernames",
+                "core.membership_requests_datatables.FreeIPAUser.find_lightweight_by_usernames",
                 side_effect=AssertionError("detail notes must stay on the existing full-detail author path"),
             ),
             patch("core.templatetags.core_membership_notes.FreeIPAUser.get", side_effect=_fake_get),
         ):
-            from core.templatetags.core_membership_notes import membership_notes
-
-            html = str(
-                membership_notes(
-                    {
-                        "request": request,
-                        "membership_can_add": True,
-                        "membership_can_change": True,
-                        "membership_can_delete": True,
-                    },
-                    req,
-                    compact=True,
-                    next_url="/",
-                )
+            self._login_as_freeipa_user("reviewer")
+            response = self.client.get(
+                reverse("api-membership-request-notes", args=[req.pk]),
+                HTTP_ACCEPT="application/json",
             )
 
-        self.assertIn("Detail note", html)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Detail note", json.dumps(response.json()))

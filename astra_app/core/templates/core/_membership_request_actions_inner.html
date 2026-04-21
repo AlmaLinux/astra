@@ -35,7 +35,7 @@ Expected context:
 
 {% if membership_request.status == 'on_hold' and show_on_hold_approve %}
   {% url 'membership-request-approve-on-hold' membership_request.pk as approve_on_hold_url %}
-  {% with approve_title="Approve (Override) "|add:membership_type_name|add:" request" %}
+  {% with approve_title="Approve "|add:membership_type_name|add:" request" %}
   <button
     type="button"
     class="btn btn-sm btn-success"
@@ -47,7 +47,8 @@ Expected context:
     data-request-target="{{ requester }}"
     data-membership-type="{{ membership_type_name }}"
     title="Approve this on-hold request with committee override"
-  >Approve (Override)</button>
+    aria-label="Approve"
+  >Approve</button>
   {% endwith %}
 {% endif %}
 

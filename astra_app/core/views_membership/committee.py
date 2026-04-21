@@ -7,7 +7,6 @@ from django.contrib.auth.decorators import login_required, permission_required
 from django.core import signing
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError
-from django.db.models import Prefetch, Q
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
@@ -22,7 +21,6 @@ from core.forms_membership import MembershipRejectForm
 from core.freeipa.user import FreeIPAUser
 from core.logging_extras import current_exception_log_fields
 from core.membership import visible_committee_membership_requests
-from core.membership_constants import MembershipCategoryCode
 from core.membership_notes import add_note
 from core.membership_notes_preload import build_notes_by_membership_request_id
 from core.membership_notes_render import (
@@ -40,27 +38,38 @@ from core.membership_request_workflow import (
     reject_membership_request,
     reopen_ignored_membership_request,
 )
-from core.models import Membership, MembershipLog, MembershipRequest
+from core.membership_requests_datatables import (
+    build_datatables_payload,
+    build_membership_request_shell_summary,
+    build_note_details,
+    build_note_summary,
+    build_on_hold_membership_request_queue,
+    build_pending_membership_request_queue,
+)
+from core.models import MembershipLog, MembershipRequest, Note
 from core.permissions import (
     ASTRA_ADD_MEMBERSHIP,
     ASTRA_ADD_SEND_MAIL,
     ASTRA_VIEW_MEMBERSHIP,
     has_any_membership_manage_permission,
+    json_permission_required,
     membership_review_permissions,
 )
 from core.tokens import read_membership_notes_aggregate_target_token
 from core.views_utils import (
     _normalize_str,
     _resolve_post_redirect,
-    build_page_url_prefix,
     get_username,
-    paginate_and_build_context,
     post_only_404,
     require_post_or_404,
     send_mail_url,
 )
 
 logger = logging.getLogger(__name__)
+
+_MEMBERSHIP_REQUEST_ALLOWED_FILTERS: frozenset[str] = frozenset(
+    {"all", "renewals", "sponsorships", "individuals", "mirrors"}
+)
 
 
 def _custom_email_recipient_for_request(membership_request: MembershipRequest) -> tuple[str, str] | None:
@@ -222,244 +231,358 @@ def _resolve_requested_by(
 
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_requests(request: HttpRequest) -> HttpResponse:
-    def _build_rows(reqs: list[MembershipRequest]) -> tuple[list[MembershipRequest], list[dict[str, object]]]:
-        visible_requests = visible_committee_membership_requests(
-            reqs,
-            live_usernames=users_by_username.keys(),
-        )
-        rows: list[dict[str, object]] = []
-        for r in visible_requests:
-            requested_log = r.requested_logs[0] if r.requested_logs else None
-            requested_by_username = requested_log.actor_username if requested_log is not None else ""
-            requested_by_full_name, requested_by_deleted = _resolve_requested_by(
-                requested_by_username,
-                users_by_username=users_by_username,
-            )
-
-            if r.is_organization_target:
-                rows.append(
-                    {
-                        "r": r,
-                        "organization": r.requested_organization,
-                        "requested_by_username": requested_by_username,
-                        "requested_by_full_name": requested_by_full_name,
-                        "requested_by_deleted": requested_by_deleted,
-                    }
-                )
-            else:
-                normalized_requested_username = _normalize_str(r.requested_username).lower()
-                fu = users_by_username.get(normalized_requested_username)
-                if fu is None:
-                    continue
-
-                rows.append(
-                    {
-                        "r": r,
-                        "full_name": fu.full_name,
-                        "requested_by_username": requested_by_username,
-                        "requested_by_full_name": requested_by_full_name,
-                        "requested_by_deleted": requested_by_deleted,
-                    }
-                )
-        return visible_requests, rows
-
-    base = MembershipRequest.objects.select_related("membership_type", "requested_organization").prefetch_related(
-        Prefetch(
-            "logs",
-            queryset=MembershipLog.objects.filter(action=MembershipLog.Action.requested)
-            .only("actor_username", "membership_request_id", "created_at")
-            .order_by("created_at", "pk"),
-            to_attr="requested_logs",
-        )
-    )
-
-    pending_requests_all = list(base.filter(status=MembershipRequest.Status.pending).order_by("requested_at"))
-    on_hold_requests_all = list(base.filter(status=MembershipRequest.Status.on_hold).order_by("on_hold_at", "requested_at"))
-
-    lookup_usernames: set[str] = set()
-    for membership_request in pending_requests_all + on_hold_requests_all:
-        normalized_requested_username = _normalize_str(membership_request.requested_username).lower()
-        if membership_request.is_user_target and normalized_requested_username:
-            lookup_usernames.add(normalized_requested_username)
-
-        requested_log = membership_request.requested_logs[0] if membership_request.requested_logs else None
-        requested_by_username = _normalize_str(requested_log.actor_username).lower() if requested_log is not None else ""
-        if requested_by_username:
-            lookup_usernames.add(requested_by_username)
-
-    users_by_username = FreeIPAUser.find_lightweight_by_usernames(lookup_usernames)
-
-    pending_visible, pending_rows_all = _build_rows(pending_requests_all)
-    on_hold_visible, on_hold_rows_all = _build_rows(on_hold_requests_all)
-
     raw_filter = _normalize_str(request.GET.get("filter")).lower()
-    allowed_filters = {"all", "renewals", "sponsorships", "individuals", "mirrors"}
-    selected_filter = raw_filter if raw_filter in allowed_filters else "all"
-    category_filters = {
-        "individuals": MembershipCategoryCode.individual,
-        "mirrors": MembershipCategoryCode.mirror,
-        "sponsorships": MembershipCategoryCode.sponsorship,
-    }
-
-    active_user_memberships: set[tuple[str, str]] = set()
-    active_org_memberships: set[tuple[int, str]] = set()
-    is_renewal_by_id: dict[int, bool] = {}
-
-    renewal_candidates = pending_visible + on_hold_visible
-    if renewal_candidates:
-        target_usernames = {
-            req.requested_username
-            for req in renewal_candidates
-            if req.is_user_target and req.requested_username
-        }
-        target_org_ids = {
-            req.requested_organization_id
-            for req in renewal_candidates
-            if req.is_organization_target and req.requested_organization_id is not None
-        }
-        membership_type_ids = {req.membership_type_id for req in renewal_candidates if req.membership_type_id}
-
-        if membership_type_ids and (target_usernames or target_org_ids):
-            active_memberships = Membership.objects.active().filter(membership_type_id__in=membership_type_ids)
-            if target_usernames and target_org_ids:
-                active_memberships = active_memberships.filter(
-                    Q(target_username__in=target_usernames) | Q(target_organization_id__in=target_org_ids)
-                )
-            elif target_usernames:
-                active_memberships = active_memberships.filter(target_username__in=target_usernames)
-            else:
-                active_memberships = active_memberships.filter(target_organization_id__in=target_org_ids)
-
-            for membership in active_memberships.only("target_username", "target_organization_id", "membership_type_id"):
-                if membership.target_username:
-                    active_user_memberships.add((membership.target_username, membership.membership_type_id))
-                elif membership.target_organization_id is not None:
-                    active_org_memberships.add((membership.target_organization_id, membership.membership_type_id))
-
-        for req in renewal_candidates:
-            if req.is_user_target:
-                is_renewal_by_id[req.pk] = (
-                    req.requested_username,
-                    req.membership_type_id,
-                ) in active_user_memberships
-            else:
-                org_id = req.requested_organization_id
-                is_renewal_by_id[req.pk] = bool(
-                    org_id and (org_id, req.membership_type_id) in active_org_memberships
-                )
-
-    for row in pending_rows_all + on_hold_rows_all:
-        row["is_renewal"] = is_renewal_by_id.get(row["r"].pk, False)
-
-    filter_counts = {
-        "all": len(pending_visible),
-        "renewals": 0,
-        "sponsorships": 0,
-        "individuals": 0,
-        "mirrors": 0,
-    }
-
-    for req in pending_visible:
-        if is_renewal_by_id.get(req.pk, False):
-            filter_counts["renewals"] += 1
-
-        category_id = req.membership_type.category_id
-        if category_id == MembershipCategoryCode.individual:
-            filter_counts["individuals"] += 1
-        elif category_id == MembershipCategoryCode.mirror:
-            filter_counts["mirrors"] += 1
-        elif category_id == MembershipCategoryCode.sponsorship:
-            filter_counts["sponsorships"] += 1
-
-    if selected_filter == "all":
-        pending_requests = pending_visible
-        pending_rows = pending_rows_all
-    else:
-        if selected_filter == "renewals":
-            match_ids = {req.pk for req in pending_visible if is_renewal_by_id.get(req.pk, False)}
-        else:
-            category = category_filters.get(selected_filter)
-            match_ids = {req.pk for req in pending_visible if req.membership_type.category_id == category}
-
-        pending_requests = [req for req in pending_visible if req.pk in match_ids]
-        pending_rows = [row for row in pending_rows_all if row["r"].pk in match_ids]
-
-    on_hold_requests = on_hold_visible
-    on_hold_rows = on_hold_rows_all
-
-    filter_options = [
-        {"value": "all", "label": "All", "count": filter_counts["all"]},
-        {"value": "renewals", "label": "Renewals", "count": filter_counts["renewals"]},
-        {"value": "sponsorships", "label": "Sponsorships", "count": filter_counts["sponsorships"]},
-        {"value": "individuals", "label": "Individuals", "count": filter_counts["individuals"]},
-        {"value": "mirrors", "label": "Mirrors", "count": filter_counts["mirrors"]},
-    ]
-    filter_empty = selected_filter != "all" and not pending_requests
+    selected_filter = raw_filter if raw_filter in _MEMBERSHIP_REQUEST_ALLOWED_FILTERS else "all"
     next_url = request.get_full_path()
+    request_id_sentinel = 123456789
 
-    pending_page_number = request.GET.get("pending_page")
-    _, pending_page_url_prefix = build_page_url_prefix(request.GET, page_param="pending_page")
-    pending_page_ctx = paginate_and_build_context(
-        pending_rows,
-        pending_page_number,
-        50,
-        page_url_prefix=pending_page_url_prefix,
+    review_permissions = membership_review_permissions(request.user)
+    snapshot = build_membership_request_shell_summary(
+        selected_filter=selected_filter,
+        lookup_users=FreeIPAUser.find_lightweight_by_usernames,
     )
-
-    on_hold_page_number = request.GET.get("on_hold_page")
-    _, on_hold_page_url_prefix = build_page_url_prefix(request.GET, page_param="on_hold_page")
-    on_hold_page_ctx = paginate_and_build_context(
-        on_hold_rows,
-        on_hold_page_number,
-        10,
-        page_url_prefix=on_hold_page_url_prefix,
-    )
-
-    pending_page_rows = list(pending_page_ctx["page_obj"].object_list)
-    pending_notes_by_request_id = build_notes_by_membership_request_id(
-        [int(row["r"].pk) for row in pending_page_rows]
-    )
-    for row in pending_page_rows:
-        row["preloaded_notes"] = pending_notes_by_request_id.get(int(row["r"].pk), [])
-
-    on_hold_page_rows = list(on_hold_page_ctx["page_obj"].object_list)
-    on_hold_notes_by_request_id = build_notes_by_membership_request_id(
-        [int(row["r"].pk) for row in on_hold_page_rows]
-    )
-    for row in on_hold_page_rows:
-        row["preloaded_notes"] = on_hold_notes_by_request_id.get(int(row["r"].pk), [])
 
     return render(
         request,
         "core/membership_requests.html",
         {
-            "pending_requests": pending_requests,
-            "pending_request_rows": pending_rows,
-            "on_hold_requests": on_hold_requests,
-            "on_hold_request_rows": on_hold_rows,
-            "pending_paginator": pending_page_ctx["paginator"],
-            "pending_page_obj": pending_page_ctx["page_obj"],
-            "pending_is_paginated": pending_page_ctx["is_paginated"],
-            "pending_page_numbers": pending_page_ctx["page_numbers"],
-            "pending_show_first": pending_page_ctx["show_first"],
-            "pending_show_last": pending_page_ctx["show_last"],
-            "pending_page_url_prefix": pending_page_ctx["page_url_prefix"],
-            "on_hold_paginator": on_hold_page_ctx["paginator"],
-            "on_hold_page_obj": on_hold_page_ctx["page_obj"],
-            "on_hold_is_paginated": on_hold_page_ctx["is_paginated"],
-            "on_hold_page_numbers": on_hold_page_ctx["page_numbers"],
-            "on_hold_show_first": on_hold_page_ctx["show_first"],
-            "on_hold_show_last": on_hold_page_ctx["show_last"],
-            "on_hold_page_url_prefix": on_hold_page_ctx["page_url_prefix"],
-            "filter_options": filter_options,
+            "pending_count": snapshot["pending_count"],
+            "on_hold_count": snapshot["on_hold_count"],
+            "filter_options": snapshot["filter_options"],
             "selected_filter": selected_filter,
-            "filter_empty": filter_empty,
+            "filter_empty": bool(snapshot["filter_empty"]),
             "clear_filter_url": reverse("membership-requests"),
             "next_url": next_url,
+            "membership_request_id_sentinel": request_id_sentinel,
+            "membership_request_detail_template": reverse("membership-request-detail", args=[request_id_sentinel]),
+            "membership_request_approve_template": reverse("membership-request-approve", args=[request_id_sentinel]),
+            "membership_request_approve_on_hold_template": reverse("membership-request-approve-on-hold", args=[request_id_sentinel]),
+            "membership_request_reject_template": reverse("membership-request-reject", args=[request_id_sentinel]),
+            "membership_request_rfi_template": reverse("membership-request-rfi", args=[request_id_sentinel]),
+            "membership_request_ignore_template": reverse("membership-request-ignore", args=[request_id_sentinel]),
+            "membership_request_note_add_template": reverse("membership-request-note-add", args=[request_id_sentinel]),
+            "membership_request_note_summary_template": reverse("api-membership-request-notes-summary", args=[request_id_sentinel]),
+            "membership_request_note_detail_template": reverse("api-membership-request-notes", args=[request_id_sentinel]),
+            "membership_user_profile_template": reverse("user-profile", args=["__username__"]),
+            "membership_organization_detail_template": reverse("organization-detail", args=[request_id_sentinel]),
+            "membership_requests_can_request_info": request.user.has_perm(ASTRA_ADD_SEND_MAIL),
+            "membership_requests_notes_can_view": review_permissions["membership_can_view"],
+            "membership_requests_notes_can_write": (
+                review_permissions["membership_can_add"]
+                or review_permissions["membership_can_change"]
+                or review_permissions["membership_can_delete"]
+            ),
+            "membership_requests_notes_can_vote": (
+                review_permissions["membership_can_add"]
+                or review_permissions["membership_can_change"]
+                or review_permissions["membership_can_delete"]
+            ),
             "membership_request_rejected_email_template_name": settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME,
             "membership_request_rfi_email_template_name": settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME,
         },
     )
+
+
+def _membership_requests_datatables_error(message: str, *, status: int = 400) -> JsonResponse:
+    return JsonResponse({"error": message}, status=status)
+
+
+def _parse_datatables_request(
+    request: HttpRequest,
+    *,
+    expected_length: int,
+    expected_order_name: str,
+    allow_queue_filter: bool,
+) -> tuple[int, int, str | None]:
+    allowed_params = {
+        "draw",
+        "start",
+        "length",
+        "search[value]",
+        "search[regex]",
+        "order[0][column]",
+        "order[0][dir]",
+        "order[0][name]",
+        "columns[0][data]",
+        "columns[0][name]",
+        "columns[0][searchable]",
+        "columns[0][orderable]",
+        "columns[0][search][value]",
+        "columns[0][search][regex]",
+    }
+    if allow_queue_filter:
+        allowed_params.add("queue_filter")
+
+    for key in request.GET.keys():
+        if key == "_":
+            cache_buster = _normalize_str(request.GET.get(key))
+            if not cache_buster.isdigit():
+                raise ValueError("Invalid query parameters.")
+            continue
+        if key not in allowed_params:
+            raise ValueError("Invalid query parameters.")
+
+    try:
+        draw = int(str(request.GET.get("draw") or ""))
+        start = int(str(request.GET.get("start") or ""))
+        length = int(str(request.GET.get("length") or ""))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Invalid query parameters.") from exc
+
+    if draw < 0 or start < 0 or length != expected_length:
+        raise ValueError("Invalid query parameters.")
+    if _normalize_str(request.GET.get("search[regex]")).lower() == "true":
+        raise ValueError("Invalid query parameters.")
+    if _normalize_str(request.GET.get("columns[0][search][regex]")).lower() == "true":
+        raise ValueError("Invalid query parameters.")
+    if _normalize_str(request.GET.get("columns[0][search][value]")).strip():
+        raise ValueError("Invalid query parameters.")
+    if _normalize_str(request.GET.get("search[value]")).strip():
+        raise ValueError("Invalid query parameters.")
+
+    order_name = _normalize_str(request.GET.get("order[0][name]"))
+    order_column = _normalize_str(request.GET.get("order[0][column]"))
+    column_name = _normalize_str(request.GET.get("columns[0][name]"))
+    column_data = _normalize_str(request.GET.get("columns[0][data]"))
+    column_searchable = _normalize_str(request.GET.get("columns[0][searchable]")).lower()
+    column_orderable = _normalize_str(request.GET.get("columns[0][orderable]")).lower()
+    order_dir = _normalize_str(request.GET.get("order[0][dir]")).lower()
+
+    if (
+        order_name != expected_order_name
+        or order_column != "0"
+        or column_name != expected_order_name
+        or column_data != "request_id"
+        or column_searchable != "true"
+        or column_orderable != "true"
+    ):
+        raise ValueError("Invalid query parameters.")
+    if order_dir != "asc":
+        raise ValueError("Invalid query parameters.")
+
+    queue_filter: str | None = None
+    if allow_queue_filter:
+        raw_filter = _normalize_str(request.GET.get("queue_filter")).lower() or "all"
+        if raw_filter not in _MEMBERSHIP_REQUEST_ALLOWED_FILTERS:
+            raise ValueError("Invalid query parameters.")
+        queue_filter = raw_filter
+
+    return draw, start, queue_filter
+
+
+@json_permission_required(ASTRA_ADD_MEMBERSHIP)
+def membership_requests_pending_api(request: HttpRequest) -> JsonResponse:
+    try:
+        draw, start, queue_filter = _parse_datatables_request(
+            request,
+            expected_length=50,
+            expected_order_name="requested_at",
+            allow_queue_filter=True,
+        )
+    except ValueError as exc:
+        return _membership_requests_datatables_error(str(exc), status=400)
+
+    selected_filter = queue_filter or "all"
+    snapshot = build_pending_membership_request_queue(
+        selected_filter=selected_filter,
+        visible_membership_requests=visible_committee_membership_requests,
+        resolve_requested_by_func=_resolve_requested_by,
+        lookup_users=FreeIPAUser.find_lightweight_by_usernames,
+        include_rows=True,
+    )
+    pending_rows = list(snapshot["pending_rows"])
+    sliced_rows = pending_rows[start : start + 50]
+    payload = build_datatables_payload(
+        rows=sliced_rows,
+        records_total=int(snapshot["filter_counts"]["all"]),
+        draw=draw,
+    )
+    payload["recordsFiltered"] = len(pending_rows)
+    return JsonResponse(payload)
+
+
+@json_permission_required(ASTRA_ADD_MEMBERSHIP)
+def membership_requests_on_hold_api(request: HttpRequest) -> JsonResponse:
+    try:
+        draw, start, _queue_filter = _parse_datatables_request(
+            request,
+            expected_length=10,
+            expected_order_name="on_hold_at",
+            allow_queue_filter=False,
+        )
+    except ValueError as exc:
+        return _membership_requests_datatables_error(str(exc), status=400)
+
+    snapshot = build_on_hold_membership_request_queue(
+        visible_membership_requests=visible_committee_membership_requests,
+        resolve_requested_by_func=_resolve_requested_by,
+        lookup_users=FreeIPAUser.find_lightweight_by_usernames,
+        include_rows=True,
+    )
+    on_hold_rows = list(snapshot["on_hold_rows"])
+    sliced_rows = on_hold_rows[start : start + 10]
+    payload = build_datatables_payload(
+        rows=sliced_rows,
+        records_total=len(on_hold_rows),
+        draw=draw,
+    )
+    payload["recordsFiltered"] = len(on_hold_rows)
+    return JsonResponse(payload)
+
+
+def _membership_notes_read_context(
+    request: HttpRequest,
+    *,
+    membership_request_id: int | None = None,
+) -> tuple[MembershipRequest | None, list[Note], str, dict[str, bool]] | JsonResponse:
+    if not request.user.is_authenticated:
+        return JsonResponse({"ok": False, "error": "Authentication required."}, status=403)
+
+    review_permissions = membership_review_permissions(request.user)
+    if not review_permissions["membership_can_view"]:
+        return JsonResponse({"error": "Permission denied."}, status=403)
+
+    current_username = get_username(request, allow_user_fallback=False)
+    if membership_request_id is not None:
+        membership_request = (
+            MembershipRequest.objects.select_related("membership_type", "requested_organization")
+            .filter(pk=membership_request_id)
+            .first()
+        )
+        if membership_request is None:
+            return JsonResponse({"error": "Membership request not found."}, status=404)
+
+        notes_by_request_id = build_notes_by_membership_request_id([membership_request_id])
+        return membership_request, list(notes_by_request_id.get(membership_request_id, [])), current_username, review_permissions
+
+    target_type = _normalize_str(request.GET.get("target_type")).lower()
+    target = _normalize_str(request.GET.get("target"))
+    if not target_type or not target:
+        return _membership_requests_datatables_error("Missing target.", status=400)
+
+    notes_query = Note.objects.order_by("timestamp", "pk")
+    if target_type == "user":
+        notes_query = notes_query.filter(membership_request__requested_username=target)
+    elif target_type == "org":
+        try:
+            organization_id = int(target)
+        except (TypeError, ValueError):
+            return _membership_requests_datatables_error("Invalid target.", status=400)
+        notes_query = notes_query.filter(membership_request__requested_organization_id=organization_id)
+    else:
+        return _membership_requests_datatables_error("Invalid target type.", status=400)
+
+    return None, list(notes_query), current_username, review_permissions
+
+
+def _membership_notes_summary_context(
+    request: HttpRequest,
+    *,
+    membership_request_id: int | None = None,
+) -> tuple[list[Note], str, dict[str, bool]] | JsonResponse:
+    if not request.user.is_authenticated:
+        return JsonResponse({"ok": False, "error": "Authentication required."}, status=403)
+
+    review_permissions = membership_review_permissions(request.user)
+    if not review_permissions["membership_can_view"]:
+        return JsonResponse({"error": "Permission denied."}, status=403)
+
+    current_username = get_username(request, allow_user_fallback=False)
+    if membership_request_id is not None:
+        if not MembershipRequest.objects.filter(pk=membership_request_id).exists():
+            return JsonResponse({"error": "Membership request not found."}, status=404)
+
+        notes = list(
+            Note.objects.filter(membership_request_id=membership_request_id)
+            .only("pk", "timestamp", "username", "action")
+            .order_by("timestamp", "pk")
+        )
+        return notes, current_username, review_permissions
+
+    target_type = _normalize_str(request.GET.get("target_type")).lower()
+    target = _normalize_str(request.GET.get("target"))
+    if not target_type or not target:
+        return _membership_requests_datatables_error("Missing target.", status=400)
+
+    notes_query = Note.objects.only("pk", "timestamp", "username", "action").order_by("timestamp", "pk")
+    if target_type == "user":
+        notes_query = notes_query.filter(membership_request__requested_username=target)
+    elif target_type == "org":
+        try:
+            organization_id = int(target)
+        except (TypeError, ValueError):
+            return _membership_requests_datatables_error("Invalid target.", status=400)
+        notes_query = notes_query.filter(membership_request__requested_organization_id=organization_id)
+    else:
+        return _membership_requests_datatables_error("Invalid target type.", status=400)
+
+    return list(notes_query), current_username, review_permissions
+
+
+def membership_request_notes_summary_api(request: HttpRequest, pk: int) -> JsonResponse:
+    note_context = _membership_notes_summary_context(request, membership_request_id=pk)
+    if isinstance(note_context, JsonResponse):
+        return note_context
+
+    notes, current_username, review_permissions = note_context
+    summary = build_note_summary(
+        notes=notes,
+        current_username=current_username,
+        review_permissions=review_permissions,
+    )
+    if summary is None:
+        return _membership_requests_datatables_error("Permission denied.", status=403)
+    return JsonResponse(summary)
+
+
+def membership_request_notes_api(request: HttpRequest, pk: int) -> JsonResponse:
+    note_context = _membership_notes_read_context(request, membership_request_id=pk)
+    if isinstance(note_context, JsonResponse):
+        return note_context
+
+    membership_request, notes, current_username, review_permissions = note_context
+    assert membership_request is not None
+    detail = build_note_details(
+        membership_request=membership_request,
+        notes=notes,
+        current_username=current_username,
+        review_permissions=review_permissions,
+    )
+    if detail is None:
+        return _membership_requests_datatables_error("Permission denied.", status=403)
+    return JsonResponse(detail)
+
+
+def membership_notes_aggregate_summary_api(request: HttpRequest) -> JsonResponse:
+    note_context = _membership_notes_summary_context(request)
+    if isinstance(note_context, JsonResponse):
+        return note_context
+
+    notes, current_username, review_permissions = note_context
+    summary = build_note_summary(
+        notes=notes,
+        current_username=current_username,
+        review_permissions=review_permissions,
+    )
+    if summary is None:
+        return _membership_requests_datatables_error("Permission denied.", status=403)
+    return JsonResponse(summary)
+
+
+def membership_notes_aggregate_api(request: HttpRequest) -> JsonResponse:
+    note_context = _membership_notes_read_context(request)
+    if isinstance(note_context, JsonResponse):
+        return note_context
+
+    _membership_request, notes, current_username, review_permissions = note_context
+    detail = build_note_details(
+        notes=notes,
+        current_username=current_username,
+        review_permissions=review_permissions,
+    )
+    if detail is None:
+        return _membership_requests_datatables_error("Permission denied.", status=403)
+    return JsonResponse(detail)
 
 
 @permission_required(ASTRA_VIEW_MEMBERSHIP, login_url=reverse_lazy("users"))

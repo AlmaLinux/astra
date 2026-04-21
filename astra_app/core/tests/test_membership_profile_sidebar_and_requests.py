@@ -1,11 +1,11 @@
 
 import datetime
-from html.parser import HTMLParser
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.conf import settings
+from django.core.cache import cache
 from django.template.loader import render_to_string
 from django.test import TestCase
 from django.urls import reverse
@@ -838,6 +838,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertContains(resp0, "badge-success")
 
         MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+        cache.clear()
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             with patch("core.freeipa.user.FreeIPAUser.all", autospec=True, return_value=[reviewer, alice]):
@@ -884,471 +885,6 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, reverse("organizations"))
 
-    def test_requests_list_links_to_profile_and_shows_full_name(self) -> None:
-        from core.models import MembershipRequest, MembershipType
-
-        MembershipType.objects.update_or_create(
-            code="individual",
-            defaults={
-                "name": "Individual",
-                "group_cn": "almalinux-individual",
-                "category_id": "individual",
-                "sort_order": 0,
-                "enabled": True,
-            },
-        )
-        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
-
-        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
-        reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
-        alice = self._make_user("alice", full_name="Alice User")
-
-        def _get_user(username: str) -> FreeIPAUser | None:
-            if username == "reviewer":
-                return reviewer
-            if username == "alice":
-                return alice
-            return None
-
-        self._login_as_freeipa_user("reviewer")
-
-        with (
-            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.freeipa.user.FreeIPAUser.all", autospec=True, return_value=[reviewer, alice]),
-        ):
-            resp = self.client.get(reverse("membership-requests"))
-
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, reverse("user-profile", kwargs={"username": req.requested_username}))
-        self.assertContains(resp, "Alice User")
-
-    def test_membership_requests_filter_dropdown_counts_and_selection(self) -> None:
-        from core.models import Membership, MembershipRequest, MembershipType, Organization
-
-        MembershipType.objects.update_or_create(
-            code="individual",
-            defaults={
-                "name": "Individual",
-                "group_cn": "almalinux-individual",
-                "category_id": "individual",
-                "sort_order": 0,
-                "enabled": True,
-            },
-        )
-        MembershipType.objects.update_or_create(
-            code="mirror",
-            defaults={
-                "name": "Mirror",
-                "group_cn": "almalinux-mirror",
-                "category_id": "mirror",
-                "sort_order": 1,
-                "enabled": True,
-            },
-        )
-        MembershipType.objects.update_or_create(
-            code="gold",
-            defaults={
-                "name": "Gold Sponsor",
-                "group_cn": "almalinux-gold",
-                "category_id": "sponsorship",
-                "sort_order": 2,
-                "enabled": True,
-            },
-        )
-
-        req_user = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
-        req_mirror = MembershipRequest.objects.create(requested_username="bob", membership_type_id="mirror")
-        org = Organization.objects.create(name="Acme", representative="rep1")
-        req_org = MembershipRequest.objects.create(
-            requested_username="",
-            requested_organization=org,
-            membership_type_id="gold",
-            status=MembershipRequest.Status.on_hold,
-            on_hold_at=timezone.now(),
-        )
-
-        Membership.objects.create(
-            target_username="alice",
-            membership_type_id="individual",
-            expires_at=timezone.now() + datetime.timedelta(days=30),
-        )
-        Membership.objects.create(
-            target_organization=org,
-            membership_type_id="gold",
-            expires_at=timezone.now() + datetime.timedelta(days=30),
-        )
-
-        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
-        reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
-        alice = self._make_user("alice", full_name="Alice User")
-        bob = self._make_user("bob", full_name="Bob User")
-
-        def _get_user(username: str) -> FreeIPAUser | None:
-            if username == "reviewer":
-                return reviewer
-            if username == "alice":
-                return alice
-            if username == "bob":
-                return bob
-            return None
-
-        self._login_as_freeipa_user("reviewer")
-
-        with (
-            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.freeipa.user.FreeIPAUser.all", autospec=True, return_value=[reviewer, alice, bob]),
-        ):
-            resp = self.client.get(f"{reverse('membership-requests')}?filter=renewals")
-
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Filter")
-        self.assertContains(resp, "All (2)")
-        self.assertContains(resp, "Renewals (1)")
-        self.assertContains(resp, "Individuals (1)")
-        self.assertContains(resp, "Mirrors (1)")
-        self.assertContains(resp, "Sponsorships (0)")
-        self.assertContains(resp, f"Request #{req_user.pk}")
-        self.assertContains(resp, f"Request #{req_org.pk}")
-        self.assertNotContains(resp, f"Request #{req_mirror.pk}")
-        next_url = f"{reverse('membership-requests')}?filter=renewals"
-        rendered = resp.content.decode()
-
-        class _FormParser(HTMLParser):
-            def __init__(self) -> None:
-                super().__init__()
-                self._div_depth = 0
-                self._modal_stack: list[tuple[str, int]] = []
-                self._form_stack: list[dict[str, object]] = []
-                self.forms: list[dict[str, object]] = []
-
-            def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:  # noqa: N802
-                attrs_dict = dict(attrs)
-                if tag == "div":
-                    self._div_depth += 1
-                    class_attr = attrs_dict.get("class") or ""
-                    modal_id = attrs_dict.get("id")
-                    if modal_id and "modal" in class_attr.split():
-                        self._modal_stack.append((modal_id, self._div_depth))
-                    return
-
-                if tag == "form":
-                    form = {
-                        "id": attrs_dict.get("id"),
-                        "modal_id": self._modal_stack[-1][0] if self._modal_stack else None,
-                        "inputs": [],
-                    }
-                    self.forms.append(form)
-                    self._form_stack.append(form)
-                    return
-
-                if tag == "input" and self._form_stack:
-                    name = attrs_dict.get("name")
-                    if name:
-                        value = attrs_dict.get("value")
-                        self._form_stack[-1]["inputs"].append((name, value))
-
-            def handle_endtag(self, tag: str) -> None:  # noqa: N802
-                if tag == "form" and self._form_stack:
-                    self._form_stack.pop()
-                elif tag == "div":
-                    if self._modal_stack and self._modal_stack[-1][1] == self._div_depth:
-                        self._modal_stack.pop()
-                    self._div_depth = max(self._div_depth - 1, 0)
-
-        parser = _FormParser()
-        parser.feed(rendered)
-
-        def _assert_form_next(form_id: str) -> None:
-            form = next((form for form in parser.forms if form.get("id") == form_id), None)
-            self.assertIsNotNone(form, f"Expected form {form_id} in response HTML")
-            inputs = form["inputs"]
-            self.assertIn(("next", next_url), inputs)
-
-        def _assert_modal_next(modal_id: str) -> None:
-            modal_forms = [form for form in parser.forms if form.get("modal_id") == modal_id]
-            self.assertTrue(modal_forms, f"Expected modal {modal_id} in response HTML")
-            self.assertTrue(
-                any(("next", next_url) in form["inputs"] for form in modal_forms),
-                f"Expected next input for modal {modal_id}",
-            )
-
-        _assert_form_next("bulk-action-form")
-        _assert_form_next("bulk-action-form-on-hold")
-        _assert_modal_next("shared-approve-modal")
-        _assert_modal_next("shared-approve-on-hold-modal")
-        _assert_modal_next("shared-reject-modal")
-        _assert_modal_next("shared-rfi-modal")
-        _assert_modal_next("shared-ignore-modal")
-
-    def test_membership_requests_show_renewal_badge_for_active_memberships(self) -> None:
-        from core.models import Membership, MembershipRequest, MembershipType, Organization
-
-        MembershipType.objects.update_or_create(
-            code="individual",
-            defaults={
-                "name": "Individual",
-                "group_cn": "almalinux-individual",
-                "category_id": "individual",
-                "sort_order": 0,
-                "enabled": True,
-            },
-        )
-        MembershipType.objects.update_or_create(
-            code="gold",
-            defaults={
-                "name": "Gold Sponsor",
-                "group_cn": "almalinux-gold",
-                "category_id": "sponsorship",
-                "sort_order": 1,
-                "enabled": True,
-            },
-        )
-
-        req_user = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
-        MembershipRequest.objects.create(requested_username="bob", membership_type_id="individual")
-        org = Organization.objects.create(name="Acme", representative="rep1")
-        req_org = MembershipRequest.objects.create(
-            requested_username="",
-            requested_organization=org,
-            membership_type_id="gold",
-            status=MembershipRequest.Status.on_hold,
-            on_hold_at=timezone.now(),
-        )
-
-        Membership.objects.create(
-            target_username="alice",
-            membership_type_id="individual",
-            expires_at=timezone.now() + datetime.timedelta(days=30),
-        )
-        Membership.objects.create(
-            target_organization=org,
-            membership_type_id="gold",
-            expires_at=timezone.now() + datetime.timedelta(days=30),
-        )
-
-        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
-        reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
-        alice = self._make_user("alice", full_name="Alice User")
-        bob = self._make_user("bob", full_name="Bob User")
-
-        def _get_user(username: str) -> FreeIPAUser | None:
-            if username == "reviewer":
-                return reviewer
-            if username == "alice":
-                return alice
-            if username == "bob":
-                return bob
-            return None
-
-        self._login_as_freeipa_user("reviewer")
-
-        with (
-            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.freeipa.user.FreeIPAUser.all", autospec=True, return_value=[reviewer, alice, bob]),
-        ):
-            resp = self.client.get(reverse("membership-requests"))
-
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, f"Request #{req_user.pk}")
-        self.assertContains(resp, f"Request #{req_org.pk}")
-        self.assertContains(resp, '<span class="badge badge-primary">Renewal</span>', count=2)
-
-    def test_membership_requests_filter_empty_state_message(self) -> None:
-        from core.models import MembershipRequest, MembershipType, Organization
-
-        MembershipType.objects.update_or_create(
-            code="individual",
-            defaults={
-                "name": "Individual",
-                "group_cn": "almalinux-individual",
-                "category_id": "individual",
-                "sort_order": 0,
-                "enabled": True,
-            },
-        )
-        MembershipType.objects.update_or_create(
-            code="gold",
-            defaults={
-                "name": "Gold Sponsor",
-                "group_cn": "almalinux-gold",
-                "category_id": "sponsorship",
-                "sort_order": 1,
-                "enabled": True,
-            },
-        )
-
-        MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
-        org = Organization.objects.create(name="Acme", representative="rep1")
-        on_hold_req = MembershipRequest.objects.create(
-            requested_username="",
-            requested_organization=org,
-            membership_type_id="gold",
-            status=MembershipRequest.Status.on_hold,
-            on_hold_at=timezone.now(),
-        )
-
-        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
-        reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
-        alice = self._make_user("alice", full_name="Alice User")
-
-        def _get_user(username: str) -> FreeIPAUser | None:
-            if username == "reviewer":
-                return reviewer
-            if username == "alice":
-                return alice
-            return None
-
-        self._login_as_freeipa_user("reviewer")
-
-        with (
-            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.freeipa.user.FreeIPAUser.all", autospec=True, return_value=[reviewer, alice]),
-        ):
-            resp = self.client.get(f"{reverse('membership-requests')}?filter=mirrors")
-
-        self.assertEqual(resp.status_code, 200)
-        rendered = resp.content.decode()
-        pending_table = rendered.split('<table class="table table-striped mb-0">', 1)[1].split("</table>", 1)[0]
-        self.assertIn("No requests match this filter.", pending_table)
-        self.assertIn(f'href="{reverse("membership-requests")}"', pending_table)
-        self.assertContains(resp, f"Request #{on_hold_req.pk}")
-        self.assertNotContains(resp, "No pending requests.")
-        self.assertNotContains(resp, "No on-hold requests.")
-
-    def test_membership_requests_filter_does_not_hide_on_hold_requests(self) -> None:
-        from core.models import MembershipRequest, MembershipType, Organization
-
-        MembershipType.objects.update_or_create(
-            code="individual",
-            defaults={
-                "name": "Individual",
-                "group_cn": "almalinux-individual",
-                "category_id": "individual",
-                "sort_order": 0,
-                "enabled": True,
-            },
-        )
-        MembershipType.objects.update_or_create(
-            code="gold",
-            defaults={
-                "name": "Gold Sponsor",
-                "group_cn": "almalinux-gold",
-                "category_id": "sponsorship",
-                "sort_order": 1,
-                "enabled": True,
-            },
-        )
-
-        req_user = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
-        org = Organization.objects.create(name="Acme", representative="rep1")
-        req_org = MembershipRequest.objects.create(
-            requested_username="",
-            requested_organization=org,
-            membership_type_id="gold",
-            status=MembershipRequest.Status.on_hold,
-            on_hold_at=timezone.now(),
-        )
-
-        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
-        reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
-        alice = self._make_user("alice", full_name="Alice User")
-
-        def _get_user(username: str) -> FreeIPAUser | None:
-            if username == "reviewer":
-                return reviewer
-            if username == "alice":
-                return alice
-            return None
-
-        self._login_as_freeipa_user("reviewer")
-
-        with (
-            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.freeipa.user.FreeIPAUser.all", autospec=True, return_value=[reviewer, alice]),
-        ):
-            resp = self.client.get(f"{reverse('membership-requests')}?filter=individuals")
-
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, f"Request #{req_user.pk}")
-        self.assertContains(resp, f"Request #{req_org.pk}")
-        self.assertNotContains(resp, "No on-hold requests.")
-
-    def test_membership_requests_list_hides_deleted_user_request(self) -> None:
-        from core.models import MembershipRequest, MembershipType
-
-        MembershipType.objects.update_or_create(
-            code="individual",
-            defaults={
-                "name": "Individual",
-                "group_cn": "almalinux-individual",
-                "category_id": "individual",
-                "sort_order": 0,
-                "enabled": True,
-            },
-        )
-        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
-
-        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
-        reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
-
-        def _get_user(username: str) -> FreeIPAUser | None:
-            if username == "reviewer":
-                return reviewer
-            # Simulate the target user having been deleted from FreeIPA.
-            return None
-
-        self._login_as_freeipa_user("reviewer")
-
-        with (
-            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.freeipa.user.FreeIPAUser.all", autospec=True, return_value=[reviewer]),
-        ):
-            resp = self.client.get(reverse("membership-requests"))
-
-        self.assertEqual(resp.status_code, 200)
-        self.assertNotContains(resp, reverse("membership-request-detail", args=[req.pk]))
-        self.assertNotContains(resp, req.requested_username)
-        self.assertContains(resp, "No pending requests.")
-
-    def test_membership_requests_list_hides_deleted_org_request(self) -> None:
-        from core.models import MembershipRequest, MembershipType
-
-        MembershipType.objects.update_or_create(
-            code="gold",
-            defaults={
-                "name": "Gold",
-                "group_cn": "almalinux-gold",
-                "category_id": "sponsorship",
-                "sort_order": 0,
-                "enabled": True,
-            },
-        )
-
-        req = MembershipRequest.objects.create(
-            requested_username="",
-            requested_organization=None,
-            requested_organization_code="acme",
-            requested_organization_name="Acme",
-            membership_type_id="gold",
-        )
-
-        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
-        reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
-
-        def _get_user(username: str) -> FreeIPAUser | None:
-            if username == "reviewer":
-                return reviewer
-            return None
-
-        self._login_as_freeipa_user("reviewer")
-
-        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
-            resp = self.client.get(reverse("membership-requests"))
-
-        self.assertEqual(resp.status_code, 200)
-        self.assertNotContains(resp, reverse("membership-request-detail", args=[req.pk]))
-        self.assertNotContains(resp, "Acme")
-        self.assertContains(resp, "No pending requests.")
 
     def test_membership_request_detail_shows_deleted_user(self) -> None:
         from core.models import MembershipRequest, MembershipType
@@ -1428,9 +964,16 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Membership Committee Notes")
-        self.assertContains(resp, "Needs manual review")
-        self.assertContains(resp, f"(req. #{req.pk})")
-        self.assertContains(resp, f'href="{reverse("membership-request-detail", args=[req.pk])}"')
+        self.assertContains(
+            resp,
+            reverse("api-membership-notes-aggregate-summary") + f"?target_type=user&amp;target={alice.username}",
+        )
+        self.assertContains(
+            resp,
+            reverse("api-membership-notes-aggregate") + f"?target_type=user&amp;target={alice.username}",
+        )
+        self.assertNotContains(resp, "Needs manual review")
+        self.assertNotContains(resp, f"(req. #{req.pk})")
 
     def test_profile_hides_status_note_without_membership_view_perm(self) -> None:
         from core.models import MembershipRequest, MembershipType, Note
@@ -1545,10 +1088,19 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Membership Committee Notes")
+        self.assertContains(
+            resp,
+            reverse("api-membership-notes-aggregate-summary") + "?target_type=user&amp;target=alice",
+        )
+        self.assertContains(
+            resp,
+            reverse("api-membership-notes-aggregate") + "?target_type=user&amp;target=alice",
+        )
         self.assertNotContains(resp, 'data-membership-notes-form="')
         self.assertNotContains(resp, 'placeholder="Type a note..."')
         self.assertNotContains(resp, 'data-note-action="vote_approve"')
         self.assertNotContains(resp, 'data-note-action="vote_disapprove"')
+        self.assertContains(resp, "Older note")
 
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.post(
@@ -1574,96 +1126,6 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
                 username="reviewer",
                 content="Hello from aggregate",
             ).exists()
-        )
-
-    def test_requests_list_includes_collapsible_status_note(self) -> None:
-        from core.models import MembershipRequest, MembershipType, Note
-
-        MembershipType.objects.update_or_create(
-            code="individual",
-            defaults={
-                "name": "Individual",
-                "group_cn": "almalinux-individual",
-                "category_id": "individual",
-                "sort_order": 0,
-                "enabled": True,
-            },
-        )
-        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
-        Note.objects.create(membership_request=req, username="reviewer", content="Request note")
-
-        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
-        reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
-        alice = FreeIPAUser(
-            "alice",
-            {
-                "uid": ["alice"],
-                "givenname": ["Alice"],
-                "sn": ["User"],
-                "mail": ["alice@example.com"],
-                "memberof_group": [],
-                "fasstatusnote": ["Request note"],
-            },
-        )
-
-        def _get_user(username: str) -> FreeIPAUser | None:
-            if username == "reviewer":
-                return reviewer
-            if username == "alice":
-                return alice
-            return None
-
-        self._login_as_freeipa_user("reviewer")
-
-        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
-            resp = self.client.get(reverse("membership-requests"))
-
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Membership Committee Notes")
-        self.assertContains(resp, "Request note")
-
-    def test_requests_list_shows_request_responses_in_collapsible_section(self) -> None:
-        from core.models import MembershipRequest, MembershipType
-
-        MembershipType.objects.update_or_create(
-            code="individual",
-            defaults={
-                "name": "Individual",
-                "group_cn": "almalinux-individual",
-                "category_id": "individual",
-                "sort_order": 0,
-                "enabled": True,
-            },
-        )
-        MembershipRequest.objects.create(
-            requested_username="alice",
-            membership_type_id="individual",
-            responses=[{"Contributions": "I did docs and CI."}],
-        )
-
-        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
-        reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
-        alice = self._make_user("alice", full_name="Alice User")
-
-        def _get_user(username: str) -> FreeIPAUser | None:
-            if username == "reviewer":
-                return reviewer
-            if username == "alice":
-                return alice
-            return None
-
-        self._login_as_freeipa_user("reviewer")
-
-        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
-            resp = self.client.get(reverse("membership-requests"))
-
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Request responses")
-        self.assertContains(resp, "Contributions")
-        self.assertContains(resp, "I did docs and CI.")
-        self.assertRegex(
-            resp.content.decode("utf-8"),
-            r"<details[^>]*\bopen\b[^>]*>",
         )
 
     def test_membership_request_note_add_creates_message_note(self) -> None:

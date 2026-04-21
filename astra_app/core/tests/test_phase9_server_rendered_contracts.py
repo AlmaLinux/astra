@@ -106,8 +106,9 @@ class Phase9ServerRenderedContractsTests(TestCase):
         self.assertIn('id="select-all-requests"', requests_html)
         self.assertIn('id="bulk-apply"', requests_html)
         self.assertIn('select name="bulk_action"', requests_html)
-        self.assertIn('class="request-checkbox request-checkbox--pending"', requests_html)
-        self.assertIn('form="bulk-action-form"', requests_html)
+        self.assertIn('id="membership-requests-pending-table"', requests_html)
+        self.assertIn('id="membership-requests-on-hold-table"', requests_html)
+        self.assertIn('data-membership-requests-root', requests_html)
 
         self.assertIn('data-bulk-table-form', invitations_html)
         self.assertIn('data-bulk-select-all-id="select-all-invitations-pending"', invitations_html)
@@ -119,7 +120,7 @@ class Phase9ServerRenderedContractsTests(TestCase):
         self.assertIn('class="invitation-checkbox invitation-checkbox--pending"', invitations_html)
         self.assertIn('form="bulk-invitations-pending-form"', invitations_html)
 
-    def test_membership_shared_modal_contract_is_rendered_with_trigger_data_attributes(self) -> None:
+    def test_membership_shared_modal_shell_is_rendered(self) -> None:
         self._login_as_freeipa_user("reviewer")
 
         MembershipType.objects.update_or_create(
@@ -145,6 +146,7 @@ class Phase9ServerRenderedContractsTests(TestCase):
         html = resp.content.decode("utf-8")
 
         self.assertIn('id="shared-approve-modal"', html)
+        self.assertIn('id="shared-approve-on-hold-modal"', html)
         self.assertIn('id="shared-reject-modal"', html)
         self.assertIn('id="shared-rfi-modal"', html)
         self.assertIn('id="shared-ignore-modal"', html)
@@ -153,22 +155,11 @@ class Phase9ServerRenderedContractsTests(TestCase):
         self.assertIn('class="js-body-emphasis"', html)
         self.assertIn('class="js-body-suffix"', html)
 
-        self.assertIn('data-target="#shared-approve-modal"', html)
-        self.assertIn('data-target="#shared-reject-modal"', html)
-        self.assertIn('data-target="#shared-rfi-modal"', html)
-        self.assertIn('data-target="#shared-ignore-modal"', html)
-        self.assertIn('data-action-url="', html)
-        self.assertIn('data-modal-title="', html)
-        self.assertIn('data-body-prefix="', html)
-        self.assertIn('data-body-emphasis="', html)
-        self.assertIn('data-body-suffix="', html)
-        self.assertIn('data-request-id="', html)
-        self.assertIn('data-request-target="', html)
-        self.assertIn('data-membership-type="', html)
-
         self.assertIn('Request #<strong class="js-request-id"></strong>', html)
         self.assertIn('Requested for <strong class="js-request-target"></strong>', html)
         self.assertIn('Membership type <strong class="js-membership-type"></strong>', html)
+        self.assertIn('Committee override justification:', html)
+        self.assertIn('Required for this committee override approval. This note is stored in the membership request audit trail.', html)
 
         self.assertIn('src="/static/core/js/membership_request_shared_modals.js"', html)
 

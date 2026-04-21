@@ -9,6 +9,9 @@ class Round4TemplateConsolidationTests(SimpleTestCase):
         template_path = Path(settings.BASE_DIR) / "core" / "templates" / "core" / template_name
         return template_path.read_text(encoding="utf-8")
 
+    def _python_source(self, relative_path: str) -> str:
+        return (Path(settings.BASE_DIR) / relative_path).read_text(encoding="utf-8")
+
     def test_expiry_and_termination_render_template_uses_single_canonical_block(self) -> None:
         source = self._template_source("_expiry_and_termination_actions_render.html")
 
@@ -41,6 +44,23 @@ class Round4TemplateConsolidationTests(SimpleTestCase):
         self.assertIn("core/js/bulk_table_actions.js", requests)
         self.assertNotIn("function setupBulk", invitations)
         self.assertNotIn("function setupBulk", requests)
+
+    def test_membership_note_templates_use_default_api_backed_contract(self) -> None:
+        detail_source = self._template_source("membership_request_detail.html")
+        profile_source = self._template_source("_membership_profile_section.html")
+        requester_cell_source = self._template_source("_membership_request_requester_cell.html")
+
+        self.assertNotIn("api_backed_read=", detail_source)
+        self.assertNotIn("api_backed_read=", profile_source)
+        self.assertNotIn("preloaded_notes=", requester_cell_source)
+        self.assertNotIn("fail_on_query_fallback=", requester_cell_source)
+
+    def test_committee_note_reads_use_shared_context_helper(self) -> None:
+        source = self._python_source("core/views_membership/committee.py")
+
+        self.assertIn("def _membership_notes_read_context(", source)
+        self.assertNotIn("def _membership_request_note_read_context(", source)
+        self.assertNotIn("def _membership_notes_aggregate_read_context(", source)
 
     def test_expiry_modal_uses_utc_today_min_date_contract(self) -> None:
         shared_source = self._template_source("_expiry_and_termination_actions_shared.html")

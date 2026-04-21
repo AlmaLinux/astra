@@ -1,6 +1,5 @@
 
 import datetime
-from collections.abc import Iterator, Mapping
 from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import parse_qs, quote_plus, urlsplit
@@ -13,7 +12,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.freeipa.user import FreeIPAUser
-from core.models import FreeIPAPermissionGrant, MembershipLog, MembershipRequest, MembershipType, Organization
+from core.models import FreeIPAPermissionGrant, MembershipRequest, MembershipType, Organization
 from core.permissions import (
     ASTRA_ADD_MEMBERSHIP,
     ASTRA_CHANGE_MEMBERSHIP,
@@ -22,24 +21,6 @@ from core.permissions import (
     ASTRA_VIEW_USER_DIRECTORY,
 )
 from core.tests.utils_test_data import ensure_core_categories, ensure_email_templates
-
-
-class _TrackingUserMap(Mapping[str, FreeIPAUser]):
-    def __init__(self, data: dict[str, FreeIPAUser]) -> None:
-        self._data = data
-        self.key_view = tuple(data.keys())
-
-    def __getitem__(self, key: str) -> FreeIPAUser:
-        return self._data[key]
-
-    def __iter__(self) -> Iterator[str]:
-        return iter(self._data)
-
-    def __len__(self) -> int:
-        return len(self._data)
-
-    def keys(self) -> tuple[str, ...]:
-        return self.key_view
 
 
 class MembershipRequestsFlowTests(TestCase):
@@ -117,114 +98,6 @@ class MembershipRequestsFlowTests(TestCase):
                 self.assertEqual(runner_mock.call_count, 1)
                 self.assertEqual(runner_mock.call_args.args[1], membership_request.pk)
                 self.assertEqual(runner_mock.call_args.kwargs["action"], action)
-
-    def test_committee_requests_page_uses_shared_lightweight_user_lookup(self) -> None:
-        membership_type, _ = MembershipType.objects.update_or_create(
-            code="individual",
-            defaults={
-                "name": "Individual",
-                "group_cn": "almalinux-individual",
-                "acceptance_template": None,
-                "category_id": "individual",
-                "sort_order": 0,
-                "enabled": True,
-            },
-        )
-        membership_request = MembershipRequest.objects.create(
-            requested_username="alice",
-            membership_type_id="individual",
-            status=MembershipRequest.Status.pending,
-        )
-        MembershipLog.objects.create(
-            actor_username="charlie",
-            target_username="alice",
-            membership_type=membership_type,
-            membership_request=membership_request,
-            action=MembershipLog.Action.requested,
-        )
-
-        reviewer = FreeIPAUser(
-            "reviewer",
-            {
-                "uid": ["reviewer"],
-                "givenname": ["Review"],
-                "sn": ["Er"],
-                "mail": ["reviewer@example.com"],
-                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
-            },
-        )
-        alice = FreeIPAUser(
-            "alice",
-            {
-                "uid": ["alice"],
-                "givenname": ["Alice"],
-                "sn": ["User"],
-                "mail": ["alice@example.com"],
-                "memberof_group": [],
-            },
-        )
-        charlie = FreeIPAUser(
-            "charlie",
-            {
-                "uid": ["charlie"],
-                "givenname": ["Charlie"],
-                "sn": ["Requester"],
-                "mail": ["charlie@example.com"],
-                "memberof_group": [],
-            },
-        )
-        users_by_username = _TrackingUserMap({"alice": alice, "charlie": charlie})
-        self._login_as_freeipa_user("reviewer")
-
-        isolated_templates = []
-        for template in settings.TEMPLATES:
-            isolated_template = dict(template)
-            options = dict(template["OPTIONS"])
-            # Django caches context-processor callables after the first template render.
-            # Removing membership_review here keeps this route-level assertion order-independent.
-            options["context_processors"] = [
-                context_processor
-                for context_processor in template["OPTIONS"]["context_processors"]
-                if context_processor != "core.context_processors.membership_review"
-            ]
-            isolated_template["OPTIONS"] = options
-            isolated_templates.append(isolated_template)
-
-        def get_user(username: str) -> FreeIPAUser:
-            if username == "reviewer":
-                return reviewer
-            raise AssertionError(f"unexpected full-detail lookup for {username}")
-
-        with (
-            override_settings(TEMPLATES=isolated_templates),
-            patch("core.freeipa.user.FreeIPAUser.get", side_effect=get_user),
-            patch("core.views_membership.committee.FreeIPAUser.all", side_effect=AssertionError("membership_requests should use the shared lightweight username helper")),
-            patch(
-                "core.views_membership.committee.FreeIPAUser.find_lightweight_by_usernames",
-                create=True,
-                return_value=users_by_username,
-            ) as find_lightweight_mock,
-            patch(
-                "core.views_membership.committee.visible_committee_membership_requests",
-                wraps=__import__("core.views_membership.committee", fromlist=["visible_committee_membership_requests"]).visible_committee_membership_requests,
-            ) as visible_mock,
-            patch(
-                "core.views_membership.committee._resolve_requested_by",
-                wraps=__import__("core.views_membership.committee", fromlist=["_resolve_requested_by"])._resolve_requested_by,
-            ) as resolve_requested_by_mock,
-        ):
-            resp = self.client.get(reverse("membership-requests"))
-
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Requested by:")
-        self.assertEqual(find_lightweight_mock.call_count, 1)
-        self.assertEqual(set(find_lightweight_mock.call_args.args[0]), {"alice", "charlie"})
-        self.assertEqual(visible_mock.call_count, 2)
-        self.assertTrue(all(call.kwargs["live_usernames"] is users_by_username.key_view for call in visible_mock.call_args_list))
-        self.assertGreaterEqual(resolve_requested_by_mock.call_count, 1)
-        self.assertTrue(
-            all(call.kwargs["users_by_username"] is users_by_username for call in resolve_requested_by_mock.call_args_list)
-        )
 
     def test_user_can_request_membership_and_email_is_sent(self) -> None:
         from core.models import MembershipLog, MembershipRequest, MembershipType

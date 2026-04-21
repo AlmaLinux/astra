@@ -619,10 +619,12 @@ class OrganizationUserViewsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=fake_get):
             resp = self.client.get(reverse("membership-request-detail", args=[mr.pk]), follow=False)
+            detail_resp = self.client.get(reverse("api-membership-request-notes", args=[mr.pk]))
         self.assertEqual(resp.status_code, 200)
-        from html import unescape
-
-        self.assertIn("Representative changed from carol to bob", unescape(resp.content.decode()))
+        self.assertContains(resp, reverse("api-membership-request-notes", args=[mr.pk]))
+        self.assertEqual(detail_resp.status_code, 200)
+        payload = detail_resp.json()
+        self.assertEqual(payload["groups"][0]["entries"][0]["label"], "Representative changed from carol to bob")
 
     def test_representative_change_does_not_create_membershiplog_when_no_pending_requests(self) -> None:
         from core.models import MembershipLog, MembershipType, Note, Organization
@@ -2848,9 +2850,16 @@ class OrganizationUserViewsTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Membership Committee Notes")
+        self.assertContains(
+            resp,
+            reverse("api-membership-notes-aggregate-summary") + f"?target_type=org&amp;target={org.pk}",
+        )
+        self.assertContains(
+            resp,
+            reverse("api-membership-notes-aggregate") + f"?target_type=org&amp;target={org.pk}",
+        )
         self.assertContains(resp, "Org note")
         self.assertContains(resp, f"(req. #{req.pk})")
-        self.assertContains(resp, f'href="{reverse("membership-request-detail", args=[req.pk])}"')
         self.assertContains(resp, "<div class=\"font-weight-bold\">Gold Sponsor Member</div>", html=True)
         self.assertContains(resp, f"Request #{req.pk}")
         self.assertNotContains(
@@ -3150,10 +3159,19 @@ class OrganizationUserViewsTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Membership Committee Notes")
+        self.assertContains(
+            resp,
+            reverse("api-membership-notes-aggregate-summary") + f"?target_type=org&amp;target={org.pk}",
+        )
+        self.assertContains(
+            resp,
+            reverse("api-membership-notes-aggregate") + f"?target_type=org&amp;target={org.pk}",
+        )
         self.assertNotContains(resp, 'data-membership-notes-form="')
         self.assertNotContains(resp, 'placeholder="Type a note..."')
         self.assertNotContains(resp, 'data-note-action="vote_approve"')
         self.assertNotContains(resp, 'data-note-action="vote_disapprove"')
+        self.assertContains(resp, "Older org note")
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(

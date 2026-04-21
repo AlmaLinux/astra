@@ -28,6 +28,39 @@ class MembershipRequestEmailModalTests(TestCase):
         session["_freeipa_username"] = username
         session.save()
 
+    def _reviewer_user(self) -> FreeIPAUser:
+        return FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+            },
+        )
+
+    def _detail_payload(self, request_pk: int) -> dict[str, object]:
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer_user()):
+            response = self.client.get(
+                reverse("api-membership-request-notes", args=[request_pk]),
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        return response.json()
+
+    def _first_contacted_email(self, request_pk: int) -> dict[str, object]:
+        payload = self._detail_payload(request_pk)
+
+        for group in payload["groups"]:
+            for entry in group["entries"]:
+                contacted_email = entry.get("contacted_email")
+                if contacted_email is not None:
+                    return contacted_email
+
+        self.fail("Expected contacted_email detail in notes payload.")
+
     def test_membership_notes_render_email_modal(self) -> None:
         MembershipType.objects.update_or_create(
             code="individual",
@@ -65,33 +98,38 @@ class MembershipRequestEmailModalTests(TestCase):
             action={"type": "contacted", "kind": "approved", "email_id": email.id},
         )
 
-        reviewer = FreeIPAUser(
-            "reviewer",
-            {
-                "uid": ["reviewer"],
-                "mail": ["reviewer@example.com"],
-                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
-            },
-        )
-
-        def _get_user(username: str) -> FreeIPAUser | None:
-            if username == "reviewer":
-                return reviewer
-            return None
-
         self._login_as_freeipa_user("reviewer")
 
-        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer_user()),
+            patch(
+                "core.templatetags.core_membership_notes.Note.objects.filter",
+                side_effect=AssertionError("legacy direct note read should not run"),
+            ),
+        ):
             resp = self.client.get(reverse("membership-request-detail", args=[req.pk]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "View email")
-        self.assertContains(resp, "Approval notice")
-        self.assertContains(resp, "alice@example.com")
-        self.assertContains(resp, "committee@example.com")
-        self.assertContains(resp, "HTML body")
-        self.assertContains(resp, "Plain text body")
-        self.assertContains(resp, "sent")
+        self.assertContains(resp, "Membership Committee Notes")
+        self.assertContains(resp, reverse("api-membership-request-notes-summary", args=[req.pk]))
+        self.assertContains(resp, reverse("api-membership-request-notes", args=[req.pk]))
+        self.assertIn('data-membership-notes-has-fallback-content="0"', resp.content.decode())
+        self.assertContains(resp, "Loading notes...")
+        self.assertNotContains(resp, "Approval email sent")
+        self.assertNotContains(resp, "View email")
+        self.assertNotContains(resp, "Approval notice")
+        self.assertNotContains(resp, "HTML body")
+        self.assertNotContains(resp, "Plain text body")
+
+        contacted_email = self._first_contacted_email(req.pk)
+        self.assertEqual(contacted_email["subject"], "Approval notice")
+        self.assertEqual(contacted_email["to"], ["alice@example.com"])
+        self.assertEqual(contacted_email["cc"], ["cc@example.com"])
+        self.assertEqual(contacted_email["bcc"], ["bcc@example.com"])
+        self.assertEqual(contacted_email["reply_to"], "committee@example.com")
+        self.assertEqual(contacted_email["html"], "<p>HTML body</p>")
+        self.assertEqual(contacted_email["text"], "Plain text body")
+        self.assertEqual(contacted_email["logs"][0]["status"], "sent")
 
     def test_modal_uses_sent_email_contents_over_template(self) -> None:
         MembershipType.objects.update_or_create(
@@ -138,32 +176,14 @@ class MembershipRequestEmailModalTests(TestCase):
             action={"type": "contacted", "kind": "approved", "email_id": email.id},
         )
 
-        reviewer = FreeIPAUser(
-            "reviewer",
-            {
-                "uid": ["reviewer"],
-                "mail": ["reviewer@example.com"],
-                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
-            },
-        )
+        contacted_email = self._first_contacted_email(req.pk)
 
-        def _get_user(username: str) -> FreeIPAUser | None:
-            if username == "reviewer":
-                return reviewer
-            return None
-
-        self._login_as_freeipa_user("reviewer")
-
-        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
-            resp = self.client.get(reverse("membership-request-detail", args=[req.pk]))
-
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Sent subject")
-        self.assertContains(resp, "Sent html body")
-        self.assertContains(resp, "Sent text body")
-        self.assertNotContains(resp, "Template subject")
-        self.assertNotContains(resp, "Template html")
-        self.assertNotContains(resp, "Template text")
+        self.assertEqual(contacted_email["subject"], "Sent subject")
+        self.assertEqual(contacted_email["html"], "<p>Sent html body</p>")
+        self.assertEqual(contacted_email["text"], "Sent text body")
+        self.assertNotEqual(contacted_email["subject"], "Template subject alice")
+        self.assertNotIn("Template html", contacted_email["html"])
+        self.assertNotIn("Template text", contacted_email["text"])
 
     def test_membership_notes_render_aggregate_recipient_delivery_summary(self) -> None:
         MembershipType.objects.update_or_create(
@@ -200,29 +220,13 @@ class MembershipRequestEmailModalTests(TestCase):
             action={"type": "contacted", "kind": "approved", "email_id": email.id},
         )
 
-        reviewer = FreeIPAUser(
-            "reviewer",
-            {
-                "uid": ["reviewer"],
-                "mail": ["reviewer@example.com"],
-                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
-            },
+        contacted_email = self._first_contacted_email(req.pk)
+
+        self.assertEqual(contacted_email["recipient_delivery_summary"], "Delivered")
+        self.assertEqual(
+            contacted_email["recipient_delivery_summary_note"],
+            "Single rolled-up status across all recipients. Individual recipient outcomes may differ.",
         )
-
-        def _get_user(username: str) -> FreeIPAUser | None:
-            if username == "reviewer":
-                return reviewer
-            return None
-
-        self._login_as_freeipa_user("reviewer")
-
-        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
-            resp = self.client.get(reverse("membership-request-detail", args=[req.pk]))
-
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Recipient delivery summary")
-        self.assertContains(resp, "Delivered")
-        self.assertContains(resp, "Single rolled-up status across all recipients. Individual recipient outcomes may differ.")
 
     def test_membership_notes_render_empty_recipient_delivery_summary(self) -> None:
         MembershipType.objects.update_or_create(
@@ -259,25 +263,7 @@ class MembershipRequestEmailModalTests(TestCase):
             action={"type": "contacted", "kind": "approved", "email_id": email.id},
         )
 
-        reviewer = FreeIPAUser(
-            "reviewer",
-            {
-                "uid": ["reviewer"],
-                "mail": ["reviewer@example.com"],
-                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
-            },
-        )
+        contacted_email = self._first_contacted_email(req.pk)
 
-        def _get_user(username: str) -> FreeIPAUser | None:
-            if username == "reviewer":
-                return reviewer
-            return None
-
-        self._login_as_freeipa_user("reviewer")
-
-        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
-            resp = self.client.get(reverse("membership-request-detail", args=[req.pk]))
-
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Recipient delivery summary")
-        self.assertContains(resp, "No aggregate recipient status recorded.")
+        self.assertEqual(contacted_email["recipient_delivery_summary"], "No aggregate recipient status recorded.")
+        self.assertEqual(contacted_email["recipient_delivery_summary_note"], "")

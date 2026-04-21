@@ -8,6 +8,10 @@
     id="membership-notes-container-{{ membership_request.pk }}"
     data-membership-notes-container="{{ membership_request.pk }}"
     data-membership-notes-default-open="{% if compact %}0{% else %}1{% endif %}"
+    data-membership-notes-summary-url="{{ note_summary_url|default:'' }}"
+    data-membership-notes-detail-url="{{ note_detail_url|default:'' }}"
+    data-membership-notes-has-fallback-content="{% if has_fallback_content %}1{% else %}0{% endif %}"
+    data-membership-notes-details-loaded="{% if details_loaded %}true{% else %}false{% endif %}"
   >
 
     <div
@@ -68,98 +72,102 @@
           data-membership-notes-messages="{{ membership_request.pk }}"
           {% if compact %} style="max-height: 260px;"{% else %} style="height: 400px;"{% endif %}
         >
-          {% for group in groups %}
-            {% with entry=group.header_entry %}
-              <div
-                class="direct-chat-msg {% if not forloop.last %}mb-3{% endif %} {% if group.is_self %} right{% endif %}"
-                data-membership-notes-group-username="{{ entry.note.username }}"
-              >
-                <div class="direct-chat-infos clearfix">
-                  {% if group.is_self %}
-                    <span class="direct-chat-name float-right">{{ entry.display_username|default:entry.note.username }}</span>
-                    <span class="direct-chat-timestamp float-left">
-                      {{ entry.note.timestamp|localtime|date:"DATETIME_FORMAT" }}
-                      {% if entry.membership_request_id and entry.membership_request_url %}
-                        <a href="{{ entry.membership_request_url }}" class="text-muted ml-1">(req. #{{ entry.membership_request_id }})</a>
-                      {% endif %}
-                    </span>
-                  {% else %}
-                    <span class="direct-chat-name float-left">{{ entry.display_username|default:entry.note.username }}</span>
-                    <span class="direct-chat-timestamp float-right">
-                      {% if entry.membership_request_id and entry.membership_request_url %}
-                        <a href="{{ entry.membership_request_url }}" class="text-muted mr-1">(req. #{{ entry.membership_request_id }})</a>
-                      {% endif %}
-                      {{ entry.note.timestamp|localtime|date:"DATETIME_FORMAT" }}
-                    </span>
-                  {% endif %}
-                </div>
-
-                {% if entry.is_custos %}
-                  <img
-                    class="direct-chat-img img-circle"
-                    src="{% static 'core/images/almalinux-logo.svg' %}"
-                    alt="Astra Custodia"
-                    style="object-fit: cover; background: #fff;"
-                  >
-                {% elif entry.avatar_user %}
-                  {% avatar entry.avatar_user 40 class="direct-chat-img img-circle" style="object-fit:cover;" alt="Avatar" %}
-                {% else %}
-                  <img class="direct-chat-img" src="{% static 'core/images/almalinux-logo.svg' %}" alt="user image">
-                {% endif %}
-
-                <div class="membership-notes-bubbles">
-                  {% for entry in group.entries %}
-                    {% if entry.kind == 'action' %}
-                      <div
-                        class="direct-chat-text bg-light membership-notes-bubble"
-                        style="{{ entry.bubble_style }} border: 1px dashed rgba(0,0,0,0.15);"
-                      >
-                        <i class="fas {{ entry.icon|default:"fa-bolt" }} mr-1"></i> {{ entry.label }}
-                        {% if entry.email_modal_id %}
-                          <button
-                            type="button"
-                            class="btn btn-link btn-sm p-0 ml-2"
-                            data-toggle="modal"
-                            data-target="#{{ entry.email_modal_id }}"
-                            aria-label="View email"
-                          >View email</button>
+          {% if has_fallback_content %}
+            {% for group in groups %}
+              {% with entry=group.header_entry %}
+                <div
+                  class="direct-chat-msg {% if not forloop.last %}mb-3{% endif %} {% if group.is_self %} right{% endif %}"
+                  data-membership-notes-group-username="{{ entry.note.username }}"
+                >
+                  <div class="direct-chat-infos clearfix">
+                    {% if group.is_self %}
+                      <span class="direct-chat-name float-right">{{ entry.display_username|default:entry.note.username }}</span>
+                      <span class="direct-chat-timestamp float-left">
+                        {{ entry.note.timestamp|localtime|date:"DATETIME_FORMAT" }}
+                        {% if entry.membership_request_id and entry.membership_request_url %}
+                          <a href="{{ entry.membership_request_url }}" class="text-muted ml-1">(req. #{{ entry.membership_request_id }})</a>
                         {% endif %}
-
-                        {% if entry.request_resubmitted_diff_rows %}
-                          <div class="mt-2" data-request-resubmitted-note-id="{{ entry.note.pk }}">
-                            {% for row in entry.request_resubmitted_diff_rows %}
-                              <details class="mt-1" data-request-resubmitted-question="{{ row.question }}">
-                                <summary>{{ row.question }}</summary>
-                                <div class="small text-muted mt-2">Previous response</div>
-                                <div data-request-resubmitted-old>{{ row.old_value|linebreaksbr }}</div>
-                                <div class="small text-muted mt-2">Updated response</div>
-                                <div data-request-resubmitted-new>{{ row.new_value|linebreaksbr }}</div>
-                              </details>
-                            {% endfor %}
-                          </div>
-                        {% endif %}
-                      </div>
+                      </span>
                     {% else %}
-                      {% if not entry.is_self and entry.bubble_style %}
+                      <span class="direct-chat-name float-left">{{ entry.display_username|default:entry.note.username }}</span>
+                      <span class="direct-chat-timestamp float-right">
+                        {% if entry.membership_request_id and entry.membership_request_url %}
+                          <a href="{{ entry.membership_request_url }}" class="text-muted mr-1">(req. #{{ entry.membership_request_id }})</a>
+                        {% endif %}
+                        {{ entry.note.timestamp|localtime|date:"DATETIME_FORMAT" }}
+                      </span>
+                    {% endif %}
+                  </div>
+
+                  {% if entry.is_custos %}
+                    <img
+                      class="direct-chat-img img-circle"
+                      src="{% static 'core/images/almalinux-logo.svg' %}"
+                      alt="Astra Custodia"
+                      style="object-fit: cover; background: #fff;"
+                    >
+                  {% elif entry.avatar_user %}
+                    {% avatar entry.avatar_user 40 class="direct-chat-img img-circle" style="object-fit:cover;" alt="Avatar" %}
+                  {% else %}
+                    <img class="direct-chat-img" src="{% static 'core/images/almalinux-logo.svg' %}" alt="user image">
+                  {% endif %}
+
+                  <div class="membership-notes-bubbles">
+                    {% for entry in group.entries %}
+                      {% if entry.kind == 'action' %}
                         <div
-                          class="direct-chat-text membership-notes-bubble"
-                          style="{{ entry.bubble_style }}{% if entry.is_custos %} border: 1px dashed rgba(0,0,0,0.15);{% endif %}"
+                          class="direct-chat-text bg-light membership-notes-bubble"
+                          style="{{ entry.bubble_style }} border: 1px dashed rgba(0,0,0,0.15);"
                         >
-                          {{ entry.rendered_content }}
+                          <i class="fas {{ entry.icon|default:"fa-bolt" }} mr-1"></i> {{ entry.label }}
+                          {% if entry.email_modal_id %}
+                            <button
+                              type="button"
+                              class="btn btn-link btn-sm p-0 ml-2"
+                              data-toggle="modal"
+                              data-target="#{{ entry.email_modal_id }}"
+                              aria-label="View email"
+                            >View email</button>
+                          {% endif %}
+
+                          {% if entry.request_resubmitted_diff_rows %}
+                            <div class="mt-2" data-request-resubmitted-note-id="{{ entry.note.pk }}">
+                              {% for row in entry.request_resubmitted_diff_rows %}
+                                <details class="mt-1" data-request-resubmitted-question="{{ row.question }}">
+                                  <summary>{{ row.question }}</summary>
+                                  <div class="small text-muted mt-2">Previous response</div>
+                                  <div data-request-resubmitted-old>{{ row.old_value|linebreaksbr }}</div>
+                                  <div class="small text-muted mt-2">Updated response</div>
+                                  <div data-request-resubmitted-new>{{ row.new_value|linebreaksbr }}</div>
+                                </details>
+                              {% endfor %}
+                            </div>
+                          {% endif %}
                         </div>
                       {% else %}
-                        <div class="direct-chat-text{% if entry.is_self %} membership-notes-self-bubble{% endif %}">
-                          {{ entry.rendered_content }}
-                        </div>
+                        {% if not entry.is_self and entry.bubble_style %}
+                          <div
+                            class="direct-chat-text membership-notes-bubble"
+                            style="{{ entry.bubble_style }}{% if entry.is_custos %} border: 1px dashed rgba(0,0,0,0.15);{% endif %}"
+                          >
+                            {{ entry.rendered_content }}
+                          </div>
+                        {% else %}
+                          <div class="direct-chat-text{% if entry.is_self %} membership-notes-self-bubble{% endif %}">
+                            {{ entry.rendered_content }}
+                          </div>
+                        {% endif %}
                       {% endif %}
-                    {% endif %}
-                  {% endfor %}
+                    {% endfor %}
+                  </div>
                 </div>
-              </div>
-            {% endwith %}
-          {% empty %}
-            <div class="text-muted small">No notes yet.</div>
-          {% endfor %}
+              {% endwith %}
+            {% empty %}
+              <div class="text-muted small">No notes yet.</div>
+            {% endfor %}
+          {% else %}
+            <div class="text-muted small">Loading notes...</div>
+          {% endif %}
         </div>
       </div>
 
@@ -280,11 +288,8 @@
       </div>
     </div>
 
-    {% if email_modals %}
-      {% for modal in email_modals %}
-        {% include "core/_membership_email_modal.html" with modal=modal %}
-      {% endfor %}
-    {% endif %}
+    <div data-membership-notes-modals="{{ membership_request.pk }}">
+    </div>
 
     <script src="{% static 'core/js/membership_notes.js' %}"></script>
     <script>AstraMembershipNotes.init('{{ membership_request.pk|escapejs }}');</script>

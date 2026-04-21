@@ -3,7 +3,7 @@ FROM python:3.14-slim
 ARG ASTRA_BUILD_SHA=""
 ENV ASTRA_BUILD_SHA=$ASTRA_BUILD_SHA
 
-# Install system dependencies for Postgres and Pillow
+# Install system dependencies for Postgres, Pillow, and in-container JS execution tests.
 RUN apt-get update && apt-get install -y \
     build-essential \
     libssl-dev \
@@ -12,6 +12,8 @@ RUN apt-get update && apt-get install -y \
     zlib1g-dev \
     tzdata-legacy \
     git \
+    nodejs \
+    npm \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app/astra_app

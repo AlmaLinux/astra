@@ -1,5 +1,7 @@
 from django.http import HttpRequest
 
+from core.membership_notes_preload import build_notes_by_membership_request_id
+from core.models import MembershipRequest
 from core.templatetags import core_membership_notes
 
 
@@ -7,16 +9,18 @@ def render_membership_notes_widget(
     *,
     request: HttpRequest,
     review_permissions: dict[str, bool],
-    membership_request: object,
+    membership_request: MembershipRequest,
     compact: bool,
     next_url: str,
 ) -> str:
     context = {"request": request, **review_permissions}
-    html = core_membership_notes.membership_notes(
+    notes_by_request_id = build_notes_by_membership_request_id([membership_request.pk])
+    html = core_membership_notes.render_membership_request_notes(
         context,
         membership_request,
         compact=compact,
         next_url=next_url,
+        notes=list(notes_by_request_id.get(int(membership_request.pk), [])),
     )
     return str(html)
 

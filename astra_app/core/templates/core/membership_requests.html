@@ -1,9 +1,13 @@
 {% extends 'core/base.html' %}
 {% load static %}
 
-{% load core_membership_notes %}
-
 {% block title %}Membership Requests{% endblock %}
+
+{% block extra_head %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static 'core/vendor/datatables/datatables.min.css' %}">
+  <link rel="stylesheet" href="{% static 'core/css/membership_notes.css' %}">
+{% endblock %}
 
 {% block header %}
   <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
@@ -12,6 +16,28 @@
 {% endblock %}
 
 {% block content %}
+  <div
+    data-membership-requests-root
+    data-membership-requests-clear-filter-url="{{ clear_filter_url }}"
+    data-membership-requests-pending-api-url="{% url 'api-membership-requests-pending' %}"
+    data-membership-requests-on-hold-api-url="{% url 'api-membership-requests-on-hold' %}"
+    data-membership-request-id-sentinel="{{ membership_request_id_sentinel }}"
+    data-membership-request-detail-template="{{ membership_request_detail_template }}"
+    data-membership-request-approve-template="{{ membership_request_approve_template }}"
+    data-membership-request-approve-on-hold-template="{{ membership_request_approve_on_hold_template }}"
+    data-membership-request-reject-template="{{ membership_request_reject_template }}"
+    data-membership-request-rfi-template="{{ membership_request_rfi_template }}"
+    data-membership-request-ignore-template="{{ membership_request_ignore_template }}"
+    data-membership-request-note-add-template="{{ membership_request_note_add_template }}"
+    data-membership-request-note-summary-template="{{ membership_request_note_summary_template }}"
+    data-membership-request-note-detail-template="{{ membership_request_note_detail_template }}"
+    data-membership-user-profile-template="{{ membership_user_profile_template }}"
+    data-membership-organization-detail-template="{{ membership_organization_detail_template }}"
+    data-membership-requests-can-request-info="{% if membership_requests_can_request_info %}true{% else %}false{% endif %}"
+    data-membership-requests-notes-can-view="{% if membership_requests_notes_can_view %}true{% else %}false{% endif %}"
+    data-membership-requests-notes-can-write="{% if membership_requests_notes_can_write %}true{% else %}false{% endif %}"
+    data-membership-requests-notes-can-vote="{% if membership_requests_notes_can_vote %}true{% else %}false{% endif %}"
+  >
   <div class="card">
     <div class="card-header">
       <div class="d-flex align-items-center justify-content-between flex-wrap" style="gap: 0.5rem;">
@@ -48,7 +74,6 @@
               name="filter"
               class="custom-select custom-select-sm ml-2"
               aria-label="Filter requests"
-              onchange="this.form.submit()"
             >
               {% for option in filter_options %}
                 <option value="{{ option.value }}"{% if option.value == selected_filter %} selected{% endif %}>
@@ -59,13 +84,16 @@
           </form>
         </div>
 
-        <div class="text-muted">Pending: {{ pending_requests|length }}</div>
+        <div class="text-muted">Pending: {{ pending_count }}</div>
       </div>
     </div>
 
     <div class="card-body p-0">
       <div class="table-responsive">
-        <table class="table table-striped mb-0">
+        <table
+          class="table table-striped mb-0 w-100"
+          id="membership-requests-pending-table"
+        >
           <thead>
             <tr>
               <th style="width: 40px;" class="text-center">
@@ -78,63 +106,17 @@
             </tr>
           </thead>
           <tbody>
-              {% for row in pending_page_obj %}
-                {% with r=row.r %}
-              <tr>
-                <td class="text-center align-top">
-                  <input
-                    type="checkbox"
-                    class="request-checkbox request-checkbox--pending"
-                    name="selected"
-                    value="{{ r.pk }}"
-                    form="bulk-action-form"
-                    aria-label="Select request"
-                  >
-                </td>
-                <td class="text-muted text-nowrap" style="width: 1%;">
-                  <a href="{% url 'membership-request-detail' r.pk %}">Request #{{ r.pk }}</a><br/>
-                  {{ r.requested_at }}
-                </td>
-                <td>
-                  {% include 'core/_membership_request_requester_cell.html' %}
-                </td>
-                <td>
-                  {{ r.membership_type.name }}
-
-                  {% if row.is_renewal %}
-                    <span class="badge badge-primary">Renewal</span>
-                  {% endif %}
-
-                  {% include 'core/_membership_request_responses.html' with request_obj=r organization=row.organization as_details=True %}
-
-                </td>
-                <td class="text-right">
-                  <div class="membership-request-actions membership-request-actions--list">
-                    {% include 'core/_membership_request_actions.html' with request=r %}
-                  </div>
-                </td>
-              </tr>
-              {% endwith %}
-            {% empty %}
-              <tr>
-                <td colspan="5" class="p-3 text-muted">
-                  {% if filter_empty %}
-                    No requests match this filter. <a href="{{ clear_filter_url }}">Clear filter</a>
-                  {% else %}
-                    No pending requests.
-                  {% endif %}
-                </td>
-              </tr>
-            {% endfor %}
+            <tr>
+              <td colspan="5" class="p-3 text-muted">Loading pending requests...</td>
+            </tr>
           </tbody>
         </table>
       </div>
 
-      {% if pending_is_paginated %}
-        <div class="p-3 border-top">
-          {% include 'core/_pagination.html' with paginator=pending_paginator page_obj=pending_page_obj is_paginated=pending_is_paginated page_numbers=pending_page_numbers show_first=pending_show_first show_last=pending_show_last page_url_prefix=pending_page_url_prefix %}
-        </div>
-      {% endif %}
+      <div class="p-3 border-top">
+        <div class="float-left text-muted small" id="membership-requests-pending-info">Loading pending requests...</div>
+        <ul class="pagination pagination-sm m-0 float-right" id="membership-requests-pending-pager" aria-label="Pending pagination"></ul>
+      </div>
     </div>
   </div>
 
@@ -168,13 +150,16 @@
             </div>
           </form>
 
-          <div class="text-muted">On hold: {{ on_hold_requests|length }}</div>
+          <div class="text-muted">On hold: {{ on_hold_count }}</div>
         </div>
       </div>
 
       <div class="card-body p-0">
         <div class="table-responsive">
-          <table class="table table-striped mb-0">
+          <table
+            class="table table-striped mb-0 w-100"
+            id="membership-requests-on-hold-table"
+          >
             <thead>
               <tr>
                 <th style="width: 40px;" class="text-center">
@@ -188,67 +173,27 @@
               </tr>
             </thead>
             <tbody>
-              {% for row in on_hold_page_obj %}
-                {% with r=row.r %}
-                  <tr>
-                    <td class="text-center align-top">
-                    <input
-                      type="checkbox"
-                      class="request-checkbox request-checkbox--on-hold"
-                      name="selected"
-                      value="{{ r.pk }}"
-                      form="bulk-action-form-on-hold"
-                      aria-label="Select request"
-                    >
-                  </td>
-                  <td class="text-muted text-nowrap" style="width: 1%;">
-                    <a href="{% url 'membership-request-detail' r.pk %}">Request #{{ r.pk }}</a><br/>
-                    {{ r.requested_at }}
-                  </td>
-                  <td>
-                    {% include 'core/_membership_request_requester_cell.html' %}
-                  </td>
-                  <td>
-                    {{ r.membership_type.name }}
-                    {% if row.is_renewal %}
-                      <span class="badge badge-primary">Renewal</span>
-                    {% endif %}
-                  </td>
-                  <td class="text-nowrap">
-                    {% if r.on_hold_at %}
-                      {{ r.on_hold_at }}
-                      <div class="text-muted small">{{ r.on_hold_at|timesince }} ago</div>
-                    {% else %}
-                      <span class="text-muted">(unknown)</span>
-                    {% endif %}
-                  </td>
-                  <td class="text-right">
-                    <div class="membership-request-actions membership-request-actions--list">
-                      {% include 'core/_membership_request_actions.html' with request=r %}
-                    </div>
-                  </td>
-                </tr>
-                {% endwith %}
-              {% empty %}
-                <tr>
-                  <td colspan="6" class="p-3 text-muted">No on-hold requests.</td>
-                </tr>
-              {% endfor %}
+              <tr>
+                <td colspan="6" class="p-3 text-muted">Loading on-hold requests...</td>
+              </tr>
             </tbody>
           </table>
         </div>
 
-        {% if on_hold_is_paginated %}
-          <div class="p-3 border-top">
-            {% include 'core/_pagination.html' with paginator=on_hold_paginator page_obj=on_hold_page_obj is_paginated=on_hold_is_paginated page_numbers=on_hold_page_numbers show_first=on_hold_show_first show_last=on_hold_show_last page_url_prefix=on_hold_page_url_prefix %}
-          </div>
-        {% endif %}
+        <div class="p-3 border-top">
+          <div class="float-left text-muted small" id="membership-requests-on-hold-info">Loading on-hold requests...</div>
+          <ul class="pagination pagination-sm m-0 float-right" id="membership-requests-on-hold-pager" aria-label="On-hold pagination"></ul>
+        </div>
       </div>
     </div>
   {% include 'core/_membership_request_shared_modals.html' with next_url=next_url %}
+  </div>
 {% endblock %}
 
 {% block scripts %}
   {{ block.super }}
   <script src="{% static 'core/js/bulk_table_actions.js' %}"></script>
+  <script src="{% static 'core/js/membership_notes.js' %}"></script>
+  <script src="{% static 'core/vendor/datatables/datatables.min.js' %}"></script>
+  <script src="{% static 'core/js/membership_requests_datatables.js' %}"></script>
 {% endblock %}

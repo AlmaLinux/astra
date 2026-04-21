@@ -2,6 +2,7 @@ import hashlib
 from datetime import timedelta
 from types import SimpleNamespace
 from typing import Any, cast
+from urllib.parse import urlencode
 
 from django import template
 from django.conf import settings
@@ -657,7 +658,7 @@ def _group_timeline_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any
 def _render_membership_notes_aggregate(
     *,
     context: dict[str, Any],
-    notes: list[Note],
+    notes: list[Note] | None,
     dom_key: str,
     compact: bool,
     next_url: str | None,
@@ -670,10 +671,8 @@ def _render_membership_notes_aggregate(
     membership_can_change = bool(context.get("membership_can_change", False))
     membership_can_delete = bool(context.get("membership_can_delete", False))
     can_write = membership_can_add or membership_can_change or membership_can_delete
+    resolved_notes = list(notes or [])
 
-    votes_by_user = last_votes(notes)
-    approvals = sum(1 for vote in votes_by_user.values() if vote == "approve")
-    disapprovals = sum(1 for vote in votes_by_user.values() if vote == "disapprove")
     dummy_request = SimpleNamespace(pk=_timeline_dom_id(dom_key))
 
     resolved_next_url = next_url
@@ -681,23 +680,10 @@ def _render_membership_notes_aggregate(
         resolved_next_url = http_request.get_full_path() if http_request is not None else ""
 
     post_url = reverse("membership-notes-aggregate-note-add")
-    email_modals = _email_modals_for_notes(notes)
-    email_modal_ids = {m["email_id"]: m["modal_id"] for m in email_modals}
-    current_responses_by_request_id = _membership_request_responses_by_id(notes)
-    request_resubmitted_new_snapshots_by_note_id = _request_resubmitted_new_snapshots_by_note_id(
-        notes,
-        current_responses_by_request_id=current_responses_by_request_id,
-    )
     aggregate_target_user = _aggregate_preloaded_target_user(
         context=context,
         aggregate_target_type=aggregate_target_type,
         aggregate_target=aggregate_target,
-    )
-    preloaded_users_by_username = _preloaded_aggregate_avatar_users_by_username(
-        context=context,
-        notes=notes,
-        http_request=http_request,
-        aggregate_target_user=aggregate_target_user,
     )
     aggregate_preloaded_target_token = ""
     if aggregate_target_user is not None:
@@ -712,35 +698,69 @@ def _render_membership_notes_aggregate(
                 }
             )
 
+    note_summary_url = ""
+    note_detail_url = ""
+    groups: list[dict[str, Any]] = []
+    note_count = 0
+    approvals = 0
+    disapprovals = 0
+    aggregate_note_query = urlencode(
+        {
+            "target_type": aggregate_target_type,
+            "target": aggregate_target,
+        }
+    )
+    note_summary_url = reverse("api-membership-notes-aggregate-summary") + "?" + aggregate_note_query
+    note_detail_url = reverse("api-membership-notes-aggregate") + "?" + aggregate_note_query
+
+    votes_by_user = last_votes(resolved_notes)
+    approvals = sum(1 for vote in votes_by_user.values() if vote == "approve")
+    disapprovals = sum(1 for vote in votes_by_user.values() if vote == "disapprove")
+    current_responses_by_request_id = _membership_request_responses_by_id(resolved_notes)
+    request_resubmitted_new_snapshots_by_note_id = _request_resubmitted_new_snapshots_by_note_id(
+        resolved_notes,
+        current_responses_by_request_id=current_responses_by_request_id,
+    )
+    preloaded_users_by_username = _preloaded_aggregate_avatar_users_by_username(
+        context=context,
+        notes=resolved_notes,
+        http_request=http_request,
+        aggregate_target_user=aggregate_target_user,
+    )
+    groups = _group_timeline_entries(
+        _timeline_entries_for_notes(
+            resolved_notes,
+            current_username=_current_username_from_request(http_request),
+            request_resubmitted_new_snapshots_by_note_id=request_resubmitted_new_snapshots_by_note_id,
+            avatar_users_by_username=_aggregate_avatar_users_by_username(
+                resolved_notes,
+                preloaded_users_by_username=preloaded_users_by_username,
+            ),
+        )
+    )
+    note_count = len(resolved_notes)
+
     html = render_to_string(
         "core/_membership_notes.html",
         {
             "compact": compact,
             "membership_request": dummy_request,
-            "groups": _group_timeline_entries(
-                _timeline_entries_for_notes(
-                    notes,
-                    current_username=_current_username_from_request(http_request),
-                    email_modal_ids=email_modal_ids,
-                    request_resubmitted_new_snapshots_by_note_id=request_resubmitted_new_snapshots_by_note_id,
-                    avatar_users_by_username=_aggregate_avatar_users_by_username(
-                        notes,
-                        preloaded_users_by_username=preloaded_users_by_username,
-                    ),
-                )
-            ),
-            "note_count": len(notes),
+            "groups": groups,
+            "note_count": note_count,
             "approvals": approvals,
             "disapprovals": disapprovals,
             "current_user_vote": None,
             "can_vote": False,
             "can_write": can_write,
+            "has_fallback_content": True,
+            "details_loaded": False,
             "post_url": post_url,
             "aggregate_target_type": aggregate_target_type,
             "aggregate_target": aggregate_target,
             "aggregate_preloaded_target_token": aggregate_preloaded_target_token,
+            "note_summary_url": note_summary_url,
+            "note_detail_url": note_detail_url,
             "next_url": resolved_next_url,
-            "email_modals": email_modals,
         },
         request=http_request,
     )
@@ -819,14 +839,13 @@ def membership_notes_aggregate_for_organization(
 
 
 @register.simple_tag(takes_context=True)
-def membership_notes(
+def render_membership_request_notes(
     context: dict[str, Any],
     membership_request: MembershipRequest | int,
     *,
     compact: bool = False,
     next_url: str | None = None,
-    preloaded_notes: list[Note] | None = None,
-    fail_on_query_fallback: bool = False,
+    notes: list[Note] | None = None,
 ) -> SafeString | str:
     request = context.get("request")
     http_request = request if isinstance(request, HttpRequest) else None
@@ -840,27 +859,9 @@ def membership_notes(
     if mr is None:
         return ""
 
-    fallback_error = "membership_notes requires a valid preloaded notes list for this rendering path"
-    if preloaded_notes is None:
-        if fail_on_query_fallback:
-            raise RuntimeError(fallback_error)
-        notes = list(Note.objects.filter(membership_request_id=mr.pk).order_by("timestamp", "pk"))
-    elif not isinstance(preloaded_notes, list) or any(not isinstance(note, Note) for note in preloaded_notes):
-        if fail_on_query_fallback:
-            raise RuntimeError(fallback_error)
-        notes = list(Note.objects.filter(membership_request_id=mr.pk).order_by("timestamp", "pk"))
-    else:
-        notes = list(preloaded_notes)
-    votes_by_user = last_votes(notes)
-    approvals = sum(1 for vote in votes_by_user.values() if vote == "approve")
-    disapprovals = sum(1 for vote in votes_by_user.values() if vote == "disapprove")
-
     resolved_next_url = next_url
     if resolved_next_url is None:
         resolved_next_url = http_request.get_full_path() if http_request is not None else ""
-
-    current_username = _current_username_from_request(http_request)
-    current_user_vote = votes_by_user.get(current_username.lower()) if current_username else None
 
     membership_can_add = bool(context.get("membership_can_add", False))
     membership_can_change = bool(context.get("membership_can_change", False))
@@ -869,40 +870,71 @@ def membership_notes(
     can_write = can_vote
 
     post_url = reverse("membership-request-note-add", args=[mr.pk])
+    note_summary_url = reverse("api-membership-request-notes-summary", args=[mr.pk])
+    note_detail_url = reverse("api-membership-request-notes", args=[mr.pk])
 
-    email_modals: list[dict[str, Any]] = []
-    email_modal_ids: dict[int, str] | None = None
-    if not compact:
-        email_modals = _email_modals_for_notes(notes)
-        email_modal_ids = {m["email_id"]: m["modal_id"] for m in email_modals}
+    resolved_notes = list(notes) if notes is not None else []
+    approvals = 0
+    disapprovals = 0
+    current_user_vote = None
+    groups: list[dict[str, Any]] = []
+    votes_by_user = last_votes(resolved_notes)
+    approvals = sum(1 for vote in votes_by_user.values() if vote == "approve")
+    disapprovals = sum(1 for vote in votes_by_user.values() if vote == "disapprove")
+
+    current_username = _current_username_from_request(http_request)
+    current_user_vote = votes_by_user.get(current_username.lower()) if current_username else None
+
     request_resubmitted_new_snapshots_by_note_id = _request_resubmitted_new_snapshots_by_note_id(
-        notes,
+        resolved_notes,
         current_responses_by_request_id={int(mr.pk): _normalize_response_snapshot(mr.responses)},
     )
-
-    entries = _timeline_entries_for_notes(
-        notes,
-        current_username=current_username,
-        email_modal_ids=email_modal_ids,
-        request_resubmitted_new_snapshots_by_note_id=request_resubmitted_new_snapshots_by_note_id,
+    groups = _group_timeline_entries(
+        _timeline_entries_for_notes(
+            resolved_notes,
+            current_username=current_username,
+            request_resubmitted_new_snapshots_by_note_id=request_resubmitted_new_snapshots_by_note_id,
+        )
     )
+    note_count = len(resolved_notes)
+    has_fallback_content = notes is not None
+    details_loaded = notes is not None
 
     html = render_to_string(
         "core/_membership_notes.html",
         {
             "compact": compact,
             "membership_request": mr,
-            "groups": _group_timeline_entries(entries),
-            "note_count": len(notes),
+            "groups": groups,
+            "note_count": note_count,
             "approvals": approvals,
             "disapprovals": disapprovals,
             "current_user_vote": current_user_vote,
             "can_vote": can_vote,
             "can_write": can_write,
+            "has_fallback_content": has_fallback_content,
+            "details_loaded": details_loaded,
             "post_url": post_url,
+            "note_summary_url": note_summary_url,
+            "note_detail_url": note_detail_url,
             "next_url": resolved_next_url,
-            "email_modals": email_modals,
         },
         request=http_request,
     )
     return mark_safe(html)
+
+
+@register.simple_tag(takes_context=True)
+def membership_notes(
+    context: dict[str, Any],
+    membership_request: MembershipRequest | int,
+    *,
+    compact: bool = False,
+    next_url: str | None = None,
+) -> SafeString | str:
+    return render_membership_request_notes(
+        context,
+        membership_request,
+        compact=compact,
+        next_url=next_url,
+    )

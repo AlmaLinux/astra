@@ -185,6 +185,36 @@ urlpatterns = [
 
     path("membership/request/", views_membership.membership_request, name="membership-request"),
     path(
+        "api/v1/membership/requests/pending",
+        views_membership.membership_requests_pending_api,
+        name="api-membership-requests-pending",
+    ),
+    path(
+        "api/v1/membership/requests/on-hold",
+        views_membership.membership_requests_on_hold_api,
+        name="api-membership-requests-on-hold",
+    ),
+    path(
+        "api/v1/membership/requests/<int:pk>/notes/summary",
+        views_membership.membership_request_notes_summary_api,
+        name="api-membership-request-notes-summary",
+    ),
+    path(
+        "api/v1/membership/requests/<int:pk>/notes",
+        views_membership.membership_request_notes_api,
+        name="api-membership-request-notes",
+    ),
+    path(
+        "api/v1/membership/notes/aggregate/summary",
+        views_membership.membership_notes_aggregate_summary_api,
+        name="api-membership-notes-aggregate-summary",
+    ),
+    path(
+        "api/v1/membership/notes/aggregate",
+        views_membership.membership_notes_aggregate_api,
+        name="api-membership-notes-aggregate",
+    ),
+    path(
         "membership/request/<int:pk>/",
         views_membership.membership_request_detail,
         name="membership-request-detail",
