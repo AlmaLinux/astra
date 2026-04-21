@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 class Command(BaseCommand):
     help = (
-        "Run the membership cron operations: expiration warnings, expired cleanup, "
+        "Run the daily operations: expiration warnings, expired cleanup, "
         "committee pending-request notifications, and embargoed-members notifications."
     )
 
@@ -32,7 +32,7 @@ class Command(BaseCommand):
         dry_run: bool = bool(options.get("dry_run"))
 
         logger.info(
-            "membership_operations: start force=%s dry_run=%s",
+            "operations_daily: start force=%s dry_run=%s",
             force,
             dry_run,
         )
@@ -43,11 +43,10 @@ class Command(BaseCommand):
             ("freeipa_membership_reconcile", {"report": True, "dry_run": dry_run}),
             ("membership_pending_requests", {"force": force, "dry_run": dry_run}),
             ("membership_embargoed_members", {"force": force, "dry_run": dry_run}),
-            ("membership_mirror_validation", {"force": force, "dry_run": dry_run}),
             ("selfservice_lifecycle_cleanup", {"dry_run": dry_run}),
             ("account_invitations_refresh", {}),
         ):
-            logger.info("membership_operations: running %s", command_name)
+            logger.info("operations_daily: running %s", command_name)
             call_command(command_name, **command_kwargs)
 
-        logger.info("membership_operations: complete")
+        logger.info("operations_daily: complete")

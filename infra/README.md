@@ -103,15 +103,20 @@ Define cron jobs in Terraform using the `cron_jobs` variable. Example:
 ```hcl
 cron_jobs = [
   {
-    name    = "membership-operations"
+    name    = "operations-hourly"
+    minute  = "0"
+    command = "podman exec astra-app-1 python manage.py operations_hourly"
+  },
+  {
+    name    = "operations-daily"
     minute  = "0"
     hour    = "0"
-    command = "podman exec astra-app-1 python manage.py membership_operations"
+    command = "podman exec astra-app-1 python manage.py operations_daily"
   }
 ]
 ```
 
 If `minute` or `hour` are omitted, they default to `0` (midnight local time).
 
-The membership operations job now includes FreeIPA membership reconciliation in report mode by default and alerts
-members of the configured `FREEIPA_ADMIN_GROUP` when drift or failures are detected.
+The daily operations job includes FreeIPA membership reconciliation in report mode by default and alerts members
+of the configured `FREEIPA_ADMIN_GROUP` when drift or failures are detected.

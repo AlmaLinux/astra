@@ -195,10 +195,15 @@ variable "cron_jobs" {
   description = "Cron jobs to configure on the host."
   default = [
     {
-      name    = "membership-operations"
+      name    = "operations-hourly"
+      minute  = "0"
+      command = "podman exec astra-app-1 python manage.py operations_hourly"
+    },
+    {
+      name    = "operations-daily"
       minute  = "0"
       hour    = "0"
-      command = "podman exec astra-app-1 python manage.py membership_operations"
+      command = "podman exec astra-app-1 python manage.py operations_daily"
     }
   ]
 }
