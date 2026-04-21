@@ -1,5 +1,6 @@
 import logging
 from collections.abc import Collection
+from concurrent.futures import ThreadPoolExecutor
 
 from django.conf import settings
 from django.utils.crypto import salted_hmac
@@ -28,6 +29,10 @@ from core.ipa_utils import bool_from_ipa
 from core.logging_extras import current_exception_log_fields
 
 logger = logging.getLogger("core.backends")
+
+_LIGHTWEIGHT_LOOKUP_SERIAL_THRESHOLD = 2
+_LIGHTWEIGHT_LOOKUP_CHUNK_SIZE = 2
+_LIGHTWEIGHT_LOOKUP_MAX_WORKERS = 4
 
 
 class _FreeIPAPK:
@@ -423,38 +428,65 @@ class FreeIPAUser(_FreeIPAClientMixin):
         if not normalized_usernames:
             return {}
 
-        def _do(client: ClientMeta) -> dict[str, FreeIPAUser]:
-            users_by_username: dict[str, FreeIPAUser] = {}
-            for username in normalized_usernames:
-                result = client.user_find(
-                    o_uid=username,
-                    o_all=False,
-                    o_no_members=True,
-                    o_sizelimit=1,
-                    o_timelimit=0,
-                )
-                if not isinstance(result, dict) or result.get("count", 0) <= 0:
-                    continue
+        def _lookup_chunk(chunk_usernames: list[str]) -> dict[str, FreeIPAUser]:
+            def _do(client: ClientMeta) -> dict[str, FreeIPAUser]:
+                users_by_username: dict[str, FreeIPAUser] = {}
+                for username in chunk_usernames:
+                    result = client.user_find(
+                        o_uid=username,
+                        o_all=False,
+                        o_no_members=True,
+                        o_sizelimit=1,
+                        o_timelimit=0,
+                    )
+                    if not isinstance(result, dict) or result.get("count", 0) <= 0:
+                        continue
 
-                first = (result.get("result") or [None])[0]
-                if not isinstance(first, dict):
-                    continue
+                    first = (result.get("result") or [None])[0]
+                    if not isinstance(first, dict):
+                        continue
 
-                uid = first.get("uid")
-                if isinstance(uid, list):
-                    resolved_username = (uid[0] if uid else "") or ""
-                else:
-                    resolved_username = uid or ""
-                resolved_username = str(resolved_username).strip().lower()
-                if not resolved_username:
-                    continue
+                    uid = first.get("uid")
+                    if isinstance(uid, list):
+                        resolved_username = (uid[0] if uid else "") or ""
+                    else:
+                        resolved_username = uid or ""
+                    resolved_username = str(resolved_username).strip().lower()
+                    if not resolved_username:
+                        continue
 
-                users_by_username[resolved_username] = cls(resolved_username, first)
+                    users_by_username[resolved_username] = cls(resolved_username, first)
 
-            return users_by_username
+                return users_by_username
+
+            return _with_freeipa_service_client_retry(cls.get_client, _do)
 
         try:
-            return _with_freeipa_service_client_retry(cls.get_client, _do)
+            if len(normalized_usernames) <= _LIGHTWEIGHT_LOOKUP_SERIAL_THRESHOLD:
+                return _lookup_chunk(normalized_usernames)
+
+            chunk_size = max(1, _LIGHTWEIGHT_LOOKUP_CHUNK_SIZE)
+            username_chunks = [
+                normalized_usernames[index:index + chunk_size]
+                for index in range(0, len(normalized_usernames), chunk_size)
+            ]
+            if len(username_chunks) == 1:
+                return _lookup_chunk(normalized_usernames)
+
+            max_workers = max(1, min(_LIGHTWEIGHT_LOOKUP_MAX_WORKERS, len(username_chunks)))
+            if max_workers == 1:
+                return _lookup_chunk(normalized_usernames)
+
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                chunk_futures = [
+                    executor.submit(_lookup_chunk, chunk_usernames)
+                    for chunk_usernames in username_chunks
+                ]
+
+                users_by_username: dict[str, FreeIPAUser] = {}
+                for chunk_future in chunk_futures:
+                    users_by_username.update(chunk_future.result())
+                return users_by_username
         except Exception as e:
             logger.exception(
                 f"Failed to find lightweight users usernames={normalized_usernames}: {e}",

@@ -1,9 +1,13 @@
+import threading
+import time
 from collections.abc import Callable
 from unittest.mock import patch
 
 from django.core.cache import cache
 from django.test import TestCase
+from python_freeipa import exceptions
 
+from core.freeipa.client import clear_freeipa_service_client_cache
 from core.freeipa.user import FreeIPAUser
 from core.freeipa.utils import _user_cache_key
 from core.freeipa_directory import search_freeipa_users
@@ -44,6 +48,73 @@ class _ShapeLookupClient:
         del args
         self.user_show_calls.append((username, dict(kwargs)))
         return {"result": self.user_show_results[username]}
+
+
+class _LookupExecutionTracker:
+    def __init__(
+        self,
+        *,
+        transient_unauthorized_by_username: dict[str, int] | None = None,
+        fatal_usernames: set[str] | None = None,
+    ) -> None:
+        self._lock = threading.Lock()
+        self.client_count = 0
+        self.active_calls = 0
+        self.max_active_calls = 0
+        self.lookup_counts_by_username: dict[str, int] = {}
+        self.transient_unauthorized_by_username = dict(transient_unauthorized_by_username or {})
+        self.fatal_usernames = set(fatal_usernames or set())
+
+    def register_client(self) -> int:
+        with self._lock:
+            self.client_count += 1
+            return self.client_count
+
+    def begin_lookup(self, username: str) -> None:
+        with self._lock:
+            self.active_calls += 1
+            if self.active_calls > self.max_active_calls:
+                self.max_active_calls = self.active_calls
+            self.lookup_counts_by_username[username] = self.lookup_counts_by_username.get(username, 0) + 1
+
+    def end_lookup(self) -> None:
+        with self._lock:
+            self.active_calls -= 1
+
+    def consume_transient_unauthorized(self, username: str) -> bool:
+        with self._lock:
+            remaining = self.transient_unauthorized_by_username.get(username, 0)
+            if remaining <= 0:
+                return False
+            self.transient_unauthorized_by_username[username] = remaining - 1
+            return True
+
+
+class _TrackingShapeLookupClient(_ShapeLookupClient):
+    def __init__(
+        self,
+        *,
+        tracker: _LookupExecutionTracker,
+        username_results: dict[str, dict[str, object]],
+        pause_seconds: float = 0.0,
+    ) -> None:
+        super().__init__(username_results=username_results)
+        self.tracker = tracker
+        self.pause_seconds = pause_seconds
+
+    def user_find(self, *args: object, **kwargs: object) -> dict[str, object]:
+        username = str(kwargs.get("o_uid") or "").strip().lower()
+        self.tracker.begin_lookup(username)
+        try:
+            if self.pause_seconds:
+                time.sleep(self.pause_seconds)
+            if username in self.tracker.fatal_usernames:
+                raise RuntimeError(f"boom for {username}")
+            if self.tracker.consume_transient_unauthorized(username):
+                raise exceptions.Unauthorized()
+            return super().user_find(*args, **kwargs)
+        finally:
+            self.tracker.end_lookup()
 
 
 def _lightweight_row(username: str, *, full_name: str | None = None) -> dict[str, object]:
@@ -138,7 +209,7 @@ class FreeIPAUserRequestTimeLookupTests(TestCase):
         self.assertEqual(set(users_by_username), {"alice", "bob"})
         self.assertEqual(users_by_username["alice"].full_name, "Alice Example")
         self.assertEqual(users_by_username["bob"].full_name, "Bob Example")
-        self.assertEqual(
+        self.assertCountEqual(
             client.user_find_calls,
             [
                 {
@@ -157,6 +228,110 @@ class FreeIPAUserRequestTimeLookupTests(TestCase):
                 },
             ],
         )
+
+    def test_find_lightweight_by_usernames_uses_serial_fast_path_for_small_inputs(self) -> None:
+        tracker = _LookupExecutionTracker()
+
+        def build_client() -> _TrackingShapeLookupClient:
+            tracker.register_client()
+            return _TrackingShapeLookupClient(
+                tracker=tracker,
+                username_results={
+                    "alice": {"count": 1, "result": [_lightweight_row("alice", full_name="Alice Example")]},
+                    "bob": {"count": 1, "result": [_lightweight_row("bob", full_name="Bob Example")]},
+                },
+                pause_seconds=0.01,
+            )
+
+        with (
+            patch("core.freeipa.user._LIGHTWEIGHT_LOOKUP_SERIAL_THRESHOLD", 2, create=True),
+            patch("core.freeipa.user.FreeIPAUser.get_client", side_effect=build_client),
+        ):
+            users_by_username = FreeIPAUser.find_lightweight_by_usernames(["alice", "bob"])
+
+        self.assertEqual(set(users_by_username), {"alice", "bob"})
+        self.assertEqual(tracker.client_count, 1)
+        self.assertEqual(tracker.max_active_calls, 1)
+
+    def test_find_lightweight_by_usernames_bounds_service_client_fanout(self) -> None:
+        tracker = _LookupExecutionTracker()
+        usernames = [f"user{index}" for index in range(8)]
+        max_workers = 3
+        username_results = {
+            username: {"count": 1, "result": [_lightweight_row(username, full_name=f"{username} Example")]}
+            for username in usernames
+        }
+
+        def build_client(*_args: object, **_kwargs: object) -> _TrackingShapeLookupClient:
+            tracker.register_client()
+            return _TrackingShapeLookupClient(
+                tracker=tracker,
+                username_results=username_results,
+                pause_seconds=0.02,
+            )
+
+        with (
+            patch("core.freeipa.user._LIGHTWEIGHT_LOOKUP_SERIAL_THRESHOLD", 2, create=True),
+            patch("core.freeipa.user._LIGHTWEIGHT_LOOKUP_CHUNK_SIZE", 2, create=True),
+            patch("core.freeipa.user._LIGHTWEIGHT_LOOKUP_MAX_WORKERS", max_workers, create=True),
+            patch("core.freeipa.client._get_freeipa_client", side_effect=build_client),
+        ):
+            clear_freeipa_service_client_cache()
+            users_by_username = FreeIPAUser.find_lightweight_by_usernames(usernames)
+            clear_freeipa_service_client_cache()
+
+        self.assertEqual(set(users_by_username), set(usernames))
+        self.assertGreater(tracker.client_count, 1)
+        self.assertLessEqual(tracker.client_count, max_workers)
+        self.assertGreater(tracker.max_active_calls, 1)
+
+    def test_find_lightweight_by_usernames_retries_unauthorized_within_worker_chunk(self) -> None:
+        tracker = _LookupExecutionTracker(transient_unauthorized_by_username={"charlie": 1})
+        usernames = ["alice", "bob", "charlie", "dave"]
+        username_results = {
+            username: {"count": 1, "result": [_lightweight_row(username, full_name=f"{username} Example")]}
+            for username in usernames
+        }
+
+        def build_client() -> _TrackingShapeLookupClient:
+            tracker.register_client()
+            return _TrackingShapeLookupClient(tracker=tracker, username_results=username_results)
+
+        with (
+            patch("core.freeipa.user._LIGHTWEIGHT_LOOKUP_SERIAL_THRESHOLD", 2, create=True),
+            patch("core.freeipa.user._LIGHTWEIGHT_LOOKUP_CHUNK_SIZE", 2, create=True),
+            patch("core.freeipa.user._LIGHTWEIGHT_LOOKUP_MAX_WORKERS", 2, create=True),
+            patch("core.freeipa.user.FreeIPAUser.get_client", side_effect=build_client),
+        ):
+            users_by_username = FreeIPAUser.find_lightweight_by_usernames(usernames)
+
+        self.assertEqual(set(users_by_username), set(usernames))
+        self.assertEqual(tracker.lookup_counts_by_username.get("alice"), 1)
+        self.assertEqual(tracker.lookup_counts_by_username.get("bob"), 1)
+        self.assertEqual(tracker.lookup_counts_by_username.get("charlie"), 2)
+        self.assertEqual(tracker.lookup_counts_by_username.get("dave"), 1)
+
+    def test_find_lightweight_by_usernames_returns_empty_dict_when_any_worker_fails(self) -> None:
+        tracker = _LookupExecutionTracker(fatal_usernames={"charlie"})
+        usernames = ["alice", "bob", "charlie", "dave"]
+        username_results = {
+            username: {"count": 1, "result": [_lightweight_row(username, full_name=f"{username} Example")]}
+            for username in usernames
+        }
+
+        def build_client() -> _TrackingShapeLookupClient:
+            tracker.register_client()
+            return _TrackingShapeLookupClient(tracker=tracker, username_results=username_results)
+
+        with (
+            patch("core.freeipa.user._LIGHTWEIGHT_LOOKUP_SERIAL_THRESHOLD", 2, create=True),
+            patch("core.freeipa.user._LIGHTWEIGHT_LOOKUP_CHUNK_SIZE", 2, create=True),
+            patch("core.freeipa.user._LIGHTWEIGHT_LOOKUP_MAX_WORKERS", 2, create=True),
+            patch("core.freeipa.user.FreeIPAUser.get_client", side_effect=build_client),
+        ):
+            users_by_username = FreeIPAUser.find_lightweight_by_usernames(usernames)
+
+        self.assertEqual(users_by_username, {})
 
     def test_find_lightweight_by_usernames_omits_missing_usernames(self) -> None:
         client = _ShapeLookupClient(
