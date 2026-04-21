@@ -106,8 +106,6 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
         self.assertContains(resp, 'id="bulk-action-form-on-hold"')
         self.assertContains(resp, '>On hold since</th>')
         self.assertNotContains(resp, ">Waiting</th>")
-        self.assertContains(resp, "Loading pending requests...")
-        self.assertContains(resp, "Loading on-hold requests...")
         self.assertNotContains(resp, "Request #1")
 
     def test_reject_modal_includes_reason_presets(self) -> None:

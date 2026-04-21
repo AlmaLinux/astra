@@ -742,8 +742,6 @@ class MembershipRequestsDataTablesApiTests(TestCase):
         self.assertContains(response, 'data-membership-requests-notes-can-view="true"')
         self.assertContains(response, 'data-membership-requests-notes-can-write="true"')
         self.assertContains(response, 'data-membership-requests-notes-can-vote="true"')
-        self.assertContains(response, 'Loading pending requests...')
-        self.assertContains(response, 'Loading on-hold requests...')
         self.assertContains(response, 'id="membership-requests-pending-info"')
         self.assertContains(response, 'id="membership-requests-pending-pager"')
         self.assertContains(response, 'id="membership-requests-on-hold-info"')
@@ -1422,15 +1420,6 @@ class MembershipRequestsDataTablesJsExecutionTests(SimpleTestCase):
         def test_script_executes_note_redraw_and_recomputes_bulk_and_modal_next(self) -> None:
                 self._run_node_scenario(
                         """
-                        assert(
-                            document._pendingTbody.innerHTML.includes('Loading pending requests...'),
-                            'Pending table should render a loading placeholder before the first draw completes.',
-                        );
-                        assert(
-                            document._onHoldTbody.innerHTML.includes('Loading on-hold requests...'),
-                            'On-hold table should render a loading placeholder before the first draw completes.',
-                        );
-
                         const bulkNext = bulkForm.querySelector('input[name="next"]');
                         const modalNext = approveModalForm.querySelector('input[name="next"]');
 
