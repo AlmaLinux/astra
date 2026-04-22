@@ -1,11 +1,16 @@
 {% extends 'core/base.html' %}
 
+{% load django_vite %}
 {% load avatar_tags %}
 {% load core_chatnickname %}
 {% load core_membership_notes %}
 {% load tz %}
 
 {% block title %}Profile{% endblock %}
+
+{% block extra_head %}
+  {{ block.super }}
+{% endblock %}
 
 {% block content %}
 <div class="profile-page">
@@ -355,4 +360,6 @@
   window.setInterval(updateTime, 1000);
 })();
 </script>
+
+{% vite_asset 'src/entrypoints/membershipProfileNotes.ts' %}
 {% endblock %}

@@ -963,17 +963,16 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Membership Committee Notes")
+        self.assertContains(resp, 'data-membership-notes-aggregate-root="user"')
         self.assertContains(
             resp,
-            reverse("api-membership-notes-aggregate-summary") + f"?target_type=user&amp;target={alice.username}",
+            reverse("api-membership-notes-aggregate-summary") + f"?target_type=user&target={alice.username}",
         )
         self.assertContains(
             resp,
-            reverse("api-membership-notes-aggregate") + f"?target_type=user&amp;target={alice.username}",
+            reverse("api-membership-notes-aggregate") + f"?target_type=user&target={alice.username}",
         )
-        self.assertContains(resp, 'data-membership-notes-has-fallback-content="0"')
-        self.assertContains(resp, "Loading notes...")
+        self.assertContains(resp, reverse("api-membership-notes-aggregate-add"))
         self.assertNotContains(resp, "Needs manual review")
         self.assertNotContains(resp, f"(req. #{req.pk})")
 
@@ -1089,29 +1088,24 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Membership Committee Notes")
+        self.assertContains(resp, 'data-membership-notes-aggregate-root="user"')
         self.assertContains(
             resp,
-            reverse("api-membership-notes-aggregate-summary") + "?target_type=user&amp;target=alice",
+            reverse("api-membership-notes-aggregate-summary") + "?target_type=user&target=alice",
         )
         self.assertContains(
             resp,
-            reverse("api-membership-notes-aggregate") + "?target_type=user&amp;target=alice",
+            reverse("api-membership-notes-aggregate") + "?target_type=user&target=alice",
         )
-        self.assertContains(resp, 'data-membership-notes-has-fallback-content="0"')
-        self.assertContains(resp, "Loading notes...")
-        self.assertNotContains(resp, 'data-membership-notes-form="')
-        self.assertNotContains(resp, 'placeholder="Type a note..."')
-        self.assertNotContains(resp, 'data-note-action="vote_approve"')
-        self.assertNotContains(resp, 'data-note-action="vote_disapprove"')
+        self.assertContains(resp, reverse("api-membership-notes-aggregate-add"))
         self.assertNotContains(resp, "Older note")
 
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.post(
-                reverse("membership-notes-aggregate-note-add"),
+                reverse("api-membership-notes-aggregate-add"),
                 data={
-                    "aggregate_target_type": "user",
-                    "aggregate_target": "alice",
+                    "target_type": "user",
+                    "target": "alice",
                     "note_action": "message",
                     "message": "Hello from aggregate",
                     "compact": "1",
@@ -1122,7 +1116,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         self.assertEqual(resp.status_code, 403)
         payload = resp.json()
-        self.assertEqual(payload, {"ok": False, "error": "Permission denied."})
+        self.assertEqual(payload, {"error": "Permission denied."})
 
         self.assertFalse(
             Note.objects.filter(
@@ -1153,7 +1147,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
-                reverse("membership-request-note-add", args=[req.pk]),
+                reverse("api-membership-request-notes-add", args=[req.pk]),
                 data={
                     "note_action": "message",
                     "message": "Hello committee",
@@ -1161,7 +1155,8 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
                 follow=False,
             )
 
-        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"ok": True, "message": "Note added."})
         self.assertTrue(
             Note.objects.filter(
                 membership_request=req,
@@ -1191,7 +1186,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
-                reverse("membership-request-note-add", args=[req.pk]),
+                reverse("api-membership-request-notes-add", args=[req.pk]),
                 data={
                     "note_action": "vote_approve",
                     "message": "LGTM",
@@ -1199,7 +1194,8 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
                 follow=False,
             )
 
-        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"ok": True, "message": "Recorded approve vote."})
         self.assertTrue(
             Note.objects.filter(
                 membership_request=req,
@@ -1230,7 +1226,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         next_url = reverse("membership-requests")
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
-                reverse("membership-request-note-add", args=[req.pk]),
+                reverse("api-membership-request-notes-add", args=[req.pk]),
                 data={
                     "note_action": "message",
                     "message": "Updated",
@@ -1239,8 +1235,8 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
                 follow=False,
             )
 
-        self.assertEqual(resp.status_code, 302)
-        self.assertEqual(resp["Location"], next_url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"ok": True, "message": "Note added."})
 
     def test_membership_request_allows_individual_and_mirror_membership_types(self) -> None:
         from core.models import MembershipRequest, MembershipType

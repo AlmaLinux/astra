@@ -1,8 +1,8 @@
 /*
- * Membership Committee Notes — visual styles.
+ * Membership Committee Notes visual styles.
  *
- * Uses [data-membership-notes-container] as the scope selector so styles
- * apply identically to all note widgets without per-PK CSS emission.
+ * This is imported by the Vue component so all entrypoints that mount the
+ * component automatically get consistent styling.
  */
 
 [data-membership-notes-container] .direct-chat-text {
@@ -12,10 +12,6 @@
   overflow-wrap: anywhere;
 }
 
-/*
- * Compact header: title on the left (ellipsis if needed), tools on the right.
- * Keep everything on a single row.
- */
 [data-membership-notes-container] .membership-notes-header-compact {
   display: flex;
   align-items: center;
@@ -51,7 +47,6 @@
   color: var(--bubble-fg, #212529) !important;
 }
 
-/* Make the little arrow/triangle match the border color. */
 [data-membership-notes-container] .direct-chat-msg.right .membership-notes-bubble::before,
 [data-membership-notes-container] .direct-chat-msg.right .membership-notes-bubble::after {
   border-left-color: #d2d6de !important;
@@ -62,17 +57,12 @@
   text-align: right;
 }
 
-/*
- * When a single note row contains multiple bubbles (grouped events),
- * stack them neatly and keep their edges aligned.
- */
 [data-membership-notes-container] .membership-notes-bubbles {
   display: flex;
   flex-direction: column;
   gap: .25rem;
 }
 
-/* Ensure self-authored message bubbles keep a distinct background. */
 [data-membership-notes-container] .membership-notes-self-bubble {
   background-color: #007bff;
   border-color: #007bff;

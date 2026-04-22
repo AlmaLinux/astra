@@ -2,6 +2,8 @@
 __pycache__
 Alex-README.md
 .ruff_cache/
+frontend/dist/
+frontend/node_modules/
 
 # Local .terraform directories
 .terraform/

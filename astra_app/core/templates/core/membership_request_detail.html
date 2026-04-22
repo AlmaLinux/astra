@@ -1,8 +1,14 @@
 {% extends 'core/base.html' %}
 
-{% load core_membership_notes %}
+{% load django_vite %}
 
 {% block title %}Membership Request #{{ req.pk }}{% endblock %}
+
+{% block extra_head %}
+  {{ block.super }}
+  {% vite_hmr_client %}
+  {% vite_asset 'src/entrypoints/membershipRequestDetail.ts' %}
+{% endblock %}
 
 {% block header %}
   <div class="d-flex align-items-center justify-content-between flex-wrap" style="gap: .5rem;">
@@ -78,7 +84,18 @@
 
       {% if membership_can_view %}
         <hr>
-        {% membership_notes req %}
+        <div
+          data-membership-request-notes-root
+          data-membership-request-id="{{ req.pk }}"
+          data-membership-request-notes-summary-url="{{ membership_request_notes_summary_url }}"
+          data-membership-request-notes-detail-url="{{ membership_request_notes_detail_url }}"
+          data-membership-request-notes-add-url="{{ membership_request_notes_add_url }}"
+          data-csrf-token="{{ csrf_token }}"
+          data-next-url="{{ request.get_full_path }}"
+          data-can-view="{% if membership_can_view %}true{% else %}false{% endif %}"
+          data-can-write="{% if membership_can_write %}true{% else %}false{% endif %}"
+          data-can-vote="{% if membership_can_vote %}true{% else %}false{% endif %}"
+        ></div>
       {% endif %}
 
       {% if req.status == 'pending' or req.status == 'on_hold' %}

@@ -2,7 +2,7 @@
 from unittest.mock import patch
 
 from django.conf import settings
-from django.test import RequestFactory, TestCase
+from django.test import TestCase
 from post_office.models import Email
 
 from core.membership_request_workflow import (
@@ -103,7 +103,7 @@ class MembershipNotesActionTests(TestCase):
         )
 
     def test_request_resubmitted_legacy_and_old_responses_payload_render_safely(self) -> None:
-        from core.templatetags.core_membership_notes import membership_notes
+        from core.templatetags.core_membership_notes import _request_resubmitted_new_snapshots_by_note_id
 
         req = MembershipRequest.objects.create(
             requested_username="alice",
@@ -124,20 +124,14 @@ class MembershipNotesActionTests(TestCase):
             },
         )
 
-        request = RequestFactory().get("/")
-        request.session = {"_freeipa_username": "reviewer"}
-        html = str(
-            membership_notes(
-                {"request": request},
-                req,
-                compact=False,
-                next_url="/",
-            )
+        snapshots_by_note_id = _request_resubmitted_new_snapshots_by_note_id(
+            [legacy_note, new_note],
+            current_responses_by_request_id={req.pk: req.responses},
         )
 
-        self.assertIn("Request resubmitted", html)
-        self.assertIn(f'data-request-resubmitted-note-id="{new_note.pk}"', html)
-        self.assertNotIn(f'data-request-resubmitted-note-id="{legacy_note.pk}"', html)
+        self.assertIn(new_note.pk, snapshots_by_note_id)
+        self.assertNotIn(legacy_note.pk, snapshots_by_note_id)
+        self.assertEqual(snapshots_by_note_id[new_note.pk], [{"Contributions": "Updated"}])
 
     def test_request_approved_records_action_note(self) -> None:
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")

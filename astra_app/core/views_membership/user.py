@@ -446,32 +446,6 @@ def membership_request_self(request: HttpRequest, pk: int) -> HttpResponse:
     return membership_request_detail(request, pk)
 
 
-def membership_request_detail_legacy_redirect(request: HttpRequest, pk: int) -> HttpResponse:
-    """Legacy detail route (/membership/requests/<pk>/) -> canonical redirect.
-
-    Redirects only for authorized viewers; otherwise returns 404 to avoid leaking
-    that a request exists.
-    """
-    if request.method != "GET":
-        raise Http404("Not found")
-
-    username = get_username(request)
-    if not username:
-        raise Http404("User not found")
-
-    req = _load_membership_request_for_detail(pk=pk)
-
-    can_view_as_committee, can_view_as_self = _membership_request_detail_access_flags(
-        request,
-        username=username,
-        membership_request=req,
-    )
-    if not can_view_as_committee and not can_view_as_self:
-        raise Http404("Not found")
-
-    return redirect("membership-request-detail", pk=req.pk)
-
-
 def _membership_request_detail_access_flags(
     request: HttpRequest,
     *,
@@ -512,7 +486,6 @@ def membership_request_rescind(request: HttpRequest, pk: int) -> HttpResponse:
 __all__ = [
     "membership_request",
     "membership_request_detail",
-    "membership_request_detail_legacy_redirect",
     "membership_request_rescind",
     "membership_request_self",
 ]

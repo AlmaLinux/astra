@@ -88,6 +88,11 @@ services:
         condition: service_healthy
     environment:
       - DEBUG=True
+      - DJANGO_VITE_DEV_MODE=True
+      - DJANGO_VITE_DEV_SERVER_HOST=localhost
+      - DJANGO_VITE_DEV_SERVER_PORT=5173
+      - DJANGO_VITE_DEV_SERVER_HEALTHCHECK_HOST=vite
+      - DJANGO_VITE_DEV_SERVER_HEALTHCHECK_PORT=5173
       - SECRET_KEY=dev_secret_key
       # Error reporting (Bugsink is Sentry-compatible). Get the DSN from Bugsink UI.
       # - SENTRY_DSN=http://fed1fa2cb35545a0873e5a36b5865bb8@bugsink:8080/1
@@ -114,6 +119,25 @@ services:
       - ELECTION_REKOR_ENDPOINT=https://rekor.sigstore.dev
       - ELECTION_REKOR_SIGNING_KEY=/run/secrets/rekor-signing-key.pem
 
+  vite:
+    build: .
+    container_name: almalinux_vite
+    working_dir: /app/frontend
+    entrypoint: []
+    command:
+      - sh
+      - -lc
+      - npm ci && npm run dev -- --host 0.0.0.0 --strictPort
+    volumes:
+      - .:/app:z
+      - frontend_node_modules:/app/frontend/node_modules:z
+    ports:
+      - "5173:5173"
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+      - WATCHPACK_POLLING=true
+
 volumes:
   postgres_data2:
   minio_data:
+  frontend_node_modules:

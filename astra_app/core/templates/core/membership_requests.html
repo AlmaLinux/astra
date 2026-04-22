@@ -1,12 +1,12 @@
 {% extends 'core/base.html' %}
-{% load static %}
+{% load django_vite %}
 
 {% block title %}Membership Requests{% endblock %}
 
 {% block extra_head %}
   {{ block.super }}
-  <link rel="stylesheet" href="{% static 'core/vendor/datatables/datatables.min.css' %}">
-  <link rel="stylesheet" href="{% static 'core/css/membership_notes.css' %}">
+  {% vite_hmr_client %}
+  {% vite_asset 'src/entrypoints/membershipRequests.ts' %}
 {% endblock %}
 
 {% block header %}
@@ -37,151 +37,8 @@
     data-membership-requests-notes-can-view="{% if membership_requests_notes_can_view %}true{% else %}false{% endif %}"
     data-membership-requests-notes-can-write="{% if membership_requests_notes_can_write %}true{% else %}false{% endif %}"
     data-membership-requests-notes-can-vote="{% if membership_requests_notes_can_vote %}true{% else %}false{% endif %}"
-  >
-  <div class="card">
-    <div class="card-header">
-      <div class="d-flex align-items-center justify-content-between flex-wrap" style="gap: 0.5rem;">
-        <div class="d-flex align-items-center flex-wrap" style="gap: 0.5rem;">
-          <form
-            id="bulk-action-form"
-            method="post"
-            action="{% url 'membership-requests-bulk' %}"
-            class="form-inline"
-            data-bulk-table-form
-            data-bulk-select-all-id="select-all-requests"
-            data-bulk-checkbox-selector=".request-checkbox--pending"
-            data-bulk-apply-id="bulk-apply"
-          >
-            {% csrf_token %}
-            <input type="hidden" name="next" value="{{ next_url }}" />
-            <div class="input-group input-group-sm">
-              <select name="bulk_action" class="custom-select custom-select-sm" aria-label="Bulk action">
-                <option value="">Bulk action…</option>
-                <option value="accept">Accept</option>
-                <option value="reject">Reject</option>
-                <option value="ignore">Ignore</option>
-              </select>
-              <div class="input-group-append">
-                <button type="submit" class="btn btn-default" id="bulk-apply" title="Apply selected action to checked requests" disabled>Apply</button>
-              </div>
-            </div>
-          </form>
-
-          <form method="get" class="form-inline" aria-label="Filter membership requests">
-            <label for="requests-filter" class="text-muted small mb-0 ml-2">Filter</label>
-            <select
-              id="requests-filter"
-              name="filter"
-              class="custom-select custom-select-sm ml-2"
-              aria-label="Filter requests"
-            >
-              {% for option in filter_options %}
-                <option value="{{ option.value }}"{% if option.value == selected_filter %} selected{% endif %}>
-                  {{ option.label }}{% if option.count != '' %} ({{ option.count }}){% endif %}
-                </option>
-              {% endfor %}
-            </select>
-          </form>
-        </div>
-
-        <div class="text-muted" id="membership-requests-pending-count">Pending: {{ pending_count }}</div>
-      </div>
-    </div>
-
-    <div class="card-body p-0">
-      <div class="table-responsive">
-        <table
-          class="table table-striped mb-0 w-100"
-          id="membership-requests-pending-table"
-        >
-          <thead>
-            <tr>
-              <th style="width: 40px;" class="text-center">
-                <input type="checkbox" id="select-all-requests" aria-label="Select all requests">
-              </th>
-              <th class="text-nowrap" style="width: 1%;">Request</th>
-              <th class="text-nowrap" style="width: 30%;">Requested for</th>
-              <th>Type</th>
-              <th class="text-right" style="width: 15%;">Actions</th>
-            </tr>
-          </thead>
-        </table>
-      </div>
-
-      <div class="p-3 border-top">
-        <ul class="pagination pagination-sm m-0 float-right" id="membership-requests-pending-pager" aria-label="Pending pagination"></ul>
-      </div>
-    </div>
-  </div>
-
-  <h3 class="mt-4 mb-2">Waiting for requester response</h3>
-
-    <div class="card">
-      <div class="card-header">
-        <div class="d-flex align-items-center justify-content-between flex-wrap" style="gap: 0.5rem;">
-          <form
-            id="bulk-action-form-on-hold"
-            method="post"
-            action="{% url 'membership-requests-bulk' %}"
-            class="form-inline"
-            data-bulk-table-form
-            data-bulk-select-all-id="select-all-requests-on-hold"
-            data-bulk-checkbox-selector=".request-checkbox--on-hold"
-            data-bulk-apply-id="bulk-apply-on-hold"
-          >
-            {% csrf_token %}
-            <input type="hidden" name="next" value="{{ next_url }}" />
-            <input type="hidden" name="bulk_scope" value="on_hold" />
-            <div class="input-group input-group-sm">
-              <select name="bulk_action" class="custom-select custom-select-sm" aria-label="Bulk action">
-                <option value="">Bulk action…</option>
-                <option value="reject">Reject</option>
-                <option value="ignore">Ignore</option>
-              </select>
-              <div class="input-group-append">
-                <button type="submit" class="btn btn-default" id="bulk-apply-on-hold" title="Apply selected action to checked requests" disabled>Apply</button>
-              </div>
-            </div>
-          </form>
-
-          <div class="text-muted" id="membership-requests-on-hold-count">On hold: {{ on_hold_count }}</div>
-        </div>
-      </div>
-
-      <div class="card-body p-0">
-        <div class="table-responsive">
-          <table
-            class="table table-striped mb-0 w-100"
-            id="membership-requests-on-hold-table"
-          >
-            <thead>
-              <tr>
-                <th style="width: 40px;" class="text-center">
-                  <input type="checkbox" id="select-all-requests-on-hold" aria-label="Select all on-hold requests">
-                </th>
-                <th class="text-nowrap" style="width: 1%;">Request</th>
-                <th class="text-nowrap" style="width: 30%;">Requested for</th>
-                <th>Type</th>
-                <th class="text-nowrap" style="width: 1%;">On hold since</th>
-                <th class="text-right" style="width: 15%;">Actions</th>
-              </tr>
-            </thead>
-          </table>
-        </div>
-
-        <div class="p-3 border-top">
-          <ul class="pagination pagination-sm m-0 float-right" id="membership-requests-on-hold-pager" aria-label="On-hold pagination"></ul>
-        </div>
-      </div>
-    </div>
+    data-membership-requests-next-url="{{ next_url }}"
+    data-membership-requests-csrf-token="{{ csrf_token }}"
+  ></div>
   {% include 'core/_membership_request_shared_modals.html' with next_url=next_url %}
-  </div>
-{% endblock %}
-
-{% block scripts %}
-  {{ block.super }}
-  <script src="{% static 'core/js/bulk_table_actions.js' %}"></script>
-  <script src="{% static 'core/js/membership_notes.js' %}"></script>
-  <script src="{% static 'core/vendor/datatables/datatables.min.js' %}"></script>
-  <script src="{% static 'core/js/membership_requests_datatables.js' %}"></script>
 {% endblock %}

@@ -2849,17 +2849,16 @@ class OrganizationUserViewsTests(TestCase):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Membership Committee Notes")
+        self.assertContains(resp, 'data-membership-notes-aggregate-root="org"')
         self.assertContains(
             resp,
-            reverse("api-membership-notes-aggregate-summary") + f"?target_type=org&amp;target={org.pk}",
+            reverse("api-membership-notes-aggregate-summary") + f"?target_type=org&target={org.pk}",
         )
         self.assertContains(
             resp,
-            reverse("api-membership-notes-aggregate") + f"?target_type=org&amp;target={org.pk}",
+            reverse("api-membership-notes-aggregate") + f"?target_type=org&target={org.pk}",
         )
-        self.assertContains(resp, 'data-membership-notes-has-fallback-content="0"')
-        self.assertContains(resp, "Loading notes...")
+        self.assertContains(resp, reverse("api-membership-notes-aggregate-add"))
         self.assertNotContains(resp, "Org note")
         self.assertNotContains(resp, f"(req. #{req.pk})")
         self.assertContains(resp, "<div class=\"font-weight-bold\">Gold Sponsor Member</div>", html=True)
@@ -3160,29 +3159,24 @@ class OrganizationUserViewsTests(TestCase):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Membership Committee Notes")
+        self.assertContains(resp, 'data-membership-notes-aggregate-root="org"')
         self.assertContains(
             resp,
-            reverse("api-membership-notes-aggregate-summary") + f"?target_type=org&amp;target={org.pk}",
+            reverse("api-membership-notes-aggregate-summary") + f"?target_type=org&target={org.pk}",
         )
         self.assertContains(
             resp,
-            reverse("api-membership-notes-aggregate") + f"?target_type=org&amp;target={org.pk}",
+            reverse("api-membership-notes-aggregate") + f"?target_type=org&target={org.pk}",
         )
-        self.assertContains(resp, 'data-membership-notes-has-fallback-content="0"')
-        self.assertContains(resp, "Loading notes...")
-        self.assertNotContains(resp, 'data-membership-notes-form="')
-        self.assertNotContains(resp, 'placeholder="Type a note..."')
-        self.assertNotContains(resp, 'data-note-action="vote_approve"')
-        self.assertNotContains(resp, 'data-note-action="vote_disapprove"')
+        self.assertContains(resp, reverse("api-membership-notes-aggregate-add"))
         self.assertNotContains(resp, "Older org note")
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
-                reverse("membership-notes-aggregate-note-add"),
+                reverse("api-membership-notes-aggregate-add"),
                 data={
-                    "aggregate_target_type": "org",
-                    "aggregate_target": str(org.pk),
+                    "target_type": "org",
+                    "target": str(org.pk),
                     "note_action": "message",
                     "message": "Hello org aggregate",
                     "compact": "1",
@@ -3193,7 +3187,7 @@ class OrganizationUserViewsTests(TestCase):
 
         self.assertEqual(resp.status_code, 403)
         payload = resp.json()
-        self.assertEqual(payload, {"ok": False, "error": "Permission denied."})
+        self.assertEqual(payload, {"error": "Permission denied."})
 
         self.assertFalse(
             Note.objects.filter(
@@ -3862,6 +3856,16 @@ class OrganizationUserViewsTests(TestCase):
                 "sort_order": 2,
                 "enabled": True,
                 "group_cn": "sponsor-group",
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 3,
+                "enabled": True,
+                "group_cn": "sponsor-group-silver",
             },
         )
 

@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 from django.conf import settings
 from django.test import RequestFactory, TestCase, override_settings
+from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.functional import SimpleLazyObject
@@ -105,7 +106,7 @@ class MembershipNotesAjaxTests(TestCase):
         self._login_as_freeipa_user("reviewer")
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer_user()):
             resp = self.client.post(
-                reverse("membership-request-note-add", args=[membership_request_id]),
+                reverse("api-membership-request-notes-add", args=[membership_request_id]),
                 data={
                     "note_action": "message",
                     "message": "render",
@@ -117,6 +118,87 @@ class MembershipNotesAjaxTests(TestCase):
         payload = json.loads(resp.content)
         self.assertTrue(payload.get("ok"))
         return str(payload.get("html", ""))
+
+    def _fetch_request_notes_detail_payload(self, membership_request_id: int) -> dict[str, object]:
+        self._login_as_freeipa_user("reviewer")
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer_user()):
+            response = self.client.get(
+                reverse("api-membership-request-notes", args=[membership_request_id]),
+                HTTP_ACCEPT="application/json",
+            )
+        self.assertEqual(response.status_code, 200)
+        return response.json()
+
+    def _fetch_request_notes_summary_payload(self, membership_request_id: int) -> dict[str, object]:
+        self._login_as_freeipa_user("reviewer")
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer_user()):
+            response = self.client.get(
+                reverse("api-membership-request-notes-summary", args=[membership_request_id]),
+                HTTP_ACCEPT="application/json",
+            )
+        self.assertEqual(response.status_code, 200)
+        return response.json()
+
+    def _plain_user(self, username: str, *, memberof_group: list[str] | None = None) -> FreeIPAUser:
+        return FreeIPAUser(
+            username,
+            {
+                "uid": [username],
+                "mail": [f"{username}@example.com"],
+                "memberof_group": list(memberof_group or []),
+            },
+        )
+
+    def _membership_request_detail_response(
+        self,
+        *,
+        viewer_username: str,
+        membership_request_id: int,
+        expected_status: int = 200,
+    ):
+        membership_request = MembershipRequest.objects.get(pk=membership_request_id)
+        self._login_as_freeipa_user(viewer_username)
+
+        def lookup_user(username: str):
+            if username == "reviewer":
+                return self._reviewer_user()
+            if username == viewer_username:
+                return self._plain_user(viewer_username)
+            return self._plain_user(username)
+
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=lookup_user):
+            response = self.client.get(reverse("membership-request-detail", args=[membership_request.pk]))
+        self.assertEqual(response.status_code, expected_status)
+        return response
+
+    def _render_user_aggregate_profile_section(
+        self,
+        *,
+        target_user: FreeIPAUser,
+        viewer_user: object,
+        membership_can_view: bool = True,
+        membership_can_write: bool = False,
+    ) -> str:
+        request = self._aggregate_request(viewer_user)
+        return render_to_string(
+            "core/_membership_profile_section.html",
+            {
+                "request": request,
+                "csrf_token": "csrf-token",
+                "membership_target_kind": "user",
+                "membership_can_view": membership_can_view,
+                "membership_can_write": membership_can_write,
+                "membership_is_owner": False,
+                "membership_can_request_any": False,
+                "membership_entries": [],
+                "membership_pending_requests": [],
+                "past_memberships": [],
+                "membership_request_url": "",
+                "fu": target_user,
+                "timezone_name": "UTC",
+            },
+            request=request,
+        )
 
     def _run_membership_notes_node_scenario(self, test_body: str) -> None:
         script_path = Path(settings.BASE_DIR) / "core/static/core/js/membership_notes.js"
@@ -430,18 +512,9 @@ class MembershipNotesAjaxTests(TestCase):
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
 
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser(
-            "reviewer",
-            {
-                "uid": ["reviewer"],
-                "mail": ["reviewer@example.com"],
-                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
-            },
-        )
-
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
-            resp = self.client.post(
-                reverse("membership-request-note-add", args=[req.pk]),
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer_user()):
+            response = self.client.post(
+                reverse("api-membership-request-notes-add", args=[req.pk]),
                 data={
                     "note_action": "message",
                     "message": "Hello via ajax",
@@ -450,20 +523,13 @@ class MembershipNotesAjaxTests(TestCase):
                 HTTP_X_REQUESTED_WITH="XMLHttpRequest",
             )
 
-        self.assertEqual(resp.status_code, 200)
-        payload = json.loads(resp.content)
-        self.assertTrue(payload.get("ok"))
-        self.assertIn("html", payload)
-        self.assertIn("Hello via ajax", payload["html"])
-        self.assertIn("Membership Committee Notes", payload["html"])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"ok": True, "message": "Note added."})
 
-        # Non-compact widgets render expanded by default.
-        self.assertIsNone(
-            re.search(
-                rf'id="membership-notes-card-{req.pk}"[^>]*class="[^"]*\bcollapsed-card\b',
-                payload["html"],
-            )
-        )
+        detail_payload = self._fetch_request_notes_detail_payload(req.pk)
+        detail_json = json.dumps(detail_payload)
+        self.assertIn("Hello via ajax", detail_json)
+        self.assertIn("reviewer", detail_json)
 
         self.assertTrue(
             Note.objects.filter(
@@ -477,18 +543,9 @@ class MembershipNotesAjaxTests(TestCase):
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
 
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser(
-            "reviewer",
-            {
-                "uid": ["reviewer"],
-                "mail": ["reviewer@example.com"],
-                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
-            },
-        )
-
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer_user()):
             resp1 = self.client.post(
-                reverse("membership-request-note-add", args=[req.pk]),
+                reverse("api-membership-request-notes-add", args=[req.pk]),
                 data={
                     "note_action": "message",
                     "message": "Self note",
@@ -500,10 +557,6 @@ class MembershipNotesAjaxTests(TestCase):
         self.assertEqual(resp1.status_code, 200)
         payload1 = json.loads(resp1.content)
         self.assertTrue(payload1.get("ok"))
-        self.assertNotIn(
-            'class="direct-chat-text membership-notes-bubble" style="--bubble-bg:',
-            payload1.get("html", ""),
-        )
 
         Note.objects.create(
             membership_request=req,
@@ -512,9 +565,9 @@ class MembershipNotesAjaxTests(TestCase):
             action={},
         )
 
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer_user()):
             resp2 = self.client.post(
-                reverse("membership-request-note-add", args=[req.pk]),
+                reverse("api-membership-request-notes-add", args=[req.pk]),
                 data={
                     "note_action": "message",
                     "message": "Another self note",
@@ -526,9 +579,13 @@ class MembershipNotesAjaxTests(TestCase):
         self.assertEqual(resp2.status_code, 200)
         payload2 = json.loads(resp2.content)
         self.assertTrue(payload2.get("ok"))
-        html2 = payload2.get("html", "")
-        self.assertIn('class="direct-chat-text membership-notes-bubble"', html2)
-        self.assertIn("--bubble-bg:", html2)
+
+        detail_payload = self._fetch_request_notes_detail_payload(req.pk)
+        groups = detail_payload["groups"]
+        other_group = next(group for group in groups if group["username"] == "someone_else")
+        other_entry = other_group["entries"][0]
+        self.assertEqual(other_entry["kind"], "message")
+        self.assertIn("--bubble-bg:", str(other_entry.get("bubble_style") or ""))
 
     def test_custos_notes_render_with_distinct_style_and_avatar(self) -> None:
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
@@ -542,18 +599,9 @@ class MembershipNotesAjaxTests(TestCase):
         )
 
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser(
-            "reviewer",
-            {
-                "uid": ["reviewer"],
-                "mail": ["reviewer@example.com"],
-                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
-            },
-        )
-
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer_user()):
             resp = self.client.post(
-                reverse("membership-request-note-add", args=[req.pk]),
+                reverse("api-membership-request-notes-add", args=[req.pk]),
                 data={
                     "note_action": "message",
                     "message": "Hello via ajax",
@@ -564,12 +612,15 @@ class MembershipNotesAjaxTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         payload = json.loads(resp.content)
-        html = payload.get("html", "")
         self.assertTrue(payload.get("ok"))
 
-        self.assertIn("Astra Custodia", html)
-        self.assertIn("core/images/almalinux-logo.svg", html)
-        self.assertIn("--bubble-bg: #e9ecef", html)
+        detail_payload = self._fetch_request_notes_detail_payload(req.pk)
+        custos_group = next(group for group in detail_payload["groups"] if group["username"] == CUSTOS)
+        self.assertEqual(custos_group["avatar_kind"], "custos")
+        self.assertEqual(custos_group["is_custos"], True)
+        self.assertIn("almalinux-logo.svg", str(custos_group.get("avatar_url") or ""))
+        custos_entry = custos_group["entries"][0]
+        self.assertIn("--bubble-bg: #e9ecef", str(custos_entry.get("bubble_style") or ""))
 
     def test_mirror_validation_notes_render_multiline_with_bold_result_values(self) -> None:
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
@@ -587,18 +638,9 @@ class MembershipNotesAjaxTests(TestCase):
         )
 
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser(
-            "reviewer",
-            {
-                "uid": ["reviewer"],
-                "mail": ["reviewer@example.com"],
-                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
-            },
-        )
-
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer_user()):
             resp = self.client.post(
-                reverse("membership-request-note-add", args=[req.pk]),
+                reverse("api-membership-request-notes-add", args=[req.pk]),
                 data={
                     "note_action": "message",
                     "message": "Hello via ajax",
@@ -609,15 +651,17 @@ class MembershipNotesAjaxTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         payload = json.loads(resp.content)
-        html = payload.get("html", "")
         self.assertTrue(payload.get("ok"))
-        self.assertIn("Mirror validation summary<br>", html)
-        self.assertIn("Domain: <strong>reachable</strong>", html)
-        self.assertIn("Mirror status: <strong>up-to-date</strong>", html)
-        self.assertIn("AlmaLinux mirror network: <strong>registered</strong>", html)
+
+        detail_payload = self._fetch_request_notes_detail_payload(req.pk)
+        detail_json = json.dumps(detail_payload)
+        self.assertIn("Mirror validation summary<br>", detail_json)
+        self.assertIn("Domain: <strong>reachable</strong>", detail_json)
+        self.assertIn("Mirror status: <strong>up-to-date</strong>", detail_json)
+        self.assertIn("AlmaLinux mirror network: <strong>registered</strong>", detail_json)
         self.assertIn(
             "GitHub pull request: <strong>valid; touches mirrors.d/mirror.example.org.yml</strong>",
-            html,
+            detail_json,
         )
 
     def test_regular_notes_render_safe_markdown_subset(self) -> None:
@@ -635,18 +679,9 @@ class MembershipNotesAjaxTests(TestCase):
         )
 
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser(
-            "reviewer",
-            {
-                "uid": ["reviewer"],
-                "mail": ["reviewer@example.com"],
-                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
-            },
-        )
-
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer_user()):
             resp = self.client.post(
-                reverse("membership-request-note-add", args=[req.pk]),
+                reverse("api-membership-request-notes-add", args=[req.pk]),
                 data={
                     "note_action": "message",
                     "message": "Hello via ajax",
@@ -657,15 +692,17 @@ class MembershipNotesAjaxTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         payload = json.loads(resp.content)
-        html = payload.get("html", "")
         self.assertTrue(payload.get("ok"))
-        self.assertIn("<strong>Bold</strong>", html)
-        self.assertIn("<em>italic</em>", html)
-        self.assertIn("<ul>", html)
-        self.assertIn("<li>first item</li>", html)
-        self.assertIn("<li>second item</li>", html)
-        self.assertIn("&lt;script&gt;alert", html)
-        self.assertNotIn("<script>alert", html)
+
+        detail_payload = self._fetch_request_notes_detail_payload(req.pk)
+        detail_json = json.dumps(detail_payload)
+        self.assertIn("<strong>Bold</strong>", detail_json)
+        self.assertIn("<em>italic</em>", detail_json)
+        self.assertIn("<ul>", detail_json)
+        self.assertIn("<li>first item</li>", detail_json)
+        self.assertIn("<li>second item</li>", detail_json)
+        self.assertIn("&lt;script&gt;alert", detail_json)
+        self.assertNotIn("<script>alert", detail_json)
 
     def test_regular_note_html_remains_escaped(self) -> None:
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
@@ -677,18 +714,9 @@ class MembershipNotesAjaxTests(TestCase):
         )
 
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser(
-            "reviewer",
-            {
-                "uid": ["reviewer"],
-                "mail": ["reviewer@example.com"],
-                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
-            },
-        )
-
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer_user()):
             resp = self.client.post(
-                reverse("membership-request-note-add", args=[req.pk]),
+                reverse("api-membership-request-notes-add", args=[req.pk]),
                 data={
                     "note_action": "message",
                     "message": "Hello via ajax",
@@ -699,10 +727,12 @@ class MembershipNotesAjaxTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         payload = json.loads(resp.content)
-        html = payload.get("html", "")
         self.assertTrue(payload.get("ok"))
-        self.assertIn("&lt;em&gt;not safe&lt;/em&gt;", html)
-        self.assertNotIn("<em>not safe</em>", html)
+
+        detail_payload = self._fetch_request_notes_detail_payload(req.pk)
+        detail_json = json.dumps(detail_payload)
+        self.assertIn("&lt;em&gt;not safe&lt;/em&gt;", detail_json)
+        self.assertNotIn("<em>not safe</em>", detail_json)
 
     def test_consecutive_actions_by_same_user_within_minute_are_grouped(self) -> None:
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
@@ -736,7 +766,7 @@ class MembershipNotesAjaxTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
-                reverse("membership-request-note-add", args=[req.pk]),
+                reverse("api-membership-request-notes-add", args=[req.pk]),
                 data={
                     "note_action": "message",
                     "message": "Hello via ajax",
@@ -748,21 +778,14 @@ class MembershipNotesAjaxTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         payload = json.loads(resp.content)
         self.assertTrue(payload.get("ok"))
-        html = payload.get("html", "")
 
-        # The two consecutive alex actions should render as one grouped row
-        # (one username header + two bubbles).
-        marker = 'data-membership-notes-group-username="alex"'
-        start = html.find(marker)
-        self.assertNotEqual(start, -1, "Expected a grouped row marker for alex")
-        end = html.find('data-membership-notes-group-username="', start + len(marker))
-        group_html = html[start:] if end == -1 else html[start:end]
-
-        self.assertEqual(group_html.count("direct-chat-infos"), 1)
-        self.assertIn("Request on hold", group_html)
-        self.assertIn("User contacted", group_html)
-        bubble_class_hits = re.findall(r'\bmembership-notes-bubble\b', group_html)
-        self.assertEqual(len(bubble_class_hits), 2)
+        detail_payload = self._fetch_request_notes_detail_payload(req.pk)
+        alex_group = next(group for group in detail_payload["groups"] if group["username"] == "alex")
+        self.assertEqual(len(alex_group["entries"]), 2)
+        self.assertEqual(alex_group["entries"][0]["kind"], "action")
+        self.assertEqual(alex_group["entries"][1]["kind"], "action")
+        self.assertIn("Request on hold", str(alex_group["entries"][0].get("label") or ""))
+        self.assertIn("User contacted", str(alex_group["entries"][1].get("label") or ""))
 
     def test_view_only_user_cannot_submit_vote_actions(self) -> None:
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
@@ -785,7 +808,7 @@ class MembershipNotesAjaxTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             resp = self.client.post(
-                reverse("membership-request-note-add", args=[req.pk]),
+                reverse("api-membership-request-notes-add", args=[req.pk]),
                 data={
                     "note_action": "vote_approve",
                     "message": "approve",
@@ -824,7 +847,7 @@ class MembershipNotesAjaxTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             resp = self.client.post(
-                reverse("membership-request-note-add", args=[req.pk]),
+                reverse("api-membership-request-notes-add", args=[req.pk]),
                 data={
                     "note_action": "message",
                     "message": "plain note",
@@ -834,7 +857,7 @@ class MembershipNotesAjaxTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 403)
-        self.assertEqual(resp.json(), {"ok": False, "error": "Permission denied."})
+        self.assertEqual(resp.json(), {"error": "Permission denied."})
         self.assertFalse(
             Note.objects.filter(
                 membership_request=req,
@@ -864,10 +887,10 @@ class MembershipNotesAjaxTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             resp = self.client.post(
-                reverse("membership-notes-aggregate-note-add"),
+                reverse("api-membership-notes-aggregate-add"),
                 data={
-                    "aggregate_target_type": "user",
-                    "aggregate_target": "alice",
+                    "target_type": "user",
+                    "target": "alice",
                     "note_action": "message",
                     "message": "aggregate note",
                     "compact": "1",
@@ -877,7 +900,7 @@ class MembershipNotesAjaxTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 403)
-        self.assertEqual(resp.json(), {"ok": False, "error": "Permission denied."})
+        self.assertEqual(resp.json(), {"error": "Permission denied."})
         self.assertFalse(
             Note.objects.filter(
                 membership_request=req,
@@ -894,10 +917,10 @@ class MembershipNotesAjaxTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
-                reverse("membership-notes-aggregate-note-add"),
+                reverse("api-membership-notes-aggregate-add"),
                 data={
-                    "aggregate_target_type": "user",
-                    "aggregate_target": "alice",
+                    "target_type": "user",
+                    "target": "alice",
                     "note_action": "vote_approve",
                     "message": "forged aggregate action",
                     "compact": "1",
@@ -906,8 +929,8 @@ class MembershipNotesAjaxTests(TestCase):
                 HTTP_X_REQUESTED_WITH="XMLHttpRequest",
             )
 
-        self.assertEqual(resp.status_code, 403)
-        self.assertEqual(resp.json(), {"ok": False, "error": "Permission denied."})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json(), {"error": "Invalid note action."})
         self.assertFalse(
             Note.objects.filter(
                 membership_request=req,
@@ -931,7 +954,7 @@ class MembershipNotesAjaxTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=no_permissions_user):
             resp = self.client.post(
-                reverse("membership-request-note-add", args=[req.pk]),
+                reverse("api-membership-request-notes-add", args=[req.pk]),
                 data={
                     "note_action": "message",
                     "message": "detail note denied",
@@ -941,7 +964,7 @@ class MembershipNotesAjaxTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 403)
-        self.assertEqual(resp.json(), {"ok": False, "error": "Permission denied."})
+        self.assertEqual(resp.json(), {"error": "Permission denied."})
         self.assertFalse(
             Note.objects.filter(
                 membership_request=req,
@@ -965,10 +988,10 @@ class MembershipNotesAjaxTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=no_permissions_user):
             resp = self.client.post(
-                reverse("membership-notes-aggregate-note-add"),
+                reverse("api-membership-notes-aggregate-add"),
                 data={
-                    "aggregate_target_type": "user",
-                    "aggregate_target": "alice",
+                    "target_type": "user",
+                    "target": "alice",
                     "note_action": "message",
                     "message": "aggregate note denied",
                     "compact": "1",
@@ -978,7 +1001,7 @@ class MembershipNotesAjaxTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 403)
-        self.assertEqual(resp.json(), {"ok": False, "error": "Permission denied."})
+        self.assertEqual(resp.json(), {"error": "Permission denied."})
         self.assertFalse(
             Note.objects.filter(
                 membership_request=req,
@@ -1003,7 +1026,7 @@ class MembershipNotesAjaxTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=no_permissions_user):
             existing_resp = self.client.post(
-                reverse("membership-request-note-add", args=[req.pk]),
+                reverse("api-membership-request-notes-add", args=[req.pk]),
                 data={
                     "note_action": "message",
                     "message": "probe note",
@@ -1012,7 +1035,7 @@ class MembershipNotesAjaxTests(TestCase):
                 HTTP_X_REQUESTED_WITH="XMLHttpRequest",
             )
             missing_resp = self.client.post(
-                reverse("membership-request-note-add", args=[missing_pk]),
+                reverse("api-membership-request-notes-add", args=[missing_pk]),
                 data={
                     "note_action": "message",
                     "message": "probe note",
@@ -1022,9 +1045,9 @@ class MembershipNotesAjaxTests(TestCase):
             )
 
         self.assertEqual(existing_resp.status_code, 403)
-        self.assertEqual(existing_resp.json(), {"ok": False, "error": "Permission denied."})
+        self.assertEqual(existing_resp.json(), {"error": "Permission denied."})
         self.assertEqual(missing_resp.status_code, 403)
-        self.assertEqual(missing_resp.json(), {"ok": False, "error": "Permission denied."})
+        self.assertEqual(missing_resp.json(), {"error": "Permission denied."})
         self.assertFalse(
             Note.objects.filter(
                 membership_request=req,
@@ -1061,7 +1084,7 @@ class MembershipNotesAjaxTests(TestCase):
             content = f"detail note {permission}"
             with patch("core.freeipa.user.FreeIPAUser.get", return_value=manager):
                 resp = self.client.post(
-                    reverse("membership-request-note-add", args=[req.pk]),
+                    reverse("api-membership-request-notes-add", args=[req.pk]),
                     data={
                         "note_action": "message",
                         "message": content,
@@ -1109,10 +1132,10 @@ class MembershipNotesAjaxTests(TestCase):
             content = f"aggregate note {permission}"
             with patch("core.freeipa.user.FreeIPAUser.get", return_value=manager):
                 resp = self.client.post(
-                    reverse("membership-notes-aggregate-note-add"),
+                    reverse("api-membership-notes-aggregate-add"),
                     data={
-                        "aggregate_target_type": "user",
-                        "aggregate_target": target_username,
+                        "target_type": "user",
+                        "target": target_username,
                         "note_action": "message",
                         "message": content,
                         "compact": "1",
@@ -1152,37 +1175,15 @@ class MembershipNotesAjaxTests(TestCase):
             },
         )
 
-        captured_context: dict[str, object] = {}
-
-        def _capture_context(context: dict[str, object], username: str, *, compact: bool, next_url: str) -> str:
-            del username
-            del compact
-            del next_url
-            captured_context.update(context)
-            return "<div>captured aggregate widget</div>"
-
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=manager),
-            patch(
-                "core.views_membership.committee.membership_review_permissions",
-                return_value={
-                    "membership_can_add": False,
-                    "membership_can_change": True,
-                    "membership_can_delete": False,
-                    "membership_can_view": False,
-                    "send_mail_can_add": False,
-                },
-            ),
-            patch(
-                "core.templatetags.core_membership_notes.membership_notes_aggregate_for_user",
-                side_effect=_capture_context,
-            ),
+            patch("core.views_membership.committee.membership_review_permissions"),
         ):
             resp = self.client.post(
-                reverse("membership-notes-aggregate-note-add"),
+                reverse("api-membership-notes-aggregate-add"),
                 data={
-                    "aggregate_target_type": "user",
-                    "aggregate_target": req.requested_username,
+                    "target_type": "user",
+                    "target": req.requested_username,
                     "note_action": "message",
                     "message": "context probe note",
                     "compact": "1",
@@ -1194,8 +1195,6 @@ class MembershipNotesAjaxTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
         self.assertEqual(payload.get("ok"), True)
-        self.assertEqual(captured_context.get("membership_can_view"), False)
-        self.assertEqual(captured_context.get("membership_can_change"), True)
         self.assertTrue(
             Note.objects.filter(
                 membership_request=req,
@@ -1210,10 +1209,10 @@ class MembershipNotesAjaxTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
-                reverse("membership-notes-aggregate-note-add"),
+                reverse("api-membership-notes-aggregate-add"),
                 data={
-                    "aggregate_target_type": "org",
-                    "aggregate_target": "not-an-int",
+                    "target_type": "org",
+                    "target": "not-an-int",
                     "note_action": "message",
                     "message": "bad org target",
                     "compact": "1",
@@ -1223,7 +1222,7 @@ class MembershipNotesAjaxTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 400)
-        self.assertEqual(resp.json(), {"ok": False, "error": "Invalid target."})
+        self.assertEqual(resp.json(), {"error": "Invalid target."})
         self.assertFalse(
             Note.objects.filter(
                 username="reviewer",
@@ -1361,284 +1360,150 @@ class MembershipNotesAjaxTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json(), {"error": "Invalid target."})
 
-    def test_membership_notes_script_auto_loads_default_open_widget_details_on_init(self) -> None:
-        self._run_membership_notes_node_scenario(
-            """
-            window.fetchQueue.push({
-              note_count: 1,
-              approvals: 1,
-              disapprovals: 0,
-              current_user_vote: 'approve',
-            });
-            window.fetchQueue.push({
-              groups: [{
-                username: 'reviewer',
-                display_username: 'reviewer',
-                is_self: false,
-                is_custos: false,
-                avatar_kind: 'default',
-                avatar_url: '',
-                timestamp_display: '2026-04-20 09:00',
-                entries: [{
-                  kind: 'message',
-                  rendered_html: 'Loaded on init.',
-                  is_self: false,
-                  is_custos: false,
-                  bubble_style: '',
-                }],
-              }],
-            });
-
-            window.AstraMembershipNotes.init('77');
-            await flushAsync();
-
-            assert(window.fetchCalls.length === 2, 'Default-open widget should fetch summary and details during init.');
-            assert(window.fetchCalls[0].url === '/summary', 'Init should fetch note summary first.');
-            assert(window.fetchCalls[1].url === '/detail', 'Init should fetch note details without waiting for a click.');
-            assert(messages.innerHTML.includes('Loaded on init.'), 'Detail payload should hydrate the open widget on init.');
-            process.exit(0);
-            """
-        )
-
-    def test_membership_notes_script_loads_details_when_widget_reopens_after_init_without_transition(self) -> None:
-        self._run_membership_notes_node_scenario(
-            """
-            card.classList.add('collapsed-card');
-            container.setAttribute('data-membership-notes-default-open', '0');
-
-                        window.fetchQueue.push({
-                            note_count: 1,
-                            approvals: 0,
-                            disapprovals: 0,
-                            current_user_vote: '',
-                        });
-                        window.fetchQueue.push({
-                            groups: [{
-                                username: 'reviewer',
-                                display_username: 'reviewer',
-                                is_self: false,
-                                is_custos: false,
-                                avatar_kind: 'default',
-                                avatar_url: '',
-                                timestamp_display: '2026-04-21 09:00',
-                                entries: [{
-                                    kind: 'message',
-                                    rendered_html: 'Loaded after browser restore.',
-                                    is_self: false,
-                                    is_custos: false,
-                                    bubble_style: '',
-                                }],
-                            }],
-                        });
-
-                        window.AstraMembershipNotes.init('77');
-                        setTimeout(function () {
-                            card.classList.remove('collapsed-card');
-                        }, 0);
-                        await new Promise((resolve) => setTimeout(resolve, 75));
-                        await flushAsync();
-
-                        assert(window.fetchCalls.length === 2, 'An already-open widget should fetch summary and details even without an expand transition event.');
-                        assert(window.fetchCalls[0].url === '/summary', 'The widget should still fetch summary first.');
-                        assert(window.fetchCalls[1].url === '/detail', 'Open widget recovery should fetch details once the card is open.');
-                        assert(messages.innerHTML.includes('Loaded after browser restore.'), 'Recovered open widgets should hydrate detail content.');
-                        process.exit(0);
-                        """
-                )
-
-    def test_request_resubmitted_diff_values_are_escaped_and_preserve_linebreaks_in_notes_js(self) -> None:
-        self._run_membership_notes_node_scenario(
-            """
-                        const rendered = window.AstraMembershipNotes.buildNotesGroupsHtml([
-                            {
-                                username: 'reviewer',
-                                display_username: 'reviewer',
-                                is_self: false,
-                                is_custos: false,
-                                avatar_kind: 'default',
-                                avatar_url: '',
-                                timestamp_display: '2026-04-20 09:00',
-                                entries: [{
-                                    kind: 'action',
-                                    label: 'Request resubmitted',
-                                    bubble_style: '',
-                                    icon: 'fa-rotate-right',
-                                    note_id: 91,
-                                    request_resubmitted_diff_rows: [{
-                                        question: 'Why join?',
-                                        old_value: '<img src=x onerror="alert(1)">\\nOld line 2',
-                                        new_value: '<script>alert(2)</script>\\nNew line 2',
-                                    }],
-                                }],
-                            },
-                        ], '77');
-
-                        assert(rendered.groupsHtml.includes('&lt;img src=x onerror=&quot;alert(1)&quot;&gt;<br>Old line 2'), 'Old diff value should be escaped and preserve line breaks.');
-                        assert(rendered.groupsHtml.includes('&lt;script&gt;alert(2)&lt;/script&gt;<br>New line 2'), 'New diff value should be escaped and preserve line breaks.');
-                        assert(!rendered.groupsHtml.includes('<img src=x onerror="alert(1)">'), 'Old diff value must not render raw HTML.');
-                        assert(!rendered.groupsHtml.includes('<script>alert(2)</script>'), 'New diff value must not render raw HTML.');
-            process.exit(0);
-            """
-        )
-
-    def test_membership_notes_script_preserves_server_rendered_details_when_default_open_detail_fetch_fails(self) -> None:
-        self._run_membership_notes_node_scenario(
-            """
-                        messages.innerHTML = '<div class="direct-chat-msg" data-membership-notes-group-username="reviewer">Existing SSR note</div>';
-                        countBadge.textContent = '1';
-                        countBadge.setAttribute('title', '1 Messages');
-
-                        window.fetchQueue.push({
-                            note_count: 1,
-                            approvals: 0,
-                            disapprovals: 0,
-                            current_user_vote: '',
-                        });
-                        window.fetchQueue.push({
-                            __fetchError: 'detail refresh failed',
-                        });
-
-                        window.AstraMembershipNotes.init('77');
-                        await flushAsync();
-
-                        assert(messages.innerHTML.includes('Existing SSR note'), 'Detail fetch failure should preserve the initial server-rendered note history.');
-                        assert(!messages.innerHTML.includes('Loading notes...'), 'Detail fetch failure should not replace fallback history with a loading placeholder.');
-                        assert(!document.getElementById('membership-notes-error-77').classList.contains('d-none'), 'Detail fetch failure should surface a degraded state.');
-                        assert(document.getElementById('membership-notes-error-text-77').textContent.includes('Could not refresh note history'), 'Detail fetch failure should report degraded history refresh.');
-            process.exit(0);
-            """
-        )
-
-    def test_membership_notes_script_marks_summary_failure_as_degraded_without_zeroing_counts(self) -> None:
-        self._run_membership_notes_node_scenario(
-            """
-                        countBadge.textContent = '4';
-                        countBadge.className = 'badge badge-primary';
-                        countBadge.setAttribute('title', '4 Messages');
-
-                        window.fetchQueue.push({
-                            ok: false,
-                            payload: { error: 'summary refresh failed' },
-                        });
-                        window.fetchQueue.push({
-                            groups: [{
-                                username: 'reviewer',
-                                display_username: 'reviewer',
-                                is_self: false,
-                                is_custos: false,
-                                avatar_kind: 'default',
-                                avatar_url: '',
-                                timestamp_display: '2026-04-20 09:00',
-                                entries: [{
-                                    kind: 'message',
-                                    rendered_html: 'Loaded on init.',
-                                    is_self: false,
-                                    is_custos: false,
-                                    bubble_style: '',
-                                }],
-                            }],
-                        });
-
-                        window.AstraMembershipNotes.init('77');
-                        await flushAsync();
-
-                        assert(countBadge.textContent === '4', 'Summary failure should keep the server-rendered count instead of zeroing it.');
-                        assert(countBadge.getAttribute('title') === 'Note summary unavailable', 'Summary failure should expose a truthful degraded title.');
-                        assert(countBadge.className.includes('badge-warning'), 'Summary failure should visibly mark the count badge as degraded.');
-            process.exit(0);
-            """
-        )
-
-    def test_membership_notes_template_hides_compose_for_read_only_viewers(self) -> None:
+    def test_membership_request_detail_renders_notes_root_urls_for_reviewers(self) -> None:
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
-        Note.objects.create(membership_request=req, username="reviewer", content="Visible note")
 
-        request = RequestFactory().get("/membership-requests")
-        request.session = {"_freeipa_username": "viewer"}
+        response = self._membership_request_detail_response(
+            viewer_username="reviewer",
+            membership_request_id=req.pk,
+        )
 
-        viewer = FreeIPAUser(
-            "viewer",
-            {
-                "uid": ["viewer"],
-                "mail": ["viewer@example.com"],
-                "memberof_group": [],
+        self.assertContains(response, 'data-membership-request-notes-root')
+        self.assertContains(response, f'data-membership-request-id="{req.pk}"')
+        self.assertContains(
+            response,
+            reverse("api-membership-request-notes-summary", args=[req.pk]),
+        )
+        self.assertContains(
+            response,
+            reverse("api-membership-request-notes", args=[req.pk]),
+        )
+        self.assertContains(
+            response,
+            reverse("api-membership-request-notes-add", args=[req.pk]),
+        )
+
+    def test_membership_request_detail_marks_manage_user_as_can_write_and_vote(self) -> None:
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        response = self._membership_request_detail_response(
+            viewer_username="reviewer",
+            membership_request_id=req.pk,
+        )
+
+        self.assertContains(response, 'data-can-view="true"')
+        self.assertContains(response, 'data-can-write="true"')
+        self.assertContains(response, 'data-can-vote="true"')
+
+    def test_request_resubmitted_diff_values_are_escaped_and_preserve_linebreaks_in_api_payload(self) -> None:
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            responses=[{"Why join?": "<script>alert(2)</script>\nNew line 2"}],
+        )
+        note = Note.objects.create(
+            membership_request=req,
+            username="alice",
+            action={
+                "type": "request_resubmitted",
+                "old_responses": [{"Why join?": '<img src=x onerror="alert(1)">\nOld line 2'}],
             },
         )
 
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
-            from core.templatetags.core_membership_notes import membership_notes
+        detail_payload = self._fetch_request_notes_detail_payload(req.pk)
+        entry = next(
+            entry
+            for group in detail_payload["groups"]
+            for entry in group["entries"]
+            if entry["kind"] == "action" and entry.get("note_id") == note.pk
+        )
 
-            html = str(
-                membership_notes(
-                    {
-                        "request": request,
-                        "membership_can_view": True,
-                        "membership_can_add": False,
-                        "membership_can_change": False,
-                        "membership_can_delete": False,
-                    },
-                    req,
-                    compact=False,
-                    next_url="/membership-requests",
-                )
+        self.assertEqual(entry["request_resubmitted_diff_rows"][0]["question"], "Why join?")
+        self.assertEqual(
+            entry["request_resubmitted_diff_rows"][0]["old_value"],
+            '<img src=x onerror="alert(1)">\nOld line 2',
+        )
+        self.assertEqual(
+            entry["request_resubmitted_diff_rows"][0]["new_value"],
+            "<script>alert(2)</script>\nNew line 2",
+        )
+
+    def test_request_notes_apis_allow_read_only_viewers_to_read(self) -> None:
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+        Note.objects.create(membership_request=req, username="reviewer", content="Visible note")
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="viewer",
+        )
+
+        self._login_as_freeipa_user("viewer")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._plain_user("viewer")):
+            summary_response = self.client.get(
+                reverse("api-membership-request-notes-summary", args=[req.pk]),
+                HTTP_ACCEPT="application/json",
+            )
+            detail_response = self.client.get(
+                reverse("api-membership-request-notes", args=[req.pk]),
+                HTTP_ACCEPT="application/json",
             )
 
-        self.assertIn("Membership Committee Notes", html)
-        self.assertIn(reverse("api-membership-request-notes-summary", args=[req.pk]), html)
-        self.assertIn(reverse("api-membership-request-notes", args=[req.pk]), html)
-        self.assertIn('data-membership-notes-has-fallback-content="0"', html)
-        self.assertIn("Loading notes...", html)
-        self.assertNotIn("Visible note", html)
-        self.assertNotIn('data-membership-notes-form="', html)
-        self.assertNotIn('placeholder="Type a note..."', html)
+        self.assertEqual(summary_response.status_code, 200)
+        self.assertEqual(summary_response.json()["note_count"], 1)
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertIn("Visible note", json.dumps(detail_response.json()))
 
-    def test_membership_notes_defaults_to_api_shell_without_direct_query_fallback(self) -> None:
+    def test_membership_request_detail_hides_notes_root_without_view_permission(self) -> None:
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        response = self._membership_request_detail_response(
+            viewer_username="viewer_no_access",
+            membership_request_id=req.pk,
+            expected_status=404,
+        )
+
+        self.assertNotContains(response, 'data-membership-request-notes-root', status_code=404)
+        self.assertNotContains(response, reverse("api-membership-request-notes-summary", args=[req.pk]), status_code=404)
+        self.assertNotContains(response, reverse("api-membership-request-notes", args=[req.pk]), status_code=404)
+
+    def test_membership_request_detail_hides_server_rendered_note_history(self) -> None:
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
         Note.objects.create(membership_request=req, username="reviewer", content="Visible note")
 
-        request = RequestFactory().get("/membership-requests")
-        request.session = {"_freeipa_username": "viewer"}
-
-        viewer = FreeIPAUser(
-            "viewer",
-            {
-                "uid": ["viewer"],
-                "mail": ["viewer@example.com"],
-                "memberof_group": [],
-            },
-        )
-
-        with (
-            patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer),
-            patch(
-                "core.templatetags.core_membership_notes.Note.objects.filter",
-                side_effect=AssertionError("legacy direct note read should not run"),
-            ),
+        with patch(
+            "core.views_membership.committee.Note.objects.filter",
+            side_effect=AssertionError("request detail notes shell must not query Note rows during render"),
         ):
-            from core.templatetags.core_membership_notes import membership_notes
-
-            html = str(
-                membership_notes(
-                    {
-                        "request": request,
-                        "membership_can_view": True,
-                        "membership_can_add": False,
-                        "membership_can_change": False,
-                        "membership_can_delete": False,
-                    },
-                    req,
-                    compact=False,
-                    next_url="/membership-requests",
-                )
+            response = self._membership_request_detail_response(
+                viewer_username="reviewer",
+                membership_request_id=req.pk,
             )
 
-        self.assertIn(reverse("api-membership-request-notes-summary", args=[req.pk]), html)
-        self.assertIn(reverse("api-membership-request-notes", args=[req.pk]), html)
-        self.assertIn('data-membership-notes-has-fallback-content="0"', html)
-        self.assertIn('data-membership-notes-details-loaded="false"', html)
-        self.assertIn("Loading notes...", html)
-        self.assertNotIn("Visible note", html)
-        self.assertNotIn('data-membership-notes-group-username="reviewer"', html)
+        self.assertContains(response, 'data-membership-request-notes-root')
+        self.assertContains(response, 'data-can-view="true"')
+        self.assertContains(response, 'data-can-write="true"')
+        self.assertContains(response, 'data-can-vote="true"')
+        self.assertNotContains(response, "Visible note")
+
+    def test_membership_request_detail_defaults_to_api_shell_without_direct_query_fallback(self) -> None:
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+        Note.objects.create(membership_request=req, username="reviewer", content="Visible note")
+
+        with patch(
+            "core.views_membership.committee.Note.objects.filter",
+            side_effect=AssertionError("legacy direct note read should not run"),
+        ):
+            response = self._membership_request_detail_response(
+                viewer_username="reviewer",
+                membership_request_id=req.pk,
+            )
+
+        self.assertContains(response, reverse("api-membership-request-notes-summary", args=[req.pk]))
+        self.assertContains(response, reverse("api-membership-request-notes", args=[req.pk]))
+        self.assertContains(response, reverse("api-membership-request-notes-add", args=[req.pk]))
+        self.assertNotContains(response, "Visible note")
+        self.assertNotContains(response, 'data-membership-notes-group-username="reviewer"')
 
     def test_membership_note_tags_remove_api_backed_parameter(self) -> None:
         from core.templatetags import core_membership_notes
@@ -1668,18 +1533,9 @@ class MembershipNotesAjaxTests(TestCase):
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
 
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser(
-            "reviewer",
-            {
-                "uid": ["reviewer"],
-                "mail": ["reviewer@example.com"],
-                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
-            },
-        )
-
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer_user()):
             resp = self.client.post(
-                reverse("membership-request-note-add", args=[req.pk]),
+                reverse("api-membership-request-notes-add", args=[req.pk]),
                 data={
                     "note_action": "vote_approve",
                     "message": "approve",
@@ -1703,18 +1559,9 @@ class MembershipNotesAjaxTests(TestCase):
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
 
         self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser(
-            "reviewer",
-            {
-                "uid": ["reviewer"],
-                "mail": ["reviewer@example.com"],
-                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
-            },
-        )
-
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer_user()):
             first = self.client.post(
-                reverse("membership-request-note-add", args=[req.pk]),
+                reverse("api-membership-request-notes-add", args=[req.pk]),
                 data={
                     "note_action": "vote_approve",
                     "message": "",
@@ -1724,30 +1571,20 @@ class MembershipNotesAjaxTests(TestCase):
             )
 
         self.assertEqual(first.status_code, 200)
-        first_payload = json.loads(first.content)
-        self.assertTrue(first_payload.get("ok"))
-        first_html = first_payload.get("html", "")
-        first_approvals = re.search(
-            rf'<span[^>]*data-membership-notes-approvals="{req.pk}"[^>]*>',
-            first_html,
-            re.DOTALL,
+        self.assertEqual(first.json(), {"ok": True, "message": "Recorded approve vote."})
+        self.assertEqual(
+            self._fetch_request_notes_summary_payload(req.pk),
+            {
+                "note_count": 1,
+                "approvals": 1,
+                "disapprovals": 0,
+                "current_user_vote": "approve",
+            },
         )
-        self.assertIsNotNone(first_approvals)
-        assert first_approvals is not None
-        self.assertIn("badge-warning", first_approvals.group(0))
 
-        first_disapprovals = re.search(
-            rf'<span[^>]*data-membership-notes-disapprovals="{req.pk}"[^>]*>',
-            first_html,
-            re.DOTALL,
-        )
-        self.assertIsNotNone(first_disapprovals)
-        assert first_disapprovals is not None
-        self.assertIn("badge-danger", first_disapprovals.group(0))
-
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer_user()):
             second = self.client.post(
-                reverse("membership-request-note-add", args=[req.pk]),
+                reverse("api-membership-request-notes-add", args=[req.pk]),
                 data={
                     "note_action": "vote_disapprove",
                     "message": "",
@@ -1757,26 +1594,16 @@ class MembershipNotesAjaxTests(TestCase):
             )
 
         self.assertEqual(second.status_code, 200)
-        second_payload = json.loads(second.content)
-        self.assertTrue(second_payload.get("ok"))
-        second_html = second_payload.get("html", "")
-        second_approvals = re.search(
-            rf'<span[^>]*data-membership-notes-approvals="{req.pk}"[^>]*>',
-            second_html,
-            re.DOTALL,
+        self.assertEqual(second.json(), {"ok": True, "message": "Recorded disapprove vote."})
+        self.assertEqual(
+            self._fetch_request_notes_summary_payload(req.pk),
+            {
+                "note_count": 2,
+                "approvals": 0,
+                "disapprovals": 1,
+                "current_user_vote": "disapprove",
+            },
         )
-        self.assertIsNotNone(second_approvals)
-        assert second_approvals is not None
-        self.assertIn("badge-success", second_approvals.group(0))
-
-        second_disapprovals = re.search(
-            rf'<span[^>]*data-membership-notes-disapprovals="{req.pk}"[^>]*>',
-            second_html,
-            re.DOTALL,
-        )
-        self.assertIsNotNone(second_disapprovals)
-        assert second_disapprovals is not None
-        self.assertIn("badge-warning", second_disapprovals.group(0))
 
     def test_request_resubmitted_diff_is_stable_across_multi_cycle_history(self) -> None:
         req = MembershipRequest.objects.create(
@@ -1810,23 +1637,24 @@ class MembershipNotesAjaxTests(TestCase):
             },
         )
 
-        html = self._render_notes_html_via_ajax(req.pk)
+        detail_payload = self._fetch_request_notes_detail_payload(req.pk)
+        request_resubmitted_entries = {
+            entry["note_id"]: entry
+            for group in detail_payload["groups"]
+            for entry in group["entries"]
+            if entry["kind"] == "action" and entry.get("note_id") in {note_1.pk, note_2.pk}
+        }
 
-        marker_1 = f'data-request-resubmitted-note-id="{note_1.pk}"'
-        marker_2 = f'data-request-resubmitted-note-id="{note_2.pk}"'
-        start_1 = html.find(marker_1)
-        start_2 = html.find(marker_2)
-        self.assertNotEqual(start_1, -1)
-        self.assertNotEqual(start_2, -1)
-        note_1_html = html[start_1:start_2]
-        note_2_html = html[start_2:]
+        note_1_entry = request_resubmitted_entries[note_1.pk]
+        note_2_entry = request_resubmitted_entries[note_2.pk]
+        self.assertEqual(note_1_entry["request_resubmitted_diff_rows"][0]["question"], "Contributions")
+        self.assertIn("Cycle 1", note_1_entry["request_resubmitted_diff_rows"][0]["old_value"])
+        self.assertIn("Cycle 2", note_1_entry["request_resubmitted_diff_rows"][0]["new_value"])
+        self.assertNotIn("Cycle 3", note_1_entry["request_resubmitted_diff_rows"][0]["new_value"])
 
-        self.assertIn("Cycle 1", note_1_html)
-        self.assertIn("Cycle 2", note_1_html)
-        self.assertNotIn("Cycle 3", note_1_html)
-
-        self.assertIn("Cycle 2", note_2_html)
-        self.assertIn("Cycle 3", note_2_html)
+        self.assertEqual(note_2_entry["request_resubmitted_diff_rows"][0]["question"], "Contributions")
+        self.assertIn("Cycle 2", note_2_entry["request_resubmitted_diff_rows"][0]["old_value"])
+        self.assertIn("Cycle 3", note_2_entry["request_resubmitted_diff_rows"][0]["new_value"])
 
     def test_request_resubmitted_diff_uses_pk_tiebreak_for_equal_timestamps(self) -> None:
         req = MembershipRequest.objects.create(
@@ -1863,25 +1691,18 @@ class MembershipNotesAjaxTests(TestCase):
         Note.objects.filter(pk=note_1.pk).update(timestamp=tie_timestamp)
         Note.objects.filter(pk=note_2.pk).update(timestamp=tie_timestamp)
 
-        html = self._render_notes_html_via_ajax(req.pk)
-
-        marker_1 = f'data-request-resubmitted-note-id="{note_1.pk}"'
-        marker_2 = f'data-request-resubmitted-note-id="{note_2.pk}"'
-        start_1 = html.find(marker_1)
-        start_2 = html.find(marker_2)
-        self.assertNotEqual(start_1, -1)
-        self.assertNotEqual(start_2, -1)
-        self.assertLess(start_1, start_2)
-
-        note_1_html = html[start_1:start_2]
-        note_2_html = html[start_2:]
-
-        self.assertIn("Cycle 1", note_1_html)
-        self.assertIn("Cycle 2", note_1_html)
-        self.assertNotIn("Cycle 3", note_1_html)
-
-        self.assertIn("Cycle 2", note_2_html)
-        self.assertIn("Cycle 3", note_2_html)
+        detail_payload = self._fetch_request_notes_detail_payload(req.pk)
+        request_resubmitted_entries = [
+            entry
+            for group in detail_payload["groups"]
+            for entry in group["entries"]
+            if entry["kind"] == "action" and entry.get("note_id") in {note_1.pk, note_2.pk}
+        ]
+        self.assertEqual([entry["note_id"] for entry in request_resubmitted_entries], [note_1.pk, note_2.pk])
+        self.assertIn("Cycle 1", request_resubmitted_entries[0]["request_resubmitted_diff_rows"][0]["old_value"])
+        self.assertIn("Cycle 2", request_resubmitted_entries[0]["request_resubmitted_diff_rows"][0]["new_value"])
+        self.assertIn("Cycle 2", request_resubmitted_entries[1]["request_resubmitted_diff_rows"][0]["old_value"])
+        self.assertIn("Cycle 3", request_resubmitted_entries[1]["request_resubmitted_diff_rows"][0]["new_value"])
 
     def test_request_resubmitted_diff_renders_changed_questions_as_collapsed_details_only(self) -> None:
         req = MembershipRequest.objects.create(
@@ -1904,16 +1725,23 @@ class MembershipNotesAjaxTests(TestCase):
             },
         )
 
-        html = self._render_notes_html_via_ajax(req.pk)
-        marker = f'data-request-resubmitted-note-id="{note.pk}"'
-        start = html.find(marker)
-        self.assertNotEqual(start, -1)
-        note_html = html[start:]
-
-        self.assertIn('data-request-resubmitted-question="Changed question"', note_html)
-        self.assertIn("<details", note_html)
-        self.assertNotIn("<details open", note_html)
-        self.assertNotIn('data-request-resubmitted-question="Unchanged question"', note_html)
+        detail_payload = self._fetch_request_notes_detail_payload(req.pk)
+        entry = next(
+            entry
+            for group in detail_payload["groups"]
+            for entry in group["entries"]
+            if entry["kind"] == "action" and entry.get("note_id") == note.pk
+        )
+        self.assertEqual(
+            entry["request_resubmitted_diff_rows"],
+            [
+                {
+                    "question": "Changed question",
+                    "old_value": "Old value",
+                    "new_value": "Updated value",
+                }
+            ],
+        )
 
     @override_settings(MEMBERSHIP_NOTES_RESUBMITTED_DIFFS_ENABLED=False)
     def test_request_resubmitted_diff_can_be_disabled_without_hiding_notes(self) -> None:
@@ -1931,31 +1759,17 @@ class MembershipNotesAjaxTests(TestCase):
             },
         )
 
-        detail_html = self._render_notes_html_via_ajax(req.pk)
-        self.assertIn("Request resubmitted", detail_html)
-        self.assertNotIn("data-request-resubmitted-note-id", detail_html)
+        detail_payload = self._fetch_request_notes_detail_payload(req.pk)
+        entry = next(
+            entry
+            for group in detail_payload["groups"]
+            for entry in group["entries"]
+            if entry["kind"] == "action"
+        )
+        self.assertEqual(entry["label"], "Request resubmitted")
+        self.assertEqual(entry["request_resubmitted_diff_rows"], [])
 
-        request = RequestFactory().get("/")
-        request.session = {"_freeipa_username": "reviewer"}
-
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer_user()):
-            from core.templatetags.core_membership_notes import membership_notes_aggregate_for_user
-
-            aggregate_html = str(
-                membership_notes_aggregate_for_user(
-                    {"request": request, "membership_can_view": True},
-                    "alice",
-                    compact=True,
-                    next_url="/",
-                )
-            )
-
-        self.assertNotIn("Request resubmitted", aggregate_html)
-        self.assertNotIn("data-request-resubmitted-note-id", aggregate_html)
-        self.assertIn('data-membership-notes-has-fallback-content="0"', aggregate_html)
-        self.assertIn("Loading notes...", aggregate_html)
-
-    def test_aggregate_profile_notes_do_not_render_authors_or_lookup_avatars_server_side(self) -> None:
+    def test_aggregate_profile_section_does_not_render_authors_or_lookup_avatars_server_side(self) -> None:
         first_request = MembershipRequest.objects.create(
             requested_username="alice",
             membership_type_id="individual",
@@ -1978,8 +1792,8 @@ class MembershipNotesAjaxTests(TestCase):
             action={},
         )
 
-        request = RequestFactory().get("/")
-        request.session = {"_freeipa_username": "reviewer"}
+        target_user = self._plain_user("alice")
+        viewer_user = self._plain_user("reviewer")
 
         with (
             patch(
@@ -1999,16 +1813,15 @@ class MembershipNotesAjaxTests(TestCase):
                 "core.templatetags.core_membership_notes.FreeIPAUser.get",
                 side_effect=AssertionError("aggregate profile notes must not use full-detail FreeIPAUser.get for author hydration"),
             ),
+            patch(
+                "core.templatetags.core_membership_notes.Note.objects.filter",
+                side_effect=AssertionError("aggregate profile notes shell must not query Note rows during render"),
+            ),
         ):
-            from core.templatetags.core_membership_notes import membership_notes_aggregate_for_user
-
-            html = str(
-                membership_notes_aggregate_for_user(
-                    {"request": request, "membership_can_view": True},
-                    "alice",
-                    compact=True,
-                    next_url="/",
-                )
+            html = self._render_user_aggregate_profile_section(
+                target_user=target_user,
+                viewer_user=viewer_user,
+                membership_can_view=True,
             )
 
         self.assertNotIn("First note", html)
@@ -2016,10 +1829,10 @@ class MembershipNotesAjaxTests(TestCase):
         self.assertNotIn('data-membership-notes-group-username="committee2"', html)
         self.assertNotIn('data-membership-notes-group-username="ghost-user"', html)
         self.assertEqual(lightweight_lookup_mock.call_count, 0)
-        self.assertIn('data-membership-notes-has-fallback-content="0"', html)
-        self.assertIn("Loading notes...", html)
+        self.assertIn('data-membership-notes-aggregate-root="user"', html)
+        self.assertIn('data-membership-notes-aggregate-target="alice"', html)
 
-    def test_aggregate_profile_notes_default_to_api_backed_shell_without_fallback_content(self) -> None:
+    def test_aggregate_profile_section_defaults_to_api_backed_shell_without_fallback_content(self) -> None:
         membership_request = MembershipRequest.objects.create(
             requested_username="alice",
             membership_type_id="individual",
@@ -2031,41 +1844,37 @@ class MembershipNotesAjaxTests(TestCase):
             action={},
         )
 
-        request = RequestFactory().get("/")
-        request.session = {"_freeipa_username": "reviewer"}
+        target_user = self._plain_user("alice")
+        viewer_user = self._plain_user("reviewer")
 
         with (
-            patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer_user()),
             patch(
                 "core.templatetags.core_membership_notes.Note.objects.filter",
                 side_effect=AssertionError("aggregate profile note shell must not query Note rows during render"),
             ),
         ):
-            from core.templatetags.core_membership_notes import membership_notes_aggregate_for_user
-
-            html = str(
-                membership_notes_aggregate_for_user(
-                    {"request": request, "membership_can_view": True},
-                    "alice",
-                    compact=True,
-                    next_url="/",
-                )
+            html = self._render_user_aggregate_profile_section(
+                target_user=target_user,
+                viewer_user=viewer_user,
+                membership_can_view=True,
             )
 
         self.assertIn(
-            reverse("api-membership-notes-aggregate-summary") + "?target_type=user&amp;target=alice",
+            reverse("api-membership-notes-aggregate-summary") + "?target_type=user&target=alice",
             html,
         )
         self.assertIn(
-            reverse("api-membership-notes-aggregate") + "?target_type=user&amp;target=alice",
+            reverse("api-membership-notes-aggregate") + "?target_type=user&target=alice",
             html,
         )
-        self.assertIn('data-membership-notes-has-fallback-content="0"', html)
-        self.assertIn('data-membership-notes-details-loaded="false"', html)
-        self.assertIn("Loading notes...", html)
+        self.assertIn(reverse("api-membership-notes-aggregate-add"), html)
+        self.assertIn('data-membership-notes-aggregate-root="user"', html)
+        self.assertIn('data-can-view="true"', html)
+        self.assertIn('data-can-write="false"', html)
+        self.assertIn('data-compact="true"', html)
         self.assertNotIn("Aggregate note", html)
 
-    def test_aggregate_profile_notes_reuse_preloaded_target_and_avatar_safe_viewer(self) -> None:
+    def test_aggregate_profile_section_reuse_preloaded_target_and_avatar_safe_viewer(self) -> None:
         membership_request = MembershipRequest.objects.create(
             requested_username="alice",
             membership_type_id="individual",
@@ -2103,8 +1912,6 @@ class MembershipNotesAjaxTests(TestCase):
             is_authenticated=True,
             get_username=lambda: "viewer",
         )
-        request = self._aggregate_request(viewer_user)
-
         with (
             patch(
                 "core.templatetags.core_membership_notes.FreeIPAUser.find_lightweight_by_usernames",
@@ -2115,37 +1922,26 @@ class MembershipNotesAjaxTests(TestCase):
                 side_effect=AssertionError("aggregate profile notes must keep route-known reuse inside the shared lightweight helper path"),
             ),
         ):
-            from core.templatetags.core_membership_notes import membership_notes_aggregate_for_user
-
-            html = str(
-                membership_notes_aggregate_for_user(
-                    {
-                        "request": request,
-                        "membership_can_view": True,
-                        "membership_can_add": True,
-                        "fu": target_user,
-                    },
-                    "alice",
-                    compact=True,
-                    next_url="/",
-                )
+            html = self._render_user_aggregate_profile_section(
+                target_user=target_user,
+                viewer_user=viewer_user,
+                membership_can_view=True,
+                membership_can_write=True,
             )
 
         self.assertEqual(lightweight_lookup_mock.call_count, 0)
-        self.assertIn('name="aggregate_preloaded_target_token"', html)
-        self.assertNotIn('aggregate_preloaded_target_username', html)
-        self.assertNotIn('aggregate_preloaded_target_email', html)
-        self.assertIn('data-membership-notes-has-fallback-content="0"', html)
-        self.assertIn('data-membership-notes-details-loaded="false"', html)
         self.assertIn(
-            reverse("api-membership-notes-aggregate-summary") + "?target_type=user&amp;target=alice",
+            reverse("api-membership-notes-aggregate-summary") + "?target_type=user&target=alice",
             html,
         )
         self.assertIn(
-            reverse("api-membership-notes-aggregate") + "?target_type=user&amp;target=alice",
+            reverse("api-membership-notes-aggregate") + "?target_type=user&target=alice",
             html,
         )
-        self.assertIn("Loading notes...", html)
+        self.assertIn(reverse("api-membership-notes-aggregate-add"), html)
+        self.assertIn('data-can-view="true"', html)
+        self.assertIn('data-can-write="true"', html)
+        self.assertIn('data-compact="true"', html)
         self.assertNotIn("Target note", html)
         self.assertNotIn("Viewer note", html)
         self.assertNotIn("Ghost note", html)
@@ -2155,7 +1951,7 @@ class MembershipNotesAjaxTests(TestCase):
         self.assertNotIn('class="direct-chat-img img-circle"', html)
         self.assertNotIn('alt="user image"', html)
 
-    def test_aggregate_profile_notes_skip_username_only_viewer_reuse(self) -> None:
+    def test_aggregate_profile_section_skip_username_only_viewer_reuse(self) -> None:
         membership_request = MembershipRequest.objects.create(
             requested_username="alice",
             membership_type_id="individual",
@@ -2195,12 +1991,10 @@ class MembershipNotesAjaxTests(TestCase):
                 "mail": ["viewer@example.com"],
             },
         )
-        request = self._aggregate_request(
-            SimpleNamespace(
-                username="viewer",
-                is_authenticated=True,
-                get_username=lambda: "viewer",
-            )
+        viewer_user = SimpleNamespace(
+            username="viewer",
+            is_authenticated=True,
+            get_username=lambda: "viewer",
         )
 
         with (
@@ -2215,21 +2009,16 @@ class MembershipNotesAjaxTests(TestCase):
                 ),
             ),
         ):
-            from core.templatetags.core_membership_notes import membership_notes_aggregate_for_user
-
-            html = str(
-                membership_notes_aggregate_for_user(
-                    {"request": request, "membership_can_view": True, "fu": target_user},
-                    "alice",
-                    compact=True,
-                    next_url="/",
-                )
+            html = self._render_user_aggregate_profile_section(
+                target_user=target_user,
+                viewer_user=viewer_user,
+                membership_can_view=True,
             )
 
         self.assertEqual(lightweight_lookup_mock.call_count, 0)
-        self.assertIn('data-membership-notes-has-fallback-content="0"', html)
-        self.assertIn('data-membership-notes-details-loaded="false"', html)
-        self.assertIn("Loading notes...", html)
+        self.assertIn('data-membership-notes-aggregate-root="user"', html)
+        self.assertIn('data-can-view="true"', html)
+        self.assertIn('data-can-write="false"', html)
         self.assertNotIn("Target note", html)
         self.assertNotIn("Viewer note", html)
         self.assertNotIn("Ghost note", html)
@@ -2240,7 +2029,7 @@ class MembershipNotesAjaxTests(TestCase):
         self.assertNotIn('class="direct-chat-img img-circle"', html)
         self.assertNotIn('alt="user image"', html)
 
-    def test_aggregate_profile_notes_reuse_evaluated_lazy_freeipa_viewer(self) -> None:
+    def test_aggregate_profile_section_reuse_evaluated_lazy_freeipa_viewer(self) -> None:
         membership_request = MembershipRequest.objects.create(
             requested_username="alice",
             membership_type_id="individual",
@@ -2282,8 +2071,6 @@ class MembershipNotesAjaxTests(TestCase):
         )
         lazy_viewer_user = SimpleLazyObject(lambda: viewer_user)
         _ = lazy_viewer_user.username
-        request = self._aggregate_request(lazy_viewer_user)
-
         with (
             patch(
                 "core.templatetags.core_membership_notes.FreeIPAUser.find_lightweight_by_usernames",
@@ -2296,21 +2083,16 @@ class MembershipNotesAjaxTests(TestCase):
                 ),
             ),
         ):
-            from core.templatetags.core_membership_notes import membership_notes_aggregate_for_user
-
-            html = str(
-                membership_notes_aggregate_for_user(
-                    {"request": request, "membership_can_view": True, "fu": target_user},
-                    "alice",
-                    compact=True,
-                    next_url="/",
-                )
+            html = self._render_user_aggregate_profile_section(
+                target_user=target_user,
+                viewer_user=lazy_viewer_user,
+                membership_can_view=True,
             )
 
         self.assertEqual(lightweight_lookup_mock.call_count, 0)
-        self.assertIn('data-membership-notes-has-fallback-content="0"', html)
-        self.assertIn('data-membership-notes-details-loaded="false"', html)
-        self.assertIn("Loading notes...", html)
+        self.assertIn('data-membership-notes-aggregate-root="user"', html)
+        self.assertIn('data-can-view="true"', html)
+        self.assertIn('data-can-write="false"', html)
         self.assertNotIn("Target note", html)
         self.assertNotIn("Viewer note", html)
         self.assertNotIn("Ghost note", html)
@@ -2355,10 +2137,10 @@ class MembershipNotesAjaxTests(TestCase):
             ),
         ):
             response = self.client.post(
-                reverse("membership-notes-aggregate-note-add"),
+                reverse("api-membership-notes-aggregate-add"),
                 data={
-                    "aggregate_target_type": "user",
-                    "aggregate_target": "alice",
+                    "target_type": "user",
+                    "target": "alice",
                     "aggregate_preloaded_target_token": self._aggregate_target_token(
                         username="alice",
                         email="alice@example.com",
@@ -2375,22 +2157,14 @@ class MembershipNotesAjaxTests(TestCase):
         payload = response.json()
         self.assertEqual(payload.get("ok"), True)
         self.assertEqual(lightweight_lookup_usernames, [])
-
-        html = str(payload.get("html", ""))
-        self.assertIn('data-membership-notes-has-fallback-content="0"', html)
-        self.assertIn('data-membership-notes-details-loaded="false"', html)
-        self.assertIn("Loading notes...", html)
-        self.assertNotIn("Target note", html)
-        self.assertNotIn("Ghost note", html)
-        self.assertNotIn("Ajax note", html)
-        self.assertNotIn('data-membership-notes-group-username="alice"', html)
-        self.assertNotIn('data-membership-notes-group-username="ghost-user"', html)
-        self.assertNotIn('data-membership-notes-group-username="reviewer"', html)
-        self.assertNotIn('class="direct-chat-img img-circle"', html)
-        self.assertNotIn('alt="user image"', html)
-        self.assertIn('name="aggregate_preloaded_target_token"', html)
-        self.assertNotIn('aggregate_preloaded_target_username', html)
-        self.assertNotIn('aggregate_preloaded_target_email', html)
+        self.assertEqual(payload.get("message"), "Note added.")
+        self.assertTrue(
+            Note.objects.filter(
+                membership_request=membership_request,
+                username="reviewer",
+                content="Ajax note",
+            ).exists()
+        )
 
     def test_aggregate_note_ajax_rerender_reuses_no_email_profile_target_from_signed_token(self) -> None:
         membership_request = MembershipRequest.objects.create(
@@ -2426,10 +2200,10 @@ class MembershipNotesAjaxTests(TestCase):
             ),
         ):
             response = self.client.post(
-                reverse("membership-notes-aggregate-note-add"),
+                reverse("api-membership-notes-aggregate-add"),
                 data={
-                    "aggregate_target_type": "user",
-                    "aggregate_target": "alice",
+                    "target_type": "user",
+                    "target": "alice",
                     "aggregate_preloaded_target_token": self._aggregate_target_token(username="alice"),
                     "note_action": "message",
                     "message": "Ajax note",
@@ -2443,22 +2217,14 @@ class MembershipNotesAjaxTests(TestCase):
         payload = response.json()
         self.assertEqual(payload.get("ok"), True)
         self.assertEqual(lightweight_lookup_usernames, [])
-
-        html = str(payload.get("html", ""))
-        self.assertIn('data-membership-notes-has-fallback-content="0"', html)
-        self.assertIn('data-membership-notes-details-loaded="false"', html)
-        self.assertIn("Loading notes...", html)
-        self.assertNotIn("Target note", html)
-        self.assertNotIn("Ghost note", html)
-        self.assertNotIn("Ajax note", html)
-        self.assertNotIn('data-membership-notes-group-username="alice"', html)
-        self.assertNotIn('data-membership-notes-group-username="ghost-user"', html)
-        self.assertNotIn('data-membership-notes-group-username="reviewer"', html)
-        self.assertNotIn('class="direct-chat-img img-circle"', html)
-        self.assertNotIn('alt="user image"', html)
-        self.assertIn('name="aggregate_preloaded_target_token"', html)
-        self.assertNotIn('aggregate_preloaded_target_username', html)
-        self.assertNotIn('aggregate_preloaded_target_email', html)
+        self.assertEqual(payload.get("message"), "Note added.")
+        self.assertTrue(
+            Note.objects.filter(
+                membership_request=membership_request,
+                username="reviewer",
+                content="Ajax note",
+            ).exists()
+        )
 
     def test_aggregate_note_ajax_rerender_ignores_untrusted_raw_target_identity_fields(self) -> None:
         membership_request = MembershipRequest.objects.create(
@@ -2494,10 +2260,10 @@ class MembershipNotesAjaxTests(TestCase):
             ),
         ):
             response = self.client.post(
-                reverse("membership-notes-aggregate-note-add"),
+                reverse("api-membership-notes-aggregate-add"),
                 data={
-                    "aggregate_target_type": "user",
-                    "aggregate_target": "alice",
+                    "target_type": "user",
+                    "target": "alice",
                     "aggregate_preloaded_target_username": "alice",
                     "aggregate_preloaded_target_email": "attacker@example.com",
                     "note_action": "message",
@@ -2512,22 +2278,14 @@ class MembershipNotesAjaxTests(TestCase):
         payload = response.json()
         self.assertEqual(payload.get("ok"), True)
         self.assertEqual(lightweight_lookup_usernames, [])
-
-        html = str(payload.get("html", ""))
-        self.assertIn('data-membership-notes-has-fallback-content="0"', html)
-        self.assertIn('data-membership-notes-details-loaded="false"', html)
-        self.assertIn("Loading notes...", html)
-        self.assertNotIn("Target note", html)
-        self.assertNotIn("Ghost note", html)
-        self.assertNotIn("Ajax note", html)
-        self.assertNotIn('data-membership-notes-group-username="alice"', html)
-        self.assertNotIn('data-membership-notes-group-username="ghost-user"', html)
-        self.assertNotIn('data-membership-notes-group-username="reviewer"', html)
-        self.assertNotIn('class="direct-chat-img img-circle"', html)
-        self.assertNotIn('alt="user image"', html)
-        self.assertNotIn('name="aggregate_preloaded_target_token"', html)
-        self.assertNotIn('aggregate_preloaded_target_username', html)
-        self.assertNotIn('aggregate_preloaded_target_email', html)
+        self.assertEqual(payload.get("message"), "Note added.")
+        self.assertTrue(
+            Note.objects.filter(
+                membership_request=membership_request,
+                username="reviewer",
+                content="Ajax note",
+            ).exists()
+        )
 
     def test_detail_notes_do_not_switch_to_aggregate_lightweight_author_lookup(self) -> None:
         req = MembershipRequest.objects.create(

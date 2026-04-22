@@ -1,5 +1,5 @@
 from django.contrib.staticfiles.storage import staticfiles_storage
-from django.urls import path
+from django.urls import include, path
 from django.views.generic import RedirectView
 
 from core import (
@@ -184,36 +184,7 @@ urlpatterns = [
     path("email-tools/images/", views_mail_images.email_images, name="email-images"),
 
     path("membership/request/", views_membership.membership_request, name="membership-request"),
-    path(
-        "api/v1/membership/requests/pending",
-        views_membership.membership_requests_pending_api,
-        name="api-membership-requests-pending",
-    ),
-    path(
-        "api/v1/membership/requests/on-hold",
-        views_membership.membership_requests_on_hold_api,
-        name="api-membership-requests-on-hold",
-    ),
-    path(
-        "api/v1/membership/requests/<int:pk>/notes/summary",
-        views_membership.membership_request_notes_summary_api,
-        name="api-membership-request-notes-summary",
-    ),
-    path(
-        "api/v1/membership/requests/<int:pk>/notes",
-        views_membership.membership_request_notes_api,
-        name="api-membership-request-notes",
-    ),
-    path(
-        "api/v1/membership/notes/aggregate/summary",
-        views_membership.membership_notes_aggregate_summary_api,
-        name="api-membership-notes-aggregate-summary",
-    ),
-    path(
-        "api/v1/membership/notes/aggregate",
-        views_membership.membership_notes_aggregate_api,
-        name="api-membership-notes-aggregate",
-    ),
+    path("api/v1/", include("api_v1.urls")),
     path(
         "membership/request/<int:pk>/",
         views_membership.membership_request_detail,
@@ -230,21 +201,6 @@ urlpatterns = [
         name="membership-request-rescind",
     ),
     path("membership/requests/", views_membership.membership_requests, name="membership-requests"),
-    path(
-        "membership/requests/<int:pk>/",
-        views_membership.membership_request_detail_legacy_redirect,
-        name="membership-request-detail-legacy",
-    ),
-    path(
-        "membership/requests/<int:pk>/notes/add/",
-        views_membership.membership_request_note_add,
-        name="membership-request-note-add",
-    ),
-    path(
-        "membership/notes/aggregate/add/",
-        views_membership.membership_notes_aggregate_note_add,
-        name="membership-notes-aggregate-note-add",
-    ),
     path(
         "membership/requests/bulk/",
         views_membership.membership_requests_bulk,

@@ -1,5 +1,4 @@
 {% load tz %}
-{% load core_membership_notes %}
 
 <ul class="list-group mb-3">
   <li class="list-group-item d-flex justify-content-between align-items-center">
@@ -157,9 +156,31 @@
 
   {% if membership_can_view %}
     {% if membership_target_kind == 'organization' %}
-      {% membership_notes_aggregate_for_organization organization.pk compact=True %}
+      <div
+        data-membership-notes-aggregate-root="org"
+        data-membership-notes-aggregate-target="{{ organization.pk }}"
+        data-membership-notes-aggregate-summary-url="{% url 'api-membership-notes-aggregate-summary' %}?target_type=org&target={{ organization.pk }}"
+        data-membership-notes-aggregate-detail-url="{% url 'api-membership-notes-aggregate' %}?target_type=org&target={{ organization.pk }}"
+        data-membership-notes-aggregate-add-url="{% url 'api-membership-notes-aggregate-add' %}"
+        data-csrf-token="{{ csrf_token }}"
+        data-next-url="{{ request.get_full_path }}"
+        data-can-view="{% if membership_can_view %}true{% else %}false{% endif %}"
+        data-can-write="{% if membership_can_write %}true{% else %}false{% endif %}"
+        data-compact="true"
+      ></div>
     {% else %}
-      {% membership_notes_aggregate_for_user fu.username compact=True %}
+      <div
+        data-membership-notes-aggregate-root="user"
+        data-membership-notes-aggregate-target="{{ fu.username }}"
+        data-membership-notes-aggregate-summary-url="{% url 'api-membership-notes-aggregate-summary' %}?target_type=user&target={{ fu.username }}"
+        data-membership-notes-aggregate-detail-url="{% url 'api-membership-notes-aggregate' %}?target_type=user&target={{ fu.username }}"
+        data-membership-notes-aggregate-add-url="{% url 'api-membership-notes-aggregate-add' %}"
+        data-csrf-token="{{ csrf_token }}"
+        data-next-url="{{ request.get_full_path }}"
+        data-can-view="{% if membership_can_view %}true{% else %}false{% endif %}"
+        data-can-write="{% if membership_can_write %}true{% else %}false{% endif %}"
+        data-compact="true"
+      ></div>
     {% endif %}
   {% endif %}
 </ul>

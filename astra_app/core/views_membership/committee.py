@@ -3,9 +3,8 @@ from collections.abc import Mapping
 
 from django.conf import settings
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required, permission_required
-from django.core import signing
-from django.core.exceptions import PermissionDenied, ValidationError
+from django.contrib.auth.decorators import permission_required
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -23,10 +22,6 @@ from core.logging_extras import current_exception_log_fields
 from core.membership import visible_committee_membership_requests
 from core.membership_notes import add_note
 from core.membership_notes_preload import build_notes_by_membership_request_id
-from core.membership_notes_render import (
-    render_membership_notes_aggregate_widget,
-    render_membership_notes_widget,
-)
 from core.membership_notifications import organization_sponsor_notification_recipient_email
 from core.membership_request_workflow import (
     _resolve_approval_template_name,
@@ -49,12 +44,14 @@ from core.models import MembershipLog, MembershipRequest, Note
 from core.permissions import (
     ASTRA_ADD_MEMBERSHIP,
     ASTRA_ADD_SEND_MAIL,
+    ASTRA_CHANGE_MEMBERSHIP,
+    ASTRA_DELETE_MEMBERSHIP,
     ASTRA_VIEW_MEMBERSHIP,
     has_any_membership_manage_permission,
     json_permission_required,
+    json_permission_required_any,
     membership_review_permissions,
 )
-from core.tokens import read_membership_notes_aggregate_target_token
 from core.views_utils import (
     _normalize_str,
     _resolve_post_redirect,
@@ -230,28 +227,15 @@ def _resolve_requested_by(
 
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_requests(request: HttpRequest) -> HttpResponse:
-    raw_filter = _normalize_str(request.GET.get("filter")).lower()
-    selected_filter = raw_filter if raw_filter in _MEMBERSHIP_REQUEST_ALLOWED_FILTERS else "all"
     next_url = request.get_full_path()
     request_id_sentinel = 123456789
 
     review_permissions = membership_review_permissions(request.user)
-    filter_options = [
-        {"value": "all", "label": "All", "count": ""},
-        {"value": "renewals", "label": "Renewals", "count": ""},
-        {"value": "sponsorships", "label": "Sponsorships", "count": ""},
-        {"value": "individuals", "label": "Individuals", "count": ""},
-        {"value": "mirrors", "label": "Mirrors", "count": ""},
-    ]
 
     return render(
         request,
         "core/membership_requests.html",
         {
-            "pending_count": "--",
-            "on_hold_count": "--",
-            "filter_options": filter_options,
-            "selected_filter": selected_filter,
             "clear_filter_url": reverse("membership-requests"),
             "next_url": next_url,
             "membership_request_id_sentinel": request_id_sentinel,
@@ -261,7 +245,7 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
             "membership_request_reject_template": reverse("membership-request-reject", args=[request_id_sentinel]),
             "membership_request_rfi_template": reverse("membership-request-rfi", args=[request_id_sentinel]),
             "membership_request_ignore_template": reverse("membership-request-ignore", args=[request_id_sentinel]),
-            "membership_request_note_add_template": reverse("membership-request-note-add", args=[request_id_sentinel]),
+            "membership_request_note_add_template": reverse("api-membership-request-notes-add", args=[request_id_sentinel]),
             "membership_request_note_summary_template": reverse("api-membership-request-notes-summary", args=[request_id_sentinel]),
             "membership_request_note_detail_template": reverse("api-membership-request-notes", args=[request_id_sentinel]),
             "membership_user_profile_template": reverse("user-profile", args=["__username__"]),
@@ -590,6 +574,129 @@ def membership_notes_aggregate_api(request: HttpRequest) -> JsonResponse:
     return JsonResponse(detail)
 
 
+@json_permission_required_any({ASTRA_ADD_MEMBERSHIP, ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP})
+def membership_request_notes_add_api(request: HttpRequest, pk: int) -> JsonResponse:
+    """Add a note to a membership request. Returns JSON-only response."""
+    if request.method != "POST":
+        return _membership_requests_datatables_error("Method not allowed.", status=405)
+
+    req = get_object_or_404(
+        MembershipRequest.objects.select_related("membership_type", "requested_organization"),
+        pk=pk,
+    )
+
+    actor_username = get_username(request)
+    note_action = _normalize_str(request.POST.get("note_action")).lower()
+    message = str(request.POST.get("message") or "")
+
+    try:
+        if note_action == "vote_approve":
+            add_note(
+                membership_request=req,
+                username=actor_username,
+                content=message,
+                action={"type": "vote", "value": "approve"},
+            )
+            user_message = "Recorded approve vote."
+        elif note_action == "vote_disapprove":
+            add_note(
+                membership_request=req,
+                username=actor_username,
+                content=message,
+                action={"type": "vote", "value": "disapprove"},
+            )
+            user_message = "Recorded disapprove vote."
+        else:
+            add_note(
+                membership_request=req,
+                username=actor_username,
+                content=message,
+                action=None,
+            )
+            user_message = "Note added."
+
+        return JsonResponse({"ok": True, "message": user_message})
+    except Exception:
+        logger.exception(
+            "Failed to add membership note request_pk=%s actor=%s",
+            req.pk,
+            actor_username,
+            extra=current_exception_log_fields(),
+        )
+        return JsonResponse({"ok": False, "error": "Failed to add note."}, status=500)
+
+
+@json_permission_required_any({ASTRA_ADD_MEMBERSHIP, ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP})
+def membership_notes_aggregate_add_api(request: HttpRequest) -> JsonResponse:
+    """Add an aggregate note for a user or organization. Returns JSON-only response."""
+    if request.method != "POST":
+        return _membership_requests_datatables_error("Method not allowed.", status=405)
+
+    actor_username = get_username(request)
+    note_action = _normalize_str(request.POST.get("note_action")).lower()
+    message = str(request.POST.get("message") or "")
+    target_type = _normalize_str(request.POST.get("target_type")).lower()
+    target = _normalize_str(request.POST.get("target"))
+
+    if not target_type or not target:
+        return _membership_requests_datatables_error("Missing target.", status=400)
+
+    try:
+        if note_action not in {"", "message"}:
+            return _membership_requests_datatables_error("Invalid note action.", status=400)
+
+        latest: MembershipRequest | None
+        if target_type == "user":
+            latest = (
+                MembershipRequest.objects.filter(requested_username=target)
+                .filter(status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold])
+                .order_by("-requested_at", "-pk")
+                .first()
+            )
+            if latest is None:
+                latest = MembershipRequest.objects.filter(requested_username=target).order_by(
+                    "-requested_at", "-pk"
+                ).first()
+        elif target_type == "org":
+            try:
+                org_id = int(target)
+            except (TypeError, ValueError):
+                return _membership_requests_datatables_error("Invalid target.", status=400)
+            latest = (
+                MembershipRequest.objects.filter(requested_organization_id=org_id)
+                .filter(status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold])
+                .order_by("-requested_at", "-pk")
+                .first()
+            )
+            if latest is None:
+                latest = MembershipRequest.objects.filter(requested_organization_id=org_id).order_by(
+                    "-requested_at", "-pk"
+                ).first()
+        else:
+            return _membership_requests_datatables_error("Invalid target type.", status=400)
+
+        if latest is None:
+            return _membership_requests_datatables_error("No matching membership request.", status=404)
+
+        add_note(
+            membership_request=latest,
+            username=actor_username,
+            content=message,
+            action=None,
+        )
+
+        return JsonResponse({"ok": True, "message": "Note added."})
+    except Exception:
+        logger.exception(
+            "Failed to add aggregate note actor=%s target_type=%s target=%s",
+            actor_username,
+            target_type,
+            target,
+            extra=current_exception_log_fields(),
+        )
+        return JsonResponse({"ok": False, "error": "Failed to add note."}, status=500)
+
+
 @permission_required(ASTRA_VIEW_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
     req = get_object_or_404(
@@ -659,6 +766,10 @@ def build_membership_request_detail_committee_context(
     requested_by_username = requested_log.actor_username if requested_log is not None else ""
     requested_by_full_name, requested_by_deleted = _resolve_requested_by(requested_by_username)
 
+    review_permissions = membership_review_permissions(request.user)
+    can_write = has_any_membership_manage_permission(request.user)
+    can_vote = review_permissions.get("membership_can_add", False) or review_permissions.get("membership_can_change", False) or review_permissions.get("membership_can_delete", False)
+
     return {
         "req": req,
         "target_user": target_user,
@@ -673,6 +784,12 @@ def build_membership_request_detail_committee_context(
         "show_on_hold_approve": show_on_hold_approve,
         "membership_request_rejected_email_template_name": settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME,
         "membership_request_rfi_email_template_name": settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME,
+        "membership_request_notes_summary_url": reverse("api-membership-request-notes-summary", args=[req.pk]),
+        "membership_request_notes_detail_url": reverse("api-membership-request-notes", args=[req.pk]),
+        "membership_request_notes_add_url": reverse("api-membership-request-notes-add", args=[req.pk]),
+        "membership_can_view": review_permissions.get("membership_can_view", False),
+        "membership_can_write": can_write,
+        "membership_can_vote": can_vote,
     }
 
 
@@ -686,220 +803,6 @@ def render_membership_request_detail_for_committee(
         "core/membership_request_detail.html",
         build_membership_request_detail_committee_context(request=request, membership_request=membership_request),
     )
-
-
-@login_required(login_url=reverse_lazy("users"))
-@post_only_404
-def membership_request_note_add(request: HttpRequest, pk: int) -> HttpResponse:
-    is_ajax = str(request.headers.get("X-Requested-With") or "").lower() == "xmlhttprequest"
-    can_write = has_any_membership_manage_permission(request.user)
-    if not can_write:
-        if is_ajax:
-            return JsonResponse({"ok": False, "error": "Permission denied."}, status=403)
-        raise PermissionDenied
-
-    req = get_object_or_404(
-        MembershipRequest.objects.select_related("membership_type", "requested_organization"),
-        pk=pk,
-    )
-
-    redirect_to = _resolve_post_redirect(request, default=reverse("membership-request-detail", args=[req.pk]))
-
-    actor_username = get_username(request)
-    note_action = _normalize_str(request.POST.get("note_action")).lower()
-    message = str(request.POST.get("message") or "")
-
-    try:
-        user_message = ""
-        if note_action == "vote_approve":
-            add_note(
-                membership_request=req,
-                username=actor_username,
-                content=message,
-                action={"type": "vote", "value": "approve"},
-            )
-            user_message = "Recorded approve vote."
-        elif note_action == "vote_disapprove":
-            add_note(
-                membership_request=req,
-                username=actor_username,
-                content=message,
-                action={"type": "vote", "value": "disapprove"},
-            )
-            user_message = "Recorded disapprove vote."
-        else:
-            add_note(
-                membership_request=req,
-                username=actor_username,
-                content=message,
-                action=None,
-            )
-            user_message = "Note added."
-
-        if is_ajax:
-            html = render_membership_notes_widget(
-                request=request,
-                review_permissions=membership_review_permissions(request.user),
-                membership_request=req,
-                compact=False,
-                next_url=redirect_to,
-            )
-            return JsonResponse({"ok": True, "html": str(html), "message": user_message})
-
-        messages.success(request, user_message)
-        return redirect(redirect_to)
-    except PermissionDenied:
-        if is_ajax:
-            return JsonResponse({"ok": False, "error": "Permission denied."}, status=403)
-        raise
-    except Exception:
-        logger.exception(
-            "Failed to add membership note request_pk=%s actor=%s",
-            req.pk,
-            actor_username,
-            extra=current_exception_log_fields(),
-        )
-        if is_ajax:
-            return JsonResponse({"ok": False, "error": "Failed to add note."}, status=500)
-
-        messages.error(request, "Failed to add note.")
-        return redirect(redirect_to)
-
-
-@login_required(login_url=reverse_lazy("users"))
-@post_only_404
-def membership_notes_aggregate_note_add(request: HttpRequest) -> HttpResponse:
-    redirect_to = _resolve_post_redirect(request, default=reverse("users"))
-
-    actor_username = get_username(request)
-    note_action = _normalize_str(request.POST.get("note_action")).lower()
-    message = str(request.POST.get("message") or "")
-    compact = _normalize_str(request.POST.get("compact")) in {"1", "true", "yes"}
-
-    is_ajax = str(request.headers.get("X-Requested-With") or "").lower() == "xmlhttprequest"
-    can_write = has_any_membership_manage_permission(request.user)
-
-    if not can_write:
-        if is_ajax:
-            return JsonResponse({"ok": False, "error": "Permission denied."}, status=403)
-        raise PermissionDenied
-
-    target_type = _normalize_str(request.POST.get("aggregate_target_type")).lower()
-    target = _normalize_str(request.POST.get("aggregate_target"))
-    aggregate_preloaded_target_user: object | None = None
-    if not target_type or not target:
-        if is_ajax:
-            return JsonResponse({"ok": False, "error": "Missing target."}, status=400)
-        messages.error(request, "Missing target.")
-        return redirect(redirect_to)
-
-    try:
-        if note_action not in {"", "message"}:
-            raise PermissionDenied
-
-        latest: MembershipRequest | None
-        if target_type == "user":
-            preloaded_target_token = _normalize_str(request.POST.get("aggregate_preloaded_target_token"))
-            if preloaded_target_token:
-                try:
-                    preloaded_target_payload = read_membership_notes_aggregate_target_token(preloaded_target_token)
-                except signing.BadSignature:
-                    preloaded_target_payload = None
-
-                if preloaded_target_payload is not None:
-                    token_target_type = _normalize_str(preloaded_target_payload.get("target_type")).lower()
-                    token_target = _normalize_str(preloaded_target_payload.get("target"))
-                    token_email = _normalize_str(preloaded_target_payload.get("email"))
-                    if token_target_type == "user" and token_target.casefold() == target.casefold():
-                        aggregate_preloaded_target_user = FreeIPAUser(
-                            token_target,
-                            {
-                                "uid": [token_target],
-                                "mail": [token_email] if token_email else [],
-                            },
-                            respect_privacy=False,
-                        )
-
-            latest = (
-                MembershipRequest.objects.filter(requested_username=target)
-                .filter(status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold])
-                .order_by("-requested_at", "-pk")
-                .first()
-            )
-            if latest is None:
-                latest = MembershipRequest.objects.filter(requested_username=target).order_by(
-                    "-requested_at", "-pk"
-                ).first()
-
-        elif target_type == "org":
-            try:
-                org_id = int(target)
-            except (TypeError, ValueError):
-                if is_ajax:
-                    return JsonResponse({"ok": False, "error": "Invalid target."}, status=400)
-                messages.error(request, "Invalid target.")
-                return redirect(redirect_to)
-
-            latest = (
-                MembershipRequest.objects.filter(requested_organization_id=org_id)
-                .filter(status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold])
-                .order_by("-requested_at", "-pk")
-                .first()
-            )
-            if latest is None:
-                latest = MembershipRequest.objects.filter(requested_organization_id=org_id).order_by(
-                    "-requested_at", "-pk"
-                ).first()
-        else:
-            if is_ajax:
-                return JsonResponse({"ok": False, "error": "Invalid target type."}, status=400)
-            messages.error(request, "Invalid target type.")
-            return redirect(redirect_to)
-
-        if latest is None:
-            if is_ajax:
-                return JsonResponse({"ok": False, "error": "No matching membership request."}, status=404)
-            messages.error(request, "No matching membership request.")
-            return redirect(redirect_to)
-
-        add_note(
-            membership_request=latest,
-            username=actor_username,
-            content=message,
-            action=None,
-        )
-
-        if is_ajax:
-            html = render_membership_notes_aggregate_widget(
-                request=request,
-                review_permissions=membership_review_permissions(request.user),
-                target_type=target_type,
-                target=target,
-                compact=compact,
-                next_url=redirect_to,
-                aggregate_preloaded_target_user=aggregate_preloaded_target_user,
-            )
-
-            return JsonResponse({"ok": True, "html": str(html), "message": "Note added."})
-
-        messages.success(request, "Note added.")
-        return redirect(redirect_to)
-    except PermissionDenied:
-        if is_ajax:
-            return JsonResponse({"ok": False, "error": "Permission denied."}, status=403)
-        raise
-    except Exception:
-        logger.exception(
-            "Failed to add aggregate membership note target_type=%s target=%s actor=%s",
-            target_type,
-            target,
-            actor_username,
-            extra=current_exception_log_fields(),
-        )
-        if is_ajax:
-            return JsonResponse({"ok": False, "error": "Failed to add note."}, status=500)
-        messages.error(request, "Failed to add note.")
-        return redirect(redirect_to)
 
 
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
@@ -1336,12 +1239,10 @@ def membership_request_reopen(request: HttpRequest, pk: int) -> HttpResponse:
 
 
 __all__ = [
-    "membership_notes_aggregate_note_add",
     "membership_request_approve",
     "membership_request_approve_on_hold",
     "membership_request_detail",
     "membership_request_ignore",
-    "membership_request_note_add",
     "membership_request_reject",
     "membership_request_reopen",
     "membership_request_rfi",

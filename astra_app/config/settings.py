@@ -1,6 +1,7 @@
 import datetime
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -287,6 +288,7 @@ if not DEBUG and not _ALLOW_MISSING_RUNTIME_SECRETS and not ALLOWED_HOSTS:
 
 INSTALLED_APPS = [
     'jazzmin',
+    'django_vite',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -772,6 +774,28 @@ STATIC_URL = '/static/'
 
 # Production collectstatic target.
 STATIC_ROOT = BASE_DIR / "staticfiles"
+_bundler_static_dir = BASE_DIR.parent / "frontend" / "dist"
+STATICFILES_DIRS = [("bundler", _bundler_static_dir)] if _bundler_static_dir.exists() else []
+
+_django_vite_dev_mode = _env_bool("DJANGO_VITE_DEV_MODE", default=DEBUG)
+
+DJANGO_VITE = {
+    "default": {
+        "dev_mode": _django_vite_dev_mode,
+        "dev_server_protocol": _env_str("DJANGO_VITE_DEV_SERVER_PROTOCOL", default="http"),
+        "dev_server_host": _env_str("DJANGO_VITE_DEV_SERVER_HOST", default="localhost"),
+        "dev_server_port": _env_int("DJANGO_VITE_DEV_SERVER_PORT", default=5173),
+        "static_url_prefix": "" if _django_vite_dev_mode else "bundler",
+        "manifest_path": _bundler_static_dir / "manifest.json",
+    }
+}
+
+
+def _vite_immutable_file_test(_path: str, url: str) -> bool:
+    return re.match(r"^.+[.-][0-9a-zA-Z_-]{8,12}\..+$", url) is not None
+
+
+WHITENOISE_IMMUTABLE_FILE_TEST = _vite_immutable_file_test
 
 # Uploaded media (e.g. Organization.logo)
 MEDIA_URL = '/media/'

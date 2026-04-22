@@ -97,15 +97,13 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
             resp = self.client.get(reverse("membership-requests"))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Pending:")
-        self.assertContains(resp, "Waiting for requester response")
+        self.assertContains(resp, "Membership Requests")
         self.assertContains(resp, 'data-membership-requests-root')
-        self.assertContains(resp, 'id="membership-requests-pending-table"')
-        self.assertContains(resp, 'id="membership-requests-on-hold-table"')
-        self.assertContains(resp, 'id="bulk-action-form"')
-        self.assertContains(resp, 'id="bulk-action-form-on-hold"')
-        self.assertContains(resp, '>On hold since</th>')
-        self.assertNotContains(resp, ">Waiting</th>")
+        self.assertContains(resp, reverse("api-membership-requests-pending"))
+        self.assertContains(resp, reverse("api-membership-requests-on-hold"))
+        self.assertContains(resp, reverse("api-membership-request-notes-summary", args=[123456789]))
+        self.assertContains(resp, reverse("api-membership-request-notes", args=[123456789]))
+        self.assertContains(resp, reverse("api-membership-request-notes-add", args=[123456789]))
         self.assertNotContains(resp, "Request #1")
 
     def test_reject_modal_includes_reason_presets(self) -> None:

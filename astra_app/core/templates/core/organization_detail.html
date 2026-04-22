@@ -1,9 +1,14 @@
 {% extends 'core/base.html' %}
 
+{% load django_vite %}
 {% load tz %}
 {% load core_membership_notes %}
 
 {% block title %}{{ organization.name }}{% endblock %}
+
+{% block extra_head %}
+  {{ block.super }}
+{% endblock %}
 
 {% block header %}
   <div class="d-flex align-items-center justify-content-between">
@@ -297,4 +302,6 @@
   {% if can_delete_organization %}
     {% include 'core/_modal_confirm.html' with modal_id='organization-delete-modal' title='Delete organization?' body_prefix='Delete organization ' body_emphasis=organization.name body_suffix='? This will terminate the membership and remove the representative from the member group. This cannot be undone. After deletion, you will be redirected to the organizations list.' action_url=organization_delete_url submit_label='Delete organization' submit_class='btn-danger' %}
   {% endif %}
+
+  {% vite_asset 'src/entrypoints/membershipProfileNotes.ts' %}
 {% endblock %}

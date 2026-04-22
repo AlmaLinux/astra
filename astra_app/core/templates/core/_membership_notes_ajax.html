@@ -1,9 +1,0 @@
-{% load core_membership_notes %}
-
-{% if membership_request %}
-  {% membership_notes membership_request compact=compact next_url=next_url %}
-{% elif aggregate_target_type == "user" and username %}
-  {% membership_notes_aggregate_for_user username compact=compact next_url=next_url %}
-{% elif aggregate_target_type == "org" and organization_id %}
-  {% membership_notes_aggregate_for_organization organization_id compact=compact next_url=next_url %}
-{% endif %}

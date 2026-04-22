@@ -28,6 +28,8 @@ RUN chmod +x /usr/local/bin/astra-entrypoint /usr/local/bin/migrate.sh
 
 COPY . .
 
+RUN cd frontend && npm ci && npm run build
+
 # Collect static files for production.
 # This intentionally runs at build time so the runtime container can serve
 # `/static/` via WhiteNoise without requiring any writable volume.

@@ -15,6 +15,7 @@ from core.freeipa.user import FreeIPAUser
 from core.models import FreeIPAPermissionGrant, MembershipRequest, MembershipType, Organization
 from core.permissions import (
     ASTRA_ADD_MEMBERSHIP,
+    ASTRA_ADD_SEND_MAIL,
     ASTRA_CHANGE_MEMBERSHIP,
     ASTRA_DELETE_MEMBERSHIP,
     ASTRA_VIEW_MEMBERSHIP,
@@ -825,6 +826,16 @@ class MembershipRequestsFlowTests(TestCase):
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
 
         committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_ADD_SEND_MAIL,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.group,
+            principal_name=committee_cn,
+        )
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_VIEW_USER_DIRECTORY,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.group,
+            principal_name=committee_cn,
+        )
         reviewer = FreeIPAUser(
             "reviewer",
             {
@@ -1262,17 +1273,23 @@ class MembershipRequestsFlowTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch.object(FreeIPAUser, "add_to_group", autospec=True):
-                with patch("post_office.mail.send", autospec=True):
+                with patch("post_office.mail.send", autospec=True) as send_mock:
                     resp = self.client.post(
                         reverse("membership-request-approve", args=[req.pk]),
                         data={"custom_email": "1"},
-                        follow=True,
+                        follow=False,
                     )
 
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "This request has already been approved")
-        self.assertContains(resp, "No email has been sent yet")
-        self.assertNotContains(resp, "Approved request for alice.")
+        self.assertEqual(resp.status_code, 302)
+        send_mock.assert_not_called()
+
+        redirect_url = str(resp["Location"])
+        self.assertTrue(redirect_url.startswith(reverse("send-mail") + "?"))
+        qs = parse_qs(urlsplit(redirect_url).query)
+        self.assertEqual(qs.get("type"), ["users"])
+        self.assertEqual(qs.get("to"), ["alice"])
+        self.assertEqual(qs.get("template"), [settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME])
+        self.assertEqual(qs.get("action_status"), ["approved"])
 
     @override_settings(MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME="membership-renewal-approved")
     def test_committee_approve_user_renewal_custom_email_preselects_renewal_template(self) -> None:

@@ -679,7 +679,7 @@ def _render_membership_notes_aggregate(
     if resolved_next_url is None:
         resolved_next_url = http_request.get_full_path() if http_request is not None else ""
 
-    post_url = reverse("membership-notes-aggregate-note-add")
+    post_url = reverse("api-membership-notes-aggregate-add")
     aggregate_target_user = _aggregate_preloaded_target_user(
         context=context,
         aggregate_target_type=aggregate_target_type,
@@ -870,7 +870,7 @@ def render_membership_request_notes(
     can_vote = membership_can_add or membership_can_change or membership_can_delete
     can_write = can_vote
 
-    post_url = reverse("membership-request-note-add", args=[mr.pk])
+    post_url = reverse("api-membership-request-notes-add", args=[mr.pk])
     note_summary_url = reverse("api-membership-request-notes-summary", args=[mr.pk])
     note_detail_url = reverse("api-membership-request-notes", args=[mr.pk])
 
