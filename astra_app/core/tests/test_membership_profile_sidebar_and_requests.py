@@ -85,6 +85,24 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         apply_membership_log_side_effects(log=log)
         return log
 
+    def _audit_log_datatables_query(self, *, start: int = 0, length: int = 50) -> dict[str, str]:
+        return {
+            "draw": "1",
+            "start": str(start),
+            "length": str(length),
+            "search[value]": "",
+            "search[regex]": "false",
+            "order[0][column]": "0",
+            "order[0][dir]": "desc",
+            "order[0][name]": "created_at",
+            "columns[0][data]": "log_id",
+            "columns[0][name]": "created_at",
+            "columns[0][searchable]": "true",
+            "columns[0][orderable]": "true",
+            "columns[0][search][value]": "",
+            "columns[0][search][regex]": "false",
+        }
+
     def test_profile_shows_request_link_when_no_membership(self) -> None:
         from core.models import MembershipType
 
@@ -1636,17 +1654,32 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self._login_as_freeipa_user("reviewer")
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
-            resp_page_1 = self.client.get(reverse("membership-audit-log"))
+            resp_page_1 = self.client.get(
+                reverse("api-membership-audit-log"),
+                data=self._audit_log_datatables_query(start=0, length=50),
+                HTTP_ACCEPT="application/json",
+            )
+
         self.assertEqual(resp_page_1.status_code, 200)
-        self.assertContains(resp_page_1, "user50")
-        self.assertNotContains(resp_page_1, "user0")
+        payload_page_1 = resp_page_1.json()
+        self.assertEqual(payload_page_1["recordsFiltered"], 51)
+        self.assertEqual(payload_page_1["data"][0]["target"]["label"], "user50")
+        self.assertEqual(payload_page_1["data"][-1]["target"]["label"], "user1")
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
-            resp_page_2 = self.client.get(reverse("membership-audit-log") + "?page=2")
-        self.assertEqual(resp_page_2.status_code, 200)
-        self.assertContains(resp_page_2, "user0")
+            resp_page_2 = self.client.get(
+                reverse("api-membership-audit-log"),
+                data=self._audit_log_datatables_query(start=50, length=50),
+                HTTP_ACCEPT="application/json",
+            )
 
-    def test_committee_can_view_membership_audit_log_all_and_by_user(self) -> None:
+        self.assertEqual(resp_page_2.status_code, 200)
+        payload_page_2 = resp_page_2.json()
+        self.assertEqual(payload_page_2["recordsFiltered"], 51)
+        self.assertEqual(len(payload_page_2["data"]), 1)
+        self.assertEqual(payload_page_2["data"][0]["target"]["label"], "user0")
+
+    def test_committee_can_view_membership_audit_log_all_and_by_user_filter(self) -> None:
         from core.models import MembershipLog, MembershipType
 
         MembershipType.objects.update_or_create(
@@ -1678,14 +1711,30 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         self.assertEqual(resp_all.status_code, 200)
         self.assertContains(resp_all, "Membership Audit Log")
-        self.assertContains(resp_all, "alice")
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
-            resp_user = self.client.get(reverse("membership-audit-log-user", kwargs={"username": "alice"}))
+            payload_all = self.client.get(
+                reverse("api-membership-audit-log"),
+                data=self._audit_log_datatables_query(),
+                HTTP_ACCEPT="application/json",
+            ).json()
+        self.assertEqual(payload_all["recordsFiltered"], 1)
+        self.assertEqual(payload_all["data"][0]["target"]["label"], "alice")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            resp_user = self.client.get(f"{reverse('membership-audit-log')}?username=alice")
 
         self.assertEqual(resp_user.status_code, 200)
         self.assertContains(resp_user, "Membership Audit Log")
-        self.assertContains(resp_user, "alice")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            payload_user = self.client.get(
+                reverse("api-membership-audit-log"),
+                data={**self._audit_log_datatables_query(), "username": "alice"},
+                HTTP_ACCEPT="application/json",
+            ).json()
+        self.assertEqual(payload_user["recordsFiltered"], 1)
+        self.assertEqual(payload_user["data"][0]["target"]["label"], "alice")
 
     def test_membership_audit_log_shows_linked_request_responses(self) -> None:
         from core.models import MembershipLog, MembershipRequest, MembershipType
@@ -1719,14 +1768,20 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self._login_as_freeipa_user("reviewer")
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
-            resp = self.client.get(reverse("membership-audit-log"))
+            resp = self.client.get(
+                reverse("api-membership-audit-log"),
+                data=self._audit_log_datatables_query(),
+                HTTP_ACCEPT="application/json",
+            )
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, f'href="{reverse("membership-request-detail", args=[req.pk])}"')
-        self.assertContains(resp, f"Request #{req.pk}")
-        self.assertContains(resp, "Request responses")
-        self.assertContains(resp, "Contributions")
-        self.assertContains(resp, "Patch submissions")
+        payload = resp.json()
+        self.assertEqual(payload["recordsFiltered"], 1)
+        request_payload = payload["data"][0]["request"]
+        self.assertEqual(request_payload["request_id"], req.pk)
+        self.assertEqual(request_payload["url"], reverse("membership-request-detail", args=[req.pk]))
+        self.assertEqual(request_payload["responses"][0]["question"], "Contributions")
+        self.assertIn("Patch submissions", request_payload["responses"][0]["answer_html"])
 
     def test_membership_management_menu_stays_open_on_child_pages(self) -> None:
         committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
@@ -1773,7 +1828,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
                         resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, reverse("membership-audit-log-user", kwargs={"username": "alice"}))
+        self.assertContains(resp, f"{reverse('membership-audit-log')}?username=alice")
 
     def test_profile_hides_renewal_button_when_pending_request_exists_for_same_type(self) -> None:
         """When an expiring-soon membership already has a pending renewal request,

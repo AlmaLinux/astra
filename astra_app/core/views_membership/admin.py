@@ -21,6 +21,7 @@ from core.models import Membership, MembershipLog, MembershipType, Organization
 from core.permissions import ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP
 from core.views_membership_admin import (
     membership_audit_log,
+    membership_audit_log_api,
     membership_audit_log_organization,
     membership_audit_log_user,
     membership_sponsors_list,
@@ -360,6 +361,7 @@ def membership_terminate(
 __all__ = [
     "_load_active_membership",
     "membership_audit_log",
+    "membership_audit_log_api",
     "membership_audit_log_organization",
     "membership_audit_log_user",
     "membership_set_expiry",

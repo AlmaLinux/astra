@@ -45,6 +45,7 @@ const props = defineProps<{
   bulkValidationMessage?: string;
   bulkSubmitting?: boolean;
   headerError?: string;
+  showSelection?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -57,7 +58,8 @@ const selectedAction = ref("");
 const localBulkError = ref("");
 const slots = useSlots();
 
-const colspan = computed(() => props.columns.length + 1);
+const showSelection = computed(() => props.showSelection !== false);
+const colspan = computed(() => props.columns.length + (showSelection.value ? 1 : 0));
 const hasBulkActions = computed(() => (props.bulkActions?.length || 0) > 0);
 const bulkActionPlaceholder = computed(() => props.bulkActionPlaceholder || "Bulk action…");
 const bulkSubmitTitle = computed(() => props.bulkSubmitTitle || "Apply selected action to checked rows");
@@ -228,7 +230,7 @@ defineSlots<{
           <table class="table table-striped mb-0 w-100">
             <thead>
               <tr>
-                <th style="width: 40px;" class="text-center">
+                <th v-if="showSelection" style="width: 40px;" class="text-center">
                   <input v-model="allSelected" type="checkbox" :class="checkboxClass" :aria-label="selectAllAriaLabel">
                 </th>
                 <th
@@ -257,7 +259,7 @@ defineSlots<{
 
               <template v-for="row in rows" :key="rowIdString(row)">
                 <tr>
-                  <td class="text-center align-top">
+                  <td v-if="showSelection" class="text-center align-top">
                     <input
                       v-model="selectedIds"
                       :class="checkboxClass"

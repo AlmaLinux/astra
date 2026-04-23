@@ -6,9 +6,9 @@
     <div class="d-flex align-items-center" style="gap: .5rem;">
       {% if membership_can_view %}
         <a href="{% if membership_target_kind == 'organization' %}
-            {% url 'membership-audit-log-organization' organization.pk %}
+            {% url 'membership-audit-log' %}?organization={{ organization.pk }}
             {% else %}
-            {% url 'membership-audit-log-user' fu.username %}
+            {% url 'membership-audit-log' %}?username={{ fu.username }}
             {% endif %}"
           class="btn btn-sm btn-outline-secondary" title="View membership history">History</a>
       {% endif %}

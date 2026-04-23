@@ -9,6 +9,7 @@ from core.membership_request_workflow import (
 from core.views_membership.admin import (
     _load_active_membership,
     membership_audit_log,
+    membership_audit_log_api,
     membership_audit_log_organization,
     membership_audit_log_user,
     membership_set_expiry,
@@ -61,6 +62,7 @@ __all__ = [
     "get_membership_request_eligibility",
     "ignore_membership_request",
     "membership_audit_log",
+    "membership_audit_log_api",
     "membership_audit_log_organization",
     "membership_audit_log_user",
     "membership_notes_aggregate_api",

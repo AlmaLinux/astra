@@ -4,6 +4,7 @@ import math
 import statistics
 from collections import defaultdict
 from collections.abc import Mapping
+from urllib.parse import urlencode
 
 from django.conf import settings
 from django.contrib.auth.decorators import permission_required, user_passes_test
@@ -11,7 +12,8 @@ from django.core.cache import cache
 from django.db.models import Count, Q
 from django.db.models.functions import TruncMonth
 from django.http import HttpRequest, HttpResponse, JsonResponse
-from django.shortcuts import render
+from django.shortcuts import redirect, render
+from django.template.defaultfilters import date as format_date
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 
@@ -27,7 +29,8 @@ from core.permissions import (
     has_any_membership_permission,
     json_permission_required_any,
 )
-from core.views_utils import _normalize_str, build_page_url_prefix, paginate_and_build_context
+from core.templatetags.core_membership_responses import membership_response_value
+from core.views_utils import _normalize_str
 
 logger = logging.getLogger(__name__)
 
@@ -156,46 +159,95 @@ def _compute_retention_cohort_12m(
     return summary, chart
 
 
-def _paginate_and_render_audit_log(
+def _parse_membership_audit_log_datatables_request(
     request: HttpRequest,
-    *,
-    logs,
-    q: str,
-    extra_query_params: dict[str, str],
-    filter_context: dict[str, str],
-) -> HttpResponse:
-    page_number = _normalize_str(request.GET.get("page")) or None
-    query_params: dict[str, str] = {}
-    if q:
-        query_params["q"] = q
-    query_params.update(extra_query_params)
-    _, page_url_prefix = build_page_url_prefix(query_params, page_param="page")
-    page_ctx = paginate_and_build_context(logs, page_number, 50, page_url_prefix=page_url_prefix)
-    return render(
-        request,
-        "core/membership_audit_log.html",
-        {
-            "logs": page_ctx["page_obj"].object_list,
-            "q": q,
-            **filter_context,
-            **page_ctx,
-        },
-    )
+) -> tuple[int, int, int, str, str, int | None]:
+    allowed_params = {
+        "draw",
+        "start",
+        "length",
+        "search[value]",
+        "search[regex]",
+        "order[0][column]",
+        "order[0][dir]",
+        "order[0][name]",
+        "columns[0][data]",
+        "columns[0][name]",
+        "columns[0][searchable]",
+        "columns[0][orderable]",
+        "columns[0][search][value]",
+        "columns[0][search][regex]",
+        "q",
+        "username",
+        "organization",
+    }
 
+    for key in request.GET.keys():
+        if key not in allowed_params:
+            raise ValueError("Invalid query parameters.")
 
-@permission_required(ASTRA_VIEW_MEMBERSHIP, login_url=reverse_lazy("users"))
-def membership_audit_log(request: HttpRequest) -> HttpResponse:
+    try:
+        draw = int(str(request.GET.get("draw") or ""))
+        start = int(str(request.GET.get("start") or ""))
+        length = int(str(request.GET.get("length") or ""))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Invalid query parameters.") from exc
+
+    if draw < 0 or start < 0:
+        raise ValueError("Invalid query parameters.")
+    if length <= 0 or length > 100:
+        raise ValueError("Invalid query parameters.")
+    if _normalize_str(request.GET.get("search[regex]", "")).lower() == "true":
+        raise ValueError("Invalid query parameters.")
+    if _normalize_str(request.GET.get("columns[0][search][regex]", "")).lower() == "true":
+        raise ValueError("Invalid query parameters.")
+    if _normalize_str(request.GET.get("columns[0][search][value]")).strip():
+        raise ValueError("Invalid query parameters.")
+    if _normalize_str(request.GET.get("search[value]")).strip():
+        raise ValueError("Invalid query parameters.")
+
+    order_column = _normalize_str(request.GET.get("order[0][column]"))
+    order_dir = _normalize_str(request.GET.get("order[0][dir]")).lower()
+    order_name = _normalize_str(request.GET.get("order[0][name]"))
+    column_data = _normalize_str(request.GET.get("columns[0][data]"))
+    column_name = _normalize_str(request.GET.get("columns[0][name]"))
+    column_searchable = _normalize_str(request.GET.get("columns[0][searchable]")).lower()
+    column_orderable = _normalize_str(request.GET.get("columns[0][orderable]")).lower()
+
+    if (
+        order_column != "0"
+        or order_dir != "desc"
+        or order_name != "created_at"
+        or column_data != "log_id"
+        or column_name != "created_at"
+        or column_searchable != "true"
+        or column_orderable != "true"
+    ):
+        raise ValueError("Invalid query parameters.")
+
     q = _normalize_str(request.GET.get("q"))
     username = _normalize_str(request.GET.get("username"))
     raw_org = _normalize_str(request.GET.get("organization"))
     organization_id = int(raw_org) if raw_org.isdigit() else None
+    if raw_org and organization_id is None:
+        raise ValueError("Invalid query parameters.")
 
+    return draw, start, length, q, username, organization_id
+
+
+def _membership_audit_log_queryset(
+    *,
+    q: str,
+    username: str,
+    organization_id: int | None,
+):
     logs = MembershipLog.objects.select_related(
         "membership_type",
         "membership_request",
         "membership_request__membership_type",
         "target_organization",
     ).all()
+
     if username:
         logs = logs.filter(target_username=username)
     if organization_id is not None:
@@ -211,96 +263,127 @@ def membership_audit_log(request: HttpRequest) -> HttpResponse:
             | Q(membership_type__code__icontains=q)
             | Q(action__icontains=q)
         )
+    return logs.order_by("-created_at")
 
-    logs = logs.order_by("-created_at")
-    extra_query_params: dict[str, str] = {}
+
+def _serialize_membership_audit_log_row(log: MembershipLog) -> dict[str, object]:
+    if log.target_username:
+        target = {
+            "kind": "user",
+            "label": log.target_username,
+            "secondary_label": "",
+            "deleted": False,
+            "url": reverse("user-profile", args=[log.target_username]),
+        }
+    elif log.target_organization is not None:
+        target = {
+            "kind": "organization",
+            "label": log.target_organization.name,
+            "secondary_label": "",
+            "deleted": False,
+            "url": reverse("organization-detail", args=[log.target_organization.pk]),
+        }
+    else:
+        target = {
+            "kind": "organization",
+            "label": log.target_organization_name,
+            "secondary_label": "",
+            "deleted": True,
+            "url": "",
+        }
+
+    request_payload: dict[str, object] | None = None
+    if log.membership_request_id is not None and log.membership_request is not None:
+        responses: list[dict[str, str]] = []
+        for response_row in list(log.membership_request.responses or []):
+            for question, value in response_row.items():
+                responses.append(
+                    {
+                        "question": str(question),
+                        "answer_html": str(membership_response_value(value, str(question))),
+                    }
+                )
+        request_payload = {
+            "request_id": log.membership_request_id,
+            "url": reverse("membership-request-detail", args=[log.membership_request_id]),
+            "responses": responses,
+        }
+
+    return {
+        "log_id": log.pk,
+        "created_at_display": format_date(log.created_at, "r"),
+        "created_at_iso": log.created_at.isoformat(),
+        "actor_username": log.actor_username,
+        "target": target,
+        "membership_name": log.membership_type.name,
+        "action": log.action,
+        "action_display": log.get_action_display(),
+        "expires_display": format_date(log.expires_at, "M j, Y") if log.expires_at is not None else "",
+        "request": request_payload,
+    }
+
+
+@permission_required(ASTRA_VIEW_MEMBERSHIP, login_url=reverse_lazy("users"))
+def membership_audit_log(request: HttpRequest) -> HttpResponse:
+    q = _normalize_str(request.GET.get("q"))
+    username = _normalize_str(request.GET.get("username"))
+    raw_org = _normalize_str(request.GET.get("organization"))
+    organization_id = int(raw_org) if raw_org.isdigit() else None
+
+    filter_label = ""
     if username:
-        extra_query_params["username"] = username
-    if organization_id is not None:
-        extra_query_params["organization"] = str(organization_id)
-    organization_str = str(organization_id) if organization_id is not None else ""
-    return _paginate_and_render_audit_log(
+        filter_label = username
+    elif organization_id is not None:
+        filter_label = f"org:{organization_id}"
+
+    return render(
         request,
-        logs=logs,
-        q=q,
-        extra_query_params=extra_query_params,
-        filter_context={
-            "filter_username": username,
-            "filter_username_param": username,
-            "filter_organization": organization_str,
-            "filter_organization_param": organization_str,
+        "core/membership_audit_log_vue.html",
+        {
+            "initial_q": q,
+            "initial_username": username,
+            "initial_organization": str(organization_id) if organization_id is not None else "",
+            "filter_label": filter_label,
         },
     )
+
+
+@json_permission_required_any({ASTRA_VIEW_MEMBERSHIP})
+def membership_audit_log_api(request: HttpRequest) -> JsonResponse:
+    try:
+        draw, start, length, q, username, organization_id = _parse_membership_audit_log_datatables_request(
+            request
+        )
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+
+    logs = _membership_audit_log_queryset(
+        q=q,
+        username=username,
+        organization_id=organization_id,
+    )
+    records_total = logs.count()
+    sliced_logs = list(logs[start : start + length])
+
+    payload = {
+        "draw": draw,
+        "recordsTotal": records_total,
+        "recordsFiltered": records_total,
+        "data": [_serialize_membership_audit_log_row(log) for log in sliced_logs],
+    }
+    return JsonResponse(payload)
 
 
 @permission_required(ASTRA_VIEW_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_audit_log_organization(request: HttpRequest, organization_id: int) -> HttpResponse:
-    q = _normalize_str(request.GET.get("q"))
-
-    logs = (
-        MembershipLog.objects.select_related(
-            "membership_type",
-            "membership_request",
-            "membership_request__membership_type",
-            "target_organization",
-        )
-        .for_organization_identifier(organization_id)
-        .order_by("-created_at")
-    )
-    if q:
-        logs = logs.filter(
-            Q(actor_username__icontains=q)
-            | Q(membership_type__name__icontains=q)
-            | Q(membership_type__code__icontains=q)
-            | Q(action__icontains=q)
-        )
-
-    return _paginate_and_render_audit_log(
-        request,
-        logs=logs,
-        q=q,
-        extra_query_params={},
-        filter_context={
-            "filter_username": "",
-            "filter_username_param": "",
-            "filter_organization": str(organization_id),
-            "filter_organization_param": str(organization_id),
-        },
-    )
+    query = urlencode({"organization": str(organization_id)})
+    return redirect(f"{reverse('membership-audit-log')}?{query}")
 
 
 @permission_required(ASTRA_VIEW_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_audit_log_user(request: HttpRequest, username: str) -> HttpResponse:
-    username = _normalize_str(username)
-    q = _normalize_str(request.GET.get("q"))
-
-    logs = (
-        MembershipLog.objects.select_related(
-            "membership_type",
-            "membership_request",
-            "membership_request__membership_type",
-        )
-        .filter(target_username=username)
-        .order_by("-created_at")
-    )
-    if q:
-        logs = logs.filter(
-            Q(actor_username__icontains=q)
-            | Q(membership_type__name__icontains=q)
-            | Q(membership_type__code__icontains=q)
-            | Q(action__icontains=q)
-        )
-
-    return _paginate_and_render_audit_log(
-        request,
-        logs=logs,
-        q=q,
-        extra_query_params={},
-        filter_context={
-            "filter_username": username,
-            "filter_username_param": "",
-        },
-    )
+    query = urlencode({"username": _normalize_str(username)})
+    return redirect(f"{reverse('membership-audit-log')}?{query}")
 
 
 @user_passes_test(has_any_membership_permission, login_url=reverse_lazy("users"))
