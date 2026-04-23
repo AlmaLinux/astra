@@ -48,4 +48,15 @@ describe("mountMembershipAuditLogPage", () => {
     expect(app).toBeNull();
     expect(root.innerHTML).toBe("");
   });
+
+  it("does not mount when page-size bootstrap data is missing", () => {
+    const root = buildRoot({
+      "data-membership-audit-log-api-url": "/api/v1/membership/audit-log",
+    });
+
+    const app = mountMembershipAuditLogPage(root);
+
+    expect(app).toBeNull();
+    expect(root.innerHTML).toBe("");
+  });
 });

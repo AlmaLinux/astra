@@ -53,10 +53,10 @@ export interface MembershipAuditLogRouteState {
   organization: string;
 }
 
-function readPositiveInt(value: string | undefined, fallback: number): number {
+function readPositiveInt(value: string | undefined): number | null {
   const parsed = Number.parseInt(value || "", 10);
   if (Number.isNaN(parsed) || parsed < 1) {
-    return fallback;
+    return null;
   }
   return parsed;
 }
@@ -74,9 +74,14 @@ export function readMembershipAuditLogBootstrap(root: HTMLElement): MembershipAu
     return null;
   }
 
+  const pageSize = readPositiveInt(membershipAuditLogPageSize);
+  if (pageSize === null) {
+    return null;
+  }
+
   return {
     apiUrl: membershipAuditLogApiUrl,
-    pageSize: readPositiveInt(membershipAuditLogPageSize, 50),
+    pageSize,
     initialQ: String(membershipAuditLogInitialQ || ""),
     initialUsername: String(membershipAuditLogInitialUsername || ""),
     initialOrganization: String(membershipAuditLogInitialOrganization || ""),
