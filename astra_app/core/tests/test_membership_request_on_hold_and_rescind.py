@@ -1684,3 +1684,177 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
         follow = self.client.get(resp["Location"])
         messages = [str(message.message) for message in get_messages(follow.wsgi_request)]
         self.assertTrue(any("cannot" in message.lower() or "rescinded" in message.lower() for message in messages))
+
+    def test_membership_action_api_urls_are_registered_under_singular_request_path(self) -> None:
+        request_id = 42
+
+        self.assertEqual(
+            reverse("api-membership-request-rescind", args=[request_id]),
+            f"/api/v1/membership/request/{request_id}/rescind",
+        )
+        self.assertEqual(
+            reverse("api-membership-request-approve", args=[request_id]),
+            f"/api/v1/membership/request/{request_id}/approve",
+        )
+        self.assertEqual(
+            reverse("api-membership-request-approve-on-hold", args=[request_id]),
+            f"/api/v1/membership/request/{request_id}/approve-on-hold",
+        )
+        self.assertEqual(
+            reverse("api-membership-request-reject", args=[request_id]),
+            f"/api/v1/membership/request/{request_id}/reject",
+        )
+        self.assertEqual(
+            reverse("api-membership-request-rfi", args=[request_id]),
+            f"/api/v1/membership/request/{request_id}/rfi",
+        )
+        self.assertEqual(
+            reverse("api-membership-request-ignore", args=[request_id]),
+            f"/api/v1/membership/request/{request_id}/ignore",
+        )
+        self.assertEqual(
+            reverse("api-membership-request-reopen", args=[request_id]),
+            f"/api/v1/membership/request/{request_id}/reopen",
+        )
+        self.assertEqual(
+            reverse("api-membership-requests-bulk"),
+            "/api/v1/membership/requests/bulk",
+        )
+
+    def test_membership_action_api_endpoints_return_json_success(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        pending_req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.pending,
+        )
+        on_hold_req = MembershipRequest.objects.create(
+            requested_username="bob",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.on_hold,
+            on_hold_at=timezone.now(),
+        )
+        ignored_req = MembershipRequest.objects.create(
+            requested_username="carol",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.ignored,
+            decided_at=timezone.now(),
+            decided_by_username="reviewer",
+        )
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        self._add_freeipa_user(
+            username="reviewer",
+            email="reviewer@example.com",
+            groups=[committee_cn],
+            first_name="Reviewer",
+            last_name="User",
+        )
+        self._login_as_freeipa_user("reviewer")
+
+        with (
+            patch("core.views_membership.committee.approve_membership_request", autospec=True) as approve_mock,
+            patch("core.views_membership.committee.approve_on_hold_membership_request", autospec=True) as approve_on_hold_mock,
+            patch("core.views_membership.committee.reject_membership_request", autospec=True, return_value=(None, None)) as reject_mock,
+            patch("core.views_membership.committee.put_membership_request_on_hold", autospec=True, return_value=(None, None)) as rfi_mock,
+            patch("core.views_membership.committee.ignore_membership_request", autospec=True) as ignore_mock,
+            patch("core.views_membership.committee.reopen_ignored_membership_request", autospec=True) as reopen_mock,
+        ):
+            approve_resp = self.client.post(reverse("api-membership-request-approve", args=[pending_req.pk]))
+            approve_on_hold_resp = self.client.post(
+                reverse("api-membership-request-approve-on-hold", args=[on_hold_req.pk]),
+                data={"justification": "Urgent policy exception."},
+            )
+            reject_resp = self.client.post(
+                reverse("api-membership-request-reject", args=[pending_req.pk]),
+                data={"reason": "Missing sponsor details."},
+            )
+            rfi_resp = self.client.post(
+                reverse("api-membership-request-rfi", args=[pending_req.pk]),
+                data={"rfi_message": "Please add your contribution links."},
+            )
+            ignore_resp = self.client.post(reverse("api-membership-request-ignore", args=[pending_req.pk]))
+            reopen_resp = self.client.post(reverse("api-membership-request-reopen", args=[ignored_req.pk]))
+
+        for response in (
+            approve_resp,
+            approve_on_hold_resp,
+            reject_resp,
+            rfi_resp,
+            ignore_resp,
+            reopen_resp,
+        ):
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json().get("ok"), True)
+
+        approve_mock.assert_called_once()
+        approve_on_hold_mock.assert_called_once_with(
+            request_id=on_hold_req.pk,
+            actor_username="reviewer",
+            justification="Urgent policy exception.",
+        )
+        reject_mock.assert_called_once()
+        rfi_mock.assert_called_once()
+        ignore_mock.assert_called_once()
+        reopen_mock.assert_called_once()
+
+    def test_membership_action_api_rejects_get_requests(self) -> None:
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        self._add_freeipa_user(
+            username="reviewer",
+            email="reviewer@example.com",
+            groups=[committee_cn],
+            first_name="Reviewer",
+            last_name="User",
+        )
+        self._login_as_freeipa_user("reviewer")
+
+        response = self.client.get(reverse("api-membership-requests-bulk"))
+
+        self.assertEqual(response.status_code, 405)
+        self.assertEqual(response.json(), {"error": "Method not allowed."})
+
+    def test_membership_rescind_api_requires_ownership(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.pending,
+        )
+
+        self._add_freeipa_user(username="alice", email="alice@example.com")
+        self._add_freeipa_user(username="bob", email="bob@example.com")
+
+        with patch("core.views_membership.user.rescind_membership_request", autospec=True) as rescind_mock:
+            self._login_as_freeipa_user("alice")
+            ok_response = self.client.post(reverse("api-membership-request-rescind", args=[req.pk]))
+            self.assertEqual(ok_response.status_code, 200)
+            self.assertEqual(ok_response.json().get("ok"), True)
+            rescind_mock.assert_called_once()
+
+            self._login_as_freeipa_user("bob")
+            not_found_response = self.client.post(reverse("api-membership-request-rescind", args=[req.pk]))
+            self.assertEqual(not_found_response.status_code, 404)

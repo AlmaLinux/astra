@@ -5,7 +5,7 @@ import { defineConfig } from "vite";
 
 export default defineConfig(({ command }) => ({
   appType: "custom",
-  base: command === "build" ? "/static/bundler/" : "/static/",
+  base: command === "build" ? "/static/bundler/" : "/",
   plugins: [vue()],
   resolve: {
     alias: {

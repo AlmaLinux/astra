@@ -80,6 +80,17 @@ async function submit(noteAction: string): Promise<void> {
   }
 }
 
+function onComposerKeydown(event: KeyboardEvent): void {
+  if (event.key !== "Enter") {
+    return;
+  }
+  if (!event.ctrlKey && !event.metaKey) {
+    return;
+  }
+  event.preventDefault();
+  void submit("message");
+}
+
 const voteText = computed(() => summary.value?.current_user_vote ?? "");
 const approvalBadgeClass = computed(() => {
   if (!props.canVote) {
@@ -328,7 +339,14 @@ function groupAvatarAlt(group: NoteGroup): string {
         </div>
         <form v-if="canWrite && isOpen" :data-membership-notes-form="String(requestId)" @submit.prevent="submit('message')">
           <div class="input-group">
-            <textarea name="message" class="form-control" rows="2" placeholder="Type a note..." v-model="message"></textarea>
+            <textarea
+              name="message"
+              class="form-control"
+              rows="2"
+              placeholder="Type a note..."
+              v-model="message"
+              @keydown="onComposerKeydown"
+            ></textarea>
             <div class="input-group-append">
               <button
                 type="submit"

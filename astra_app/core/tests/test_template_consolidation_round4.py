@@ -17,11 +17,11 @@ class Round4TemplateConsolidationTests(SimpleTestCase):
 
         self.assertNotIn("{% elif organization %}", source)
 
-    def test_membership_request_actions_invokes_inner_template_once(self) -> None:
-        source = self._template_source("_membership_request_actions.html")
+    def test_membership_request_detail_uses_vue_actions_root_contract(self) -> None:
+        source = self._template_source("membership_request_detail.html")
 
-        include_stmt = "{% include 'core/_membership_request_actions_inner.html'"
-        self.assertEqual(source.count(include_stmt), 1)
+        self.assertIn("data-membership-request-actions-root", source)
+        self.assertNotIn("_membership_request_actions.html", source)
 
     def test_membership_request_target_display_is_shared_include(self) -> None:
         requester_cell_source = self._template_source("_membership_request_requester_cell.html")
@@ -31,17 +31,18 @@ class Round4TemplateConsolidationTests(SimpleTestCase):
         self.assertIn(include_stmt, requester_cell_source)
         self.assertIn(include_stmt, detail_source)
 
-    def test_membership_request_actions_avoids_target_sentinel_fallback(self) -> None:
-        source = self._template_source("_membership_request_actions.html")
+    def test_membership_request_detail_does_not_include_shared_modals_partial(self) -> None:
+        source = self._template_source("membership_request_detail.html")
 
-        self.assertNotIn("organization_display_name|default:membership_request.requested_username", source)
+        self.assertNotIn("_membership_request_shared_modals.html", source)
 
-    def test_phase9_bulk_pages_use_shared_bulk_table_actions_module(self) -> None:
+    def test_phase9_bulk_pages_use_expected_action_modules(self) -> None:
         invitations = self._template_source("account_invitations.html")
         requests = self._template_source("membership_requests.html")
 
         self.assertIn("core/js/bulk_table_actions.js", invitations)
-        self.assertIn("core/js/bulk_table_actions.js", requests)
+        self.assertIn("src/entrypoints/membershipRequests.ts", requests)
+        self.assertNotIn("core/js/bulk_table_actions.js", requests)
         self.assertNotIn("function setupBulk", invitations)
         self.assertNotIn("function setupBulk", requests)
 
@@ -70,13 +71,6 @@ class Round4TemplateConsolidationTests(SimpleTestCase):
         self.assertIn('{% now "Y-m-d" as min_expiration_on_utc %}', shared_source)
         self.assertIn("min_value=min_expiration_on_utc", shared_source)
         self.assertIn('min="{{ min_value|default:\'\' }}"', modal_source)
-
-    def test_phase9_membership_shared_modals_compose_canonical_modal_includes(self) -> None:
-        source = self._template_source("_membership_request_shared_modals.html")
-
-        self.assertIn("_modal_confirm.html", source)
-        self.assertIn("_modal_preset_textarea.html", source)
-        self.assertNotIn("<div class=\"modal fade\"", source)
 
     def test_phase9_compose_template_is_markup_only_and_uses_include_contract(self) -> None:
         compose = self._template_source("_templated_email_compose.html")

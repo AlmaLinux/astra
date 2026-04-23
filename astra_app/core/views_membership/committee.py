@@ -240,11 +240,13 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
             "next_url": next_url,
             "membership_request_id_sentinel": request_id_sentinel,
             "membership_request_detail_template": reverse("membership-request-detail", args=[request_id_sentinel]),
-            "membership_request_approve_template": reverse("membership-request-approve", args=[request_id_sentinel]),
-            "membership_request_approve_on_hold_template": reverse("membership-request-approve-on-hold", args=[request_id_sentinel]),
-            "membership_request_reject_template": reverse("membership-request-reject", args=[request_id_sentinel]),
-            "membership_request_rfi_template": reverse("membership-request-rfi", args=[request_id_sentinel]),
-            "membership_request_ignore_template": reverse("membership-request-ignore", args=[request_id_sentinel]),
+            "membership_requests_bulk_url": reverse("api-membership-requests-bulk"),
+            "membership_request_approve_template": reverse("api-membership-request-approve", args=[request_id_sentinel]),
+            "membership_request_approve_on_hold_template": reverse("api-membership-request-approve-on-hold", args=[request_id_sentinel]),
+            "membership_request_reject_template": reverse("api-membership-request-reject", args=[request_id_sentinel]),
+            "membership_request_rfi_template": reverse("api-membership-request-rfi", args=[request_id_sentinel]),
+            "membership_request_ignore_template": reverse("api-membership-request-ignore", args=[request_id_sentinel]),
+            "membership_request_reopen_template": reverse("api-membership-request-reopen", args=[request_id_sentinel]),
             "membership_request_note_add_template": reverse("api-membership-request-notes-add", args=[request_id_sentinel]),
             "membership_request_note_summary_template": reverse("api-membership-request-notes-summary", args=[request_id_sentinel]),
             "membership_request_note_detail_template": reverse("api-membership-request-notes", args=[request_id_sentinel]),
@@ -270,6 +272,43 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
 
 def _membership_requests_datatables_error(message: str, *, status: int = 400) -> JsonResponse:
     return JsonResponse({"error": message}, status=status)
+
+
+def _membership_action_json_error(message: str, *, status: int = 400) -> JsonResponse:
+    return JsonResponse({"ok": False, "error": message}, status=status)
+
+
+def _membership_action_target_label(membership_request: MembershipRequest) -> str:
+    return (
+        membership_request.requested_username
+        if membership_request.is_user_target
+        else (membership_request.organization_display_name or "organization")
+    )
+
+
+def _load_membership_request_for_action_api(
+    pk: int,
+    *,
+    already_status: str,
+    already_label: str,
+) -> MembershipRequest | JsonResponse:
+    membership_request = (
+        MembershipRequest.objects.select_related("membership_type", "requested_organization")
+        .filter(pk=pk)
+        .first()
+    )
+    if membership_request is None:
+        return _membership_action_json_error("Membership request not found.", status=404)
+
+    if membership_request.status == already_status:
+        return JsonResponse(
+            {
+                "ok": True,
+                "message": f"Request for {_membership_action_target_label(membership_request)} is already {already_label}.",
+            }
+        )
+
+    return membership_request
 
 
 def _parse_datatables_request(
@@ -712,6 +751,7 @@ def build_membership_request_detail_committee_context(
     membership_request: MembershipRequest,
 ) -> dict[str, object]:
     req = membership_request
+    request_target_label = req.requested_username if req.is_user_target else (req.organization_display_name or "organization")
 
     show_on_hold_approve = req.status == MembershipRequest.Status.on_hold and request.user.has_perm(ASTRA_ADD_MEMBERSHIP)
 
@@ -782,6 +822,13 @@ def build_membership_request_detail_committee_context(
         "requested_by_deleted": requested_by_deleted,
         "contact_url": contact_url,
         "show_on_hold_approve": show_on_hold_approve,
+        "membership_request_target_label": request_target_label,
+        "membership_request_api_approve_url": reverse("api-membership-request-approve", args=[req.pk]),
+        "membership_request_api_approve_on_hold_url": reverse("api-membership-request-approve-on-hold", args=[req.pk]),
+        "membership_request_api_reject_url": reverse("api-membership-request-reject", args=[req.pk]),
+        "membership_request_api_rfi_url": reverse("api-membership-request-rfi", args=[req.pk]),
+        "membership_request_api_ignore_url": reverse("api-membership-request-ignore", args=[req.pk]),
+        "membership_request_can_request_info": request.user.has_perm(ASTRA_ADD_SEND_MAIL),
         "membership_request_rejected_email_template_name": settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME,
         "membership_request_rfi_email_template_name": settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME,
         "membership_request_notes_summary_url": reverse("api-membership-request-notes-summary", args=[req.pk]),
@@ -1140,6 +1187,349 @@ def run_membership_request_action(request: HttpRequest, pk: int, *, action: str)
     raise Http404("Not found")
 
 
+@json_permission_required(ASTRA_ADD_MEMBERSHIP)
+def membership_request_approve_api(request: HttpRequest, pk: int) -> JsonResponse:
+    if request.method != "POST":
+        return _membership_requests_datatables_error("Method not allowed.", status=405)
+
+    req_or_error = _load_membership_request_for_action_api(
+        pk,
+        already_status=MembershipRequest.Status.approved,
+        already_label="approved",
+    )
+    if isinstance(req_or_error, JsonResponse):
+        return req_or_error
+
+    req = req_or_error
+    try:
+        approve_membership_request(
+            membership_request=req,
+            actor_username=get_username(request),
+            send_approved_email=True,
+            approved_email_template_name=None,
+        )
+    except ValidationError as exc:
+        message = exc.messages[0] if exc.messages else str(exc)
+        return _membership_action_json_error(message, status=400)
+    except Exception:
+        logger.exception(
+            "Failed to approve membership request pk=%s",
+            req.pk,
+            extra=current_exception_log_fields(),
+        )
+        return _membership_action_json_error("Failed to approve the request.", status=500)
+
+    return JsonResponse({"ok": True, "message": f"Approved request for {_membership_action_target_label(req)}."})
+
+
+@json_permission_required(ASTRA_ADD_MEMBERSHIP)
+def membership_request_approve_on_hold_api(request: HttpRequest, pk: int) -> JsonResponse:
+    if request.method != "POST":
+        return _membership_requests_datatables_error("Method not allowed.", status=405)
+
+    req = (
+        MembershipRequest.objects.select_related("membership_type", "requested_organization")
+        .filter(pk=pk)
+        .first()
+    )
+    if req is None:
+        return _membership_action_json_error("Membership request not found.", status=404)
+
+    if req.status == MembershipRequest.Status.approved:
+        return JsonResponse({"ok": True, "message": f"Request for {_membership_action_target_label(req)} is already approved."})
+
+    justification = str(request.POST.get("justification") or "").strip()
+    if not justification:
+        return _membership_action_json_error("Override justification is required.", status=400)
+
+    try:
+        approve_on_hold_membership_request(
+            request_id=req.pk,
+            actor_username=get_username(request),
+            justification=justification,
+        )
+    except ValidationError as exc:
+        message = exc.messages[0] if exc.messages else str(exc)
+        return _membership_action_json_error(message, status=400)
+    except Exception:
+        logger.exception(
+            "Failed to approve on-hold membership request pk=%s",
+            req.pk,
+            extra=current_exception_log_fields(),
+        )
+        return _membership_action_json_error("Failed to approve the on-hold request.", status=500)
+
+    return JsonResponse({"ok": True, "message": f"Approved on-hold request for {_membership_action_target_label(req)}."})
+
+
+@json_permission_required(ASTRA_ADD_MEMBERSHIP)
+def membership_request_reject_api(request: HttpRequest, pk: int) -> JsonResponse:
+    if request.method != "POST":
+        return _membership_requests_datatables_error("Method not allowed.", status=405)
+
+    req_or_error = _load_membership_request_for_action_api(
+        pk,
+        already_status=MembershipRequest.Status.rejected,
+        already_label="rejected",
+    )
+    if isinstance(req_or_error, JsonResponse):
+        return req_or_error
+
+    req = req_or_error
+    form = MembershipRejectForm(request.POST)
+    if not form.is_valid():
+        return _membership_action_json_error("Invalid rejection reason.", status=400)
+
+    reason = str(form.cleaned_data.get("reason") or "").strip()
+    _log, email_error = reject_membership_request(
+        membership_request=req,
+        actor_username=get_username(request),
+        rejection_reason=reason,
+        send_rejected_email=True,
+    )
+
+    payload: dict[str, str | bool] = {
+        "ok": True,
+        "message": f"Rejected request for {_membership_action_target_label(req)}.",
+    }
+    if email_error is not None:
+        payload["warning"] = "Request was rejected, but the email could not be sent."
+    return JsonResponse(payload)
+
+
+@json_permission_required(ASTRA_ADD_MEMBERSHIP)
+def membership_request_rfi_api(request: HttpRequest, pk: int) -> JsonResponse:
+    if request.method != "POST":
+        return _membership_requests_datatables_error("Method not allowed.", status=405)
+
+    req_or_error = _load_membership_request_for_action_api(
+        pk,
+        already_status=MembershipRequest.Status.on_hold,
+        already_label="on hold",
+    )
+    if isinstance(req_or_error, JsonResponse):
+        return req_or_error
+
+    req = req_or_error
+    rfi_message = str(request.POST.get("rfi_message") or "").strip()
+    application_url = request.build_absolute_uri(reverse("membership-request-detail", args=[req.pk]))
+
+    _log, email_error = put_membership_request_on_hold(
+        membership_request=req,
+        actor_username=get_username(request),
+        rfi_message=rfi_message,
+        send_rfi_email=True,
+        application_url=application_url,
+    )
+
+    payload: dict[str, str | bool] = {
+        "ok": True,
+        "message": f"Sent Request for Information for {_membership_action_target_label(req)}.",
+    }
+    if email_error is not None:
+        payload["warning"] = "Request was put on hold, but the email could not be sent."
+    return JsonResponse(payload)
+
+
+@json_permission_required(ASTRA_ADD_MEMBERSHIP)
+def membership_request_ignore_api(request: HttpRequest, pk: int) -> JsonResponse:
+    if request.method != "POST":
+        return _membership_requests_datatables_error("Method not allowed.", status=405)
+
+    req_or_error = _load_membership_request_for_action_api(
+        pk,
+        already_status=MembershipRequest.Status.ignored,
+        already_label="ignored",
+    )
+    if isinstance(req_or_error, JsonResponse):
+        return req_or_error
+
+    req = req_or_error
+    ignore_membership_request(
+        membership_request=req,
+        actor_username=get_username(request),
+    )
+
+    return JsonResponse({"ok": True, "message": f"Ignored request for {_membership_action_target_label(req)}."})
+
+
+@json_permission_required(ASTRA_ADD_MEMBERSHIP)
+def membership_request_reopen_api(request: HttpRequest, pk: int) -> JsonResponse:
+    if request.method != "POST":
+        return _membership_requests_datatables_error("Method not allowed.", status=405)
+
+    req = (
+        MembershipRequest.objects.select_related("membership_type", "requested_organization")
+        .filter(pk=pk)
+        .first()
+    )
+    if req is None:
+        return _membership_action_json_error("Membership request not found.", status=404)
+
+    try:
+        reopen_ignored_membership_request(
+            membership_request=req,
+            actor_username=get_username(request),
+        )
+    except ValidationError as exc:
+        message = exc.messages[0] if exc.messages else str(exc)
+        return _membership_action_json_error(message, status=400)
+    except IntegrityError:
+        return _membership_action_json_error(
+            "Cannot reopen: another open request for this target already exists.",
+            status=400,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to reopen membership request pk=%s",
+            req.pk,
+            extra=current_exception_log_fields(),
+        )
+        return _membership_action_json_error("Failed to reopen the request.", status=500)
+
+    return JsonResponse({"ok": True, "message": f"Reopened request for {_membership_action_target_label(req)}."})
+
+
+@json_permission_required(ASTRA_ADD_MEMBERSHIP)
+def membership_requests_bulk_api(request: HttpRequest) -> JsonResponse:
+    if request.method != "POST":
+        return _membership_requests_datatables_error("Method not allowed.", status=405)
+
+    bulk_scope = _normalize_str(request.POST.get("bulk_scope")).lower() or "pending"
+
+    allowed_statuses: set[str]
+    allowed_actions: set[str]
+    if bulk_scope == "on_hold":
+        allowed_statuses = {MembershipRequest.Status.on_hold}
+        allowed_actions = {"reject", "ignore"}
+    else:
+        bulk_scope = "pending"
+        allowed_statuses = {MembershipRequest.Status.pending}
+        allowed_actions = {"approve", "reject", "ignore"}
+
+    raw_action = _normalize_str(request.POST.get("bulk_action"))
+    action = "approve" if raw_action == "accept" else raw_action
+
+    selected_raw = request.POST.getlist("selected")
+    selected_ids: list[int] = []
+    for value in selected_raw:
+        try:
+            selected_ids.append(int(value))
+        except (TypeError, ValueError):
+            continue
+
+    if not selected_ids:
+        return _membership_action_json_error("Select one or more requests first.", status=400)
+
+    if action not in allowed_actions:
+        if bulk_scope == "on_hold":
+            return _membership_action_json_error("Choose a valid bulk action for on-hold requests.", status=400)
+        return _membership_action_json_error("Choose a valid bulk action.", status=400)
+
+    actor_username = get_username(request)
+    reqs_all = list(
+        MembershipRequest.objects.select_related("membership_type", "requested_organization")
+        .filter(pk__in=selected_ids)
+        .order_by("pk")
+    )
+    if not reqs_all:
+        return _membership_action_json_error("No matching requests were found.", status=404)
+
+    target_status = None
+    if action == "approve":
+        target_status = MembershipRequest.Status.approved
+    elif action == "reject":
+        target_status = MembershipRequest.Status.rejected
+    elif action == "ignore":
+        target_status = MembershipRequest.Status.ignored
+
+    already_in_target = []
+    if target_status is not None:
+        already_in_target = [req for req in reqs_all if req.status == target_status]
+
+    reqs = [req for req in reqs_all if req.status in allowed_statuses]
+    if not reqs:
+        if already_in_target:
+            status_label = str(target_status).replace("_", " ")
+            return JsonResponse({"ok": True, "message": f"Selected request(s) already {status_label}."})
+        if bulk_scope == "on_hold":
+            return _membership_action_json_error("No matching on-hold requests were found.", status=400)
+        return _membership_action_json_error("No matching pending requests were found.", status=400)
+
+    approved = 0
+    rejected = 0
+    ignored = 0
+    failures = 0
+
+    for req in reqs:
+        if action == "approve":
+            try:
+                approve_membership_request(
+                    membership_request=req,
+                    actor_username=actor_username,
+                    send_approved_email=True,
+                )
+            except Exception:
+                logger.exception(
+                    "Bulk approve failed for membership request pk=%s",
+                    req.pk,
+                    extra=current_exception_log_fields(),
+                )
+                failures += 1
+                continue
+
+            approved += 1
+
+        elif action == "reject":
+            try:
+                _, email_error = reject_membership_request(
+                    membership_request=req,
+                    actor_username=actor_username,
+                    rejection_reason="",
+                    send_rejected_email=True,
+                )
+                if email_error is not None:
+                    failures += 1
+            except Exception:
+                logger.exception(
+                    "Bulk reject failed for membership request pk=%s",
+                    req.pk,
+                    extra=current_exception_log_fields(),
+                )
+                failures += 1
+                continue
+
+            rejected += 1
+
+        else:
+            try:
+                ignore_membership_request(
+                    membership_request=req,
+                    actor_username=actor_username,
+                )
+            except Exception:
+                logger.exception(
+                    "Bulk ignore failed for membership request pk=%s",
+                    req.pk,
+                    extra=current_exception_log_fields(),
+                )
+                failures += 1
+                continue
+
+            ignored += 1
+
+    return JsonResponse(
+        {
+            "ok": True,
+            "approved": approved,
+            "rejected": rejected,
+            "ignored": ignored,
+            "failures": failures,
+            "already_in_target": len(already_in_target),
+        }
+    )
+
+
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_request_approve(request: HttpRequest, pk: int) -> HttpResponse:
     return run_membership_request_action(request, pk, action="approve")
@@ -1239,13 +1629,20 @@ def membership_request_reopen(request: HttpRequest, pk: int) -> HttpResponse:
 
 
 __all__ = [
+    "membership_request_approve_api",
+    "membership_request_approve_on_hold_api",
     "membership_request_approve",
+    "membership_request_ignore_api",
     "membership_request_approve_on_hold",
     "membership_request_detail",
     "membership_request_ignore",
+    "membership_request_reject_api",
     "membership_request_reject",
+    "membership_request_reopen_api",
     "membership_request_reopen",
+    "membership_request_rfi_api",
     "membership_request_rfi",
+    "membership_requests_bulk_api",
     "membership_requests",
     "membership_requests_bulk",
     "run_membership_request_action",

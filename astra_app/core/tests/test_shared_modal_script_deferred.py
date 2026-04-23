@@ -1,17 +1,9 @@
-"""
-Verify that shared modal JS defers initialization until DOMContentLoaded,
-so jQuery and Bootstrap are available when event handlers are bound.
-
-The inline script in _membership_request_shared_modals.html runs inside
-{% block content %}, which is parsed BEFORE {% block scripts %} (where
-jQuery/Bootstrap are loaded). Without DOMContentLoaded, window.jQuery is
-undefined and the show.bs.modal handler never fires → blank modal title/body.
-"""
+"""Verify modal and action wiring contracts for membership-related pages."""
 
 from unittest.mock import patch
 
 from django.conf import settings
-from django.test import TestCase, override_settings
+from django.test import TestCase
 from django.urls import reverse
 
 from core.freeipa.user import FreeIPAUser
@@ -20,8 +12,8 @@ from core.permissions import ASTRA_ADD_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP
 from core.tests.utils_test_data import ensure_core_categories
 
 
-class SharedModalScriptDeferredTests(TestCase):
-    """Shared modals must wrap their jQuery event binding in DOMContentLoaded."""
+class MembershipRequestDetailActionContractsTests(TestCase):
+    """Membership request detail actions are now Vue-owned on the detail page."""
 
     def setUp(self) -> None:
         super().setUp()
@@ -56,9 +48,7 @@ class SharedModalScriptDeferredTests(TestCase):
         session["_freeipa_username"] = username
         session.save()
 
-    def test_shared_modal_script_uses_domcontentloaded(self) -> None:
-        """The shared-modal IIFE must be wrapped in DOMContentLoaded so that
-        jQuery is available when show.bs.modal handlers are bound."""
+    def test_membership_request_detail_uses_vue_actions_root(self) -> None:
         reviewer = FreeIPAUser(
             "reviewer",
             {
@@ -69,76 +59,25 @@ class SharedModalScriptDeferredTests(TestCase):
         )
 
         self._login_as_committee()
-
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
-            resp = self.client.get(reverse("membership-requests"))
-
-        self.assertEqual(resp.status_code, 200)
-
-        content = resp.content.decode()
-
-        # The shared modals must be present.
-        self.assertIn('id="shared-approve-modal"', content)
-
-        # The shared-modal binding must be loaded as a dedicated static module.
-        self.assertIn('src="/static/core/js/membership_request_shared_modals.js"', content)
-
-    @override_settings(
-        MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME="membership-request-rejected-custom",
-        MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME="membership-request-rfi-custom",
-    )
-    def test_membership_requests_page_shared_modals_use_settings_template_names(self) -> None:
-        reviewer = FreeIPAUser(
-            "reviewer",
-            {
-                "uid": ["reviewer"],
-                "mail": ["reviewer@example.com"],
-                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
-            },
-        )
-
-        self._login_as_committee()
-
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
-            resp = self.client.get(reverse("membership-requests"))
-
-        self.assertEqual(resp.status_code, 200)
-        content = resp.content.decode()
-        self.assertIn("membership-request-rejected-custom", content)
-        self.assertIn("membership-request-rfi-custom", content)
-        self.assertIn("<code>membership-request-rejected-custom</code>", content)
-        self.assertIn("<code>membership-request-rfi-custom</code>", content)
-        self.assertNotIn("&lt;code&gt;membership-request-rejected-custom&lt;/code&gt;", content)
-        self.assertNotIn("&lt;code&gt;membership-request-rfi-custom&lt;/code&gt;", content)
-
-    @override_settings(
-        MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME="membership-request-rejected-custom",
-        MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME="membership-request-rfi-custom",
-    )
-    def test_membership_request_detail_shared_modals_use_settings_template_names(self) -> None:
-        reviewer = FreeIPAUser(
-            "reviewer",
-            {
-                "uid": ["reviewer"],
-                "mail": ["reviewer@example.com"],
-                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
-            },
-        )
 
         membership_request = MembershipRequest.objects.first()
         assert membership_request is not None
-
-        self._login_as_committee()
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("membership-request-detail", args=[membership_request.pk]))
 
         self.assertEqual(resp.status_code, 200)
+
         content = resp.content.decode()
-        self.assertIn("membership-request-rejected-custom", content)
-        self.assertIn("membership-request-rfi-custom", content)
-        self.assertIn("<code>membership-request-rejected-custom</code>", content)
-        self.assertIn("<code>membership-request-rfi-custom</code>", content)
+        self.assertIn('data-membership-request-actions-root', content)
+        self.assertIn('data-membership-request-id="', content)
+        self.assertIn('data-membership-request-status="', content)
+        self.assertIn('data-membership-request-api-approve-url="', content)
+        self.assertIn('data-membership-request-api-reject-url="', content)
+        self.assertIn('data-membership-request-api-rfi-url="', content)
+        self.assertIn('data-membership-request-api-ignore-url="', content)
+        self.assertNotIn('id="shared-approve-modal"', content)
+        self.assertNotIn('src="/static/core/js/membership_request_shared_modals.js"', content)
 
 
 class GroupDetailModalScriptDeferredTests(TestCase):

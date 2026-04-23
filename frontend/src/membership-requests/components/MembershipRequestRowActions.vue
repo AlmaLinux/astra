@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
-import type { MembershipRequestRow, MembershipRequestsBootstrap } from "../types";
+import type { MembershipRequestActionIntent, MembershipRequestRow, MembershipRequestsBootstrap } from "../types";
 import { membershipRequestTargetContext, replaceTemplateToken } from "../types";
 
 const props = defineProps<{
   row: MembershipRequestRow;
   bootstrap: MembershipRequestsBootstrap;
+}>();
+
+const emit = defineEmits<{
+  (event: "open-action", value: MembershipRequestActionIntent): void;
 }>();
 
 const requester = computed(() => {
@@ -15,6 +19,17 @@ const requester = computed(() => {
 
 function actionUrl(template: string): string {
   return replaceTemplateToken(template, props.bootstrap.requestIdSentinel, props.row.request_id);
+}
+
+function openAction(actionKind: MembershipRequestActionIntent["actionKind"], template: string): void {
+  emit("open-action", {
+    requestId: props.row.request_id,
+    requestStatus: props.row.status,
+    actionKind,
+    actionUrl: actionUrl(template),
+    requestTarget: requester.value,
+    membershipType: props.row.membership_type.name,
+  });
 }
 </script>
 
@@ -26,16 +41,7 @@ function actionUrl(template: string): string {
       class="btn btn-sm btn-success"
       title="Approve this request"
       aria-label="Approve"
-      data-toggle="modal"
-      data-target="#shared-approve-modal"
-      :data-action-url="actionUrl(bootstrap.approveTemplate)"
-      :data-modal-title="`Approve ${row.membership_type.name} request`"
-      :data-request-id="String(row.request_id)"
-      :data-request-target="requester"
-      :data-membership-type="row.membership_type.name"
-      :data-body-prefix="`Approve ${row.membership_type.name} request from`"
-      :data-body-emphasis="requester"
-      data-body-suffix="?"
+      @click="openAction('approve', bootstrap.approveTemplate)"
     >Approve</button>
     <button
       v-if="row.status === 'on_hold'"
@@ -43,26 +49,14 @@ function actionUrl(template: string): string {
       class="btn btn-sm btn-success"
       title="Approve this on-hold request with committee override"
       aria-label="Approve"
-      data-toggle="modal"
-      data-target="#shared-approve-on-hold-modal"
-      :data-action-url="actionUrl(bootstrap.approveOnHoldTemplate)"
-      :data-modal-title="`Approve ${row.membership_type.name} request`"
-      :data-request-id="String(row.request_id)"
-      :data-request-target="requester"
-      :data-membership-type="row.membership_type.name"
+      @click="openAction('approve_on_hold', bootstrap.approveOnHoldTemplate)"
     >Approve</button>
     <button
       type="button"
       class="btn btn-sm btn-danger"
       title="Reject this request"
       aria-label="Reject"
-      data-toggle="modal"
-      data-target="#shared-reject-modal"
-      :data-action-url="actionUrl(bootstrap.rejectTemplate)"
-      :data-modal-title="`Reject ${row.membership_type.name} request`"
-      :data-request-id="String(row.request_id)"
-      :data-request-target="requester"
-      :data-membership-type="row.membership_type.name"
+      @click="openAction('reject', bootstrap.rejectTemplate)"
     >Reject</button>
     <button
       v-if="row.status === 'pending' && bootstrap.canRequestInfo"
@@ -70,29 +64,14 @@ function actionUrl(template: string): string {
       class="btn btn-sm btn-outline-primary"
       title="Request information and put on hold"
       aria-label="Request for Information"
-      data-toggle="modal"
-      data-target="#shared-rfi-modal"
-      :data-action-url="actionUrl(bootstrap.requestInfoTemplate)"
-      :data-modal-title="`Request information for ${row.membership_type.name} request`"
-      :data-request-id="String(row.request_id)"
-      :data-request-target="requester"
-      :data-membership-type="row.membership_type.name"
+      @click="openAction('rfi', bootstrap.requestInfoTemplate)"
     >RFI</button>
     <button
       type="button"
       class="btn btn-sm btn-outline-secondary"
       title="Ignore this request"
       aria-label="Ignore"
-      data-toggle="modal"
-      data-target="#shared-ignore-modal"
-      :data-action-url="actionUrl(bootstrap.ignoreTemplate)"
-      :data-modal-title="`Ignore ${row.membership_type.name} request`"
-      :data-request-id="String(row.request_id)"
-      :data-request-target="requester"
-      :data-membership-type="row.membership_type.name"
-      :data-body-prefix="`Ignore ${row.membership_type.name} request from`"
-      :data-body-emphasis="requester"
-      data-body-suffix="? This does not approve the membership, nor does it notify the user."
+      @click="openAction('ignore', bootstrap.ignoreTemplate)"
     >Ignore</button>
   </div>
 </template>

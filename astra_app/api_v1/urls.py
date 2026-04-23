@@ -4,6 +4,46 @@ from core import views_membership
 
 urlpatterns = [
     path(
+        "membership/request/<int:pk>/rescind",
+        views_membership.membership_request_rescind_api,
+        name="api-membership-request-rescind",
+    ),
+    path(
+        "membership/request/<int:pk>/approve",
+        views_membership.membership_request_approve_api,
+        name="api-membership-request-approve",
+    ),
+    path(
+        "membership/request/<int:pk>/approve-on-hold",
+        views_membership.membership_request_approve_on_hold_api,
+        name="api-membership-request-approve-on-hold",
+    ),
+    path(
+        "membership/request/<int:pk>/reject",
+        views_membership.membership_request_reject_api,
+        name="api-membership-request-reject",
+    ),
+    path(
+        "membership/request/<int:pk>/rfi",
+        views_membership.membership_request_rfi_api,
+        name="api-membership-request-rfi",
+    ),
+    path(
+        "membership/request/<int:pk>/ignore",
+        views_membership.membership_request_ignore_api,
+        name="api-membership-request-ignore",
+    ),
+    path(
+        "membership/request/<int:pk>/reopen",
+        views_membership.membership_request_reopen_api,
+        name="api-membership-request-reopen",
+    ),
+    path(
+        "membership/requests/bulk",
+        views_membership.membership_requests_bulk_api,
+        name="api-membership-requests-bulk",
+    ),
+    path(
         "membership/requests/pending",
         views_membership.membership_requests_pending_api,
         name="api-membership-requests-pending",

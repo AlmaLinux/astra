@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 
-import type { MembershipRequestRow, MembershipRequestsBootstrap } from "../types";
+import type { MembershipRequestActionIntent, MembershipRequestRow, MembershipRequestsBootstrap } from "../types";
 import {
   buildPaginationWindow,
   canLinkMembershipRequestTarget,
@@ -19,6 +19,11 @@ interface ColumnDef {
   noWrap?: boolean;
 }
 
+interface BulkActionOption {
+  value: string;
+  label: string;
+}
+
 const props = defineProps<{
   bootstrap: MembershipRequestsBootstrap;
   rows: MembershipRequestRow[];
@@ -34,13 +39,34 @@ const props = defineProps<{
   columns: ColumnDef[];
   colspan: number;
   loadingMessage?: string;
+  bulkActions?: BulkActionOption[];
+  bulkScope?: string;
+  bulkFormId?: string;
+  bulkSubmitTitle?: string;
+  bulkActionPlaceholder?: string;
+  bulkSubmitUrl?: string;
 }>();
 
 const emit = defineEmits<{
   (event: "page-change", value: number): void;
+  (event: "bulk-success", payload: { scope: "pending" | "on_hold" }): void;
+  (event: "open-action", payload: MembershipRequestActionIntent): void;
 }>();
 
 const selectedIds = ref<number[]>([]);
+const bulkAction = ref("");
+const bulkError = ref("");
+const isBulkSubmitting = ref(false);
+
+const hasBulkActions = computed(() => (props.bulkActions?.length || 0) > 0);
+
+const bulkScope = computed<"pending" | "on_hold">(() => (props.bulkScope === "on_hold" ? "on_hold" : "pending"));
+
+const bulkActionPlaceholder = computed(() => props.bulkActionPlaceholder || "Bulk action…");
+
+const bulkSubmitTitle = computed(() => props.bulkSubmitTitle || "Apply selected action to checked requests");
+
+const bulkSubmitUrl = computed(() => props.bulkSubmitUrl || props.bootstrap.bulkUrl || "/api/v1/membership/requests/bulk");
 
 const nextUrl = computed(() => {
   if (props.bootstrap.nextUrl) {
@@ -109,8 +135,55 @@ function onPageLinkClick(event: Event, pageNumber: number, disabled: boolean): v
   emit("page-change", pageNumber);
 }
 
+async function submitBulkAction(): Promise<void> {
+  if (!bulkAction.value || selectedIds.value.length === 0 || isBulkSubmitting.value) {
+    return;
+  }
+
+  bulkError.value = "";
+  isBulkSubmitting.value = true;
+
+  try {
+    const formData = new FormData();
+    formData.append("bulk_action", bulkAction.value);
+    formData.append("next", nextUrl.value);
+    if (bulkScope.value === "on_hold") {
+      formData.append("bulk_scope", "on_hold");
+    }
+    for (const requestId of selectedIds.value) {
+      formData.append("selected", String(requestId));
+    }
+
+    const response = await fetch(bulkSubmitUrl.value, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "X-CSRFToken": props.bootstrap.csrfToken || "",
+      },
+      body: formData,
+      credentials: "same-origin",
+    });
+
+    const payload = (await response.json()) as { ok?: boolean; error?: string };
+    if (!response.ok || payload.ok === false) {
+      bulkError.value = payload.error || "Failed to apply bulk action.";
+      return;
+    }
+
+    bulkAction.value = "";
+    selectedIds.value = [];
+    emit("bulk-success", { scope: bulkScope.value });
+  } catch {
+    bulkError.value = "Failed to apply bulk action.";
+  } finally {
+    isBulkSubmitting.value = false;
+  }
+}
+
 defineSlots<{
   header(): any;
+  "header-tools"(): any;
+  "header-meta"(): any;
   "row-extra-columns"(props: { row: MembershipRequestRow }): any;
   "empty-state"(): any;
 }>();
@@ -125,7 +198,38 @@ defineSlots<{
       <div class="card-header">
         <slot name="header">
           <div class="d-flex align-items-center justify-content-between flex-wrap" style="gap: 0.5rem;">
-            <div class="text-muted">{{ count }}</div>
+            <div class="d-flex align-items-center flex-wrap" style="gap: 0.5rem;">
+              <form
+                v-if="hasBulkActions"
+                :id="bulkFormId"
+                :action="bulkSubmitUrl"
+                class="form-inline"
+                @submit.prevent="submitBulkAction"
+              >
+                <input type="hidden" name="next" :value="nextUrl">
+                <input v-if="bulkScope" type="hidden" name="bulk_scope" :value="bulkScope">
+                <div class="input-group input-group-sm">
+                  <select v-model="bulkAction" name="bulk_action" class="custom-select custom-select-sm" aria-label="Bulk action">
+                    <option value="">{{ bulkActionPlaceholder }}</option>
+                    <option v-for="option in bulkActions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                  </select>
+                  <div class="input-group-append">
+                    <button
+                      type="submit"
+                      class="btn btn-default"
+                      :title="bulkSubmitTitle"
+                      :disabled="selectedIds.length === 0 || !bulkAction || isBulkSubmitting"
+                    >Apply</button>
+                  </div>
+                </div>
+                <input v-for="requestId in selectedIds" :key="requestId" type="hidden" name="selected" :value="String(requestId)">
+              </form>
+              <div v-if="bulkError" class="small text-danger">{{ bulkError }}</div>
+              <slot name="header-tools" />
+            </div>
+            <slot name="header-meta">
+              <div class="text-muted">{{ count }}</div>
+            </slot>
           </div>
         </slot>
       </div>
@@ -197,7 +301,7 @@ defineSlots<{
                   </td>
                   <slot name="row-extra-columns" :row="row" />
                   <td class="align-top text-right" style="width: 15%;">
-                    <MembershipRequestRowActions :row="row" :bootstrap="bootstrap" />
+                    <MembershipRequestRowActions :row="row" :bootstrap="bootstrap" @open-action="emit('open-action', $event)" />
                   </td>
                 </tr>
               </template>

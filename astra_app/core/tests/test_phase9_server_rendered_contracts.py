@@ -106,7 +106,8 @@ class Phase9ServerRenderedContractsTests(TestCase):
         self.assertIn('data-membership-request-note-summary-template="/api/v1/membership/notes/123456789/summary"', requests_html)
         self.assertIn('data-membership-request-note-detail-template="/api/v1/membership/notes/123456789"', requests_html)
         self.assertIn('data-membership-request-note-add-template="/api/v1/membership/requests/123456789/notes/add"', requests_html)
-        self.assertIn('id="shared-approve-modal"', requests_html)
+        self.assertNotIn('id="shared-approve-modal"', requests_html)
+        self.assertNotIn('src="/static/core/js/membership_request_shared_modals.js"', requests_html)
 
         self.assertIn('data-bulk-table-form', invitations_html)
         self.assertIn('data-bulk-select-all-id="select-all-invitations-pending"', invitations_html)
@@ -118,7 +119,7 @@ class Phase9ServerRenderedContractsTests(TestCase):
         self.assertIn('class="invitation-checkbox invitation-checkbox--pending"', invitations_html)
         self.assertIn('form="bulk-invitations-pending-form"', invitations_html)
 
-    def test_membership_shared_modal_shell_is_rendered(self) -> None:
+    def test_membership_requests_page_uses_vue_owned_modals(self) -> None:
         self._login_as_freeipa_user("reviewer")
 
         MembershipType.objects.update_or_create(
@@ -143,23 +144,12 @@ class Phase9ServerRenderedContractsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode("utf-8")
 
-        self.assertIn('id="shared-approve-modal"', html)
-        self.assertIn('id="shared-approve-on-hold-modal"', html)
-        self.assertIn('id="shared-reject-modal"', html)
-        self.assertIn('id="shared-rfi-modal"', html)
-        self.assertIn('id="shared-ignore-modal"', html)
-
-        self.assertIn('class="js-body-prefix"', html)
-        self.assertIn('class="js-body-emphasis"', html)
-        self.assertIn('class="js-body-suffix"', html)
-
-        self.assertIn('Request #<strong class="js-request-id"></strong>', html)
-        self.assertIn('Requested for <strong class="js-request-target"></strong>', html)
-        self.assertIn('Membership type <strong class="js-membership-type"></strong>', html)
-        self.assertIn('Committee override justification:', html)
-        self.assertIn('Required for this committee override approval. This note is stored in the membership request audit trail.', html)
-
-        self.assertIn('src="/static/core/js/membership_request_shared_modals.js"', html)
+        self.assertNotIn('id="shared-approve-modal"', html)
+        self.assertNotIn('id="shared-approve-on-hold-modal"', html)
+        self.assertNotIn('id="shared-reject-modal"', html)
+        self.assertNotIn('id="shared-rfi-modal"', html)
+        self.assertNotIn('id="shared-ignore-modal"', html)
+        self.assertNotIn('src="/static/core/js/membership_request_shared_modals.js"', html)
 
     def test_compose_embed_contract_renders_for_send_mail_election_edit_and_email_template_edit(self) -> None:
         self._login_as_freeipa_user("reviewer")

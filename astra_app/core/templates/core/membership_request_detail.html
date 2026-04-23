@@ -100,9 +100,21 @@
 
       {% if req.status == 'pending' or req.status == 'on_hold' %}
         <hr>
-        <div class="membership-request-actions membership-request-actions--detail">
-          {% include 'core/_membership_request_actions.html' with request=req show_on_hold_approve=show_on_hold_approve %}
-        </div>
+        <div
+          data-membership-request-actions-root
+          data-membership-request-id="{{ req.pk }}"
+          data-membership-request-status="{{ req.status }}"
+          data-membership-request-membership-type-name="{{ req.membership_type.name }}"
+          data-membership-request-target="{{ membership_request_target_label }}"
+          data-membership-request-api-approve-url="{{ membership_request_api_approve_url }}"
+          data-membership-request-api-approve-on-hold-url="{{ membership_request_api_approve_on_hold_url }}"
+          data-membership-request-api-reject-url="{{ membership_request_api_reject_url }}"
+          data-membership-request-api-rfi-url="{{ membership_request_api_rfi_url }}"
+          data-membership-request-api-ignore-url="{{ membership_request_api_ignore_url }}"
+          data-membership-request-can-request-info="{% if membership_request_can_request_info %}true{% else %}false{% endif %}"
+          data-membership-request-show-on-hold-approve="{% if show_on_hold_approve %}true{% else %}false{% endif %}"
+          data-membership-request-csrf-token="{{ csrf_token }}"
+        ></div>
       {% endif %}
 
       {% if req.status == 'ignored' and membership_can_add %}
@@ -114,6 +126,4 @@
       {% endif %}
     </div>
   </div>
-
-  {% include 'core/_membership_request_shared_modals.html' %}
 {% endblock %}

@@ -229,6 +229,47 @@ describe("MembershipNotesCard", () => {
     expect(wrapper.find('button[data-note-action="message"]').exists()).toBe(false);
   });
 
+  it("submits message on Ctrl+Enter in the composer", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "POST") {
+        return new Response(JSON.stringify({ ok: true, message: "Note added." }));
+      }
+      if (url.endsWith("/summary")) {
+        return new Response(JSON.stringify({ note_count: 0, approvals: 0, disapprovals: 0, current_user_vote: null }));
+      }
+      return new Response(JSON.stringify({ groups: [] }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const wrapper = mount(MembershipNotesCard, {
+      props: {
+        requestId: 99,
+        summaryUrl: "/api/v1/membership/notes/99/summary",
+        detailUrl: "/api/v1/membership/notes/99",
+        addUrl: "/membership/requests/99/notes/add/",
+        csrfToken: "csrf-token",
+        nextUrl: "/membership/requests/",
+        canView: true,
+        canWrite: true,
+        canVote: false,
+      },
+    });
+
+    await flushPromises();
+    await wrapper.get('[data-membership-notes-toggle="99"]').trigger("click");
+    await flushPromises();
+
+    const textarea = wrapper.get('textarea[name="message"]');
+    await textarea.setValue("Send via keyboard");
+    await textarea.trigger("keydown", { key: "Enter", ctrlKey: true });
+    await flushPromises();
+    await flushPromises();
+
+    const postCall = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
+    expect(postCall).toBeDefined();
+  });
+
   it("degrades summary failures to the legacy warning badge state", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

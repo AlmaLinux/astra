@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed } from "vue";
 
-import type { MembershipRequestRow, MembershipRequestsBootstrap } from "../types";
+import type { MembershipRequestActionIntent, MembershipRequestRow, MembershipRequestsBootstrap } from "../types";
 import { buildMembershipRequestsRouteUrl, formatLegacyDateTime, formatRelativeAgo, readMembershipRequestsRouteState } from "../types";
 import RequestsTable from "./RequestsTable.vue";
 
@@ -17,10 +17,9 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (event: "page-change", value: number): void;
+  (event: "bulk-success", payload: { scope: "pending" | "on_hold" }): void;
+  (event: "open-action", payload: MembershipRequestActionIntent): void;
 }>();
-
-const bulkAction = ref("");
-const selectedIds = ref<number[]>([]);
 
 const nextUrl = computed(() => {
   if (props.bootstrap.nextUrl) {
@@ -70,29 +69,18 @@ function onPageChange(pageNumber: number): void {
       :build-page-href="onHoldPageHref"
       :columns="columns"
       :colspan="6"
+      :bulk-actions="[
+        { value: 'reject', label: 'Reject' },
+        { value: 'ignore', label: 'Ignore' },
+      ]"
+      bulk-scope="on_hold"
       loading-message="Loading on-hold requests..."
       @page-change="onPageChange"
+      @bulk-success="emit('bulk-success', $event)"
+      @open-action="emit('open-action', $event)"
     >
-      <template #header>
-        <div class="d-flex align-items-center justify-content-between flex-wrap" style="gap: 0.5rem;">
-          <form method="post" :action="bootstrap.bulkUrl || '/membership/requests/bulk/'" class="form-inline">
-            <input type="hidden" name="csrfmiddlewaretoken" :value="bootstrap.csrfToken || ''">
-            <input type="hidden" name="next" :value="nextUrl">
-            <input type="hidden" name="bulk_scope" value="on_hold">
-            <div class="input-group input-group-sm">
-              <select v-model="bulkAction" name="bulk_action" class="custom-select custom-select-sm" aria-label="Bulk action">
-                <option value="">Bulk action…</option>
-                <option value="reject">Reject</option>
-                <option value="ignore">Ignore</option>
-              </select>
-              <div class="input-group-append">
-                <button type="submit" class="btn btn-default" title="Apply selected action to checked requests" :disabled="selectedIds.length === 0 || !bulkAction">Apply</button>
-              </div>
-            </div>
-            <input v-for="requestId in selectedIds" :key="requestId" type="hidden" name="selected" :value="String(requestId)">
-          </form>
-          <div class="text-muted">On hold: {{ count }}</div>
-        </div>
+      <template #header-meta>
+        <div class="text-muted">On hold: {{ count }}</div>
       </template>
 
       <template #row-extra-columns="{ row }">

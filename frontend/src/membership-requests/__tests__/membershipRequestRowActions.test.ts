@@ -2,6 +2,8 @@ import { mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
 
 import MembershipRequestRowActions from "../components/MembershipRequestRowActions.vue";
+import type { DOMWrapper, VueWrapper } from "@vue/test-utils";
+
 import type { MembershipRequestRow, MembershipRequestsBootstrap } from "../types";
 
 const bootstrap: MembershipRequestsBootstrap = {
@@ -57,7 +59,15 @@ function buildRow(status: "pending" | "on_hold"): MembershipRequestRow {
 }
 
 describe("MembershipRequestRowActions", () => {
-  it("matches legacy titles, aria labels, and request-target modal context", () => {
+  function buttonByLabel(wrapper: VueWrapper, label: string): DOMWrapper<Element> {
+    const button = wrapper.findAll("button").find((node) => node.text() === label);
+    if (!button) {
+      throw new Error(`Missing button: ${label}`);
+    }
+    return button;
+  }
+
+  it("emits Vue action payloads for pending-row actions", async () => {
     const wrapper = mount(MembershipRequestRowActions, {
       props: {
         row: buildRow("pending"),
@@ -67,25 +77,58 @@ describe("MembershipRequestRowActions", () => {
 
     expect(wrapper.attributes("style")).toBeUndefined();
 
-    const approve = wrapper.get('button[data-target="#shared-approve-modal"]');
-    const reject = wrapper.get('button[data-target="#shared-reject-modal"]');
-    const rfi = wrapper.get('button[data-target="#shared-rfi-modal"]');
-    const ignore = wrapper.get('button[data-target="#shared-ignore-modal"]');
+    const buttons = wrapper.findAll("button");
+    const approve = buttonByLabel(wrapper, "Approve");
+    const reject = buttonByLabel(wrapper, "Reject");
+    const rfi = buttonByLabel(wrapper, "RFI");
+    const ignore = buttonByLabel(wrapper, "Ignore");
+
+    await approve.trigger("click");
+    await reject.trigger("click");
+    await rfi.trigger("click");
+    await ignore.trigger("click");
+
+    const events = wrapper.emitted("open-action") || [];
+    expect(events).toHaveLength(4);
+    expect(events[0]?.[0]).toMatchObject({
+      actionKind: "approve",
+      requestStatus: "pending",
+      actionUrl: "/membership/requests/51/approve/",
+      membershipType: "Sponsor",
+      requestTarget: "sponsor@example.com",
+    });
+    expect(events[1]?.[0]).toMatchObject({
+      actionKind: "reject",
+      requestStatus: "pending",
+      actionUrl: "/membership/requests/51/reject/",
+    });
+    expect(events[2]?.[0]).toMatchObject({
+      actionKind: "rfi",
+      requestStatus: "pending",
+      actionUrl: "/membership/requests/51/rfi/",
+    });
+    expect(events[3]?.[0]).toMatchObject({
+      actionKind: "ignore",
+      requestStatus: "pending",
+      actionUrl: "/membership/requests/51/ignore/",
+    });
 
     expect(approve.attributes("title")).toBe("Approve this request");
     expect(approve.attributes("aria-label")).toBe("Approve");
-    expect(approve.attributes("data-request-target")).toBe("sponsor@example.com");
-    expect(approve.attributes("data-body-emphasis")).toBe("sponsor@example.com");
     expect(reject.attributes("title")).toBe("Reject this request");
     expect(reject.attributes("aria-label")).toBe("Reject");
     expect(rfi.attributes("title")).toBe("Request information and put on hold");
     expect(rfi.attributes("aria-label")).toBe("Request for Information");
     expect(ignore.attributes("title")).toBe("Ignore this request");
     expect(ignore.attributes("aria-label")).toBe("Ignore");
-    expect(ignore.attributes("data-body-emphasis")).toBe("sponsor@example.com");
+
+    for (const button of buttons) {
+      expect(button.attributes("data-toggle")).toBeUndefined();
+      expect(button.attributes("data-target")).toBeUndefined();
+    }
   });
 
-  it("uses the legacy on-hold approve help text", () => {
+  it("emits on-hold approve action payload", async () => {
     const wrapper = mount(MembershipRequestRowActions, {
       props: {
         row: buildRow("on_hold"),
@@ -93,9 +136,20 @@ describe("MembershipRequestRowActions", () => {
       },
     });
 
-    const approve = wrapper.get('button[data-target="#shared-approve-on-hold-modal"]');
+    const approve = wrapper.get("button.btn-success");
+    await approve.trigger("click");
+
+    const events = wrapper.emitted("open-action") || [];
+    expect(events).toHaveLength(1);
+    expect(events[0]?.[0]).toMatchObject({
+      actionKind: "approve_on_hold",
+      requestStatus: "on_hold",
+      actionUrl: "/membership/requests/51/approve-on-hold/",
+      membershipType: "Sponsor",
+      requestTarget: "sponsor@example.com",
+    });
+
     expect(approve.attributes("title")).toBe("Approve this on-hold request with committee override");
     expect(approve.attributes("aria-label")).toBe("Approve");
-    expect(approve.attributes("data-request-target")).toBe("sponsor@example.com");
   });
 });

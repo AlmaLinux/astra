@@ -21,6 +21,7 @@
     data-membership-requests-clear-filter-url="{{ clear_filter_url }}"
     data-membership-requests-pending-api-url="{% url 'api-membership-requests-pending' %}"
     data-membership-requests-on-hold-api-url="{% url 'api-membership-requests-on-hold' %}"
+    data-membership-requests-bulk-url="{{ membership_requests_bulk_url }}"
     data-membership-request-id-sentinel="{{ membership_request_id_sentinel }}"
     data-membership-request-detail-template="{{ membership_request_detail_template }}"
     data-membership-request-approve-template="{{ membership_request_approve_template }}"
@@ -28,6 +29,7 @@
     data-membership-request-reject-template="{{ membership_request_reject_template }}"
     data-membership-request-rfi-template="{{ membership_request_rfi_template }}"
     data-membership-request-ignore-template="{{ membership_request_ignore_template }}"
+    data-membership-request-reopen-template="{{ membership_request_reopen_template }}"
     data-membership-request-note-add-template="{{ membership_request_note_add_template }}"
     data-membership-request-note-summary-template="{{ membership_request_note_summary_template }}"
     data-membership-request-note-detail-template="{{ membership_request_note_detail_template }}"
@@ -40,5 +42,4 @@
     data-membership-requests-next-url="{{ next_url }}"
     data-membership-requests-csrf-token="{{ csrf_token }}"
   ></div>
-  {% include 'core/_membership_request_shared_modals.html' with next_url=next_url %}
 {% endblock %}

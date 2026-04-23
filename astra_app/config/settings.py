@@ -785,7 +785,8 @@ DJANGO_VITE = {
         "dev_server_protocol": _env_str("DJANGO_VITE_DEV_SERVER_PROTOCOL", default="http"),
         "dev_server_host": _env_str("DJANGO_VITE_DEV_SERVER_HOST", default="localhost"),
         "dev_server_port": _env_int("DJANGO_VITE_DEV_SERVER_PORT", default=5173),
-        "static_url_prefix": "" if _django_vite_dev_mode else "bundler",
+        # django-vite joins STATIC_URL even in dev mode; use '/' to keep dev URLs rooted at /@vite/client and /src/*.
+        "static_url_prefix": "/" if _django_vite_dev_mode else "bundler",
         "manifest_path": _bundler_static_dir / "manifest.json",
     }
 }

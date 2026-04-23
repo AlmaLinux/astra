@@ -3,7 +3,7 @@ import logging
 from django.conf import settings
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.http import Http404, HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.html import format_html
@@ -483,9 +483,38 @@ def membership_request_rescind(request: HttpRequest, pk: int) -> HttpResponse:
         return redirect("organization-detail", organization_id=org.pk)
     return redirect("user-profile", username=username)
 
+
+def membership_request_rescind_api(request: HttpRequest, pk: int) -> JsonResponse:
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed."}, status=405)
+
+    username = get_username(request)
+    if not username:
+        return JsonResponse({"ok": False, "error": "User not found."}, status=404)
+
+    req = (
+        MembershipRequest.objects.select_related("membership_type", "requested_organization")
+        .filter(pk=pk)
+        .first()
+    )
+    if req is None:
+        return JsonResponse({"ok": False, "error": "Membership request not found."}, status=404)
+
+    if not _user_can_access_membership_request(username=username, membership_request=req):
+        raise Http404("Not found")
+
+    try:
+        rescind_membership_request(membership_request=req, actor_username=username)
+    except ValidationError as exc:
+        error_message = exc.messages[0] if exc.messages else str(exc)
+        return JsonResponse({"ok": False, "error": error_message}, status=400)
+
+    return JsonResponse({"ok": True, "message": "Your request has been rescinded."})
+
 __all__ = [
     "membership_request",
     "membership_request_detail",
     "membership_request_rescind",
+    "membership_request_rescind_api",
     "membership_request_self",
 ]

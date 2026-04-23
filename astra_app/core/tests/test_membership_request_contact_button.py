@@ -60,16 +60,13 @@ class MembershipRequestRfiButtonTests(TestCase):
             resp = self.client.get(reverse("membership-request-detail", args=[req.pk]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, ">RFI<")
-        self.assertContains(resp, "Request for Information")
-        # Shared modal: button carries action URL as data attribute, targets shared modal
-        rfi_url = reverse("membership-request-rfi", args=[req.pk])
-        self.assertContains(resp, f'data-action-url="{rfi_url}"')
-        self.assertContains(resp, 'data-target="#shared-rfi-modal"')
-        self.assertContains(resp, 'id="shared-rfi-modal"')
-        self.assertContains(resp, 'name="rfi_message"')
+        self.assertContains(resp, "data-membership-request-actions-root")
+        rfi_url = reverse("api-membership-request-rfi", args=[req.pk])
+        self.assertContains(resp, f'data-membership-request-api-rfi-url="{rfi_url}"')
+        self.assertContains(resp, 'data-membership-request-can-request-info="true"')
+        self.assertNotContains(resp, 'id="shared-rfi-modal"')
 
-    def test_rfi_modal_includes_message_preset(self) -> None:
+    def test_rfi_action_bootstrap_contract_is_rendered(self) -> None:
         MembershipType.objects.update_or_create(
             code="individual",
             defaults={
@@ -102,11 +99,10 @@ class MembershipRequestRfiButtonTests(TestCase):
             resp = self.client.get(reverse("membership-request-detail", args=[req.pk]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(
-            resp,
-            "Please provide additional details about your involvement with the AlmaLinux community, including any "
-            "contributions, participation, or other relevant activities.",
-        )
+        self.assertContains(resp, "data-membership-request-actions-root")
+        self.assertContains(resp, f'data-membership-request-id="{req.pk}"')
+        self.assertContains(resp, 'data-membership-request-status="pending"')
+        self.assertContains(resp, 'data-membership-request-can-request-info="true"')
 
     def test_contact_button_links_to_send_mail_for_user_request(self) -> None:
         MembershipType.objects.update_or_create(
@@ -171,14 +167,11 @@ class MembershipRequestRfiButtonTests(TestCase):
             resp = self.client.get(reverse("membership-request-detail", args=[req.pk]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, ">RFI<")
-        self.assertContains(resp, "Request for Information")
-        # Shared modal: button carries action URL as data attribute, targets shared modal
-        rfi_url = reverse("membership-request-rfi", args=[req.pk])
-        self.assertContains(resp, f'data-action-url="{rfi_url}"')
-        self.assertContains(resp, 'data-target="#shared-rfi-modal"')
-        self.assertContains(resp, 'id="shared-rfi-modal"')
-        self.assertContains(resp, 'name="rfi_message"')
+        self.assertContains(resp, "data-membership-request-actions-root")
+        rfi_url = reverse("api-membership-request-rfi", args=[req.pk])
+        self.assertContains(resp, f'data-membership-request-api-rfi-url="{rfi_url}"')
+        self.assertContains(resp, 'data-membership-request-can-request-info="true"')
+        self.assertNotContains(resp, 'id="shared-rfi-modal"')
 
     def test_contact_button_links_to_send_mail_for_org_representative(self) -> None:
         MembershipType.objects.update_or_create(

@@ -10,6 +10,7 @@ export interface MembershipRequestsBootstrap {
   rejectTemplate: string;
   requestInfoTemplate: string;
   ignoreTemplate: string;
+  reopenTemplate?: string;
   noteAddTemplate: string;
   noteSummaryTemplate: string;
   noteDetailTemplate: string;
@@ -61,6 +62,17 @@ export interface MembershipRequestRow {
   membership_type: MembershipTypeSummary;
   is_renewal: boolean;
   responses: MembershipRequestResponseItem[];
+}
+
+export type MembershipActionKind = "approve" | "approve_on_hold" | "reject" | "rfi" | "ignore";
+
+export interface MembershipRequestActionIntent {
+  requestId: number;
+  requestStatus: string;
+  actionKind: MembershipActionKind;
+  actionUrl: string;
+  requestTarget: string;
+  membershipType: string;
 }
 
 export interface PendingFilterOption {
@@ -289,6 +301,7 @@ export function readMembershipRequestsBootstrap(root: HTMLElement): MembershipRe
     membershipRequestRejectTemplate,
     membershipRequestRfiTemplate,
     membershipRequestIgnoreTemplate,
+    membershipRequestReopenTemplate,
     membershipRequestNoteAddTemplate,
     membershipRequestNoteSummaryTemplate,
     membershipRequestNoteDetailTemplate,
@@ -334,6 +347,7 @@ export function readMembershipRequestsBootstrap(root: HTMLElement): MembershipRe
     rejectTemplate: membershipRequestRejectTemplate,
     requestInfoTemplate: membershipRequestRfiTemplate,
     ignoreTemplate: membershipRequestIgnoreTemplate,
+    reopenTemplate: membershipRequestReopenTemplate,
     noteAddTemplate: membershipRequestNoteAddTemplate,
     noteSummaryTemplate: membershipRequestNoteSummaryTemplate,
     noteDetailTemplate: membershipRequestNoteDetailTemplate,
