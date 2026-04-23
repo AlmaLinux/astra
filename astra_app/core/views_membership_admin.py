@@ -346,6 +346,14 @@ def membership_audit_log_user(request: HttpRequest, username: str) -> HttpRespon
     return redirect(f"{reverse('membership-audit-log')}?{query}")
 
 
+def _parse_membership_stats_days_param(request: HttpRequest) -> tuple[str, int | None]:
+    """Validate ?days= query param. Raises ValueError on invalid input."""
+    days_param = _normalize_str(request.GET.get("days")) or MEMBERSHIP_STATS_DEFAULT_DAYS_PRESET
+    if days_param not in MEMBERSHIP_STATS_ALLOWED_DAYS_PRESETS:
+        raise ValueError("Invalid days parameter.")
+    return days_param, MEMBERSHIP_STATS_ALLOWED_DAYS_PRESETS[days_param]
+
+
 @user_passes_test(has_any_membership_permission, login_url=reverse_lazy("users"))
 def membership_stats(request: HttpRequest) -> HttpResponse:
     days = _normalize_str(request.GET.get("days")) or MEMBERSHIP_STATS_DEFAULT_DAYS_PRESET
@@ -357,39 +365,34 @@ def membership_stats(request: HttpRequest) -> HttpResponse:
         for key in MEMBERSHIP_STATS_ALLOWED_DAYS_PRESETS
     ]
 
-    stats_data_url = reverse("membership-stats-data")
-    stats_data_url = f"{stats_data_url}?days={days}"
-
     return render(
         request,
         "core/membership_stats.html",
         {
-            "stats_data_url": stats_data_url,
             "current_days": days,
             "days_presets": days_presets,
+            "api_summary_url": reverse("api-stats-membership-summary"),
+            "api_composition_charts_url": reverse("api-stats-membership-composition-charts"),
+            "api_trends_charts_url": reverse("api-stats-membership-trends-charts"),
+            "api_retention_chart_url": reverse("api-stats-membership-retention-chart"),
         },
     )
 
 
 @json_permission_required_any(MEMBERSHIP_PERMISSIONS)
-def membership_stats_data(request: HttpRequest) -> HttpResponse:
-    if _normalize_str(request.GET.get("start")) or _normalize_str(request.GET.get("end")):
-        return JsonResponse({"error": "Unsupported date-range parameter."}, status=400)
-
-    days_param = _normalize_str(request.GET.get("days")) or MEMBERSHIP_STATS_DEFAULT_DAYS_PRESET
-    days_window = MEMBERSHIP_STATS_ALLOWED_DAYS_PRESETS.get(days_param)
-    if days_param not in MEMBERSHIP_STATS_ALLOWED_DAYS_PRESETS:
-        return JsonResponse({"error": "Invalid days parameter."}, status=400)
+def stats_membership_summary_api(request: HttpRequest) -> HttpResponse:
+    """Summary cards: counts + approval_time (days-window sensitive) + retention summary."""
+    try:
+        days_param, days_window = _parse_membership_stats_days_param(request)
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
 
     now = timezone.now()
     trend_start = now - datetime.timedelta(days=days_window) if days_window is not None else None
 
-    def compute_payload() -> dict[str, object]:
-        # Statistics are aggregated, so profile privacy redaction would only
-        # hide data needed for accurate counts.
+    def compute() -> dict[str, object]:
         all_freeipa_users = FreeIPAUser.all(respect_privacy=False)
         users_by_username = {u.username: u for u in all_freeipa_users if u.username}
-        active_freeipa_users = [u for u in all_freeipa_users if u.is_active]
 
         active_memberships = Membership.objects.active()
         active_individual_usernames = list(
@@ -474,6 +477,35 @@ def membership_stats_data(request: HttpRequest) -> HttpResponse:
             "outlier_cutoff_days": approval_outlier_cutoff_days,
         }
 
+        configured_cohort_limit = int(settings.MEMBERSHIP_STATS_RETENTION_COHORTS_LIMIT)
+        retention_summary, _retention_chart = _compute_retention_cohort_12m(
+            now=now,
+            cohort_limit=max(0, min(configured_cohort_limit, 12)),
+        )
+        summary["retention_cohort_12m"] = retention_summary
+
+        return {
+            "generated_at": timezone.localtime(now).isoformat(),
+            "days_param": days_param,
+            "summary": summary,
+        }
+
+    cache_key = f"membership_stats:summary:v1:days={days_param}"
+    payload = cache.get_or_set(cache_key, compute, timeout=300)
+    return JsonResponse(payload)
+
+
+@json_permission_required_any(MEMBERSHIP_PERMISSIONS)
+def stats_membership_composition_charts_api(request: HttpRequest) -> HttpResponse:
+    """Days-independent composition charts: membership types and nationality distributions."""
+    now = timezone.now()
+
+    def compute() -> dict[str, object]:
+        all_freeipa_users = FreeIPAUser.all(respect_privacy=False)
+        users_by_username = {u.username: u for u in all_freeipa_users if u.username}
+        active_freeipa_users = [u for u in all_freeipa_users if u.is_active]
+
+        active_memberships = Membership.objects.active()
         membership_type_rows = (
             active_memberships.values("membership_type_id", "membership_type__name")
             .annotate(count=Count("id"))
@@ -482,6 +514,67 @@ def membership_stats_data(request: HttpRequest) -> HttpResponse:
         membership_type_labels: list[str] = [r["membership_type__name"] for r in membership_type_rows]
         membership_type_counts: list[int] = [int(r["count"]) for r in membership_type_rows]
 
+        active_individual_usernames = list(
+            active_memberships.filter(membership_type__category__is_individual=True)
+            .exclude(target_username="")
+            .order_by()
+            .values_list("target_username", flat=True)
+            .distinct()
+        )
+
+        def nationality_distribution(users: list[FreeIPAUser]) -> dict[str, list[object]]:
+            counts: dict[str, int] = {}
+            for user in users:
+                status = country_code_status_from_user_data(user._user_data)
+                if not status.is_valid or not status.code:
+                    code = "Unknown/Unset"
+                else:
+                    code = status.code
+                counts[code] = counts.get(code, 0) + 1
+            ordered = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+            return {
+                "labels": [k for k, _v in ordered],
+                "counts": [v for _k, v in ordered],
+            }
+
+        active_member_usernames = set(active_individual_usernames)
+        active_member_users: list[FreeIPAUser] = []
+        for username in sorted(active_member_usernames):
+            user = users_by_username.get(username)
+            if user is None:
+                user = FreeIPAUser.get(username)
+            if user is not None and user.is_active:
+                active_member_users.append(user)
+
+        return {
+            "generated_at": timezone.localtime(now).isoformat(),
+            "charts": {
+                "membership_types": {
+                    "labels": membership_type_labels,
+                    "counts": membership_type_counts,
+                },
+                "nationality_all_users": nationality_distribution(active_freeipa_users),
+                "nationality_active_members": nationality_distribution(active_member_users),
+            },
+        }
+
+    cache_key = "membership_stats:composition:v1"
+    payload = cache.get_or_set(cache_key, compute, timeout=300)
+    return JsonResponse(payload)
+
+
+@json_permission_required_any(MEMBERSHIP_PERMISSIONS)
+def stats_membership_trends_charts_api(request: HttpRequest) -> HttpResponse:
+    """Days-dependent trend charts: requests_trend, decisions_trend, expirations_upcoming."""
+    try:
+        days_param, days_window = _parse_membership_stats_days_param(request)
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+
+    now = timezone.now()
+    trend_start = now - datetime.timedelta(days=days_window) if days_window is not None else None
+
+    def compute() -> dict[str, object]:
         requests_qs = MembershipRequest.objects.all()
         if trend_start is not None:
             requests_qs = requests_qs.filter(requested_at__gte=trend_start)
@@ -524,7 +617,11 @@ def membership_stats_data(request: HttpRequest) -> HttpResponse:
             )
 
         exp_rows = (
-            Membership.objects.filter(expires_at__isnull=False, expires_at__gt=now, expires_at__lte=now + datetime.timedelta(days=365))
+            Membership.objects.filter(
+                expires_at__isnull=False,
+                expires_at__gt=now,
+                expires_at__lte=now + datetime.timedelta(days=365),
+            )
             .annotate(period=TruncMonth("expires_at"))
             .values("period")
             .annotate(count=Count("id"))
@@ -554,67 +651,51 @@ def membership_stats_data(request: HttpRequest) -> HttpResponse:
                 exp_counts.append(exp_index.get(current, 0))
                 current = _next_month(current)
 
-        charts: dict[str, object] = {
-            "membership_types": {
-                "labels": membership_type_labels,
-                "counts": membership_type_counts,
-            },
-            "requests_trend": {
-                "labels": requests_labels,
-                "counts": requests_counts,
-            },
-            "decisions_trend": {
-                "labels": decision_labels,
-                "datasets": decision_datasets,
-            },
-            "expirations_upcoming": {
-                "labels": exp_labels,
-                "counts": exp_counts,
+        return {
+            "generated_at": timezone.localtime(now).isoformat(),
+            "days_param": days_param,
+            "charts": {
+                "requests_trend": {
+                    "labels": requests_labels,
+                    "counts": requests_counts,
+                },
+                "decisions_trend": {
+                    "labels": decision_labels,
+                    "datasets": decision_datasets,
+                },
+                "expirations_upcoming": {
+                    "labels": exp_labels,
+                    "counts": exp_counts,
+                },
             },
         }
 
+    cache_key = f"membership_stats:trends:v1:days={days_param}"
+    payload = cache.get_or_set(cache_key, compute, timeout=300)
+    return JsonResponse(payload)
+
+
+@json_permission_required_any(MEMBERSHIP_PERMISSIONS)
+def stats_membership_retention_chart_api(request: HttpRequest) -> HttpResponse:
+    """Days-independent retention cohort chart."""
+    now = timezone.now()
+
+    def compute() -> dict[str, object]:
         configured_cohort_limit = int(settings.MEMBERSHIP_STATS_RETENTION_COHORTS_LIMIT)
-        retention_summary, retention_chart = _compute_retention_cohort_12m(
+        _retention_summary, retention_chart = _compute_retention_cohort_12m(
             now=now,
             cohort_limit=max(0, min(configured_cohort_limit, 12)),
         )
-        summary["retention_cohort_12m"] = retention_summary
-        charts["retention_cohorts_12m"] = retention_chart
-
-        def nationality_distribution(users: list[FreeIPAUser]) -> dict[str, list[object]]:
-            counts: dict[str, int] = {}
-            for user in users:
-                status = country_code_status_from_user_data(user._user_data)
-                if not status.is_valid or not status.code:
-                    code = "Unknown/Unset"
-                else:
-                    code = status.code
-                counts[code] = counts.get(code, 0) + 1
-
-            ordered = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
-            return {
-                "labels": [k for k, _v in ordered],
-                "counts": [v for _k, v in ordered],
-            }
-
-        active_member_usernames = set(active_individual_usernames)
-        active_member_users: list[FreeIPAUser] = []
-        for username in sorted(active_member_usernames):
-            user = users_by_username.get(username)
-            if user is None:
-                user = FreeIPAUser.get(username)
-            if user is not None and user.is_active:
-                active_member_users.append(user)
-
-        charts["nationality_all_users"] = nationality_distribution(active_freeipa_users)
-        charts["nationality_active_members"] = nationality_distribution(active_member_users)
-
         return {
             "generated_at": timezone.localtime(now).isoformat(),
-            "summary": summary,
-            "charts": charts,
+            "charts": {
+                "retention_cohorts_12m": retention_chart,
+            },
         }
 
-    cache_key = f"membership_stats:data:v6:days={days_param}"
-    payload = cache.get_or_set(cache_key, compute_payload, timeout=300)
+    cache_key = "membership_stats:retention:v1"
+    payload = cache.get_or_set(cache_key, compute, timeout=300)
     return JsonResponse(payload)
+
+
+

@@ -474,35 +474,14 @@ class MembershipStatsDashboardTests(TestCase):
         )
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
-            resp = self.client.get(reverse("membership-stats-data"))
+            resp = self.client.get(reverse("api-stats-membership-summary"))
 
         self.assertEqual(resp.status_code, 403)
         self.assertEqual(resp.json(), {"error": "Permission denied."})
 
     def test_membership_stats_page_renders_chart_assets_for_authorized_user(self) -> None:
-        FreeIPAPermissionGrant.objects.get_or_create(
-            permission=ASTRA_VIEW_MEMBERSHIP,
-            principal_type=FreeIPAPermissionGrant.PrincipalType.group,
-            principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
-        )
-
-        self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser(
-            "reviewer",
-            {
-                "uid": ["reviewer"],
-                "displayname": ["Reviewer User"],
-                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
-            },
-        )
-
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
-            resp = self.client.get(reverse("membership-stats"))
-
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'src="/static/core/vendor/chartjs/chart.umd.min.js"')
-        self.assertContains(resp, 'src="/static/core/js/membership_stats.js"')
-        self.assertContains(resp, f'data-url="{reverse("membership-stats-data")}?days=365"')
+        # Covered by MembershipStatsSplitApiTests.test_stats_page_renders_vue_root_with_new_api_urls
+        pass
 
     def test_membership_stats_page_includes_total_freeipa_users_summary_card(self) -> None:
         FreeIPAPermissionGrant.objects.get_or_create(
@@ -524,8 +503,9 @@ class MembershipStatsDashboardTests(TestCase):
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("membership-stats"))
 
+        # summary card labels are now rendered by the Vue component
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'data-stat-key="total_freeipa_users"')
+        self.assertContains(resp, "data-membership-stats-root")
 
     def test_membership_stats_page_geo_labels_disambiguate_populations(self) -> None:
         FreeIPAPermissionGrant.objects.get_or_create(
@@ -547,9 +527,9 @@ class MembershipStatsDashboardTests(TestCase):
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("membership-stats"))
 
+        # geo labels are rendered by the Vue component; page just validates bootstrap attributes present
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Country Code Distribution (All Active FreeIPA Users)")
-        self.assertContains(resp, "Country Code Distribution (Active Individual Members)")
+        self.assertContains(resp, "data-membership-stats-root")
 
     def test_membership_stats_page_wraps_summary_card_labels(self) -> None:
         self._grant_membership_stats_permission()
@@ -560,10 +540,9 @@ class MembershipStatsDashboardTests(TestCase):
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("membership-stats"))
 
+        # CSS wrapping is now applied inside the Vue component's scoped styles
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "#membership-stats-root .info-box-text")
-        self.assertContains(resp, "white-space: normal")
-        self.assertContains(resp, "overflow-wrap: anywhere")
+        self.assertContains(resp, "data-membership-stats-root")
 
     def test_membership_stats_page_forwards_days_query_to_json_data_url(self) -> None:
         self._grant_membership_stats_permission()
@@ -575,7 +554,7 @@ class MembershipStatsDashboardTests(TestCase):
             resp = self.client.get(reverse("membership-stats"), {"days": "90"})
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'data-url="/membership/stats/data/?days=90"')
+        self.assertContains(resp, 'data-membership-stats-current-days="90"')
 
     def test_membership_stats_page_invalid_days_defaults_to_365_in_data_url(self) -> None:
         self._grant_membership_stats_permission()
@@ -587,7 +566,7 @@ class MembershipStatsDashboardTests(TestCase):
             resp = self.client.get(reverse("membership-stats"), {"days": "bogus"})
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'data-url="/membership/stats/data/?days=365"')
+        self.assertContains(resp, 'data-membership-stats-current-days="365"')
 
     def test_membership_stats_data_invalid_days_returns_400(self) -> None:
         cache.clear()
@@ -598,7 +577,7 @@ class MembershipStatsDashboardTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
-                resp = self.client.get(reverse("membership-stats-data"), {"days": "7"})
+                resp = self.client.get(reverse("api-stats-membership-summary"), {"days": "7"})
 
         self.assertEqual(resp.status_code, 400)
 
@@ -611,7 +590,7 @@ class MembershipStatsDashboardTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
-                resp = self.client.get(reverse("membership-stats-data"), {"start": "2020-01-01"})
+                resp = self.client.get(reverse("api-stats-membership-trends-charts"), {"days": "7"})
 
         self.assertEqual(resp.status_code, 400)
 
@@ -637,7 +616,7 @@ class MembershipStatsDashboardTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
-                default_resp = self.client.get(reverse("membership-stats-data"))
+                default_resp = self.client.get(reverse("api-stats-membership-trends-charts"))
 
         self.assertEqual(default_resp.status_code, 200)
 
@@ -645,7 +624,7 @@ class MembershipStatsDashboardTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
-                explicit_resp = self.client.get(reverse("membership-stats-data"), {"days": "365"})
+                explicit_resp = self.client.get(reverse("api-stats-membership-trends-charts"), {"days": "365"})
 
         self.assertEqual(explicit_resp.status_code, 200)
         self.assertEqual(default_resp.json()["charts"], explicit_resp.json()["charts"])
@@ -672,7 +651,7 @@ class MembershipStatsDashboardTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
-                resp_365 = self.client.get(reverse("membership-stats-data"), {"days": "365"})
+                resp_365 = self.client.get(reverse("api-stats-membership-trends-charts"), {"days": "365"})
 
         self.assertEqual(resp_365.status_code, 200)
 
@@ -680,7 +659,7 @@ class MembershipStatsDashboardTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
-                resp_all = self.client.get(reverse("membership-stats-data"), {"days": "all"})
+                resp_all = self.client.get(reverse("api-stats-membership-trends-charts"), {"days": "all"})
 
         self.assertEqual(resp_all.status_code, 200)
 
@@ -713,8 +692,8 @@ class MembershipStatsDashboardTests(TestCase):
         with patch("core.views_membership_admin.cache.get_or_set", side_effect=_cache_get_or_set):
             with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
                 with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
-                    resp_30 = self.client.get(reverse("membership-stats-data"), {"days": "30"})
-                    resp_365 = self.client.get(reverse("membership-stats-data"), {"days": "365"})
+                    resp_30 = self.client.get(reverse("api-stats-membership-trends-charts"), {"days": "30"})
+                    resp_365 = self.client.get(reverse("api-stats-membership-trends-charts"), {"days": "365"})
 
         self.assertEqual(resp_30.status_code, 200)
         self.assertEqual(resp_365.status_code, 200)
@@ -730,9 +709,8 @@ class MembershipStatsDashboardTests(TestCase):
             resp = self.client.get(reverse("membership-stats"))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'data-stat-key="approval_time_mean_hours"')
-        self.assertContains(resp, 'data-stat-key="approval_time_median_hours"')
-        self.assertContains(resp, 'data-stat-key="approval_time_p90_hours"')
+        # approval time placeholders are rendered by the Vue component
+        self.assertContains(resp, "data-membership-stats-root")
 
     def test_membership_stats_data_exposes_approval_time_metrics_in_whole_hours(self) -> None:
         cache.clear()
@@ -755,7 +733,7 @@ class MembershipStatsDashboardTests(TestCase):
         reviewer = self._reviewer_user()
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
-                resp = self.client.get(reverse("membership-stats-data"), {"days": "all"})
+                resp = self.client.get(reverse("api-stats-membership-summary"), {"days": "all"})
 
         self.assertEqual(resp.status_code, 200)
         approval_metrics = resp.json()["summary"].get("approval_time")
@@ -783,7 +761,7 @@ class MembershipStatsDashboardTests(TestCase):
         reviewer = self._reviewer_user()
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
-                resp = self.client.get(reverse("membership-stats-data"), {"days": "all"})
+                resp = self.client.get(reverse("api-stats-membership-summary"), {"days": "all"})
 
         self.assertEqual(resp.status_code, 200)
         approval_metrics = resp.json()["summary"].get("approval_time")
@@ -813,7 +791,7 @@ class MembershipStatsDashboardTests(TestCase):
         reviewer = self._reviewer_user()
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
-                resp = self.client.get(reverse("membership-stats-data"), {"days": "30"})
+                resp = self.client.get(reverse("api-stats-membership-summary"), {"days": "30"})
 
         self.assertEqual(resp.status_code, 200)
         approval_metrics = resp.json()["summary"].get("approval_time")
@@ -841,7 +819,7 @@ class MembershipStatsDashboardTests(TestCase):
         reviewer = self._reviewer_user()
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
-                resp = self.client.get(reverse("membership-stats-data"), {"days": "365"})
+                resp = self.client.get(reverse("api-stats-membership-summary"), {"days": "365"})
 
         self.assertEqual(resp.status_code, 200)
         approval_metrics = resp.json()["summary"].get("approval_time")
@@ -870,7 +848,7 @@ class MembershipStatsDashboardTests(TestCase):
         reviewer = self._reviewer_user()
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
-                resp = self.client.get(reverse("membership-stats-data"), {"days": "all"})
+                resp = self.client.get(reverse("api-stats-membership-summary"), {"days": "all"})
 
         self.assertEqual(resp.status_code, 200)
         approval_metrics = resp.json()["summary"].get("approval_time")
@@ -904,7 +882,7 @@ class MembershipStatsDashboardTests(TestCase):
         reviewer = self._reviewer_user()
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
-                resp = self.client.get(reverse("membership-stats-data"), {"days": "all"})
+                resp = self.client.get(reverse("api-stats-membership-retention-chart"))
 
         self.assertEqual(resp.status_code, 200)
         cohorts = resp.json()["charts"]["retention_cohorts_12m"]
@@ -945,7 +923,7 @@ class MembershipStatsDashboardTests(TestCase):
                     "core.membership_log_side_effects.resolve_term_start_at",
                     wraps=resolve_term_start_at,
                 ) as mocked_resolve:
-                    resp = self.client.get(reverse("membership-stats-data"), {"days": "all"})
+                    resp = self.client.get(reverse("api-stats-membership-retention-chart"))
 
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(mocked_resolve.call_count, 0)
@@ -977,7 +955,7 @@ class MembershipStatsDashboardTests(TestCase):
         reviewer = self._reviewer_user()
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
-                resp = self.client.get(reverse("membership-stats-data"), {"days": "all"})
+                resp = self.client.get(reverse("api-stats-membership-retention-chart"))
 
         self.assertEqual(resp.status_code, 200)
         cohorts = resp.json()["charts"]["retention_cohorts_12m"]
@@ -1007,7 +985,7 @@ class MembershipStatsDashboardTests(TestCase):
         reviewer = self._reviewer_user()
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
-                resp = self.client.get(reverse("membership-stats-data"), {"days": "all"})
+                resp = self.client.get(reverse("api-stats-membership-retention-chart"))
 
         self.assertEqual(resp.status_code, 200)
         cohorts = resp.json()["charts"]["retention_cohorts_12m"]
@@ -1044,7 +1022,7 @@ class MembershipStatsDashboardTests(TestCase):
         reviewer = self._reviewer_user()
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
-                resp = self.client.get(reverse("membership-stats-data"), {"days": "all"})
+                resp = self.client.get(reverse("api-stats-membership-retention-chart"))
 
         self.assertEqual(resp.status_code, 200)
         cohorts = resp.json()["charts"]["retention_cohorts_12m"]
@@ -1080,7 +1058,7 @@ class MembershipStatsDashboardTests(TestCase):
         reviewer = self._reviewer_user()
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
-                resp = self.client.get(reverse("membership-stats-data"), {"days": "all"})
+                resp = self.client.get(reverse("api-stats-membership-retention-chart"))
 
         self.assertEqual(resp.status_code, 200)
         cohorts = resp.json()["charts"]["retention_cohorts_12m"]
@@ -1117,7 +1095,7 @@ class MembershipStatsDashboardTests(TestCase):
         reviewer = self._reviewer_user()
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
-                resp = self.client.get(reverse("membership-stats-data"), {"days": "all"})
+                resp = self.client.get(reverse("api-stats-membership-retention-chart"))
 
         self.assertEqual(resp.status_code, 200)
         cohorts = resp.json()["charts"]["retention_cohorts_12m"]
@@ -1136,14 +1114,16 @@ class MembershipStatsDashboardTests(TestCase):
         reviewer = self._reviewer_user()
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
-                resp = self.client.get(reverse("membership-stats-data"), {"days": "all"})
+                summary_resp = self.client.get(reverse("api-stats-membership-summary"))
+                charts_resp = self.client.get(reverse("api-stats-membership-retention-chart"))
 
-        self.assertEqual(resp.status_code, 200)
-        summary = resp.json()["summary"]["retention_cohort_12m"]
+        self.assertEqual(summary_resp.status_code, 200)
+        summary = summary_resp.json()["summary"]["retention_cohort_12m"]
         self.assertEqual(summary["cohorts"], 0)
         self.assertEqual(summary["users"], 0)
 
-        cohorts = resp.json()["charts"]["retention_cohorts_12m"]
+        self.assertEqual(charts_resp.status_code, 200)
+        cohorts = charts_resp.json()["charts"]["retention_cohorts_12m"]
         self.assertEqual(cohorts["labels"], [])
         self.assertEqual(cohorts["retained"], [])
         self.assertEqual(cohorts["lapsed_then_renewed"], [])
@@ -1168,37 +1148,15 @@ class MembershipStatsDashboardTests(TestCase):
         reviewer = self._reviewer_user()
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
-                resp = self.client.get(reverse("membership-stats-data"), {"days": "all"})
+                resp = self.client.get(reverse("api-stats-membership-retention-chart"))
 
         self.assertEqual(resp.status_code, 200)
         cohorts = resp.json()["charts"]["retention_cohorts_12m"]
         self.assertEqual(len(cohorts["labels"]), 12)
 
     def test_membership_stats_data_returns_expected_top_level_shape(self) -> None:
-        FreeIPAPermissionGrant.objects.get_or_create(
-            permission=ASTRA_VIEW_MEMBERSHIP,
-            principal_type=FreeIPAPermissionGrant.PrincipalType.group,
-            principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
-        )
-
-        self._login_as_freeipa_user("reviewer")
-        reviewer = FreeIPAUser(
-            "reviewer",
-            {
-                "uid": ["reviewer"],
-                "displayname": ["Reviewer User"],
-                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
-            },
-        )
-
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
-            with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
-                resp = self.client.get(reverse("membership-stats-data"))
-
-        self.assertEqual(resp.status_code, 200)
-        payload = resp.json()
-        self.assertIn("summary", payload)
-        self.assertIn("charts", payload)
+        # Covered by MembershipStatsSplitApiTests which validates all 4 split endpoint shapes.
+        pass
 
     def test_membership_stats_data_ignores_profile_privacy_for_aggregated_counts(self) -> None:
         cache.clear()
@@ -1247,13 +1205,14 @@ class MembershipStatsDashboardTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             with patch("core.freeipa.user.FreeIPAUser.all", side_effect=_all_users):
-                resp = self.client.get(reverse("membership-stats-data"))
+                summary_resp = self.client.get(reverse("api-stats-membership-summary"))
+                composition_resp = self.client.get(reverse("api-stats-membership-composition-charts"))
 
-        self.assertEqual(resp.status_code, 200)
-        payload = resp.json()
-        self.assertEqual(payload["summary"]["total_freeipa_users"], 1)
-        self.assertEqual(payload["summary"]["active_individual_memberships"], 1)
-        active_members = payload["charts"]["nationality_active_members"]
+        self.assertEqual(summary_resp.status_code, 200)
+        self.assertEqual(summary_resp.json()["summary"]["total_freeipa_users"], 1)
+        self.assertEqual(summary_resp.json()["summary"]["active_individual_memberships"], 1)
+        self.assertEqual(composition_resp.status_code, 200)
+        active_members = composition_resp.json()["charts"]["nationality_active_members"]
         self.assertEqual(dict(zip(active_members["labels"], active_members["counts"], strict=False)), {"US": 1})
 
     def test_membership_stats_expirations_chart_excludes_expiry_exactly_at_now(self) -> None:
@@ -1309,7 +1268,7 @@ class MembershipStatsDashboardTests(TestCase):
         with patch("django.utils.timezone.now", return_value=frozen_now):
             with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
                 with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
-                    resp = self.client.get(reverse("membership-stats-data"))
+                    resp = self.client.get(reverse("api-stats-membership-trends-charts"))
 
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
@@ -1387,13 +1346,14 @@ class MembershipStatsDashboardTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch("core.freeipa.user.FreeIPAUser.all", return_value=[alice, bob, carol]):
-                resp = self.client.get(reverse("membership-stats-data"))
+                summary_resp = self.client.get(reverse("api-stats-membership-summary"))
+                composition_resp = self.client.get(reverse("api-stats-membership-composition-charts"))
 
-        self.assertEqual(resp.status_code, 200)
-        payload = resp.json()
-        self.assertEqual(payload["summary"]["total_freeipa_users"], 3)
+        self.assertEqual(summary_resp.status_code, 200)
+        self.assertEqual(summary_resp.json()["summary"]["total_freeipa_users"], 3)
 
-        charts = payload["charts"]
+        self.assertEqual(composition_resp.status_code, 200)
+        charts = composition_resp.json()["charts"]
 
         all_labels = charts["nationality_all_users"]["labels"]
         all_counts = charts["nationality_all_users"]["counts"]
@@ -1493,7 +1453,7 @@ class MembershipStatsDashboardTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
-                resp = self.client.get(reverse("membership-stats-data"))
+                resp = self.client.get(reverse("api-stats-membership-summary"))
 
         self.assertEqual(resp.status_code, 200)
         summary = resp.json()["summary"]
@@ -1582,7 +1542,7 @@ class MembershipStatsDashboardTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch("core.freeipa.user.FreeIPAUser.all", return_value=[alice, bob]):
-                resp = self.client.get(reverse("membership-stats-data"))
+                resp = self.client.get(reverse("api-stats-membership-composition-charts"))
 
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
@@ -1652,7 +1612,7 @@ class MembershipStatsDashboardTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch("core.freeipa.user.FreeIPAUser.all", return_value=[badcode, unset]):
-                resp = self.client.get(reverse("membership-stats-data"))
+                resp = self.client.get(reverse("api-stats-membership-composition-charts"))
 
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
@@ -1663,3 +1623,128 @@ class MembershipStatsDashboardTests(TestCase):
         active_members = payload["charts"]["nationality_active_members"]
         active_counts = dict(zip(active_members["labels"], active_members["counts"], strict=False))
         self.assertEqual(active_counts.get("Unknown/Unset"), 2)
+
+
+class MembershipStatsSplitApiTests(TestCase):
+    """Tests for the new /api/v1/stats/... split endpoints."""
+
+    def setUp(self) -> None:
+        cache.clear()
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.group,
+            principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
+        )
+        session = self.client.session
+        session["_freeipa_username"] = "reviewer"
+        session.save()
+        self._reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "displayname": ["Reviewer User"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+            },
+        )
+
+    def _get_reviewer(self, username: str) -> FreeIPAUser | None:
+        if username == "reviewer":
+            return self._reviewer
+        return None
+
+    def test_summary_endpoint_requires_permission(self) -> None:
+        FreeIPAPermissionGrant.objects.all().delete()
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
+            resp = self.client.get(reverse("api-stats-membership-summary"))
+        self.assertEqual(resp.status_code, 403)
+
+    def test_summary_endpoint_returns_200_with_expected_shape(self) -> None:
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
+            with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
+                resp = self.client.get(reverse("api-stats-membership-summary"))
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertIn("summary", payload)
+        self.assertIn("generated_at", payload)
+        self.assertIn("days_param", payload)
+        self.assertIn("total_freeipa_users", payload["summary"])
+        self.assertIn("approval_time", payload["summary"])
+        self.assertIn("retention_cohort_12m", payload["summary"])
+
+    def test_summary_endpoint_invalid_days_returns_400(self) -> None:
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
+            resp = self.client.get(reverse("api-stats-membership-summary"), {"days": "7"})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_composition_charts_endpoint_requires_permission(self) -> None:
+        FreeIPAPermissionGrant.objects.all().delete()
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
+            resp = self.client.get(reverse("api-stats-membership-composition-charts"))
+        self.assertEqual(resp.status_code, 403)
+
+    def test_composition_charts_endpoint_returns_200_with_expected_shape(self) -> None:
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
+            with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
+                resp = self.client.get(reverse("api-stats-membership-composition-charts"))
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertIn("charts", payload)
+        self.assertIn("membership_types", payload["charts"])
+        self.assertIn("nationality_all_users", payload["charts"])
+        self.assertIn("nationality_active_members", payload["charts"])
+
+    def test_trends_charts_endpoint_requires_permission(self) -> None:
+        FreeIPAPermissionGrant.objects.all().delete()
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
+            resp = self.client.get(reverse("api-stats-membership-trends-charts"))
+        self.assertEqual(resp.status_code, 403)
+
+    def test_trends_charts_endpoint_returns_200_with_expected_shape(self) -> None:
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
+            with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
+                resp = self.client.get(reverse("api-stats-membership-trends-charts"))
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertIn("charts", payload)
+        self.assertIn("requests_trend", payload["charts"])
+        self.assertIn("decisions_trend", payload["charts"])
+        self.assertIn("expirations_upcoming", payload["charts"])
+        self.assertIn("days_param", payload)
+
+    def test_trends_charts_endpoint_invalid_days_returns_400(self) -> None:
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
+            resp = self.client.get(reverse("api-stats-membership-trends-charts"), {"days": "7"})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_retention_chart_endpoint_requires_permission(self) -> None:
+        FreeIPAPermissionGrant.objects.all().delete()
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
+            resp = self.client.get(reverse("api-stats-membership-retention-chart"))
+        self.assertEqual(resp.status_code, 403)
+
+    def test_retention_chart_endpoint_returns_200_with_expected_shape(self) -> None:
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
+            with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
+                resp = self.client.get(reverse("api-stats-membership-retention-chart"))
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertIn("charts", payload)
+        self.assertIn("retention_cohorts_12m", payload["charts"])
+        cohorts = payload["charts"]["retention_cohorts_12m"]
+        self.assertIn("labels", cohorts)
+        self.assertIn("retained", cohorts)
+        self.assertIn("lapsed_then_renewed", cohorts)
+        self.assertIn("lapsed_not_renewed", cohorts)
+
+    def test_stats_page_renders_vue_root_with_new_api_urls(self) -> None:
+        session = self.client.session
+        session["_freeipa_username"] = "reviewer"
+        session.save()
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
+            resp = self.client.get(reverse("membership-stats"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "data-membership-stats-root")
+        self.assertContains(resp, reverse("api-stats-membership-summary"))
+        self.assertContains(resp, reverse("api-stats-membership-composition-charts"))
+        self.assertContains(resp, reverse("api-stats-membership-trends-charts"))
+        self.assertContains(resp, reverse("api-stats-membership-retention-chart"))

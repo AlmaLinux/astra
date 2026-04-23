@@ -285,11 +285,6 @@ urlpatterns = [
     ),
 
     path("membership/stats/", views_membership.membership_stats, name="membership-stats"),
-    path(
-        "membership/stats/data/",
-        views_membership.membership_stats_data,
-        name="membership-stats-data",
-    ),
     path("membership/sponsors/", views_membership.membership_sponsors_list, name="membership-sponsors"),
 
     path(

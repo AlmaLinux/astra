@@ -16,7 +16,6 @@ from core.views_membership.admin import (
     membership_sponsors_api,
     membership_sponsors_list,
     membership_stats,
-    membership_stats_data,
     membership_terminate,
 )
 from core.views_membership.committee import (
@@ -98,7 +97,6 @@ __all__ = [
     "membership_set_expiry",
     "membership_sponsors_list",
     "membership_stats",
-    "membership_stats_data",
     "membership_terminate",
     "record_membership_request_created",
     "reject_membership_request",

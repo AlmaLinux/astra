@@ -9,6 +9,12 @@ from core.views_invitations_api import (
     account_invitations_refresh_api,
     account_invitations_resend_api,
 )
+from core.views_membership.admin import (
+    stats_membership_composition_charts_api,
+    stats_membership_retention_chart_api,
+    stats_membership_summary_api,
+    stats_membership_trends_charts_api,
+)
 
 urlpatterns = [
     path(
@@ -131,5 +137,26 @@ urlpatterns = [
         "membership/invitations/bulk",
         account_invitations_bulk_api,
         name="api-account-invitations-bulk",
+    ),
+    # Stats API endpoints
+    path(
+        "stats/membership/summary",
+        stats_membership_summary_api,
+        name="api-stats-membership-summary",
+    ),
+    path(
+        "stats/membership/charts/composition",
+        stats_membership_composition_charts_api,
+        name="api-stats-membership-composition-charts",
+    ),
+    path(
+        "stats/membership/charts/trends",
+        stats_membership_trends_charts_api,
+        name="api-stats-membership-trends-charts",
+    ),
+    path(
+        "stats/membership/charts/retention",
+        stats_membership_retention_chart_api,
+        name="api-stats-membership-retention-chart",
     ),
 ]
