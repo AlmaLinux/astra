@@ -314,10 +314,8 @@ def _load_membership_request_for_action_api(
 def _parse_datatables_request(
     request: HttpRequest,
     *,
-    expected_length: int,
-    expected_order_name: str,
     allow_queue_filter: bool,
-) -> tuple[int, int, str | None]:
+) -> tuple[int, int, int, str | None]:
     allowed_params = {
         "draw",
         "start",
@@ -353,7 +351,9 @@ def _parse_datatables_request(
     except (TypeError, ValueError) as exc:
         raise ValueError("Invalid query parameters.") from exc
 
-    if draw < 0 or start < 0 or length != expected_length:
+    if draw < 0 or start < 0:
+        raise ValueError("Invalid query parameters.")
+    if length <= 0 or length > 100:
         raise ValueError("Invalid query parameters.")
     if _normalize_str(request.GET.get("search[regex]")).lower() == "true":
         raise ValueError("Invalid query parameters.")
@@ -364,18 +364,14 @@ def _parse_datatables_request(
     if _normalize_str(request.GET.get("search[value]")).strip():
         raise ValueError("Invalid query parameters.")
 
-    order_name = _normalize_str(request.GET.get("order[0][name]"))
     order_column = _normalize_str(request.GET.get("order[0][column]"))
-    column_name = _normalize_str(request.GET.get("columns[0][name]"))
     column_data = _normalize_str(request.GET.get("columns[0][data]"))
     column_searchable = _normalize_str(request.GET.get("columns[0][searchable]")).lower()
     column_orderable = _normalize_str(request.GET.get("columns[0][orderable]")).lower()
     order_dir = _normalize_str(request.GET.get("order[0][dir]")).lower()
 
     if (
-        order_name != expected_order_name
-        or order_column != "0"
-        or column_name != expected_order_name
+        order_column != "0"
         or column_data != "request_id"
         or column_searchable != "true"
         or column_orderable != "true"
@@ -391,16 +387,14 @@ def _parse_datatables_request(
             raise ValueError("Invalid query parameters.")
         queue_filter = raw_filter
 
-    return draw, start, queue_filter
+    return draw, start, length, queue_filter
 
 
 @json_permission_required(ASTRA_ADD_MEMBERSHIP)
 def membership_requests_pending_api(request: HttpRequest) -> JsonResponse:
     try:
-        draw, start, queue_filter = _parse_datatables_request(
+        draw, start, length, queue_filter = _parse_datatables_request(
             request,
-            expected_length=50,
-            expected_order_name="requested_at",
             allow_queue_filter=True,
         )
     except ValueError as exc:
@@ -415,7 +409,7 @@ def membership_requests_pending_api(request: HttpRequest) -> JsonResponse:
         include_rows=True,
     )
     pending_rows = list(snapshot["pending_rows"])
-    sliced_rows = pending_rows[start : start + 50]
+    sliced_rows = pending_rows[start : start + length]
     payload = build_datatables_payload(
         rows=sliced_rows,
         records_total=int(snapshot["filter_counts"]["all"]),
@@ -432,10 +426,8 @@ def membership_requests_pending_api(request: HttpRequest) -> JsonResponse:
 @json_permission_required(ASTRA_ADD_MEMBERSHIP)
 def membership_requests_on_hold_api(request: HttpRequest) -> JsonResponse:
     try:
-        draw, start, _queue_filter = _parse_datatables_request(
+        draw, start, length, _queue_filter = _parse_datatables_request(
             request,
-            expected_length=10,
-            expected_order_name="on_hold_at",
             allow_queue_filter=False,
         )
     except ValueError as exc:
@@ -448,7 +440,7 @@ def membership_requests_on_hold_api(request: HttpRequest) -> JsonResponse:
         include_rows=True,
     )
     on_hold_rows = list(snapshot["on_hold_rows"])
-    sliced_rows = on_hold_rows[start : start + 10]
+    sliced_rows = on_hold_rows[start : start + length]
     payload = build_datatables_payload(
         rows=sliced_rows,
         records_total=len(on_hold_rows),

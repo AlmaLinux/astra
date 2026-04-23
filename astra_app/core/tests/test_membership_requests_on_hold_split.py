@@ -205,7 +205,7 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
             resp = self.client.get(
                 reverse("api-membership-requests-pending"),
                 data={
-                    **self._datatables_query(order_name="requested_at", length=50),
+                    **self._datatables_query(order_name="requested_at", length=25),
                     "queue_filter": "all",
                 },
                 HTTP_ACCEPT="application/json",

@@ -195,7 +195,7 @@ class MembershipRequestsDataTablesApiTests(TestCase):
             response = self.client.get(
                 "/api/v1/membership/requests/pending",
                 data={
-                    **self._datatables_query(order_name="requested_at", length=50),
+                    **self._datatables_query(order_name="requested_at", length=25),
                     "queue_filter": "all",
                 },
                 HTTP_ACCEPT="application/json",
@@ -286,7 +286,7 @@ class MembershipRequestsDataTablesApiTests(TestCase):
             response = self.client.get(
                 "/api/v1/membership/requests/pending",
                 data={
-                    **self._datatables_query(order_name="requested_at", length=50),
+                    **self._datatables_query(order_name="requested_at", length=25),
                     "queue_filter": "all",
                 },
                 HTTP_ACCEPT="application/json",
@@ -655,7 +655,7 @@ class MembershipRequestsDataTablesApiTests(TestCase):
             response = self.client.get(
                 "/api/v1/membership/requests/pending",
                 data={
-                    **self._datatables_query(order_name="requested_at", length=50),
+                    **self._datatables_query(order_name="requested_at", length=25),
                     "queue_filter": "all",
                     "unexpected": "1",
                 },
@@ -664,6 +664,65 @@ class MembershipRequestsDataTablesApiTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error"], "Invalid query parameters.")
+
+    def test_pending_endpoint_rejects_non_positive_or_too_large_length(self) -> None:
+        reviewer = self._make_freeipa_user(
+            "reviewer",
+            email="reviewer@example.com",
+            groups=[settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+        )
+        self._login_as_committee()
+
+        invalid_lengths = (0, 101)
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            for length in invalid_lengths:
+                with self.subTest(length=length):
+                    response = self.client.get(
+                        "/api/v1/membership/requests/pending",
+                        data={
+                            **self._datatables_query(order_name="requested_at", length=length),
+                            "queue_filter": "all",
+                        },
+                        HTTP_ACCEPT="application/json",
+                    )
+
+                    self.assertEqual(response.status_code, 400)
+                    self.assertEqual(response.json()["error"], "Invalid query parameters.")
+
+    def test_pending_endpoint_accepts_length_up_to_100(self) -> None:
+        MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.pending,
+        )
+
+        reviewer = self._make_freeipa_user(
+            "reviewer",
+            email="reviewer@example.com",
+            groups=[settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+        )
+        alice = self._make_freeipa_user("alice", email="alice@example.com")
+
+        self._login_as_committee()
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch(
+                "core.freeipa.user.FreeIPAUser.find_lightweight_by_usernames",
+                return_value={user.username: user for user in [reviewer, alice] if user.username},
+            ),
+        ):
+            response = self.client.get(
+                "/api/v1/membership/requests/pending",
+                data={
+                    **self._datatables_query(order_name="requested_at", length=100),
+                    "queue_filter": "all",
+                },
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["recordsFiltered"], 1)
 
     def test_pending_endpoint_rejects_descending_order_it_does_not_honor(self) -> None:
         reviewer = self._make_freeipa_user(
@@ -677,7 +736,7 @@ class MembershipRequestsDataTablesApiTests(TestCase):
             response = self.client.get(
                 "/api/v1/membership/requests/pending",
                 data={
-                    **self._datatables_query(order_name="requested_at", length=50),
+                    **self._datatables_query(order_name="requested_at", length=25),
                     "queue_filter": "all",
                     "order[0][dir]": "desc",
                 },
@@ -707,7 +766,7 @@ class MembershipRequestsDataTablesApiTests(TestCase):
                     response = self.client.get(
                         "/api/v1/membership/requests/pending",
                         data={
-                            **self._datatables_query(order_name="requested_at", length=50),
+                            **self._datatables_query(order_name="requested_at", length=25),
                             "queue_filter": "all",
                             **overrides,
                         },
