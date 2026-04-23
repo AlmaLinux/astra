@@ -16,7 +16,7 @@ from django.core.files.uploadedfile import UploadedFile
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import IntegrityError, models, transaction
 from django.db.models import Q
-from django.db.models.signals import post_save
+from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 from django.utils import timezone
 from PIL import Image
@@ -1875,3 +1875,27 @@ def _cleanup_credentials_on_election_soft_delete(
     if update_fields is not None and "status" not in update_fields:
         return
     VotingCredential.objects.filter(election=instance).delete()
+
+
+@receiver(post_save, sender=MembershipRequest)
+def _invalidate_badge_cache_on_membership_request_change(
+    sender: type[MembershipRequest],
+    instance: MembershipRequest,
+    **kwargs: object,
+) -> None:
+    """Invalidate badge count cache when membership requests change."""
+    from core.membership import invalidate_membership_review_badge_cache
+    
+    invalidate_membership_review_badge_cache()
+
+
+@receiver(post_delete, sender=MembershipRequest)
+def _invalidate_badge_cache_on_membership_request_delete(
+    sender: type[MembershipRequest],
+    instance: MembershipRequest,
+    **kwargs: object,
+) -> None:
+    """Invalidate badge count cache when membership requests are deleted."""
+    from core.membership import invalidate_membership_review_badge_cache
+    
+    invalidate_membership_review_badge_cache()

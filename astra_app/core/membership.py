@@ -726,6 +726,68 @@ def visible_committee_membership_requests(
     return visible_requests
 
 
+def auto_ignore_pending_requests_for_deleted_users() -> int:
+    """Auto-ignore pending requests for users that no longer exist in FreeIPA.
+
+    Can be called from cache invalidation handlers or routine operations.
+    Returns count of requests that were auto-ignored.
+    """
+    from core.membership_request_workflow import ignore_membership_request
+
+    try:
+        live_usernames = _normalize_live_usernames(None)
+    except Exception:
+        # If FreeIPA is unavailable, don't auto-ignore anything
+        logger.debug("skipped_auto_ignore_freeipa_unavailable")
+        return 0
+
+    ignored_count = 0
+    pending_all = list(MembershipRequest.objects.filter(status=MembershipRequest.Status.pending))
+
+    for request in pending_all:
+        # Only auto-ignore user targets (not org targets).
+        if request.is_organization_target:
+            continue
+
+        normalized_username = str(request.requested_username or "").strip().lower()
+        if not normalized_username or normalized_username in live_usernames:
+            continue
+
+        # User doesn't exist in FreeIPA; auto-ignore the request.
+        try:
+            ignore_membership_request(
+                membership_request=request,
+                actor_username="system",
+            )
+            ignored_count += 1
+            logger.info(
+                "auto_ignored_pending_request_for_deleted_user request_id=%s username=%s",
+                request.pk,
+                request.requested_username,
+                extra={
+                    "event": "astra.membership.auto_ignore",
+                    "component": "membership",
+                    "outcome": "deleted_user",
+                },
+            )
+        except Exception:
+            logger.exception(
+                "failed_to_auto_ignore_pending_request_for_deleted_user request_id=%s username=%s",
+                request.pk,
+                request.requested_username,
+            )
+
+    return ignored_count
+
+
+def invalidate_membership_review_badge_cache() -> None:
+    """Invalidate the cached membership review badge counts."""
+    try:
+        cache.delete(_MEMBERSHIP_REVIEW_BADGE_COUNTS_CACHE_KEY)
+    except Exception:
+        pass
+
+
 def get_membership_review_badge_counts() -> dict[str, int]:
     try:
         cached_counts = cache.get(_MEMBERSHIP_REVIEW_BADGE_COUNTS_CACHE_KEY)
