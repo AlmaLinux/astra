@@ -29,6 +29,7 @@ export default defineConfig(({ command }) => ({
         accountInvitations: fileURLToPath(new URL("./src/entrypoints/accountInvitations.ts", import.meta.url)),
         membershipRequests: fileURLToPath(new URL("./src/entrypoints/membershipRequests.ts", import.meta.url)),
         membershipAuditLog: fileURLToPath(new URL("./src/entrypoints/membershipAuditLog.ts", import.meta.url)),
+        membershipSponsors: fileURLToPath(new URL("./src/entrypoints/membershipSponsors.ts", import.meta.url)),
         membershipRequestDetail: fileURLToPath(new URL("./src/entrypoints/membershipRequestDetail.ts", import.meta.url)),
         membershipProfileNotes: fileURLToPath(new URL("./src/entrypoints/membershipProfileNotes.ts", import.meta.url)),
         membershipStats: fileURLToPath(new URL("./src/entrypoints/membershipStats.ts", import.meta.url)),
