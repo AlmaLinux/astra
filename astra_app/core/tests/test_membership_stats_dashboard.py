@@ -269,16 +269,9 @@ class MembershipStatsDashboardTests(TestCase):
                 resp = self.client.get(reverse("membership-sponsors"))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Sponsor Org")
-        self.assertContains(resp, "Fallback Org")
-        self.assertContains(resp, "Representative User (repuser)")
-        self.assertContains(resp, "repfallback")
-        self.assertContains(resp, f'href="{reverse("organization-detail", kwargs={"organization_id": sponsor_org.pk})}"')
-        self.assertContains(resp, f'href="{reverse("user-profile", kwargs={"username": "repuser"})}"')
-        self.assertContains(resp, 'id="sponsors-table"')
-        self.assertContains(resp, "(5 days left)")
-        self.assertContains(resp, "data-order=\"9999-12-31\"")
-        self.assertNotContains(resp, "alice")
+        self.assertContains(resp, "data-membership-sponsors-root")
+        self.assertContains(resp, 'data-membership-sponsors-api-url="/api/v1/membership/sponsors"')
+        self.assertContains(resp, 'data-membership-sponsors-page-size="25"')
 
     def test_membership_sponsors_page_uses_effective_category_when_denorm_drifts(self) -> None:
         MembershipTypeCategory.objects.update_or_create(
@@ -345,11 +338,29 @@ class MembershipStatsDashboardTests(TestCase):
                 return sponsor_rep
             return None
 
+        query = {
+            "draw": "1",
+            "start": "0",
+            "length": "25",
+            "search[value]": "",
+            "search[regex]": "false",
+            "order[0][column]": "0",
+            "order[0][dir]": "asc",
+            "order[0][name]": "expires_at",
+            "columns[0][data]": "membership_id",
+            "columns[0][name]": "expires_at",
+            "columns[0][searchable]": "true",
+            "columns[0][orderable]": "true",
+            "columns[0][search][value]": "",
+            "columns[0][search][regex]": "false",
+        }
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
-            resp = self.client.get(reverse("membership-sponsors"))
+            resp = self.client.get(reverse("api-membership-sponsors"), data=query, HTTP_ACCEPT="application/json")
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Drifted Sponsor Org")
+        payload = resp.json()
+        self.assertEqual(payload["recordsFiltered"], 1)
+        self.assertEqual(payload["data"][0]["organization"]["name"], "Drifted Sponsor Org")
 
     def test_membership_sponsors_page_uses_bulk_freeipa_lookup_for_multiple_representatives(self) -> None:
         MembershipTypeCategory.objects.update_or_create(
@@ -422,14 +433,33 @@ class MembershipStatsDashboardTests(TestCase):
                 return reviewer
             raise AssertionError(f"Unexpected per-user FreeIPA lookup for representative username={username}")
 
+        query = {
+            "draw": "1",
+            "start": "0",
+            "length": "25",
+            "search[value]": "",
+            "search[regex]": "false",
+            "order[0][column]": "0",
+            "order[0][dir]": "asc",
+            "order[0][name]": "expires_at",
+            "columns[0][data]": "membership_id",
+            "columns[0][name]": "expires_at",
+            "columns[0][searchable]": "true",
+            "columns[0][orderable]": "true",
+            "columns[0][search][value]": "",
+            "columns[0][search][regex]": "false",
+        }
+
         with patch("core.freeipa.user.FreeIPAUser.all", return_value=[rep_one, rep_two]) as mocked_all:
             with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
-                resp = self.client.get(reverse("membership-sponsors"))
+                resp = self.client.get(reverse("api-membership-sponsors"), data=query, HTTP_ACCEPT="application/json")
 
         self.assertEqual(resp.status_code, 200)
         mocked_all.assert_called_once()
-        self.assertContains(resp, "Representative One (repone)")
-        self.assertContains(resp, "Representative Two (reptwo)")
+        payload = resp.json()
+        labels = [row["representative"]["display_label"] for row in payload["data"]]
+        self.assertIn("Representative One (repone)", labels)
+        self.assertIn("Representative Two (reptwo)", labels)
 
     def test_membership_stats_data_requires_permission(self) -> None:
         self._login_as_freeipa_user("viewer")

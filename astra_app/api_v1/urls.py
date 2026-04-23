@@ -67,6 +67,11 @@ urlpatterns = [
         name="api-membership-audit-log",
     ),
     path(
+        "membership/sponsors",
+        views_membership.membership_sponsors_api,
+        name="api-membership-sponsors",
+    ),
+    path(
         "membership/notes/<int:pk>/summary",
         views_membership.membership_request_notes_summary_api,
         name="api-membership-request-notes-summary",

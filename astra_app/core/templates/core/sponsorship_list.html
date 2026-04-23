@@ -1,92 +1,23 @@
-{% extends "core/base.html" %}
+{% extends 'core/base.html' %}
+{% load django_vite %}
 
 {% block title %}Sponsors{% endblock %}
 
-{% block header %}
-<h1 class="m-0">Sponsors</h1>
+{% block extra_head %}
+  {{ block.super }}
+  {% vite_hmr_client %}
+  {% vite_asset 'src/entrypoints/membershipSponsors.ts' %}
 {% endblock %}
 
-{% block extra_head %}
-{{ block.super }}
-{% load static %}
-<link rel="stylesheet" href="{% static 'core/vendor/datatables/datatables.min.css' %}">
-<style>
-  #sponsors-table_wrapper .dt-buttons { margin-bottom: 5px; }
-  #sponsors-table_wrapper .dt-paging { float: right; }
-</style>
+{% block header %}
+  <h1 class="m-0">Sponsors</h1>
 {% endblock %}
 
 {% block content %}
-<div class="card">
-  <div class="card-body">
-    <div class="table-responsive">
-      <table id="sponsors-table" class="table table-bordered table-striped mb-2">
-        <thead>
-          <tr>
-            <th>Organization</th>
-            <th>Representative</th>
-            <th>Sponsorship Level</th>
-            <th>Expires</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for item in memberships %}
-            <tr>
-              <td>
-                <a href="{% url 'organization-detail' item.organization.pk %}">{{ item.organization.name }}</a>
-              </td>
-              <td>
-                {% if item.rep_username %}
-                  <a href="{% url 'user-profile' item.rep_username %}">
-                    {% if item.rep_fullname %}
-                      {{ item.rep_fullname }} ({{ item.rep_username }})
-                    {% else %}
-                      {{ item.rep_username }}
-                    {% endif %}
-                  </a>
-                {% else %}
-                  -
-                {% endif %}
-              </td>
-              <td>{{ item.membership.membership_type.name }}</td>
-              <td data-order="{% if item.membership.expires_at %}{{ item.membership.expires_at|date:'Y-m-d H:i:s' }}{% else %}9999-12-31{% endif %}">
-                {% if item.membership.expires_at %}
-                  {% if item.is_expiring_soon %}
-                    <span class="text-danger">
-                      {{ item.membership.expires_at|date:"Y-m-d" }} ({{ item.days_left }} days left)
-                    </span>
-                  {% else %}
-                    {{ item.membership.expires_at|date:"Y-m-d" }} ({{ item.days_left }} days left)
-                  {% endif %}
-                {% else %}
-                  -
-                {% endif %}
-              </td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-</div>
-{% endblock %}
-
-{% block scripts %}
-{{ block.super }}
-{% load static %}
-<script src="{% static 'core/vendor/datatables/datatables.min.js' %}"></script>
-<script>
-  $(document).ready(function() {
-    $('#sponsors-table').DataTable({
-      responsive: true,
-      dom: "<'row'<'col-sm-12 col-md-6'B><'col-sm-12 col-md-6 text-right'f>>" +
-           "<'row'<'col-sm-12'tr>>" +
-           "<'row'<'col-sm-12 col-md-5'i><'col-sm-12 col-md-7'p>>",
-      buttons: ['copy', 'csv', 'excel', 'pdf', 'print', 'colvis'],
-      order: [[3, 'asc']],
-      pageLength: 25,
-      language: { emptyTable: 'No active sponsors found.' },
-    });
-  });
-</script>
+  <div
+    data-membership-sponsors-root
+    data-membership-sponsors-api-url="{% url 'api-membership-sponsors' %}"
+    data-membership-sponsors-page-size="25"
+    data-membership-sponsors-initial-q="{{ initial_q }}"
+  ></div>
 {% endblock %}

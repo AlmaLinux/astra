@@ -19,9 +19,7 @@ from django.utils import timezone
 
 from core.country_codes import country_code_status_from_user_data
 from core.freeipa.user import FreeIPAUser
-from core.logging_extras import current_exception_log_fields
 from core.membership import visible_committee_membership_requests
-from core.membership_constants import MembershipCategoryCode
 from core.models import Membership, MembershipLog, MembershipRequest
 from core.permissions import (
     ASTRA_VIEW_MEMBERSHIP,
@@ -30,7 +28,7 @@ from core.permissions import (
     json_permission_required_any,
 )
 from core.templatetags.core_membership_responses import membership_response_value
-from core.views_utils import _normalize_str
+from core.views_utils import _normalize_str, parse_datatables_request_base
 
 logger = logging.getLogger(__name__)
 
@@ -162,49 +160,11 @@ def _compute_retention_cohort_12m(
 def _parse_membership_audit_log_datatables_request(
     request: HttpRequest,
 ) -> tuple[int, int, int, str, str, int | None]:
-    allowed_params = {
-        "draw",
-        "start",
-        "length",
-        "search[value]",
-        "search[regex]",
-        "order[0][column]",
-        "order[0][dir]",
-        "order[0][name]",
-        "columns[0][data]",
-        "columns[0][name]",
-        "columns[0][searchable]",
-        "columns[0][orderable]",
-        "columns[0][search][value]",
-        "columns[0][search][regex]",
-        "q",
-        "username",
-        "organization",
-    }
-
-    for key in request.GET.keys():
-        if key not in allowed_params:
-            raise ValueError("Invalid query parameters.")
-
-    try:
-        draw = int(str(request.GET.get("draw") or ""))
-        start = int(str(request.GET.get("start") or ""))
-        length = int(str(request.GET.get("length") or ""))
-    except (TypeError, ValueError) as exc:
-        raise ValueError("Invalid query parameters.") from exc
-
-    if draw < 0 or start < 0:
-        raise ValueError("Invalid query parameters.")
-    if length <= 0 or length > 100:
-        raise ValueError("Invalid query parameters.")
-    if _normalize_str(request.GET.get("search[regex]", "")).lower() == "true":
-        raise ValueError("Invalid query parameters.")
-    if _normalize_str(request.GET.get("columns[0][search][regex]", "")).lower() == "true":
-        raise ValueError("Invalid query parameters.")
-    if _normalize_str(request.GET.get("columns[0][search][value]")).strip():
-        raise ValueError("Invalid query parameters.")
-    if _normalize_str(request.GET.get("search[value]")).strip():
-        raise ValueError("Invalid query parameters.")
+    draw, start, length = parse_datatables_request_base(
+        request,
+        additional_allowed_params={"q", "username", "organization"},
+        allow_cache_buster=False,
+    )
 
     order_column = _normalize_str(request.GET.get("order[0][column]"))
     order_dir = _normalize_str(request.GET.get("order[0][dir]")).lower()
@@ -407,97 +367,6 @@ def membership_stats(request: HttpRequest) -> HttpResponse:
             "stats_data_url": stats_data_url,
             "current_days": days,
             "days_presets": days_presets,
-        },
-    )
-
-
-@user_passes_test(has_any_membership_permission, login_url=reverse_lazy("users"))
-def membership_sponsors_list(request: HttpRequest) -> HttpResponse:
-    active_sponsorships = list(
-        Membership.objects.active()
-        .filter(membership_type__category_id=MembershipCategoryCode.sponsorship)
-        .select_related("target_organization", "membership_type")
-        .order_by("expires_at")
-    )
-
-    representative_usernames = {
-        str(membership.target_organization.representative or "").strip()
-        for membership in active_sponsorships
-        if membership.target_organization is not None and str(membership.target_organization.representative or "").strip()
-    }
-
-    representative_full_names: dict[str, str] = {}
-    usernames_to_lookup = sorted(representative_usernames)
-    users_by_username: dict[str, FreeIPAUser] = {}
-    use_bulk_lookup = len(usernames_to_lookup) > 1
-    if use_bulk_lookup:
-        all_freeipa_users = FreeIPAUser.all()
-        users_by_username = {
-            username: user
-            for user in all_freeipa_users
-            for username in [str(user.username or "").strip()]
-            if username
-        }
-        if not users_by_username:
-            # FreeIPAUser.all() can return [] when the backend is unavailable.
-            # Fall back to per-user lookups to preserve existing behavior.
-            use_bulk_lookup = False
-
-    for username in usernames_to_lookup:
-        representative: FreeIPAUser | None = None
-        if use_bulk_lookup:
-            representative = users_by_username.get(username)
-        else:
-            try:
-                representative = FreeIPAUser.get(username)
-            except Exception:
-                logger.exception(
-                    "membership_sponsors_list: failed to fetch representative from FreeIPA username=%s",
-                    username,
-                    extra=current_exception_log_fields(),
-                )
-                continue
-
-        if representative is None:
-            continue
-
-        full_name = str(representative.full_name or "").strip()
-        if full_name:
-            representative_full_names[username] = full_name
-
-    now = timezone.now()
-    warning_days = settings.MEMBERSHIP_EXPIRING_SOON_DAYS
-    memberships: list[dict[str, object]] = []
-    for membership in active_sponsorships:
-        organization = membership.target_organization
-        if organization is None:
-            continue
-
-        rep_username = str(organization.representative or "").strip()
-        rep_fullname = representative_full_names.get(rep_username, "")
-
-        days_left: int | None = None
-        is_expiring_soon = False
-        if membership.expires_at is not None:
-            days_left = (membership.expires_at - now).days
-            is_expiring_soon = days_left <= warning_days
-
-        memberships.append(
-            {
-                "organization": organization,
-                "membership": membership,
-                "rep_username": rep_username,
-                "rep_fullname": rep_fullname,
-                "days_left": days_left,
-                "is_expiring_soon": is_expiring_soon,
-            }
-        )
-
-    return render(
-        request,
-        "core/sponsorship_list.html",
-        {
-            "memberships": memberships,
         },
     )
 

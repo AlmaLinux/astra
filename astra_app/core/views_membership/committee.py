@@ -56,6 +56,7 @@ from core.views_utils import (
     _normalize_str,
     _resolve_post_redirect,
     get_username,
+    parse_datatables_request_base,
     post_only_404,
     require_post_or_404,
     send_mail_url,
@@ -316,53 +317,11 @@ def _parse_datatables_request(
     *,
     allow_queue_filter: bool,
 ) -> tuple[int, int, int, str | None]:
-    allowed_params = {
-        "draw",
-        "start",
-        "length",
-        "search[value]",
-        "search[regex]",
-        "order[0][column]",
-        "order[0][dir]",
-        "order[0][name]",
-        "columns[0][data]",
-        "columns[0][name]",
-        "columns[0][searchable]",
-        "columns[0][orderable]",
-        "columns[0][search][value]",
-        "columns[0][search][regex]",
-    }
-    if allow_queue_filter:
-        allowed_params.add("queue_filter")
-
-    for key in request.GET.keys():
-        if key == "_":
-            cache_buster = _normalize_str(request.GET.get(key))
-            if not cache_buster.isdigit():
-                raise ValueError("Invalid query parameters.")
-            continue
-        if key not in allowed_params:
-            raise ValueError("Invalid query parameters.")
-
-    try:
-        draw = int(str(request.GET.get("draw") or ""))
-        start = int(str(request.GET.get("start") or ""))
-        length = int(str(request.GET.get("length") or ""))
-    except (TypeError, ValueError) as exc:
-        raise ValueError("Invalid query parameters.") from exc
-
-    if draw < 0 or start < 0:
-        raise ValueError("Invalid query parameters.")
-    if length <= 0 or length > 100:
-        raise ValueError("Invalid query parameters.")
-    if _normalize_str(request.GET.get("search[regex]")).lower() == "true":
-        raise ValueError("Invalid query parameters.")
-    if _normalize_str(request.GET.get("columns[0][search][regex]")).lower() == "true":
-        raise ValueError("Invalid query parameters.")
-    if _normalize_str(request.GET.get("columns[0][search][value]")).strip():
-        raise ValueError("Invalid query parameters.")
-    if _normalize_str(request.GET.get("search[value]")).strip():
-        raise ValueError("Invalid query parameters.")
+    draw, start, length = parse_datatables_request_base(
+        request,
+        additional_allowed_params={"queue_filter"} if allow_queue_filter else None,
+        allow_cache_buster=True,
+    )
 
     order_column = _normalize_str(request.GET.get("order[0][column]"))
     column_data = _normalize_str(request.GET.get("columns[0][data]"))

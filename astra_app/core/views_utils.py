@@ -303,6 +303,70 @@ def _normalize_str(value: object) -> str:
     return str(value).strip()
 
 
+_DATATABLES_BASE_ALLOWED_PARAMS: frozenset[str] = frozenset(
+    {
+        "draw",
+        "start",
+        "length",
+        "search[value]",
+        "search[regex]",
+        "order[0][column]",
+        "order[0][dir]",
+        "order[0][name]",
+        "columns[0][data]",
+        "columns[0][name]",
+        "columns[0][searchable]",
+        "columns[0][orderable]",
+        "columns[0][search][value]",
+        "columns[0][search][regex]",
+    }
+)
+
+
+def parse_datatables_request_base(
+    request: HttpRequest,
+    *,
+    allowed_params: set[str] | frozenset[str] | None = None,
+    additional_allowed_params: set[str] | frozenset[str] | None = None,
+    allow_cache_buster: bool,
+    max_length: int = 100,
+) -> tuple[int, int, int]:
+    allowed_params_set = set(_DATATABLES_BASE_ALLOWED_PARAMS if allowed_params is None else allowed_params)
+    if additional_allowed_params is not None:
+        allowed_params_set.update(additional_allowed_params)
+
+    for key in request.GET.keys():
+        if key == "_" and allow_cache_buster:
+            cache_buster = _normalize_str(request.GET.get(key))
+            if not cache_buster.isdigit():
+                raise ValueError("Invalid query parameters.")
+            continue
+        if key not in allowed_params_set:
+            raise ValueError("Invalid query parameters.")
+
+    try:
+        draw = int(str(request.GET.get("draw") or ""))
+        start = int(str(request.GET.get("start") or ""))
+        length = int(str(request.GET.get("length") or ""))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Invalid query parameters.") from exc
+
+    if draw < 0 or start < 0:
+        raise ValueError("Invalid query parameters.")
+    if length <= 0 or length > max_length:
+        raise ValueError("Invalid query parameters.")
+    if _normalize_str(request.GET.get("search[regex]")).lower() == "true":
+        raise ValueError("Invalid query parameters.")
+    if _normalize_str(request.GET.get("columns[0][search][regex]")).lower() == "true":
+        raise ValueError("Invalid query parameters.")
+    if _normalize_str(request.GET.get("columns[0][search][value]")).strip():
+        raise ValueError("Invalid query parameters.")
+    if _normalize_str(request.GET.get("search[value]")).strip():
+        raise ValueError("Invalid query parameters.")
+
+    return draw, start, length
+
+
 def pagination_window(paginator: Paginator, page_number: int) -> tuple[list[int], bool, bool]:
     """Compute a sliding page-number window for paginated views.
 

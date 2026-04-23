@@ -1,14 +1,17 @@
 import datetime
 import logging
 
+from django.conf import settings
 from django.contrib import messages
-from django.contrib.auth.decorators import permission_required
-from django.http import Http404, HttpRequest, HttpResponse
-from django.shortcuts import get_object_or_404, redirect
+from django.contrib.auth.decorators import permission_required, user_passes_test
+from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
+from django.utils import timezone
 
 from core.forms_membership import MembershipUpdateExpiryForm
 from core.freeipa.user import FreeIPAUser
+from core.logging_extras import current_exception_log_fields
 from core.membership import (
     FreeIPACallerMode,
     FreeIPAGroupRemovalOutcome,
@@ -17,20 +20,214 @@ from core.membership import (
     remove_organization_representative_from_group_if_present,
     remove_user_from_group,
 )
+from core.membership_constants import MembershipCategoryCode
 from core.models import Membership, MembershipLog, MembershipType, Organization
-from core.permissions import ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP
+from core.permissions import (
+    ASTRA_CHANGE_MEMBERSHIP,
+    ASTRA_DELETE_MEMBERSHIP,
+    MEMBERSHIP_PERMISSIONS,
+    has_any_membership_permission,
+    json_permission_required_any,
+)
 from core.views_membership_admin import (
     membership_audit_log,
     membership_audit_log_api,
     membership_audit_log_organization,
     membership_audit_log_user,
-    membership_sponsors_list,
     membership_stats,
     membership_stats_data,
 )
-from core.views_utils import _normalize_str, _resolve_post_redirect, get_username, post_only_404
+from core.views_utils import (
+    _normalize_str,
+    _resolve_post_redirect,
+    get_username,
+    parse_datatables_request_base,
+    post_only_404,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _load_active_sponsorship_memberships() -> list[Membership]:
+    return list(
+        Membership.objects.active()
+        .filter(membership_type__category_id=MembershipCategoryCode.sponsorship)
+        .select_related("target_organization", "membership_type")
+        .order_by("expires_at")
+    )
+
+
+def _load_representative_full_names(usernames: set[str]) -> dict[str, str]:
+    representative_full_names: dict[str, str] = {}
+    usernames_to_lookup = sorted(usernames)
+    users_by_username: dict[str, FreeIPAUser] = {}
+    use_bulk_lookup = len(usernames_to_lookup) > 1
+    if use_bulk_lookup:
+        all_freeipa_users = FreeIPAUser.all()
+        users_by_username = {
+            username: user
+            for user in all_freeipa_users
+            for username in [str(user.username or "").strip()]
+            if username
+        }
+        if not users_by_username:
+            # FreeIPAUser.all() can return [] when the backend is unavailable.
+            # Fall back to per-user lookups to preserve existing behavior.
+            use_bulk_lookup = False
+
+    for username in usernames_to_lookup:
+        representative: FreeIPAUser | None = None
+        if use_bulk_lookup:
+            representative = users_by_username.get(username)
+        else:
+            try:
+                representative = FreeIPAUser.get(username)
+            except Exception:
+                logger.exception(
+                    "membership_sponsors: failed to fetch representative from FreeIPA username=%s",
+                    username,
+                    extra=current_exception_log_fields(),
+                )
+                continue
+
+        if representative is None:
+            continue
+
+        full_name = str(representative.full_name or "").strip()
+        if full_name:
+            representative_full_names[username] = full_name
+
+    return representative_full_names
+
+
+def _build_membership_sponsor_rows(*, q: str) -> list[dict[str, object]]:
+    active_sponsorships = _load_active_sponsorship_memberships()
+    representative_usernames = {
+        str(membership.target_organization.representative or "").strip()
+        for membership in active_sponsorships
+        if membership.target_organization is not None and str(membership.target_organization.representative or "").strip()
+    }
+    representative_full_names = _load_representative_full_names(representative_usernames)
+
+    now = timezone.now()
+    warning_days = settings.MEMBERSHIP_EXPIRING_SOON_DAYS
+    normalized_query = q.strip().lower()
+    rows: list[dict[str, object]] = []
+    for membership in active_sponsorships:
+        organization = membership.target_organization
+        if organization is None:
+            continue
+
+        rep_username = str(organization.representative or "").strip()
+        rep_fullname = representative_full_names.get(rep_username, "")
+
+        days_left: int | None = None
+        is_expiring_soon = False
+        expires_display = "-"
+        expires_at_order = "9999-12-31"
+        if membership.expires_at is not None:
+            days_left = (membership.expires_at - now).days
+            is_expiring_soon = days_left <= warning_days
+            expires_display = f"{membership.expires_at:%Y-%m-%d} ({days_left} days left)"
+            expires_at_order = membership.expires_at.strftime("%Y-%m-%d %H:%M:%S")
+
+        representative_label = rep_fullname and f"{rep_fullname} ({rep_username})" or rep_username
+
+        row = {
+            "membership_id": membership.pk,
+            "organization": {
+                "id": organization.pk,
+                "name": organization.name,
+                "url": reverse("organization-detail", args=[organization.pk]),
+            },
+            "representative": {
+                "username": rep_username,
+                "full_name": rep_fullname,
+                "display_label": representative_label,
+                "url": reverse("user-profile", args=[rep_username]) if rep_username else "",
+            },
+            "sponsorship_level": membership.membership_type.name,
+            "days_left": days_left,
+            "is_expiring_soon": is_expiring_soon,
+            "expires_display": expires_display,
+            "expires_at_order": expires_at_order,
+        }
+        if normalized_query:
+            search_blob = " ".join(
+                (
+                    organization.name,
+                    rep_username,
+                    rep_fullname,
+                    membership.membership_type.name,
+                    expires_display,
+                )
+            ).lower()
+            if normalized_query not in search_blob:
+                continue
+        rows.append(row)
+
+    return rows
+
+
+def _parse_membership_sponsors_datatables_request(request: HttpRequest) -> tuple[int, int, int, str]:
+    draw, start, length = parse_datatables_request_base(
+        request,
+        additional_allowed_params={"q"},
+        allow_cache_buster=True,
+    )
+
+    order_column = _normalize_str(request.GET.get("order[0][column]"))
+    order_dir = _normalize_str(request.GET.get("order[0][dir]")).lower()
+    order_name = _normalize_str(request.GET.get("order[0][name]"))
+    column_data = _normalize_str(request.GET.get("columns[0][data]"))
+    column_name = _normalize_str(request.GET.get("columns[0][name]"))
+    column_searchable = _normalize_str(request.GET.get("columns[0][searchable]"))
+    column_orderable = _normalize_str(request.GET.get("columns[0][orderable]"))
+    if (
+        order_column != "0"
+        or order_dir != "asc"
+        or order_name != "expires_at"
+        or column_data != "membership_id"
+        or column_name != "expires_at"
+        or column_searchable.lower() != "true"
+        or column_orderable.lower() != "true"
+    ):
+        raise ValueError("Invalid query parameters.")
+
+    q = _normalize_str(request.GET.get("q"))
+    return draw, start, length, q
+
+
+@json_permission_required_any(MEMBERSHIP_PERMISSIONS)
+def membership_sponsors_api(request: HttpRequest) -> JsonResponse:
+    try:
+        draw, start, length, q = _parse_membership_sponsors_datatables_request(request)
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+
+    all_rows = _build_membership_sponsor_rows(q="")
+    rows = _build_membership_sponsor_rows(q=q) if q else all_rows
+    sliced_rows = rows[start : start + length]
+    return JsonResponse(
+        {
+            "draw": draw,
+            "recordsTotal": len(all_rows),
+            "recordsFiltered": len(rows),
+            "data": sliced_rows,
+        }
+    )
+
+
+@user_passes_test(has_any_membership_permission, login_url=reverse_lazy("users"))
+def membership_sponsors_list(request: HttpRequest) -> HttpResponse:
+    initial_q = _normalize_str(request.GET.get("q"))
+    return render(
+        request,
+        "core/sponsorship_list.html",
+        {
+            "initial_q": initial_q,
+        },
+    )
 
 
 def _load_active_membership(
@@ -364,6 +561,7 @@ __all__ = [
     "membership_audit_log_api",
     "membership_audit_log_organization",
     "membership_audit_log_user",
+    "membership_sponsors_api",
     "membership_set_expiry",
     "membership_sponsors_list",
     "membership_stats",
