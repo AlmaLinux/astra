@@ -37,10 +37,10 @@ class Round4TemplateConsolidationTests(SimpleTestCase):
         self.assertNotIn("_membership_request_shared_modals.html", source)
 
     def test_phase9_bulk_pages_use_expected_action_modules(self) -> None:
-        invitations = self._template_source("account_invitations.html")
+        invitations = self._template_source("account_invitations_vue.html")
         requests = self._template_source("membership_requests.html")
 
-        self.assertIn("core/js/bulk_table_actions.js", invitations)
+        self.assertIn("src/entrypoints/accountInvitations.ts", invitations)
         self.assertIn("src/entrypoints/membershipRequests.ts", requests)
         self.assertNotIn("core/js/bulk_table_actions.js", requests)
         self.assertNotIn("function setupBulk", invitations)

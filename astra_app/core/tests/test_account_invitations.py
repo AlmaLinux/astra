@@ -9,7 +9,7 @@ from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.test import TestCase, override_settings
-from django.urls import reverse
+from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
 from post_office.models import EmailTemplate
 
@@ -21,7 +21,7 @@ from core.account_invitations import (
 from core.freeipa.user import FreeIPAUser
 from core.models import AccountInvitation, AccountInvitationSend, FreeIPAPermissionGrant, Organization
 from core.permissions import ASTRA_ADD_MEMBERSHIP
-from core.views_account_invitations import ACCOUNT_INVITATIONS_PER_PAGE, _build_invitation_email_context
+from core.views_account_invitations import _build_invitation_email_context
 
 
 class AccountInvitationFreeIPAServiceTests(TestCase):
@@ -89,6 +89,10 @@ class AccountInvitationViewsTests(TestCase):
         session = self.client.session
         session["_freeipa_username"] = username
         session.save()
+
+    def test_legacy_account_invitations_route_is_removed(self) -> None:
+        with self.assertRaises(NoReverseMatch):
+            reverse("account-invitations-legacy")
 
     def _committee_user(self) -> FreeIPAUser:
         return FreeIPAUser(
@@ -367,28 +371,6 @@ class AccountInvitationViewsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         invitation.refresh_from_db()
         self.assertIsNone(invitation.freeipa_last_checked_at)
-
-    def test_account_invitations_page_paginates_pending(self) -> None:
-        self._login_as_freeipa_user("committee")
-
-        for idx in range(ACCOUNT_INVITATIONS_PER_PAGE + 1):
-            AccountInvitation.objects.create(
-                email=f"pending{idx}@example.com",
-                full_name="",
-                note="",
-                invited_by_username="committee",
-            )
-
-        with (
-            patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
-            patch("core.views_account_invitations.find_account_invitation_matches", return_value=[]),
-        ):
-            resp = self.client.get(reverse("account-invitations"))
-
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.context["pending_paginator"].count, ACCOUNT_INVITATIONS_PER_PAGE + 1)
-        self.assertEqual(len(resp.context["pending_invitations"]), ACCOUNT_INVITATIONS_PER_PAGE)
-        self.assertTrue(resp.context["pending_is_paginated"])
 
     def test_account_invitations_manual_refresh_updates_pending(self) -> None:
         self._login_as_freeipa_user("committee")

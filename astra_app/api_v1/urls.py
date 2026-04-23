@@ -1,6 +1,14 @@
 from django.urls import path
 
 from core import views_membership
+from core.views_invitations_api import (
+    account_invitations_accepted_api,
+    account_invitations_bulk_api,
+    account_invitations_dismiss_api,
+    account_invitations_pending_api,
+    account_invitations_refresh_api,
+    account_invitations_resend_api,
+)
 
 urlpatterns = [
     path(
@@ -82,5 +90,36 @@ urlpatterns = [
         "membership/notes/aggregate/add",
         views_membership.membership_notes_aggregate_add_api,
         name="api-membership-notes-aggregate-add",
+    ),
+    # Account Invitations API endpoints
+    path(
+        "membership/invitations/pending",
+        account_invitations_pending_api,
+        name="api-account-invitations-pending",
+    ),
+    path(
+        "membership/invitations/accepted",
+        account_invitations_accepted_api,
+        name="api-account-invitations-accepted",
+    ),
+    path(
+        "membership/invitations/refresh",
+        account_invitations_refresh_api,
+        name="api-account-invitations-refresh",
+    ),
+    path(
+        "membership/invitations/<int:pk>/resend",
+        account_invitations_resend_api,
+        name="api-account-invitations-resend",
+    ),
+    path(
+        "membership/invitations/<int:pk>/dismiss",
+        account_invitations_dismiss_api,
+        name="api-account-invitations-dismiss",
+    ),
+    path(
+        "membership/invitations/bulk",
+        account_invitations_bulk_api,
+        name="api-account-invitations-bulk",
     ),
 ]

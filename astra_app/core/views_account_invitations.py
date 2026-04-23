@@ -34,10 +34,7 @@ from core.public_urls import PublicBaseUrlConfigurationError, build_public_absol
 from core.rate_limit import allow_request
 from core.templated_email import queue_templated_email
 from core.views_utils import (
-    _normalize_str,
-    build_page_url_prefix,
     get_username,
-    paginate_and_build_context,
     post_only_404,
 )
 
@@ -47,9 +44,6 @@ _PREVIEW_SESSION_KEY = "account_invitation_preview_v1"
 _INVITATION_PUBLIC_BASE_URL_ERROR_MESSAGE = (
     "Invitation email configuration error: PUBLIC_BASE_URL must be configured to build invitation links."
 )
-ACCOUNT_INVITATIONS_PER_PAGE = 50
-
-
 def _invitation_template_names() -> list[str]:
     return [str(name).strip() for name in settings.ACCOUNT_INVITATION_EMAIL_TEMPLATE_NAMES if str(name).strip()]
 
@@ -300,61 +294,6 @@ def _resend_invitation(
 
 class AccountInvitationUploadForm(StyledForm):
     csv_file = forms.FileField(required=True)
-
-
-@permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
-def account_invitations(request: HttpRequest) -> HttpResponse:
-    pending_qs = (
-        AccountInvitation.objects.select_related("organization")
-        .filter(dismissed_at__isnull=True, accepted_at__isnull=True)
-        .order_by("-invited_at")
-    )
-    accepted_qs = (
-        AccountInvitation.objects.select_related("organization")
-        .filter(dismissed_at__isnull=True, accepted_at__isnull=False)
-        .order_by("-accepted_at", "-invited_at")
-    )
-
-    pending_page_number = _normalize_str(request.GET.get("pending_page")) or None
-    accepted_page_number = _normalize_str(request.GET.get("accepted_page")) or None
-    _, pending_page_url_prefix = build_page_url_prefix(request.GET, page_param="pending_page")
-    _, accepted_page_url_prefix = build_page_url_prefix(request.GET, page_param="accepted_page")
-
-    pending_page_ctx = paginate_and_build_context(
-        pending_qs,
-        pending_page_number,
-        ACCOUNT_INVITATIONS_PER_PAGE,
-        page_url_prefix=pending_page_url_prefix,
-    )
-    accepted_page_ctx = paginate_and_build_context(
-        accepted_qs,
-        accepted_page_number,
-        ACCOUNT_INVITATIONS_PER_PAGE,
-        page_url_prefix=accepted_page_url_prefix,
-    )
-
-    return render(
-        request,
-        "core/account_invitations.html",
-        {
-            "pending_invitations": pending_page_ctx["page_obj"].object_list,
-            "pending_paginator": pending_page_ctx["paginator"],
-            "pending_page_obj": pending_page_ctx["page_obj"],
-            "pending_is_paginated": pending_page_ctx["is_paginated"],
-            "pending_page_numbers": pending_page_ctx["page_numbers"],
-            "pending_show_first": pending_page_ctx["show_first"],
-            "pending_show_last": pending_page_ctx["show_last"],
-            "pending_page_url_prefix": pending_page_ctx["page_url_prefix"],
-            "accepted_invitations": accepted_page_ctx["page_obj"].object_list,
-            "accepted_paginator": accepted_page_ctx["paginator"],
-            "accepted_page_obj": accepted_page_ctx["page_obj"],
-            "accepted_is_paginated": accepted_page_ctx["is_paginated"],
-            "accepted_page_numbers": accepted_page_ctx["page_numbers"],
-            "accepted_show_first": accepted_page_ctx["show_first"],
-            "accepted_show_last": accepted_page_ctx["show_last"],
-            "accepted_page_url_prefix": accepted_page_ctx["page_url_prefix"],
-        },
-    )
 
 
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
@@ -781,3 +720,20 @@ def account_invitation_dismiss(request: HttpRequest, invitation_id: int) -> Http
 
     messages.success(request, "Invitation dismissed.")
     return redirect("account-invitations")
+
+
+@permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
+def account_invitations_vue(request: HttpRequest) -> HttpResponse:
+    """
+    Vue 3 version of the invitations list page.
+    Serves bootstrap data via data-* attributes for Vue hydration.
+    """
+    return render(
+        request,
+        "core/account_invitations_vue.html",
+        {
+            "can_manage_invitations": True,  # Already checked by permission_required
+            "can_create_invitations": True,
+            "invitation_id_sentinel": "123456789",  # Placeholder for API URL templates
+        },
+    )

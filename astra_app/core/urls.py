@@ -238,7 +238,7 @@ urlpatterns = [
     ),
     path(
         "membership/account-invitations/",
-        views_account_invitations.account_invitations,
+        views_account_invitations.account_invitations_vue,
         name="account-invitations",
     ),
     path(
