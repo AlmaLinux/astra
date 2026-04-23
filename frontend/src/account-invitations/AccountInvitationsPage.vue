@@ -9,7 +9,7 @@
       :total-pages="acceptedTable.totalPages.value"
       :is-loading="acceptedTable.isLoading.value"
       :error="acceptedTable.error.value"
-      title="Accepted Invitations"
+      :build-page-href="acceptedPageHref"
       scope="accepted"
       @page-change="onAcceptedPageChange"
       @bulk-success="onBulkSuccess('accepted')"
@@ -27,7 +27,7 @@
       :total-pages="pendingTable.totalPages.value"
       :is-loading="pendingTable.isLoading.value"
       :error="pendingTable.error.value"
-      title="Pending Invitations"
+      :build-page-href="pendingPageHref"
       scope="pending"
       @page-change="onPendingPageChange"
       @bulk-success="onBulkSuccess('pending')"
@@ -68,12 +68,21 @@ const showPending = computed(() => props.bootstrap.canManageInvitations);
 const showAccepted = computed(() => props.bootstrap.canManageInvitations);
 
 /**
+ * Read pagination page parameter from URL.
+ */
+function readPageParam(name: string): number {
+  const params = new URLSearchParams(window.location.search);
+  const rawValue = Number.parseInt(params.get(name) || "1", 10);
+  return Number.isNaN(rawValue) || rawValue < 1 ? 1 : rawValue;
+}
+
+/**
  * Load both tables on mount.
  */
 onMounted(async () => {
   await Promise.all([
-    pendingTable.load(1),
-    acceptedTable.load(1),
+    pendingTable.load(readPageParam("pending_page")),
+    acceptedTable.load(readPageParam("accepted_page")),
   ]);
 });
 
@@ -91,6 +100,34 @@ async function onPendingPageChange(page: number): Promise<void> {
 async function onAcceptedPageChange(page: number): Promise<void> {
   await acceptedTable.reloadForPageNum(page);
   syncUrl();
+}
+
+/**
+ * Build pagination URL for pending invitations.
+ */
+function pendingPageHref(pageNumber: number): string {
+  const params = new URLSearchParams(window.location.search);
+  if (pageNumber <= 1) {
+    params.delete("pending_page");
+  } else {
+    params.set("pending_page", String(pageNumber));
+  }
+  const query = params.toString();
+  return `${window.location.pathname}${query ? `?${query}` : ""}`;
+}
+
+/**
+ * Build pagination URL for accepted invitations.
+ */
+function acceptedPageHref(pageNumber: number): string {
+  const params = new URLSearchParams(window.location.search);
+  if (pageNumber <= 1) {
+    params.delete("accepted_page");
+  } else {
+    params.set("accepted_page", String(pageNumber));
+  }
+  const query = params.toString();
+  return `${window.location.pathname}${query ? `?${query}` : ""}`;
 }
 
 /**

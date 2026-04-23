@@ -50,7 +50,7 @@ function syncUrl(pendingPage: number, onHoldPage: number, filter: string): void 
 
 const pendingTable = useMembershipRequestsTable({
   url: props.bootstrap.pendingApiUrl,
-  pageSize: 50,
+  pageSize: props.bootstrap.pendingPageSize,
   orderName: "requested_at",
   initialPage: readPageParam("pending_page"),
   initialFilter: new URLSearchParams(window.location.search).get("filter") || "all",
@@ -58,7 +58,7 @@ const pendingTable = useMembershipRequestsTable({
 
 const onHoldTable = useMembershipRequestsTable({
   url: props.bootstrap.onHoldApiUrl,
-  pageSize: 10,
+  pageSize: props.bootstrap.onHoldPageSize,
   orderName: "on_hold_at",
   initialPage: readPageParam("on_hold_page"),
 });
@@ -157,8 +157,8 @@ async function onBulkSuccess(payload: { scope: TableScope }): Promise<void> {
   await refreshByScope(payload.scope);
 }
 
-const pendingTotalPages = computed(() => Math.max(1, Math.ceil(pendingTable.totalRows.value / 50)));
-const onHoldTotalPages = computed(() => Math.max(1, Math.ceil(onHoldTable.totalRows.value / 10)));
+const pendingTotalPages = computed(() => Math.max(1, Math.ceil(pendingTable.totalRows.value / props.bootstrap.pendingPageSize)));
+const onHoldTotalPages = computed(() => Math.max(1, Math.ceil(onHoldTable.totalRows.value / props.bootstrap.onHoldPageSize)));
 </script>
 
 <template>
@@ -171,6 +171,7 @@ const onHoldTotalPages = computed(() => Math.max(1, Math.ceil(onHoldTable.totalR
       :selected-filter="pendingTable.selectedFilter.value"
       :current-page="pendingTable.currentPage.value"
       :total-pages="pendingTotalPages"
+      :page-size="bootstrap.pendingPageSize"
       :is-loading="pendingTable.isLoading.value"
       :error="pendingTable.error.value"
       @filter-change="onPendingFilterChange"
@@ -178,12 +179,14 @@ const onHoldTotalPages = computed(() => Math.max(1, Math.ceil(onHoldTable.totalR
       @bulk-success="onBulkSuccess"
       @open-action="onOpenAction"
     />
+    <h3 class="mt-4 mb-2">Waiting for requester response</h3>
     <OnHoldRequestsTable
       :bootstrap="bootstrap"
       :rows="onHoldTable.rows.value"
       :count="onHoldTable.totalRows.value"
       :current-page="onHoldTable.currentPage.value"
       :total-pages="onHoldTotalPages"
+      :page-size="bootstrap.onHoldPageSize"
       :is-loading="onHoldTable.isLoading.value"
       :error="onHoldTable.error.value"
       @page-change="onOnHoldPageChange"

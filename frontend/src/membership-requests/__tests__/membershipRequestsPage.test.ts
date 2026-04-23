@@ -14,6 +14,8 @@ const bootstrap: MembershipRequestsBootstrap = {
   clearFilterUrl: "/membership/requests/",
   pendingApiUrl: "/api/v1/membership/requests/pending",
   onHoldApiUrl: "/api/v1/membership/requests/on-hold",
+  pendingPageSize: 25,
+  onHoldPageSize: 10,
   requestIdSentinel: "123456789",
   requestDetailTemplate: "/membership/request/123456789/",
   approveTemplate: "/membership/requests/123456789/approve/",
@@ -134,7 +136,7 @@ describe("MembershipRequestsPage", () => {
 
     expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(fetchMock.mock.calls[0]?.[0]).toContain("queue_filter=all");
-    expect(fetchMock.mock.calls[0]?.[0]).toContain("length=50");
+    expect(fetchMock.mock.calls[0]?.[0]).toContain("length=25");
     expect(fetchMock.mock.calls[1]?.[0]).toContain("length=10");
     expect(wrapper.text()).toContain("Pending: 1");
     expect(wrapper.text()).toContain("On hold: 1");

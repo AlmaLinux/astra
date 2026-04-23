@@ -2,6 +2,8 @@ export interface MembershipRequestsBootstrap {
   clearFilterUrl: string;
   pendingApiUrl: string;
   onHoldApiUrl: string;
+  pendingPageSize: number;
+  onHoldPageSize: number;
   bulkUrl?: string;
   requestIdSentinel: string;
   requestDetailTemplate: string;
@@ -288,11 +290,21 @@ function readBoolean(value: string | undefined): boolean {
   return String(value || "").toLowerCase() === "true";
 }
 
+function readPositiveInt(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value || "", 10);
+  if (Number.isNaN(parsed) || parsed < 1) {
+    return fallback;
+  }
+  return parsed;
+}
+
 export function readMembershipRequestsBootstrap(root: HTMLElement): MembershipRequestsBootstrap | null {
   const {
     membershipRequestsClearFilterUrl,
     membershipRequestsPendingApiUrl,
     membershipRequestsOnHoldApiUrl,
+    membershipRequestsPendingPageSize,
+    membershipRequestsOnHoldPageSize,
     membershipRequestsBulkUrl,
     membershipRequestIdSentinel,
     membershipRequestDetailTemplate,
@@ -339,6 +351,8 @@ export function readMembershipRequestsBootstrap(root: HTMLElement): MembershipRe
     clearFilterUrl: membershipRequestsClearFilterUrl,
     pendingApiUrl: membershipRequestsPendingApiUrl,
     onHoldApiUrl: membershipRequestsOnHoldApiUrl,
+    pendingPageSize: readPositiveInt(membershipRequestsPendingPageSize, 25),
+    onHoldPageSize: readPositiveInt(membershipRequestsOnHoldPageSize, 10),
     bulkUrl: membershipRequestsBulkUrl,
     requestIdSentinel: membershipRequestIdSentinel,
     requestDetailTemplate: membershipRequestDetailTemplate,

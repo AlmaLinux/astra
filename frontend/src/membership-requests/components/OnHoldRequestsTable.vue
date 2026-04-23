@@ -11,6 +11,7 @@ const props = defineProps<{
   count: number;
   currentPage: number;
   totalPages: number;
+  pageSize: number;
   isLoading: boolean;
   error: string;
 }>();
@@ -55,7 +56,6 @@ function onPageChange(pageNumber: number): void {
 
 <template>
   <div>
-    <h3 class="mt-4 mb-2">Waiting for requester response</h3>
     <RequestsTable
       :bootstrap="bootstrap"
       :rows="rows"
@@ -68,13 +68,13 @@ function onPageChange(pageNumber: number): void {
       pagination-aria-label="On-hold pagination"
       :build-page-href="onHoldPageHref"
       :columns="columns"
-      :colspan="6"
       :bulk-actions="[
         { value: 'reject', label: 'Reject' },
         { value: 'ignore', label: 'Ignore' },
       ]"
       bulk-scope="on_hold"
       loading-message="Loading on-hold requests..."
+      :page-size="pageSize"
       @page-change="onPageChange"
       @bulk-success="emit('bulk-success', $event)"
       @open-action="emit('open-action', $event)"

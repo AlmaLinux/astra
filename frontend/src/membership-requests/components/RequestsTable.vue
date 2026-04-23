@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, ref } from "vue";
 
+import TableBase from "../../shared/components/TableBase.vue";
 import type { MembershipRequestActionIntent, MembershipRequestRow, MembershipRequestsBootstrap } from "../types";
 import {
-  buildPaginationWindow,
   canLinkMembershipRequestTarget,
   formatLegacyDateTime,
   membershipRequestActorLabel,
@@ -24,6 +24,20 @@ interface BulkActionOption {
   label: string;
 }
 
+interface BulkSubmitPayload {
+  action: string;
+  selectedIds: string[];
+  scope?: string;
+}
+
+interface SharedColumnDef {
+  key: string;
+  label: string;
+  width?: string;
+  noWrap?: boolean;
+  align?: "left" | "center" | "right";
+}
+
 const props = defineProps<{
   bootstrap: MembershipRequestsBootstrap;
   rows: MembershipRequestRow[];
@@ -32,12 +46,11 @@ const props = defineProps<{
   totalPages: number;
   isLoading: boolean;
   error: string;
-  title?: string;
+  pageSize: number;
   checkboxClass: string;
   paginationAriaLabel: string;
   buildPageHref: (pageNumber: number) => string;
   columns: ColumnDef[];
-  colspan: number;
   loadingMessage?: string;
   bulkActions?: BulkActionOption[];
   bulkScope?: string;
@@ -53,12 +66,9 @@ const emit = defineEmits<{
   (event: "open-action", payload: MembershipRequestActionIntent): void;
 }>();
 
-const selectedIds = ref<number[]>([]);
-const bulkAction = ref("");
-const bulkError = ref("");
 const isBulkSubmitting = ref(false);
-
-const hasBulkActions = computed(() => (props.bulkActions?.length || 0) > 0);
+const bulkError = ref("");
+const actionError = ref("");
 
 const bulkScope = computed<"pending" | "on_hold">(() => (props.bulkScope === "on_hold" ? "on_hold" : "pending"));
 
@@ -78,22 +88,18 @@ const nextUrl = computed(() => {
   return `${window.location.pathname}${window.location.search}`;
 });
 
-watch(
-  () => props.rows,
-  (rows) => {
-    selectedIds.value = selectedIds.value.filter((requestId) => rows.some((row) => row.request_id === requestId));
-  },
-  { deep: true },
-);
-
-const allSelected = computed({
-  get: () => props.rows.length > 0 && props.rows.every((row) => selectedIds.value.includes(row.request_id)),
-  set: (value: boolean) => {
-    selectedIds.value = value ? props.rows.map((row) => row.request_id) : [];
-  },
+const displayColumns = computed<SharedColumnDef[]>(() => {
+  const baseColumns: SharedColumnDef[] = [
+    { key: "request", label: "Request", width: "1%", noWrap: true },
+    { key: "requested-for", label: "Requested for", width: "30%", noWrap: true },
+  ];
+  const trailingColumns: SharedColumnDef[] = [{ key: "actions", label: "Actions", width: "15%", align: "right" }];
+  return [...baseColumns, ...props.columns, ...trailingColumns];
 });
 
-const paginationWindow = computed(() => buildPaginationWindow(props.totalPages, props.currentPage));
+function rowId(row: unknown): string | number {
+  return (row as MembershipRequestRow).request_id;
+}
 
 function noteSummaryUrl(row: MembershipRequestRow): string {
   return replaceTemplateToken(props.bootstrap.noteSummaryTemplate, props.bootstrap.requestIdSentinel, row.request_id);
@@ -126,17 +132,16 @@ function hasTargetLink(row: MembershipRequestRow): boolean {
   return canLinkMembershipRequestTarget(row.target);
 }
 
-function onPageLinkClick(event: Event, pageNumber: number, disabled: boolean): void {
-  event.preventDefault();
-  if (disabled || pageNumber === props.currentPage) {
-    return;
-  }
-  selectedIds.value = [];
+function asRow(row: unknown): MembershipRequestRow {
+  return row as MembershipRequestRow;
+}
+
+function onPageChange(pageNumber: number): void {
   emit("page-change", pageNumber);
 }
 
-async function submitBulkAction(): Promise<void> {
-  if (!bulkAction.value || selectedIds.value.length === 0 || isBulkSubmitting.value) {
+async function submitBulkAction(payload: BulkSubmitPayload): Promise<void> {
+  if (!payload.action || payload.selectedIds.length === 0 || isBulkSubmitting.value) {
     return;
   }
 
@@ -144,34 +149,28 @@ async function submitBulkAction(): Promise<void> {
   isBulkSubmitting.value = true;
 
   try {
-    const formData = new FormData();
-    formData.append("bulk_action", bulkAction.value);
-    formData.append("next", nextUrl.value);
-    if (bulkScope.value === "on_hold") {
-      formData.append("bulk_scope", "on_hold");
-    }
-    for (const requestId of selectedIds.value) {
-      formData.append("selected", String(requestId));
-    }
-
     const response = await fetch(bulkSubmitUrl.value, {
       method: "POST",
       headers: {
         Accept: "application/json",
         "X-CSRFToken": props.bootstrap.csrfToken || "",
+        "Content-Type": "application/json",
       },
-      body: formData,
       credentials: "same-origin",
+      body: JSON.stringify({
+        bulk_action: payload.action,
+        next: nextUrl.value,
+        bulk_scope: bulkScope.value,
+        selected: payload.selectedIds.map((id) => Number.parseInt(id, 10)).filter((id) => !Number.isNaN(id)),
+      }),
     });
 
-    const payload = (await response.json()) as { ok?: boolean; error?: string };
-    if (!response.ok || payload.ok === false) {
-      bulkError.value = payload.error || "Failed to apply bulk action.";
+    const result = (await response.json()) as { ok?: boolean; error?: string };
+    if (!response.ok || result.ok === false) {
+      bulkError.value = result.error || "Failed to apply bulk action.";
       return;
     }
 
-    bulkAction.value = "";
-    selectedIds.value = [];
     emit("bulk-success", { scope: bulkScope.value });
   } catch {
     bulkError.value = "Failed to apply bulk action.";
@@ -190,151 +189,82 @@ defineSlots<{
 </script>
 
 <template>
-  <div>
-    <div v-if="title" class="mt-4 mb-2">
-      <h3>{{ title }}</h3>
-    </div>
-    <div class="card">
-      <div class="card-header">
-        <slot name="header">
-          <div class="d-flex align-items-center justify-content-between flex-wrap" style="gap: 0.5rem;">
-            <div class="d-flex align-items-center flex-wrap" style="gap: 0.5rem;">
-              <form
-                v-if="hasBulkActions"
-                :id="bulkFormId"
-                :action="bulkSubmitUrl"
-                class="form-inline"
-                @submit.prevent="submitBulkAction"
-              >
-                <input type="hidden" name="next" :value="nextUrl">
-                <input v-if="bulkScope" type="hidden" name="bulk_scope" :value="bulkScope">
-                <div class="input-group input-group-sm">
-                  <select v-model="bulkAction" name="bulk_action" class="custom-select custom-select-sm" aria-label="Bulk action">
-                    <option value="">{{ bulkActionPlaceholder }}</option>
-                    <option v-for="option in bulkActions" :key="option.value" :value="option.value">{{ option.label }}</option>
-                  </select>
-                  <div class="input-group-append">
-                    <button
-                      type="submit"
-                      class="btn btn-default"
-                      :title="bulkSubmitTitle"
-                      :disabled="selectedIds.length === 0 || !bulkAction || isBulkSubmitting"
-                    >Apply</button>
-                  </div>
-                </div>
-                <input v-for="requestId in selectedIds" :key="requestId" type="hidden" name="selected" :value="String(requestId)">
-              </form>
-              <div v-if="bulkError" class="small text-danger">{{ bulkError }}</div>
-              <slot name="header-tools" />
-            </div>
-            <slot name="header-meta">
-              <div class="text-muted">{{ count }}</div>
-            </slot>
-          </div>
-        </slot>
-      </div>
+  <TableBase
+    :rows="rows"
+    :count="count"
+    :current-page="currentPage"
+    :total-pages="totalPages"
+    :is-loading="isLoading"
+    :error="error"
+    :loading-message="loadingMessage || 'Loading requests...'"
+    :checkbox-class="checkboxClass"
+    select-all-aria-label="Select all requests"
+    :columns="displayColumns"
+    :page-size="pageSize"
+    :get-row-id="rowId"
+    :pagination-aria-label="paginationAriaLabel"
+    :build-page-href="buildPageHref"
+    :bulk-actions="bulkActions"
+    :bulk-action-placeholder="bulkActionPlaceholder"
+    :bulk-submit-title="bulkSubmitTitle"
+    :bulk-form-id="bulkFormId"
+    :bulk-scope="bulkScope"
+    :bulk-error="bulkError"
+    :bulk-submitting="isBulkSubmitting"
+    :header-error="actionError"
+    @page-change="onPageChange"
+    @bulk-submit="submitBulkAction"
+  >
+    <template #header-tools>
+      <slot name="header-tools" />
+    </template>
 
-      <div class="card-body p-0">
-        <div class="table-responsive">
-          <table class="table table-striped mb-0 w-100">
-            <thead>
-              <tr>
-                <th style="width: 40px;" class="text-center">
-                  <input v-model="allSelected" type="checkbox" :class="checkboxClass" aria-label="Select all requests">
-                </th>
-                <th class="text-nowrap" style="width: 1%;">Request</th>
-                <th class="text-nowrap" style="width: 30%;">Requested for</th>
-                <th v-for="col in columns" :key="col.key" :style="col.width ? `width: ${col.width}` : undefined" :class="col.noWrap ? 'text-nowrap' : ''">
-                  {{ col.label }}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-if="error">
-                <td :colspan="colspan" class="p-3 text-muted">{{ error }}</td>
-              </tr>
-              <tr v-else-if="isLoading">
-                <td :colspan="colspan" class="p-3 text-muted">{{ loadingMessage || 'Loading requests...' }}</td>
-              </tr>
-              <tr v-else-if="rows.length === 0">
-                <td :colspan="colspan" class="p-3 text-muted">
-                  <slot name="empty-state">No requests.</slot>
-                </td>
-              </tr>
-              <template v-for="row in rows" :key="row.request_id">
-                <tr>
-                  <td class="text-center align-top">
-                    <input v-model="selectedIds" :class="checkboxClass" type="checkbox" name="selected" :value="row.request_id" :aria-label="`Select request ${row.request_id}`">
-                  </td>
-                  <td class="align-top text-muted text-nowrap" style="width: 1%;">
-                    <a :href="requestDetailUrl(row)">Request #{{ row.request_id }}</a>
-                    <br>{{ formatLegacyDateTime(row.requested_at) }}
-                  </td>
-                  <td class="align-top">
-                    <div>
-                      <template v-if="hasTargetLink(row)">
-                        <a :href="targetHref(row)">{{ row.target.label }}<span v-if="row.target.secondary_label" :class="row.target.kind === 'user' ? 'text-muted small' : 'text-muted'"> ({{ row.target.secondary_label }})</span></a>
-                      </template>
-                      <template v-else>
-                        <span>{{ row.target.label }}</span>
-                        <span v-if="row.target.deleted" class="text-muted"> (deleted)</span>
-                      </template>
-                    </div>
-                    <div v-if="row.requested_by.show" class="text-muted small">
-                      Requested by:
-                      <a :href="replaceTemplateToken(bootstrap.userProfileTemplate, '__username__', row.requested_by.username)">{{ membershipRequestActorLabel(row.requested_by) }}</a>
-                      <span v-if="row.requested_by.deleted" class="text-muted"> (deleted)</span>
-                    </div>
-                    <div class="mt-2">
-                      <MembershipNotesCard
-                        :request-id="row.request_id"
-                        :summary-url="noteSummaryUrl(row)"
-                        :detail-url="noteDetailUrl(row)"
-                        :add-url="noteAddUrl(row)"
-                        :csrf-token="bootstrap.csrfToken || ''"
-                        :next-url="nextUrl"
-                        :can-view="bootstrap.notesCanView"
-                        :can-write="bootstrap.notesCanWrite"
-                        :can-vote="bootstrap.notesCanVote"
-                      />
-                    </div>
-                  </td>
-                  <slot name="row-extra-columns" :row="row" />
-                  <td class="align-top text-right" style="width: 15%;">
-                    <MembershipRequestRowActions :row="row" :bootstrap="bootstrap" @open-action="emit('open-action', $event)" />
-                  </td>
-                </tr>
-              </template>
-            </tbody>
-          </table>
+    <template #header-meta>
+      <slot name="header-meta" />
+    </template>
+
+    <template #row-cells="{ row }">
+      <td class="align-top text-muted text-nowrap" style="width: 1%;">
+        <a :href="requestDetailUrl(asRow(row))">Request #{{ asRow(row).request_id }}</a>
+        <br>{{ formatLegacyDateTime(asRow(row).requested_at) }}
+      </td>
+      <td class="align-top">
+        <div>
+          <template v-if="hasTargetLink(asRow(row))">
+            <a :href="targetHref(asRow(row))">{{ asRow(row).target.label }}<span v-if="asRow(row).target.secondary_label" :class="asRow(row).target.kind === 'user' ? 'text-muted small' : 'text-muted'"> ({{ asRow(row).target.secondary_label }})</span></a>
+          </template>
+          <template v-else>
+            <span>{{ asRow(row).target.label }}</span>
+            <span v-if="asRow(row).target.deleted" class="text-muted"> (deleted)</span>
+          </template>
         </div>
-        <div class="p-3 border-top" v-if="totalPages > 1">
-          <ul class="pagination pagination-sm m-0 float-right" :aria-label="paginationAriaLabel">
-            <li class="page-item" :class="{ disabled: currentPage <= 1 }">
-              <a class="page-link" :href="currentPage <= 1 ? '#' : buildPageHref(currentPage - 1)" aria-label="Previous" @click="onPageLinkClick($event, currentPage - 1, currentPage <= 1)">«</a>
-            </li>
-            <li v-if="paginationWindow.showFirst" class="page-item">
-              <a class="page-link" :href="buildPageHref(1)" @click="onPageLinkClick($event, 1, false)">1</a>
-            </li>
-            <li v-if="paginationWindow.showFirst" class="page-item disabled"><span class="page-link">…</span></li>
-            <li
-              v-for="pageNumber in paginationWindow.pageNumbers"
-              :key="pageNumber"
-              class="page-item"
-              :class="{ active: pageNumber === currentPage }"
-            >
-              <a class="page-link" :href="buildPageHref(pageNumber)" @click="onPageLinkClick($event, pageNumber, false)">{{ pageNumber }}</a>
-            </li>
-            <li v-if="paginationWindow.showLast" class="page-item disabled"><span class="page-link">…</span></li>
-            <li v-if="paginationWindow.showLast" class="page-item">
-              <a class="page-link" :href="buildPageHref(totalPages)" @click="onPageLinkClick($event, totalPages, false)">{{ totalPages }}</a>
-            </li>
-            <li class="page-item" :class="{ disabled: currentPage >= totalPages }">
-              <a class="page-link" :href="currentPage >= totalPages ? '#' : buildPageHref(currentPage + 1)" aria-label="Next" @click="onPageLinkClick($event, currentPage + 1, currentPage >= totalPages)">»</a>
-            </li>
-          </ul>
+        <div v-if="asRow(row).requested_by.show" class="text-muted small">
+          Requested by:
+          <a :href="replaceTemplateToken(bootstrap.userProfileTemplate, '__username__', asRow(row).requested_by.username)">{{ membershipRequestActorLabel(asRow(row).requested_by) }}</a>
+          <span v-if="asRow(row).requested_by.deleted" class="text-muted"> (deleted)</span>
         </div>
-      </div>
-    </div>
-  </div>
+        <div class="mt-2">
+          <MembershipNotesCard
+            :request-id="asRow(row).request_id"
+            :summary-url="noteSummaryUrl(asRow(row))"
+            :detail-url="noteDetailUrl(asRow(row))"
+            :add-url="noteAddUrl(asRow(row))"
+            :csrf-token="bootstrap.csrfToken || ''"
+            :next-url="nextUrl"
+            :can-view="bootstrap.notesCanView"
+            :can-write="bootstrap.notesCanWrite"
+            :can-vote="bootstrap.notesCanVote"
+          />
+        </div>
+      </td>
+      <slot name="row-extra-columns" :row="asRow(row)" />
+      <td class="align-top text-right" style="width: 15%;">
+        <MembershipRequestRowActions :row="asRow(row)" :bootstrap="bootstrap" @open-action="emit('open-action', $event)" />
+      </td>
+    </template>
+
+    <template #empty-state>
+      <slot name="empty-state">No requests.</slot>
+    </template>
+  </TableBase>
 </template>

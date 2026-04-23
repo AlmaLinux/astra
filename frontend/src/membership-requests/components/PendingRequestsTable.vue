@@ -14,6 +14,7 @@ const props = defineProps<{
   selectedFilter: string;
   currentPage: number;
   totalPages: number;
+  pageSize: number;
   isLoading: boolean;
   error: string;
 }>();
@@ -74,7 +75,6 @@ function onPageChange(pageNumber: number): void {
     pagination-aria-label="Pending pagination"
     :build-page-href="pendingPageHref"
     :columns="columns"
-    :colspan="5"
     :bulk-actions="[
       { value: 'accept', label: 'Accept' },
       { value: 'reject', label: 'Reject' },
@@ -82,6 +82,7 @@ function onPageChange(pageNumber: number): void {
     ]"
     bulk-form-id="bulk-action-form"
     loading-message="Loading pending requests..."
+    :page-size="pageSize"
     @page-change="onPageChange"
     @bulk-success="emit('bulk-success', $event)"
     @open-action="emit('open-action', $event)"
