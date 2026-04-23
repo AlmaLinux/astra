@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import re
+import threading
 from collections.abc import Callable
 
 import requests
@@ -1293,7 +1294,17 @@ def connect_mattermost_receivers() -> None:
         @safe_receiver(event_key)
         def _receiver(*args: object, __event_key: str = event_key, **kwargs: object) -> None:
             _ = args
-            dispatch_mattermost_event(__event_key, **kwargs)
+            # Defer webhook dispatch to a background thread so it doesn't block the HTTP request.
+            # This is critical for endpoints like membership RFI that trigger multiple webhooks
+            # and would otherwise timeout waiting for Mattermost responses.
+            thread = threading.Thread(
+                target=dispatch_mattermost_event,
+                args=(__event_key,),
+                kwargs=dict(kwargs),
+                daemon=True,
+                name=f"mattermost-dispatch-{__event_key}",
+            )
+            thread.start()
 
         _RECEIVER_FUNCTIONS[event_key] = _receiver
         signal.connect(_receiver, dispatch_uid=f"core.mattermost_webhooks.{event_key}")
