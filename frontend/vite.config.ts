@@ -26,6 +26,7 @@ export default defineConfig(({ command }) => ({
     emptyOutDir: true,
     rollupOptions: {
       input: {
+        accountInvitations: fileURLToPath(new URL("./src/entrypoints/accountInvitations.ts", import.meta.url)),
         membershipRequests: fileURLToPath(new URL("./src/entrypoints/membershipRequests.ts", import.meta.url)),
         membershipRequestDetail: fileURLToPath(new URL("./src/entrypoints/membershipRequestDetail.ts", import.meta.url)),
         membershipProfileNotes: fileURLToPath(new URL("./src/entrypoints/membershipProfileNotes.ts", import.meta.url)),
