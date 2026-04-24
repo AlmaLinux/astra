@@ -24,7 +24,6 @@ urlpatterns = [
     path("favicon.ico", RedirectView.as_view(url=staticfiles_storage.url("core/images/fav/favicon.ico"), permanent=True)),
     path("_ci/envelope/", views_sentry.sentry_browser_tunnel, name="sentry-browser-tunnel"),
     path("users/", views_users.users, name="users"),
-    path("users/grid/", views_users.users_grid, name="users-grid"),
     path("user/<str:username>/", views_users.user_profile, name="user-profile"),
     path("groups/", views_groups.groups, name="groups"),
     path("groups/search/", views_groups.group_search, name="group-search"),

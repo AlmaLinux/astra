@@ -1,6 +1,6 @@
 import datetime
+import json
 import re
-from html.parser import HTMLParser
 from unittest.mock import patch
 from urllib.parse import quote_plus
 
@@ -27,52 +27,6 @@ from core.permissions import (
     ASTRA_VIEW_USER_DIRECTORY,
 )
 from core.views_organizations import _filter_organization_queryset_by_search
-
-
-class _FormInputParser(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__()
-        self._forms: list[list[dict[str, str]]] = []
-        self._current_form_inputs: list[dict[str, str]] | None = None
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag == "form":
-            self._current_form_inputs = []
-            return
-
-        if tag != "input" or self._current_form_inputs is None:
-            return
-
-        normalized_attrs = {
-            attr_name: attr_value or ""
-            for attr_name, attr_value in attrs
-            if attr_name
-        }
-        self._current_form_inputs.append(normalized_attrs)
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag != "form" or self._current_form_inputs is None:
-            return
-
-        self._forms.append(self._current_form_inputs)
-        self._current_form_inputs = None
-
-    def hidden_fields_for_search_field(self, search_field_name: str) -> dict[str, str]:
-        for form_inputs in self._forms:
-            has_target_search_field = any(
-                attrs.get("name") == search_field_name and attrs.get("type", "text") == "text"
-                for attrs in form_inputs
-            )
-            if not has_target_search_field:
-                continue
-
-            return {
-                attrs["name"]: attrs.get("value", "")
-                for attrs in form_inputs
-                if attrs.get("type") == "hidden" and attrs.get("name")
-            }
-
-        return {}
 
 
 class OrganizationListPaginationTests(TestCase):
@@ -231,11 +185,6 @@ class OrganizationListPaginationTests(TestCase):
             "q",
         ):
             self.assertFalse(key in render_context, f"Legacy context key {key} is still present")
-
-    def _hidden_fields_for_search_form(self, response, search_field_name: str) -> dict[str, str]:
-        parser = _FormInputParser()
-        parser.feed(response.content.decode("utf-8"))
-        return parser.hidden_fields_for_search_field(search_field_name)
 
     def test_organizations_list_paginates_with_stable_ordering(self) -> None:
         _, sponsor_type = self._ensure_org_membership_types()
@@ -680,249 +629,6 @@ class OrganizationListPaginationTests(TestCase):
                         expected_mirror_names,
                     )
 
-    def test_regular_user_can_access_organizations_page(self) -> None:
-        self._login_as_freeipa_user("alice")
-
-        user = FreeIPAUser(
-            "alice",
-            {"uid": ["alice"], "memberof_group": [], "c": ["US"]},
-        )
-
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=user):
-            response = self.client.get(reverse("organizations"))
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "My Organization")
-
-    def test_organizations_page_accessible_when_authenticated_username_resolution_is_empty(self) -> None:
-        self._login_as_freeipa_user("alice")
-
-        user = FreeIPAUser(
-            "alice",
-            {"uid": ["alice"], "memberof_group": [], "c": ["US"]},
-        )
-
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=user):
-            with patch("core.views_organizations.get_username", return_value=""):
-                response = self.client.get(reverse("organizations"))
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "My Organization")
-
-    def test_regular_user_top_card_shows_create_button_when_not_representative(self) -> None:
-        self._login_as_freeipa_user("alice")
-
-        Organization.objects.create(
-            name="Claimed Org",
-            representative="bob",
-        )
-
-        user = FreeIPAUser(
-            "alice",
-            {"uid": ["alice"], "memberof_group": [], "c": ["US"]},
-        )
-
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=user):
-            response = self.client.get(reverse("organizations"))
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "My Organization")
-        self.assertContains(response, reverse("organization-create"))
-        self.assertContains(
-            response,
-            "Create an organization profile only if you are an employee or authorized representative of the organization applying to sponsor AlmaLinux.",
-        )
-
-    def test_representative_top_card_shows_represented_organization_widget(self) -> None:
-        self._login_as_freeipa_user("alice")
-
-        Organization.objects.create(
-            name="Alice Org",
-            representative="alice",
-        )
-
-        user = FreeIPAUser(
-            "alice",
-            {"uid": ["alice"], "memberof_group": [], "c": ["US"]},
-        )
-
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=user):
-            response = self.client.get(reverse("organizations"))
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "My Organization")
-        self.assertContains(response, "Alice Org")
-        self.assertNotContains(response, reverse("organization-create"))
-
-    def test_regular_user_lower_section_shows_claimed_only_without_detail_links(self) -> None:
-        mirror_type, sponsor_type = self._ensure_org_membership_types()
-        self._login_as_freeipa_user("alice")
-
-        mirror_only = Organization.objects.create(name="Mirror Only", representative="bob")
-        sponsor_only = Organization.objects.create(name="Sponsor Only", representative="carol")
-        sponsor_and_mirror = Organization.objects.create(name="Sponsor And Mirror", representative="dave")
-        Organization.objects.create(name="Claimed No Membership", representative="erin")
-        unclaimed_with_mirror = Organization.objects.create(name="Unclaimed With Mirror", representative="")
-
-        Membership.objects.create(target_organization=mirror_only, membership_type=mirror_type)
-        Membership.objects.create(target_organization=sponsor_only, membership_type=sponsor_type)
-        Membership.objects.create(target_organization=sponsor_and_mirror, membership_type=sponsor_type)
-        Membership.objects.create(target_organization=sponsor_and_mirror, membership_type=mirror_type)
-        Membership.objects.create(target_organization=unclaimed_with_mirror, membership_type=mirror_type)
-
-        user = FreeIPAUser(
-            "alice",
-            {"uid": ["alice"], "memberof_group": [], "c": ["US"]},
-        )
-
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=user):
-            response = self.client.get(reverse("organizations"))
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "AlmaLinux Sponsor Members")
-        self.assertContains(response, "Mirror Sponsor Members")
-
-        sponsor_names = {organization.name for organization in response.context["sponsor_organizations"]}
-        mirror_names = {organization.name for organization in response.context["mirror_organizations"]}
-        self.assertEqual(sponsor_names, {"Sponsor Only", "Sponsor And Mirror"})
-        self.assertEqual(mirror_names, {"Mirror Only"})
-
-        self.assertNotContains(response, reverse("organization-detail", args=[mirror_only.pk]))
-        self.assertNotContains(response, reverse("organization-detail", args=[sponsor_only.pk]))
-        self.assertNotContains(response, reverse("organization-detail", args=[sponsor_and_mirror.pk]))
-
-    def test_regular_user_claimed_organizations_empty_state_copy(self) -> None:
-        self._ensure_org_membership_types()
-        self._login_as_freeipa_user("alice")
-
-        Organization.objects.create(name="Claimed Without Membership", representative="bob")
-        Organization.objects.create(name="Unclaimed Without Membership", representative="")
-
-        user = FreeIPAUser(
-            "alice",
-            {"uid": ["alice"], "memberof_group": [], "c": ["US"]},
-        )
-
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=user):
-            response = self.client.get(reverse("organizations"))
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "No AlmaLinux sponsor members found.")
-        self.assertContains(response, "No mirror sponsor members found.")
-
-    def test_committee_lower_section_shows_all_orgs_with_links_and_default_empty_copy(self) -> None:
-        mirror_type, sponsor_type = self._ensure_org_membership_types()
-        FreeIPAPermissionGrant.objects.create(
-            permission=ASTRA_VIEW_MEMBERSHIP,
-            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
-            principal_name="reviewer",
-        )
-        self._login_as_freeipa_user("reviewer")
-
-        mirror_only = Organization.objects.create(name="Mirror Only", representative="bob")
-        sponsor_only = Organization.objects.create(name="Sponsor Only", representative="carol")
-        sponsor_and_mirror = Organization.objects.create(name="Sponsor And Mirror", representative="dave")
-        no_membership = Organization.objects.create(name="No Membership", representative="erin")
-        Organization.objects.create(name="Unclaimed Without Membership", representative="")
-
-        Membership.objects.create(target_organization=mirror_only, membership_type=mirror_type)
-        Membership.objects.create(target_organization=sponsor_only, membership_type=sponsor_type)
-        Membership.objects.create(target_organization=sponsor_and_mirror, membership_type=sponsor_type)
-        Membership.objects.create(target_organization=sponsor_and_mirror, membership_type=mirror_type)
-
-        reviewer = FreeIPAUser(
-            "reviewer",
-            {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]},
-        )
-
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
-            response = self.client.get(reverse("organizations"))
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "AlmaLinux Sponsor Members")
-        self.assertContains(response, "Mirror Sponsor Members")
-
-        sponsor_names = {organization.name for organization in response.context["sponsor_organizations"]}
-        mirror_names = {organization.name for organization in response.context["mirror_organizations"]}
-        self.assertEqual(sponsor_names, {"Sponsor Only", "Sponsor And Mirror"})
-        self.assertEqual(
-            mirror_names,
-            {
-                "Mirror Only",
-                "No Membership",
-                "Unclaimed Without Membership",
-            },
-        )
-
-        self.assertContains(response, reverse("organization-detail", args=[mirror_only.pk]))
-        self.assertContains(response, reverse("organization-detail", args=[sponsor_only.pk]))
-        self.assertContains(response, reverse("organization-detail", args=[sponsor_and_mirror.pk]))
-        self.assertContains(response, reverse("organization-detail", args=[no_membership.pk]))
-
-        Organization.objects.all().delete()
-
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
-            empty_response = self.client.get(reverse("organizations"))
-
-        self.assertEqual(empty_response.status_code, 200)
-        self.assertContains(empty_response, "No AlmaLinux sponsor members found.")
-        self.assertContains(
-            empty_response,
-            "No mirror sponsor members or organizations without memberships found.",
-        )
-
-    def test_lower_cards_use_independent_search_and_pagination_query_params(self) -> None:
-        mirror_type, sponsor_type = self._ensure_org_membership_types()
-        FreeIPAPermissionGrant.objects.create(
-            permission=ASTRA_VIEW_MEMBERSHIP,
-            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
-            principal_name="reviewer",
-        )
-        self._login_as_freeipa_user("reviewer")
-
-        for index in range(26):
-            sponsor_org = Organization.objects.create(name=f"Sponsor Org {index:02d}", representative=f"s-{index}")
-            mirror_org = Organization.objects.create(name=f"Mirror Org {index:02d}", representative=f"m-{index}")
-            Membership.objects.create(target_organization=sponsor_org, membership_type=sponsor_type)
-            Membership.objects.create(target_organization=mirror_org, membership_type=mirror_type)
-
-        reviewer = FreeIPAUser(
-            "reviewer",
-            {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]},
-        )
-
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
-            response = self.client.get(
-                reverse("organizations"),
-                {
-                    "q_sponsor": "Sponsor Org",
-                    "page_sponsor": "2",
-                    "q_mirror": "Mirror Org",
-                    "page_mirror": "2",
-                },
-            )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'name="q_sponsor"')
-        self.assertContains(response, 'name="q_mirror"')
-
-        sponsor_hidden_fields = self._hidden_fields_for_search_form(response, "q_sponsor")
-        mirror_hidden_fields = self._hidden_fields_for_search_form(response, "q_mirror")
-        self.assertEqual(sponsor_hidden_fields.get("q_mirror"), "Mirror Org")
-        self.assertEqual(sponsor_hidden_fields.get("page_mirror"), "2")
-        self.assertEqual(mirror_hidden_fields.get("q_sponsor"), "Sponsor Org")
-        self.assertEqual(mirror_hidden_fields.get("page_sponsor"), "2")
-
-        self.assertEqual(response.context["sponsor_page_obj"].number, 2)
-        self.assertEqual(response.context["mirror_page_obj"].number, 2)
-        self.assertEqual(response.context["sponsor_paginator"].num_pages, 2)
-        self.assertEqual(response.context["mirror_paginator"].num_pages, 2)
-
-        self.assertIn("q_mirror=Mirror+Org", response.context["sponsor_page_url_prefix"])
-        self.assertIn("page_mirror=2", response.context["sponsor_page_url_prefix"])
-        self.assertIn("q_sponsor=Sponsor+Org", response.context["mirror_page_url_prefix"])
-        self.assertIn("page_sponsor=2", response.context["mirror_page_url_prefix"])
-
     def test_legacy_q_and_page_params_fallback_to_sponsor_card(self) -> None:
         mirror_type, sponsor_type = self._ensure_org_membership_types()
         FreeIPAPermissionGrant.objects.create(
@@ -1098,7 +804,7 @@ class OrganizationListPaginationTests(TestCase):
 
         self.assertEqual([organization.name for organization in matched], ["Infra Services"])
 
-    def test_org_widget_badges_show_sponsorship_before_mirror(self) -> None:
+    def test_organizations_api_badges_show_sponsorship_before_mirror(self) -> None:
         self._ensure_org_membership_types()
         sponsor_priority = MembershipType.objects.create(
             code="sponsor-priority",
@@ -1132,24 +838,23 @@ class OrganizationListPaginationTests(TestCase):
         )
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
-            response = self.client.get(reverse("organizations"))
+            response = self.client.get(reverse("api-organizations"), HTTP_ACCEPT="application/json")
 
         self.assertEqual(response.status_code, 200)
-        body = response.content.decode("utf-8")
-        org_position = body.find("Badge Order Org")
-        self.assertGreaterEqual(org_position, 0)
-
-        sponsor_position = body.find("Sponsor Priority Badge", org_position)
-        mirror_position = body.find("Mirror Priority Badge", org_position)
-        self.assertGreaterEqual(sponsor_position, 0)
-        self.assertGreaterEqual(mirror_position, 0)
+        payload = json.loads(response.content)
+        sponsor_item = next(
+            item for item in payload["sponsor_card"]["items"] if item["name"] == "Badge Order Org"
+        )
+        badge_labels = [badge["label"] for badge in sponsor_item["memberships"]]
+        sponsor_position = badge_labels.index("Sponsor Priority Badge")
+        mirror_position = badge_labels.index("Mirror Priority Badge")
         self.assertLess(
             sponsor_position,
             mirror_position,
             "Expected sponsorship badge to render before mirror badge.",
         )
 
-    def test_organizations_page_keeps_membership_review_query_families_constant(self) -> None:
+    def test_organizations_api_keeps_membership_review_query_families_constant(self) -> None:
         mirror_type, sponsor_type = self._ensure_org_membership_types()
         FreeIPAPermissionGrant.objects.create(
             permission=ASTRA_ADD_MEMBERSHIP,
@@ -1201,7 +906,7 @@ class OrganizationListPaginationTests(TestCase):
                 patch("core.freeipa.user.FreeIPAUser.all", return_value=[]),
                 CaptureQueriesContext(connection) as query_context,
             ):
-                response = self.client.get(reverse("organizations"))
+                response = self.client.get(reverse("api-organizations"), HTTP_ACCEPT="application/json")
 
             self.assertEqual(response.status_code, 200)
             executed_queries = [

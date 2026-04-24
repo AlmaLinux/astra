@@ -1,6 +1,7 @@
 import logging
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
+from typing import cast
 
 from django.conf import settings
 from django.contrib import messages
@@ -633,6 +634,70 @@ def _profile_context_for_user(
     }
 
 
+def _build_user_profile_summary_bootstrap(context: dict[str, object]) -> dict[str, object]:
+    fu = cast(FreeIPAUser, context["fu"])
+    avatar_url_by_username, _avatar_resolution_count, _avatar_fallback_count = resolve_avatar_urls_for_users(
+        [fu],
+        width=220,
+        height=220,
+    )
+
+    current_time = cast(object | None, context["current_time"])
+    current_time_label = current_time.strftime("%A %H:%M:%S") if current_time is not None else ""
+
+    return {
+        "fullName": fu.get_full_name(),
+        "username": fu.username,
+        "email": fu.email,
+        "profileEditUrl": settings_url(tab="profile") if bool(context["is_self"]) else "",
+        "avatarUrl": avatar_url_by_username.get(fu.username, ""),
+        "viewerIsMembershipCommittee": bool(context["viewer_is_membership_committee"]),
+        "profileCountry": str(context["profile_country"]),
+        "pronouns": str(context["pronouns"]),
+        "locale": str(context["locale"]),
+        "timezoneName": str(context["timezone_name"]),
+        "currentTimeLabel": current_time_label,
+        "ircNicks": cast(list[str], context["irc_nicks"]),
+        "socialProfiles": cast(list[dict[str, object]], context["social_profiles"]),
+        "websiteUrls": cast(list[dict[str, str | None]], context["website_urls"]),
+        "rssUrls": cast(list[dict[str, str | None]], context["rss_urls"]),
+        "rhbzEmail": str(context["rhbz_email"]),
+        "githubUsername": str(context["github_username"]),
+        "gitlabUsername": str(context["gitlab_username"]),
+        "gpgKeys": cast(list[str], context["gpg_keys"]),
+        "sshKeys": cast(list[str], context["ssh_keys"]),
+        "isSelf": bool(context["is_self"]),
+    }
+
+
+def _build_user_profile_groups_bootstrap(context: dict[str, object]) -> dict[str, object]:
+    fu = cast(FreeIPAUser, context["fu"])
+    groups = cast(list[dict[str, str]], context["groups"])
+    agreements = cast(list[str], context["agreements"])
+    missing_agreements = cast(list[dict[str, object]], context["missing_agreements"])
+
+    return {
+        "username": fu.username,
+        "groups": [
+            {
+                "cn": str(group["cn"]),
+                "role": str(group["role"]),
+            }
+            for group in groups
+        ],
+        "agreements": [str(agreement) for agreement in agreements],
+        "missingAgreements": [
+            {
+                "cn": str(agreement["cn"]),
+                "requiredBy": [str(group_cn) for group_cn in cast(list[str], agreement["required_by"])],
+                "settingsUrl": str(agreement["settings_url"] or ""),
+            }
+            for agreement in missing_agreements
+        ],
+        "isSelf": bool(context["is_self"]),
+    }
+
+
 def home(request: HttpRequest) -> HttpResponse:
     username = get_username(request)
     if not username:
@@ -662,6 +727,8 @@ def user_profile(request: HttpRequest, username: str) -> HttpResponse:
         is_self=is_self,
         viewer_is_membership_committee=viewer_is_membership_committee,
     )
+    context["profile_summary_bootstrap"] = _build_user_profile_summary_bootstrap(context)
+    context["profile_groups_bootstrap"] = _build_user_profile_groups_bootstrap(context)
     return render(request, "core/user_profile.html", context)
 
 
@@ -680,11 +747,11 @@ def users(request: HttpRequest) -> HttpResponse:
     )
 
 
-def users_grid(request: HttpRequest) -> JsonResponse:
+def users_api(request: HttpRequest) -> JsonResponse:
     if not can_view_user_directory(request.user):
         raise Http404
 
-    q, page_number, _base_query, page_url_prefix = parse_grid_query(request)
+    q, page_number, _base_query, _page_url_prefix = parse_grid_query(request)
     users_list = snapshot_freeipa_users()
 
     users_page, paginator, page_obj, page_numbers, show_first, show_last = build_user_grid_page(
@@ -716,19 +783,17 @@ def users_grid(request: HttpRequest) -> JsonResponse:
         )
 
     logger.info(
-        "users_grid_metrics route=/users/grid page_size=%s avatar_resolution_count=%s avatar_fallback_count=%s",
+        "users_api_metrics route=/api/v1/users page_size=%s avatar_resolution_count=%s avatar_fallback_count=%s",
         len(items),
         avatar_resolution_count,
         avatar_fallback_count,
     )
 
-    page_url_prefix = f"{reverse('users')}{page_url_prefix}"
     start_index = page_obj.start_index() if paginator.count else 0
     end_index = page_obj.end_index() if paginator.count else 0
 
     payload = {
         "users": items,
-        "empty_label": "No users found.",
         "pagination": {
             "count": paginator.count,
             "page": page_obj.number,
@@ -742,7 +807,6 @@ def users_grid(request: HttpRequest) -> JsonResponse:
             "next_page_number": page_obj.next_page_number() if page_obj.has_next() else None,
             "start_index": start_index,
             "end_index": end_index,
-            "page_url_prefix": page_url_prefix,
         },
     }
     return JsonResponse(payload)

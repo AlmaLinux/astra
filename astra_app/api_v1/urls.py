@@ -1,6 +1,8 @@
 from django.urls import path
 
 from core import views_membership
+from core.views_organizations import organization_detail_api, organizations_api
+from core.views_users import users_api
 from core.views_invitations_api import (
     account_invitations_accepted_api,
     account_invitations_bulk_api,
@@ -17,6 +19,21 @@ from core.views_membership.admin import (
 )
 
 urlpatterns = [
+    path(
+        "users",
+        users_api,
+        name="api-users",
+    ),
+    path(
+        "organizations/<int:organization_id>",
+        organization_detail_api,
+        name="api-organization-detail",
+    ),
+    path(
+        "organizations",
+        organizations_api,
+        name="api-organizations",
+    ),
     path(
         "membership/request/<int:pk>/rescind",
         views_membership.membership_request_rescind_api,

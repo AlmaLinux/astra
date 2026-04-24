@@ -1,57 +1,75 @@
 {% extends 'core/base.html' %}
+{% load django_vite %}
 
 {% block title %}Claim organization{% endblock %}
+
+{% block extra_head %}
+  {% vite_hmr_client %}
+  {% vite_asset 'src/entrypoints/organizationClaim.ts' %}
+{% endblock %}
 
 {% block header %}
   <h1 class="h3 m-0">Claim organization</h1>
 {% endblock %}
 
 {% block content %}
-  <div class="row">
-    <div class="col-lg-8">
-      <div class="card">
-        <div class="card-body">
-          {% if state == "invalid" %}
-            <div class="alert alert-danger mb-0">This claim link is invalid or has expired.</div>
-          {% elif state == "already_claimed" %}
-            <div class="alert alert-warning mb-0">
-              This organization has already been claimed. If you need access,
-              <a href="mailto:{{ membership_committee_email }}">contact the Membership Committee</a>.
-            </div>
-          {% else %}
-            <p>
-              Claim this organization to become its representative.
-              As the representative, you will be able to manage the organization's sponsorship and vote on its behalf.
-            </p>
+  <div
+    class="organization-claim-page"
+    data-organization-claim-root
+    data-claim-state="{{ state }}"
+    data-membership-committee-email="{{ membership_committee_email }}"
+    data-organization-name="{% if organization %}{{ organization.name }}{% endif %}"
+    data-organization-website="{% if organization %}{{ organization.website|default:'' }}{% endif %}"
+    data-organization-contact-email="{% if organization %}{{ organization.primary_contact_email|default:'' }}{% endif %}"
+    data-csrf-token="{{ csrf_token }}"
+    data-form-action="{{ request.path }}"
+  >
+    <div class="row">
+      <div class="col-lg-8">
+        <div class="card">
+          <div class="card-body">
+            {% if state == "invalid" %}
+              <div class="alert alert-danger mb-0">This claim link is invalid or has expired.</div>
+            {% elif state == "already_claimed" %}
+              <div class="alert alert-warning mb-0">
+                This organization has already been claimed. If you need access,
+                <a href="mailto:{{ membership_committee_email }}">contact the Membership Committee</a>.
+              </div>
+            {% else %}
+              <p>
+                Claim this organization to become its representative.
+                As the representative, you will be able to manage the organization's sponsorship and vote on its behalf.
+              </p>
 
-            <dl class="row mb-4">
-              <dt class="col-sm-4">Organization</dt>
-              <dd class="col-sm-8">{{ organization.name }}</dd>
+              <dl class="row mb-4">
+                <dt class="col-sm-4">Organization</dt>
+                <dd class="col-sm-8">{{ organization.name }}</dd>
 
-              <dt class="col-sm-4">Website</dt>
-              <dd class="col-sm-8">
-                {% if organization.website %}
-                  <a href="{{ organization.website }}" rel="noopener noreferrer">{{ organization.website }}</a>
-                {% else %}
-                  —
-                {% endif %}
-              </dd>
+                <dt class="col-sm-4">Website</dt>
+                <dd class="col-sm-8">
+                  {% if organization.website %}
+                    <a href="{{ organization.website }}" rel="noopener noreferrer">{{ organization.website }}</a>
+                  {% else %}
+                    —
+                  {% endif %}
+                </dd>
 
-              <dt class="col-sm-4">Contact email</dt>
-              <dd class="col-sm-8">
-                {% if organization.primary_contact_email %}
-                  {{ organization.primary_contact_email }}
-                {% else %}
-                  —
-                {% endif %}
-              </dd>
-            </dl>
+                <dt class="col-sm-4">Contact email</dt>
+                <dd class="col-sm-8">
+                  {% if organization.primary_contact_email %}
+                    {{ organization.primary_contact_email }}
+                  {% else %}
+                    —
+                  {% endif %}
+                </dd>
+              </dl>
 
-            <form method="post">
-              {% csrf_token %}
-              <button type="submit" class="btn btn-primary">Claim organization</button>
-            </form>
-          {% endif %}
+              <form method="post">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-primary">Claim organization</button>
+              </form>
+            {% endif %}
+          </div>
         </div>
       </div>
     </div>

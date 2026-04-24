@@ -37,7 +37,18 @@ class UserRoutesTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertIn(username, resp.content.decode("utf-8"))
 
-    def test_users_list_route_renders(self) -> None:
+    @override_settings(
+        DJANGO_VITE={
+            "default": {
+                "dev_mode": True,
+                "dev_server_protocol": "http",
+                "dev_server_host": "localhost",
+                "dev_server_port": 5173,
+                "static_url_prefix": "",
+            }
+        },
+    )
+    def test_users_list_route_renders_vue_shell_contract(self) -> None:
         self._login_as_freeipa("admin")
 
         users = [
@@ -50,11 +61,12 @@ class UserRoutesTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         content = resp.content.decode("utf-8")
-        self.assertIn("Loading users", content)
-        self.assertIn("data-users-grid-url", content)
+        self.assertIn("data-users-root", content)
+        self.assertIn("data-users-api-url", content)
+        self.assertIn('src="http://localhost:5173/src/entrypoints/users.ts"', content)
         self.assertNotIn('href="/user/alice/"', content)
 
-    def test_users_grid_paginates_28_per_page_and_preserves_json_envelope(self) -> None:
+    def test_users_api_paginates_28_per_page_and_returns_data_only_payload(self) -> None:
         self._login_as_freeipa("admin")
 
         users = [
@@ -66,18 +78,17 @@ class UserRoutesTests(TestCase):
             patch("core.views_users.snapshot_freeipa_users", return_value=users, create=True),
             patch(
                 "core.views_users.FreeIPAUser.all",
-                side_effect=AssertionError("/users/grid/ must not use FreeIPAUser.all()"),
+                side_effect=AssertionError("/api/v1/users must not use FreeIPAUser.all()"),
             ),
         ):
-            resp_page_1 = self.client.get("/users/grid/")
-            resp_page_2 = self.client.get("/users/grid/?page=2")
+            resp_page_1 = self.client.get("/api/v1/users")
+            resp_page_2 = self.client.get("/api/v1/users?page=2")
 
         self.assertEqual(resp_page_1.status_code, 200)
         payload_page_1 = json.loads(resp_page_1.content)
         payload_page_2 = json.loads(resp_page_2.content)
 
-        self.assertEqual(set(payload_page_1.keys()), {"users", "empty_label", "pagination"})
-        self.assertEqual(payload_page_1["empty_label"], "No users found.")
+        self.assertEqual(set(payload_page_1.keys()), {"users", "pagination"})
         self.assertEqual(payload_page_1["pagination"], {
             "count": 65,
             "page": 1,
@@ -91,13 +102,11 @@ class UserRoutesTests(TestCase):
             "next_page_number": 2,
             "start_index": 1,
             "end_index": 28,
-            "page_url_prefix": "/users/?page=",
         })
         self.assertEqual(payload_page_2["pagination"]["count"], 65)
         self.assertEqual(payload_page_2["pagination"]["page"], 2)
         self.assertEqual(payload_page_2["pagination"]["start_index"], 29)
         self.assertEqual(payload_page_2["pagination"]["end_index"], 56)
-        self.assertEqual(payload_page_2["pagination"]["page_url_prefix"], "/users/?page=")
 
         usernames_page_1 = [item["username"] for item in payload_page_1.get("users", [])]
         usernames_page_2 = [item["username"] for item in payload_page_2.get("users", [])]
@@ -107,7 +116,7 @@ class UserRoutesTests(TestCase):
         self.assertNotIn("user028", usernames_page_1)
         self.assertIn("user028", usernames_page_2)
 
-    def test_users_grid_search_filters_results(self) -> None:
+    def test_users_api_search_filters_results(self) -> None:
         self._login_as_freeipa("admin")
 
         users = [
@@ -119,10 +128,10 @@ class UserRoutesTests(TestCase):
             patch("core.views_users.snapshot_freeipa_users", return_value=users, create=True),
             patch(
                 "core.views_users.FreeIPAUser.all",
-                side_effect=AssertionError("/users/grid/ must not use FreeIPAUser.all()"),
+                side_effect=AssertionError("/api/v1/users must not use FreeIPAUser.all()"),
             ),
         ):
-            resp = self.client.get("/users/grid/?q=ali")
+            resp = self.client.get("/api/v1/users?q=ali")
 
         self.assertEqual(resp.status_code, 200)
         payload = json.loads(resp.content)
@@ -136,7 +145,7 @@ class UserRoutesTests(TestCase):
             "avatar.providers.DefaultAvatarProvider",
         )
     )
-    def test_users_grid_minimal_payload(self) -> None:
+    def test_users_api_minimal_payload(self) -> None:
         self._login_as_freeipa("admin")
 
         users = [
@@ -147,10 +156,10 @@ class UserRoutesTests(TestCase):
             patch("core.views_users.snapshot_freeipa_users", return_value=users, create=True),
             patch(
                 "core.views_users.FreeIPAUser.all",
-                side_effect=AssertionError("/users/grid/ must not use FreeIPAUser.all()"),
+                side_effect=AssertionError("/api/v1/users must not use FreeIPAUser.all()"),
             ),
         ):
-            resp = self.client.get("/users/grid/")
+            resp = self.client.get("/api/v1/users")
 
         self.assertEqual(resp.status_code, 200)
         payload = json.loads(resp.content)
@@ -161,23 +170,22 @@ class UserRoutesTests(TestCase):
         self.assertEqual("Alice User", items[0]["full_name"])
         self.assertIn("gravatar.com/avatar", items[0]["avatar_url"])
 
-    def test_users_grid_empty_response_preserves_json_envelope(self) -> None:
+    def test_users_api_empty_response_returns_data_only_payload(self) -> None:
         self._login_as_freeipa("admin")
 
         with (
             patch("core.views_users.snapshot_freeipa_users", return_value=[], create=True),
             patch(
                 "core.views_users.FreeIPAUser.all",
-                side_effect=AssertionError("/users/grid/ must not use FreeIPAUser.all()"),
+                side_effect=AssertionError("/api/v1/users must not use FreeIPAUser.all()"),
             ),
         ):
-            response = self.client.get("/users/grid/?q=zzz")
+            response = self.client.get("/api/v1/users?q=zzz")
 
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.content)
         self.assertEqual(payload, {
             "users": [],
-            "empty_label": "No users found.",
             "pagination": {
                 "count": 0,
                 "page": 1,
@@ -191,11 +199,10 @@ class UserRoutesTests(TestCase):
                 "next_page_number": None,
                 "start_index": 0,
                 "end_index": 0,
-                "page_url_prefix": "/users/?q=zzz&page=",
             },
         })
 
-    def test_users_grid_resolves_avatar_once_per_unique_username_within_request(self) -> None:
+    def test_users_api_resolves_avatar_once_per_unique_username_within_request(self) -> None:
         self._login_as_freeipa("admin")
 
         users = [
@@ -217,11 +224,11 @@ class UserRoutesTests(TestCase):
             patch("core.views_users.snapshot_freeipa_users", return_value=users, create=True),
             patch(
                 "core.views_users.FreeIPAUser.all",
-                side_effect=AssertionError("/users/grid/ must not use FreeIPAUser.all()"),
+                side_effect=AssertionError("/api/v1/users must not use FreeIPAUser.all()"),
             ),
             patch("core.avatar_providers.avatar_url", side_effect=_fake_avatar_url),
         ):
-            response = self.client.get("/users/grid/")
+            response = self.client.get("/api/v1/users")
 
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.content)

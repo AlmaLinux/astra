@@ -1,12 +1,14 @@
 import logging
 import secrets
 from collections.abc import Collection
+from typing import cast
 from urllib.parse import urlencode
 
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core import signing
+from django.core.paginator import Page, Paginator
 from django.db import IntegrityError, transaction
 from django.db.models import Exists, OuterRef, Q, QuerySet
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
@@ -63,6 +65,7 @@ from core.permissions import (
     has_any_membership_permission,
     json_permission_required_any,
 )
+from core.templatetags.core_dict import membership_tier_class
 from core.views_utils import (
     _normalize_str,
     block_action_without_coc,
@@ -426,7 +429,7 @@ def _build_organization_membership_card_context(
     }
 
 
-def organizations(request: HttpRequest) -> HttpResponse:
+def _build_organizations_page_context(request: HttpRequest) -> dict[str, object]:
     username = get_username(request)
     if not username and not request.user.is_authenticated:
         raise Http404
@@ -530,8 +533,8 @@ def organizations(request: HttpRequest) -> HttpResponse:
     visible_org_ids = {
         organization.pk
         for organization in (
-            list(sponsor_card_context["organizations"])
-            + list(mirror_card_context["organizations"])
+            cast(list[Organization], sponsor_card_context["organizations"])
+            + cast(list[Organization], mirror_card_context["organizations"])
             + ([my_organization] if my_organization is not None else [])
         )
     }
@@ -539,41 +542,372 @@ def organizations(request: HttpRequest) -> HttpResponse:
         organization_ids=visible_org_ids,
     )
 
+    return {
+        "sponsor_organizations": sponsor_card_context["organizations"],
+        "mirror_organizations": mirror_card_context["organizations"],
+        "sponsor_grid_items": sponsor_card_context["grid_items"],
+        "mirror_grid_items": mirror_card_context["grid_items"],
+        "my_organization": my_organization,
+        "my_organization_create_url": (
+            reverse("organization-create")
+            if username and my_organization is None
+            else None
+        ),
+        "q_sponsor": sponsor_card_context["q"],
+        "q_mirror": mirror_card_context["q"],
+        "sponsor_paginator": sponsor_card_context["paginator"],
+        "sponsor_page_obj": sponsor_card_context["page_obj"],
+        "sponsor_is_paginated": sponsor_card_context["is_paginated"],
+        "sponsor_page_numbers": sponsor_card_context["page_numbers"],
+        "sponsor_show_first": sponsor_card_context["show_first"],
+        "sponsor_show_last": sponsor_card_context["show_last"],
+        "sponsor_page_url_prefix": sponsor_card_context["page_url_prefix"],
+        "mirror_paginator": mirror_card_context["paginator"],
+        "mirror_page_obj": mirror_card_context["page_obj"],
+        "mirror_is_paginated": mirror_card_context["is_paginated"],
+        "mirror_page_numbers": mirror_card_context["page_numbers"],
+        "mirror_show_first": mirror_card_context["show_first"],
+        "mirror_show_last": mirror_card_context["show_last"],
+        "mirror_page_url_prefix": mirror_card_context["page_url_prefix"],
+        "sponsor_empty_label": "No AlmaLinux sponsor members found.",
+        "mirror_empty_label": mirror_empty_label,
+        "organization_memberships_by_id": organization_memberships_by_id,
+    }
+
+
+def organizations(request: HttpRequest) -> HttpResponse:
     return render(
         request,
         "core/organizations.html",
-        {
-            "sponsor_organizations": sponsor_card_context["organizations"],
-            "mirror_organizations": mirror_card_context["organizations"],
-            "sponsor_grid_items": sponsor_card_context["grid_items"],
-            "mirror_grid_items": mirror_card_context["grid_items"],
-            "my_organization": my_organization,
-            "my_organization_create_url": (
-                reverse("organization-create")
-                if username and my_organization is None
-                else None
-            ),
-            "q_sponsor": sponsor_card_context["q"],
-            "q_mirror": mirror_card_context["q"],
-            "sponsor_paginator": sponsor_card_context["paginator"],
-            "sponsor_page_obj": sponsor_card_context["page_obj"],
-            "sponsor_is_paginated": sponsor_card_context["is_paginated"],
-            "sponsor_page_numbers": sponsor_card_context["page_numbers"],
-            "sponsor_show_first": sponsor_card_context["show_first"],
-            "sponsor_show_last": sponsor_card_context["show_last"],
-            "sponsor_page_url_prefix": sponsor_card_context["page_url_prefix"],
-            "mirror_paginator": mirror_card_context["paginator"],
-            "mirror_page_obj": mirror_card_context["page_obj"],
-            "mirror_is_paginated": mirror_card_context["is_paginated"],
-            "mirror_page_numbers": mirror_card_context["page_numbers"],
-            "mirror_show_first": mirror_card_context["show_first"],
-            "mirror_show_last": mirror_card_context["show_last"],
-            "mirror_page_url_prefix": mirror_card_context["page_url_prefix"],
-            "sponsor_empty_label": "No AlmaLinux sponsor members found.",
-            "mirror_empty_label": mirror_empty_label,
-            "organization_memberships_by_id": organization_memberships_by_id,
-        },
+        _build_organizations_page_context(request),
     )
+
+
+def _serialize_organization_membership_badge(membership: Membership) -> dict[str, str | None]:
+    return {
+        "label": membership.membership_type.name,
+        "class_name": membership_tier_class(membership.membership_type.code),
+        "request_url": None,
+    }
+
+
+def _serialize_organization_card_item(
+    *,
+    grid_item: dict[str, object],
+    organization_memberships_by_id: dict[int, list[Membership]],
+) -> dict[str, object]:
+    organization = grid_item["organization"]
+    if not isinstance(organization, Organization):
+        raise TypeError("Expected organization grid item")
+
+    memberships = organization_memberships_by_id.get(organization.pk, [])
+    logo_url = organization.logo.url if organization.logo else ""
+    return {
+        "id": organization.pk,
+        "name": organization.name,
+        "status": organization.status,
+        "detail_url": reverse("organization-detail", args=[organization.pk]),
+        "logo_url": logo_url,
+        "link_to_detail": bool(grid_item.get("link_to_detail", True)),
+        "memberships": [_serialize_organization_membership_badge(membership) for membership in memberships],
+    }
+
+
+def _serialize_organizations_card(
+    *,
+    title: str,
+    q: str,
+    grid_items: list[dict[str, object]],
+    paginator: Paginator,
+    page_obj: Page,
+    page_numbers: list[int],
+    show_first: bool,
+    show_last: bool,
+    empty_label: str,
+    organization_memberships_by_id: dict[int, list[Membership]],
+) -> dict[str, object]:
+    items_payload = [
+        _serialize_organization_card_item(
+            grid_item=grid_item,
+            organization_memberships_by_id=organization_memberships_by_id,
+        )
+        for grid_item in grid_items
+    ]
+
+    paginator_count = int(getattr(paginator, "count", 0))
+    page_number = int(getattr(page_obj, "number", 1))
+    num_pages = int(getattr(paginator, "num_pages", 1))
+    start_index = page_obj.start_index() if paginator_count else 0
+    end_index = page_obj.end_index() if paginator_count else 0
+
+    return {
+        "title": title,
+        "q": str(q or ""),
+        "items": items_payload,
+        "empty_label": empty_label,
+        "pagination": {
+            "count": paginator_count,
+            "page": page_number,
+            "num_pages": num_pages,
+            "page_numbers": page_numbers,
+            "show_first": show_first,
+            "show_last": show_last,
+            "has_previous": page_obj.has_previous(),
+            "has_next": page_obj.has_next(),
+            "previous_page_number": page_obj.previous_page_number() if page_obj.has_previous() else None,
+            "next_page_number": page_obj.next_page_number() if page_obj.has_next() else None,
+            "start_index": start_index,
+            "end_index": end_index,
+        },
+    }
+
+
+@require_GET
+def organizations_api(request: HttpRequest) -> JsonResponse:
+    context = _build_organizations_page_context(request)
+    organization_memberships_by_id = context["organization_memberships_by_id"]
+    if not isinstance(organization_memberships_by_id, dict):
+        raise TypeError("Expected organization memberships mapping")
+
+    my_organization_payload: dict[str, object] | None = None
+    my_organization = context["my_organization"]
+    if isinstance(my_organization, Organization):
+        my_organization_payload = {
+            "id": my_organization.pk,
+            "name": my_organization.name,
+            "status": my_organization.status,
+            "detail_url": reverse("organization-detail", args=[my_organization.pk]),
+            "logo_url": my_organization.logo.url if my_organization.logo else "",
+            "link_to_detail": True,
+            "memberships": [
+                _serialize_organization_membership_badge(membership)
+                for membership in organization_memberships_by_id.get(my_organization.pk, [])
+            ],
+        }
+
+    payload = {
+        "my_organization": my_organization_payload,
+        "my_organization_create_url": context["my_organization_create_url"],
+        "sponsor_card": _serialize_organizations_card(
+            title="AlmaLinux Sponsor Members",
+            q=cast(str, context["q_sponsor"]),
+            grid_items=cast(list[dict[str, object]], context["sponsor_grid_items"]),
+            paginator=cast(Paginator, context["sponsor_paginator"]),
+            page_obj=cast(Page, context["sponsor_page_obj"]),
+            page_numbers=cast(list[int], context["sponsor_page_numbers"]),
+            show_first=cast(bool, context["sponsor_show_first"]),
+            show_last=cast(bool, context["sponsor_show_last"]),
+            empty_label=str(context["sponsor_empty_label"]),
+            organization_memberships_by_id=organization_memberships_by_id,
+        ),
+        "mirror_card": _serialize_organizations_card(
+            title="Mirror Sponsor Members",
+            q=cast(str, context["q_mirror"]),
+            grid_items=cast(list[dict[str, object]], context["mirror_grid_items"]),
+            paginator=cast(Paginator, context["mirror_paginator"]),
+            page_obj=cast(Page, context["mirror_page_obj"]),
+            page_numbers=cast(list[int], context["mirror_page_numbers"]),
+            show_first=cast(bool, context["mirror_show_first"]),
+            show_last=cast(bool, context["mirror_show_last"]),
+            empty_label=str(context["mirror_empty_label"]),
+            organization_memberships_by_id=organization_memberships_by_id,
+        ),
+    }
+    return JsonResponse(payload)
+
+
+def _build_organization_detail_page_context(
+    request: HttpRequest,
+    *,
+    organization: Organization,
+) -> dict[str, object]:
+    is_representative = _is_representative(request, organization)
+
+    representative_username = _normalize_str(organization.representative)
+    representative_full_name = ""
+    if representative_username:
+        representative_user = FreeIPAUser.get(representative_username)
+        if representative_user is not None:
+            representative_full_name = representative_user.full_name
+
+    sponsorships = get_valid_memberships(organization=organization)
+    expiring_soon_by = expiring_soon_cutoff()
+
+    pending_requests = list(
+        MembershipRequest.objects.select_related("membership_type")
+        .filter(
+            requested_organization=organization,
+            status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
+        )
+        .order_by("-requested_at", "-pk")
+    )
+    pending_request_context = build_pending_request_context(
+        pending_requests,
+        is_organization=True,
+    )
+    pending_request_entries = pending_request_context.entries
+
+    eligibility = get_membership_request_eligibility(organization=organization)
+    requestability_context = compute_membership_requestability_context(
+        organization=organization,
+        eligibility=eligibility,
+        held_category_ids={sponsorship.membership_type.category_id for sponsorship in sponsorships},
+    )
+    requestable_codes_by_category = requestability_context.requestable_codes_by_category
+
+    sponsorship_request_id_by_type = resolve_request_ids_by_membership_type(
+        organization=organization,
+        membership_type_ids={s.membership_type_id for s in sponsorships},
+    )
+
+    sponsorship_entries: list[dict[str, object]] = []
+    for sponsorship in sponsorships:
+        sponsorship_category_id = sponsorship.membership_type.category_id
+        has_pending_request_in_category = sponsorship_category_id in pending_request_context.category_ids
+        suggested_tier_code = _suggest_tier_change_membership_type_code(
+            current_membership_type=sponsorship.membership_type,
+            requestable_codes=requestable_codes_by_category.get(sponsorship_category_id, set()),
+        )
+        sponsorship_entries.append({
+            "sponsorship": sponsorship,
+            "badge_text": str(sponsorship.membership_type_id).replace("_", " ").title(),
+            "is_expiring_soon": bool(sponsorship.expires_at and sponsorship.expires_at <= expiring_soon_by),
+            "pending_request": pending_request_context.by_category.get(sponsorship_category_id),
+            "can_request_tier_change": (
+                any(
+                    code != sponsorship.membership_type.code
+                    for code in requestable_codes_by_category.get(sponsorship_category_id, set())
+                )
+                and not has_pending_request_in_category
+            ),
+            "tier_change_url": (
+                reverse("organization-membership-request", kwargs={"organization_id": organization.pk})
+                + "?"
+                + urlencode({"membership_type": suggested_tier_code})
+            ),
+            "request_id": sponsorship_request_id_by_type.get(sponsorship.membership_type_id),
+        })
+
+    can_edit_organization = _can_edit_organization(request, organization)
+    can_delete_organization = _can_delete_organization(request, organization)
+    can_request_membership = is_representative or request.user.has_perm(ASTRA_ADD_MEMBERSHIP)
+    membership_can_request_any = False
+    if can_request_membership:
+        membership_can_request_any = requestability_context.membership_can_request_any
+
+    contact_display_groups = [
+        {
+            "key": "business",
+            "label": "Business",
+            "name": organization.business_contact_name,
+            "email": organization.business_contact_email,
+            "phone": organization.business_contact_phone,
+        },
+        {
+            "key": "marketing",
+            "label": "PR and marketing",
+            "name": organization.pr_marketing_contact_name,
+            "email": organization.pr_marketing_contact_email,
+            "phone": organization.pr_marketing_contact_phone,
+        },
+        {
+            "key": "technical",
+            "label": "Technical",
+            "name": organization.technical_contact_name,
+            "email": organization.technical_contact_email,
+            "phone": organization.technical_contact_phone,
+        },
+    ]
+
+    claim_url = ""
+    can_send_claim_invitation = False
+    send_claim_invitation_url = ""
+    if organization.status == Organization.Status.unclaimed:
+        claim_url = build_organization_claim_url(organization=organization, request=request)
+
+        recipient_email = str(organization.primary_contact_email() or "").strip()
+        if request.user.has_perm(ASTRA_ADD_SEND_MAIL) and recipient_email:
+            can_send_claim_invitation = True
+            send_claim_invitation_url = send_mail_url(
+                to_type="manual",
+                to=recipient_email,
+                template_name=settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME,
+                extra_context={
+                    "invitation_action": "org_claim",
+                    "invitation_org_id": str(organization.pk),
+                    "organization_name": organization.name,
+                    "claim_url": claim_url,
+                },
+                reply_to=settings.MEMBERSHIP_COMMITTEE_EMAIL,
+            )
+
+    return {
+        "organization": organization,
+        "representative_username": representative_username,
+        "representative_full_name": representative_full_name,
+        "pending_requests": pending_request_entries,
+        "sponsorship_entries": sponsorship_entries,
+        "sponsorships": sponsorships,
+        "is_representative": is_representative,
+        "can_request_membership": can_request_membership,
+        "membership_can_request_any": membership_can_request_any,
+        "can_edit_organization": can_edit_organization,
+        "can_delete_organization": can_delete_organization,
+        "contact_display_groups": contact_display_groups,
+        "claim_url": claim_url,
+        "can_send_claim_invitation": can_send_claim_invitation,
+        "send_claim_invitation_url": send_claim_invitation_url,
+    }
+
+
+def _serialize_organization_detail_payload(context: dict[str, object]) -> dict[str, object]:
+    organization = context["organization"]
+    if not isinstance(organization, Organization):
+        raise TypeError("Expected organization in detail context")
+
+    sponsorships = cast(list[Membership], context["sponsorships"])
+    representative_username = cast(str, context["representative_username"])
+    representative_full_name = cast(str, context["representative_full_name"])
+    contact_display_groups = cast(list[dict[str, object]], context["contact_display_groups"])
+
+    return {
+        "organization": {
+            "id": organization.pk,
+            "name": organization.name,
+            "status": organization.status,
+            "website": organization.website,
+            "detail_url": reverse("organization-detail", args=[organization.pk]),
+            "logo_url": organization.logo.url if organization.logo else "",
+            "memberships": [
+                {
+                    "label": membership.membership_type.name,
+                    "class_name": membership_tier_class(membership.membership_type.code),
+                    "request_url": None,
+                }
+                for membership in sponsorships
+            ],
+            "representative": {
+                "username": representative_username,
+                "full_name": representative_full_name or representative_username,
+            },
+            "contact_groups": contact_display_groups,
+            "address": {
+                "street": organization.street,
+                "city": organization.city,
+                "state": organization.state,
+                "postal_code": organization.postal_code,
+                "country_code": organization.country_code,
+            },
+        },
+    }
+
+
+@require_GET
+def organization_detail_api(request: HttpRequest, organization_id: int) -> JsonResponse:
+    organization = get_object_or_404(Organization, pk=organization_id)
+    _require_organization_access(request, organization)
+    context = _build_organization_detail_page_context(request, organization=organization)
+    return JsonResponse(_serialize_organization_detail_payload(context))
 
 
 def organization_create(request: HttpRequest) -> HttpResponse:
@@ -715,153 +1049,10 @@ def organization_representatives_search(request: HttpRequest) -> HttpResponse:
 def organization_detail(request: HttpRequest, organization_id: int) -> HttpResponse:
     organization = get_object_or_404(Organization, pk=organization_id)
     _require_organization_access(request, organization)
-
-    is_representative = _is_representative(request, organization)
-
-    representative_username = _normalize_str(organization.representative)
-    representative_full_name = ""
-    if representative_username:
-        representative_user = FreeIPAUser.get(representative_username)
-        if representative_user is not None:
-            representative_full_name = representative_user.full_name
-
-    sponsorships = get_valid_memberships(organization=organization)
-    expiring_soon_by = expiring_soon_cutoff()
-
-    pending_requests = list(
-        MembershipRequest.objects.select_related("membership_type")
-        .filter(
-            requested_organization=organization,
-            status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
-        )
-        .order_by("-requested_at", "-pk")
-    )
-    pending_request_context = build_pending_request_context(
-        pending_requests,
-        is_organization=True,
-    )
-    pending_request_entries = pending_request_context.entries
-
-    eligibility = get_membership_request_eligibility(organization=organization)
-    requestability_context = compute_membership_requestability_context(
-        organization=organization,
-        eligibility=eligibility,
-        held_category_ids={sponsorship.membership_type.category_id for sponsorship in sponsorships},
-    )
-    requestable_codes_by_category = requestability_context.requestable_codes_by_category
-
-    sponsorship_request_id_by_type = resolve_request_ids_by_membership_type(
-        organization=organization,
-        membership_type_ids={s.membership_type_id for s in sponsorships},
-    )
-
-    # Build per-sponsorship display entries for the template.
-    sponsorship_entries: list[dict[str, object]] = []
-    for s in sponsorships:
-        sponsorship_category_id = s.membership_type.category_id
-        has_pending_request_in_category = sponsorship_category_id in pending_request_context.category_ids
-        suggested_tier_code = _suggest_tier_change_membership_type_code(
-            current_membership_type=s.membership_type,
-            requestable_codes=requestable_codes_by_category.get(sponsorship_category_id, set()),
-        )
-        sponsorship_entries.append({
-            "sponsorship": s,
-            "badge_text": str(s.membership_type_id).replace("_", " ").title(),
-            "is_expiring_soon": bool(s.expires_at and s.expires_at <= expiring_soon_by),
-            "pending_request": pending_request_context.by_category.get(sponsorship_category_id),
-            "can_request_tier_change": (
-                any(
-                    code != s.membership_type.code
-                    for code in requestable_codes_by_category.get(sponsorship_category_id, set())
-                )
-                and not has_pending_request_in_category
-            ),
-            "tier_change_url": (
-                reverse("organization-membership-request", kwargs={"organization_id": organization.pk})
-                + "?"
-                + urlencode({"membership_type": suggested_tier_code})
-            ),
-            "request_id": sponsorship_request_id_by_type.get(s.membership_type_id),
-        })
-
-    can_edit_organization = _can_edit_organization(request, organization)
-    can_delete_organization = _can_delete_organization(request, organization)
-    can_request_membership = is_representative or request.user.has_perm(ASTRA_ADD_MEMBERSHIP)
-    membership_can_request_any = False
-    if can_request_membership:
-        membership_can_request_any = requestability_context.membership_can_request_any
-
-
-
-    # Build contact-group descriptors for looped rendering. Same pattern
-    # as `contact_groups` in the edit form (see _render_org_form), but
-    # with plain values instead of form fields.
-    contact_display_groups = [
-        {
-            "key": "business",
-            "label": "Business",
-            "name": organization.business_contact_name,
-            "email": organization.business_contact_email,
-            "phone": organization.business_contact_phone,
-        },
-        {
-            "key": "marketing",
-            "label": "PR and marketing",
-            "name": organization.pr_marketing_contact_name,
-            "email": organization.pr_marketing_contact_email,
-            "phone": organization.pr_marketing_contact_phone,
-        },
-        {
-            "key": "technical",
-            "label": "Technical",
-            "name": organization.technical_contact_name,
-            "email": organization.technical_contact_email,
-            "phone": organization.technical_contact_phone,
-        },
-    ]
-
-    claim_url = ""
-    can_send_claim_invitation = False
-    send_claim_invitation_url = ""
-    if organization.status == Organization.Status.unclaimed:
-        claim_url = build_organization_claim_url(organization=organization, request=request)
-
-        recipient_email = str(organization.primary_contact_email() or "").strip()
-        if request.user.has_perm(ASTRA_ADD_SEND_MAIL) and recipient_email:
-            can_send_claim_invitation = True
-            send_claim_invitation_url = send_mail_url(
-                to_type="manual",
-                to=recipient_email,
-                template_name=settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME,
-                extra_context={
-                    "invitation_action": "org_claim",
-                    "invitation_org_id": str(organization.pk),
-                    "organization_name": organization.name,
-                    "claim_url": claim_url,
-                },
-                reply_to=settings.MEMBERSHIP_COMMITTEE_EMAIL,
-            )
-
     return render(
         request,
         "core/organization_detail.html",
-        {
-            "organization": organization,
-            "representative_username": representative_username,
-            "representative_full_name": representative_full_name,
-            "pending_requests": pending_request_entries,
-            "sponsorship_entries": sponsorship_entries,
-            "sponsorships": sponsorships,
-            "is_representative": is_representative,
-            "can_request_membership": can_request_membership,
-            "membership_can_request_any": membership_can_request_any,
-            "can_edit_organization": can_edit_organization,
-            "can_delete_organization": can_delete_organization,
-            "contact_display_groups": contact_display_groups,
-            "claim_url": claim_url,
-            "can_send_claim_invitation": can_send_claim_invitation,
-            "send_claim_invitation_url": send_claim_invitation_url,
-        },
+        _build_organization_detail_page_context(request, organization=organization),
     )
 
 

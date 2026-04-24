@@ -1,31 +1,23 @@
 {% extends 'core/base.html' %}
-{% load core_organization_widget %}
+{% load django_vite %}
 
 {% block title %}Organizations{% endblock %}
+
+{% block extra_head %}
+  {{ block.super }}
+  {% vite_hmr_client %}
+  {% vite_asset 'src/entrypoints/organizations.ts' %}
+{% endblock %}
 
 {% block header %}
   <h1 class="m-0">Organizations</h1>
 {% endblock %}
 
 {% block content %}
-  <div class="card">
-    <div class="card-header">
-      <h3 class="card-title mb-0">My Organization</h3>
-    </div>
-    <div class="card-body">
-      <div class="alert alert-info">
-        Create an organization profile only if you are an employee or authorized representative of the organization applying to sponsor AlmaLinux.
-      </div>
-
-      {% if my_organization %}
-        {% organization my_organization %}
-      {% elif my_organization_create_url %}
-        <a href="{{ my_organization_create_url }}" class="btn btn-primary" title="Create a new organization">Create organization</a>
-      {% endif %}
-    </div>
+  <div
+    data-organizations-root
+    data-organizations-api-url="{% url 'api-organizations' %}"
+  >
+    <div class="text-muted">Loading organizations...</div>
   </div>
-
-  {% include "core/_organizations_membership_card.html" with card_title="AlmaLinux Sponsor Members" search_field_name="q_sponsor" search_value=q_sponsor search_hidden_fields_template="core/_organizations_sponsor_search_hidden_fields.html" search_aria_label="Search sponsor organizations" search_submit_title="Search sponsor organizations" grid_items=sponsor_grid_items paginator=sponsor_paginator page_obj=sponsor_page_obj is_paginated=sponsor_is_paginated page_numbers=sponsor_page_numbers show_first=sponsor_show_first show_last=sponsor_show_last page_url_prefix=sponsor_page_url_prefix empty_label=sponsor_empty_label %}
-
-  {% include "core/_organizations_membership_card.html" with card_title="Mirror Sponsor Members" search_field_name="q_mirror" search_value=q_mirror search_hidden_fields_template="core/_organizations_mirror_search_hidden_fields.html" search_aria_label="Search mirror organizations" search_submit_title="Search mirror organizations" grid_items=mirror_grid_items paginator=mirror_paginator page_obj=mirror_page_obj is_paginated=mirror_is_paginated page_numbers=mirror_page_numbers show_first=mirror_show_first show_last=mirror_show_last page_url_prefix=mirror_page_url_prefix empty_label=mirror_empty_label %}
 {% endblock %}

@@ -24,13 +24,13 @@
         <form method="post" {% include 'core/_form_validation_attrs.html' with form=form %}>
           {% csrf_token %}
           <div class="card-body">
-            {% include 'core/_form_field.html' with field=form.description show_errors=0 %}
+            {% include 'core/_form_field.html' with field=form.description %}
 
-            {% include 'core/_form_field.html' with field=form.fas_url show_errors=0 %}
+            {% include 'core/_form_field.html' with field=form.fas_url %}
 
-            {% include 'core/_form_field.html' with field=form.fas_mailing_list show_errors=0 %}
+            {% include 'core/_form_field.html' with field=form.fas_mailing_list %}
 
-            {% include 'core/_form_field.html' with field=form.fas_discussion_url show_errors=0 %}
+            {% include 'core/_form_field.html' with field=form.fas_discussion_url %}
 
             <div class="form-group mb-0">
               {{ form.fas_irc_channels.label_tag }}
@@ -73,13 +73,6 @@
               <div class="mt-3 alert alert-danger">{{ form.non_field_errors }}</div>
             {% endif %}
 
-            {% for field in form %}
-              {% if field.errors %}
-                <div class="mt-2 alert alert-danger">
-                  <strong>{{ field.label }}:</strong> {{ field.errors|join:", " }}
-                </div>
-              {% endif %}
-            {% endfor %}
           </div>
 
           <div class="card-footer d-flex justify-content-end" style="gap: .5rem;">
