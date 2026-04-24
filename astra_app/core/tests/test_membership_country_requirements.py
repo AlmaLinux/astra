@@ -451,7 +451,7 @@ class MembershipCountryRequirementsTests(TestCase):
             captured["context"] = context
             return HttpResponse("ok")
 
-        with patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_target):
+        with patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_target) as get_mock:
             with patch("core.views_membership.committee.render", autospec=True, side_effect=fake_render):
                 response = views_membership.membership_request_detail(request, pk=mr.pk)
 
@@ -460,6 +460,7 @@ class MembershipCountryRequirementsTests(TestCase):
         ctx = captured.get("context") or {}
         self.assertEqual(ctx.get("embargoed_country_code"), "RU")
         self.assertEqual(ctx.get("embargoed_country_label"), f"{country_name_from_code('RU')} (RU)")
+        get_mock.assert_any_call("alice", respect_privacy=False)
 
     @override_settings(MEMBERSHIP_EMBARGOED_COUNTRY_CODES=["RU", "IR"])
     def test_membership_committee_sees_org_representative_embargo_warning(self) -> None:
@@ -495,7 +496,7 @@ class MembershipCountryRequirementsTests(TestCase):
             captured["context"] = context
             return HttpResponse("ok")
 
-        with patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_rep):
+        with patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_rep) as get_mock:
             with patch("core.views_membership.committee.render", autospec=True, side_effect=fake_render):
                 response = views_membership.membership_request_detail(request, pk=mr.pk)
 
@@ -504,6 +505,7 @@ class MembershipCountryRequirementsTests(TestCase):
         ctx = captured.get("context") or {}
         self.assertEqual(ctx.get("embargoed_country_code"), "RU")
         self.assertEqual(ctx.get("embargoed_country_label"), f"{country_name_from_code('RU')} (RU)")
+        get_mock.assert_any_call("bob", respect_privacy=False)
 
     def test_country_change_with_pending_request_creates_system_note(self) -> None:
         self._ensure_membership_type()

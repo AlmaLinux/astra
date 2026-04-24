@@ -330,7 +330,7 @@ def _issue_and_email_credentials(
             continue
 
         try:
-            user = FreeIPAUser.get(username)
+            user = FreeIPAUser.get(username, respect_privacy=False)
         except Exception:
             failures += 1
             continue

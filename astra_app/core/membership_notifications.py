@@ -51,7 +51,7 @@ def organization_sponsor_notification_recipient_email(
     representative_username = str(organization.representative or "").strip()
     if representative_username:
         try:
-            representative = FreeIPAUser.get(representative_username)
+            representative = FreeIPAUser.get(representative_username, respect_privacy=False)
         except Exception:
             representative = None
         if representative is not None:
@@ -190,7 +190,11 @@ def committee_recipient_emails_for_permission(
     user_getter: Callable[[str], FreeIPAUser | None] | None = None,
 ) -> list[str]:
     resolved_group_getter = group_getter or FreeIPAGroup.get
-    resolved_user_getter = user_getter or FreeIPAUser.get
+    if user_getter is None:
+        def resolved_user_getter(username: str) -> FreeIPAUser | None:
+            return FreeIPAUser.get(username, respect_privacy=False)
+    else:
+        resolved_user_getter = user_getter
     recipients, warnings = committee_recipient_emails_for_permission_graceful(
         permission=permission,
         group_getter=resolved_group_getter,
@@ -210,7 +214,11 @@ def committee_recipient_emails_for_permission_graceful(
     user_getter: Callable[[str], FreeIPAUser | None] | None = None,
 ) -> tuple[list[str], list[str]]:
     resolved_group_getter = group_getter or FreeIPAGroup.get
-    resolved_user_getter = user_getter or FreeIPAUser.get
+    if user_getter is None:
+        def resolved_user_getter(username: str) -> FreeIPAUser | None:
+            return FreeIPAUser.get(username, respect_privacy=False)
+    else:
+        resolved_user_getter = user_getter
 
     warnings: list[str] = []
     grants = list(FreeIPAPermissionGrant.objects.filter(permission=permission))

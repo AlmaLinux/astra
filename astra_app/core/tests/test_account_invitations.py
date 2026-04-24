@@ -15,6 +15,7 @@ from post_office.models import EmailTemplate
 
 from core.account_invitations import (
     _mark_invitation_accepted_from_email_match,
+    build_freeipa_email_lookup,
     find_account_invitation_matches,
     parse_invitation_csv,
 )
@@ -25,6 +26,25 @@ from core.views_account_invitations import _build_invitation_email_context
 
 
 class AccountInvitationFreeIPAServiceTests(TestCase):
+    def test_build_freeipa_email_lookup_uses_delivery_safe_privacy_override(self) -> None:
+        private_user = FreeIPAUser(
+            "privateuser",
+            {
+                "uid": ["privateuser"],
+                "mail": ["private@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        def _all(*, respect_privacy: bool = True) -> list[FreeIPAUser]:
+            self.assertFalse(respect_privacy)
+            return [private_user]
+
+        with patch("core.account_invitations.FreeIPAUser.all", side_effect=_all):
+            lookup = build_freeipa_email_lookup()
+
+        self.assertEqual({"private@example.com": {"privateuser"}}, lookup)
+
     def test_find_account_invitation_matches_returns_sorted_unique(self) -> None:
         response = {
             "count": 2,

@@ -21,7 +21,7 @@ def normalize_invitation_email(value: str) -> str:
 
 
 def build_freeipa_email_lookup() -> dict[str, set[str]]:
-    users = FreeIPAUser.all()
+    users = FreeIPAUser.all(respect_privacy=False)
     if not users:
         logger.warning(
             "Account invitation FreeIPA lookup: FreeIPAUser.all() returned 0 users; falling back to per-email lookup"

@@ -67,7 +67,7 @@ def election_send_mail_credentials(request: HttpRequest, election_id: int) -> Ht
         if not username:
             continue
 
-        user = FreeIPAUser.get(username)
+        user = FreeIPAUser.get(username, respect_privacy=False)
         if user is None or not user.email:
             continue
 

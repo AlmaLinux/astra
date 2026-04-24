@@ -87,7 +87,7 @@ def _custom_email_recipient_for_request(membership_request: MembershipRequest) -
     representative_username = org.representative
     if representative_username:
         try:
-            representative = FreeIPAUser.get(representative_username)
+            representative = FreeIPAUser.get(representative_username, respect_privacy=False)
         except Exception:
             representative = None
         if representative is not None and representative.email:
@@ -727,7 +727,7 @@ def build_membership_request_detail_committee_context(
     embargoed_country_code: str | None = None
     embargoed_country_label: str | None = None
     if req.requested_username:
-        target_user = FreeIPAUser.get(req.requested_username)
+        target_user = FreeIPAUser.get(req.requested_username, respect_privacy=False)
         target_deleted = target_user is None
         if target_user is not None:
             target_full_name = target_user.full_name
@@ -739,7 +739,7 @@ def build_membership_request_detail_committee_context(
         org = req.requested_organization
         representative_username = str(org.representative or "").strip() if org is not None else ""
         if representative_username:
-            representative_user = FreeIPAUser.get(representative_username)
+            representative_user = FreeIPAUser.get(representative_username, respect_privacy=False)
             if representative_user is not None:
                 embargoed_match = embargoed_country_match_from_user_data(
                     user_data=representative_user._user_data,

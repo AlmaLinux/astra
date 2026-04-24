@@ -1823,6 +1823,108 @@ class MembershipRequestsFlowTests(TestCase):
         qs = parse_qs(urlsplit(redirect_url).query)
         self.assertEqual(qs.get("type"), ["manual"])
         self.assertEqual(qs.get("to"), ["cern@example.com"])
+
+    @override_settings(MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME="membership-renewal-approved")
+    def test_committee_approve_org_renewal_custom_email_prefers_private_representative(self) -> None:
+        from post_office.models import EmailTemplate
+
+        from core.models import Membership, MembershipRequest, MembershipType, Organization
+
+        template, _ = EmailTemplate.objects.update_or_create(
+            name="membership-request-approved-silver",
+            defaults={
+                "subject": "Approved",
+                "content": "Approved",
+                "html_content": "<p>Approved</p>",
+                "description": "Org approval template",
+            },
+        )
+
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor",
+                "group_cn": "almalinux-sponsor-silver",
+                "acceptance_template": template,
+                "category_id": "sponsorship",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        org = Organization.objects.create(
+            name="CERN",
+            business_contact_email="cern@example.com",
+            representative="bob",
+        )
+        Membership.objects.create(
+            target_organization=org,
+            membership_type_id="silver",
+            expires_at=timezone.now() + datetime.timedelta(days=30),
+        )
+        req = MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=org,
+            membership_type_id="silver",
+        )
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "mail": ["reviewer@example.com"],
+                "memberof_group": [committee_cn],
+            },
+        )
+        bob_full = FreeIPAUser(
+            "bob",
+            {
+                "uid": ["bob"],
+                "givenname": ["Bob"],
+                "sn": ["Rep"],
+                "cn": ["Bob Rep"],
+                "displayname": ["Bob Rep"],
+                "mail": ["bob@example.com"],
+                "fasIsPrivate": ["TRUE"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str, *, respect_privacy: bool = True) -> FreeIPAUser | None:
+            if username == "reviewer":
+                return reviewer
+            if username == "bob":
+                return bob_full if not respect_privacy else FreeIPAUser(
+                    "bob",
+                    {
+                        "uid": ["bob"],
+                        "mail": ["bob@example.com"],
+                        "fasIsPrivate": ["TRUE"],
+                        "memberof_group": [],
+                    },
+                )
+            return None
+
+        self._login_as_freeipa_user("reviewer")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
+            with patch("core.views_membership.committee.approve_membership_request", autospec=True):
+                with patch("post_office.mail.send", autospec=True) as send_mock:
+                    resp = self.client.post(
+                        reverse("membership-request-approve", args=[req.pk]),
+                        data={"custom_email": "1"},
+                        follow=False,
+                    )
+
+        self.assertEqual(resp.status_code, 302)
+        send_mock.assert_not_called()
+
+        redirect_url = str(resp["Location"])
+        self.assertTrue(redirect_url.startswith(reverse("send-mail") + "?"))
+        qs = parse_qs(urlsplit(redirect_url).query)
+        self.assertEqual(qs.get("type"), ["users"])
+        self.assertEqual(qs.get("to"), ["bob"])
         self.assertEqual(
             qs.get("template"),
             [settings.MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME],

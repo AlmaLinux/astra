@@ -137,7 +137,7 @@ def organization_sponsor_email_context(*, organization: Organization) -> dict[st
     representative_username = str(organization.representative or "").strip()
     if representative_username:
         try:
-            representative = FreeIPAUser.get(representative_username)
+            representative = FreeIPAUser.get(representative_username, respect_privacy=False)
         except Exception:
             representative = None
         representative_context = (

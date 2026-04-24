@@ -1,4 +1,5 @@
 import datetime
+from unittest.mock import patch
 
 from django.test import TestCase
 from django.utils import timezone
@@ -11,6 +12,7 @@ from core.elections_services import (
     submit_ballot,
 )
 from core.models import Election, VotingCredential
+from core.views_elections.edit import _issue_and_email_credentials
 
 
 class ElectionPrivacyTest(TestCase):
@@ -98,3 +100,30 @@ class ElectionPrivacyTest(TestCase):
         # 5. Verify Emails are deleted (The fix)
         emails_after_close = Email.objects.filter(to=email_addr)
         self.assertEqual(emails_after_close.count(), 0)
+
+    def test_issue_and_email_credentials_uses_delivery_safe_privacy_override(self) -> None:
+        credential = type("_Cred", (), {"freeipa_username": "alice", "public_id": "cred-1"})()
+        private_user = type(
+            "_User",
+            (),
+            {
+                "email": "alice@example.com",
+                "_user_data": {"fasTimezone": ["UTC"]},
+            },
+        )()
+
+        def _get(username: str, **kwargs: object):
+            self.assertEqual(username, "alice")
+            self.assertFalse(kwargs.get("respect_privacy", True))
+            return private_user
+
+        with (
+            patch("core.views_elections.edit.issue_credentials_at_start_transition", return_value=[credential]),
+            patch("core.views_elections.edit.FreeIPAUser.get", side_effect=_get),
+            patch("core.views_elections.edit.elections_services.send_voting_credential_email", autospec=True) as send_mock,
+        ):
+            total, emailed, skipped, failures = _issue_and_email_credentials(None, self.election)
+
+        self.assertEqual((total, emailed, skipped, failures), (1, 1, 0, 0))
+        send_mock.assert_called_once()
+        self.assertEqual(send_mock.call_args.kwargs["email"], "alice@example.com")

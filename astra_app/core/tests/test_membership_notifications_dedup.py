@@ -9,12 +9,14 @@ from post_office.models import Email, EmailTemplate
 from core.freeipa.user import FreeIPAUser
 from core.membership_notifications import (
     already_sent_today,
+    committee_recipient_emails_for_permission_graceful,
     membership_requests_url,
     oldest_pending_membership_request_wait_time,
     organization_sponsor_notification_recipient_email,
     would_queue_membership_pending_requests_notification,
 )
-from core.models import MembershipRequest, MembershipType, Organization
+from core.models import FreeIPAPermissionGrant, MembershipRequest, MembershipType, Organization
+from core.permissions import ASTRA_ADD_MEMBERSHIP
 from core.public_urls import normalize_public_base_url
 
 
@@ -222,6 +224,27 @@ class AlreadySentTodayTests(TestCase):
 
 
 class OrganizationSponsorRecipientTests(TestCase):
+    def test_representative_lookup_uses_delivery_safe_privacy_override(self) -> None:
+        organization = Organization.objects.create(
+            name="Example Org",
+            representative="org-rep",
+            business_contact_email="fallback@example.com",
+        )
+
+        def _get(username: str, **kwargs: object) -> object:
+            self.assertEqual(username, "org-rep")
+            self.assertFalse(kwargs.get("respect_privacy", True))
+            return type("_Rep", (), {"email": "rep@example.com"})()
+
+        with patch("core.membership_notifications.FreeIPAUser.get", side_effect=_get):
+            recipient, warning = organization_sponsor_notification_recipient_email(
+                organization=organization,
+                notification_kind="org submitted",
+            )
+
+        self.assertEqual("rep@example.com", recipient)
+        self.assertIsNone(warning)
+
     def test_returns_representative_email_when_available(self) -> None:
         organization = Organization.objects.create(
             name="Example Org",
@@ -277,3 +300,26 @@ class OrganizationSponsorRecipientTests(TestCase):
         assert warning is not None
         self.assertIn("organization id", warning)
         self.assertIn("org expired-cleanup", warning)
+
+
+class CommitteeRecipientTests(TestCase):
+    def test_committee_recipient_lookup_uses_delivery_safe_privacy_override(self) -> None:
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_ADD_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="committee-user",
+        )
+
+        def _get(username: str, **kwargs: object) -> object:
+            self.assertFalse(kwargs.get("respect_privacy", True))
+            if username == "committee-user":
+                return type("_User", (), {"email": "committee@example.com"})()
+            return type("_User", (), {"email": ""})()
+
+        with patch("core.membership_notifications.FreeIPAUser.get", side_effect=_get):
+            recipients, warnings = committee_recipient_emails_for_permission_graceful(
+                permission=ASTRA_ADD_MEMBERSHIP,
+            )
+
+        self.assertEqual(["committee@example.com"], recipients)
+        self.assertEqual([], warnings)
