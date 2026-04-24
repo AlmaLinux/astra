@@ -9,6 +9,7 @@ from django.conf import settings
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 
+from core.freeipa.client import clear_current_viewer_username, set_current_viewer_username
 from core.freeipa.user import FreeIPAUser
 from core.models import AccountInvitation, AccountInvitationSend, FreeIPAPermissionGrant, Organization
 from core.permissions import ASTRA_ADD_SEND_MAIL
@@ -111,7 +112,7 @@ class SendMailTests(TestCase):
             },
         )
 
-        def _get_user(username: str):
+        def _get_user(username: str, **_kwargs):
             if username == "reviewer":
                 return reviewer
             if username == "alice":
@@ -222,7 +223,7 @@ class SendMailTests(TestCase):
             },
         )
 
-        def _get_user(username: str):
+        def _get_user(username: str, **_kwargs):
             if username == "reviewer":
                 return reviewer
             if username == "alice":
@@ -469,7 +470,7 @@ class SendMailTests(TestCase):
             },
         )
 
-        def _get_user(username: str):
+        def _get_user(username: str, **_kwargs):
             if username == "reviewer":
                 return reviewer
             if username == "alice":
@@ -495,6 +496,106 @@ class SendMailTests(TestCase):
         # Should preselect the users in the multi-select.
         self.assertContains(resp, '<option value="alice" selected>')
         self.assertContains(resp, '<option value="bob" selected>')
+
+    def test_get_prefills_users_includes_private_profile_recipient_email(self) -> None:
+        self._login_as_freeipa_user("reviewer")
+
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+            },
+        )
+
+        set_current_viewer_username("reviewer")
+        try:
+            private_user_redacted = FreeIPAUser(
+                "bob",
+                {
+                    "uid": ["bob"],
+                    "givenname": ["Bob"],
+                    "sn": ["User"],
+                    "mail": ["bob@example.com"],
+                    "fasIsPrivate": ["TRUE"],
+                    "memberof_group": [],
+                },
+            )
+        finally:
+            clear_current_viewer_username()
+
+        private_user_unredacted = FreeIPAUser(
+            "bob",
+            {
+                "uid": ["bob"],
+                "givenname": ["Bob"],
+                "sn": ["User"],
+                "mail": ["bob@example.com"],
+                "fasIsPrivate": ["TRUE"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str, **_kwargs):
+            if username == "reviewer":
+                return reviewer
+            if username == "bob":
+                if _kwargs.get("respect_privacy", True):
+                    return private_user_redacted
+                return private_user_unredacted
+            return None
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.freeipa.user.FreeIPAUser.all", return_value=[private_user_redacted]),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
+        ):
+            resp = self.client.get(reverse("send-mail") + "?type=users&to=bob")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Recipient count")
+        self.assertContains(resp, "1")
+        self.assertContains(resp, "bob@example.com")
+
+    def test_get_prefills_users_logs_warning_when_selected_user_has_no_email(self) -> None:
+        self._login_as_freeipa_user("reviewer")
+
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {
+                "uid": ["reviewer"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+            },
+        )
+        missing_email_user = FreeIPAUser(
+            "bob",
+            {
+                "uid": ["bob"],
+                "givenname": ["Bob"],
+                "sn": ["User"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str, **_kwargs):
+            if username == "reviewer":
+                return reviewer
+            if username == "bob":
+                return missing_email_user
+            return None
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.freeipa.user.FreeIPAUser.all", return_value=[missing_email_user]),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
+            self.assertLogs("core.views_send_mail", level="WARNING") as captured,
+        ):
+            resp = self.client.get(reverse("send-mail") + "?type=users&to=bob")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Recipient count")
+        self.assertContains(resp, "0")
+        self.assertTrue(any("skipped recipients" in line.lower() for line in captured.output))
 
     def test_variable_examples_choose_best_context_and_placeholder_missing(self) -> None:
         self._login_as_freeipa_user("reviewer")
@@ -528,7 +629,7 @@ class SendMailTests(TestCase):
             },
         )
 
-        def _get_user(username: str):
+        def _get_user(username: str, **_kwargs):
             if username == "reviewer":
                 return reviewer
             if username == "alice":
@@ -794,7 +895,7 @@ class SendMailTests(TestCase):
             },
         )
 
-        def _get_user(username: str):
+        def _get_user(username: str, **_kwargs):
             if username == "reviewer":
                 return reviewer
             if username == "alice":
@@ -845,7 +946,7 @@ class SendMailTests(TestCase):
             },
         )
 
-        def _get_user(username: str):
+        def _get_user(username: str, **_kwargs):
             if username == "reviewer":
                 return reviewer
             if username == "alice":
@@ -912,7 +1013,7 @@ class SendMailTests(TestCase):
             },
         )
 
-        def _get_user(username: str):
+        def _get_user(username: str, **_kwargs):
             if username == "reviewer":
                 return reviewer
             if username == "alice":
@@ -986,7 +1087,7 @@ class SendMailTests(TestCase):
             },
         )
 
-        def _get_user(username: str):
+        def _get_user(username: str, **_kwargs):
             if username == "reviewer":
                 return reviewer
             if username == "alice":
@@ -1053,7 +1154,7 @@ class SendMailTests(TestCase):
             },
         )
 
-        def _get_user(username: str):
+        def _get_user(username: str, **_kwargs):
             if username == "reviewer":
                 return reviewer
             if username == "alice":

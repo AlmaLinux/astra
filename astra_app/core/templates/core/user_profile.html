@@ -79,8 +79,8 @@
 
             <h3 class="profile-username mb-1">{{ fu.get_full_name }}</h3>
             <div class="text-muted" id="user_username">{{ fu.username }}</div>
-            {% if fu.email %}
-              <div class="mt-1" id="user_mail"><a href="mailto:{{ fu.email }}">{{ fu.email }}</a></div>
+            {% if profile_email %}
+              <div class="mt-1" id="user_mail"><a href="mailto:{{ profile_email }}">{{ profile_email }}</a></div>
             {% endif %}
 
             {% if is_self %}

@@ -53,6 +53,7 @@ class RecipientPreview:
     variables: list[tuple[str, str]]
     recipient_count: int
     first_context: dict[str, str]
+    skipped_count: int = 0
 
 
 def _best_example_context(*, recipients: list[dict[str, str]], var_names: list[str]) -> dict[str, str]:
@@ -81,13 +82,19 @@ def _best_example_context(*, recipients: list[dict[str, str]], var_names: list[s
     return filled
 
 
-def _preview_from_recipients(*, recipients: list[dict[str, str]], var_names: list[str]) -> RecipientPreview:
+def _preview_from_recipients(
+    *,
+    recipients: list[dict[str, str]],
+    var_names: list[str],
+    skipped_count: int = 0,
+) -> RecipientPreview:
     example_context = _best_example_context(recipients=recipients, var_names=var_names)
     variables = [(v, str(example_context.get(v, ""))) for v in var_names]
     return RecipientPreview(
         variables=variables,
         recipient_count=len(recipients),
         first_context=example_context,
+        skipped_count=skipped_count,
     )
 
 
@@ -192,11 +199,23 @@ def _apply_extra_context(
         example_context = {v: str(extra_context.get(v) or f"-{v}-") for v in var_names}
         variables = [(v, str(example_context.get(v, ""))) for v in var_names]
         return (
-            RecipientPreview(variables=variables, recipient_count=0, first_context=example_context),
+            RecipientPreview(
+                variables=variables,
+                recipient_count=0,
+                first_context=example_context,
+                skipped_count=preview.skipped_count,
+            ),
             merged_recipients,
         )
 
-    return _preview_from_recipients(recipients=merged_recipients, var_names=var_names), merged_recipients
+    return (
+        _preview_from_recipients(
+            recipients=merged_recipients,
+            var_names=var_names,
+            skipped_count=preview.skipped_count,
+        ),
+        merged_recipients,
+    )
 
 
 def _preview_for_group(group_cn: str) -> tuple[RecipientPreview, list[dict[str, str]]]:
@@ -206,17 +225,37 @@ def _preview_for_group(group_cn: str) -> tuple[RecipientPreview, list[dict[str, 
 
     usernames = sorted(group.member_usernames_recursive(), key=str.lower)
     recipients: list[dict[str, str]] = []
+    skipped_usernames: list[str] = []
     for username in usernames:
-        user = FreeIPAUser.get(username)
+        user = FreeIPAUser.get(username, respect_privacy=False)
         if user is None:
+            skipped_usernames.append(str(username))
             continue
         ctx = user_email_context_from_user(user=user)
         if not ctx["email"].strip():
+            skipped_usernames.append(str(username))
             continue
         recipients.append(ctx)
 
     var_names = ["username", "first_name", "last_name", "email", "full_name"]
-    preview = _preview_from_recipients(recipients=recipients, var_names=var_names)
+    preview = _preview_from_recipients(
+        recipients=recipients,
+        var_names=var_names,
+        skipped_count=len(skipped_usernames),
+    )
+    if skipped_usernames:
+        logger.warning(
+            "Send-mail group preview skipped recipients with missing deliverable email",
+            extra={
+                "event": "astra.send_mail.recipients.skipped",
+                "component": "send_mail",
+                "outcome": "warning",
+                "recipient_mode": SendMailForm.RECIPIENT_MODE_GROUP,
+                "group_cn": group_cn,
+                "skipped_count": len(skipped_usernames),
+                "skipped_usernames": skipped_usernames[:20],
+            },
+        )
     return preview, recipients
 
 
@@ -557,20 +596,39 @@ def _preview_for_manual(emails: list[str]) -> tuple[RecipientPreview, list[dict[
 
 def _preview_for_users(usernames: list[str]) -> tuple[RecipientPreview, list[dict[str, str]]]:
     recipients: list[dict[str, str]] = []
+    skipped_usernames: list[str] = []
     for username in usernames:
         normalized = str(username or "").strip()
         if not normalized:
             continue
-        user = FreeIPAUser.get(normalized)
+        user = FreeIPAUser.get(normalized, respect_privacy=False)
         if user is None:
+            skipped_usernames.append(normalized)
             continue
         ctx = user_email_context_from_user(user=user)
         if not ctx["email"].strip():
+            skipped_usernames.append(normalized)
             continue
         recipients.append(ctx)
 
     var_names = ["username", "first_name", "last_name", "email", "full_name"]
-    preview = _preview_from_recipients(recipients=recipients, var_names=var_names)
+    preview = _preview_from_recipients(
+        recipients=recipients,
+        var_names=var_names,
+        skipped_count=len(skipped_usernames),
+    )
+    if skipped_usernames:
+        logger.warning(
+            "Send-mail user preview skipped recipients with missing deliverable email",
+            extra={
+                "event": "astra.send_mail.recipients.skipped",
+                "component": "send_mail",
+                "outcome": "warning",
+                "recipient_mode": SendMailForm.RECIPIENT_MODE_USERS,
+                "skipped_count": len(skipped_usernames),
+                "skipped_usernames": skipped_usernames[:20],
+            },
+        )
     return preview, recipients
 
 
@@ -736,6 +794,11 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                 recipients=recipients,
                 extra_context=posted_extra_context,
             )
+            if preview is not None and preview.skipped_count > 0:
+                messages.warning(
+                    request,
+                    f"Skipped {preview.skipped_count} recipient{'s' if preview.skipped_count != 1 else ''} due to missing deliverable email address.",
+                )
             if preview and preview.first_context:
                 request.session[_PREVIEW_CONTEXT_SESSION_KEY] = json.dumps(preview.first_context)
 
@@ -982,6 +1045,12 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                 messages.error(request, str(e))
                 preview = None
                 recipients = []
+
+            if preview is not None and preview.skipped_count > 0:
+                messages.warning(
+                    request,
+                    f"Skipped {preview.skipped_count} recipient{'s' if preview.skipped_count != 1 else ''} due to missing deliverable email address.",
+                )
 
             preview, recipients = _apply_extra_context(
                 preview=preview,

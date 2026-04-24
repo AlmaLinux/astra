@@ -50,7 +50,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
         session["_freeipa_username"] = username
         session.save()
 
-    def _get_freeipa_user(self, username: str) -> FreeIPAUser | None:
+    def _get_freeipa_user(self, username: str, **_kwargs) -> FreeIPAUser | None:
         return self._freeipa_users.get(str(username))
 
     def _add_freeipa_user(
@@ -235,6 +235,55 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
             existing_logs,
         )
         send_mock.assert_not_called()
+
+    def test_committee_rfi_logs_warning_when_target_email_missing(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        self._add_freeipa_user(
+            username="reviewer",
+            email="reviewer@example.com",
+            groups=[committee_cn],
+            first_name="Reviewer",
+            last_name="User",
+        )
+        self._add_freeipa_user(
+            username="alice",
+            email=None,
+            groups=[],
+            first_name="Alice",
+            last_name="User",
+        )
+
+        self._login_as_freeipa_user("reviewer")
+
+        with (
+            patch("core.membership_request_workflow.queue_templated_email", autospec=True) as send_mock,
+            self.assertLogs("core.membership_request_workflow", level="WARNING") as captured,
+        ):
+            resp = self.client.post(
+                reverse("membership-request-rfi", args=[req.pk]),
+                data={"rfi_message": "Please add details."},
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 302)
+        req.refresh_from_db()
+        self.assertEqual(req.status, MembershipRequest.Status.on_hold)
+        send_mock.assert_not_called()
+        self.assertTrue(any(f"request_id={req.pk}" in line for line in captured.output))
 
     def test_user_cannot_view_other_users_request(self) -> None:
         from core.models import MembershipType

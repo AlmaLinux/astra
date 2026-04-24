@@ -349,7 +349,7 @@ class FreeIPAUser(_FreeIPAClientMixin):
         return None
 
     @classmethod
-    def get(cls, username):
+    def get(cls, username, *, respect_privacy: bool = True):
         """
         Fetch a single user by username.
         """
@@ -359,7 +359,7 @@ class FreeIPAUser(_FreeIPAClientMixin):
         cached_data = cache.get(cache_key)
 
         if cached_data is not None:
-            return cls(username, cached_data)
+            return cls(username, cached_data, respect_privacy=respect_privacy)
 
         try:
             user_data = _with_freeipa_service_client_retry(
@@ -368,7 +368,7 @@ class FreeIPAUser(_FreeIPAClientMixin):
             )
             if user_data is not None:
                 cache.set(cache_key, user_data)
-                return cls(username, user_data)
+                return cls(username, user_data, respect_privacy=respect_privacy)
         except Exception as e:
             logger.exception(
                 f"Failed to get user username={username}: {e}",

@@ -72,6 +72,46 @@ def user_email_context_from_user(*, user: FreeIPAUser) -> dict[str, str]:
     }
 
 
+def user_email_delivery_context(*, username: str) -> dict[str, str]:
+    """Return user email context for operational delivery paths.
+
+    Privacy settings control profile visibility, but delivery pathways must
+    always resolve the real address when available.
+    """
+
+    normalized_username = str(username or "").strip()
+    if not normalized_username:
+        return {"username": "", "first_name": "", "last_name": "", "full_name": "", "email": ""}
+
+    try:
+        user = FreeIPAUser.get(normalized_username, respect_privacy=False)
+    except Exception as exc:
+        reason_code = str(exc.__class__.__name__ or "").strip() or "freeipa_unavailable"
+        logger.warning(
+            "Delivery email context degraded due to FreeIPA lookup failure",
+            extra={
+                "event": "astra.email.delivery_context.degraded",
+                "component": "email",
+                "outcome": "warning",
+                "reason_code": reason_code,
+                "freeipa_operation": "FreeIPAUser.get",
+                "correlation_id": "email_context.user_email_delivery_context",
+            },
+        )
+        user = None
+
+    if user is None:
+        return {
+            "username": normalized_username,
+            "first_name": "",
+            "last_name": "",
+            "full_name": normalized_username,
+            "email": "",
+        }
+
+    return user_email_context_from_user(user=user)
+
+
 def organization_email_context_from_organization(*, organization: Organization) -> dict[str, str]:
     """Return canonical organization variables for sponsor-facing templated emails.
 

@@ -1,7 +1,7 @@
 import logging
+from typing import cast
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
-from typing import cast
 
 from django.conf import settings
 from django.contrib import messages
@@ -597,8 +597,18 @@ def _profile_context_for_user(
     profile_is_private = fu.fas_is_private if hasattr(fu, "fas_is_private") else False
     show_membership_card = (not profile_is_private) or is_self or viewer_is_membership_committee
 
+    profile_email = str(fu.email or "").strip()
+    if profile_is_private and not is_self and viewer_is_membership_committee and not profile_email:
+        try:
+            full_profile_user = FreeIPAUser.get(fu.username, respect_privacy=False)
+        except Exception:
+            full_profile_user = None
+        if full_profile_user is not None:
+            profile_email = str(full_profile_user.email or "").strip()
+
     return {
         "fu": fu,
+        "profile_email": profile_email,
         "profile_avatar_user": profile_avatar_user,
         "is_self": is_self,
         "email_is_blacklisted": email_is_blacklisted,
@@ -648,7 +658,7 @@ def _build_user_profile_summary_bootstrap(context: dict[str, object]) -> dict[st
     return {
         "fullName": fu.get_full_name(),
         "username": fu.username,
-        "email": fu.email,
+        "email": str(context["profile_email"]),
         "profileEditUrl": settings_url(tab="profile") if bool(context["is_self"]) else "",
         "avatarUrl": avatar_url_by_username.get(fu.username, ""),
         "viewerIsMembershipCommittee": bool(context["viewer_is_membership_committee"]),

@@ -65,7 +65,7 @@ class MembershipTarget:
 def _build_membership_target(membership_request: MembershipRequest) -> MembershipTarget:
     """Resolve the notification target from a membership request."""
     if membership_request.target_kind == MembershipRequest.TargetKind.user:
-        user = FreeIPAUser.get(membership_request.requested_username)
+        user = FreeIPAUser.get(membership_request.requested_username, respect_privacy=False)
         return MembershipTarget(
             email=user.email if user is not None else "",
             email_context=user_email_context_from_user(user=user) if user is not None else {},
@@ -250,8 +250,35 @@ def _send_membership_request_notification(
     membership_type: MembershipType,
     template_name: str,
     extra_context: dict[str, object] | None = None,
+    log_context: dict[str, object] | None = None,
 ) -> object | None:
     if not target.email:
+        request_id = None
+        action = "unknown"
+        if log_context:
+            request_id = log_context.get("request_id")
+            action = str(log_context.get("action") or action)
+        warning_extra = {
+            "event": "astra.membership.email.skipped_missing_recipient",
+            "component": "membership",
+            "outcome": "warning",
+            "template_name": template_name,
+            "target_kind": "organization" if target.target_organization is not None else "user",
+            "target_username": target.target_username,
+            "target_organization_id": target.target_organization.pk if target.target_organization is not None else None,
+        }
+        if log_context:
+            warning_extra.update(log_context)
+        logger.warning(
+            "Membership email skipped because recipient email is missing request_id=%s action=%s target_kind=%s target_username=%s target_organization_id=%s template_name=%s",
+            request_id,
+            action,
+            "organization" if target.target_organization is not None else "user",
+            target.target_username,
+            target.target_organization.pk if target.target_organization is not None else None,
+            template_name,
+            extra=warning_extra,
+        )
         return None
 
     context: dict[str, object] = {
@@ -405,7 +432,7 @@ def record_membership_request_created(
 
         if send_submitted_email:
             try:
-                target = FreeIPAUser.get(membership_request.requested_username)
+                target = FreeIPAUser.get(membership_request.requested_username, respect_privacy=False)
             except Exception as e:
                 logger.exception(
                     "%s: FreeIPAUser.get failed for submitted email request_id=%s target=%r",
@@ -440,6 +467,23 @@ def record_membership_request_created(
                             extra=current_exception_log_fields(),
                         )
                         email_error = e
+                elif target is not None:
+                    logger.warning(
+                        "%s: submitted email skipped due to missing recipient address request_id=%s target=%r",
+                        log_prefix,
+                        membership_request.pk,
+                        membership_request.requested_username,
+                        extra={
+                            "event": "astra.membership.email.skipped_missing_recipient",
+                            "component": "membership",
+                            "outcome": "warning",
+                            "template_name": settings.MEMBERSHIP_REQUEST_SUBMITTED_EMAIL_TEMPLATE_NAME,
+                            "request_id": membership_request.pk,
+                            "target_kind": "user",
+                            "target_username": membership_request.requested_username,
+                            "action": "submitted",
+                        },
+                    )
 
         _try_record_email_note(
             membership_request=membership_request,
@@ -663,6 +707,23 @@ def approve_membership_request(
                 previous_expires_at=previous_expires_at,
             )
             _ensure_configured_email_template_exists(template_name=template_name)
+        elif send_approved_email:
+            logger.warning(
+                "%s: approved email skipped due to missing recipient address request_id=%s org_id=%s",
+                log_prefix,
+                membership_request.pk,
+                org.pk,
+                extra={
+                    "event": "astra.membership.email.skipped_missing_recipient",
+                    "component": "membership",
+                    "outcome": "warning",
+                    "template_name": settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME,
+                    "request_id": membership_request.pk,
+                    "target_kind": "organization",
+                    "target_organization_id": org.pk,
+                    "action": "approved",
+                },
+            )
 
         old_membership = (
             Membership.objects.select_related("membership_type")
@@ -731,7 +792,7 @@ def approve_membership_request(
             )
 
         try:
-            user = FreeIPAUser.get(membership_request.requested_username)
+            user = FreeIPAUser.get(membership_request.requested_username, respect_privacy=False)
         except Exception:
             logger.exception(
                 "%s: FreeIPAUser.get failed request_id=%s target=%r",
@@ -759,6 +820,23 @@ def approve_membership_request(
                 previous_expires_at=previous_expires_at,
             )
             _ensure_configured_email_template_exists(template_name=template_name)
+        elif send_approved_email:
+            logger.warning(
+                "%s: approved email skipped due to missing recipient address request_id=%s target=%r",
+                log_prefix,
+                membership_request.pk,
+                membership_request.requested_username,
+                extra={
+                    "event": "astra.membership.email.skipped_missing_recipient",
+                    "component": "membership",
+                    "outcome": "warning",
+                    "template_name": settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME,
+                    "request_id": membership_request.pk,
+                    "target_kind": "user",
+                    "target_username": membership_request.requested_username,
+                    "action": "approved",
+                },
+            )
         group_add_payload = (membership_request.requested_username, membership_type.group_cn)
 
         email_context = (
@@ -978,14 +1056,19 @@ def reject_membership_request(
 
     email_error: Exception | None = None
     sent_email = None
-    if send_rejected_email and target.email:
+    if send_rejected_email:
         try:
             sent_email = _send_membership_request_notification(
                 target=target,
                 membership_type=membership_type,
                 template_name=settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME,
                 extra_context=freeform_message_email_context(key="rejection_reason", value=reason),
+                log_context={
+                    "request_id": membership_request.pk,
+                    "action": "rejected",
+                },
             )
+
         except Exception as e:
             logger.exception(
                 "%s: sending rejected email failed request_id=%s",
@@ -1182,6 +1265,10 @@ def put_membership_request_on_hold(
                     **freeform_message_email_context(key="rfi_message", value=message),
                     "application_url": application_url,
                 },
+                log_context={
+                    "request_id": membership_request.pk,
+                    "action": "rfi",
+                },
             )
         except Exception as e:
             logger.exception(
@@ -1191,6 +1278,16 @@ def put_membership_request_on_hold(
                 extra=current_exception_log_fields(),
             )
             email_error = e
+    elif send_rfi_email:
+        _send_membership_request_notification(
+            target=target,
+            membership_type=membership_type,
+            template_name=settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME,
+            log_context={
+                "request_id": membership_request.pk,
+                "action": "rfi",
+            },
+        )
 
     log = _create_status_change_log(
         membership_request=membership_request,

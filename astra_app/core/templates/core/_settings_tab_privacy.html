@@ -9,17 +9,6 @@
 		<button type="submit" class="btn btn-primary">Save privacy settings</button>
 	</form>
 
-	{% if privacy_warnings %}
-		<div class="alert alert-warning" role="alert">
-			<strong>Manual review required.</strong>
-			<ul class="mb-0 mt-2">
-				{% for warning in privacy_warnings %}
-					<li>{{ warning }}</li>
-				{% endfor %}
-			</ul>
-		</div>
-	{% endif %}
-
 	<div class="card border-danger">
 		<div class="card-body">
 			<h3 class="h5">Delete my account</h3>
@@ -44,6 +33,17 @@
 					{% include 'core/_form_field.html' with field=account_deletion_form.current_password %}
 					<button type="submit" class="btn btn-danger">Submit deletion request</button>
 				</form>
+			{% endif %}
+
+			{% if privacy_warnings %}
+				<div class="alert alert-warning mt-3" role="alert">
+					<strong>Manual review required.</strong>
+					<ul class="mb-0 mt-2">
+						{% for warning in privacy_warnings %}
+							<li>{{ warning }}</li>
+						{% endfor %}
+					</ul>
+				</div>
 			{% endif %}
 		</div>
 	</div>
