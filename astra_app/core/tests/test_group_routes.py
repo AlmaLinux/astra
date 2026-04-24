@@ -1,11 +1,9 @@
 
-from types import SimpleNamespace
 from unittest.mock import patch
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from core.freeipa.group import FreeIPAGroup
-from core.freeipa.user import FreeIPAUser
 
 
 class GroupRoutesTests(TestCase):
@@ -14,74 +12,47 @@ class GroupRoutesTests(TestCase):
         session["_freeipa_username"] = username
         session.save()
 
-    def test_groups_route_filters_to_fasgroups(self) -> None:
+    @override_settings(
+        DJANGO_VITE={
+            "default": {
+                "dev_mode": True,
+                "dev_server_protocol": "http",
+                "dev_server_host": "localhost",
+                "dev_server_port": 5173,
+                "static_url_prefix": "",
+            }
+        },
+    )
+    def test_groups_route_renders_vue_shell_contract(self) -> None:
         self._login_as_freeipa("admin")
 
-        groups = [
-            SimpleNamespace(cn="fas1", description="FAS Group 1", fas_group=True, member_count_recursive=lambda: 0),
-            SimpleNamespace(cn="ipa_only", description="Not a FAS group", fas_group=False, member_count_recursive=lambda: 0),
-            SimpleNamespace(cn="fas2", description="FAS Group 2", fas_group=True, member_count_recursive=lambda: 0),
-        ]
-
-        with patch("core.freeipa.group.FreeIPAGroup.all", return_value=groups):
-            resp = self.client.get("/groups/")
+        resp = self.client.get("/groups/")
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "fas1")
-        self.assertContains(resp, "fas2")
-        self.assertNotContains(resp, "ipa_only")
+        self.assertContains(resp, "data-groups-root")
+        self.assertContains(resp, 'data-groups-api-url="/api/v1/groups"')
+        self.assertContains(resp, 'src="http://localhost:5173/src/entrypoints/groups.ts"')
+        self.assertContains(resp, "Loading groups...")
 
-    def test_groups_route_paginates_30_per_page(self) -> None:
+    @override_settings(
+        DJANGO_VITE={
+            "default": {
+                "dev_mode": True,
+                "dev_server_protocol": "http",
+                "dev_server_host": "localhost",
+                "dev_server_port": 5173,
+                "static_url_prefix": "",
+            }
+        },
+    )
+    def test_groups_route_shell_does_not_prerender_groups_table(self) -> None:
         self._login_as_freeipa("admin")
 
-        groups = [
-            SimpleNamespace(cn=f"group{i:03d}", description="", fas_group=True, member_count_recursive=lambda: 0)
-            for i in range(65)
-        ]
-
-        with patch("core.freeipa.group.FreeIPAGroup.all", return_value=groups):
-            resp_page_1 = self.client.get("/groups/")
-            resp_page_2 = self.client.get("/groups/?page=2")
-
-        self.assertEqual(resp_page_1.status_code, 200)
-        self.assertContains(resp_page_1, "group000")
-        self.assertContains(resp_page_1, "group029")
-        self.assertNotContains(resp_page_1, "group030")
-
-        self.assertEqual(resp_page_2.status_code, 200)
-        self.assertContains(resp_page_2, "group030")
-
-    def test_groups_route_search_filters_results(self) -> None:
-        self._login_as_freeipa("admin")
-
-        groups = [
-            SimpleNamespace(cn="infra", description="Infrastructure", fas_group=True, member_count_recursive=lambda: 0),
-            SimpleNamespace(cn="docs", description="Documentation", fas_group=True, member_count_recursive=lambda: 0),
-        ]
-
-        with patch("core.freeipa.group.FreeIPAGroup.all", return_value=groups):
-            resp = self.client.get("/groups/?q=inf")
+        resp = self.client.get("/groups/")
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "infra")
-        self.assertNotContains(resp, "docs")
-
-    def test_groups_route_shows_member_count(self) -> None:
-        self._login_as_freeipa("admin")
-
-        groups = [
-            SimpleNamespace(cn="fas1", description="", fas_group=True, member_count_recursive=lambda: 2),
-            SimpleNamespace(cn="fas2", description="", fas_group=True, member_count_recursive=lambda: 0),
-        ]
-
-        with patch("core.freeipa.group.FreeIPAGroup.all", return_value=groups):
-            resp = self.client.get("/groups/")
-
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "fas1")
-        self.assertContains(resp, ">2<")
-        self.assertContains(resp, "fas2")
-        self.assertContains(resp, ">0<")
+        self.assertNotContains(resp, "<table")
+        self.assertNotContains(resp, "No groups found.")
 
 
 class GroupDetailRouteTests(TestCase):
@@ -90,7 +61,18 @@ class GroupDetailRouteTests(TestCase):
         session["_freeipa_username"] = username
         session.save()
 
-    def test_group_detail_route_renders_info_and_members(self) -> None:
+    @override_settings(
+        DJANGO_VITE={
+            "default": {
+                "dev_mode": True,
+                "dev_server_protocol": "http",
+                "dev_server_host": "localhost",
+                "dev_server_port": 5173,
+                "static_url_prefix": "",
+            }
+        },
+    )
+    def test_group_detail_route_renders_vue_shell_contract(self) -> None:
         self._login_as_freeipa("admin")
 
         group = FreeIPAGroup(
@@ -110,32 +92,17 @@ class GroupDetailRouteTests(TestCase):
             },
         )
 
-        def _fake_user_get(username: str) -> FreeIPAUser:
-            return FreeIPAUser(
-                username,
-                {
-                    "uid": [username],
-                    "givenname": [username.capitalize()],
-                    "sn": ["User"],
-                    "mail": [""],
-                },
-            )
-
-        with (
-            patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
-            patch("core.templatetags.core_user_widget.FreeIPAUser.get", side_effect=_fake_user_get),
-        ):
+        with patch("core.freeipa.group.FreeIPAGroup.get", return_value=group):
             resp = self.client.get("/group/fas1/")
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "fas1")
-        self.assertContains(resp, "FAS Group 1")
-        self.assertContains(resp, "https://example.org/group/fas1")
-        self.assertContains(resp, "fas1@example.org")
-        self.assertContains(resp, "#fas1")
-        self.assertContains(resp, "https://discussion.example.org/c/fas1")
-        self.assertContains(resp, 'href="/user/alice/"')
-        self.assertContains(resp, 'href="/user/bob/"')
+        self.assertContains(resp, "data-group-detail-root")
+        self.assertContains(resp, 'data-group-detail-info-api-url="/api/v1/groups/fas1/info"')
+        self.assertContains(resp, 'data-group-detail-leaders-api-url="/api/v1/groups/fas1/leaders"')
+        self.assertContains(resp, 'data-group-detail-members-api-url="/api/v1/groups/fas1/members"')
+        self.assertContains(resp, 'data-group-detail-action-url="/api/v1/groups/fas1/action"')
+        self.assertContains(resp, 'src="http://localhost:5173/src/entrypoints/groupDetail.ts"')
+        self.assertContains(resp, "Loading group details...")
 
     def test_group_detail_route_404_for_non_fas_group(self) -> None:
         self._login_as_freeipa("admin")
@@ -156,7 +123,18 @@ class GroupDetailRouteTests(TestCase):
 
         self.assertEqual(resp.status_code, 404)
 
-    def test_group_detail_members_paginate_30_per_page(self) -> None:
+    @override_settings(
+        DJANGO_VITE={
+            "default": {
+                "dev_mode": True,
+                "dev_server_protocol": "http",
+                "dev_server_host": "localhost",
+                "dev_server_port": 5173,
+                "static_url_prefix": "",
+            }
+        },
+    )
+    def test_group_detail_route_shell_does_not_prerender_members_grid(self) -> None:
         self._login_as_freeipa("admin")
 
         members = [f"user{i:03d}" for i in range(65)]
@@ -173,107 +151,74 @@ class GroupDetailRouteTests(TestCase):
             },
         )
 
-        def _fake_user_get(username: str) -> FreeIPAUser:
-            return FreeIPAUser(username, {"uid": [username], "givenname": [""], "sn": [""], "mail": [""]})
+        with patch("core.freeipa.group.FreeIPAGroup.get", return_value=group):
+            resp = self.client.get("/group/fas1/")
 
-        with (
-            patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
-            patch("core.templatetags.core_user_widget.FreeIPAUser.get", side_effect=_fake_user_get),
-        ):
-            resp_page_1 = self.client.get("/group/fas1/")
-            resp_page_2 = self.client.get("/group/fas1/?page=2")
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "Search members...")
+        self.assertNotContains(resp, "Search group members")
 
-        self.assertEqual(resp_page_1.status_code, 200)
-        self.assertContains(resp_page_1, 'href="/user/user000/"')
-        self.assertContains(resp_page_1, 'href="/user/user027/"')
-        self.assertNotContains(resp_page_1, 'href="/user/user028/"')
 
-        self.assertEqual(resp_page_2.status_code, 200)
-        self.assertContains(resp_page_2, 'href="/user/user028/"')
+class GroupEditRouteTests(TestCase):
+    def _login_as_freeipa(self, username: str) -> None:
+        session = self.client.session
+        session["_freeipa_username"] = username
+        session.save()
 
-    def test_group_detail_members_search_filters(self) -> None:
+    @override_settings(
+        DJANGO_VITE={
+            "default": {
+                "dev_mode": True,
+                "dev_server_protocol": "http",
+                "dev_server_host": "localhost",
+                "dev_server_port": 5173,
+                "static_url_prefix": "",
+            }
+        },
+    )
+    def test_group_edit_route_renders_vue_shell_contract_for_sponsor(self) -> None:
         self._login_as_freeipa("admin")
 
         group = FreeIPAGroup(
             "fas1",
             {
                 "cn": ["fas1"],
-                "description": [""],
-                "member_user": ["alice", "bob"],
+                "description": ["FAS Group 1"],
+                "member_user": ["admin"],
                 "member_group": [],
-                "membermanager_user": [],
+                "membermanager_user": ["admin"],
                 "membermanager_group": [],
                 "objectclass": ["fasgroup"],
             },
         )
 
-        def _fake_user_get(username: str) -> FreeIPAUser:
-            return FreeIPAUser(username, {"uid": [username], "givenname": [""], "sn": [""], "mail": [""]})
-
-        with (
-            patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
-            patch("core.templatetags.core_user_widget.FreeIPAUser.get", side_effect=_fake_user_get),
-        ):
-            resp = self.client.get("/group/fas1/?q=ali")
+        with patch("core.freeipa.group.FreeIPAGroup.get", return_value=group):
+            resp = self.client.get("/group/fas1/edit/")
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'href="/user/alice/"')
-        self.assertNotContains(resp, 'href="/user/bob/"')
+        self.assertContains(resp, "data-group-form-root")
+        self.assertContains(resp, 'data-group-form-api-url="/api/v1/groups/fas1/edit"')
+        self.assertContains(resp, 'data-group-form-detail-url="/group/fas1/"')
+        self.assertContains(resp, 'src="http://localhost:5173/src/entrypoints/groupForm.ts"')
+        self.assertContains(resp, "Loading group editor...")
 
-    def test_group_detail_members_search_matches_display_name(self) -> None:
+    def test_group_edit_route_forbidden_for_non_sponsor(self) -> None:
         self._login_as_freeipa("admin")
 
         group = FreeIPAGroup(
             "fas1",
             {
                 "cn": ["fas1"],
-                "description": [""],
-                "member_user": ["alice", "bob"],
+                "description": ["FAS Group 1"],
+                "member_user": ["admin"],
                 "member_group": [],
-                "membermanager_user": [],
+                "membermanager_user": ["bob"],
                 "membermanager_group": [],
                 "objectclass": ["fasgroup"],
             },
         )
 
-        def _fake_user_get(username: str) -> FreeIPAUser:
-            if username == "alice":
-                return FreeIPAUser(
-                    "alice",
-                    {
-                        "uid": ["alice"],
-                        "displayname": ["Alice Example"],
-                        "mail": ["alice@example.org"],
-                    },
-                )
-            return FreeIPAUser(
-                username,
-                {
-                    "uid": [username],
-                    "displayname": [f"{username.title()} User"],
-                    "mail": [f"{username}@example.org"],
-                },
-            )
+        with patch("core.freeipa.group.FreeIPAGroup.get", return_value=group):
+            resp = self.client.get("/group/fas1/edit/")
 
-        with (
-            patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
-            patch("core.templatetags.core_user_widget.FreeIPAUser.get", side_effect=_fake_user_get),
-            patch(
-                "core.templatetags.core_user_grid.search_freeipa_users",
-                return_value=[
-                    FreeIPAUser(
-                        "alice",
-                        {
-                            "uid": ["alice"],
-                            "displayname": ["Alice Example"],
-                            "mail": ["alice@example.org"],
-                        },
-                    )
-                ],
-            ),
-        ):
-            resp = self.client.get("/group/fas1/?q=Example")
-
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'href="/user/alice/"')
-        self.assertNotContains(resp, 'href="/user/bob/"')
+        self.assertEqual(resp.status_code, 403)

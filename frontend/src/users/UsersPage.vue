@@ -16,10 +16,6 @@ const isLoading = ref(false);
 const error = ref("");
 const currentSearch = ref(window.location.search);
 
-function profileUrl(username: string): string {
-  return `/user/${encodeURIComponent(username)}/`;
-}
-
 function buildPageHref(pageNumber: number): string {
   const params = new URLSearchParams(currentSearch.value);
   if (pageNumber <= 1) {
@@ -98,7 +94,6 @@ onMounted(async () => {
           :username="(item as UsersGridItem).username"
           :full-name="(item as UsersGridItem).full_name"
           :avatar-url="(item as UsersGridItem).avatar_url"
-          :profile-url="profileUrl((item as UsersGridItem).username)"
         />
       </template>
     </WidgetGrid>

@@ -21,12 +21,6 @@ class FormFieldDryPhase1TemplateTests(SimpleTestCase):
                 "{% include 'core/_form_field.html' with field=form.password %}",
                 "{% include 'core/_form_field.html' with field=form.password_confirm %}",
             ],
-            "group_edit.html": [
-                "{% include 'core/_form_field.html' with field=form.description",
-                "{% include 'core/_form_field.html' with field=form.fas_url",
-                "{% include 'core/_form_field.html' with field=form.fas_mailing_list",
-                "{% include 'core/_form_field.html' with field=form.fas_discussion_url",
-            ],
             "_settings_tab_emails.html": [
                 "{% if email_is_blacklisted %}",
                 "<h5>Email delivery problem</h5>",

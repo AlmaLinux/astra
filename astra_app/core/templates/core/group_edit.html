@@ -1,8 +1,13 @@
 {% extends 'core/base.html' %}
-
-{% load static %}
+{% load django_vite %}
 
 {% block title %}Edit {{ group.cn }}{% endblock %}
+
+{% block extra_head %}
+  {{ block.super }}
+  {% vite_hmr_client %}
+  {% vite_asset 'src/entrypoints/groupForm.ts' %}
+{% endblock %}
 
 {% block header %}
   <div class="d-flex align-items-center justify-content-between flex-wrap" style="gap: .5rem;">
@@ -14,82 +19,11 @@
 {% endblock %}
 
 {% block content %}
-  <div class="row">
-    <div class="col-lg-8">
-      <div class="card card-outline card-primary">
-        <div class="card-header">
-          <h3 class="card-title">Group info</h3>
-        </div>
-
-        <form method="post" {% include 'core/_form_validation_attrs.html' with form=form %}>
-          {% csrf_token %}
-          <div class="card-body">
-            {% include 'core/_form_field.html' with field=form.description %}
-
-            {% include 'core/_form_field.html' with field=form.fas_url %}
-
-            {% include 'core/_form_field.html' with field=form.fas_mailing_list %}
-
-            {% include 'core/_form_field.html' with field=form.fas_discussion_url %}
-
-            <div class="form-group mb-0">
-              {{ form.fas_irc_channels.label_tag }}
-
-              <small class="form-text text-muted">
-                Chat channels:
-                <ul class="mb-0">
-                  <li>Mattermost: <strong>~channel</strong> or <strong>~channel:server.name:team</strong> (default <strong>{{ chat_networks.mattermost.default_server }}</strong>, team <strong>{{ chat_networks.mattermost.default_team }}</strong>)</li>
-                  <li>IRC: <strong>#channel</strong> or <strong>#channel:server.name</strong> (default <strong>{{ chat_networks.irc.default_server }}</strong>)</li>
-                  <li>Matrix: <strong>matrix:/#channel</strong> or <strong>matrix://server.name/#channel</strong> (default <strong>{{ chat_networks.matrix.default_server }}</strong>)</li>
-                </ul>
-              </small>
-
-              <div
-                id="group-chat-channels-widget"
-                class="d-none js-chat-channels-editor"
-                data-textarea-id="{{ form.fas_irc_channels.id_for_label }}"
-                data-fallback-id="group-chat-channels-fallback"
-                data-mattermost-default-server="{{ chat_networks.mattermost.default_server }}"
-                data-mattermost-default-team="{{ chat_networks.mattermost.default_team }}"
-                data-irc-default-server="{{ chat_networks.irc.default_server }}"
-                data-matrix-default-server="{{ chat_networks.matrix.default_server }}"
-              >
-                <div class="table-responsive">
-                  <table class="table table-sm table-bordered align-middle mb-2" id="group-chat-channels-table">
-                    <tbody></tbody>
-                  </table>
-                </div>
-                <button type="button" class="btn btn-sm btn-outline-secondary js-chat-channels-add" id="group-chat-channels-add" title="Add chat channel">Add channel</button>
-              </div>
-
-              <div id="group-chat-channels-fallback">
-                {{ form.fas_irc_channels }}
-                {% if form.fas_irc_channels.errors %}<div class="invalid-feedback d-block">{{ form.fas_irc_channels.errors }}</div>{% endif %}
-                {% if form.fas_irc_channels.help_text %}<small class="form-text text-muted">{{ form.fas_irc_channels.help_text }}</small>{% endif %}
-              </div>
-            </div>
-
-            {% if form.non_field_errors %}
-              <div class="mt-3 alert alert-danger">{{ form.non_field_errors }}</div>
-            {% endif %}
-
-          </div>
-
-          <div class="card-footer d-flex justify-content-end" style="gap: .5rem;">
-            <a class="btn btn-outline-secondary" href="{% url 'group-detail' group.cn %}" title="Discard changes and return to group">
-              Cancel
-            </a>
-            <button type="submit" class="btn btn-primary" title="Save group info">
-              <i class="fas fa-save mr-1"></i> Save
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+  <div
+    data-group-form-root
+    data-group-form-api-url="{% url 'api-group-edit' group.cn %}"
+    data-group-form-detail-url="{% url 'group-detail' group.cn %}"
+  >
+    <div class="text-muted">Loading group editor...</div>
   </div>
-{% endblock %}
-
-{% block scripts %}
-  {{ block.super }}
-  <script src="{% static 'core/js/chat_channels_editor.js' %}"></script>
 {% endblock %}

@@ -44,12 +44,6 @@ class FormFieldDryPhase2TemplateTests(SimpleTestCase):
                 "{% include 'core/_form_field.html' with field=form.name %}",
                 "{% include 'core/_form_field.html' with field=form.description wrapper_class='mb-0' %}",
             ],
-            "group_edit.html": [
-                "{% include 'core/_form_field.html' with field=form.description show_errors=0 %}",
-                "{% include 'core/_form_field.html' with field=form.fas_url show_errors=0 %}",
-                "{% include 'core/_form_field.html' with field=form.fas_mailing_list show_errors=0 %}",
-                "{% include 'core/_form_field.html' with field=form.fas_discussion_url show_errors=0 %}",
-            ],
         }
 
         for template_name, snippets in expectations.items():

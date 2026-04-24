@@ -1,10 +1,9 @@
-
-from types import SimpleNamespace
+import json
 from unittest.mock import MagicMock, patch
 
 import requests
-from django.contrib.messages import get_messages
-from django.test import TestCase
+from django.test import TestCase, override_settings
+from django.urls import reverse
 
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import FreeIPAUser
@@ -16,19 +15,15 @@ class GroupSponsorCanEditGroupInfoTests(TestCase):
         session["_freeipa_username"] = username
         session.save()
 
-    def test_group_detail_shows_edit_button_for_sponsor(self) -> None:
-        self._login_as_freeipa("bob")
-
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
-
-        group = FreeIPAGroup(
+    def _group(self, *, sponsors: list[str]) -> FreeIPAGroup:
+        return FreeIPAGroup(
             "fas1",
             {
                 "cn": ["fas1"],
                 "description": ["FAS Group 1"],
-                "member_user": [],
+                "member_user": ["bob", "alice"],
                 "member_group": [],
-                "membermanager_user": ["bob"],
+                "membermanager_user": sponsors,
                 "membermanager_group": [],
                 "fasurl": ["https://example.org/group/fas1"],
                 "fasmailinglist": ["fas1@example.org"],
@@ -38,34 +33,21 @@ class GroupSponsorCanEditGroupInfoTests(TestCase):
             },
         )
 
-        with (
-            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
-            patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
-        ):
-            resp = self.client.get("/group/fas1/")
-
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'href="/group/fas1/edit/"')
-        self.assertContains(resp, "Edit group")
-
-    def test_sponsor_can_get_edit_form_prefilled(self) -> None:
+    @override_settings(
+        DJANGO_VITE={
+            "default": {
+                "dev_mode": True,
+                "dev_server_protocol": "http",
+                "dev_server_host": "localhost",
+                "dev_server_port": 5173,
+                "static_url_prefix": "",
+            }
+        },
+    )
+    def test_sponsor_can_get_edit_route_shell(self) -> None:
         self._login_as_freeipa("bob")
-
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
-
-        group = SimpleNamespace(
-            cn="fas1",
-            description="FAS Group 1",
-            fas_group=True,
-            fas_url="https://example.org/group/fas1",
-            fas_mailing_list="fas1@example.org",
-            fas_irc_channels=["#fas1"],
-            fas_discussion_url="https://discussion.example.org/c/fas1",
-            members=[],
-            sponsors=["bob"],
-            sponsor_groups=[],
-            save=MagicMock(),
-        )
+        group = self._group(sponsors=["bob"])
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
@@ -74,62 +56,56 @@ class GroupSponsorCanEditGroupInfoTests(TestCase):
             resp = self.client.get("/group/fas1/edit/")
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'name="description"')
-        self.assertContains(resp, 'id="id_description"')
-        self.assertContains(resp, 'FAS Group 1</textarea>')
-        self.assertContains(resp, 'name="fas_url"')
-        self.assertContains(resp, 'value="https://example.org/group/fas1"')
-        self.assertContains(resp, 'name="fas_mailing_list"')
-        self.assertContains(resp, 'value="fas1@example.org"')
-        self.assertContains(resp, "#fas1")
-        self.assertContains(resp, 'name="fas_discussion_url"')
-        self.assertContains(resp, 'value="https://discussion.example.org/c/fas1"')
+        self.assertContains(resp, "data-group-form-root")
+        self.assertContains(resp, 'data-group-form-api-url="/api/v1/groups/fas1/edit"')
+        self.assertContains(resp, 'data-group-form-detail-url="/group/fas1/"')
+        self.assertContains(resp, 'src="http://localhost:5173/src/entrypoints/groupForm.ts"')
 
-        # Group chat values should use the reusable chat channels editor.
-        self.assertContains(resp, "core/js/chat_channels_editor.js")
-        self.assertContains(resp, 'class="d-none js-chat-channels-editor"')
-        self.assertContains(resp, 'data-textarea-id="id_fas_irc_channels"')
-        self.assertContains(resp, 'data-mattermost-default-server="chat.almalinux.org"')
-        self.assertContains(resp, 'data-mattermost-default-team="almalinux"')
-
-    def test_sponsor_can_post_updates(self) -> None:
+    def test_sponsor_can_get_edit_api_prefilled(self) -> None:
         self._login_as_freeipa("bob")
-
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
-
-        group = SimpleNamespace(
-            cn="fas1",
-            description="FAS Group 1",
-            fas_group=True,
-            fas_url="https://example.org/group/fas1",
-            fas_mailing_list="fas1@example.org",
-            fas_irc_channels=["#fas1"],
-            fas_discussion_url="https://discussion.example.org/c/fas1",
-            members=[],
-            sponsors=["bob"],
-            sponsor_groups=[],
-            save=MagicMock(),
-        )
+        group = self._group(sponsors=["bob"])
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
             patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
         ):
-            resp = self.client.post(
-                "/group/fas1/edit/",
-                {
-                    "description": "Updated desc",
-                    "fas_url": "https://example.org/new",
-                    "fas_mailing_list": "new@example.org",
-                    "fas_irc_channels": "#new\n#new-dev",
-                    "fas_discussion_url": "https://discussion.example.org/c/new",
-                },
-                follow=False,
+            resp = self.client.get(reverse("api-group-edit", args=["fas1"]), HTTP_ACCEPT="application/json")
+
+        self.assertEqual(resp.status_code, 200)
+        payload = json.loads(resp.content)
+        self.assertEqual(payload["group"]["cn"], "fas1")
+        self.assertEqual(payload["group"]["description"], "FAS Group 1")
+        self.assertEqual(payload["group"]["fas_irc_channels"], ["#fas1"])
+
+    def test_sponsor_can_put_updates_via_api(self) -> None:
+        self._login_as_freeipa("bob")
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        group = self._group(sponsors=["bob"])
+        group.save = MagicMock()
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
+        ):
+            resp = self.client.put(
+                reverse("api-group-edit", args=["fas1"]),
+                data=json.dumps(
+                    {
+                        "description": "Updated desc",
+                        "fas_url": "https://example.org/new",
+                        "fas_mailing_list": "new@example.org",
+                        "fas_irc_channels": "#new\n#new-dev",
+                        "fas_discussion_url": "https://discussion.example.org/c/new",
+                    }
+                ),
+                content_type="application/json",
+                HTTP_ACCEPT="application/json",
             )
 
-        self.assertEqual(resp.status_code, 302)
-        self.assertEqual(resp["Location"], "/group/fas1/")
-
+        self.assertEqual(resp.status_code, 200)
+        payload = json.loads(resp.content)
+        self.assertTrue(payload["ok"])
         self.assertEqual(group.description, "Updated desc")
         self.assertEqual(group.fas_url, "https://example.org/new")
         self.assertEqual(group.fas_mailing_list, "new@example.org")
@@ -137,149 +113,81 @@ class GroupSponsorCanEditGroupInfoTests(TestCase):
         self.assertEqual(group.fas_discussion_url, "https://discussion.example.org/c/new")
         group.save.assert_called_once()
 
-    def test_sponsor_invalid_post_renders_bootstrap_validation_feedback(self) -> None:
+    def test_sponsor_invalid_put_returns_validation_errors(self) -> None:
         self._login_as_freeipa("bob")
-
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
-
-        group = SimpleNamespace(
-            cn="fas1",
-            description="FAS Group 1",
-            fas_group=True,
-            fas_url="https://example.org/group/fas1",
-            fas_mailing_list="fas1@example.org",
-            fas_irc_channels=["#fas1"],
-            fas_discussion_url="https://discussion.example.org/c/fas1",
-            members=[],
-            sponsors=["bob"],
-            sponsor_groups=[],
-            save=MagicMock(),
-        )
+        group = self._group(sponsors=["bob"])
+        group.save = MagicMock()
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
             patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
         ):
-            resp = self.client.post(
-                "/group/fas1/edit/",
-                {
-                    "description": "Updated desc",
-                    "fas_url": "not-a-url",
-                    "fas_mailing_list": "new@example.org",
-                    "fas_irc_channels": "#new\n#new-dev",
-                    "fas_discussion_url": "https://discussion.example.org/c/new",
-                },
-                follow=False,
+            resp = self.client.put(
+                reverse("api-group-edit", args=["fas1"]),
+                data=json.dumps(
+                    {
+                        "description": "Updated desc",
+                        "fas_url": "not-a-url",
+                        "fas_mailing_list": "new@example.org",
+                        "fas_irc_channels": "#new\n#new-dev",
+                        "fas_discussion_url": "https://discussion.example.org/c/new",
+                    }
+                ),
+                content_type="application/json",
+                HTTP_ACCEPT="application/json",
             )
 
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Invalid URL")
-        self.assertContains(resp, "invalid-feedback")
-        self.assertContains(resp, "was-validated")
+        self.assertEqual(resp.status_code, 400)
+        payload = json.loads(resp.content)
+        self.assertFalse(payload["ok"])
+        self.assertIn("fas_url", payload["errors"])
         group.save.assert_not_called()
 
-    def test_sponsor_can_post_mattermost_channel_with_tilde(self) -> None:
+    def test_sponsor_save_connection_error_returns_unavailable_json(self) -> None:
         self._login_as_freeipa("bob")
-
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
-
-        group = SimpleNamespace(
-            cn="fas1",
-            description="FAS Group 1",
-            fas_group=True,
-            fas_url=None,
-            fas_mailing_list=None,
-            fas_irc_channels=[],
-            fas_discussion_url=None,
-            members=[],
-            sponsors=["bob"],
-            sponsor_groups=[],
-            save=MagicMock(),
-        )
+        group = self._group(sponsors=["bob"])
+        group.save = MagicMock(side_effect=requests.exceptions.ConnectionError())
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
             patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
         ):
-            resp = self.client.post(
-                "/group/fas1/edit/",
-                {
-                    "description": "FAS Group 1",
-                    "fas_irc_channels": "~atomicsig",
-                },
-                follow=False,
+            resp = self.client.put(
+                reverse("api-group-edit", args=["fas1"]),
+                data=json.dumps(
+                    {
+                        "description": "Updated desc",
+                        "fas_url": "https://example.org/new",
+                        "fas_mailing_list": "new@example.org",
+                        "fas_irc_channels": "#new",
+                        "fas_discussion_url": "https://discussion.example.org/c/new",
+                    }
+                ),
+                content_type="application/json",
+                HTTP_ACCEPT="application/json",
             )
 
-        self.assertEqual(resp.status_code, 302)
-        self.assertEqual(resp["Location"], "/group/fas1/")
-        self.assertEqual(group.fas_irc_channels, ["mattermost://channels/atomicsig"])
-        group.save.assert_called_once()
+        self.assertEqual(resp.status_code, 503)
+        payload = json.loads(resp.content)
+        self.assertFalse(payload["ok"])
+        self.assertIn("temporarily unavailable", payload["error"])
 
-    def test_sponsor_save_connection_error_shows_unavailable_message(self) -> None:
-        self._login_as_freeipa("bob")
-
-        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
-
-        group = SimpleNamespace(
-            cn="fas1",
-            description="FAS Group 1",
-            fas_group=True,
-            fas_url="https://example.org/group/fas1",
-            fas_mailing_list="fas1@example.org",
-            fas_irc_channels=["#fas1"],
-            fas_discussion_url="https://discussion.example.org/c/fas1",
-            members=[],
-            sponsors=["bob"],
-            sponsor_groups=[],
-            save=MagicMock(side_effect=requests.exceptions.ConnectionError()),
-        )
-
-        with (
-            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
-            patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
-        ):
-            resp = self.client.post(
-                "/group/fas1/edit/",
-                {
-                    "description": "Updated desc",
-                    "fas_url": "https://example.org/new",
-                    "fas_mailing_list": "new@example.org",
-                    "fas_irc_channels": "#new\n#new-dev",
-                    "fas_discussion_url": "https://discussion.example.org/c/new",
-                },
-                follow=False,
-            )
-
-        self.assertEqual(resp.status_code, 200)
-        msgs = [m.message for m in get_messages(resp.wsgi_request)]
-        self.assertIn(
-            "This action cannot be completed right now because AlmaLinux Accounts is temporarily unavailable. "
-            "Please try again later.",
-            msgs,
-        )
-
-    def test_non_sponsor_forbidden(self) -> None:
+    def test_non_sponsor_forbidden_on_route_and_api(self) -> None:
         self._login_as_freeipa("alice")
-
         alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": []})
-
-        group = SimpleNamespace(
-            cn="fas1",
-            description="FAS Group 1",
-            fas_group=True,
-            members=[],
-            sponsors=["bob"],
-            sponsor_groups=[],
-            fas_url=None,
-            fas_mailing_list=None,
-            fas_irc_channels=[],
-            fas_discussion_url=None,
-        )
+        group = self._group(sponsors=["bob"])
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
             patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
         ):
-            resp = self.client.get("/group/fas1/edit/")
+            route_resp = self.client.get("/group/fas1/edit/")
+            api_resp = self.client.get(reverse("api-group-edit", args=["fas1"]), HTTP_ACCEPT="application/json")
 
-        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(route_resp.status_code, 403)
+        self.assertEqual(api_resp.status_code, 403)
+        payload = json.loads(api_resp.content)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"], "Only sponsors can edit group info.")

@@ -1,8 +1,14 @@
 from django.urls import path
 
 from core import views_membership
-from core.views_organizations import organization_detail_api, organizations_api
-from core.views_users import users_api
+from core.views_groups import (
+    group_action_api,
+    group_detail_info_api,
+    group_detail_leaders_api,
+    group_detail_members_api,
+    group_edit_api,
+    groups_api,
+)
 from core.views_invitations_api import (
     account_invitations_accepted_api,
     account_invitations_bulk_api,
@@ -17,6 +23,8 @@ from core.views_membership.admin import (
     stats_membership_summary_api,
     stats_membership_trends_charts_api,
 )
+from core.views_organizations import organization_detail_api, organizations_api
+from core.views_users import users_api
 
 urlpatterns = [
     path(
@@ -33,6 +41,36 @@ urlpatterns = [
         "organizations",
         organizations_api,
         name="api-organizations",
+    ),
+    path(
+        "groups",
+        groups_api,
+        name="api-groups",
+    ),
+    path(
+        "groups/<str:name>/info",
+        group_detail_info_api,
+        name="api-group-detail-info",
+    ),
+    path(
+        "groups/<str:name>/leaders",
+        group_detail_leaders_api,
+        name="api-group-detail-leaders",
+    ),
+    path(
+        "groups/<str:name>/members",
+        group_detail_members_api,
+        name="api-group-detail-members",
+    ),
+    path(
+        "groups/<str:name>/action",
+        group_action_api,
+        name="api-group-action",
+    ),
+    path(
+        "groups/<str:name>/edit",
+        group_edit_api,
+        name="api-group-edit",
     ),
     path(
         "membership/request/<int:pk>/rescind",

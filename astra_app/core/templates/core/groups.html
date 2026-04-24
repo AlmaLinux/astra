@@ -1,48 +1,21 @@
 {% extends 'core/base.html' %}
+{% load django_vite %}
 
 {% block title %}Groups{% endblock %}
+
+{% block extra_head %}
+  {{ block.super }}
+  {% vite_hmr_client %}
+  {% vite_asset 'src/entrypoints/groups.ts' %}
+{% endblock %}
 
 {% block header %}<h1 class="m-0">Groups</h1>{% endblock %}
 
 {% block content %}
-<div class="card">
-  <div class="card-header">
-    <div class="card-tools">
-      {% include "core/_search_form.html" with search_value=q search_placeholder="Search groups..." search_aria_label="Search groups" search_submit_title="Search groups" %}
-    </div>
+  <div
+    data-groups-root
+    data-groups-api-url="{% url 'api-groups' %}"
+  >
+    <div class="text-muted">Loading groups...</div>
   </div>
-
-  <div class="card-body p-0">
-    <div class="table-responsive">
-      <table class="table table-striped">
-        <thead>
-          <tr>
-            <th>Group</th>
-            <th>Description</th>
-            <th style="width: 110px" class="text-right">Members</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for g in groups %}
-            <tr>
-              <td><a href="{% url 'group-detail' g.cn %}">{{ g.cn }}</a></td>
-              <td class="text-muted">{% if g.description %}{{ g.description }}{% endif %}</td>
-              <td class="text-right">
-                <span class="badge badge-secondary">{{ g.member_count }}</span>
-              </td>
-            </tr>
-          {% empty %}
-            <tr>
-              <td colspan="3" class="p-3 text-muted">No groups found.</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <div class="card-footer clearfix">
-    {% include "core/_pagination.html" %}
-  </div>
-</div>
 {% endblock %}

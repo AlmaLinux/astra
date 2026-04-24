@@ -1,13 +1,16 @@
-from typing import cast
+import json
+from typing import Any, cast
 
 import requests
-from django.contrib import messages
+from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
-from django.shortcuts import redirect, render
-from django.views.decorators.http import require_GET
+from django.shortcuts import render
+from django.urls import reverse
+from django.views.decorators.http import require_GET, require_http_methods
 
 from core.agreements import missing_required_agreements_for_user_in_group, required_agreements_for_group
+from core.avatar_providers import resolve_avatar_urls_for_users
 from core.forms_groups import GroupEditForm
 from core.freeipa.agreement import FreeIPAFASAgreement
 from core.freeipa.circuit_breaker import _freeipa_circuit_open
@@ -15,6 +18,7 @@ from core.freeipa.exceptions import FreeIPAOperationFailed
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import DegradedFreeIPAUser, FreeIPAUser
 from core.permissions import ASTRA_ADD_ELECTION, json_permission_required
+from core.templatetags._user_helpers import try_get_full_name
 from core.views_utils import (
     MSG_SERVICE_UNAVAILABLE,
     _normalize_str,
@@ -50,60 +54,68 @@ def group_search(request: HttpRequest) -> HttpResponse:
     return JsonResponse({"results": results})
 
 
-def groups(request: HttpRequest) -> HttpResponse:
+def _sort_key(group: FreeIPAGroup) -> str:
+    return group.cn.lower()
+
+
+def _matches_query(group: FreeIPAGroup, query: str) -> bool:
+    if not query:
+        return True
+    query_lower = query.lower()
+    if query_lower in group.cn.lower():
+        return True
+    desc = (group.description or "").lower()
+    return query_lower in desc
+
+
+def _serialize_pagination(page_ctx: dict[str, object]) -> dict[str, object]:
+    paginator = page_ctx["paginator"]
+    page_obj = page_ctx["page_obj"]
+    page_numbers = page_ctx["page_numbers"]
+    show_first = page_ctx["show_first"]
+    show_last = page_ctx["show_last"]
+
+    return {
+        "count": paginator.count,
+        "page": page_obj.number,
+        "num_pages": paginator.num_pages,
+        "page_numbers": page_numbers,
+        "show_first": show_first,
+        "show_last": show_last,
+        "has_previous": page_obj.has_previous(),
+        "has_next": page_obj.has_next(),
+        "previous_page_number": page_obj.previous_page_number() if page_obj.has_previous() else None,
+        "next_page_number": page_obj.next_page_number() if page_obj.has_next() else None,
+        "start_index": page_obj.start_index() if paginator.count else 0,
+        "end_index": page_obj.end_index() if paginator.count else 0,
+    }
+
+
+def _groups_page_context(request: HttpRequest) -> dict[str, object]:
     q = _normalize_str(request.GET.get("q"))
     page_number = _normalize_str(request.GET.get("page")) or None
-
-    def _sort_key(group: FreeIPAGroup) -> str:
-        return group.cn.lower()
-
-    def _matches_query(group: FreeIPAGroup, query: str) -> bool:
-        if not query:
-            return True
-        query_lower = query.lower()
-        if query_lower in group.cn.lower():
-            return True
-        desc = (group.description or "").lower()
-        return query_lower in desc
-
     groups_list = FreeIPAGroup.all()
     groups_filtered = [g for g in groups_list if g.fas_group and _matches_query(g, q)]
     groups_sorted = sorted(groups_filtered, key=_sort_key)
 
-    for g in groups_sorted:
-        g.member_count = g.member_count_recursive()
+    for group in groups_sorted:
+        group.member_count = group.member_count_recursive()
 
     _, page_url_prefix = build_page_url_prefix(request.GET, page_param="page")
     page_ctx = paginate_and_build_context(groups_sorted, page_number, 30, page_url_prefix=page_url_prefix)
-
-    return render(
-        request,
-        "core/groups.html",
-        {
-            "q": q,
-            **page_ctx,
-            "groups": page_ctx["page_obj"].object_list,
-        },
-    )
+    return {
+        "q": q,
+        "groups": page_ctx["page_obj"].object_list,
+        **page_ctx,
+    }
 
 
-def group_detail(request: HttpRequest, name: str) -> HttpResponse:
-    cn = _normalize_str(name)
-    if not cn:
-        raise Http404("Group not found")
+def _is_fas_group(cn: str) -> bool:
+    group_obj = FreeIPAGroup.get(cn)
+    return bool(group_obj and group_obj.fas_group)
 
-    group = FreeIPAGroup.get(cn)
-    if not group or not group.fas_group:
-        raise Http404("Group not found")
 
-    q = _normalize_str(request.GET.get("q"))
-
-    def _is_fas_group(cn: str) -> bool:
-        group_obj = FreeIPAGroup.get(cn)
-        return bool(group_obj and group_obj.fas_group)
-
-    member_count = group.member_count_recursive(fas_only=True)
-
+def _group_membership_context(request: HttpRequest, group: FreeIPAGroup) -> dict[str, object]:
     username = get_username(request)
     try:
         sponsors = set(group.sponsors)
@@ -119,20 +131,21 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
         members = set(group.members)
     except AttributeError:
         members = set()
+
     user_groups: set[str] = set()
     if isinstance(request.user, FreeIPAUser):
         user_groups = set(request.user.groups_list)
 
-    sponsor_groups_lower = {g.lower() for g in sponsor_groups}
-    user_groups_lower = {g.lower() for g in user_groups}
+    sponsor_groups_lower = {group_name.lower() for group_name in sponsor_groups}
+    user_groups_lower = {group_name.lower() for group_name in user_groups}
     is_sponsor = (username in sponsors) or bool(sponsor_groups_lower & user_groups_lower)
     is_member = username in members
 
-    sponsor_groups_list = sorted((g for g in sponsor_groups if _is_fas_group(g)), key=lambda s: s.lower())
-    sponsors_list = sorted(sponsors, key=lambda s: s.lower())
-    promotable_members = sorted((members - sponsors), key=lambda s: s.lower())
+    sponsor_groups_list = sorted((group_name for group_name in sponsor_groups if _is_fas_group(group_name)), key=lambda value: value.lower())
+    sponsors_list = sorted(sponsors, key=lambda value: value.lower())
+    promotable_members = sorted((members - sponsors), key=lambda value: value.lower())
 
-    required_agreement_cns = required_agreements_for_group(cn)
+    required_agreement_cns = required_agreements_for_group(group.cn)
     required_agreements: list[dict[str, object]] = []
     unsigned_usernames: set[str] = set()
     if required_agreement_cns:
@@ -153,185 +166,170 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
                 }
             )
 
-        for u in sorted(members | sponsors, key=lambda s: s.lower()):
+        for member_username in sorted(members | sponsors, key=lambda value: value.lower()):
             for agreement_cn in required_agreement_cns:
-                if u not in agreement_user_sets.get(agreement_cn, set()):
-                    unsigned_usernames.add(u)
+                if member_username not in agreement_user_sets.get(agreement_cn, set()):
+                    unsigned_usernames.add(member_username)
                     break
 
-    if request.method == "POST":
-        if isinstance(request.user, DegradedFreeIPAUser) or _freeipa_circuit_open():
-            messages.error(
-                request,
-                MSG_SERVICE_UNAVAILABLE,
-            )
-            return redirect("group-detail", name)
+    return {
+        "username": username,
+        "sponsors": sponsors,
+        "sponsor_groups": sponsor_groups,
+        "members": members,
+        "is_sponsor": is_sponsor,
+        "is_member": is_member,
+        "sponsors_list": sponsors_list,
+        "sponsor_groups_list": sponsor_groups_list,
+        "promotable_members": promotable_members,
+        "required_agreements": required_agreements,
+        "unsigned_usernames": sorted(unsigned_usernames, key=lambda value: value.lower()),
+    }
 
-        action = _normalize_str(request.POST.get("action")).lower()
 
-        if action == "leave":
-            if not is_member:
-                messages.info(request, "You are not a member of this group.")
-                return redirect("group-detail", name)
-            try:
-                cast(FreeIPAUser, request.user).remove_from_group(cn)
-                messages.success(request, "You have left the group.")
-            except requests.exceptions.ConnectionError:
-                messages.error(
-                    request,
-                    MSG_SERVICE_UNAVAILABLE,
-                )
-            except Exception:
-                messages.error(request, "Failed to leave group due to an internal error.")
-            return redirect("group-detail", name)
+def _group_edit_payload(group: FreeIPAGroup) -> dict[str, object]:
+    return {
+        "cn": group.cn,
+        "description": group.description or "",
+        "fas_url": group.fas_url or "",
+        "fas_mailing_list": group.fas_mailing_list or "",
+        "fas_discussion_url": group.fas_discussion_url or "",
+        "fas_irc_channels": list(group.fas_irc_channels or []),
+    }
 
-        if action == "stop_sponsoring":
-            if not is_sponsor:
-                messages.info(request, "You are not a Team Lead of this group.")
-                return redirect("group-detail", name)
-            try:
-                group.remove_sponsor(username)
-                messages.success(request, "You are no longer a Team Lead of this group.")
-            except requests.exceptions.ConnectionError:
-                messages.error(
-                    request,
-                    MSG_SERVICE_UNAVAILABLE,
-                )
-            except Exception:
-                messages.error(request, "Failed to update sponsor status due to an internal error.")
-            return redirect("group-detail", name)
 
-        if action in {"add_member", "remove_member"}:
-            if not is_sponsor:
-                messages.error(request, "Only Team Leads can manage group members.")
-                return redirect("group-detail", name)
+def _serialize_group_user_items(usernames: list[str]) -> dict[str, dict[str, str]]:
+    users_by_username: dict[str, FreeIPAUser] = {}
+    user_objects: list[FreeIPAUser] = []
 
-            target = _normalize_str(request.POST.get("username"))
-            if not target:
-                messages.error(request, "Please provide a username.")
-                return redirect("group-detail", name)
+    for username in usernames:
+        if username in users_by_username:
+            continue
+        user = FreeIPAUser.get(username)
+        if user is None:
+            continue
+        users_by_username[username] = user
+        user_objects.append(user)
 
-            if target == username and action == "add_member":
-                messages.error(request, "You can't add yourself to a group.")
-                return redirect("group-detail", name)
+    avatar_url_by_username, _avatar_resolution_count, _avatar_fallback_count = resolve_avatar_urls_for_users(
+        user_objects,
+        width=50,
+        height=50,
+    )
 
-            if action == "add_member":
-                missing = missing_required_agreements_for_user_in_group(target, cn)
-                if missing:
-                    messages.error(
-                        request,
-                        "User must sign required agreement(s) before joining: " + ", ".join(missing),
-                    )
-                    return redirect("group-detail", name)
-                try:
-                    group.add_member(target)
-                    messages.success(request, f"Added {target} to the group.")
-                except FreeIPAOperationFailed as e:
-                    messages.error(request, str(e))
-                except requests.exceptions.ConnectionError:
-                    messages.error(
-                        request,
-                        MSG_SERVICE_UNAVAILABLE,
-                    )
-                except Exception:
-                    messages.error(request, "Failed to add member due to an internal error.")
-                return redirect("group-detail", name)
+    items_by_username: dict[str, dict[str, str]] = {}
+    for username in usernames:
+        user = users_by_username.get(username)
+        items_by_username[username] = {
+            "username": username,
+            "full_name": try_get_full_name(user) if user is not None else "",
+            "avatar_url": avatar_url_by_username.get(username, ""),
+        }
 
-            if action == "remove_member":
-                try:
-                    group.remove_member(target)
-                    messages.success(request, f"Removed {target} from the group.")
-                except FreeIPAOperationFailed as e:
-                    messages.error(request, str(e))
-                except requests.exceptions.ConnectionError:
-                    messages.error(
-                        request,
-                        MSG_SERVICE_UNAVAILABLE,
-                    )
-                except Exception:
-                    messages.error(request, "Failed to remove member due to an internal error.")
-                return redirect("group-detail", name)
+    return items_by_username
 
-        if action == "promote_member":
-            if not is_sponsor:
-                messages.error(request, "Only Team Leads can manage group members.")
-                return redirect("group-detail", name)
 
-            target = _normalize_str(request.POST.get("username"))
-            if not target:
-                messages.error(request, "Please provide a username.")
-                return redirect("group-detail", name)
+def _paginate_detail_items(
+    request: HttpRequest,
+    items: list[object],
+    *,
+    page_param: str = "page",
+    per_page: int = 30,
+) -> tuple[list[object], dict[str, object]]:
+    page_number = _normalize_str(request.GET.get(page_param)) or None
+    _, page_prefix = build_page_url_prefix(request.GET, page_param=page_param)
+    page_ctx = paginate_and_build_context(items, page_number, per_page, page_url_prefix=page_prefix)
+    return list(page_ctx["page_obj"].object_list), page_ctx
 
-            if target in sponsors:
-                messages.info(request, f"{target} is already a Team Lead of this group.")
-                return redirect("group-detail", name)
 
-            if target not in members:
-                messages.error(request, "User must be a member before being promoted to Team Lead.")
-                return redirect("group-detail", name)
+def _serialize_group_user_list_items(
+    usernames: list[str],
+    *,
+    leader_usernames: set[str] | None = None,
+) -> list[dict[str, object]]:
+    serialized_users = _serialize_group_user_items(usernames)
+    items: list[dict[str, object]] = []
+    for username in usernames:
+        serialized = {
+            **serialized_users.get(username, {"username": username, "full_name": "", "avatar_url": ""}),
+        }
+        if leader_usernames is not None:
+            serialized["is_leader"] = username in leader_usernames
+        items.append(serialized)
+    return items
 
-            try:
-                group.add_sponsor(target)
-                messages.success(request, f"Promoted {target} to Team Lead.")
-            except FreeIPAOperationFailed as e:
-                messages.error(request, str(e))
-            except requests.exceptions.ConnectionError:
-                messages.error(
-                    request,
-                    MSG_SERVICE_UNAVAILABLE,
-                )
-            except Exception:
-                messages.error(request, "Failed to update sponsor status due to an internal error.")
-            return redirect("group-detail", name)
 
-        if action == "demote_sponsor":
-            if not is_sponsor:
-                messages.error(request, "Only Team Leads can manage group members.")
-                return redirect("group-detail", name)
+def _serialize_group_leader_items(leader_entries: list[dict[str, str]]) -> list[dict[str, object]]:
+    leader_usernames = [entry["username"] for entry in leader_entries if entry["kind"] == "user"]
+    serialized_users = _serialize_group_user_items(leader_usernames)
 
-            target = _normalize_str(request.POST.get("username"))
-            if not target:
-                messages.error(request, "Please provide a username.")
-                return redirect("group-detail", name)
+    items: list[dict[str, object]] = []
+    for entry in leader_entries:
+        if entry["kind"] == "group":
+            items.append({"kind": "group", "cn": entry["cn"]})
+            continue
 
-            if target == username:
-                messages.info(request, "Use the Team membership box to stop being a Team Lead.")
-                return redirect("group-detail", name)
+        username = entry["username"]
+        items.append(
+            {
+                "kind": "user",
+                **serialized_users.get(username, {"username": username, "full_name": "", "avatar_url": ""}),
+            }
+        )
 
-            if target not in sponsors:
-                messages.error(request, "User is not a Team Lead of this group.")
-                return redirect("group-detail", name)
+    return items
 
-            try:
-                group.remove_sponsor(target)
-                messages.success(request, f"Removed {target} as a Team Lead.")
-            except FreeIPAOperationFailed as e:
-                messages.error(request, str(e))
-            except requests.exceptions.ConnectionError:
-                messages.error(
-                    request,
-                    MSG_SERVICE_UNAVAILABLE,
-                )
-            except Exception:
-                messages.error(request, "Failed to update sponsor status due to an internal error.")
-            return redirect("group-detail", name)
+
+def _group_or_404(name: str) -> FreeIPAGroup:
+    cn = _normalize_str(name)
+    if not cn:
+        raise Http404("Group not found")
+
+    group = FreeIPAGroup.get(cn)
+    if not group or not group.fas_group:
+        raise Http404("Group not found")
+
+    return group
+
+
+def _group_info_payload(group: FreeIPAGroup, membership_ctx: dict[str, object]) -> dict[str, object]:
+    return {
+        "cn": group.cn,
+        "description": group.description or "",
+        "fas_url": group.fas_url or "",
+        "fas_mailing_list": group.fas_mailing_list or "",
+        "fas_discussion_url": group.fas_discussion_url or "",
+        "fas_irc_channels": list(group.fas_irc_channels or []),
+        "member_count": group.member_count_recursive(fas_only=True),
+        "is_member": membership_ctx["is_member"],
+        "is_sponsor": membership_ctx["is_sponsor"],
+        "required_agreements": membership_ctx["required_agreements"],
+        "unsigned_usernames": membership_ctx["unsigned_usernames"],
+        "edit_url": reverse("group-edit", args=[group.cn]),
+    }
+
+
+def _json_error(message: str, *, status: int) -> JsonResponse:
+    return JsonResponse({"ok": False, "error": message}, status=status)
+
+
+def groups(request: HttpRequest) -> HttpResponse:
+    return render(request, "core/groups.html")
+
+
+def group_detail(request: HttpRequest, name: str) -> HttpResponse:
+    cn = _normalize_str(name)
+    if not cn:
+        raise Http404("Group not found")
+
+    group = FreeIPAGroup.get(cn)
+    if not group or not group.fas_group:
+        raise Http404("Group not found")
 
     return render(
         request,
         "core/group_detail.html",
-        {
-            "group": group,
-            "member_count": member_count,
-            "q": q,
-            "is_member": is_member,
-            "is_sponsor": is_sponsor,
-            "current_username": username,
-            "sponsors_list": sponsors_list,
-            "sponsor_groups_list": sponsor_groups_list,
-            "promotable_members": promotable_members,
-            "required_agreements": required_agreements,
-            "unsigned_usernames": sorted(unsigned_usernames, key=lambda s: s.lower()),
-        },
+        {"group": group},
     )
 
 
@@ -357,42 +355,275 @@ def group_edit(request: HttpRequest, name: str) -> HttpResponse:
     if not is_sponsor:
         raise PermissionDenied("Only sponsors can edit group info.")
 
-    if request.method == "POST":
-        form = GroupEditForm(request.POST)
-        if form.is_valid():
-            group.description = form.cleaned_data["description"]
-            group.fas_url = form.cleaned_data["fas_url"] or None
-            group.fas_mailing_list = form.cleaned_data["fas_mailing_list"] or None
-            group.fas_discussion_url = form.cleaned_data["fas_discussion_url"] or None
-            group.fas_irc_channels = list(form.cleaned_data["fas_irc_channels"])
-
-            try:
-                group.save()
-                messages.success(request, "Saved group info.")
-                return redirect("group-detail", cn)
-            except requests.exceptions.ConnectionError:
-                messages.error(
-                    request,
-                    MSG_SERVICE_UNAVAILABLE,
-                )
-            except Exception:
-                messages.error(request, "Failed to save group info due to an internal error.")
-    else:
-        form = GroupEditForm(
-            initial={
-                "description": group.description or "",
-                "fas_url": group.fas_url or "",
-                "fas_mailing_list": group.fas_mailing_list or "",
-                "fas_discussion_url": group.fas_discussion_url or "",
-                "fas_irc_channels": "\n".join(group.fas_irc_channels or []),
-            }
-        )
-
     return render(
         request,
         "core/group_edit.html",
-        {
-            "group": group,
-            "form": form,
-        },
+        {"group": group},
     )
+
+
+@login_required
+@require_GET
+def groups_api(request: HttpRequest) -> JsonResponse:
+    page_context = _groups_page_context(request)
+    groups_list = page_context["groups"]
+    payload = {
+        "q": page_context["q"],
+        "items": [
+            {
+                "cn": group.cn,
+                "description": group.description or "",
+                "member_count": group.member_count,
+                "detail_url": reverse("group-detail", args=[group.cn]),
+            }
+            for group in groups_list
+        ],
+        "pagination": _serialize_pagination(page_context),
+    }
+    return JsonResponse(payload)
+
+
+@login_required
+@require_GET
+def group_detail_info_api(request: HttpRequest, name: str) -> JsonResponse:
+    group = _group_or_404(name)
+    membership_ctx = _group_membership_context(request, group)
+
+    return JsonResponse({"group": _group_info_payload(group, membership_ctx)})
+
+
+@login_required
+@require_GET
+def group_detail_leaders_api(request: HttpRequest, name: str) -> JsonResponse:
+    group = _group_or_404(name)
+    membership_ctx = _group_membership_context(request, group)
+
+    leader_entries = [
+        {"kind": "group", "cn": sponsor_group}
+        for sponsor_group in membership_ctx["sponsor_groups_list"]
+    ] + [
+        {"kind": "user", "username": sponsor_username}
+        for sponsor_username in membership_ctx["sponsors_list"]
+    ]
+
+    leaders_page_items, leaders_page_ctx = _paginate_detail_items(request, cast(list[object], leader_entries))
+    items = _serialize_group_leader_items(cast(list[dict[str, str]], leaders_page_items))
+
+    return JsonResponse(
+        {
+            "leaders": {
+                "items": items,
+                "pagination": _serialize_pagination(leaders_page_ctx),
+            }
+        }
+    )
+
+
+@login_required
+@require_GET
+def group_detail_members_api(request: HttpRequest, name: str) -> JsonResponse:
+    group = _group_or_404(name)
+    membership_ctx = _group_membership_context(request, group)
+    members_q = _normalize_str(request.GET.get("q"))
+
+    members_all = sorted(membership_ctx["members"], key=lambda value: value.lower())
+    members_filtered = [
+        username
+        for username in members_all
+        if (not members_q) or (members_q.lower() in username.lower())
+    ]
+    members_page_items, members_page_ctx = _paginate_detail_items(request, cast(list[object], members_filtered))
+    sponsor_usernames = set(membership_ctx["sponsors_list"])
+
+    return JsonResponse(
+        {
+            "members": {
+                "q": members_q,
+                "items": _serialize_group_user_list_items(cast(list[str], members_page_items), leader_usernames=sponsor_usernames),
+                "pagination": _serialize_pagination(members_page_ctx),
+            }
+        }
+    )
+
+
+def _json_dict_from_body(request: HttpRequest) -> dict[str, Any]:
+    try:
+        raw = json.loads(request.body.decode("utf-8") or "{}")
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    return raw
+
+
+@login_required
+@require_http_methods(["POST"])
+def group_action_api(request: HttpRequest, name: str) -> JsonResponse:
+    cn = _normalize_str(name)
+    if not cn:
+        raise Http404("Group not found")
+
+    group = FreeIPAGroup.get(cn)
+    if not group or not group.fas_group:
+        raise Http404("Group not found")
+
+    if isinstance(request.user, DegradedFreeIPAUser) or _freeipa_circuit_open():
+        return _json_error(MSG_SERVICE_UNAVAILABLE, status=503)
+
+    payload = _json_dict_from_body(request)
+    action = _normalize_str(payload.get("action")).lower()
+    target = _normalize_str(payload.get("username"))
+
+    membership_ctx = _group_membership_context(request, group)
+    username = membership_ctx["username"]
+    is_sponsor = bool(membership_ctx["is_sponsor"])
+    is_member = bool(membership_ctx["is_member"])
+    sponsors = membership_ctx["sponsors"]
+    members = membership_ctx["members"]
+
+    if action == "leave":
+        if not is_member:
+            return _json_error("You are not a member of this group.", status=400)
+        try:
+            cast(FreeIPAUser, request.user).remove_from_group(cn)
+        except requests.exceptions.ConnectionError:
+            return _json_error(MSG_SERVICE_UNAVAILABLE, status=503)
+        except Exception:
+            return _json_error("Failed to leave group due to an internal error.", status=500)
+        return JsonResponse({"ok": True, "message": "You have left the group."})
+
+    if action == "stop_sponsoring":
+        if not is_sponsor:
+            return _json_error("You are not a Team Lead of this group.", status=403)
+        try:
+            group.remove_sponsor(username)
+        except requests.exceptions.ConnectionError:
+            return _json_error(MSG_SERVICE_UNAVAILABLE, status=503)
+        except Exception:
+            return _json_error("Failed to update sponsor status due to an internal error.", status=500)
+        return JsonResponse({"ok": True, "message": "You are no longer a Team Lead of this group."})
+
+    if action in {"add_member", "remove_member"}:
+        if not is_sponsor:
+            return _json_error("Only Team Leads can manage group members.", status=403)
+        if not target:
+            return _json_error("Please provide a username.", status=400)
+        if action == "add_member" and target == username:
+            return _json_error("You can't add yourself to a group.", status=400)
+
+        if action == "add_member":
+            missing = missing_required_agreements_for_user_in_group(target, cn)
+            if missing:
+                return _json_error(
+                    "User must sign required agreement(s) before joining: " + ", ".join(missing),
+                    status=400,
+                )
+            try:
+                group.add_member(target)
+            except FreeIPAOperationFailed as exc:
+                return _json_error(str(exc), status=400)
+            except requests.exceptions.ConnectionError:
+                return _json_error(MSG_SERVICE_UNAVAILABLE, status=503)
+            except Exception:
+                return _json_error("Failed to add member due to an internal error.", status=500)
+            return JsonResponse({"ok": True, "message": f"Added {target} to the group."})
+
+        try:
+            group.remove_member(target)
+        except FreeIPAOperationFailed as exc:
+            return _json_error(str(exc), status=400)
+        except requests.exceptions.ConnectionError:
+            return _json_error(MSG_SERVICE_UNAVAILABLE, status=503)
+        except Exception:
+            return _json_error("Failed to remove member due to an internal error.", status=500)
+        return JsonResponse({"ok": True, "message": f"Removed {target} from the group."})
+
+    if action == "promote_member":
+        if not is_sponsor:
+            return _json_error("Only Team Leads can manage group members.", status=403)
+        if not target:
+            return _json_error("Please provide a username.", status=400)
+        if target in sponsors:
+            return _json_error(f"{target} is already a Team Lead of this group.", status=400)
+        if target not in members:
+            return _json_error("User must be a member before being promoted to Team Lead.", status=400)
+        try:
+            group.add_sponsor(target)
+        except FreeIPAOperationFailed as exc:
+            return _json_error(str(exc), status=400)
+        except requests.exceptions.ConnectionError:
+            return _json_error(MSG_SERVICE_UNAVAILABLE, status=503)
+        except Exception:
+            return _json_error("Failed to update sponsor status due to an internal error.", status=500)
+        return JsonResponse({"ok": True, "message": f"Promoted {target} to Team Lead."})
+
+    if action == "demote_sponsor":
+        if not is_sponsor:
+            return _json_error("Only Team Leads can manage group members.", status=403)
+        if not target:
+            return _json_error("Please provide a username.", status=400)
+        if target == username:
+            return _json_error("Use the Team membership box to stop being a Team Lead.", status=400)
+        if target not in sponsors:
+            return _json_error("User is not a Team Lead of this group.", status=400)
+        try:
+            group.remove_sponsor(target)
+        except FreeIPAOperationFailed as exc:
+            return _json_error(str(exc), status=400)
+        except requests.exceptions.ConnectionError:
+            return _json_error(MSG_SERVICE_UNAVAILABLE, status=503)
+        except Exception:
+            return _json_error("Failed to update sponsor status due to an internal error.", status=500)
+        return JsonResponse({"ok": True, "message": f"Removed {target} as a Team Lead."})
+
+    return _json_error("Invalid action.", status=400)
+
+
+@login_required
+@require_http_methods(["GET", "PUT"])
+def group_edit_api(request: HttpRequest, name: str) -> JsonResponse:
+    cn = _normalize_str(name)
+    if not cn:
+        raise Http404("Group not found")
+
+    group = FreeIPAGroup.get(cn)
+    if not group or not group.fas_group:
+        raise Http404("Group not found")
+
+    membership_ctx = _group_membership_context(request, group)
+    if not membership_ctx["is_sponsor"]:
+        return _json_error("Only sponsors can edit group info.", status=403)
+
+    if request.method == "GET":
+        return JsonResponse({"group": _group_edit_payload(group)})
+
+    payload = _json_dict_from_body(request)
+    if not payload:
+        return _json_error("Invalid request payload.", status=400)
+
+    form = GroupEditForm(
+        {
+            "description": str(payload.get("description") or ""),
+            "fas_url": str(payload.get("fas_url") or ""),
+            "fas_mailing_list": str(payload.get("fas_mailing_list") or ""),
+            "fas_discussion_url": str(payload.get("fas_discussion_url") or ""),
+            "fas_irc_channels": str(payload.get("fas_irc_channels") or ""),
+        }
+    )
+    if not form.is_valid():
+        return JsonResponse({"ok": False, "errors": form.errors}, status=400)
+
+    group.description = form.cleaned_data["description"]
+    group.fas_url = form.cleaned_data["fas_url"] or None
+    group.fas_mailing_list = form.cleaned_data["fas_mailing_list"] or None
+    group.fas_discussion_url = form.cleaned_data["fas_discussion_url"] or None
+    group.fas_irc_channels = list(form.cleaned_data["fas_irc_channels"])
+
+    try:
+        group.save()
+    except requests.exceptions.ConnectionError:
+        return _json_error(MSG_SERVICE_UNAVAILABLE, status=503)
+    except Exception:
+        return _json_error("Failed to save group info due to an internal error.", status=500)
+
+    return JsonResponse({"ok": True, "group": _group_edit_payload(group)})
