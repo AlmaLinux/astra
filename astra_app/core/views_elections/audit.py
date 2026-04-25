@@ -2,17 +2,19 @@
 
 import datetime
 from decimal import Decimal, InvalidOperation
+from typing import cast
 
-from django.core.paginator import Paginator
+from django.core.paginator import Page
 from django.db.models import Count, Max, Min, Sum
 from django.db.models.functions import TruncDate
-from django.http import Http404, JsonResponse
+from django.http import Http404, HttpRequest, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_GET
 
 from core import elections_services
+from core.api_pagination import paginate_detail_items, serialize_pagination
 from core.elections_sankey import build_sankey_flows
 from core.elections_services import candidate_username_by_id_map
 from core.models import AuditLogEntry, Ballot, Candidate, Election
@@ -61,20 +63,159 @@ def election_public_audit(request, election_id: int):
     return JsonResponse(elections_services.build_public_audit_export(election=election))
 
 
-@require_GET
-def election_audit_log(request, election_id: int):
-    """Render a human-readable election audit log.
+def _serialize_elected_users_for_api(users: object) -> list[dict[str, object]]:
+    if not isinstance(users, list):
+        return []
+    serialized: list[dict[str, object]] = []
+    for user in users:
+        if not isinstance(user, dict):
+            continue
+        serialized.append(
+            {
+                "username": str(user.get("username") or ""),
+                "full_name": str(user.get("full_name") or ""),
+            }
+        )
+    return serialized
 
-    This page is meant to improve transparency and auditability by presenting
-    the election's public audit events (and, for election managers, private
-    events as well) in a chronological timeline.
-    """
 
-    election = _get_active_election(election_id)
+def _serialize_round_rows_for_api(rows: object) -> list[dict[str, object]]:
+    if not isinstance(rows, list):
+        return []
+    serialized: list[dict[str, object]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        serialized.append(
+            {
+                "candidate_id": row.get("candidate_id"),
+                "candidate_username": str(row.get("candidate_username") or ""),
+                "candidate_label": str(row.get("candidate_label") or ""),
+                "retained_total": str(row.get("retained_total") or ""),
+                "retention_factor": str(row.get("retention_factor") or ""),
+                "is_elected": bool(row.get("is_elected")),
+                "is_eliminated": bool(row.get("is_eliminated")),
+            }
+        )
+    return serialized
 
-    if election.status not in {Election.Status.closed, Election.Status.tallied}:
-        raise Http404
 
+def _serialize_audit_log_payload_for_api(
+    *,
+    event_type: str,
+    payload: dict[str, object],
+    can_manage_elections: bool,
+) -> dict[str, object]:
+    match event_type:
+        case "election_end_extended":
+            allowed_keys = {
+                "previous_end_datetime",
+                "new_end_datetime",
+                "quorum_percent",
+                "required_participating_voter_count",
+                "required_participating_vote_weight_total",
+                "participating_voter_count",
+                "participating_vote_weight_total",
+            }
+            return {key: payload[key] for key in allowed_keys if key in payload}
+        case "quorum_reached":
+            allowed_keys = {
+                "quorum_percent",
+                "required_participating_voter_count",
+                "required_participating_vote_weight_total",
+                "participating_voter_count",
+                "participating_vote_weight_total",
+                "eligible_voter_count",
+            }
+            return {key: payload[key] for key in allowed_keys if key in payload}
+        case "election_started":
+            serialized: dict[str, object] = {}
+            if "genesis_chain_hash" in payload:
+                serialized["genesis_chain_hash"] = payload["genesis_chain_hash"]
+            candidates = payload.get("candidates")
+            if isinstance(candidates, list):
+                serialized["candidates"] = [
+                    {
+                        "id": candidate.get("id"),
+                        "freeipa_username": candidate.get("freeipa_username"),
+                        "tiebreak_uuid": candidate.get("tiebreak_uuid"),
+                    }
+                    for candidate in candidates
+                    if isinstance(candidate, dict)
+                ]
+            return serialized
+        case "election_closed":
+            serialized = {"chain_head": payload["chain_head"]} if "chain_head" in payload else {}
+            if not can_manage_elections:
+                if "credentials_affected" in payload:
+                    serialized["credentials_affected"] = bool(payload["credentials_affected"])
+                if "emails_scrubbed" in payload:
+                    serialized["emails_scrubbed"] = bool(payload["emails_scrubbed"])
+            return serialized
+        case "election_anonymized":
+            allowed_keys = {"credentials_affected", "emails_scrubbed", "scrub_anomaly"}
+            return {key: payload[key] for key in allowed_keys if key in payload}
+        case _:
+            return {}
+
+
+def _serialize_audit_log_event(event: dict[str, object], *, can_manage_elections: bool) -> dict[str, object]:
+    event_type = str(event.get("event_type") or "")
+    raw_payload = event.get("payload")
+    payload = cast(dict[str, object], raw_payload) if isinstance(raw_payload, dict) else {}
+    serialized = {
+        "timestamp": event["timestamp"].isoformat() if isinstance(event.get("timestamp"), datetime.datetime) else None,
+        "event_type": event_type,
+        "title": str(event.get("title") or ""),
+        "icon": str(event.get("icon") or ""),
+        "icon_bg": str(event.get("icon_bg") or ""),
+        "anchor": str(event.get("anchor") or "") or None,
+        "payload": _serialize_audit_log_payload_for_api(
+            event_type=event_type,
+            payload=payload,
+            can_manage_elections=can_manage_elections,
+        ),
+    }
+
+    if "ballot_date" in event:
+        serialized["ballot_date"] = str(event.get("ballot_date") or "")
+    if "ballots_count" in event:
+        serialized["ballots_count"] = int(event.get("ballots_count") or 0)
+    if "ballots_preview_truncated" in event:
+        serialized["ballots_preview_truncated"] = bool(event.get("ballots_preview_truncated"))
+    if "ballots_preview_limit" in event:
+        serialized["ballots_preview_limit"] = int(event.get("ballots_preview_limit") or 0)
+    if "first_timestamp" in event:
+        first_timestamp = event.get("first_timestamp")
+        serialized["first_timestamp"] = first_timestamp.isoformat() if isinstance(first_timestamp, datetime.datetime) else None
+    if "last_timestamp" in event:
+        last_timestamp = event.get("last_timestamp")
+        serialized["last_timestamp"] = last_timestamp.isoformat() if isinstance(last_timestamp, datetime.datetime) else None
+    if "summary_text" in event:
+        serialized["summary_text"] = str(event.get("summary_text") or "")
+    if "audit_text" in event:
+        serialized["audit_text"] = str(event.get("audit_text") or "")
+    if "round_rows" in event:
+        serialized["round_rows"] = _serialize_round_rows_for_api(event.get("round_rows"))
+    if "elected_users" in event:
+        serialized["elected_users"] = _serialize_elected_users_for_api(event.get("elected_users"))
+    if "ballot_entries" in event:
+        serialized["ballot_entries"] = [
+            {
+                "timestamp": ballot_entry["timestamp"].isoformat()
+                if isinstance(ballot_entry.get("timestamp"), datetime.datetime)
+                else None,
+                "ballot_hash": str(ballot_entry.get("ballot_hash") or ""),
+                "supersedes_ballot_hash": str(ballot_entry.get("supersedes_ballot_hash") or "") or None,
+            }
+            for ballot_entry in event.get("ballot_entries", [])
+            if isinstance(ballot_entry, dict)
+        ]
+
+    return serialized
+
+
+def _build_election_audit_log_context(request: HttpRequest, *, election: Election) -> dict[str, object]:
     candidates = list(
         Candidate.objects.filter(election=election).only("id", "freeipa_username").order_by("freeipa_username", "id")
     )
@@ -121,7 +262,6 @@ def election_audit_log(request, election_id: int):
     timeline_items.extend(non_ballot_entries)
 
     if can_manage_elections:
-        # Group ballot submissions by day for managers to keep the timeline readable.
         ballot_qs = audit_qs.filter(event_type="ballot_submitted")
         for row in (
             ballot_qs.annotate(day=TruncDate("timestamp"))
@@ -160,17 +300,10 @@ def election_audit_log(request, election_id: int):
             return (datetime.datetime.min.replace(tzinfo=timezone.get_current_timezone()), 0)
         return (item.timestamp, item.id)
 
-    # Sort newest-first to support "load older" navigation.
     timeline_items.sort(key=_timeline_sort_key, reverse=True)
 
-    page_raw = str(request.GET.get("page") or "1").strip()
-    try:
-        page_number = int(page_raw)
-    except ValueError:
-        page_number = 1
-
-    paginator = Paginator(timeline_items, 60)
-    page_obj = paginator.get_page(page_number)
+    page_items, page_ctx = paginate_detail_items(request, timeline_items, per_page=60)
+    page_obj = cast(Page, page_ctx["page_obj"])
 
     base_url = reverse("election-audit-log", args=[election.id])
 
@@ -199,7 +332,7 @@ def election_audit_log(request, election_id: int):
     ballot_preview_limit = 50
     if can_manage_elections:
         preview_dates: list[datetime.date] = []
-        for it in page_obj.object_list:
+        for it in page_items:
             if not isinstance(it, dict):
                 continue
             if str(it.get("event_type") or "") != "ballots_submitted_summary":
@@ -327,7 +460,7 @@ def election_audit_log(request, election_id: int):
     }
     anchors_added: set[str] = set()
 
-    for item in page_obj.object_list:
+    for item in page_items:
         if isinstance(item, dict):
             payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
             event_type = str(item.get("event_type") or "").strip() or "unknown"
@@ -369,7 +502,7 @@ def election_audit_log(request, election_id: int):
         event_type = str(entry.event_type or "").strip() or "unknown"
         icon, icon_bg = _icon_for_event(event_type)
 
-        event: dict[str, object] = {
+        event = {
             "timestamp": entry.timestamp,
             "event_type": event_type,
             "title": _title_for_event(event_type, payload),
@@ -466,26 +599,89 @@ def election_audit_log(request, election_id: int):
         users_by_username=users_by_username,
     )
 
-    return render(
-        request,
-        "core/election_audit_log.html",
+    return {
+        "election": election,
+        "can_manage_elections": can_manage_elections,
+        "events": events,
+        "jump_links": jump_links,
+        "newer_url": newer_url,
+        "older_url": older_url,
+        "page_obj": page_obj,
+        "candidates": candidates,
+        "ballots_cast": ballots_cast,
+        "votes_cast": votes_cast,
+        "tally_result": tally_result,
+        "quota": tally_result.get("quota"),
+        "tally_elected_users": tally_elected_users,
+        "empty_seats": empty_seats,
+        "sankey_flows": sankey_flows,
+        "sankey_elected_nodes": sankey_elected_nodes,
+        "sankey_eliminated_nodes": sankey_eliminated_nodes,
+        "audit_log_pagination": serialize_pagination(page_ctx),
+    }
+
+
+def _serialize_audit_summary(context: dict[str, object]) -> dict[str, object]:
+    return {
+        "ballots_cast": context["ballots_cast"],
+        "votes_cast": context["votes_cast"],
+        "quota": context["quota"],
+        "empty_seats": context["empty_seats"],
+        "tally_elected_users": _serialize_elected_users_for_api(context["tally_elected_users"]),
+        "sankey_flows": context["sankey_flows"],
+        "sankey_elected_nodes": context["sankey_elected_nodes"],
+        "sankey_eliminated_nodes": context["sankey_eliminated_nodes"],
+    }
+
+
+@require_GET
+def election_audit_log(request, election_id: int):
+    """Render a human-readable election audit log.
+
+    This page is meant to improve transparency and auditability by presenting
+    the election's public audit events (and, for election managers, private
+    events as well) in a chronological timeline.
+    """
+
+    election = _get_active_election(election_id)
+
+    if election.status not in {Election.Status.closed, Election.Status.tallied}:
+        raise Http404
+
+    return render(request, "core/election_audit_log.html", {"election": election})
+
+
+@require_GET
+def election_audit_log_api(request: HttpRequest, election_id: int) -> JsonResponse:
+    election = _get_active_election(election_id)
+
+    if election.status not in {Election.Status.closed, Election.Status.tallied}:
+        raise Http404
+
+    context = _build_election_audit_log_context(request, election=election)
+    return JsonResponse(
         {
-            "election": election,
-            "can_manage_elections": can_manage_elections,
-            "events": events,
-            "jump_links": jump_links,
-            "newer_url": newer_url,
-            "older_url": older_url,
-            "page_obj": page_obj,
-            "candidates": candidates,
-            "ballots_cast": ballots_cast,
-            "votes_cast": votes_cast,
-            "tally_result": tally_result,
-            "quota": tally_result.get("quota"),
-            "tally_elected_users": tally_elected_users,
-            "empty_seats": empty_seats,
-            "sankey_flows": sankey_flows,
-            "sankey_elected_nodes": sankey_elected_nodes,
-            "sankey_eliminated_nodes": sankey_eliminated_nodes,
-        },
+            "audit_log": {
+                "items": [
+                    _serialize_audit_log_event(
+                        event,
+                        can_manage_elections=bool(context["can_manage_elections"]),
+                    )
+                    for event in context["events"]
+                ],
+                "pagination": context["audit_log_pagination"],
+                "jump_links": context["jump_links"],
+            },
+        }
     )
+
+
+@require_GET
+def election_audit_summary_api(request: HttpRequest, election_id: int) -> JsonResponse:
+    election = _get_active_election(election_id)
+
+    if election.status not in {Election.Status.closed, Election.Status.tallied}:
+        raise Http404
+
+    context = _build_election_audit_log_context(request, election=election)
+    return JsonResponse({"summary": _serialize_audit_summary(context)})

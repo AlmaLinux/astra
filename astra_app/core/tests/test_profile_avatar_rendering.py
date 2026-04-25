@@ -1,4 +1,5 @@
 
+import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -54,13 +55,18 @@ class ProfileAvatarRenderingTests(TestCase):
             },
         )
 
-        with patch("core.views_users._get_full_user", autospec=True) as mocked_get_full_user:
+        with (
+            patch("core.views_users._get_full_user", autospec=True) as mocked_get_full_user,
+            patch("core.views_users._is_membership_committee_viewer", autospec=True, return_value=False),
+            patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]),
+            patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
+        ):
             mocked_get_full_user.return_value = fake_user
-            response = views_users.user_profile(request, "alice")
+            response = views_users.user_profile_api(request, "alice")
 
         self.assertEqual(response.status_code, 200)
-        content = response.content.decode("utf-8")
-        self.assertIn("gravatar.com/avatar", content)
+        payload = json.loads(response.content)
+        self.assertIn("gravatar.com/avatar", payload["summary"]["avatarUrl"])
 
     @override_settings(
         FREEIPA_HOST="ipa.test",
@@ -91,9 +97,15 @@ class ProfileAvatarRenderingTests(TestCase):
         # to a SimpleLazyObject.
         request.user = SimpleLazyObject(lambda: fu)
 
-        with patch("core.views_users._get_full_user", autospec=True) as mocked_get_full_user:
+        with (
+            patch("core.views_users._get_full_user", autospec=True) as mocked_get_full_user,
+            patch("core.views_users._is_membership_committee_viewer", autospec=True, return_value=False),
+            patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]),
+            patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
+        ):
             mocked_get_full_user.return_value = fu
-            response = views_users.user_profile(request, "alice")
+            response = views_users.user_profile_api(request, "alice")
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("gravatar.com/avatar", response.content.decode("utf-8"))
+        payload = json.loads(response.content)
+        self.assertIn("gravatar.com/avatar", payload["summary"]["avatarUrl"])

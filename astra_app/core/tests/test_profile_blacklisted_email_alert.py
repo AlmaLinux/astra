@@ -47,29 +47,28 @@ class ProfileBlacklistedEmailAlertTests(TestCase):
 
         # Self view: should see the alert + link.
         self._login_as_freeipa("bob")
-        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=fake_get):
-            resp = self.client.get(reverse("user-profile", kwargs={"username": "bob"}))
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=fake_get),
+            patch("core.views_users.FreeIPAGroup.all", return_value=[]),
+            patch("core.views_users.has_enabled_agreements", return_value=False),
+        ):
+            resp = self.client.get(reverse("api-user-profile", kwargs={"username": "bob"}))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'id="account-setup-required-alert"')
-        self.assertContains(resp, 'id="email-blacklisted-alert"')
-        self.assertContains(
-            resp,
-            "your address may have bounced or been marked as spam",
-            html=False,
-        )
-        self.assertContains(resp, "Update your email address", html=False)
-        self.assertContains(resp, f'href="{reverse("settings")}?tab=emails"')
+        required_actions = {action["id"]: action for action in resp.json()["accountSetup"]["requiredActions"]}
+        action = required_actions["email-blacklisted-alert"]
+        self.assertIn("your address may have bounced or been marked as spam", action["label"])
+        self.assertEqual(action["urlLabel"], "Update your email address")
+        self.assertEqual(action["url"], f'{reverse("settings")}?tab=emails')
 
         # Other user view: should not see the alert.
         self._login_as_freeipa("viewer")
-        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=fake_get):
-            resp = self.client.get(reverse("user-profile", kwargs={"username": "bob"}))
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=fake_get),
+            patch("core.views_users.FreeIPAGroup.all", return_value=[]),
+            patch("core.views_users.has_enabled_agreements", return_value=False),
+        ):
+            resp = self.client.get(reverse("api-user-profile", kwargs={"username": "bob"}))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertNotContains(resp, 'id="email-blacklisted-alert"')
-        self.assertNotContains(
-            resp,
-            "your address may have bounced or been marked as spam",
-            html=False,
-        )
+        self.assertEqual(resp.json()["accountSetup"]["requiredActions"], [])

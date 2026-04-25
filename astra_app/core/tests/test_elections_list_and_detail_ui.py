@@ -1,6 +1,5 @@
 
 import datetime
-import json
 from unittest.mock import patch
 
 from django.test import TestCase, override_settings
@@ -60,11 +59,18 @@ class ElectionsListDraftVisibilityTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(reverse("elections"))
+            api_resp = self.client.get(reverse("api-elections"), HTTP_ACCEPT="application/json")
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Published election")
+        self.assertContains(resp, 'data-elections-root')
+        self.assertContains(resp, reverse("api-elections"))
         self.assertNotContains(resp, "Draft election")
-        self.assertContains(resp, reverse("election-detail", args=[open_election.id]))
+        self.assertNotContains(resp, "Published election")
+
+        self.assertEqual(api_resp.status_code, 200)
+        payload = api_resp.json()
+        self.assertEqual([item["name"] for item in payload["items"]], ["Published election"])
+        self.assertEqual(payload["items"][0]["detail_url"], reverse("election-detail", args=[open_election.id]))
 
     def test_elections_list_shows_drafts_for_managers_and_links_to_edit(self) -> None:
         self._login_as_freeipa_user("admin")
@@ -101,11 +107,20 @@ class ElectionsListDraftVisibilityTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(reverse("elections"))
+            api_resp = self.client.get(reverse("api-elections"), HTTP_ACCEPT="application/json")
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Draft election")
-        self.assertContains(resp, reverse("election-edit", args=[draft_election.id]))
-        self.assertContains(resp, reverse("election-detail", args=[open_election.id]))
+        self.assertContains(resp, 'data-elections-root')
+        self.assertContains(resp, reverse("election-edit", args=[0]))
+        self.assertNotContains(resp, "Draft election")
+        self.assertNotContains(resp, "Published election")
+
+        self.assertEqual(api_resp.status_code, 200)
+        payload = api_resp.json()
+        names = [item["name"] for item in payload["items"]]
+        self.assertEqual(names, ["Draft election", "Published election"])
+        self.assertEqual(payload["items"][0]["edit_url"], reverse("election-edit", args=[draft_election.id]))
+        self.assertEqual(payload["items"][1]["detail_url"], reverse("election-detail", args=[open_election.id]))
 
 
 class ElectionsListGroupingTests(TestCase):
@@ -139,15 +154,17 @@ class ElectionsListGroupingTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             resp = self.client.get(reverse("elections"))
+            api_resp = self.client.get(reverse("api-elections"), HTTP_ACCEPT="application/json")
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Open elections")
-        self.assertContains(resp, "Past elections")
-        self.assertNotContains(resp, 'class="card card-outline card-secondary collapsed-card')
-        self.assertNotContains(resp, '<div class="card-body" style="display: none;">')
-        self.assertContains(resp, "Open election")
-        self.assertContains(resp, "Past election")
-        self.assertContains(resp, reverse("election-detail", args=[past_election.id]))
+        self.assertContains(resp, 'data-elections-root')
+        self.assertNotContains(resp, "Open election")
+        self.assertNotContains(resp, "Past election")
+
+        self.assertEqual(api_resp.status_code, 200)
+        payload = api_resp.json()
+        self.assertEqual([item["name"] for item in payload["items"]], ["Open election", "Past election"])
+        self.assertEqual(payload["items"][1]["detail_url"], reverse("election-detail", args=[past_election.id]))
 
 
 class ElectionsDeletedVisibilityTests(TestCase):
@@ -180,11 +197,16 @@ class ElectionsDeletedVisibilityTests(TestCase):
         viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "memberof_group": []})
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             resp = self.client.get(reverse("elections"))
+            api_resp = self.client.get(reverse("api-elections"), HTTP_ACCEPT="application/json")
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Visible election")
+        self.assertContains(resp, 'data-elections-root')
+        self.assertNotContains(resp, "Visible election")
         self.assertNotContains(resp, "Deleted election")
         self.assertNotContains(resp, reverse("election-detail", args=[deleted.id]))
+
+        self.assertEqual(api_resp.status_code, 200)
+        self.assertEqual([item["name"] for item in api_resp.json()["items"]], ["Visible election"])
 
     def test_elections_list_hides_deleted_for_managers(self) -> None:
         self._login_as_freeipa_user("admin")
@@ -215,11 +237,16 @@ class ElectionsDeletedVisibilityTests(TestCase):
         admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin):
             resp = self.client.get(reverse("elections"))
+            api_resp = self.client.get(reverse("api-elections"), HTTP_ACCEPT="application/json")
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Visible election")
+        self.assertContains(resp, 'data-elections-root')
+        self.assertNotContains(resp, "Visible election")
         self.assertNotContains(resp, "Deleted election")
         self.assertNotContains(resp, reverse("election-edit", args=[deleted.id]))
+
+        self.assertEqual(api_resp.status_code, 200)
+        self.assertEqual([item["name"] for item in api_resp.json()["items"]], ["Visible election"])
 
     def test_election_detail_returns_404_for_deleted(self) -> None:
         self._login_as_freeipa_user("viewer")
@@ -334,25 +361,32 @@ class ElectionDetailManagerUIStatsTests(TestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.elections_eligibility.FreeIPAUser.all", return_value=[]),
+            patch("core.elections_eligibility.snapshot_freeipa_users", return_value=[]),
         ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Participation")
-        self.assertContains(resp, "Number of unique voters")
-        self.assertContains(resp, "Votes cast")
-        self.assertContains(resp, "Quorum")
+        self.assertContains(resp, reverse("api-election-detail-info", args=[election.id]))
 
-        # ChartJS turnout timeline.
-        self.assertContains(resp, 'id="election-turnout-chart"')
-        self.assertContains(resp, 'id="election-turnout-chart-data"')
+        # ChartJS is still loaded for the Vue turnout timeline, but legacy static hooks are gone.
         self.assertContains(resp, 'src="/static/core/vendor/chartjs/chart.umd.min.js"')
-        self.assertContains(resp, "election_turnout_chart.js", html=False)
+        self.assertNotContains(resp, "election_turnout_chart.js", html=False)
         self.assertNotContains(resp, "cdn.jsdelivr.net/npm/chart.js")
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.elections_eligibility.snapshot_freeipa_users", return_value=[]),
+        ):
+            api_resp = self.client.get(reverse("api-election-detail-info", args=[election.id]))
+        self.assertEqual(api_resp.status_code, 200)
+        election_payload = api_resp.json()["election"]
+        self.assertTrue(election_payload["show_turnout_chart"])
+        self.assertEqual(election_payload["turnout_stats"]["participating_voter_count"], 1)
+        self.assertEqual(election_payload["turnout_stats"]["participating_vote_weight_total"], 2)
+        self.assertEqual(set(election_payload["turnout_chart_data"]), {"labels", "counts"})
 
     def test_election_voting_window_renders_in_users_timezone(self) -> None:
         # If the user has a FreeIPA timezone configured, our middleware activates it.
-        # The UI should therefore display election datetimes in that timezone.
+        # The API should therefore provide display datetimes in that timezone for Vue.
         start_utc = timezone.make_aware(datetime.datetime(2026, 1, 2, 12, 0, 0), timezone=timezone.UTC)
         end_utc = timezone.make_aware(datetime.datetime(2026, 1, 2, 14, 0, 0), timezone=timezone.UTC)
 
@@ -377,11 +411,16 @@ class ElectionDetailManagerUIStatsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
+            api_resp = self.client.get(reverse("api-election-detail-info", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, reverse("api-election-detail-info", args=[election.id]))
+
+        self.assertEqual(api_resp.status_code, 200)
+        payload = api_resp.json()["election"]
         # 12:00Z -> 13:00 Europe/Paris (winter), 14:00Z -> 15:00.
-        self.assertContains(resp, "2026-01-02 13:00")
-        self.assertContains(resp, "2026-01-02 15:00")
+        self.assertIn("2026-01-02 13:00", payload["start_datetime_display"])
+        self.assertIn("2026-01-02 15:00", payload["end_datetime_display"])
 
     def test_turnout_chart_includes_zero_days_since_start(self) -> None:
         today = datetime.date(2026, 1, 2)
@@ -431,23 +470,21 @@ class ElectionDetailManagerUIStatsTests(TestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=admin),
-            patch("core.elections_eligibility.FreeIPAUser.all", return_value=[]),
+            patch("core.elections_eligibility.snapshot_freeipa_users", return_value=[]),
             patch("core.views_elections.detail.timezone.localdate", side_effect=_localdate_side_effect),
         ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)
 
-        # Extract json_script payload.
-        marker = 'id="election-turnout-chart-data"'
-        html = resp.content.decode("utf-8")
-        idx = html.find(marker)
-        self.assertNotEqual(idx, -1)
-
-        # Very small/targeted parse: find the next '>' and the closing '</script>'.
-        start = html.find(">", idx)
-        end = html.find("</script>", start)
-        payload = json.loads(html[start + 1 : end])
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin),
+            patch("core.elections_eligibility.snapshot_freeipa_users", return_value=[]),
+            patch("core.views_elections.detail.timezone.localdate", side_effect=_localdate_side_effect),
+        ):
+            api_resp = self.client.get(reverse("api-election-detail-info", args=[election.id]))
+        self.assertEqual(api_resp.status_code, 200)
+        payload = api_resp.json()["election"]["turnout_chart_data"]
 
         self.assertEqual(
             payload.get("labels"),
@@ -501,21 +538,20 @@ class ElectionDetailManagerUIStatsTests(TestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=admin),
-            patch("core.elections_eligibility.FreeIPAUser.all", return_value=[]),
+            patch("core.elections_eligibility.snapshot_freeipa_users", return_value=[]),
             patch("core.views_elections.detail.timezone.localdate", side_effect=_localdate_side_effect),
         ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Participation")
-
-        marker = 'id="election-turnout-chart-data"'
-        html = resp.content.decode("utf-8")
-        idx = html.find(marker)
-        self.assertNotEqual(idx, -1)
-        start = html.find(">", idx)
-        end = html.find("</script>", start)
-        payload = json.loads(html[start + 1 : end])
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin),
+            patch("core.elections_eligibility.snapshot_freeipa_users", return_value=[]),
+            patch("core.views_elections.detail.timezone.localdate", side_effect=_localdate_side_effect),
+        ):
+            api_resp = self.client.get(reverse("api-election-detail-info", args=[election.id]))
+        self.assertEqual(api_resp.status_code, 200)
+        payload = api_resp.json()["election"]["turnout_chart_data"]
 
         # The chart should end at 2026-01-01 (election end), not 2026-01-02 (today).
         self.assertEqual(payload.get("labels"), ["2025-12-30", "2025-12-31", "2026-01-01"])
@@ -553,16 +589,21 @@ class ElectionDetailManagerUIStatsTests(TestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=admin),
-            patch("core.elections_eligibility.FreeIPAUser.all", return_value=[]),
+            patch("core.elections_eligibility.snapshot_freeipa_users", return_value=[]),
         ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Participation")
-        self.assertContains(resp, 'id="election-turnout-chart"')
-        self.assertContains(resp, 'id="election-turnout-chart-data"')
         self.assertContains(resp, 'src="/static/core/vendor/chartjs/chart.umd.min.js"')
-        self.assertContains(resp, "election_turnout_chart.js", html=False)
+        self.assertNotContains(resp, "election_turnout_chart.js", html=False)
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin),
+            patch("core.elections_eligibility.snapshot_freeipa_users", return_value=[]),
+        ):
+            api_resp = self.client.get(reverse("api-election-detail-info", args=[election.id]))
+        self.assertEqual(api_resp.status_code, 200)
+        self.assertTrue(api_resp.json()["election"]["show_turnout_chart"])
 
     @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=30)
     def test_ineligible_voters_render_with_modal_details_for_manager(self) -> None:
@@ -605,25 +646,28 @@ class ElectionDetailManagerUIStatsTests(TestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=admin),
-            patch("core.elections_eligibility.FreeIPAUser.all", return_value=freeipa_users),
+            patch("core.elections_eligibility.snapshot_freeipa_users", return_value=freeipa_users),
         ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
+            api_resp = self.client.get(
+                reverse("api-election-detail-ineligible-voters", args=[election.id]),
+                HTTP_ACCEPT="application/json",
+            )
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Eligible voters")
+        self.assertContains(resp, 'data-election-eligible-voters-root')
+        self.assertContains(resp, reverse("api-election-detail-eligible-voters", args=[election.id]))
+        self.assertContains(resp, reverse("api-election-detail-ineligible-voters", args=[election.id]))
+        self.assertNotContains(resp, "bob")
 
-        # New UI: managers can see ineligible voters and click to view details.
-        self.assertContains(resp, "Ineligible voters")
-        self.assertContains(resp, 'id="ineligible-voters-card"')
-        self.assertContains(resp, 'name="ineligible_q"')
-        self.assertContains(resp, 'id="ineligible-voter-details"')
-        self.assertContains(resp, "bob")
+        self.assertEqual(api_resp.status_code, 200)
+        payload = api_resp.json()
+        self.assertIn("bob", [item["username"] for item in payload["ineligible_voters"]["items"]])
 
-        # Modal should include the membership term start and election start date.
-        self.assertContains(resp, "Membership start")
-        self.assertContains(resp, "Election start")
-        self.assertContains(resp, "2026-02-01")
-        self.assertContains(resp, "2026-02-10")
+        details = payload["ineligible_voters"]["details_by_username"]["bob"]
+        self.assertEqual(details["reason"], "too_new")
+        self.assertEqual(details["term_start_date"], "2026-02-01")
+        self.assertEqual(details["election_start_date"], "2026-02-10")
 
     @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=30)
     def test_ineligible_voter_modal_preserves_zero_days_at_start(self) -> None:
@@ -664,16 +708,22 @@ class ElectionDetailManagerUIStatsTests(TestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=admin),
-            patch("core.elections_eligibility.FreeIPAUser.all", return_value=freeipa_users),
+            patch("core.elections_eligibility.snapshot_freeipa_users", return_value=freeipa_users),
         ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
+            api_resp = self.client.get(
+                reverse("api-election-detail-ineligible-voters", args=[election.id]),
+                HTTP_ACCEPT="application/json",
+            )
 
         self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'data-election-eligible-voters-root')
+        self.assertNotContains(resp, 'data-ineligible-voter-details-json-id="ineligible-voter-details"')
 
-        html = resp.content.decode("utf-8")
-        self.assertIn('"days_at_start": 0', html)
-        self.assertIn("d.days_at_start == null ? '' : d.days_at_start", html)
-        self.assertIn("d.days_short == null ? '' : d.days_short", html)
+        self.assertEqual(api_resp.status_code, 200)
+        details = api_resp.json()["ineligible_voters"]["details_by_username"]["bob"]
+        self.assertEqual(details["days_at_start"], 0)
+        self.assertEqual(details["days_short"], 30)
 
     @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=30)
     def test_ineligible_voters_card_is_visible_and_renders_when_empty_for_manager(self) -> None:
@@ -713,21 +763,22 @@ class ElectionDetailManagerUIStatsTests(TestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=admin),
-            patch("core.elections_eligibility.FreeIPAUser.all", return_value=freeipa_users),
+            patch("core.elections_eligibility.snapshot_freeipa_users", return_value=freeipa_users),
         ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
+            api_resp = self.client.get(
+                reverse("api-election-detail-ineligible-voters", args=[election.id]),
+                HTTP_ACCEPT="application/json",
+            )
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Ineligible voters")
-        self.assertContains(resp, 'id="ineligible-voters-card"')
-        self.assertContains(resp, "No ineligible voters found.")
+        self.assertContains(resp, 'data-election-eligible-voters-root')
+        self.assertNotContains(resp, "No ineligible voters found.")
 
-        html = resp.content.decode("utf-8")
-        idx = html.find('id="ineligible-voters-card"')
-        self.assertNotEqual(idx, -1)
-        card_snippet = html[idx : idx + 800]
-        self.assertIn("collapsed-card", card_snippet)
-        self.assertIn('style="display: none;"', card_snippet)
+        self.assertEqual(api_resp.status_code, 200)
+        payload = api_resp.json()
+        self.assertEqual(payload["ineligible_voters"]["items"], [])
+        self.assertEqual(payload["ineligible_voters"]["pagination"]["count"], 0)
 
     @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=30)
     def test_ineligible_voters_username_search_filters_before_pagination(self) -> None:
@@ -774,17 +825,17 @@ class ElectionDetailManagerUIStatsTests(TestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=admin),
-            patch("core.elections_eligibility.FreeIPAUser.all", return_value=freeipa_users),
+            patch("core.elections_eligibility.snapshot_freeipa_users", return_value=freeipa_users),
         ):
             resp = self.client.get(
-                reverse("election-detail", args=[election.id]),
-                {"ineligible_q": "bo"},
+                reverse("api-election-detail-ineligible-voters", args=[election.id]),
+                {"q": "bo"},
+                HTTP_ACCEPT="application/json",
             )
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'name="ineligible_q"')
-        self.assertContains(resp, "bob")
-        self.assertNotContains(resp, "alice")
+        payload = resp.json()
+        self.assertEqual([item["username"] for item in payload["ineligible_voters"]["items"]], ["bob"])
 
     def test_eligible_voters_username_search_filters_grid(self) -> None:
         now = timezone.make_aware(datetime.datetime(2026, 2, 1, 12, 0, 0))
@@ -830,18 +881,25 @@ class ElectionDetailManagerUIStatsTests(TestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=admin),
-            patch("core.elections_eligibility.FreeIPAUser.all", return_value=freeipa_users),
+            patch("core.elections_eligibility.snapshot_freeipa_users", return_value=freeipa_users),
         ):
             resp = self.client.get(
                 reverse("election-detail", args=[election.id]),
                 {"eligible_q": "ali"},
             )
+            api_resp = self.client.get(
+                reverse("api-election-detail-eligible-voters", args=[election.id]),
+                {"q": "ali"},
+                HTTP_ACCEPT="application/json",
+            )
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'name="eligible_q"')
-        self.assertContains(resp, 'value="ali"')
-        self.assertContains(resp, "alice")
-        self.assertNotContains(resp, "bob")
+        self.assertContains(resp, 'data-election-eligible-voters-root')
+        self.assertContains(resp, 'data-election-eligible-voters-api-url="/api/v1/elections/')
+        self.assertContains(resp, 'data-election-ineligible-voters-api-url="/api/v1/elections/')
+
+        self.assertEqual(api_resp.status_code, 200)
+        self.assertEqual([item["username"] for item in api_resp.json()["eligible_voters"]["items"]], ["alice"])
 
     def test_ineligible_voters_include_group_member_with_no_membership(self) -> None:
         now = timezone.make_aware(datetime.datetime(2026, 2, 1, 12, 0, 0))
@@ -876,16 +934,18 @@ class ElectionDetailManagerUIStatsTests(TestCase):
                 "core.elections_eligibility._freeipa_group_recursive_member_usernames",
                 return_value={"nomember"},
             ),
-            patch("core.elections_eligibility.FreeIPAUser.all", return_value=[]),
+            patch("core.elections_eligibility.snapshot_freeipa_users", return_value=[]),
             patch("core.views_elections.detail.timezone.now", return_value=now),
         ):
-            resp = self.client.get(reverse("election-detail", args=[election.id]))
+            resp = self.client.get(
+                reverse("api-election-detail-ineligible-voters", args=[election.id]),
+                HTTP_ACCEPT="application/json",
+            )
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Ineligible voters")
-        self.assertContains(resp, 'id="ineligible-voter-details"')
-        self.assertContains(resp, '"nomember"')
-        self.assertContains(resp, '"no_membership"')
+        payload = resp.json()["ineligible_voters"]
+        self.assertEqual([item["username"] for item in payload["items"]], ["nomember"])
+        self.assertEqual(payload["details_by_username"]["nomember"]["reason"], "no_membership")
 
     def test_ineligible_voters_include_freeipa_user_with_no_membership_when_no_group_cn(self) -> None:
         now = timezone.make_aware(datetime.datetime(2026, 2, 1, 12, 0, 0))
@@ -918,16 +978,18 @@ class ElectionDetailManagerUIStatsTests(TestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=admin),
-            patch("core.elections_eligibility.FreeIPAUser.all", return_value=freeipa_users),
+            patch("core.elections_eligibility.snapshot_freeipa_users", return_value=freeipa_users),
             patch("core.views_elections.detail.timezone.now", return_value=now),
         ):
-            resp = self.client.get(reverse("election-detail", args=[election.id]))
+            resp = self.client.get(
+                reverse("api-election-detail-ineligible-voters", args=[election.id]),
+                HTTP_ACCEPT="application/json",
+            )
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Ineligible voters")
-        self.assertContains(resp, 'id="ineligible-voter-details"')
-        self.assertContains(resp, '"nomember"')
-        self.assertContains(resp, '"no_membership"')
+        payload = resp.json()["ineligible_voters"]
+        self.assertEqual([item["username"] for item in payload["items"]], ["nomember"])
+        self.assertEqual(payload["details_by_username"]["nomember"]["reason"], "no_membership")
 
     def test_ineligible_voters_include_expired_membership_reason_expired(self) -> None:
         now = timezone.make_aware(datetime.datetime(2026, 2, 1, 12, 0, 0))
@@ -964,15 +1026,17 @@ class ElectionDetailManagerUIStatsTests(TestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=admin),
-            patch("core.elections_eligibility.FreeIPAUser.all", return_value=freeipa_users),
+            patch("core.elections_eligibility.snapshot_freeipa_users", return_value=freeipa_users),
         ):
-            resp = self.client.get(reverse("election-detail", args=[election.id]))
+            resp = self.client.get(
+                reverse("api-election-detail-ineligible-voters", args=[election.id]),
+                HTTP_ACCEPT="application/json",
+            )
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Ineligible voters")
-        self.assertContains(resp, 'id="ineligible-voter-details"')
-        self.assertContains(resp, '"expireduser"')
-        self.assertContains(resp, '"expired"')
+        payload = resp.json()["ineligible_voters"]
+        self.assertEqual([item["username"] for item in payload["items"]], ["expireduser"])
+        self.assertEqual(payload["details_by_username"]["expireduser"]["reason"], "expired")
 
     def test_exclusion_group_warning_renders_when_groups_exist(self) -> None:
         self._login_as_freeipa_user("admin")
@@ -1017,14 +1081,20 @@ class ElectionDetailManagerUIStatsTests(TestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.elections_eligibility.FreeIPAUser.all", return_value=[]),
+            patch("core.elections_eligibility.snapshot_freeipa_users", return_value=[]),
         ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
+            api_resp = self.client.get(reverse("api-election-detail-info", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Employees of X")
-        self.assertContains(resp, "exclusion group")
-        self.assertContains(resp, "only 1")
+        self.assertContains(resp, reverse("api-election-detail-info", args=[election.id]))
+
+        self.assertEqual(api_resp.status_code, 200)
+        messages = api_resp.json()["election"]["exclusion_group_messages"]
+        self.assertEqual(len(messages), 1)
+        self.assertIn("Employees of X", messages[0])
+        self.assertIn("exclusion group", messages[0])
+        self.assertIn("only 1 candidate", messages[0])
 
 
 @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=1)
@@ -1081,16 +1151,15 @@ class ElectionDetailConcludeElectionTests(TestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.elections_eligibility.FreeIPAUser.all", return_value=[]),
+            patch("core.elections_eligibility.snapshot_freeipa_users", return_value=[]),
         ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Conclude Election")
-        self.assertContains(resp, "Close election, but do not tally votes")
-        self.assertContains(resp, "Type the election name to confirm")
+        self.assertContains(resp, "data-election-conclude-action-root")
+        self.assertContains(resp, reverse("api-election-conclude", args=[election.id]))
         self.assertNotContains(resp, "Election ID")
-        self.assertContains(resp, 'id="conclude-submit"')
-        self.assertContains(resp, 'id="conclude-submit" disabled')
+        self.assertNotContains(resp, "_modal_name_confirm.html")
+        self.assertNotContains(resp, "bindNameConfirm")
 
     def test_conclude_post_closes_and_tallies_by_default(self) -> None:
         now = timezone.now()
@@ -1228,19 +1297,20 @@ class ElectionDetailExtendElectionTests(TestCase):
         admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=admin),
-            patch("core.elections_eligibility.FreeIPAUser.all", return_value=[]),
+            patch("core.elections_eligibility.snapshot_freeipa_users", return_value=[]),
         ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Extend Election")
-        self.assertContains(resp, "Conclude Election")
-        self.assertContains(resp, "Type the election name to confirm")
+        self.assertContains(resp, "data-election-extend-action-root")
+        self.assertContains(resp, "data-election-conclude-action-root")
+        self.assertContains(resp, reverse("api-election-extend-end", args=[election.id]))
+        self.assertContains(resp, reverse("api-election-conclude", args=[election.id]))
         self.assertNotContains(resp, "Election ID")
-        self.assertContains(resp, 'id="extend-submit"')
-        self.assertContains(resp, 'id="extend-submit" disabled')
+        self.assertNotContains(resp, "_modal_name_confirm.html")
+        self.assertNotContains(resp, "bindNameConfirm")
 
         body = resp.content.decode("utf-8")
-        self.assertLess(body.find("Extend Election"), body.find("Conclude Election"))
+        self.assertLess(body.find("data-election-extend-action-root"), body.find("data-election-conclude-action-root"))
 
     def test_extend_post_requires_new_end_after_current_and_logs_quota_status(self) -> None:
         now = timezone.now()

@@ -1,4 +1,5 @@
 
+import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -94,22 +95,24 @@ class FASIsPrivateAnonymizeTests(TestCase):
 
         with (
             patch("core.views_users._get_full_user", autospec=True, return_value=bob),
+            patch("core.views_users._is_membership_committee_viewer", autospec=True, return_value=False),
             patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]),
             patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
+            patch("core.views_users.resolve_avatar_urls_for_users", autospec=True, return_value=({}, 0, 0)),
         ):
-            resp = views_users.user_profile(request, "bob")
+            resp = views_users.user_profile_api(request, "bob")
 
         self.assertEqual(resp.status_code, 200)
-        html = resp.content.decode("utf-8")
+        payload = json.loads(resp.content)
 
         # Private data is redacted
-        self.assertNotIn("Bob User", html)
-        self.assertNotIn("they/them", html)
-        self.assertNotIn("example.invalid", html)
-        self.assertNotIn("bob@example.org", html)
+        self.assertNotEqual(payload["summary"]["fullName"], "Bob User")
+        self.assertEqual(payload["summary"]["pronouns"], "")
+        self.assertEqual(payload["summary"]["websiteUrls"], [])
+        self.assertEqual(payload["summary"]["email"], "")
 
         # Username remains visible
-        self.assertIn("bob", html)
+        self.assertEqual(payload["summary"]["username"], "bob")
 
     def test_user_profile_hides_membership_card_for_private_profile_non_committee_viewer(self) -> None:
         factory = RequestFactory()
@@ -142,13 +145,14 @@ class FASIsPrivateAnonymizeTests(TestCase):
             patch("core.views_users._get_full_user", autospec=True, return_value=bob),
             patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[fas_group]),
             patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
+            patch("core.views_users.resolve_avatar_urls_for_users", autospec=True, return_value=({}, 0, 0)),
         ):
-            resp = views_users.user_profile(request, "bob")
+            resp = views_users.user_profile_api(request, "bob")
 
         self.assertEqual(resp.status_code, 200)
-        html = resp.content.decode("utf-8")
-        self.assertNotIn("Membership</strong>", html)
-        self.assertIn("packagers", html)
+        payload = json.loads(resp.content)
+        self.assertFalse(payload["membership"]["showCard"])
+        self.assertEqual(payload["groups"]["groups"], [{"cn": "packagers", "role": "Member"}])
 
     def test_user_profile_shows_membership_card_for_private_profile_self_viewer(self) -> None:
         factory = RequestFactory()
@@ -179,12 +183,13 @@ class FASIsPrivateAnonymizeTests(TestCase):
             patch("core.views_users._get_full_user", autospec=True, return_value=bob),
             patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]),
             patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
+            patch("core.views_users.resolve_avatar_urls_for_users", autospec=True, return_value=({}, 0, 0)),
         ):
-            resp = views_users.user_profile(request, "bob")
+            resp = views_users.user_profile_api(request, "bob")
 
         self.assertEqual(resp.status_code, 200)
-        html = resp.content.decode("utf-8")
-        self.assertIn("Membership</strong>", html)
+        payload = json.loads(resp.content)
+        self.assertTrue(payload["membership"]["showCard"])
 
     def test_user_profile_shows_membership_card_for_private_profile_committee_viewer(self) -> None:
         factory = RequestFactory()
@@ -215,12 +220,13 @@ class FASIsPrivateAnonymizeTests(TestCase):
             patch("core.views_users._get_full_user", autospec=True, return_value=bob),
             patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]),
             patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
+            patch("core.views_users.resolve_avatar_urls_for_users", autospec=True, return_value=({}, 0, 0)),
         ):
-            resp = views_users.user_profile(request, "bob")
+            resp = views_users.user_profile_api(request, "bob")
 
         self.assertEqual(resp.status_code, 200)
-        html = resp.content.decode("utf-8")
-        self.assertIn("Membership</strong>", html)
+        payload = json.loads(resp.content)
+        self.assertTrue(payload["membership"]["showCard"])
 
     def test_user_profile_shows_email_for_private_profile_committee_viewer(self) -> None:
         factory = RequestFactory()
@@ -264,12 +270,13 @@ class FASIsPrivateAnonymizeTests(TestCase):
             patch("core.views_users.FreeIPAUser.get", autospec=True, return_value=full_profile),
             patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]),
             patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
+            patch("core.views_users.resolve_avatar_urls_for_users", autospec=True, return_value=({}, 0, 0)),
         ):
-            resp = views_users.user_profile(request, "bob")
+            resp = views_users.user_profile_api(request, "bob")
 
         self.assertEqual(resp.status_code, 200)
-        html = resp.content.decode("utf-8")
-        self.assertIn("bob@example.org", html)
+        payload = json.loads(resp.content)
+        self.assertEqual(payload["summary"]["email"], "bob@example.org")
 
     def test_user_profile_shows_membership_card_for_private_profile_committee_viewer_without_groups_list(self) -> None:
         factory = RequestFactory()
@@ -312,9 +319,10 @@ class FASIsPrivateAnonymizeTests(TestCase):
             ),
             patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]),
             patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
+            patch("core.views_users.resolve_avatar_urls_for_users", autospec=True, return_value=({}, 0, 0)),
         ):
-            resp = views_users.user_profile(request, "bob")
+            resp = views_users.user_profile_api(request, "bob")
 
         self.assertEqual(resp.status_code, 200)
-        html = resp.content.decode("utf-8")
-        self.assertIn("Membership</strong>", html)
+        payload = json.loads(resp.content)
+        self.assertTrue(payload["membership"]["showCard"])

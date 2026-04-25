@@ -2,6 +2,7 @@
 from unittest.mock import patch
 
 from django.test import TestCase
+from django.urls import reverse
 
 from core.freeipa.user import FreeIPAUser
 
@@ -23,8 +24,13 @@ class ProfileRenderingWithoutEmailTests(TestCase):
         # Missing mail should not crash avatar providers.
         self.assertEqual(fu.email, "")
 
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=fu):
-            resp = self.client.get(f"/user/{username}/")
+        with (
+            patch("core.views_users._get_full_user", return_value=fu),
+            patch("core.views_users._is_membership_committee_viewer", return_value=False),
+            patch("core.views_users.FreeIPAGroup.all", return_value=[]),
+            patch("core.views_users.has_enabled_agreements", return_value=False),
+        ):
+            resp = self.client.get(reverse("api-user-profile", args=[username]))
 
-        # Desired behavior: profile page should render even without an email.
+        # Desired behavior: profile API should render even without an email.
         self.assertEqual(resp.status_code, 200)

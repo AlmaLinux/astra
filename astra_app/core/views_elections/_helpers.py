@@ -1,7 +1,7 @@
 """Shared private helpers used across election view sub-modules."""
 
 import datetime
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 from django.http import Http404
@@ -22,11 +22,16 @@ class ElectionEndExtensionResult:
     errors: tuple[str, ...]
 
 
-def _extend_election_end_from_post(*, request, election: Election) -> ElectionEndExtensionResult:
+def _extend_election_end_from_post(
+    *,
+    request,
+    election: Election,
+    data: Mapping[str, object] | None = None,
+) -> ElectionEndExtensionResult:
     if election.status != Election.Status.open:
         return ElectionEndExtensionResult(success=False, errors=("Only open elections can be extended.",))
 
-    end_form = ElectionEndDateForm(request.POST, instance=election)
+    end_form = ElectionEndDateForm(data if data is not None else request.POST, instance=election)
     if not end_form.is_valid():
         errors = tuple(str(msg) for msg in end_form.errors.get("end_datetime", []))
         if not errors:

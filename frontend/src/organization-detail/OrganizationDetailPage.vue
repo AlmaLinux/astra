@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 
+import MembershipNotesCard from "../membership-requests/components/MembershipNotesCard.vue";
 import type {
   OrganizationDetailBootstrap,
   OrganizationDetailContactGroup,
@@ -109,6 +110,30 @@ onMounted(async () => {
             </div>
           </div>
 
+        </div>
+      </div>
+
+      <div v-if="payload.organization.notes" class="card organization-notes-card">
+        <div class="card-header">
+          <h3 class="card-title mb-0">
+            <i class="fas fa-sticky-note mr-1 text-muted" />
+            Membership notes
+          </h3>
+        </div>
+        <div class="card-body">
+          <MembershipNotesCard
+            :request-id="0"
+            :summary-url="payload.organization.notes.summaryUrl"
+            :detail-url="payload.organization.notes.detailUrl"
+            :add-url="payload.organization.notes.addUrl"
+            :csrf-token="payload.organization.notes.csrfToken"
+            :next-url="payload.organization.notes.nextUrl"
+            :can-view="payload.organization.notes.canView"
+            :can-write="payload.organization.notes.canWrite"
+            :can-vote="false"
+            :target-type="payload.organization.notes.targetType"
+            :target="payload.organization.notes.target"
+          />
         </div>
       </div>
 

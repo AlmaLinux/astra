@@ -25,6 +25,18 @@ export interface OrganizationDetailAddress {
   country_code: string;
 }
 
+export interface OrganizationDetailNotes {
+  summaryUrl: string;
+  detailUrl: string;
+  addUrl: string;
+  csrfToken: string;
+  nextUrl: string;
+  canView: boolean;
+  canWrite: boolean;
+  targetType: string;
+  target: string;
+}
+
 export interface OrganizationDetailOrganization {
   id: number;
   name: string;
@@ -36,6 +48,7 @@ export interface OrganizationDetailOrganization {
   representative: OrganizationDetailRepresentative;
   contact_groups: OrganizationDetailContactGroup[];
   address: OrganizationDetailAddress;
+  notes: OrganizationDetailNotes | null;
 }
 
 export interface OrganizationDetailResponse {

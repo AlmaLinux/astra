@@ -1,44 +1,27 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { mountUserProfileController, mountUserProfileGroupsPanel } from "../../entrypoints/userProfile";
+import { mountUserProfilePage } from "../../entrypoints/userProfile";
 
-describe("mountUserProfileController", () => {
+describe("mountUserProfilePage", () => {
   afterEach(() => {
     document.body.innerHTML = "";
+    vi.restoreAllMocks();
   });
 
-  it("mounts when the user profile root exists", () => {
+  it("mounts when the user profile API URL exists", () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ summary: null, groups: null, membership: null, accountSetup: { requiredActions: [], recommendedActions: [], recommendedDismissKey: "" } }))),
+    );
+
     const root = document.createElement("div");
     root.setAttribute("data-user-profile-root", "");
+    root.setAttribute("data-user-profile-api-url", "/api/v1/users/alice/profile");
     document.body.appendChild(root);
 
-    const app = mountUserProfileController(root);
+    const app = mountUserProfilePage(root);
 
     expect(app).not.toBeNull();
-    expect(root.querySelector("[data-user-profile-controller-root]"))?.not.toBeNull();
-  });
-
-  it("mounts groups panel when groups bootstrap exists", () => {
-    const script = document.createElement("script");
-    script.type = "application/json";
-    script.id = "user-profile-groups-bootstrap";
-    script.textContent = JSON.stringify({
-      username: "alice",
-      groups: [{ cn: "infra", role: "Member" }],
-      agreements: ["coc"],
-      missingAgreements: [],
-      isSelf: true,
-    });
-    document.body.appendChild(script);
-
-    const root = document.createElement("div");
-    root.setAttribute("data-user-profile-groups-root", "");
-    root.setAttribute("data-user-profile-bootstrap-id", "user-profile-groups-bootstrap");
-    document.body.appendChild(root);
-
-    const app = mountUserProfileGroupsPanel(root);
-
-    expect(app).not.toBeNull();
-    expect(root.querySelector("[data-user-profile-groups-root-vue]"))?.not.toBeNull();
+    expect(root.querySelector("[data-user-profile-page-vue-root]"))?.not.toBeNull();
   });
 });

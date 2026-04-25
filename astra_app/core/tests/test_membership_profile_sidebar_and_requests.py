@@ -124,11 +124,15 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             with patch("core.views_users._get_full_user", return_value=alice):
                 with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
                     with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
-                        resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
+                        resp = self.client.get(reverse("api-user-profile", args=["alice"]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Membership")
-        self.assertContains(resp, reverse("membership-request"))
+        membership = resp.json()["membership"]
+        self.assertTrue(membership["showCard"])
+        self.assertTrue(membership["canRequestAny"])
+        self.assertEqual(membership["requestUrl"], reverse("membership-request"))
+        self.assertEqual(membership["entries"], [])
+        self.assertEqual(membership["pendingEntries"], [])
 
     def test_profile_shows_pending_membership_request_greyed_out(self) -> None:
         from core.models import MembershipRequest, MembershipType
@@ -152,19 +156,15 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             with patch("core.views_users._get_full_user", return_value=alice):
                 with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
                     with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
-                        resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
+                        resp = self.client.get(reverse("api-user-profile", args=["alice"]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Under review")
-        self.assertContains(resp, "Individual")
-        self.assertContains(resp, "<div class=\"font-weight-bold\">Individual</div>", html=True)
-        self.assertContains(resp, f'href="{reverse("membership-request-self", args=[req.pk])}"')
-        self.assertContains(resp, f"Request #{req.pk}")
-        self.assertNotContains(
-            resp,
-            f'<a href="{reverse("membership-request-self", args=[req.pk])}">Individual</a>',
-            html=True,
-        )
+        [entry] = resp.json()["membership"]["pendingEntries"]
+        self.assertEqual(entry["badge"]["label"], "Under review")
+        self.assertEqual(entry["membershipType"]["name"], "Individual")
+        self.assertEqual(entry["requestId"], req.pk)
+        self.assertEqual(entry["requestUrl"], reverse("membership-request-self", args=[req.pk]))
+        self.assertEqual(entry["badge"]["url"], reverse("membership-request-self", args=[req.pk]))
 
     def test_committee_viewer_sees_in_review_badge_linked_to_request(self) -> None:
         from core.models import MembershipRequest, MembershipType
@@ -198,18 +198,15 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             with patch("core.views_users._get_full_user", return_value=alice):
                 with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
                     with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
-                        resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
+                        resp = self.client.get(reverse("api-user-profile", args=["alice"]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Under review")
-        self.assertContains(resp, f'href="{reverse("membership-request-detail", args=[req.pk])}"')
-        self.assertContains(resp, "<div class=\"font-weight-bold\">Individual</div>", html=True)
-        self.assertContains(resp, f"Request #{req.pk}")
-        self.assertNotContains(
-            resp,
-            f'<a href="{reverse("membership-request-detail", args=[req.pk])}">Individual</a>',
-            html=True,
-        )
+        [entry] = resp.json()["membership"]["pendingEntries"]
+        self.assertEqual(entry["badge"]["label"], "Under review")
+        self.assertEqual(entry["membershipType"]["name"], "Individual")
+        self.assertEqual(entry["requestId"], req.pk)
+        self.assertEqual(entry["requestUrl"], reverse("membership-request-detail", args=[req.pk]))
+        self.assertEqual(entry["badge"]["url"], reverse("membership-request-detail", args=[req.pk]))
 
     def test_committee_viewer_sees_active_badge_linked_to_request(self) -> None:
         from core.models import MembershipLog, MembershipRequest, MembershipType
@@ -260,12 +257,13 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             with patch("core.views_users._get_full_user", return_value=alice):
                 with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
                     with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
-                        resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
+                        resp = self.client.get(reverse("api-user-profile", args=["alice"]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "alx-status-badge--active")
-        self.assertContains(resp, "Individual")
-        self.assertContains(resp, f'href="{reverse("membership-request-detail", args=[req.pk])}"')
+        [entry] = resp.json()["membership"]["entries"]
+        self.assertIn("alx-status-badge--active", entry["badge"]["className"])
+        self.assertEqual(entry["membershipType"]["name"], "Individual")
+        self.assertEqual(entry["badge"]["url"], reverse("membership-request-detail", args=[req.pk]))
 
     def test_membership_badge_renders_active_without_expiry_label(self) -> None:
         expires_at = timezone.now() + datetime.timedelta(days=30)
@@ -342,9 +340,13 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             with patch("core.views_users._get_full_user", return_value=alice):
                 with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
                     with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
-                        resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
+                        with patch("core.views_users.resolve_avatar_urls_for_users", autospec=True, return_value=({}, 0, 0)):
+                            resp = self.client.get(reverse("api-user-profile", args=["alice"]))
 
         self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        entry = payload["membership"]["entries"][0]
+        management = entry["management"]
 
         set_expiry_url = reverse(
             "membership-set-expiry",
@@ -355,49 +357,15 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             kwargs={"username": "alice", "membership_type_code": "individual"},
         )
 
-        self.assertContains(resp, 'data-target="#expiry-modal-1"')
-        self.assertContains(resp, 'id="expiry-modal-1"')
-        self.assertContains(resp, f'action="{set_expiry_url}"')
-        self.assertContains(resp, "Edit expiration")
-
-        self.assertNotContains(resp, 'data-target="#terminate-modal-1"')
-        self.assertNotContains(resp, 'id="terminate-modal-1"')
-        self.assertContains(resp, f'action="{terminate_url}"')
-        self.assertContains(resp, "Manage membership: Individual for alice")
-        self.assertNotContains(resp, "Target:")
-        self.assertContains(resp, "Expiration date")
-        self.assertContains(resp, "Expiration is an end-of-day date in UTC.")
-        self.assertContains(resp, "Save expiration")
-        self.assertContains(resp, "Danger zone")
-        self.assertContains(resp, "Ends this membership early.")
-        self.assertContains(resp, "Terminate membership&hellip;", html=True)
-        self.assertContains(resp, 'data-target="#expiry-modal-1-terminate-collapse"')
-        self.assertContains(resp, 'id="expiry-modal-1-terminate-collapse"')
-        self.assertContains(resp, "This will end the membership early and cannot be undone.")
-        self.assertContains(resp, "Type the name to confirm")
-        self.assertContains(resp, 'placeholder="alice"')
-        self.assertContains(resp, 'data-terminate-target="alice"')
-        self.assertContains(resp, "Does not match. Type the name to enable termination (case-insensitive).")
-        self.assertContains(resp, 'data-terminate-action="cancel"')
-        self.assertContains(resp, "Cancel termination")
-        self.assertContains(resp, 'id="expiry-modal-1-terminate-submit"')
-        self.assertContains(resp, "disabled")
-        self.assertContains(resp, "aria-disabled=\"true\"")
-        self.assertContains(resp, "attr('data-terminate-target')")
-        self.assertContains(resp, "var modalId = 'expiry\\u002Dmodal\\u002D1';")
-        self.assertContains(resp, "var inputId = modalId + '-terminate-confirm-input';")
-        self.assertContains(resp, "var submitId = modalId + '-terminate-submit';")
-        self.assertContains(resp, "jq(document).on('input', '#' + inputId, function() {")
-        self.assertContains(resp, "var $input = jq(this);")
-        self.assertContains(resp, "jq(document).on('click', '[data-terminate-action=\"cancel\"]', function() {")
-        self.assertContains(resp, "jq(collapseSel).on('shown.bs.collapse', function() {")
-        self.assertContains(resp, "jq(collapseSel).on('hidden.bs.collapse', function() {")
-        self.assertContains(resp, "jq(modalSel).on('hidden.bs.modal', function() {")
-        self.assertContains(resp, "$submit.prop('disabled', !matches).attr('aria-disabled', !matches ? 'true' : 'false');")
-        self.assertNotContains(resp, "$input.off('input.terminate');")
-        self.assertNotContains(resp, "$input.on('input.terminate', updateConfirmState);")
-        self.assertNotContains(resp, "jq(collapseSel).on('click', '[data-terminate-action=\"cancel\"]', function () {")
-        self.assertNotContains(resp, "jq(modalSel).on('shown.bs.modal hidden.bs.modal', function () {")
+        self.assertEqual(entry["membershipType"]["name"], "Individual")
+        self.assertEqual(management["modalId"], "expiry-modal-1")
+        self.assertEqual(management["inputId"], "expires-on-1")
+        self.assertEqual(management["expiryActionUrl"], set_expiry_url)
+        self.assertEqual(management["terminateActionUrl"], terminate_url)
+        self.assertEqual(management["terminator"], "alice")
+        self.assertIn("csrfToken", management)
+        self.assertEqual(management["nextUrl"], reverse("api-user-profile", args=["alice"]))
+        self.assertIn("Current expiration:", management["currentText"])
         self.assertNotContains(resp, "function setDisabled(btn, disabled) {")
         self.assertNotContains(resp, "data-expiry-modal-state")
         self.assertNotContains(resp, 'data-expiry-action="go-confirm-terminate"')
@@ -437,12 +405,13 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             with patch("core.views_users._get_full_user", return_value=alice):
                 with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
                     with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
-                        resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
+                        resp = self.client.get(reverse("api-user-profile", args=["alice"]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Under review")
-        self.assertContains(resp, "Individual")
-        self.assertContains(resp, "Mirror")
+        pending_names = [entry["membershipType"]["name"] for entry in resp.json()["membership"]["pendingEntries"]]
+        pending_badges = [entry["badge"]["label"] for entry in resp.json()["membership"]["pendingEntries"]]
+        self.assertEqual(pending_names, ["Individual", "Mirror"])
+        self.assertEqual(pending_badges, ["Under review", "Under review"])
 
     def test_profile_shows_extend_button_when_membership_expires_soon(self) -> None:
         from core.models import MembershipLog, MembershipType
@@ -475,11 +444,12 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             with patch("core.views_users._get_full_user", return_value=alice):
                 with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
                     with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
-                        resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
+                        resp = self.client.get(reverse("api-user-profile", args=["alice"]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Request renewal")
-        self.assertContains(resp, reverse("membership-request") + "?membership_type=individual")
+        [entry] = resp.json()["membership"]["entries"]
+        self.assertEqual(entry["membershipType"]["name"], "Individual")
+        self.assertEqual(entry["renewUrl"], reverse("membership-request") + "?membership_type=individual")
 
         # Verify prefill: visiting with ?membership_type=individual should select that option.
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
@@ -532,12 +502,14 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             with patch("core.views_users._get_full_user", return_value=alice):
                 with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
                     with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
-                        resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
+                        resp = self.client.get(reverse("api-user-profile", args=["alice"]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Change tier")
-        self.assertContains(resp, reverse("membership-request") + "?membership_type=individual")
-        self.assertNotContains(resp, "Request membership")
+        membership = resp.json()["membership"]
+        [entry] = membership["entries"]
+        self.assertEqual(entry["membershipType"]["name"], "Individual")
+        self.assertEqual(entry["tierChangeUrl"], reverse("membership-request") + "?membership_type=individual")
+        self.assertFalse(membership["canRequestAny"])
 
     def test_membership_request_prefills_mirror_type(self) -> None:
         """When ?membership_type=mirror is passed, the mirror option should be selected."""
@@ -699,10 +671,10 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             with patch("core.views_users._get_full_user", return_value=alice):
                 with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
                     with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
-                        resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
+                        resp = self.client.get(reverse("api-user-profile", args=["alice"]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertNotContains(resp, 'class="btn btn-sm btn-outline-primary">Request</a>')
+        self.assertFalse(resp.json()["membership"]["canRequestAny"])
 
     def test_committee_can_terminate_membership_early_and_it_is_logged(self) -> None:
         from core.models import MembershipLog, MembershipType
@@ -922,7 +894,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
         reviewer = self._make_user("reviewer", full_name="Reviewer Person", groups=[committee_cn])
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, *, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             return None
@@ -977,22 +949,20 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             patch("core.views_users._get_full_user", return_value=alice),
             patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]),
             patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
+            patch("core.views_users.resolve_avatar_urls_for_users", autospec=True, return_value=({}, 0, 0)),
         ):
-            resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
+            resp = self.client.get(reverse("api-user-profile", args=["alice"]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'data-membership-notes-aggregate-root="user"')
-        self.assertContains(
-            resp,
-            reverse("api-membership-notes-aggregate-summary") + f"?target_type=user&target={alice.username}",
-        )
-        self.assertContains(
-            resp,
-            reverse("api-membership-notes-aggregate") + f"?target_type=user&target={alice.username}",
-        )
-        self.assertContains(resp, reverse("api-membership-notes-aggregate-add"))
-        self.assertNotContains(resp, "Needs manual review")
-        self.assertNotContains(resp, f"(req. #{req.pk})")
+        payload = resp.json()
+        notes = payload["membership"]["notes"]
+        self.assertEqual(notes["summaryUrl"], reverse("api-membership-notes-aggregate-summary") + f"?target_type=user&target={alice.username}")
+        self.assertEqual(notes["detailUrl"], reverse("api-membership-notes-aggregate") + f"?target_type=user&target={alice.username}")
+        self.assertEqual(notes["addUrl"], reverse("api-membership-notes-aggregate-add"))
+        self.assertTrue(notes["canView"])
+        self.assertTrue(notes["canWrite"])
+        self.assertNotIn("Needs manual review", str(payload))
+        self.assertNotIn(f"(req. #{req.pk})", str(payload))
 
     def test_profile_hides_status_note_without_membership_view_perm(self) -> None:
         from core.models import MembershipRequest, MembershipType, Note
@@ -1030,12 +1000,14 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             patch("core.views_users._get_full_user", return_value=alice),
             patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]),
             patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
+            patch("core.views_users.resolve_avatar_urls_for_users", autospec=True, return_value=({}, 0, 0)),
         ):
-            resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
+            resp = self.client.get(reverse("api-user-profile", args=["alice"]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertNotContains(resp, "Membership Committee Notes")
-        self.assertNotContains(resp, "Hidden note")
+        payload = resp.json()
+        self.assertIsNone(payload["membership"]["notes"])
+        self.assertNotIn("Hidden note", str(payload))
 
     def test_profile_aggregate_notes_read_only_hides_compose_and_denies_post(self) -> None:
         from core.models import MembershipRequest, MembershipType, Note
@@ -1102,21 +1074,19 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             patch("core.views_users._get_full_user", return_value=alice),
             patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]),
             patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
+            patch("core.views_users.resolve_avatar_urls_for_users", autospec=True, return_value=({}, 0, 0)),
         ):
-            resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
+            resp = self.client.get(reverse("api-user-profile", args=["alice"]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'data-membership-notes-aggregate-root="user"')
-        self.assertContains(
-            resp,
-            reverse("api-membership-notes-aggregate-summary") + "?target_type=user&target=alice",
-        )
-        self.assertContains(
-            resp,
-            reverse("api-membership-notes-aggregate") + "?target_type=user&target=alice",
-        )
-        self.assertContains(resp, reverse("api-membership-notes-aggregate-add"))
-        self.assertNotContains(resp, "Older note")
+        payload = resp.json()
+        notes = payload["membership"]["notes"]
+        self.assertEqual(notes["summaryUrl"], reverse("api-membership-notes-aggregate-summary") + "?target_type=user&target=alice")
+        self.assertEqual(notes["detailUrl"], reverse("api-membership-notes-aggregate") + "?target_type=user&target=alice")
+        self.assertEqual(notes["addUrl"], reverse("api-membership-notes-aggregate-add"))
+        self.assertTrue(notes["canView"])
+        self.assertFalse(notes["canWrite"])
+        self.assertNotIn("Older note", str(payload))
 
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.post(
@@ -1576,16 +1546,17 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             ).exists()
         )
 
-    def test_user_profile_template_uses_pending_request_badge_include(self) -> None:
+    def test_user_profile_template_uses_vue_shell_without_membership_include(self) -> None:
         template_path = Path(__file__).resolve().parents[1] / "templates" / "core" / "user_profile.html"
         source = template_path.read_text(encoding="utf-8")
-        self.assertIn("{% include 'core/_membership_profile_section.html'", source)
+        self.assertIn("data-user-profile-root", source)
+        self.assertIn("data-user-profile-api-url", source)
+        self.assertNotIn("{% include 'core/_membership_profile_section.html'", source)
 
         section_template_path = (
             Path(__file__).resolve().parents[1] / "templates" / "core" / "_membership_profile_section.html"
         )
-        section_source = section_template_path.read_text(encoding="utf-8")
-        self.assertIn("{% include 'core/_membership_badge.html'", section_source)
+        self.assertFalse(section_template_path.exists())
 
     def test_membership_request_detail_linkifies_mirror_url_responses(self) -> None:
         from core.models import MembershipRequest, MembershipType
@@ -1825,10 +1796,10 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             with patch("core.views_users._get_full_user", return_value=alice):
                 with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
                     with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
-                        resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
+                        resp = self.client.get(reverse("api-user-profile", args=["alice"]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, f"{reverse('membership-audit-log')}?username=alice")
+        self.assertEqual(resp.json()["membership"]["historyUrl"], f"{reverse('membership-audit-log')}?username=alice")
 
     def test_profile_hides_renewal_button_when_pending_request_exists_for_same_type(self) -> None:
         """When an expiring-soon membership already has a pending renewal request,
@@ -1871,13 +1842,12 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             with patch("core.views_users._get_full_user", return_value=alice):
                 with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
                     with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
-                        resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
+                        resp = self.client.get(reverse("api-user-profile", args=["alice"]))
 
         self.assertEqual(resp.status_code, 200)
-        # The renewal button must NOT appear — they already requested it.
-        self.assertNotContains(resp, "Request renewal")
-        # But the membership should still be listed.
-        self.assertContains(resp, "Individual")
+        [entry] = resp.json()["membership"]["entries"]
+        self.assertEqual(entry["membershipType"]["name"], "Individual")
+        self.assertEqual(entry["renewUrl"], "")
 
     def test_profile_hides_renewal_button_when_on_hold_request_exists_for_same_type(self) -> None:
         """Same as above, but with an on_hold request instead of pending."""
@@ -1917,11 +1887,12 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             with patch("core.views_users._get_full_user", return_value=alice):
                 with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
                     with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
-                        resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
+                        resp = self.client.get(reverse("api-user-profile", args=["alice"]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertNotContains(resp, "Request renewal")
-        self.assertContains(resp, "Individual")
+        [entry] = resp.json()["membership"]["entries"]
+        self.assertEqual(entry["membershipType"]["name"], "Individual")
+        self.assertEqual(entry["renewUrl"], "")
 
     def test_profile_shows_renewal_button_when_no_pending_request_for_type(self) -> None:
         """A pending request for a DIFFERENT type should not suppress the button."""
@@ -1972,10 +1943,11 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             with patch("core.views_users._get_full_user", return_value=alice):
                 with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
                     with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
-                        resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
+                        resp = self.client.get(reverse("api-user-profile", args=["alice"]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Request renewal")
+        [entry] = resp.json()["membership"]["entries"]
+        self.assertEqual(entry["renewUrl"], reverse("membership-request") + "?membership_type=individual")
 
     def test_profile_shows_expiry_in_users_timezone(self) -> None:
         import datetime
@@ -2027,10 +1999,11 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             with patch("core.views_users._get_full_user", return_value=alice):
                 with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
                     with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
-                        resp = self.client.get(reverse("user-profile", kwargs={"username": "alice"}))
+                        resp = self.client.get(reverse("api-user-profile", args=["alice"]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "(Australia/Brisbane)")
+        [entry] = resp.json()["membership"]["entries"]
+        self.assertIn("(Australia/Brisbane)", entry["expiresLabel"])
 
     def test_membership_request_shows_no_types_message_when_all_types_blocked(self) -> None:
         """When a user already holds all available individual membership types, the

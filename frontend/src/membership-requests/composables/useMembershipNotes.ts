@@ -11,6 +11,8 @@ interface UseMembershipNotesOptions {
   nextUrl: string;
   canView: boolean;
   initialOpen?: boolean;
+  targetType?: string;
+  target?: string;
 }
 
 export function useMembershipNotes(options: UseMembershipNotesOptions) {
@@ -83,6 +85,10 @@ export function useMembershipNotes(options: UseMembershipNotesOptions) {
       message,
       next: options.nextUrl,
     });
+    if (options.targetType && options.target) {
+      body.set("target_type", options.targetType);
+      body.set("target", options.target);
+    }
     const response = await fetch(options.addUrl, {
       method: "POST",
       headers: {

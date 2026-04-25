@@ -1,10 +1,12 @@
 {% extends 'core/base.html' %}
-{% load static %}
+{% load static django_vite %}
 
 {% block title %}Election edit{% endblock %}
 
 {% block extra_head %}
   {{ block.super }}
+  {% vite_hmr_client %}
+  {% vite_asset 'src/entrypoints/electionEdit.ts' %}
   <link rel="stylesheet" href="{% static 'admin/css/vendor/select2/select2.css' %}">
   <link rel="stylesheet" href="{% static 'core/css/select2_overrides.css' %}">
   {% include 'core/_templated_email_compose_assets_head.html' %}
@@ -25,6 +27,7 @@
 {% endblock %}
 
 {% block content %}
+  <div data-election-edit-root></div>
   <form method="post" id="election-edit-form" {% include 'core/_form_validation_attrs.html' with form=details_form %}>
     {% csrf_token %}
     <input type="hidden" name="action" id="election-edit-action" value="" />
@@ -333,5 +336,4 @@
   {{ block.super }}
   <script src="{% static 'admin/js/vendor/select2/select2.full.js' %}"></script>
   {% include 'core/_templated_email_compose_assets_scripts.html' %}
-  <script src="{% static 'core/js/election_edit.js' %}"></script>
 {% endblock %}

@@ -239,3 +239,30 @@ class OrganizationsVueTests(TestCase):
         payload = json.loads(response.content)
         badges = payload["sponsor_card"]["items"][0]["memberships"]
         self.assertEqual([badge["label"] for badge in badges], ["Sponsor", "Mirror"])
+
+    def test_organizations_api_uses_shared_pagination_serializer_for_cards(self) -> None:
+        mirror_type, sponsor_type = self._ensure_org_membership_types()
+        self._login_as_freeipa_user("alice")
+
+        sponsor_org = Organization.objects.create(name="Sponsor Org", representative="bob")
+        mirror_org = Organization.objects.create(name="Mirror Org", representative="carol")
+        Membership.objects.create(target_organization=sponsor_org, membership_type=sponsor_type)
+        Membership.objects.create(target_organization=mirror_org, membership_type=mirror_type)
+
+        viewer = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer),
+            patch(
+                "core.views_organizations.serialize_pagination",
+                wraps=lambda page_ctx: {"count": 123},
+                create=True,
+            ) as serialize_mock,
+        ):
+            response = self.client.get(reverse("api-organizations"), HTTP_ACCEPT="application/json")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        self.assertEqual(payload["sponsor_card"]["pagination"], {"count": 123})
+        self.assertEqual(payload["mirror_card"]["pagination"], {"count": 123})
+        self.assertEqual(serialize_mock.call_count, 2)

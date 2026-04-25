@@ -1,8 +1,10 @@
 """Ballot verification view."""
 
 import re
+from typing import Any
 
 from django.conf import settings
+from django.http import JsonResponse
 from django.shortcuts import render
 from django.urls import reverse
 from django.views.decorators.http import require_GET
@@ -13,8 +15,7 @@ from core.rate_limit import allow_request
 _RECEIPT_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
-@require_GET
-def ballot_verify(request):
+def _ballot_verify_context(request) -> tuple[dict[str, Any], int]:
     receipt_raw = str(request.GET.get("receipt") or "").strip()
     receipt = receipt_raw.lower()
 
@@ -29,9 +30,7 @@ def ballot_verify(request):
         limit=settings.ELECTION_RATE_LIMIT_BALLOT_VERIFY_LIMIT,
         window_seconds=settings.ELECTION_RATE_LIMIT_BALLOT_VERIFY_WINDOW_SECONDS,
     ):
-        return render(
-            request,
-            "core/ballot_verify.html",
+        return (
             {
                 "receipt": receipt_raw,
                 "has_query": has_query,
@@ -45,8 +44,9 @@ def ballot_verify(request):
                 "public_ballots_url": "",
                 "audit_log_url": "",
                 "rate_limited": True,
+                "verification_snippet": "",
             },
-            status=429,
+            429,
         )
 
     ballot: Ballot | None = None
@@ -76,19 +76,15 @@ def ballot_verify(request):
     is_superseded = bool(ballot is not None and ballot.superseded_by_id)
     is_final_ballot = bool(found and not is_superseded)
 
-    # Privacy guardrail: never reveal ranking, IPs, or precise timestamps.
     submitted_date = ballot.created_at.date().isoformat() if ballot is not None else ""
 
+    has_public_verification = election is not None and election.status in {Election.Status.closed, Election.Status.tallied}
     public_ballots_url = ""
-    if election is not None and election.status == Election.Status.tallied:
+    if election is not None and has_public_verification:
         public_ballots_url = election.public_ballots_file.url if election.public_ballots_file else reverse(
             "election-public-ballots", args=[election.id]
         )
-    audit_log_url = (
-        reverse("election-audit-log", args=[election.id])
-        if election is not None and election.status == Election.Status.tallied
-        else ""
-    )
+    audit_log_url = reverse("election-audit-log", args=[election.id]) if election is not None and has_public_verification else ""
 
     verification_snippet = ""
     if found and election is not None and ballot is not None:
@@ -108,9 +104,7 @@ def ballot_verify(request):
 
         verification_snippet = "\n".join(lines)
 
-    return render(
-        request,
-        "core/ballot_verify.html",
+    return (
         {
             "receipt": receipt_raw,
             "has_query": has_query,
@@ -126,4 +120,42 @@ def ballot_verify(request):
             "rate_limited": False,
             "verification_snippet": verification_snippet,
         },
+        200,
+    )
+
+
+@require_GET
+def ballot_verify(request):
+    return render(request, "core/ballot_verify.html")
+
+
+@require_GET
+def ballot_verify_api(request):
+    context, status_code = _ballot_verify_context(request)
+    election = context["election"]
+    return JsonResponse(
+        {
+            "receipt": context["receipt"],
+            "has_query": context["has_query"],
+            "is_valid_receipt": context["is_valid_receipt"],
+            "found": context["found"],
+            "election": (
+                {
+                    "id": election.id,
+                    "name": election.name,
+                    "detail_url": reverse("election-detail", args=[election.id]),
+                }
+                if election is not None
+                else None
+            ),
+            "election_status": context["election_status"],
+            "submitted_date": context["submitted_date"],
+            "is_superseded": context["is_superseded"],
+            "is_final_ballot": context["is_final_ballot"],
+            "public_ballots_url": context["public_ballots_url"],
+            "audit_log_url": context["audit_log_url"],
+            "rate_limited": context["rate_limited"],
+            "verification_snippet": context["verification_snippet"],
+        },
+        status=status_code,
     )

@@ -73,9 +73,13 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
+            api_resp = self.client.get(reverse("api-election-detail-info", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "viewer@example.com")
+        self.assertContains(resp, reverse("api-election-detail-info", args=[election.id]))
+
+        self.assertEqual(api_resp.status_code, 200)
+        self.assertEqual(api_resp.json()["election"]["viewer_email"], "viewer@example.com")
 
     def test_shows_eligible_voters_and_allows_resend(self) -> None:
         self._login_as_freeipa_user("viewer")
@@ -139,11 +143,16 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
+            api_resp = self.client.get(reverse("api-election-detail-eligible-voters", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Eligible voters")
-        self.assertContains(resp, ">alice<")
-        self.assertContains(resp, "Resend voting credential")
+        self.assertContains(resp, reverse("api-election-detail-eligible-voters", args=[election.id]))
+        self.assertContains(resp, reverse("api-election-send-mail-credentials", args=[election.id]))
+
+        self.assertEqual(api_resp.status_code, 200)
+        payload = api_resp.json()["eligible_voters"]
+        self.assertEqual([item["username"] for item in payload["items"]], ["alice"])
+        self.assertEqual(payload["usernames"], ["alice"])
 
     def test_resend_all_credentials_opens_send_mail_with_voting_credential_context(self) -> None:
         self._login_as_freeipa_user("viewer")
@@ -182,7 +191,7 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
             weight=1,
         )
 
-        def _get_user(username: str):
+        def _get_user(username: str, respect_privacy: bool = True):
             if username == "alice":
                 return FreeIPAUser(
                     "alice",
@@ -254,7 +263,7 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
             weight=1,
         )
 
-        def _get_user(username: str):
+        def _get_user(username: str, respect_privacy: bool = True):
             return FreeIPAUser(username, {"uid": [username], "mail": [f"{username}@example.com"], "memberof_group": []})
 
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
@@ -442,7 +451,7 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
             },
         )
 
-        def _get_user(username: str):
+        def _get_user(username: str, respect_privacy: bool = True):
             if username == "viewer":
                 return viewer
             if username == "alice":

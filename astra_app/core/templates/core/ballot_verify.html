@@ -1,146 +1,22 @@
 {% extends 'core/base.html' %}
 
-{% load static %}
+{% load django_vite static %}
 
 {% block title %}Verify ballot receipt{% endblock %}
 
 {% block header %}<h1 class="m-0">Verify ballot receipt</h1>{% endblock %}
 
+{% block extra_head %}
+  {% vite_hmr_client %}
+  {% vite_asset 'src/entrypoints/ballotVerify.ts' %}
+{% endblock %}
+
 {% block content %}
-<div class="row justify-content-center">
-  <div class="col-md-10 col-lg-8">
-    <div class="card card-primary">
-      <div class="card-header">
-        <h3 class="card-title">Ballot receipt verification</h3>
-      </div>
-
-      <div class="card-body">
-        {% if rate_limited %}
-          <div class="alert alert-danger" role="alert">
-            <strong>Too many verification requests.</strong> Please wait a moment and try again.
-          </div>
-        {% endif %}
-
-        <p class="text-muted">
-          Enter the 64-character receipt you received after submitting your ballot. This page confirms whether a ballot
-          with that receipt is recorded. It does not show your selections, your identity, or exact timestamps.
-        </p>
-
-        <p class="text-muted">
-          After the election closes, we will publish an anonymized ballots ledger and a public audit log so the final result can be independently verified. The winner calculation uses <strong>Meek STV (High-Precision Variant)</strong>, implemented with <strong>80-digit precision</strong> to eliminate rounding ambiguity and ensure deterministic recounts.
-        </p>
-
-        <div class="alert alert-info" role="alert">
-          <strong>Local verification scripts</strong>
-          <ul>
-            <li>Recompute your ballot hash locally: <a href="{% static 'verify-ballot-hash.py' %}" download>Download verify-ballot-hash.py</a></li>
-            <li>Verify the public ballot chain after the election closes: <a href="{% static 'verify-ballot-chain.py' %}" download>Download verify-ballot-chain.py</a></li>
-            <li>Verify Rekor audit-log attestations after the election closes: <a href="{% static 'verify-audit-log.py' %}" download>Download verify-audit-log.py</a></li>
-          </ul>
-        </div>
-
-        <form method="get" action="{% url 'ballot-verify' %}" class="mb-4" novalidate>
-          <div class="form-group">
-            <label for="id_receipt">Ballot receipt code</label>
-            <input
-              type="text"
-              class="form-control"
-              id="id_receipt"
-              name="receipt"
-              value="{{ receipt|default:'' }}"
-              placeholder="64-character lowercase hex"
-              autocomplete="off"
-              spellcheck="false"
-            />
-          </div>
-
-          <button type="submit" class="btn btn-primary" title="Check receipt in the ballot ledger">Verify</button>
-        </form>
-
-        {% if has_query %}
-          {% if not is_valid_receipt %}
-            <div class="alert alert-danger" role="alert">
-              <strong>Invalid receipt.</strong> Please enter a 64-character lowercase hex value.
-            </div>
-          {% elif not found %}
-            <div class="alert alert-warning" role="alert">
-              <strong>No ballot with this receipt was found.</strong>
-            </div>
-          {% else %}
-            <div class="card">
-              <div class="card-body">
-                <h5>Ballot status</h5>
-                <div class="alert alert-success mb-3" role="alert">
-                  Yes — a ballot with this receipt is recorded for this election.
-                </div>
-
-                <h5>Tally status</h5>
-                {% if election_status == 'open' %}
-                  <p>
-                    This election is still open, so the final tally is not available yet. We will not report whether any ballot
-                    is included in the final tally until after the election closes.
-                  </p>
-                {% elif election_status == 'closed' %}
-                  {% if is_superseded %}
-                    <p>
-                      This ballot was replaced by a later submission from the same voter and will not be included in the upcoming tally.
-                    </p>
-                  {% else %}
-                    <p>This ballot is recorded and locked and will be included in the upcoming tally.</p>
-                  {% endif %}
-                {% elif election_status == 'tallied' %}
-                  {% if is_superseded %}
-                    <p>
-                      This ballot was replaced by a later submission from the same voter and was not included in the final tally.
-                    </p>
-                  {% else %}
-                    <p>This ballot was included in the final tally.</p>
-                  {% endif %}
-
-                  {% if public_ballots_url or audit_log_url %}
-                    <h5>Public verification</h5>
-                    <ul>
-                      {% if public_ballots_url %}
-                        <li><a href="{{ public_ballots_url }}">Public ballots ledger (JSON)</a></li>
-                      {% endif %}
-                      {% if audit_log_url %}
-                        <li><a href="{{ audit_log_url }}">Audit log</a></li>
-                      {% endif %}
-                    </ul>
-                  {% endif %}
-                {% endif %}
-
-                <h5>Ballot Information</h5>
-                <ul>
-                  <li><strong>Election:</strong> <a href="{% url 'election-detail' election.id %}">{{ election.name }}</a></li>
-                  <li><strong>Election status:</strong> {{ election_status }}</li>
-                  <li><strong>Submission date:</strong> {{ submitted_date }}</li>
-                  <li>
-                    <strong>Ballot status:</strong>
-                    {% if is_superseded %}
-                      Superseded (replaced by a later submission)
-                    {% else %}
-                      Final ballot submission
-                    {% endif %}
-                  </li>
-                </ul>
-
-                {% if verification_snippet %}
-                  <h5>Copy/paste constants for local verification</h5>
-                  <p class="text-muted">
-                    Copy/paste the block below into <strong><a href="{% static 'verify-ballot-hash.py' %}">verify-ballot-hash.py</a></strong>. It includes the election ID,
-                    candidate username-to-ID mapping, and where to find your voting credential. You still need to enter your own vote choices
-                    in the script (vote choices are secret and are not shown on this page).
-                  </p>
-                  <pre class="bg-light p-3"><code>{{ verification_snippet }}</code></pre>
-                {% endif %}
-
-              </div>
-            </div>
-          {% endif %}
-        {% endif %}
-      </div>
-    </div>
-  </div>
-</div>
+  <div
+    data-ballot-verify-root
+    data-ballot-verify-api-url="{% url 'api-ballot-verify' %}"
+    data-ballot-verify-hash-script-url="{% static 'verify-ballot-hash.py' %}"
+    data-ballot-verify-chain-script-url="{% static 'verify-ballot-chain.py' %}"
+    data-ballot-verify-audit-script-url="{% static 'verify-audit-log.py' %}"
+  ></div>
 {% endblock %}

@@ -79,12 +79,10 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
             patch("core.freeipa.user.FreeIPAUser.get", return_value=alex),
         ):
-            resp = self.client.get(reverse("user-profile", kwargs={"username": "alex"}))
+            resp = self.client.get(reverse("api-user-profile", kwargs={"username": "alex"}))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertFalse(bool(resp.context["membership_can_request_any"]))
-        self.assertNotContains(resp, 'title="No additional membership types available"')
-        self.assertNotContains(resp, "btn btn-sm btn-outline-primary disabled")
+        self.assertFalse(resp.json()["membership"]["canRequestAny"])
 
     def test_user_profile_does_not_recommend_request_after_rejection(self) -> None:
         # Ensure the test is deterministic: only one membership type is requestable.
@@ -126,10 +124,10 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
             patch("core.freeipa.user.FreeIPAUser.get", return_value=alex),
         ):
-            resp = self.client.get(reverse("user-profile", kwargs={"username": "alex"}))
+            resp = self.client.get(reverse("api-user-profile", kwargs={"username": "alex"}))
 
         self.assertEqual(resp.status_code, 200)
-        recommended = list(resp.context.get("account_setup_recommended_actions") or [])
+        recommended = resp.json()["accountSetup"]["recommendedActions"]
         self.assertFalse(
             any(a.get("id") == "membership-request-recommended-alert" for a in recommended),
             "Did not expect a membership request recommendation after a rejected request.",
@@ -172,10 +170,10 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
             patch("core.freeipa.user.FreeIPAUser.get", return_value=alex),
         ):
-            resp = self.client.get(reverse("user-profile", kwargs={"username": "alex"}))
+            resp = self.client.get(reverse("api-user-profile", kwargs={"username": "alex"}))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertFalse(bool(resp.context["membership_can_request_any"]))
+        self.assertFalse(resp.json()["membership"]["canRequestAny"])
 
     def test_user_profile_required_actions_use_context_aware_settings_links(self) -> None:
         MembershipType.objects.update(enabled=False)
@@ -200,12 +198,15 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
             patch("core.freeipa.user.FreeIPAUser.get", return_value=alex),
         ):
-            resp = self.client.get(reverse("user-profile", kwargs={"username": "alex"}))
+            resp = self.client.get(reverse("api-user-profile", kwargs={"username": "alex"}))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, '/settings/?tab=agreements')
-        self.assertContains(resp, 'return=profile')
-        self.assertContains(resp, 'href="/settings/?tab=profile&amp;highlight=country_code"')
+        required_urls = {action["url"] for action in resp.json()["accountSetup"]["requiredActions"]}
+        self.assertIn(
+            "/settings/?tab=agreements&agreement=AlmaLinux+Community+Code+of+Conduct&return=profile",
+            required_urls,
+        )
+        self.assertIn("/settings/?tab=profile&highlight=country_code", required_urls)
 
     def test_committee_viewer_sees_country_row_first_with_human_readable_name(self) -> None:
         alex_data = {
@@ -241,21 +242,12 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
         ):
-            resp = self.client.get(reverse("user-profile", kwargs={"username": "alex"}))
+            resp = self.client.get(reverse("api-user-profile", kwargs={"username": "alex"}))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Country")
-        self.assertContains(resp, "United States")
-
-        html = resp.content.decode("utf-8")
-        self.assertRegex(
-            html,
-            r'id="user_attributes">\s*<li[^>]*>\s*<strong[^>]*>\s*(?:<i[^>]*></i>\s*)?Country</strong>',
-        )
-        self.assertLess(
-            html.find("Country</strong>"),
-            html.find("Pronouns</strong>"),
-        )
+        payload = resp.json()
+        self.assertTrue(payload["summary"]["viewerIsMembershipCommittee"])
+        self.assertEqual(payload["summary"]["profileCountry"], "United States")
 
     def test_committee_viewer_sees_not_provided_when_country_missing(self) -> None:
         alex = FreeIPAUser(
@@ -288,11 +280,12 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
         ):
-            resp = self.client.get(reverse("user-profile", kwargs={"username": "alex"}))
+            resp = self.client.get(reverse("api-user-profile", kwargs={"username": "alex"}))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Country")
-        self.assertContains(resp, "Not provided")
+        payload = resp.json()
+        self.assertTrue(payload["summary"]["viewerIsMembershipCommittee"])
+        self.assertEqual(payload["summary"]["profileCountry"], "Not provided")
 
     def test_non_committee_viewer_does_not_see_country_row(self) -> None:
         alex_data = {
@@ -328,8 +321,10 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
         ):
-            resp = self.client.get(reverse("user-profile", kwargs={"username": "alex"}))
+            resp = self.client.get(reverse("api-user-profile", kwargs={"username": "alex"}))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Pronouns")
-        self.assertNotContains(resp, "Country</strong>")
+        payload = resp.json()
+        self.assertFalse(payload["summary"]["viewerIsMembershipCommittee"])
+        self.assertEqual(payload["summary"]["pronouns"], "they/them")
+        self.assertEqual(payload["summary"]["profileCountry"], "")

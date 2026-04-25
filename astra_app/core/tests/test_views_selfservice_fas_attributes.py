@@ -1,4 +1,5 @@
 
+import json
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -11,7 +12,7 @@ from django.http import HttpResponse
 from django.test import RequestFactory, TestCase, override_settings
 
 from core.views_settings import settings_root
-from core.views_users import user_profile
+from core.views_users import user_profile_api
 
 
 @dataclass
@@ -27,6 +28,9 @@ class _DummyFreeIPAUser:
     def full_name(self) -> str:
         full_name = f"{self.first_name} {self.last_name}".strip()
         return full_name or self.username
+
+    def get_full_name(self) -> str:
+        return self.full_name
 
 
 class FASAttributesTests(TestCase):
@@ -436,10 +440,8 @@ class FASAttributesTests(TestCase):
         send_mock.assert_called_once()
         self.assertEqual(Note.objects.filter(membership_request=membership_request).count(), 0)
 
-
-    @patch("core.views_users.render", autospec=True)
     @override_settings(SELF_SERVICE_ADDRESS_COUNTRY_ATTR="fasstatusnote")
-    def test_user_profile_self_shows_danger_when_missing_country_code(self, mocked_render):
+    def test_user_profile_self_shows_danger_when_missing_country_code(self):
         fu = _DummyFreeIPAUser(
             username="alice",
             first_name="Alice",
@@ -457,23 +459,19 @@ class FASAttributesTests(TestCase):
         self._add_session_and_messages(req)
         req.user = self._auth_user("alice")
 
-        captured: dict[str, object] = {}
-
-        def fake_render(_request, template, context):
-            captured["template"] = template
-            captured["context"] = context
-            return HttpResponse("ok")
-
-        mocked_render.side_effect = fake_render
-
-        with patch("core.views_users._get_full_user", autospec=True, return_value=fu):
-            resp = user_profile(req, "alice")
+        with (
+            patch("core.views_users._get_full_user", autospec=True, return_value=fu),
+            patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]),
+            patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
+            patch("core.views_users.resolve_avatar_urls_for_users", autospec=True, return_value=({}, 0, 0)),
+        ):
+            resp = user_profile_api(req, "alice")
 
         self.assertEqual(resp.status_code, 200)
-        ctx = captured.get("context")
-        self.assertIsNotNone(ctx)
-        self.assertTrue(ctx.get("is_self"))
-        self.assertTrue(ctx.get("country_code_missing_or_invalid"))
+        payload = json.loads(resp.content)
+        self.assertTrue(payload["summary"]["isSelf"])
+        required_action_ids = {action["id"] for action in payload["accountSetup"]["requiredActions"]}
+        self.assertIn("country-code-missing-alert", required_action_ids)
 
 
     @patch("core.forms_selfservice.get_timezone_options", autospec=True, return_value=["UTC", "Europe/Paris"])

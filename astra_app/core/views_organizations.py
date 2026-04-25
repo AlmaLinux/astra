@@ -12,6 +12,7 @@ from django.core.paginator import Page, Paginator
 from django.db import IntegrityError, transaction
 from django.db.models import Exists, OuterRef, Q, QuerySet
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
+from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -20,6 +21,7 @@ from django.views.decorators.http import require_GET
 
 from core import signals as astra_signals
 from core.account_invitation_reconcile import schedule_account_invitation_accepted_signal
+from core.api_pagination import serialize_pagination
 from core.forms_organizations import OrganizationEditForm
 from core.freeipa.user import FreeIPAUser
 from core.freeipa_directory import search_freeipa_users
@@ -64,6 +66,7 @@ from core.permissions import (
     has_any_membership_manage_permission,
     has_any_membership_permission,
     json_permission_required_any,
+    membership_review_permissions,
 )
 from core.templatetags.core_dict import membership_tier_class
 from core.views_utils import (
@@ -634,31 +637,22 @@ def _serialize_organizations_card(
         for grid_item in grid_items
     ]
 
-    paginator_count = int(getattr(paginator, "count", 0))
-    page_number = int(getattr(page_obj, "number", 1))
-    num_pages = int(getattr(paginator, "num_pages", 1))
-    start_index = page_obj.start_index() if paginator_count else 0
-    end_index = page_obj.end_index() if paginator_count else 0
+    pagination = serialize_pagination(
+        {
+            "paginator": paginator,
+            "page_obj": page_obj,
+            "page_numbers": page_numbers,
+            "show_first": show_first,
+            "show_last": show_last,
+        }
+    )
 
     return {
         "title": title,
         "q": str(q or ""),
         "items": items_payload,
         "empty_label": empty_label,
-        "pagination": {
-            "count": paginator_count,
-            "page": page_number,
-            "num_pages": num_pages,
-            "page_numbers": page_numbers,
-            "show_first": show_first,
-            "show_last": show_last,
-            "has_previous": page_obj.has_previous(),
-            "has_next": page_obj.has_next(),
-            "previous_page_number": page_obj.previous_page_number() if page_obj.has_previous() else None,
-            "next_page_number": page_obj.next_page_number() if page_obj.has_next() else None,
-            "start_index": start_index,
-            "end_index": end_index,
-        },
+        "pagination": pagination,
     }
 
 
@@ -860,7 +854,7 @@ def _build_organization_detail_page_context(
     }
 
 
-def _serialize_organization_detail_payload(context: dict[str, object]) -> dict[str, object]:
+def _serialize_organization_detail_payload(context: dict[str, object], request: HttpRequest) -> dict[str, object]:
     organization = context["organization"]
     if not isinstance(organization, Organization):
         raise TypeError("Expected organization in detail context")
@@ -869,6 +863,27 @@ def _serialize_organization_detail_payload(context: dict[str, object]) -> dict[s
     representative_username = cast(str, context["representative_username"])
     representative_full_name = cast(str, context["representative_full_name"])
     contact_display_groups = cast(list[dict[str, object]], context["contact_display_groups"])
+    review_permissions = membership_review_permissions(request.user)
+    membership_can_view = bool(review_permissions["membership_can_view"])
+    membership_can_write = bool(
+        review_permissions["membership_can_add"]
+        or review_permissions["membership_can_change"]
+        or review_permissions["membership_can_delete"]
+    )
+    notes = None
+    if membership_can_view:
+        target_params = urlencode({"target_type": "org", "target": str(organization.pk)})
+        notes = {
+            "summaryUrl": f"{reverse('api-membership-notes-aggregate-summary')}?{target_params}",
+            "detailUrl": f"{reverse('api-membership-notes-aggregate')}?{target_params}",
+            "addUrl": reverse("api-membership-notes-aggregate-add"),
+            "csrfToken": get_token(request),
+            "nextUrl": request.get_full_path(),
+            "canView": membership_can_view,
+            "canWrite": membership_can_write,
+            "targetType": "org",
+            "target": str(organization.pk),
+        }
 
     return {
         "organization": {
@@ -898,6 +913,7 @@ def _serialize_organization_detail_payload(context: dict[str, object]) -> dict[s
                 "postal_code": organization.postal_code,
                 "country_code": organization.country_code,
             },
+            "notes": notes,
         },
     }
 
@@ -907,7 +923,7 @@ def organization_detail_api(request: HttpRequest, organization_id: int) -> JsonR
     organization = get_object_or_404(Organization, pk=organization_id)
     _require_organization_access(request, organization)
     context = _build_organization_detail_page_context(request, organization=organization)
-    return JsonResponse(_serialize_organization_detail_payload(context))
+    return JsonResponse(_serialize_organization_detail_payload(context, request))
 
 
 def organization_create(request: HttpRequest) -> HttpResponse:

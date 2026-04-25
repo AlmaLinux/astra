@@ -5,19 +5,19 @@ from django.test import SimpleTestCase
 
 
 class FrontendViteEntriesContractTests(SimpleTestCase):
-    def test_all_vite_build_input_entrypoints_are_listed_in_templates(self) -> None:
+    def test_all_entrypoint_files_are_listed_in_templates(self) -> None:
         repository_root = Path(__file__).resolve().parents[3]
         template_assets = self._collect_template_vite_assets(repository_root=repository_root)
-        vite_inputs = self._collect_vite_config_entrypoints(repository_root=repository_root)
+        entrypoint_files = self._collect_entrypoint_files(repository_root=repository_root)
 
-        missing_assets = sorted(vite_inputs - template_assets)
+        missing_assets = sorted(entrypoint_files - template_assets)
         self.assertEqual(
             missing_assets,
             [],
             msg=(
-                "frontend/vite.config.ts rollupOptions.input contains entrypoints not listed in template "
+                "frontend/src/entrypoints contains entrypoints not listed in template "
                 "vite_asset tags: "
-                f"rollupOptions.input: {', '.join(missing_assets)}"
+                f"entrypoints: {', '.join(missing_assets)}"
             ),
         )
 
@@ -32,8 +32,9 @@ class FrontendViteEntriesContractTests(SimpleTestCase):
 
         return assets
 
-    def _collect_vite_config_entrypoints(self, *, repository_root: Path) -> set[str]:
-        vite_config_path = repository_root / "frontend" / "vite.config.ts"
-        vite_config = vite_config_path.read_text(encoding="utf-8")
-        entrypoint_pattern = re.compile(r"\.\/src\/entrypoints\/[^'\"]+\.ts")
-        return {entry.removeprefix("./") for entry in entrypoint_pattern.findall(vite_config)}
+    def _collect_entrypoint_files(self, *, repository_root: Path) -> set[str]:
+        entrypoints_root = repository_root / "frontend" / "src" / "entrypoints"
+        return {
+            f"src/entrypoints/{entrypoint_path.name}"
+            for entrypoint_path in entrypoints_root.glob("*.ts")
+        }

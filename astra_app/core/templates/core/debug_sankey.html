@@ -1,4 +1,5 @@
 {% extends 'core/base.html' %}
+{% load django_vite %}
 {% load static %}
 
 {% block title %}Sankey Debug{% endblock %}
@@ -9,6 +10,8 @@
 
 {% block extra_head %}
   {{ block.super }}
+  {% vite_hmr_client %}
+  {% vite_asset 'src/entrypoints/debugSankey.ts' %}
   {% if sankey_flows %}
     <style>
       .chart {
@@ -91,21 +94,26 @@
             <p class="mb-0">No elected list was recorded.</p>
           {% endif %}
 
+          <div
+            data-debug-sankey-root
+            data-debug-sankey-flows-id="debug-sankey-data"
+            data-debug-sankey-elected-id="debug-sankey-elected"
+            data-debug-sankey-eliminated-id="debug-sankey-eliminated"
+          >
+            {% if not sankey_flows %}
+              <p class="text-muted mb-3">No Sankey data available.</p>
+            {% endif %}
+          </div>
+        {% block scripts %}
+          {{ block.super }}
           {% if sankey_flows %}
-            <div class="chart mb-3">
-              <canvas
-                id="debug-sankey-chart"
-                data-sankey-chart
-                data-sankey-data-id="debug-sankey-data"
-                data-sankey-elected-id="debug-sankey-elected"
-                data-sankey-eliminated-id="debug-sankey-eliminated"
-                aria-label="Sankey debug view"
-                role="img"
-              ></canvas>
-            </div>
-          {% else %}
-            <p class="text-muted mb-3">No Sankey data available.</p>
+            <script src="{% static 'core/vendor/chartjs/chart.umd.min.js' %}"></script>
+            <script src="{% static 'core/vendor/chartjs/chartjs-chart-sankey.js' %}"></script>
+            {{ sankey_flows|json_script:"debug-sankey-data" }}
+            {{ sankey_elected_nodes|json_script:"debug-sankey-elected" }}
+            {{ sankey_eliminated_nodes|json_script:"debug-sankey-eliminated" }}
           {% endif %}
+        {% endblock %}
         </div>
       </div>
 
@@ -173,14 +181,3 @@
   </div>
 {% endblock %}
 
-{% block scripts %}
-  {{ block.super }}
-  {% if sankey_flows %}
-    <script src="{% static 'core/vendor/chartjs/chart.umd.min.js' %}"></script>
-    <script src="{% static 'core/vendor/chartjs/chartjs-chart-sankey.js' %}"></script>
-    <script src="{% static 'core/js/election_sankey.js' %}"></script>
-    {{ sankey_flows|json_script:"debug-sankey-data" }}
-    {{ sankey_elected_nodes|json_script:"debug-sankey-elected" }}
-    {{ sankey_eliminated_nodes|json_script:"debug-sankey-eliminated" }}
-  {% endif %}
-{% endblock %}

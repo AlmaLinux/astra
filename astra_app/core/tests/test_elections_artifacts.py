@@ -173,3 +173,87 @@ class ElectionArtifactGenerationTests(TestCase):
         self.assertEqual(payload["audit_log"][0]["payload"].get("chain_head"), "d" * 64)
         self.assertNotIn("credentials_affected", payload["audit_log"][0]["payload"])
         self.assertNotIn("emails_scrubbed", payload["audit_log"][0]["payload"])
+
+    def test_persisted_public_audit_artifact_hides_start_operational_fields(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Artifact start redaction election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=2),
+            end_datetime=now - datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.tallied,
+        )
+
+        AuditLogEntry.objects.create(
+            election=election,
+            event_type="election_started",
+            payload={
+                "actor": "admin",
+                "eligible_voters": 12,
+                "emailed": 10,
+                "skipped": 1,
+                "failures": 1,
+                "genesis_chain_hash": "e" * 64,
+                "candidates": [
+                    {
+                        "id": 1,
+                        "freeipa_username": "alice",
+                        "tiebreak_uuid": "00000000-0000-0000-0000-000000000001",
+                    },
+                ],
+            },
+            is_public=True,
+        )
+
+        elections_services.persist_public_election_artifacts(election=election)
+        election.refresh_from_db()
+
+        with election.public_audit_file.open("rb") as fh:
+            payload = json.loads(fh.read().decode("utf-8"))
+
+        self.assertEqual(payload["audit_log"][0]["event_type"], "election_started")
+        self.assertEqual(
+            payload["audit_log"][0]["payload"],
+            {
+                "genesis_chain_hash": "e" * 64,
+                "candidates": [
+                    {
+                        "id": 1,
+                        "freeipa_username": "alice",
+                        "tiebreak_uuid": "00000000-0000-0000-0000-000000000001",
+                    },
+                ],
+            },
+        )
+        self.assertNotIn("actor", json.dumps(payload))
+        self.assertNotIn("eligible_voters", json.dumps(payload))
+        self.assertNotIn("failures", json.dumps(payload))
+
+    def test_persisted_public_audit_artifact_hides_rekor_failure_error_type(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Artifact rekor redaction election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=2),
+            end_datetime=now - datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.tallied,
+        )
+
+        AuditLogEntry.objects.create(
+            election=election,
+            event_type="rekor_attestation_failed",
+            payload={"error_type": "ConnectionError"},
+            is_public=True,
+        )
+
+        elections_services.persist_public_election_artifacts(election=election)
+        election.refresh_from_db()
+
+        with election.public_audit_file.open("rb") as fh:
+            payload = json.loads(fh.read().decode("utf-8"))
+
+        self.assertEqual(payload["audit_log"][0]["event_type"], "rekor_attestation_failed")
+        self.assertEqual(payload["audit_log"][0]["payload"], {})
+        self.assertNotIn("ConnectionError", json.dumps(payload))

@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -119,7 +120,7 @@ class UserProfileFreeIPARequestFanoutTests(TestCase):
         *,
         request_user: SimpleNamespace,
         lightweight_users_by_username: dict[str, FreeIPAUser],
-    ) -> tuple[object, list[str], list[tuple[str, ...]], str]:
+    ) -> tuple[object, list[str], list[tuple[str, ...]], dict[str, object]]:
         request = self._request_for_user(request_user)
         target_fetches: list[str] = []
         aggregate_lookup_usernames: list[tuple[str, ...]] = []
@@ -141,6 +142,7 @@ class UserProfileFreeIPARequestFanoutTests(TestCase):
             patch("core.views_users._get_full_user", side_effect=_record_target_fetch),
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
             patch("core.views_users.has_enabled_agreements", return_value=False),
+            patch("core.views_users.resolve_avatar_urls_for_users", return_value=({}, 0, 0)),
             patch(
                 "core.templatetags.core_membership_notes.FreeIPAUser.find_lightweight_by_usernames",
                 side_effect=_record_lightweight_lookup,
@@ -150,9 +152,9 @@ class UserProfileFreeIPARequestFanoutTests(TestCase):
                 side_effect=AssertionError("profile aggregate note rendering must stay on the shared lightweight author-lookup path"),
             ),
         ):
-            response = views_users.user_profile(request, "alice")
+            response = views_users.user_profile_api(request, "alice")
 
-        return response, target_fetches, aggregate_lookup_usernames, response.content.decode("utf-8")
+        return response, target_fetches, aggregate_lookup_usernames, json.loads(response.content)
 
     def test_reviewer_profile_render_cold_cache_avoids_badge_username_fanout(self) -> None:
         MembershipRequest.objects.create(
@@ -304,8 +306,9 @@ class UserProfileFreeIPARequestFanoutTests(TestCase):
             patch("core.views_users._get_full_user", return_value=self._target_user("alice")),
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
             patch("core.views_users.has_enabled_agreements", return_value=False),
+            patch("core.views_users.resolve_avatar_urls_for_users", return_value=({}, 0, 0)),
         ):
-            response = views_users.user_profile(request, "alice")
+            response = views_users.user_profile_api(request, "alice")
 
         self.assertEqual(response.status_code, 200)
 
@@ -323,8 +326,9 @@ class UserProfileFreeIPARequestFanoutTests(TestCase):
             patch("core.views_users._get_full_user", return_value=self._target_user("alice")),
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
             patch("core.views_users.has_enabled_agreements", return_value=False),
+            patch("core.views_users.resolve_avatar_urls_for_users", return_value=({}, 0, 0)),
         ):
-            response = views_users.user_profile(request, "alice")
+            response = views_users.user_profile_api(request, "alice")
 
         self.assertEqual(response.status_code, 200)
         get_mock.assert_called_once_with("reviewer")
@@ -332,7 +336,7 @@ class UserProfileFreeIPARequestFanoutTests(TestCase):
     def test_profile_route_reuses_target_and_avatar_safe_viewer_for_aggregate_notes(self) -> None:
         self._create_aggregate_profile_notes()
 
-        response, target_fetches, aggregate_lookup_usernames, html = self._render_profile_with_aggregate_trace(
+        response, target_fetches, aggregate_lookup_usernames, payload = self._render_profile_with_aggregate_trace(
             request_user=self._viewer_request_user(include_email=True),
             lightweight_users_by_username={},
         )
@@ -340,13 +344,15 @@ class UserProfileFreeIPARequestFanoutTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(target_fetches, ["alice"])
         self.assertEqual(aggregate_lookup_usernames, [])
-        self.assertIn('data-membership-notes-aggregate-root="user"', html)
-        self.assertIn('data-membership-notes-aggregate-target="alice"', html)
-        self.assertIn('data-can-view="true"', html)
-        self.assertIn('data-can-write="false"', html)
-        self.assertNotIn("Target note", html)
-        self.assertNotIn("Viewer note", html)
-        self.assertNotIn("Ghost note", html)
+        notes = payload["membership"]["notes"]
+        self.assertEqual(notes["targetType"], "user")
+        self.assertEqual(notes["target"], "alice")
+        self.assertTrue(notes["canView"])
+        self.assertFalse(notes["canWrite"])
+        encoded_payload = json.dumps(payload)
+        self.assertNotIn("Target note", encoded_payload)
+        self.assertNotIn("Viewer note", encoded_payload)
+        self.assertNotIn("Ghost note", encoded_payload)
 
     def test_profile_route_skips_username_only_viewer_reuse_for_aggregate_notes(self) -> None:
         self._create_aggregate_profile_notes()
@@ -359,7 +365,7 @@ class UserProfileFreeIPARequestFanoutTests(TestCase):
             },
         )
 
-        response, target_fetches, aggregate_lookup_usernames, html = self._render_profile_with_aggregate_trace(
+        response, target_fetches, aggregate_lookup_usernames, payload = self._render_profile_with_aggregate_trace(
             request_user=self._viewer_request_user(include_email=False),
             lightweight_users_by_username={"viewer": viewer_from_lookup},
         )
@@ -367,10 +373,12 @@ class UserProfileFreeIPARequestFanoutTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(target_fetches, ["alice"])
         self.assertEqual(aggregate_lookup_usernames, [])
-        self.assertIn('data-membership-notes-aggregate-root="user"', html)
-        self.assertIn('data-membership-notes-aggregate-target="alice"', html)
-        self.assertIn('data-can-view="true"', html)
-        self.assertIn('data-can-write="false"', html)
-        self.assertNotIn("Target note", html)
-        self.assertNotIn("Viewer note", html)
-        self.assertNotIn("Ghost note", html)
+        notes = payload["membership"]["notes"]
+        self.assertEqual(notes["targetType"], "user")
+        self.assertEqual(notes["target"], "alice")
+        self.assertTrue(notes["canView"])
+        self.assertFalse(notes["canWrite"])
+        encoded_payload = json.dumps(payload)
+        self.assertNotIn("Target note", encoded_payload)
+        self.assertNotIn("Viewer note", encoded_payload)
+        self.assertNotIn("Ghost note", encoded_payload)

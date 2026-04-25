@@ -34,6 +34,7 @@ describe("OrganizationDetailPage", () => {
             representative: { username: "alice", full_name: "Alice Example" },
             contact_groups: [{ key: "business", label: "Business", name: "Business Person", email: "biz@example.com", phone: "" }],
             address: { street: "", city: "Durham", state: "", postal_code: "", country_code: "US" },
+            notes: { summaryUrl: "/summary", detailUrl: "/detail", addUrl: "/add", csrfToken: "csrf", nextUrl: "/organization/1/", canView: true, canWrite: false, targetType: "org", target: "1" },
           },
         }),
       );
@@ -42,6 +43,14 @@ describe("OrganizationDetailPage", () => {
 
     const wrapper = mount(OrganizationDetailPage, {
       props: { bootstrap },
+      global: {
+        stubs: {
+          MembershipNotesCard: {
+            props: ["targetType", "target"],
+            template: '<div data-test="notes-card">{{ targetType }}:{{ target }}</div>',
+          },
+        },
+      },
     });
 
     await flushPromises();
@@ -55,6 +64,7 @@ describe("OrganizationDetailPage", () => {
     await contactTabs[1]!.trigger("click");
     expect(wrapper.text()).toContain("biz@example.com");
     expect(wrapper.text()).toContain("Durham");
+    expect(wrapper.find('[data-test="notes-card"]').text()).toBe("org:1");
     expect(wrapper.find('a[href="/organization/1/edit/"]').exists()).toBe(false);
   });
 });

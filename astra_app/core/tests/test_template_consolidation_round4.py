@@ -48,11 +48,9 @@ class Round4TemplateConsolidationTests(SimpleTestCase):
 
     def test_membership_note_templates_use_default_api_backed_contract(self) -> None:
         detail_source = self._template_source("membership_request_detail.html")
-        profile_source = self._template_source("_membership_profile_section.html")
         requester_cell_source = self._template_source("_membership_request_requester_cell.html")
 
         self.assertNotIn("api_backed_read=", detail_source)
-        self.assertNotIn("api_backed_read=", profile_source)
         self.assertNotIn("preloaded_notes=", requester_cell_source)
         self.assertNotIn("fail_on_query_fallback=", requester_cell_source)
 

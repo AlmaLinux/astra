@@ -1,4 +1,5 @@
 
+import json
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import patch
@@ -34,6 +35,7 @@ class AgreementsSelfServiceTests(TestCase):
             email="a@example.org",
             is_authenticated=True,
             get_username=lambda: "alice",
+            get_full_name=lambda: "Alice User",
             groups_list=[],
             _user_data={"uid": ["alice"], "givenname": ["Alice"], "sn": ["User"]},
         )
@@ -59,28 +61,18 @@ class AgreementsSelfServiceTests(TestCase):
             },
         )
 
-        captured: dict[str, object] = {}
-
-        def fake_render(_request, template, context):
-            captured["template"] = template
-            captured["context"] = context
-            return HttpResponse("ok")
-
-        with patch("core.views_users._get_full_user", autospec=True, return_value=fu):
-            with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
-                with patch("core.freeipa.agreement.FreeIPAFASAgreement.all", autospec=True, return_value=agreements):
-                    with patch(
-                        "core.freeipa.agreement.FreeIPAFASAgreement.get",
-                        autospec=True,
-                        return_value=agreement_detail,
-                    ):
-                        with patch("core.views_users.render", autospec=True, side_effect=fake_render):
-                            resp = views_users.user_profile(request, "alice")
+        with (
+            patch("core.views_users._get_full_user", autospec=True, return_value=fu),
+            patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]),
+            patch("core.freeipa.agreement.FreeIPAFASAgreement.all", autospec=True, return_value=agreements),
+            patch("core.freeipa.agreement.FreeIPAFASAgreement.get", autospec=True, return_value=agreement_detail),
+            patch("core.views_users.resolve_avatar_urls_for_users", autospec=True, return_value=({}, 0, 0)),
+        ):
+            resp = views_users.user_profile_api(request, "alice")
 
         self.assertEqual(resp.status_code, 200)
-        ctx = captured["context"]
-        self.assertEqual(len(ctx["agreements"]), 1)
-        self.assertIn("cla", ctx["agreements"])
+        payload = json.loads(resp.content)
+        self.assertEqual(payload["groups"]["agreements"], ["cla"])
 
     def test_profile_shows_missing_required_agreements_for_member_group_with_link_for_self(self):
         factory = RequestFactory()
@@ -115,31 +107,22 @@ class AgreementsSelfServiceTests(TestCase):
 
         fas_group = SimpleNamespace(cn="packagers", fas_group=True, sponsors=[])
 
-        captured: dict[str, object] = {}
-
-        def fake_render(_request, template, context):
-            captured["template"] = template
-            captured["context"] = context
-            return HttpResponse("ok")
-
-        with patch("core.views_users._get_full_user", autospec=True, return_value=fu):
-            with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[fas_group]):
-                with patch("core.agreements.FreeIPAFASAgreement.all", autospec=True, return_value=[agreement_summary]):
-                    with patch(
-                        "core.agreements.FreeIPAFASAgreement.get",
-                        autospec=True,
-                        return_value=agreement_full,
-                    ):
-                        with patch("core.views_users.render", autospec=True, side_effect=fake_render):
-                            resp = views_users.user_profile(request, "alice")
+        with (
+            patch("core.views_users._get_full_user", autospec=True, return_value=fu),
+            patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[fas_group]),
+            patch("core.agreements.FreeIPAFASAgreement.all", autospec=True, return_value=[agreement_summary]),
+            patch("core.agreements.FreeIPAFASAgreement.get", autospec=True, return_value=agreement_full),
+            patch("core.views_users.resolve_avatar_urls_for_users", autospec=True, return_value=({}, 0, 0)),
+        ):
+            resp = views_users.user_profile_api(request, "alice")
 
         self.assertEqual(resp.status_code, 200)
-        ctx = cast(dict[str, object], captured["context"])
-        self.assertEqual(len(ctx["missing_agreements"]), 1)
-        missing = cast(list[dict[str, object]], ctx["missing_agreements"])
+        payload = json.loads(resp.content)
+        missing = payload["groups"]["missingAgreements"]
+        self.assertEqual(len(missing), 1)
         self.assertEqual(missing[0]["cn"], "cla")
         self.assertEqual(
-            missing[0]["settings_url"],
+            missing[0]["settingsUrl"],
             reverse("settings") + "?tab=agreements&agreement=cla",
         )
 

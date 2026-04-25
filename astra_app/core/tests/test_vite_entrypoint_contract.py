@@ -5,7 +5,7 @@ from django.test import SimpleTestCase
 
 
 class ViteEntrypointContractTests(SimpleTestCase):
-    def test_template_vite_assets_are_declared_in_vite_build_inputs(self) -> None:
+    def test_template_vite_assets_have_source_files_and_dynamic_build_inputs(self) -> None:
         repo_root = Path(__file__).resolve().parents[3]
         templates_root = repo_root / "astra_app" / "core" / "templates"
         vite_config_path = repo_root / "frontend" / "vite.config.ts"
@@ -21,25 +21,7 @@ class ViteEntrypointContractTests(SimpleTestCase):
         self.assertTrue(template_entries, "Expected at least one vite_asset entrypoint reference in templates.")
 
         vite_config_text = vite_config_path.read_text(encoding="utf-8")
-        config_entries = {
-            match
-            for match in re.findall(
-                r"\"\./(src/entrypoints/[^\"]+\.ts)\"|\'\./(src/entrypoints/[^\']+\.ts)\'",
-                vite_config_text,
-            )
-            for match in match
-            if match
-        }
-
-        self.assertTrue(config_entries, "Expected at least one Vite build input entrypoint in vite.config.ts.")
-
-        missing_from_config = sorted(template_entries - config_entries)
-        self.assertEqual(
-            missing_from_config,
-            [],
-            "Template vite_asset entrypoints missing from frontend/vite.config.ts build.rollupOptions.input: "
-            f"{missing_from_config}",
-        )
+        self.assertIn("buildEntrypointInputs(new URL(\"./\", import.meta.url))", vite_config_text)
 
         missing_files = sorted(
             entry for entry in template_entries if not (frontend_root / entry).exists()

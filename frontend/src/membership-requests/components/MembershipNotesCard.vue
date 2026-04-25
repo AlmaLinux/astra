@@ -18,6 +18,8 @@ const props = defineProps<{
   canWrite: boolean;
   canVote: boolean;
   initialOpen?: boolean;
+  targetType?: string;
+  target?: string;
 }>();
 
 const message = ref("");
@@ -46,6 +48,8 @@ const {
   nextUrl: props.nextUrl,
   canView: props.canView,
   initialOpen: props.initialOpen ?? false,
+  targetType: props.targetType,
+  target: props.target,
 });
 
 function scrollToBottom(): void {

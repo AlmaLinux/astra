@@ -21,7 +21,26 @@ describe("mountOrganizationDetailPage", () => {
   it("mounts when required organization detail bootstrap data exists", () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => new Response(JSON.stringify({ organization: { id: 1, name: "Acme Org", status: "active", website: "", detail_url: "/organizations/1/", logo_url: "", memberships: [], representative: { username: "alice", full_name: "Alice" }, contact_groups: [], address: { street: "", city: "", state: "", postal_code: "", country_code: "" } } }))),
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              organization: {
+                id: 1,
+                name: "Acme Org",
+                status: "active",
+                website: "",
+                detail_url: "/organizations/1/",
+                logo_url: "",
+                memberships: [],
+                representative: { username: "alice", full_name: "Alice" },
+                contact_groups: [],
+                address: { street: "", city: "", state: "", postal_code: "", country_code: "" },
+                notes: null,
+              },
+            }),
+          ),
+      ),
     );
 
     const root = buildRoot({

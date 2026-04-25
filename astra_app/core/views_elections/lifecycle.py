@@ -1,10 +1,12 @@
 """Election lifecycle actions: credential re-send, conclude, extend end date."""
 import json
+from collections.abc import Mapping
+from dataclasses import dataclass
 
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import permission_required
-from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest
+from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import redirect
 from django.urls import reverse_lazy
 from django.views.decorators.http import require_POST
@@ -14,21 +16,36 @@ from core.elections_services import ElectionError
 from core.freeipa.user import FreeIPAUser
 from core.ipa_user_attrs import _get_freeipa_timezone_name
 from core.models import Election, VotingCredential
-from core.permissions import ASTRA_ADD_ELECTION
+from core.permissions import ASTRA_ADD_ELECTION, json_permission_required
 from core.rate_limit import allow_request
 from core.views_elections._helpers import _extend_election_end_from_post, _get_active_election
 from core.views_send_mail import _CSV_SESSION_KEY
 from core.views_utils import get_username, send_mail_url
 
 
-@require_POST
-@permission_required(ASTRA_ADD_ELECTION, raise_exception=True, login_url=reverse_lazy("users"))
-def election_send_mail_credentials(request: HttpRequest, election_id: int) -> HttpResponse:
-    election = _get_active_election(election_id)
+@dataclass(frozen=True)
+class ElectionCredentialResendResult:
+    success: bool
+    status_code: int
+    message: str
+    redirect_url: str | None = None
+    recipient_count: int = 0
 
+
+@dataclass(frozen=True)
+class ElectionConcludeResult:
+    ok: bool
+    message: str
+    tally_failed: bool = False
+
+
+def _send_mail_credentials_result(*, request: HttpRequest, election: Election, data: Mapping[str, object]) -> ElectionCredentialResendResult:
     if election.status != Election.Status.open:
-        messages.error(request, "Only open elections can send credential reminders.")
-        return redirect("election-detail", election_id=election.id)
+        return ElectionCredentialResendResult(
+            success=False,
+            status_code=400,
+            message="Only open elections can send credential reminders.",
+        )
 
     admin_username = get_username(request)
 
@@ -38,17 +55,23 @@ def election_send_mail_credentials(request: HttpRequest, election_id: int) -> Ht
         limit=settings.ELECTION_RATE_LIMIT_CREDENTIAL_RESEND_LIMIT,
         window_seconds=settings.ELECTION_RATE_LIMIT_CREDENTIAL_RESEND_WINDOW_SECONDS,
     ):
-        return HttpResponse("Too many resend attempts. Please try again later.", status=429)
+        return ElectionCredentialResendResult(
+            success=False,
+            status_code=429,
+            message="Too many resend attempts. Please try again later.",
+        )
 
-    target_username = str(request.POST.get("username") or "").strip()
+    target_username = str(data.get("username") or "").strip()
 
     credentials_qs = VotingCredential.objects.filter(election=election).exclude(freeipa_username__isnull=True)
     if not credentials_qs.exists():
-        messages.error(
-            request,
-            "No voting credentials exist for this election. Credentials are issued only at election start (draft -> open).",
+        return ElectionCredentialResendResult(
+            success=False,
+            status_code=400,
+            message=(
+                "No voting credentials exist for this election. Credentials are issued only at election start (draft -> open)."
+            ),
         )
-        return redirect("election-detail", election_id=election.id)
     else:
         if target_username:
             credential_list = list(
@@ -58,8 +81,11 @@ def election_send_mail_credentials(request: HttpRequest, election_id: int) -> Ht
             credential_list = list(credentials_qs.only("freeipa_username", "public_id"))
 
     if target_username and not credential_list:
-        messages.error(request, "That user does not have a voting credential for this election.")
-        return redirect("election-detail", election_id=election.id)
+        return ElectionCredentialResendResult(
+            success=False,
+            status_code=400,
+            message="That user does not have a voting credential for this election.",
+        )
 
     recipients: list[dict[str, str]] = []
     for credential in credential_list:
@@ -84,8 +110,11 @@ def election_send_mail_credentials(request: HttpRequest, election_id: int) -> Ht
         recipients.append({str(k): str(v) for k, v in ctx.items()})
 
     if not recipients:
-        messages.error(request, "No credential recipients are available (missing email addresses?).")
-        return redirect("election-detail", election_id=election.id)
+        return ElectionCredentialResendResult(
+            success=False,
+            status_code=400,
+            message="No credential recipients are available (missing email addresses?).",
+        )
 
     request.session[_CSV_SESSION_KEY] = json.dumps(
         {
@@ -110,19 +139,53 @@ def election_send_mail_credentials(request: HttpRequest, election_id: int) -> Ht
         }
     )
 
-    return redirect(
-        send_mail_url(
-            to_type="csv",
-            to="",
-            template_name=settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME,
-            extra_context={"election_committee_email": settings.ELECTION_COMMITTEE_EMAIL},
-            reply_to=settings.ELECTION_COMMITTEE_EMAIL,
-        )
+    redirect_url = send_mail_url(
+        to_type="csv",
+        to="",
+        template_name=settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME,
+        extra_context={"election_committee_email": settings.ELECTION_COMMITTEE_EMAIL},
+        reply_to=settings.ELECTION_COMMITTEE_EMAIL,
+    )
+
+    return ElectionCredentialResendResult(
+        success=True,
+        status_code=200,
+        message="Credential resend prepared.",
+        redirect_url=redirect_url,
+        recipient_count=len(recipients),
     )
 
 
-def _confirm_election_action(*, request: HttpRequest, election: Election) -> bool:
-    raw = str(request.POST.get("confirm") or "").strip()
+@require_POST
+@permission_required(ASTRA_ADD_ELECTION, raise_exception=True, login_url=reverse_lazy("users"))
+def election_send_mail_credentials(request: HttpRequest, election_id: int) -> HttpResponse:
+    election = _get_active_election(election_id)
+    result = _send_mail_credentials_result(request=request, election=election, data=_request_data(request))
+
+    if result.success and result.redirect_url:
+        return redirect(result.redirect_url)
+
+    if result.status_code == 429:
+        return HttpResponse(result.message, status=429)
+
+    messages.error(request, result.message)
+    return redirect("election-detail", election_id=election.id)
+
+
+def _request_data(request: HttpRequest) -> Mapping[str, object]:
+    if request.content_type and request.content_type.startswith("application/json"):
+        try:
+            raw = json.loads(request.body.decode("utf-8") or "{}")
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return {}
+        if isinstance(raw, dict):
+            return raw
+        return {}
+    return request.POST
+
+
+def _confirm_election_action(*, data: Mapping[str, object], election: Election) -> bool:
+    raw = str(data.get("confirm") or "").strip()
     if not raw:
         return False
     expected = str(election.name or "").strip()
@@ -131,35 +194,49 @@ def _confirm_election_action(*, request: HttpRequest, election: Election) -> boo
     return raw.casefold() == expected.casefold()
 
 
-@require_POST
-@permission_required(ASTRA_ADD_ELECTION, raise_exception=True, login_url=reverse_lazy("users"))
-def election_conclude(request, election_id: int):
-    election = _get_active_election(election_id)
-
-    if not _confirm_election_action(request=request, election=election):
-        return HttpResponseBadRequest("Confirmation required.")
-
-    skip_tally = bool(request.POST.get("skip_tally"))
-
+def _conclude_election(*, request: HttpRequest, election: Election, skip_tally: bool) -> ElectionConcludeResult:
     actor = get_username(request) or None
 
     try:
         elections_services.close_election(election=election, actor=actor)
     except ElectionError as exc:
-        messages.error(request, str(exc))
-        return redirect("election-detail", election_id=election.id)
+        return ElectionConcludeResult(ok=False, message=str(exc))
 
     if skip_tally:
-        messages.success(request, "Election closed.")
-        return redirect("election-detail", election_id=election.id)
+        return ElectionConcludeResult(ok=True, message="Election closed.")
 
     try:
         elections_services.tally_election(election=election, actor=actor)
     except ElectionError as exc:
-        messages.error(request, f"Election closed, but tally failed: {exc}")
+        return ElectionConcludeResult(
+            ok=True,
+            message=f"Election closed, but tally failed: {exc}",
+            tally_failed=True,
+        )
+
+    return ElectionConcludeResult(ok=True, message="Election closed and tallied.")
+
+
+@require_POST
+@permission_required(ASTRA_ADD_ELECTION, raise_exception=True, login_url=reverse_lazy("users"))
+def election_conclude(request, election_id: int):
+    election = _get_active_election(election_id)
+    data = _request_data(request)
+
+    if not _confirm_election_action(data=data, election=election):
+        return HttpResponseBadRequest("Confirmation required.")
+
+    skip_tally = bool(data.get("skip_tally"))
+
+    result = _conclude_election(request=request, election=election, skip_tally=skip_tally)
+    if result.ok:
+        if result.tally_failed:
+            messages.warning(request, result.message)
+        else:
+            messages.success(request, result.message)
         return redirect("election-detail", election_id=election.id)
 
-    messages.success(request, "Election closed and tallied.")
+    messages.error(request, result.message)
     return redirect("election-detail", election_id=election.id)
 
 
@@ -167,11 +244,12 @@ def election_conclude(request, election_id: int):
 @permission_required(ASTRA_ADD_ELECTION, raise_exception=True, login_url=reverse_lazy("users"))
 def election_extend_end(request, election_id: int):
     election = _get_active_election(election_id)
+    data = _request_data(request)
 
-    if not _confirm_election_action(request=request, election=election):
+    if not _confirm_election_action(data=data, election=election):
         return HttpResponseBadRequest("Confirmation required.")
 
-    result = _extend_election_end_from_post(request=request, election=election)
+    result = _extend_election_end_from_post(request=request, election=election, data=data)
     if not result.success:
         for msg in result.errors:
             messages.error(request, str(msg))
@@ -179,3 +257,77 @@ def election_extend_end(request, election_id: int):
 
     messages.success(request, "Election end date extended.")
     return redirect("election-detail", election_id=election.id)
+
+
+@require_POST
+@json_permission_required(ASTRA_ADD_ELECTION)
+def election_extend_end_api(request: HttpRequest, election_id: int) -> JsonResponse:
+    election = _get_active_election(election_id)
+    data = _request_data(request)
+
+    if not _confirm_election_action(data=data, election=election):
+        return JsonResponse({"ok": False, "errors": ["Confirmation required."]}, status=400)
+
+    result = _extend_election_end_from_post(request=request, election=election, data=data)
+    if not result.success:
+        return JsonResponse({"ok": False, "errors": list(result.errors)}, status=400)
+
+    return JsonResponse(
+        {
+            "ok": True,
+            "election": {
+                "id": election.id,
+                "end_datetime": election.end_datetime.isoformat(),
+            },
+        }
+    )
+
+
+@require_POST
+@json_permission_required(ASTRA_ADD_ELECTION)
+def election_conclude_api(request: HttpRequest, election_id: int) -> JsonResponse:
+    election = _get_active_election(election_id)
+    data = _request_data(request)
+
+    if not _confirm_election_action(data=data, election=election):
+        return JsonResponse({"ok": False, "errors": ["Confirmation required."]}, status=400)
+
+    result = _conclude_election(
+        request=request,
+        election=election,
+        skip_tally=bool(data.get("skip_tally")),
+    )
+    if not result.ok:
+        return JsonResponse({"ok": False, "errors": [result.message]}, status=400)
+
+    election.refresh_from_db(fields=["status"])
+
+    return JsonResponse(
+        {
+            "ok": True,
+            "message": result.message,
+            "tally_failed": result.tally_failed,
+            "election": {
+                "id": election.id,
+                "status": election.status,
+            },
+        }
+    )
+
+
+@require_POST
+@json_permission_required(ASTRA_ADD_ELECTION)
+def election_send_mail_credentials_api(request: HttpRequest, election_id: int) -> JsonResponse:
+    election = _get_active_election(election_id)
+    result = _send_mail_credentials_result(request=request, election=election, data=_request_data(request))
+
+    if not result.success:
+        return JsonResponse({"ok": False, "errors": [result.message]}, status=result.status_code)
+
+    return JsonResponse(
+        {
+            "ok": True,
+            "redirect_url": result.redirect_url,
+            "recipient_count": result.recipient_count,
+        }
+    )

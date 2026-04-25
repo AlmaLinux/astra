@@ -1,6 +1,27 @@
 from django.urls import path
 
 from core import views_membership
+from core.views_elections.audit import (
+    election_audit_log_api,
+    election_audit_summary_api,
+    election_public_audit,
+    election_public_ballots,
+)
+from core.views_elections.ballot_verify import ballot_verify_api
+from core.views_elections.detail import (
+    election_detail_candidates_api,
+    election_detail_eligible_voters_api,
+    election_detail_ineligible_voters_api,
+    election_detail_info_api,
+    elections_api,
+)
+from core.views_elections.lifecycle import (
+    election_conclude_api,
+    election_extend_end_api,
+    election_send_mail_credentials_api,
+)
+from core.views_elections.reporting import elections_turnout_report_api
+from core.views_elections.vote import election_vote_api, election_vote_submit
 from core.views_groups import (
     group_action_api,
     group_detail_info_api,
@@ -24,13 +45,18 @@ from core.views_membership.admin import (
     stats_membership_trends_charts_api,
 )
 from core.views_organizations import organization_detail_api, organizations_api
-from core.views_users import users_api
+from core.views_users import user_profile_api, users_api
 
 urlpatterns = [
     path(
         "users",
         users_api,
         name="api-users",
+    ),
+    path(
+        "users/<str:username>/profile",
+        user_profile_api,
+        name="api-user-profile",
     ),
     path(
         "organizations/<int:organization_id>",
@@ -71,6 +97,86 @@ urlpatterns = [
         "groups/<str:name>/edit",
         group_edit_api,
         name="api-group-edit",
+    ),
+    path(
+        "elections",
+        elections_api,
+        name="api-elections",
+    ),
+    path(
+        "elections/<int:election_id>/info",
+        election_detail_info_api,
+        name="api-election-detail-info",
+    ),
+    path(
+        "elections/<int:election_id>/candidates",
+        election_detail_candidates_api,
+        name="api-election-detail-candidates",
+    ),
+    path(
+        "elections/<int:election_id>/eligible-voters",
+        election_detail_eligible_voters_api,
+        name="api-election-detail-eligible-voters",
+    ),
+    path(
+        "elections/<int:election_id>/ineligible-voters",
+        election_detail_ineligible_voters_api,
+        name="api-election-detail-ineligible-voters",
+    ),
+    path(
+        "elections/<int:election_id>/audit-log",
+        election_audit_log_api,
+        name="api-election-audit-log",
+    ),
+    path(
+        "elections/<int:election_id>/audit-summary",
+        election_audit_summary_api,
+        name="api-election-audit-summary",
+    ),
+    path(
+        "elections/<int:election_id>/extend-end",
+        election_extend_end_api,
+        name="api-election-extend-end",
+    ),
+    path(
+        "elections/<int:election_id>/conclude",
+        election_conclude_api,
+        name="api-election-conclude",
+    ),
+    path(
+        "elections/<int:election_id>/send-mail-credentials",
+        election_send_mail_credentials_api,
+        name="api-election-send-mail-credentials",
+    ),
+    path(
+        "elections/<int:election_id>/public/ballots",
+        election_public_ballots,
+        name="api-election-public-ballots",
+    ),
+    path(
+        "elections/<int:election_id>/public/audit",
+        election_public_audit,
+        name="api-election-public-audit",
+    ),
+    path(
+        "elections/reports/turnout",
+        elections_turnout_report_api,
+        name="api-elections-turnout-report",
+    ),
+    path(
+        "elections/<int:election_id>/vote",
+        election_vote_api,
+        name="api-election-vote",
+    ),
+    path(
+        "elections/<int:election_id>/vote/submit",
+        election_vote_submit,
+        name="api-election-vote-submit",
+    ),
+    path(
+        "elections/ballot/verify",
+        ballot_verify_api,
+        name="api-ballot-verify",
     ),
     path(
         "membership/request/<int:pk>/rescind",

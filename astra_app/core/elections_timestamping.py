@@ -32,8 +32,28 @@ CANONICAL_MESSAGE_VERSION = 1
 
 
 def get_public_payload(entry: AuditLogEntry) -> Any:
+    if entry.event_type == "rekor_attestation_failed":
+        return {}
+
     payload = entry.payload
     if isinstance(payload, dict):
+        if entry.event_type == "election_started":
+            public_payload: dict[str, object] = {}
+            if "genesis_chain_hash" in payload:
+                public_payload["genesis_chain_hash"] = payload["genesis_chain_hash"]
+            candidates = payload.get("candidates")
+            if isinstance(candidates, list):
+                public_payload["candidates"] = [
+                    {
+                        "id": candidate.get("id"),
+                        "freeipa_username": candidate.get("freeipa_username"),
+                        "tiebreak_uuid": candidate.get("tiebreak_uuid"),
+                    }
+                    for candidate in candidates
+                    if isinstance(candidate, dict)
+                ]
+            return public_payload
+
         public_payload = dict(payload)
         public_payload.pop("actor", None)
         if entry.event_type == "election_closed":

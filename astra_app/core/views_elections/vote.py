@@ -4,6 +4,7 @@ import hmac
 import json
 import logging
 import random
+from typing import cast
 
 from django.conf import settings
 from django.http import Http404, JsonResponse
@@ -12,7 +13,7 @@ from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 
 from core import elections_services
-from core.elections_eligibility import vote_weight_breakdown_for_username
+from core.elections_eligibility import VoteWeightLine, vote_weight_breakdown_for_username
 from core.elections_services import (
     ElectionNotOpenError,
     InvalidBallotError,
@@ -30,12 +31,83 @@ from core.views_utils import block_action_without_coc, get_username, has_signed_
 logger = logging.getLogger(__name__)
 
 
+def _candidate_vote_display(candidates: list[Candidate]) -> list[dict[str, object]]:
+    users_by_username = _load_candidate_users({candidate.freeipa_username for candidate in candidates if candidate.freeipa_username})
+
+    candidate_display: list[dict[str, object]] = []
+    for candidate in candidates:
+        user = users_by_username.get(candidate.freeipa_username)
+        full_name = user.full_name if user is not None else candidate.freeipa_username
+        label = f"{full_name} ({candidate.freeipa_username})"
+        candidate_display.append({"candidate": candidate, "label": label})
+    return candidate_display
+
+
+def _election_vote_page_context(request, *, election: Election) -> dict[str, object]:
+    username = get_username(request)
+
+    if username:
+        blocked = block_action_without_coc(
+            request,
+            username=username,
+            action_label="vote in elections",
+        )
+        if blocked is not None:
+            return {"blocked_response": blocked}
+
+    voter_votes: int | None = None
+    if username:
+        credential = (
+            VotingCredential.objects.filter(election=election, freeipa_username=username)
+            .only("weight")
+            .first()
+        )
+        voter_votes = int(credential.weight or 0) if credential is not None else 0
+
+    voter_vote_breakdown = []
+    if username and voter_votes is not None and voter_votes > 0:
+        voter_vote_breakdown = vote_weight_breakdown_for_username(
+            election=election,
+            username=username,
+        )
+
+    can_submit_vote = voter_votes is not None and voter_votes > 0
+
+    candidates = list(Candidate.objects.filter(election=election))
+    random.shuffle(candidates)
+
+    return {
+        "election": election,
+        "candidates": _candidate_vote_display(candidates),
+        "voter_votes": voter_votes,
+        "voter_vote_breakdown": voter_vote_breakdown,
+        "can_submit_vote": can_submit_vote,
+        "ballot_verify_url": reverse("ballot-verify"),
+        "vote_submit_url": reverse("api-election-vote-submit", args=[election.id]),
+        "election_detail_url": reverse("election-detail", args=[election.id]),
+    }
+
+
+def _serialize_vote_weight_breakdown(lines: list[VoteWeightLine]) -> list[dict[str, object]]:
+    return [
+        {
+            "votes": line.votes,
+            "label": line.label,
+            "org_name": line.org_name or None,
+        }
+        for line in lines
+    ]
+
+
 def _parse_vote_payload(request, *, election: Election) -> tuple[str, list[int]]:
     if request.content_type and request.content_type.startswith("application/json"):
         raw = request.body.decode("utf-8") if request.body else "{}"
         data = json.loads(raw)
         credential_public_id = str(data.get("credential_public_id") or "").strip()
         ranking_raw = data.get("ranking")
+        ranking_usernames_raw = str(data.get("ranking_usernames") or "").strip()
+        if not ranking_raw and ranking_usernames_raw:
+            ranking_raw = ranking_usernames_raw
     else:
         credential_public_id = str(request.POST.get("credential_public_id") or "").strip()
         ranking_raw = str(request.POST.get("ranking") or "").strip()
@@ -216,54 +288,56 @@ def election_vote(request, election_id: int):
         raise Http404
 
     username = get_username(request)
-
     if username:
-        blocked = block_action_without_coc(
+        blocked_response = block_action_without_coc(
             request,
             username=username,
             action_label="vote in elections",
         )
-        if blocked is not None:
-            return blocked
-
-    voter_votes: int | None = None
-    if username:
-        credential = (
-            VotingCredential.objects.filter(election=election, freeipa_username=username)
-            .only("weight")
-            .first()
-        )
-        voter_votes = int(credential.weight or 0) if credential is not None else 0
-
-    voter_vote_breakdown = []
-    if username and voter_votes is not None and voter_votes > 0:
-        voter_vote_breakdown = vote_weight_breakdown_for_username(
-            election=election,
-            username=username,
-        )
-
-    can_submit_vote = voter_votes is not None and voter_votes > 0
-
-    candidates = list(Candidate.objects.filter(election=election))
-    random.shuffle(candidates)
-
-    users_by_username = _load_candidate_users({c.freeipa_username for c in candidates if c.freeipa_username})
-
-    candidate_display: list[dict[str, object]] = []
-    for c in candidates:
-        user = users_by_username.get(c.freeipa_username)
-        full_name = user.full_name if user is not None else c.freeipa_username
-        label = f"{full_name} ({c.freeipa_username})"
-        candidate_display.append({"candidate": c, "label": label})
+        if blocked_response is not None:
+            return blocked_response
 
     return render(
         request,
         "core/election_vote.html",
+        {"election": election},
+    )
+
+
+@require_GET
+def election_vote_api(request, election_id: int):
+    election = _get_active_election(election_id)
+    if election.status != Election.Status.open:
+        raise Http404
+
+    context = _election_vote_page_context(request, election=election)
+    blocked_response = context.pop("blocked_response", None)
+    if blocked_response is not None:
+        return blocked_response
+
+    return JsonResponse(
         {
-            "election": election,
-            "candidates": candidate_display,
-            "voter_votes": voter_votes,
-            "voter_vote_breakdown": voter_vote_breakdown,
-            "can_submit_vote": can_submit_vote,
-        },
+            "election": {
+                "id": election.id,
+                "name": election.name,
+                "start_datetime": election.start_datetime.isoformat(),
+                "end_datetime": election.end_datetime.isoformat(),
+                "detail_url": context["election_detail_url"],
+                "submit_url": context["vote_submit_url"],
+                "verify_url": reverse("ballot-verify"),
+                "can_submit_vote": context["can_submit_vote"],
+                "voter_votes": context["voter_votes"],
+            },
+            "vote_weight_breakdown": _serialize_vote_weight_breakdown(
+                cast(list[VoteWeightLine], context["voter_vote_breakdown"])
+            ),
+            "candidates": [
+                {
+                    "id": item["candidate"].id,
+                    "username": item["candidate"].freeipa_username,
+                    "label": item["label"],
+                }
+                for item in context["candidates"]
+            ],
+        }
     )

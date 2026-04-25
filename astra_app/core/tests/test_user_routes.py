@@ -202,6 +202,24 @@ class UserRoutesTests(TestCase):
             },
         })
 
+    def test_users_api_uses_shared_pagination_serializer(self) -> None:
+        self._login_as_freeipa("admin")
+
+        users = [
+            self._user_stub("alice", full_name="Alice User", email="alice@example.org"),
+        ]
+
+        with (
+            patch("core.views_users.snapshot_freeipa_users", return_value=users, create=True),
+            patch("core.views_users.serialize_pagination", wraps=lambda page_ctx: {"count": 999}, create=True) as serialize_mock,
+        ):
+            response = self.client.get("/api/v1/users")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        self.assertEqual(payload["pagination"], {"count": 999})
+        serialize_mock.assert_called_once()
+
     def test_users_api_resolves_avatar_once_per_unique_username_within_request(self) -> None:
         self._login_as_freeipa("admin")
 

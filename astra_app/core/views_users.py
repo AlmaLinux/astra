@@ -1,20 +1,24 @@
 import logging
+from datetime import datetime
 from typing import cast
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.contrib import messages
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
+from django.middleware.csrf import get_token
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.formats import date_format
 
 from core.agreements import (
     has_enabled_agreements,
     list_agreements_for_user,
     missing_required_agreements_for_user_in_group,
 )
+from core.api_pagination import serialize_pagination
 from core.avatar_providers import resolve_avatar_urls_for_users
 from core.country_codes import country_code_status_from_user_data, country_name_from_code
 from core.freeipa.group import FreeIPAGroup
@@ -30,10 +34,11 @@ from core.membership import (
     resolve_request_ids_by_membership_type,
 )
 from core.membership_notifications import membership_extend_url
-from core.models import MembershipRequest
-from core.permissions import can_view_user_directory
+from core.models import MembershipRequest, MembershipType
+from core.permissions import can_view_user_directory, membership_review_permissions
 from core.templatetags._grid_tag_utils import parse_grid_query
 from core.templatetags._user_helpers import try_get_full_name
+from core.templatetags.core_dict import membership_tier_class
 from core.templatetags.core_user_grid import build_user_grid_page
 from core.views_utils import (
     _normalize_str,
@@ -662,7 +667,7 @@ def _build_user_profile_summary_bootstrap(context: dict[str, object]) -> dict[st
         "profileEditUrl": settings_url(tab="profile") if bool(context["is_self"]) else "",
         "avatarUrl": avatar_url_by_username.get(fu.username, ""),
         "viewerIsMembershipCommittee": bool(context["viewer_is_membership_committee"]),
-        "profileCountry": str(context["profile_country"]),
+        "profileCountry": str(context["profile_country"]) if bool(context["viewer_is_membership_committee"]) else "",
         "pronouns": str(context["pronouns"]),
         "locale": str(context["locale"]),
         "timezoneName": str(context["timezone_name"]),
@@ -708,6 +713,265 @@ def _build_user_profile_groups_bootstrap(context: dict[str, object]) -> dict[str
     }
 
 
+def _profile_context_for_request(request: HttpRequest, username: str) -> dict[str, object]:
+    username = _normalize_str(username)
+    if not username:
+        raise Http404("User not found")
+
+    viewer_username = get_username(request)
+    logger.debug("User profile API: username=%s viewer=%s", username, viewer_username)
+
+    fu = _get_full_user(username)
+    if not fu:
+        raise Http404("User not found")
+
+    return _profile_context_for_user(
+        request,
+        fu=fu,
+        is_self=username == viewer_username,
+        viewer_is_membership_committee=_is_membership_committee_viewer(request),
+    )
+
+
+def _serialize_user_profile_action(action: dict[str, str]) -> dict[str, str]:
+    return {
+        "id": action["id"],
+        "label": action["label"],
+        "url": action["url"],
+        "urlLabel": action["url_label"],
+    }
+
+
+def _serialize_user_profile_account_setup(context: dict[str, object]) -> dict[str, object]:
+    required_actions = cast(list[dict[str, str]], context["account_setup_required_actions"])
+    recommended_actions = cast(list[dict[str, str]], context["account_setup_recommended_actions"])
+
+    return {
+        "requiredActions": [_serialize_user_profile_action(action) for action in required_actions],
+        "requiredIsRfi": bool(context["account_setup_required_is_rfi"]),
+        "recommendedActions": [_serialize_user_profile_action(action) for action in recommended_actions],
+        "recommendedDismissKey": f"astra:profile-recommended-dismissed:{cast(FreeIPAUser, context['fu']).username}",
+    }
+
+
+def _format_profile_membership_date(value: object, *, timezone_name: str, fmt: str) -> str:
+    if not isinstance(value, datetime):
+        return ""
+
+    if timezone_name:
+        try:
+            value = timezone.localtime(value, timezone=ZoneInfo(timezone_name))
+        except Exception:
+            value = timezone.localtime(value, timezone=ZoneInfo("UTC"))
+    else:
+        value = timezone.localtime(value, timezone=ZoneInfo("UTC"))
+
+    return date_format(value, fmt)
+
+
+def _serialize_user_profile_membership_type(membership_type: MembershipType) -> dict[str, str]:
+    return {
+        "name": membership_type.name,
+        "code": membership_type.code,
+        "description": membership_type.description,
+        "className": membership_tier_class(membership_type.code),
+    }
+
+
+def _serialize_user_profile_membership_badge(
+    membership_type: MembershipType,
+    *,
+    request_id: object,
+    can_link: bool,
+) -> dict[str, object]:
+    tier_class = membership_tier_class(membership_type.code)
+    request_url = reverse("membership-request-detail", args=[request_id]) if request_id and can_link else None
+    return {
+        "label": membership_type.name,
+        "className": f"badge alx-status-badge {tier_class} alx-status-badge--active",
+        "url": request_url,
+    }
+
+
+def _serialize_user_profile_pending_badge(
+    status: str,
+    *,
+    is_owner: bool,
+    can_view: bool,
+    request_id: int,
+) -> dict[str, object]:
+    is_on_hold = status == MembershipRequest.Status.on_hold
+    label = "Action required" if is_on_hold and is_owner else "On hold" if is_on_hold else "Under review"
+    status_class = "alx-status-badge--action" if is_on_hold else "alx-status-badge--review"
+    legacy_class = "membership-action-required" if is_on_hold else "membership-under-review"
+    return {
+        "label": label,
+        "className": f"badge {legacy_class} alx-status-badge {status_class}",
+        "url": reverse("membership-request-detail", args=[request_id]) if is_owner or can_view else None,
+    }
+
+
+def _serialize_user_profile_membership_entry(
+    entry: dict[str, object],
+    *,
+    index: int,
+    timezone_name: str,
+    is_owner: bool,
+    can_view: bool,
+    can_manage: bool,
+    username: str,
+    csrf_token: str,
+    next_url: str,
+) -> dict[str, object]:
+    membership_type = cast(MembershipType, entry["membership_type"])
+    is_expiring_soon = bool(entry["is_expiring_soon"])
+    expires_label = _format_profile_membership_date(
+        entry["expires_at"],
+        timezone_name=timezone_name,
+        fmt="M j, Y H:i" if is_expiring_soon else "M j, Y",
+    )
+    if is_expiring_soon and expires_label:
+        expires_label = f"{expires_label} ({timezone_name or 'UTC'})"
+
+    request_id = entry["request_id"]
+    management = None
+    if can_manage:
+        modal_id = f"expiry-modal-{index}"
+        input_id = f"expires-on-{index}"
+        initial_value = _format_profile_membership_date(entry["expires_at"], timezone_name="UTC", fmt="Y-m-d")
+        current_expiration = _format_profile_membership_date(entry["expires_at"], timezone_name="UTC", fmt="M j, Y")
+        management = {
+            "modalId": modal_id,
+            "inputId": input_id,
+            "expiryActionUrl": reverse("membership-set-expiry", args=[username, membership_type.code]),
+            "terminateActionUrl": reverse("membership-terminate", args=[username, membership_type.code]),
+            "csrfToken": csrf_token,
+            "nextUrl": next_url,
+            "initialValue": initial_value,
+            "minValue": _format_profile_membership_date(timezone.now(), timezone_name="UTC", fmt="Y-m-d"),
+            "currentText": f"Current expiration: {current_expiration}" if current_expiration else "",
+            "terminator": username,
+        }
+
+    return {
+        "kind": "membership",
+        "key": f"membership-{membership_type.code}",
+        "membershipType": _serialize_user_profile_membership_type(membership_type),
+        "badge": _serialize_user_profile_membership_badge(
+            membership_type,
+            request_id=request_id,
+            can_link=is_owner or can_view,
+        ),
+        "memberSinceLabel": _format_profile_membership_date(
+            entry["created_at"],
+            timezone_name=timezone_name,
+            fmt="F Y",
+        ),
+        "expiresLabel": expires_label if is_owner or can_view else "",
+        "expiresTone": "danger" if is_expiring_soon else "muted",
+        "renewUrl": str(entry["extend_url"]) if is_owner and is_expiring_soon and not bool(entry["has_pending_request_in_category"]) else "",
+        "tierChangeUrl": str(entry["extend_url"]) if is_owner and bool(entry["can_request_tier_change"]) else "",
+        "management": management,
+    }
+
+
+def _serialize_user_profile_pending_membership_entry(
+    entry: dict[str, object],
+    *,
+    is_owner: bool,
+    can_view: bool,
+) -> dict[str, object]:
+    membership_type = cast(MembershipType, entry["membership_type"])
+    request_id = int(entry["request_id"])
+    status = str(entry["status"])
+    return {
+        "kind": "pending",
+        "key": f"pending-{request_id}",
+        "membershipType": _serialize_user_profile_membership_type(membership_type),
+        "requestId": request_id,
+        "requestUrl": reverse("membership-request-detail", args=[request_id]),
+        "status": status,
+        "organizationName": str(entry["organization_name"]),
+        "badge": _serialize_user_profile_pending_badge(
+            status,
+            is_owner=is_owner,
+            can_view=can_view,
+            request_id=request_id,
+        ),
+    }
+
+
+def _serialize_user_profile_membership(context: dict[str, object], request: HttpRequest) -> dict[str, object]:
+    fu = cast(FreeIPAUser, context["fu"])
+    review_permissions = membership_review_permissions(request.user)
+    membership_can_view = bool(review_permissions["membership_can_view"])
+    membership_can_write = bool(
+        review_permissions["membership_can_add"]
+        or review_permissions["membership_can_change"]
+        or review_permissions["membership_can_delete"]
+    )
+    membership_can_manage = bool(review_permissions["membership_can_change"] and review_permissions["membership_can_delete"])
+    is_owner = bool(context["is_self"])
+    timezone_name = str(context["timezone_name"])
+    membership_entries = cast(list[dict[str, object]], context["memberships"])
+    pending_entries = cast(list[dict[str, object]], context["membership_pending_requests"])
+    history_url = f"{reverse('membership-audit-log')}?{urlencode({'username': fu.username})}"
+    target_params = urlencode({"target_type": "user", "target": fu.username})
+    csrf_token = get_token(request)
+
+    notes = None
+    if membership_can_view:
+        notes = {
+            "summaryUrl": f"{reverse('api-membership-notes-aggregate-summary')}?{target_params}",
+            "detailUrl": f"{reverse('api-membership-notes-aggregate')}?{target_params}",
+            "addUrl": reverse("api-membership-notes-aggregate-add"),
+            "csrfToken": csrf_token,
+            "nextUrl": request.get_full_path(),
+            "canView": membership_can_view,
+            "canWrite": membership_can_write,
+            "targetType": "user",
+            "target": fu.username,
+        }
+
+    visible_pending_entries = pending_entries if is_owner or membership_can_view else []
+    return {
+        "showCard": bool(context["show_membership_card"]),
+        "username": fu.username,
+        "historyUrl": history_url if membership_can_view else "",
+        "requestUrl": str(context["membership_request_url"]),
+        "canRequestAny": bool(context["membership_can_request_any"]),
+        "isOwner": is_owner,
+        "entries": [
+            _serialize_user_profile_membership_entry(
+                entry,
+                index=index,
+                timezone_name=timezone_name,
+                is_owner=is_owner,
+                can_view=membership_can_view,
+                can_manage=membership_can_manage,
+                username=fu.username,
+                csrf_token=csrf_token,
+                next_url=request.get_full_path(),
+            )
+            for index, entry in enumerate(membership_entries, start=1)
+        ],
+        "pendingEntries": [
+            _serialize_user_profile_pending_membership_entry(entry, is_owner=is_owner, can_view=membership_can_view)
+            for entry in visible_pending_entries
+        ],
+        "notes": notes,
+    }
+
+
+def _build_user_profile_payload(context: dict[str, object], request: HttpRequest) -> dict[str, object]:
+    return {
+        "summary": _build_user_profile_summary_bootstrap(context),
+        "groups": _build_user_profile_groups_bootstrap(context),
+        "membership": _serialize_user_profile_membership(context, request),
+        "accountSetup": _serialize_user_profile_account_setup(context),
+    }
+
+
 def home(request: HttpRequest) -> HttpResponse:
     username = get_username(request)
     if not username:
@@ -722,24 +986,13 @@ def user_profile(request: HttpRequest, username: str) -> HttpResponse:
         raise Http404("User not found")
 
     viewer_username = get_username(request)
-    logger.debug("User profile view: username=%s viewer=%s", username, viewer_username)
+    logger.debug("User profile shell view: username=%s viewer=%s", username, viewer_username)
+    return render(request, "core/user_profile.html", {"profile_username": username})
 
-    fu = _get_full_user(username)
-    if not fu:
-        raise Http404("User not found")
 
-    is_self = username == viewer_username
-    viewer_is_membership_committee = _is_membership_committee_viewer(request)
-
-    context = _profile_context_for_user(
-        request,
-        fu=fu,
-        is_self=is_self,
-        viewer_is_membership_committee=viewer_is_membership_committee,
-    )
-    context["profile_summary_bootstrap"] = _build_user_profile_summary_bootstrap(context)
-    context["profile_groups_bootstrap"] = _build_user_profile_groups_bootstrap(context)
-    return render(request, "core/user_profile.html", context)
+def user_profile_api(request: HttpRequest, username: str) -> JsonResponse:
+    context = _profile_context_for_request(request, username)
+    return JsonResponse(_build_user_profile_payload(context, request))
 
 
 def users(request: HttpRequest) -> HttpResponse:
@@ -799,24 +1052,16 @@ def users_api(request: HttpRequest) -> JsonResponse:
         avatar_fallback_count,
     )
 
-    start_index = page_obj.start_index() if paginator.count else 0
-    end_index = page_obj.end_index() if paginator.count else 0
-
     payload = {
         "users": items,
-        "pagination": {
-            "count": paginator.count,
-            "page": page_obj.number,
-            "num_pages": paginator.num_pages,
-            "page_numbers": page_numbers,
-            "show_first": show_first,
-            "show_last": show_last,
-            "has_previous": page_obj.has_previous(),
-            "has_next": page_obj.has_next(),
-            "previous_page_number": page_obj.previous_page_number() if page_obj.has_previous() else None,
-            "next_page_number": page_obj.next_page_number() if page_obj.has_next() else None,
-            "start_index": start_index,
-            "end_index": end_index,
-        },
+        "pagination": serialize_pagination(
+            {
+                "paginator": paginator,
+                "page_obj": page_obj,
+                "page_numbers": page_numbers,
+                "show_first": show_first,
+                "show_last": show_last,
+            }
+        ),
     }
     return JsonResponse(payload)

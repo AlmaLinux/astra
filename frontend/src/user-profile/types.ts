@@ -53,30 +53,109 @@ export interface UserProfileGroupsBootstrap {
   isSelf: boolean;
 }
 
-export function readUserProfileSummaryBootstrap(root: HTMLElement): UserProfileSummaryBootstrap | null {
-  const bootstrapId = String(root.dataset.userProfileBootstrapId || "").trim();
-  if (!bootstrapId) {
-    return null;
-  }
-
-  const script = document.getElementById(bootstrapId);
-  if (!(script instanceof HTMLScriptElement) || !script.textContent) {
-    return null;
-  }
-
-  return JSON.parse(script.textContent) as UserProfileSummaryBootstrap;
+export interface UserProfileActionItem {
+  id: string;
+  label: string;
+  url: string;
+  urlLabel: string;
 }
 
-export function readUserProfileGroupsBootstrap(root: HTMLElement): UserProfileGroupsBootstrap | null {
-  const bootstrapId = String(root.dataset.userProfileBootstrapId || "").trim();
-  if (!bootstrapId) {
+export interface UserProfileAccountSetup {
+  requiredActions: UserProfileActionItem[];
+  requiredIsRfi: boolean;
+  recommendedActions: UserProfileActionItem[];
+  recommendedDismissKey: string;
+}
+
+export interface UserProfileMembershipType {
+  name: string;
+  code: string;
+  description: string;
+  className: string;
+}
+
+export interface UserProfileMembershipBadge {
+  label: string;
+  className: string;
+  url: string | null;
+}
+
+export interface UserProfileMembershipManagementAction {
+  modalId: string;
+  inputId: string;
+  expiryActionUrl: string;
+  terminateActionUrl: string;
+  csrfToken: string;
+  nextUrl: string;
+  initialValue: string;
+  minValue: string;
+  currentText: string;
+  terminator: string;
+}
+
+export interface UserProfileMembershipEntry {
+  kind: "membership";
+  key: string;
+  membershipType: UserProfileMembershipType;
+  badge: UserProfileMembershipBadge;
+  memberSinceLabel: string;
+  expiresLabel: string;
+  expiresTone: "danger" | "muted";
+  renewUrl: string;
+  tierChangeUrl: string;
+  management: UserProfileMembershipManagementAction | null;
+}
+
+export interface UserProfilePendingMembershipEntry {
+  kind: "pending";
+  key: string;
+  membershipType: UserProfileMembershipType;
+  requestId: number;
+  requestUrl: string;
+  status: string;
+  organizationName: string;
+  badge: UserProfileMembershipBadge;
+}
+
+export interface UserProfileMembershipNotes {
+  summaryUrl: string;
+  detailUrl: string;
+  addUrl: string;
+  csrfToken: string;
+  nextUrl: string;
+  canView: boolean;
+  canWrite: boolean;
+  targetType: string;
+  target: string;
+}
+
+export interface UserProfileMembershipSection {
+  showCard: boolean;
+  username: string;
+  historyUrl: string;
+  requestUrl: string;
+  canRequestAny: boolean;
+  isOwner: boolean;
+  entries: UserProfileMembershipEntry[];
+  pendingEntries: UserProfilePendingMembershipEntry[];
+  notes: UserProfileMembershipNotes | null;
+}
+
+export interface UserProfileResponse {
+  summary: UserProfileSummaryBootstrap;
+  groups: UserProfileGroupsBootstrap;
+  membership: UserProfileMembershipSection;
+  accountSetup: UserProfileAccountSetup;
+}
+
+export interface UserProfileBootstrap {
+  apiUrl: string;
+}
+
+export function readUserProfileBootstrap(root: HTMLElement): UserProfileBootstrap | null {
+  const apiUrl = String(root.dataset.userProfileApiUrl || "").trim();
+  if (!apiUrl) {
     return null;
   }
-
-  const script = document.getElementById(bootstrapId);
-  if (!(script instanceof HTMLScriptElement) || !script.textContent) {
-    return null;
-  }
-
-  return JSON.parse(script.textContent) as UserProfileGroupsBootstrap;
+  return { apiUrl };
 }

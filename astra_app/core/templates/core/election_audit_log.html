@@ -1,4 +1,5 @@
 {% extends 'core/base.html' %}
+{% load django_vite %}
 {% load static %}
 
 {% block title %}Election Audit Log{% endblock %}
@@ -9,486 +10,51 @@
 
 {% block extra_head %}
   {{ block.super }}
-  {% if sankey_flows %}
-    <style>
-      .chart {
-        max-width: 800px;
-        max-height: 600px;
-      }
+  {% vite_hmr_client %}
+  {% vite_asset 'src/entrypoints/electionAuditLog.ts' %}
+  <style>
+    .election-sankey-chart {
+      width: 100%;
+      height: min(300px, 60vw);
+      max-height: 300px;
+    }
 
-      canvas {
-        -moz-user-select: none;
-        -webkit-user-select: none;
-        -ms-user-select: none;
-      }
-    </style>
-  {% endif %}
+    .election-sankey-chart canvas {
+      width: 100% !important;
+      height: min(300px, 60vw) !important;
+      max-height: 300px;
+    }
+
+    canvas {
+      -moz-user-select: none;
+      -webkit-user-select: none;
+      -ms-user-select: none;
+    }
+  </style>
 {% endblock %}
 
 {% block content %}
-  <div class="row">
-    <div class="col-lg-4">
-      <div class="card card-outline card-primary">
-        <div class="card-header">
-          <h3 class="card-title">Election</h3>
-        </div>
-        <div class="card-body">
-          <dl class="row mb-0">
-            <dt class="col-sm-5">Name</dt>
-            <dd class="col-sm-7">{{ election.name }}</dd>
-            <dt class="col-sm-5">Status</dt>
-            <dd class="col-sm-7">{{ election.status }}</dd>
-            <dt class="col-sm-5">Voting window</dt>
-            <dd class="col-sm-7">{{ election.start_datetime|date:"Y-m-d H:i T" }} → {{ election.end_datetime|date:"Y-m-d H:i T" }}</dd>
-            <dt class="col-sm-5">Seats</dt>
-            <dd class="col-sm-7">{{ election.number_of_seats }}</dd>
-            <dt class="col-sm-5">Unique voters</dt>
-            <dd class="col-sm-7">{{ ballots_cast }}</dd>
-            <dt class="col-sm-5">Votes cast</dt>
-            <dd class="col-sm-7">{{ votes_cast }}</dd>
-            <dt class="col-sm-5">Counting method</dt>
-            <dd class="col-sm-7">{{ tally_result.algorithm.name|default:"Unknown" }}</dd>
-            <dt class="col-sm-5">Algorithm version</dt>
-            <dd class="col-sm-7">{{ tally_result.algorithm.version|default:"1.0" }}</dd>
-            <dt class="col-sm-5">Specification</dt>
-            <dd class="col-sm-7"><a href="{% url 'election-algorithm' %}">Election algorithm</a></dd>
-            <dt class="col-sm-5">Quota (Droop)</dt>
-            <dd class="col-sm-7">{{ quota|floatformat:4 }}</dd>
-          </dl>
-
-          <hr class="my-3" />
-
-          <a class="btn btn-outline-primary btn-block" href="{% url 'election-detail' election.id %}" title="Return to election details">Back to election page</a>
-          {% if election.public_ballots_file %}
-            <a class="btn btn-outline-secondary btn-block" href="{{ election.public_ballots_file.url }}" title="Download ballots (JSON)">Download ballots (JSON)</a>
-          {% else %}
-            <a class="btn btn-outline-secondary btn-block" href="{% url 'election-public-ballots' election.id %}" title="Download ballots (JSON)">Download ballots (JSON)</a>
-          {% endif %}
-          {% if election.public_audit_file %}
-            <a class="btn btn-outline-secondary btn-block" href="{{ election.public_audit_file.url }}" title="Download audit log (JSON)">Download audit log (JSON)</a>
-          {% else %}
-            <a class="btn btn-outline-secondary btn-block" href="{% url 'election-public-audit' election.id %}" title="Download audit log (JSON)">Download audit log (JSON)</a>
-          {% endif %}
-        </div>
-      </div>
-
-      {% if election.status == 'tallied' and tally_result %}
-        <div class="card card-outline card-success">
-          <div class="card-header">
-            <h3 class="card-title">Tally summary</h3>
-          </div>
-          <div class="card-body">
-            {% if tally_elected_users %}
-              <p class="mb-2"><strong>Elected:</strong></p>
-              <ul class="pl-3 ml-2">
-                {% for u in tally_elected_users %}
-                  <li>{{ u.full_name }} (<a href="{{ u.profile_url }}">{{ u.username }}</a>)</li>
-                {% endfor %}
-              </ul>
-              {% if empty_seats > 0 %}
-                <p><strong>Empty seats:</strong> {{ empty_seats }}</p>
-              {% endif %}
-            {% else %}
-              <p class="mb-0">No elected list was recorded.</p>
-            {% endif %}
-          </div>
-        </div>
-      {% endif %}
-    </div>
-
-    <div class="col-lg-8">
-      <div class="card card-outline card-info">
-        <div class="card-header">
-          <h3 class="card-title">Timeline</h3>
-        </div>
-        <div class="card-body">
-          <div id="timeline-top" class="d-flex flex-wrap align-items-center justify-content-between mb-2">
-            <div class="btn-group btn-group-sm mb-2" role="group" aria-label="Jump to">
-              {% for j in jump_links %}
-                <a class="btn btn-outline-secondary" href="#{{ j.anchor }}" title="Jump to {{ j.label|striptags }}">{{ j.label }}</a>
-              {% endfor %}
-            </div>
-
-            <div class="btn-group btn-group-sm mb-2" role="group" aria-label="Timeline navigation">
-              {% if newer_url %}
-                <a class="btn btn-outline-secondary" href="{{ newer_url }}" title="Show newer timeline events">Newer</a>
-              {% endif %}
-              {% if older_url %}
-                <a class="btn btn-outline-secondary" href="{{ older_url }}" title="Load older timeline events">Load older</a>
-              {% endif %}
-            </div>
-          </div>
-
-          <div class="timeline">
-            {% for ev in events %}
-              {% ifchanged ev.timestamp.date %}
-                <div class="time-label">
-                  <span class="bg-green">{{ ev.timestamp|date:"j M Y" }}</span>
-                </div>
-              {% endifchanged %}
-
-              <div>
-                <i class="{{ ev.icon }} {{ ev.icon_bg }}"></i>
-                <div class="timeline-item"{% if ev.anchor %} id="{{ ev.anchor }}"{% endif %}>
-                  <span class="time"><i class="fas fa-clock"></i> {{ ev.timestamp|time:"H:i:s" }}</span>
-                  <h3 class="timeline-header">{{ ev.title }}</h3>
-                  <div class="timeline-body">
-                    {% if ev.event_type == 'tally_round' %}
-                      {% if ev.summary_text %}
-                        <p class="mb-2">{{ ev.summary_text|linebreaksbr }}</p>
-                      {% endif %}
-
-                      {% if ev.round_rows %}
-                        <div class="table-responsive">
-                          <table class="table table-sm table-striped mb-2">
-                            <thead>
-                              <tr>
-                                <th>Candidate</th>
-                                <th class="text-right">Retained total</th>
-                                <th class="text-right">Retention factor</th>
-                                <th>Status</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {% for row in ev.round_rows %}
-                                <tr>
-                                  <td>
-                                    {% if row.candidate_profile_url %}
-                                      <a href="{{ row.candidate_profile_url }}">{{ row.candidate_label }}</a>
-                                    {% else %}
-                                      {{ row.candidate_label }}
-                                    {% endif %}
-                                  </td>
-                                  <td class="text-right">{{ row.retained_total|floatformat:4 }}</td>
-                                  <td class="text-right">{{ row.retention_factor|floatformat:4 }}</td>
-                                  <td>
-                                    {% if row.is_elected %}
-                                      <span class="badge badge-success">elected</span>
-                                    {% elif row.is_eliminated %}
-                                      <span class="badge badge-danger">eliminated</span>
-                                    {% else %}
-                                      <span class="badge badge-secondary">continuing</span>
-                                    {% endif %}
-                                  </td>
-                                </tr>
-                              {% endfor %}
-                            </tbody>
-                          </table>
-                        </div>
-                      {% endif %}
-
-                      {% if ev.audit_text %}
-                        <div class="mb-0">{{ ev.audit_text|linebreaksbr }}</div>
-                      {% endif %}
-
-                    {% elif ev.event_type == 'ballots_submitted_summary' %}
-                      <p class="mb-2">
-                        <strong>{{ ev.ballots_count }}</strong> ballot{{ ev.ballots_count|pluralize }} submitted.
-                      </p>
-
-                      {% if ev.first_timestamp and ev.last_timestamp %}
-                        <p class="text-muted small mb-2">
-                          {{ ev.first_timestamp|time:"H:i:s" }} → {{ ev.last_timestamp|time:"H:i:s" }}
-                        </p>
-                      {% endif %}
-
-                      <details class="mb-2">
-                        <summary class="text-muted">Show ballot hashes</summary>
-                        <ul class="mb-2 pl-3 mt-2">
-                          {% for b in ev.ballot_entries %}
-                            <li>
-                              <span class="text-muted">{{ b.timestamp|time:"H:i:s" }}</span>
-                              {% if b.ballot_hash %}
-                                —
-                                <code title="{{ b.ballot_hash }}">
-                                  {% if b.ballot_hash|length > 16 %}
-                                    {{ b.ballot_hash|slice:":16" }}…
-                                  {% else %}
-                                    {{ b.ballot_hash }}
-                                  {% endif %}
-                                </code>
-                                {% if b.supersedes_ballot_hash %}
-                                  <span class="text-muted small">
-                                    (supersedes
-                                    <code title="{{ b.supersedes_ballot_hash }}">
-                                      {% if b.supersedes_ballot_hash|length > 16 %}
-                                        {{ b.supersedes_ballot_hash|slice:":16" }}…
-                                      {% else %}
-                                        {{ b.supersedes_ballot_hash }}
-                                      {% endif %}
-                                    </code>)
-                                  </span>
-                                {% endif %}
-                                <button
-                                  type="button"
-                                  class="btn btn-outline-secondary btn-xs ml-2 js-copy-hash"
-                                  data-hash="{{ b.ballot_hash }}"
-                                  aria-label="Copy full ballot hash"
-                                  title="Copy full ballot hash"
-                                >
-                                  <i class="fas fa-copy" aria-hidden="true"></i>
-                                </button>
-                              {% endif %}
-                            </li>
-                          {% empty %}
-                            <li class="text-muted">No ballot details recorded.</li>
-                          {% endfor %}
-                        </ul>
-
-                        {% if ev.ballots_preview_truncated %}
-                          <p class="text-muted small mb-2">Showing first {{ ev.ballots_preview_limit }} ballot{{ ev.ballots_preview_limit|pluralize }}.</p>
-                        {% endif %}
-                      </details>
-
-                    {% elif ev.event_type == 'election_end_extended' %}
-                      <p class="mb-2"><strong>Election end was extended</strong></p>
-                      <dl class="row mb-2">
-                        {% if ev.payload.previous_end_datetime %}
-                          <dt class="col-sm-5">Previous end</dt>
-                          <dd class="col-sm-7">{{ ev.payload.previous_end_datetime }}</dd>
-                        {% endif %}
-                        {% if ev.payload.new_end_datetime %}
-                          <dt class="col-sm-5">New end</dt>
-                          <dd class="col-sm-7">{{ ev.payload.new_end_datetime }}</dd>
-                        {% endif %}
-                        {% if ev.payload.quorum_percent %}
-                          <dt class="col-sm-5">Quorum percent</dt>
-                          <dd class="col-sm-7">{{ ev.payload.quorum_percent }}%</dd>
-                        {% endif %}
-                        {% if ev.payload.required_participating_voter_count %}
-                          <dt class="col-sm-5">Quorum voters required</dt>
-                          <dd class="col-sm-7">{{ ev.payload.required_participating_voter_count }}</dd>
-                        {% endif %}
-                        {% if ev.payload.required_participating_vote_weight_total %}
-                          <dt class="col-sm-5">Quorum vote weight required</dt>
-                          <dd class="col-sm-7">{{ ev.payload.required_participating_vote_weight_total }}</dd>
-                        {% endif %}
-                        {% if ev.payload.participating_voter_count %}
-                          <dt class="col-sm-5">Voters participated</dt>
-                          <dd class="col-sm-7">{{ ev.payload.participating_voter_count }}</dd>
-                        {% endif %}
-                        {% if ev.payload.participating_vote_weight_total %}
-                          <dt class="col-sm-5">Vote weight participated</dt>
-                          <dd class="col-sm-7">{{ ev.payload.participating_vote_weight_total }}</dd>
-                        {% endif %}
-                      </dl>
-
-                    {% elif ev.event_type == 'quorum_reached' %}
-                      <p class="mb-2"><strong>Quorum reached</strong></p>
-                      <dl class="row mb-2">
-                        {% if ev.payload.quorum_percent %}
-                          <dt class="col-sm-5">Quorum percent</dt>
-                          <dd class="col-sm-7">{{ ev.payload.quorum_percent }}%</dd>
-                        {% endif %}
-                        {% if ev.payload.required_participating_voter_count %}
-                          <dt class="col-sm-5">Voters required</dt>
-                          <dd class="col-sm-7">{{ ev.payload.required_participating_voter_count }}</dd>
-                        {% endif %}
-                        {% if ev.payload.required_participating_vote_weight_total %}
-                          <dt class="col-sm-5">Vote weight required</dt>
-                          <dd class="col-sm-7">{{ ev.payload.required_participating_vote_weight_total }}</dd>
-                        {% endif %}
-                        {% if ev.payload.participating_voter_count %}
-                          <dt class="col-sm-5">Voters participated</dt>
-                          <dd class="col-sm-7">{{ ev.payload.participating_voter_count }}</dd>
-                        {% endif %}
-                        {% if ev.payload.participating_vote_weight_total %}
-                          <dt class="col-sm-5">Vote weight participated</dt>
-                          <dd class="col-sm-7">{{ ev.payload.participating_vote_weight_total }}</dd>
-                        {% endif %}
-                        {% if ev.payload.eligible_voter_count %}
-                          <dt class="col-sm-5">Eligible voters</dt>
-                          <dd class="col-sm-7">{{ ev.payload.eligible_voter_count }}</dd>
-                        {% endif %}
-                      </dl>
-
-                    {% elif ev.event_type == 'election_started' %}
-                      <p class="mb-2">
-                        <strong>Genesis chain head:</strong>
-                        <code title="{{ ev.payload.genesis_chain_hash }}">
-                          {% if ev.payload.genesis_chain_hash|length > 16 %}
-                            {{ ev.payload.genesis_chain_hash|slice:":16" }}…
-                          {% else %}
-                            {{ ev.payload.genesis_chain_hash }}
-                          {% endif %}
-                        </code>
-                        <button
-                          type="button"
-                          class="btn btn-outline-secondary btn-xs ml-2 js-copy-hash"
-                          data-hash="{{ ev.payload.genesis_chain_hash }}"
-                          aria-label="Copy genesis chain head"
-                          title="Copy genesis chain head"
-                        >
-                          <i class="fas fa-copy" aria-hidden="true"></i>
-                        </button>
-                      </p>
-                      {% if ev.payload.candidates %}
-                        <p class="mb-1"><strong>Candidates (tie-break order):</strong></p>
-                        <table class="table table-sm table-borderless mb-2" style="font-size:0.85em;">
-                          <thead>
-                            <tr>
-                              <th>Username</th>
-                              <th>ID</th>
-                              <th>Tie-break UUID</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {% for cand in ev.payload.candidates %}
-                              <tr>
-                                <td>{{ cand.freeipa_username }}</td>
-                                <td>{{ cand.id }}</td>
-                                <td><code>{{ cand.tiebreak_uuid }}</code></td>
-                              </tr>
-                            {% endfor %}
-                          </tbody>
-                        </table>
-                      {% endif %}
-
-                    {% elif ev.event_type == 'election_closed' %}
-                      <p class="mb-2">
-                        <strong>Final chain head:</strong>
-                        <code title="{{ ev.payload.chain_head }}">
-                          {% if ev.payload.chain_head|length > 16 %}
-                            {{ ev.payload.chain_head|slice:":16" }}…
-                          {% else %}
-                            {{ ev.payload.chain_head }}
-                          {% endif %}
-                        </code>
-                        <button
-                          type="button"
-                          class="btn btn-outline-secondary btn-xs ml-2 js-copy-hash"
-                          data-hash="{{ ev.payload.chain_head }}"
-                          aria-label="Copy final chain head"
-                          title="Copy final chain head"
-                        >
-                          <i class="fas fa-copy" aria-hidden="true"></i>
-                        </button>
-                      </p>
-                      {% if not can_manage_elections %}
-                        <p class="mb-2">
-                          <strong>Credentials anonymized:</strong>
-                          {{ ev.payload.credentials_affected|default:0|yesno:"true,false" }}
-                        </p>
-                        <p class="mb-2">
-                          <strong>Emails scrubbed:</strong>
-                          {{ ev.payload.emails_scrubbed|default:0|yesno:"true,false" }}
-                        </p>
-                      {% endif %}
-
-                    {% elif ev.event_type == 'election_anonymized' %}
-                      <p class="mb-2">Voter credentials anonymized and sensitive emails scrubbed.</p>
-                      <dl class="row mb-0">
-                        <dt class="col-sm-6">Credentials anonymized</dt>
-                        <dd class="col-sm-6">
-                          {{ ev.payload.credentials_affected|default:0 }}
-                        </dd>
-                        <dt class="col-sm-6">Emails scrubbed</dt>
-                        <dd class="col-sm-6">
-                          {{ ev.payload.emails_scrubbed|default:0 }}
-                        </dd>
-                        {% if ev.payload.scrub_anomaly == True %}
-                          <dt class="col-sm-6">Scrub anomaly detected</dt>
-                          <dd class="col-sm-6">{{ ev.payload.scrub_anomaly }}</dd>
-                        {% endif %}
-                      </dl>
-
-                    {% elif ev.event_type == 'tally_completed' %}
-                      {% if ev.elected_users %}
-                        <p class="mb-2"><strong>Elected:</strong></p>
-                        <ul class="pl-3 ml-2">
-                          {% for u in ev.elected_users %}
-                            <li>{{ u.full_name }} (<a href="{{ u.profile_url }}">{{ u.username }}</a>)</li>
-                          {% endfor %}
-                        </ul>
-                      {% endif %}
-                      {% if empty_seats > 0 %}
-                        <p class="mt-2"><strong>Empty seats:</strong> {{ empty_seats }}</p>
-                      {% endif %}
-                      {% if sankey_flows %}
-                        <div class="mt-3">
-                          <div class="chart">
-                            <canvas
-                              id="tally-sankey-chart"
-                              data-sankey-chart
-                              data-sankey-data-id="tally-sankey-data"
-                              data-sankey-elected-id="tally-sankey-elected"
-                              data-sankey-eliminated-id="tally-sankey-eliminated"
-                              aria-label="Vote flow by round"
-                              role="img"
-                            ></canvas>
-                          </div>
-                        </div>
-                      {% endif %}
-                    {% endif %}
-                  </div>
-                </div>
-              </div>
-            {% empty %}
-              <p class="text-muted mb-0">No audit events recorded.</p>
-            {% endfor %}
-
-            <div>
-              <i class="fas fa-clock bg-gray"></i>
-            </div>
-          </div>
-
-          <div class="d-flex flex-wrap align-items-center justify-content-between mt-3">
-            <a class="btn btn-link px-0" href="#timeline-top" title="Jump to the top of the timeline">Back to top</a>
-
-            <div class="btn-group btn-group-sm" role="group" aria-label="Timeline navigation">
-              {% if newer_url %}
-                <a class="btn btn-outline-secondary" href="{{ newer_url }}" title="Show newer timeline events">Newer</a>
-              {% endif %}
-              {% if older_url %}
-                <a class="btn btn-outline-secondary" href="{{ older_url }}" title="Load older timeline events">Load older</a>
-              {% endif %}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
+  <div
+    data-election-audit-log-root
+    data-election-audit-log-api-url="{% url 'api-election-audit-log' election.id %}"
+    data-election-audit-summary-api-url="{% url 'api-election-audit-summary' election.id %}"
+    data-election-audit-detail-url="{% url 'election-detail' election.id %}"
+    data-election-audit-algorithm-url="{% url 'election-algorithm' %}"
+    data-election-audit-public-ballots-url="{% if election.public_ballots_file %}{{ election.public_ballots_file.url }}{% else %}{% url 'election-public-ballots' election.id %}{% endif %}"
+    data-election-audit-public-audit-url="{% if election.public_audit_file %}{{ election.public_audit_file.url }}{% else %}{% url 'election-public-audit' election.id %}{% endif %}"
+    data-election-audit-user-profile-url-template="{% url 'user-profile' '__username__' %}"
+    data-election-audit-election-name="{{ election.name }}"
+    data-election-audit-election-status="{{ election.status }}"
+    data-election-audit-start-datetime="{{ election.start_datetime|date:'c' }}"
+    data-election-audit-end-datetime="{{ election.end_datetime|date:'c' }}"
+    data-election-audit-number-of-seats="{{ election.number_of_seats }}"
+    data-election-audit-algorithm-name="{{ election.tally_result.algorithm.name|default:'Unknown' }}"
+    data-election-audit-algorithm-version="{{ election.tally_result.algorithm.version|default:'1.0' }}"
+  ></div>
 {% endblock %}
 
 {% block scripts %}
   {{ block.super }}
-  {% if sankey_flows %}
-    <script src="{% static 'core/vendor/chartjs/chart.umd.min.js' %}"></script>
-    <script src="{% static 'core/vendor/chartjs/chartjs-chart-sankey.js' %}"></script>
-    <script src="{% static 'core/js/election_sankey.js' %}"></script>
-    {{ sankey_flows|json_script:"tally-sankey-data" }}
-    {{ sankey_elected_nodes|json_script:"tally-sankey-elected" }}
-    {{ sankey_eliminated_nodes|json_script:"tally-sankey-eliminated" }}
-  {% endif %}
-  <script>
-    (function () {
-      function copyText(text) {
-        if (!text) return;
-
-        if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(text);
-          return;
-        }
-
-        // Fallback for older browsers.
-        window.prompt('Copy:', text);
-      }
-
-      document.addEventListener('click', function (ev) {
-        var target = ev.target;
-        if (!target) return;
-
-        var button = null;
-        if (target.closest) {
-          button = target.closest('button.js-copy-hash');
-        } else if (target.classList && target.classList.contains('js-copy-hash')) {
-          button = target;
-        }
-
-        if (!button) return;
-        var hash = button.getAttribute('data-hash') || '';
-        copyText(String(hash || '').trim());
-      });
-    })();
-  </script>
+  <script src="{% static 'core/vendor/chartjs/chart.umd.min.js' %}"></script>
+  <script src="{% static 'core/vendor/chartjs/chartjs-chart-sankey.js' %}"></script>
 {% endblock %}

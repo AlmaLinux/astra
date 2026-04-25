@@ -1,9 +1,11 @@
 {% extends 'core/base.html' %}
+{% load django_vite %}
 {% load static %}
-{% load avatar_tags %}
 
 {% block extra_head %}
   {{ block.super }}
+  {% vite_hmr_client %}
+  {% vite_asset 'src/entrypoints/electionDetail.ts' %}
   <style>
     /* Keep header tools aligned across collapsed/expanded cards. */
     .election-collapsible-card > .card-header {
@@ -32,10 +34,6 @@
     .election-voter-card.collapsed-card .card-tools .js-card-search {
       display: none;
     }
-
-    .candidate-card-divider {
-      clear: both;
-    }
   </style>
 {% endblock %}
 
@@ -48,35 +46,12 @@
 {% block content %}
   <div class="row">
     <div class="col-lg-8">
-      <div class="card card-outline card-primary">
-        <div class="card-body">
-          <dl class="row mb-0">
-            <dt class="col-sm-4">Status</dt>
-            <dd class="col-sm-8">{% if election.status == 'open' %}Open{% elif election.status == 'closed' %}Closed{% elif election.status == 'tallied' %}Tallied{% else %}{{ election.status }}{% endif %}</dd>
-            <dt class="col-sm-4">Voting window</dt>
-              <dd class="col-sm-8">
-                {{ election.start_datetime|date:"Y-m-d H:i T" }} → {{ election.end_datetime|date:"Y-m-d H:i T" }}
-                {% if election.status == 'open' %}
-                  <i class="fas fa-info-circle text-muted" data-toggle="tooltip" title="Election administrators may extend the end date if quorum is not reached."></i>
-                {% endif %}
-              </dd>
-            <dt class="col-sm-4">Seats</dt>
-            <dd class="col-sm-8">{{ election.number_of_seats }}</dd>
-          </dl>
-
-          {% if election.description %}
-            <p>{{ election.description }}</p>
-          {% endif %}
-
-          {% if election.url %}
-            <p class="mb-2">
-              <strong>URL:</strong>
-              <a href="{{ election.url }}" target="_blank" rel="noopener noreferrer">{{ election.url }}</a>
-            </p>
-          {% endif %}
-        </div>
-      </div>
-
+      <div
+        data-election-detail-root
+        data-election-detail-info-api-url="{% url 'api-election-detail-info' election.id %}"
+        data-election-detail-candidates-api-url="{% url 'api-election-detail-candidates' election.id %}"
+        data-election-detail-user-profile-url-template="{% url 'user-profile' '__username__' %}"
+      ></div>
     </div>
 
     <div class="col-lg-4">
@@ -85,198 +60,33 @@
           <h3 class="card-title">Actions</h3>
         </div>
         <div class="card-body">
-          {% if election.status == 'open' %}
-            {% if can_vote %}
-              <a class="btn btn-primary btn-block" href="{% url 'election-vote' election.id %}" title="Cast your ballot in this election">Vote</a>
-              {% if request.user.email %}
-                <p class="text-muted small mb-0">You'll need your voting credential, which was sent to <b>{{ request.user.email }}</b>.</p>
-              {% else %}
-                <p class="text-muted small mb-0 mt-2">You'll need your voting credential.</p>
-              {% endif %}
-              {% if credential_issued_at %}
-                <p class="text-muted small mb-1">Voting credential issued: {{ credential_issued_at|date:"Y-m-d H:i" }} UTC</p>
-              {% endif %}
-            {% else %}
-              <p class="mb-2"><strong>You're not eligible to vote in this election.</strong></p>
-              <p class="text-muted small mb-2">Eligibility is based on memberships/sponsorships of the AlmaLinux OS Foundation.</p>
-              <ul class="text-muted small pl-3 mb-2">
-                <li>Hold an active individual membership</li>
-                <li>Or be a representative of a sponsoring organization</li>
-                <li>And it must have started at least {{ eligibility_min_membership_age_days }} day{{ eligibility_min_membership_age_days|pluralize }} before the election start</li>
-              </ul>
-              <a class="btn btn-outline-primary btn-block" href="{% url 'membership-request' %}" title="Start a membership request">Request membership</a>
-            {% endif %}
-          {% elif election_is_finished %}
-            <a class="btn btn-outline-primary btn-block" href="{% url 'election-audit-log' election.id %}" title="Review the election audit log">View audit log</a>
-            {% if election.public_ballots_file %}
-              <a class="btn btn-outline-secondary btn-block" href="{{ election.public_ballots_file.url }}" title="Download the ballots ledger (JSON)">Download ballots (JSON)</a>
-            {% else %}
-              <a class="btn btn-outline-secondary btn-block" href="{% url 'election-public-ballots' election.id %}" title="Download the ballots ledger (JSON)">Download ballots (JSON)</a>
-            {% endif %}
-            {% if election.public_audit_file %}
-              <a class="btn btn-outline-secondary btn-block" href="{{ election.public_audit_file.url }}" title="Download the audit log (JSON)">Download audit log (JSON)</a>
-            {% else %}
-              <a class="btn btn-outline-secondary btn-block" href="{% url 'election-public-audit' election.id %}" title="Download the audit log (JSON)">Download audit log (JSON)</a>
-            {% endif %}
-          {% endif %}
+          <div
+            data-election-detail-action-root
+            data-election-detail-info-api-url="{% url 'api-election-detail-info' election.id %}"
+            data-election-vote-url="{% url 'election-vote' election.id %}"
+            data-election-membership-request-url="{% url 'membership-request' %}"
+            data-election-audit-log-url="{% url 'election-audit-log' election.id %}"
+            data-election-public-ballots-url="{% if election.public_ballots_file %}{{ election.public_ballots_file.url }}{% else %}{% url 'election-public-ballots' election.id %}{% endif %}"
+            data-election-public-audit-url="{% if election.public_audit_file %}{{ election.public_audit_file.url }}{% else %}{% url 'election-public-audit' election.id %}{% endif %}"
+          ></div>
 
           {% if can_manage_elections and election.status == 'open' %}
             <hr class="my-3" />
 
-            <button
-              type="button"
-              class="btn btn-warning btn-block mb-2"
-              data-toggle="modal"
-              data-target="#extend-election-modal"
-              title="Extend the election end date if needed"
-            >
-              Extend Election
-            </button>
+            <div
+              data-election-extend-action-root
+              data-election-extend-api-url="{% url 'api-election-extend-end' election.id %}"
+              data-election-name="{{ election.name }}"
+              data-election-current-end-datetime-value="{{ election.end_datetime|date:'Y-m-d\\TH:i' }}"
+              data-election-current-end-datetime-display="{{ election.end_datetime|date:'Y-m-d H:i T' }}"
+            ></div>
 
-            {% url 'election-extend-end' election.id as extend_url %}
-            {% include 'core/_modal_name_confirm.html' with modal_id="extend-election-modal" action_url=extend_url modal_title="Extend election?" button_text="Extend Election" button_class="btn btn-warning" confirm_input_id="extend-confirm" confirm_submit_id="extend-submit" confirm_name=election.name cancel_title="Close dialog without extending" submit_title="Extend the election end date" modal_body_template="core/_modal_extend_election_body.html" %}
-
-            <button
-              type="button"
-              class="btn btn-danger btn-block"
-              data-toggle="modal"
-              data-target="#conclude-election-modal"
-              title="Conclude the election and stop voting"
-            >
-              Conclude Election
-            </button>
-
-            {% url 'election-conclude' election.id as conclude_url %}
-            {% include 'core/_modal_name_confirm.html' with modal_id="conclude-election-modal" action_url=conclude_url modal_title="Conclude election?" button_text="Conclude Election" button_class="btn btn-danger" confirm_input_id="conclude-confirm" confirm_submit_id="conclude-submit" confirm_name=election.name cancel_title="Close dialog without concluding" submit_title="Conclude the election and stop voting" modal_body_template="core/_modal_conclude_election_body.html" %}
-          {% endif %}
-        </div>
-      </div>
-    </div>
-  </div>
-
-  {% if election.status == 'tallied' %}
-    <div class="row">
-      <div class="col-12">
-        <div class="card  card-success">
-          <div class="card-header">
-            <h3 class="card-title">Results</h3>
-          </div>
-          <div class="card-body">
-            {% if tally_winners %}
-              <h5 class="mb-2"><strong>Elected</strong></h5>
-              <ul>
-                {% for w in tally_winners %}
-                  <li>
-                    {{ w.full_name }}
-                    (<a href="{% url 'user-profile' w.username %}">{{ w.username }}</a>)
-                  </li>
-                {% endfor %}
-              </ul>
-              {% if empty_seats > 0 %}
-                <p><strong>Empty seats:</strong> {{ empty_seats }}</p>
-              {% endif %}
-            {% endif %}
-
-            {% if turnout_stats %}
-              <h5 class="mb-2"><strong>Participation</strong></h5>
-
-              {% include 'core/_election_participation_stats.html' %}
-            {% endif %}
-          </div>
-        </div>
-      </div>
-    </div>
-  {% endif %}
-
-  {% if show_turnout_chart and turnout_stats %}
-    <div class="row">
-      <div class="col-12">
-        <div class="card card-outline card-secondary">
-          <div class="card-header">
-            <h3 class="card-title">Participation{% if election.status == 'open' %} so far{% endif %}</h3>
-          </div>
-          <div class="card-body">
-            <div class="row">
-              {% if election.status == 'open' %}
-                <div class="col-12 col-lg-4">
-                  {% include 'core/_election_participation_stats.html' %}
-                </div>
-              {% endif %}
-
-              <div class="col-12 {% if election.status == 'open' %}col-lg-8{% endif %} mt-3 mt-lg-0">
-                <p class="mb-2"><strong>Ballots submitted over time (including superseded ballots)</strong></p>
-                {{ turnout_chart_data|json_script:"election-turnout-chart-data" }}
-                <div class="chart">
-                  <canvas id="election-turnout-chart" style="min-height: 250px; height: 250px; max-height: 250px; max-width: 100%;"></canvas>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  {% endif %}
-
-  <div class="row">
-    <div class="col-12">
-      <div class="card card-outline card-success">
-        <div class="card-header">
-          <h3 class="card-title">Candidates</h3>
-        </div>
-        <div class="card-body">
-          <div class="row">
-            {% for item in candidate_cards %}
-              <div class="col-12 col-md-6 col-xl-6 mb-3">
-                <div class="card card-primary h-100">
-                    <div class="card-header">
-                      <h3 class="card-title mb-0">
-                        {% if item.candidate_user %}
-                          {{ item.candidate_user.get_full_name }}
-                        {% endif %}
-                        (<a href="{% url 'user-profile' item.candidate.freeipa_username %}">{{ item.candidate.freeipa_username }}</a>)
-                      </h3>
-                    </div>
-                    <div class="card-body">
-                      {% if item.candidate_user %}
-                        <div style="float:left; margin-right:1rem; margin-bottom:0.5rem;">
-                          {% avatar item.candidate_user 120 class="img-circle" style="width:120px;height:120px;object-fit:cover;" alt="Avatar" title=item.candidate_user.get_full_name %}
-                        </div>
-                      {% endif %}
-                      {% if item.candidate.description %}
-                        <p class="mb-2">{{ item.candidate.description|linebreaksbr }}</p>
-                      {% endif %}
-
-                      {% if item.candidate.url %}
-                        <p class="mb-2">
-                          <a href="{{ item.candidate.url }}" target="_blank" rel="noopener noreferrer">{{ item.candidate.url }}</a>
-                        </p>
-                      {% endif %}
-
-                      <hr class="candidate-card-divider" />
-                      <p class="mb-0">
-                        <strong>Nominated by</strong>
-                          —
-                          {{ item.nominator_display_name }}
-                          {% if item.nominator_profile_username %}
-                            (<a href="{% url 'user-profile' item.nominator_profile_username %}">{{ item.nominator_profile_username }}</a>)
-                          {% endif %}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-            {% endfor %}
-          </div>
-
-          {% if exclusion_group_messages %}
-            <div class="card card-outline card-danger mt-3">
-              <div class="card-body">
-                {% for msg in exclusion_group_messages %}
-                  <p class="mb-0{% if not forloop.last %} mb-2{% endif %}">
-                    {{ msg }}
-                  </p>
-                {% endfor %}
-              </div>
-            </div>
+            <div
+              data-election-conclude-action-root
+              data-election-conclude-api-url="{% url 'api-election-conclude' election.id %}"
+              data-election-name="{{ election.name }}"
+              data-election-conclude-quorum-warning=""
+            ></div>
           {% endif %}
         </div>
       </div>
@@ -304,304 +114,23 @@
             <li><strong>Why you can trust it:</strong> the tally is <strong>deterministic</strong> and produces a public audit trail. Independent observers can verify the final result using the published ballots ledger and audit log.</li>
           </ul>
 
-          {% if election_is_finished %}
-            <p class="mb-2">For full details and verification artifacts, see the <a href="{% url 'election-audit-log' election.id %}"><strong>audit log</strong></a> and the downloadable <a href="{% url 'election-public-ballots' election.id %}"><strong>ballots ledger (JSON)</strong></a> and <a href="{% url 'election-public-audit' election.id %}"><strong>audit log (JSON)</strong></a>.</p>
-          {% else %}
-            <p class="mb-2">For full details and verification artifacts, the audit log and downloadable ballots ledger will be published when the election ends.</p>
-          {% endif %}
+          <p class="mb-2">For full details and verification artifacts, see the <a href="{% url 'election-audit-log' election.id %}"><strong>audit log</strong></a> and the downloadable <a href="{% url 'election-public-ballots' election.id %}"><strong>ballots ledger (JSON)</strong></a> and <a href="{% url 'election-public-audit' election.id %}"><strong>audit log (JSON)</strong></a> when they are available.</p>
         </div>
       </div>
     </div>
   </div>
 
   {% if can_manage_elections %}
-    <div class="row">
-      <div class="col-12">
-        <div class="card card-outline card-primary collapsed-card election-voter-card election-collapsible-card">
-          <div class="card-header">
-            <h3 class="card-title">Eligible voters</h3>
-
-            <div class="card-tools">
-              <div class="js-card-search">
-                {% include 'core/_search_form.html' with search_field_name="eligible_q" search_value=eligible_q search_placeholder="Search users..." search_aria_label="Search users" search_submit_title="Search eligible voters" %}
-              </div>
-
-              <button type="button" class="btn btn-tool" data-card-widget="collapse" title="Expand or collapse this section">
-                <i class="fas fa-plus"></i>
-              </button>
-            </div>
-          </div>
-
-          <div class="card-body" style="display: none;">
-            {% if election.status == 'open' %}
-              <div class="mb-3">
-                <div class="mb-3">
-                  <form method="post" action="{% url 'election-send-mail-credentials' election.id %}" class="mb-0">
-                    {% csrf_token %}
-                    <button type="submit" class="btn btn-outline-primary btn-sm" title="Resend credentials to all eligible voters">Resend all credentials</button>
-                  </form>
-                </div>
-
-                <form method="post" action="{% url 'election-send-mail-credentials' election.id %}" class="mb-0">
-                  {% csrf_token %}
-                  <label class="sr-only" for="resend-credential-username">Username</label>
-                  <div class="input-group input-group-sm">
-                    <input
-                      id="resend-credential-username"
-                      type="text"
-                      name="username"
-                      class="form-control"
-                      placeholder="username"
-                      list="eligible-voter-usernames"
-                      autocomplete="off"
-                    >
-                    <div class="input-group-append">
-                      <button type="submit" class="btn btn-outline-primary" title="Resend credential to the selected user">Resend voting credential</button>
-                    </div>
-                  </div>
-                  {% if eligible_voter_usernames %}
-                    <datalist id="eligible-voter-usernames">
-                      {% for u in eligible_voter_usernames %}
-                        <option value="{{ u }}"></option>
-                      {% endfor %}
-                    </datalist>
-                  {% endif %}
-                </form>
-              </div>
-            {% endif %}
-
-            {% include 'core/_widget_grid.html' %}
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="row">
-      <div class="col-12">
-        <div id="ineligible-voters-card" class="card card-outline card-warning collapsed-card election-voter-card election-collapsible-card">
-          <span style="display: none;"></span>
-          <div class="card-header">
-            <h3 class="card-title">Ineligible voters</h3>
-
-            <div class="card-tools">
-              <div class="js-card-search">
-                {% include 'core/_search_form.html' with search_field_name="ineligible_q" search_value=ineligible_q search_placeholder="Search users..." search_aria_label="Search users" search_submit_title="Search ineligible voters" %}
-              </div>
-
-              <button type="button" class="btn btn-tool" data-card-widget="collapse" title="Expand or collapse this section">
-                <i class="fas fa-plus"></i>
-              </button>
-            </div>
-          </div>
-
-          <div class="card-body" style="display: none;">
-              <p class="text-muted small mb-3">Click a username to view eligibility details.</p>
-
-              {{ ineligible_voter_details_by_username|json_script:"ineligible-voter-details" }}
-
-              {% include 'core/_widget_grid.html' with grid_items=ineligible_grid_items paginator=ineligible_paginator page_obj=ineligible_page_obj is_paginated=ineligible_is_paginated page_numbers=ineligible_page_numbers show_first=ineligible_show_first show_last=ineligible_show_last page_url_prefix=ineligible_page_url_prefix empty_label=ineligible_empty_label %}
-          </div>
-        </div>
-      </div>
-    </div>
-
     <div
-      class="modal fade"
-      id="ineligible-voter-modal"
-      tabindex="-1"
-      role="dialog"
-      aria-labelledby="ineligible-voter-modal-label"
-      aria-hidden="true"
-    >
-      <div class="modal-dialog" role="document">
-        <div class="modal-content">
-          <div class="modal-header">
-            <h5 class="modal-title" id="ineligible-voter-modal-label">Ineligible voter details</h5>
-            <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close voter details">
-              <span aria-hidden="true">&times;</span>
-            </button>
-          </div>
-          <div class="modal-body">
-            <div class="mb-2"><strong class="js-ineligible-username"></strong></div>
-
-            <div class="text-muted small mb-3 js-ineligible-reason"></div>
-
-            <dl class="row mb-0">
-              <dt class="col-sm-5">Membership start</dt>
-              <dd class="col-sm-7 js-ineligible-term-start"></dd>
-
-              <dt class="col-sm-5">Election start</dt>
-              <dd class="col-sm-7 js-ineligible-election-start"></dd>
-
-              <dt class="col-sm-5">Days of membership at election start</dt>
-              <dd class="col-sm-7 js-ineligible-days-at-start"></dd>
-
-              <dt class="col-sm-5">Days short</dt>
-              <dd class="col-sm-7 js-ineligible-days-short"></dd>
-            </dl>
-          </div>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-outline-secondary" data-dismiss="modal" title="Close voter details">Close</button>
-          </div>
-        </div>
-      </div>
-    </div>
+      data-election-eligible-voters-root
+      data-election-eligible-voters-api-url="{% url 'api-election-detail-eligible-voters' election.id %}"
+      data-election-ineligible-voters-api-url="{% url 'api-election-detail-ineligible-voters' election.id %}"
+      {% if election.status == 'open' %}data-election-send-mail-credentials-api-url="{% url 'api-election-send-mail-credentials' election.id %}"{% endif %}
+    ></div>
   {% endif %}
 {% endblock %}
 
 {% block scripts %}
   {{ block.super }}
-  {% if show_turnout_chart and turnout_stats %}
-    <script src="{% static 'core/vendor/chartjs/chart.umd.min.js' %}"></script>
-    <script src="{% static 'core/js/election_turnout_chart.js' %}"></script>
-  {% endif %}
-
-  {% if can_manage_elections %}
-    <script>
-      (function () {
-        var jq = window.jQuery;
-        if (!jq || !jq.fn) return;
-
-        var detailsEl = document.getElementById('ineligible-voter-details');
-        if (!detailsEl) return;
-
-        var details = {};
-        try {
-          details = JSON.parse(detailsEl.textContent || '{}');
-        } catch (e) {
-          details = {};
-        }
-
-        function reasonText(reason) {
-          if (reason === 'no_membership') return 'No qualifying membership or sponsorship found.';
-          if (reason === 'expired') return 'Membership or sponsorship was not active at the reference date.';
-          if (reason === 'too_new') return 'Membership or sponsorship is active, but too new at the reference date.';
-          return reason || '';
-        }
-
-        function openModal(username) {
-          var modalEl = document.getElementById('ineligible-voter-modal');
-          if (!modalEl) return;
-
-          var d = details && username ? details[username] : null;
-          if (!d) return;
-
-          var usernameEl = modalEl.querySelector('.js-ineligible-username');
-          if (usernameEl) usernameEl.textContent = username;
-
-          var reasonEl = modalEl.querySelector('.js-ineligible-reason');
-          if (reasonEl) reasonEl.textContent = reasonText(String(d.reason || ''));
-
-          var termEl = modalEl.querySelector('.js-ineligible-term-start');
-          if (termEl) termEl.textContent = String(d.term_start_date || '');
-
-          var electionEl = modalEl.querySelector('.js-ineligible-election-start');
-          if (electionEl) electionEl.textContent = String(d.election_start_date || '');
-
-          var daysAtStartEl = modalEl.querySelector('.js-ineligible-days-at-start');
-          if (daysAtStartEl) daysAtStartEl.textContent = String(d.days_at_start == null ? '' : d.days_at_start);
-
-          var daysShortEl = modalEl.querySelector('.js-ineligible-days-short');
-          if (daysShortEl) daysShortEl.textContent = String(d.days_short == null ? '' : d.days_short);
-
-          jq(modalEl).modal('show');
-        }
-
-        var card = document.getElementById('ineligible-voters-card');
-        if (!card || !card.addEventListener) return;
-
-        card.addEventListener('click', function (evt) {
-          var target = evt && evt.target ? evt.target : null;
-          if (!target || !target.closest) return;
-
-          var link = target.closest('a[href]');
-          if (!link) return;
-
-          var href = String(link.getAttribute('href') || '');
-          var match = href.match(/\/user\/([^\/]+)\/?$/);
-          if (!match || !match[1]) return;
-
-          var username = '';
-          try {
-            username = decodeURIComponent(match[1]);
-          } catch (e) {
-            username = match[1];
-          }
-
-          if (!username || !Object.prototype.hasOwnProperty.call(details, username)) return;
-          evt.preventDefault();
-          openModal(username);
-        });
-      })();
-    </script>
-
-    <script>
-      (function () {
-        'use strict';
-
-        function normalizeConfirmValue(value) {
-          return (value || '').trim().toLocaleLowerCase();
-        }
-
-        function setSubmitEnabled(submitButton, enabled) {
-          submitButton.disabled = !enabled;
-          submitButton.setAttribute('aria-disabled', String(!enabled));
-        }
-
-        function resetConfirm(input, submitButton) {
-          input.value = '';
-          setSubmitEnabled(submitButton, false);
-        }
-
-        function bindNameConfirm(inputId, submitId) {
-          var input = document.getElementById(inputId);
-          var submitButton = document.getElementById(submitId);
-          if (!input || !submitButton) {
-            return;
-          }
-
-          var expectedName = normalizeConfirmValue(input.dataset.confirmName);
-          resetConfirm(input, submitButton);
-
-          input.addEventListener('input', function () {
-            var actual = normalizeConfirmValue(input.value);
-            setSubmitEnabled(submitButton, actual === expectedName);
-          });
-
-          var jq = window.jQuery;
-          if (jq && jq.fn) {
-            var modal = input.closest('.modal');
-            if (modal) {
-              jq(modal).on('show.bs.modal', function () {
-                resetConfirm(input, submitButton);
-              });
-            }
-            return;
-          }
-
-          var modalEl = input.closest('.modal');
-          if (!modalEl || !modalEl.id) {
-            return;
-          }
-
-          var selector = '[data-toggle="modal"][data-target="#' + modalEl.id + '"]';
-          document.querySelectorAll(selector).forEach(function (trigger) {
-            trigger.addEventListener('click', function () {
-              resetConfirm(input, submitButton);
-            });
-          });
-        }
-
-        if (document.readyState === 'loading') {
-          document.addEventListener('DOMContentLoaded', function () {
-            bindNameConfirm('extend-confirm', 'extend-submit');
-            bindNameConfirm('conclude-confirm', 'conclude-submit');
-          });
-        } else {
-          bindNameConfirm('extend-confirm', 'extend-submit');
-          bindNameConfirm('conclude-confirm', 'conclude-submit');
-        }
-      })();
-    </script>
-  {% endif %}
+  <script src="{% static 'core/vendor/chartjs/chart.umd.min.js' %}"></script>
 {% endblock %}

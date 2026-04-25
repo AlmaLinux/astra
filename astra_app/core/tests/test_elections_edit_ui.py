@@ -567,7 +567,7 @@ class ElectionDraftDeletionTests(_CoreCategoriesTestCase):
         self.assertContains(resp, "Candidates cannot nominate themselves.")
         self.assertEqual(Candidate.objects.count(), 0)
 
-    def test_new_election_includes_scripts_in_correct_order_for_select2(self) -> None:
+    def test_new_election_mounts_vue_edit_controller_and_keeps_select2_assets(self) -> None:
         self._login_as_freeipa_user("admin")
         FreeIPAPermissionGrant.objects.create(
             principal_type=FreeIPAPermissionGrant.PrincipalType.user,
@@ -579,15 +579,10 @@ class ElectionDraftDeletionTests(_CoreCategoriesTestCase):
         self.assertEqual(resp.status_code, 200)
 
         html = resp.content.decode("utf-8")
-        jquery_i = html.find("admin/js/vendor/jquery/jquery.js")
-        select2_i = html.find("admin/js/vendor/select2/select2.full.js")
-        election_js_i = html.find("core/js/election_edit.js")
-
-        self.assertNotEqual(jquery_i, -1)
-        self.assertNotEqual(select2_i, -1)
-        self.assertNotEqual(election_js_i, -1)
-        self.assertLess(jquery_i, select2_i)
-        self.assertLess(select2_i, election_js_i)
+        self.assertIn("src/entrypoints/electionEdit.ts", html)
+        self.assertIn("data-election-edit-root", html)
+        self.assertIn("admin/js/vendor/select2/select2.full.js", html)
+        self.assertNotIn("core/js/election_edit.js", html)
 
     def test_new_election_renders_seats_and_quorum_inputs(self) -> None:
         self._login_as_freeipa_user("admin")

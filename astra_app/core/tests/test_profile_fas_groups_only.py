@@ -1,4 +1,5 @@
 
+import json
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import patch
@@ -61,12 +62,15 @@ class ProfileFasGroupsOnlyTests(TestCase):
         with (
             patch("core.views_users._get_full_user", autospec=True, return_value=fake_user),
             patch("core.freeipa.group.FreeIPAGroup.all", return_value=groups),
+            patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
+            patch("core.views_users.resolve_avatar_urls_for_users", autospec=True, return_value=({}, 0, 0)),
         ):
-            response = views_users.user_profile(request, "alice")
+            response = views_users.user_profile_api(request, "alice")
 
         self.assertEqual(response.status_code, 200)
-        content = response.content.decode("utf-8")
+        payload = json.loads(response.content)
 
-        self.assertIn('href="/group/fas1/"', content)
-        self.assertIn('href="/group/fas2/"', content)
-        self.assertNotIn("ipa_only", content)
+        self.assertEqual(
+            payload["groups"]["groups"],
+            [{"cn": "fas1", "role": "Member"}, {"cn": "fas2", "role": "Member"}],
+        )

@@ -32,9 +32,12 @@ class SankeyDebugViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         html = response.content.decode("utf-8")
+        self.assertIn('data-debug-sankey-root', html)
+        self.assertIn("src/entrypoints/debugSankey.ts", html)
         self.assertIn("debug-sankey-data", html)
         self.assertIn("debug-sankey-elected", html)
         self.assertIn("debug-sankey-eliminated", html)
+        self.assertNotIn("election_sankey.js", html)
         self.assertIn("Pear", html)
         self.assertIn("Voters", html)
         self.assertIn("Round 1", html)

@@ -55,16 +55,19 @@ class ProfileAccountSetupAlertTests(TestCase):
                 "core.views_users.country_code_status_from_user_data",
                 return_value=SimpleNamespace(code="US", is_valid=True),
             ),
+            patch("core.views_users.FreeIPAGroup.all", return_value=[]),
         ):
-            resp = self.client.get(reverse("user-profile", kwargs={"username": "bob"}))
+            resp = self.client.get(reverse("api-user-profile", kwargs={"username": "bob"}))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'id="account-setup-required-alert"')
-        self.assertContains(resp, "Please complete these steps to finish setting up your account")
-        self.assertNotContains(resp, "Please address the following issues")
-        self.assertContains(resp, coc_cn)
-        self.assertContains(resp, f'href="{reverse("settings")}?tab=agreements')
-        self.assertContains(resp, "return=profile")
+        account_setup = resp.json()["accountSetup"]
+        self.assertFalse(account_setup["requiredIsRfi"])
+        self.assertEqual(account_setup["requiredActions"][0]["id"], "coc-not-signed-alert")
+        self.assertEqual(account_setup["requiredActions"][0]["label"], f"Sign the {coc_cn}")
+        self.assertEqual(
+            account_setup["requiredActions"][0]["url"],
+            f'{reverse("settings")}?tab=agreements&agreement=AlmaLinux+Community+Code+of+Conduct&return=profile',
+        )
 
     def test_shows_recommended_membership_request_when_no_individual_membership(self) -> None:
         bob = FreeIPAUser(
@@ -96,12 +99,14 @@ class ProfileAccountSetupAlertTests(TestCase):
                 "core.views_users.country_code_status_from_user_data",
                 return_value=SimpleNamespace(code="US", is_valid=True),
             ),
+            patch("core.views_users.FreeIPAGroup.all", return_value=[]),
         ):
-            resp = self.client.get(reverse("user-profile", kwargs={"username": "bob"}))
+            resp = self.client.get(reverse("api-user-profile", kwargs={"username": "bob"}))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'id="account-setup-recommended-alert"')
-        self.assertContains(resp, f'href="{reverse("membership-request")}"')
+        recommended = resp.json()["accountSetup"]["recommendedActions"]
+        self.assertEqual(recommended[0]["id"], "membership-request-recommended-alert")
+        self.assertEqual(recommended[0]["url"], reverse("membership-request"))
 
     def test_does_not_recommend_membership_when_request_already_pending(self) -> None:
         bob = FreeIPAUser(
@@ -139,8 +144,9 @@ class ProfileAccountSetupAlertTests(TestCase):
                 "core.views_users.country_code_status_from_user_data",
                 return_value=SimpleNamespace(code="US", is_valid=True),
             ),
+            patch("core.views_users.FreeIPAGroup.all", return_value=[]),
         ):
-            resp = self.client.get(reverse("user-profile", kwargs={"username": "bob"}))
+            resp = self.client.get(reverse("api-user-profile", kwargs={"username": "bob"}))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertNotContains(resp, 'id="account-setup-recommended-alert"')
+        self.assertEqual(resp.json()["accountSetup"]["recommendedActions"], [])

@@ -54,20 +54,23 @@ class BallotVerificationPageTests(TestCase):
         url = reverse("ballot-verify")
         resp = self.client.get(url)
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "verify")
+        self.assertContains(resp, "data-ballot-verify-root")
+        self.assertContains(resp, reverse("api-ballot-verify"))
 
-        resp2 = self.client.get(url, data={"receipt": "not-a-hash"})
+        resp2 = self.client.get(reverse("api-ballot-verify"), data={"receipt": "not-a-hash"}, HTTP_ACCEPT="application/json")
         self.assertEqual(resp2.status_code, 200)
-        self.assertContains(resp2, "Invalid receipt")
+        payload = resp2.json()
+        self.assertTrue(payload["has_query"])
+        self.assertFalse(payload["is_valid_receipt"])
 
     def test_verify_page_not_found_does_not_leak_election_info(self) -> None:
-        url = reverse("ballot-verify")
         unknown = "a" * 64
-        resp = self.client.get(url, data={"receipt": unknown})
+        resp = self.client.get(reverse("api-ballot-verify"), data={"receipt": unknown}, HTTP_ACCEPT="application/json")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "No ballot with this receipt")
-        self.assertNotContains(resp, "Election status")
-        self.assertNotContains(resp, "Election name")
+        payload = resp.json()
+        self.assertFalse(payload["found"])
+        self.assertIsNone(payload["election"])
+        self.assertEqual(payload["election_status"], "")
 
     def test_verify_page_open_election_never_says_counted(self) -> None:
         now = timezone.now()
@@ -91,16 +94,15 @@ class BallotVerificationPageTests(TestCase):
             created_at=created_at,
         )
 
-        url = reverse("ballot-verify")
-        resp = self.client.get(url, data={"receipt": ballot.ballot_hash})
+        resp = self.client.get(reverse("api-ballot-verify"), data={"receipt": ballot.ballot_hash}, HTTP_ACCEPT="application/json")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Yes")
-        self.assertContains(resp, election.name)
-        self.assertContains(resp, "open")
-        self.assertContains(resp, "2026-01-02")
-        self.assertNotContains(resp, "12:34")
-        self.assertNotContains(resp, "counted")
-        self.assertNotContains(resp, "ranking")
+        payload = resp.json()
+        self.assertTrue(payload["found"])
+        self.assertEqual(payload["election"]["name"], election.name)
+        self.assertEqual(payload["election_status"], "open")
+        self.assertEqual(payload["submitted_date"], "2026-01-02")
+        self.assertNotIn("12:34", str(payload))
+        self.assertNotIn("ranking", payload)
 
     def test_verify_page_closed_election_indicates_locked_and_upcoming_tally(self) -> None:
         now = timezone.now()
@@ -124,12 +126,13 @@ class BallotVerificationPageTests(TestCase):
             created_at=created_at,
         )
 
-        url = reverse("ballot-verify")
-        resp = self.client.get(url, data={"receipt": ballot.ballot_hash})
+        resp = self.client.get(reverse("api-ballot-verify"), data={"receipt": ballot.ballot_hash}, HTTP_ACCEPT="application/json")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "recorded and locked")
-        self.assertContains(resp, "upcoming tally")
-        self.assertNotContains(resp, "counted")
+        payload = resp.json()
+        self.assertEqual(payload["election_status"], "closed")
+        self.assertEqual(payload["public_ballots_url"], reverse("election-public-ballots", args=[election.id]))
+        self.assertEqual(payload["audit_log_url"], reverse("election-audit-log", args=[election.id]))
+        self.assertTrue(payload["is_final_ballot"])
 
     def test_verify_page_tallied_election_links_to_public_exports(self) -> None:
         now = timezone.now()
@@ -154,12 +157,13 @@ class BallotVerificationPageTests(TestCase):
             created_at=created_at,
         )
 
-        url = reverse("ballot-verify")
-        resp = self.client.get(url, data={"receipt": ballot.ballot_hash})
+        resp = self.client.get(reverse("api-ballot-verify"), data={"receipt": ballot.ballot_hash}, HTTP_ACCEPT="application/json")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "included in the final")
-        self.assertContains(resp, reverse("election-public-ballots", args=[election.id]))
-        self.assertContains(resp, reverse("election-audit-log", args=[election.id]))
+        payload = resp.json()
+        self.assertEqual(payload["election_status"], "tallied")
+        self.assertEqual(payload["public_ballots_url"], reverse("election-public-ballots", args=[election.id]))
+        self.assertEqual(payload["audit_log_url"], reverse("election-audit-log", args=[election.id]))
+        self.assertFalse(payload["is_superseded"])
 
     def test_verify_page_superseded_ballot_does_not_reveal_replacement_receipt(self) -> None:
         now = timezone.now()
@@ -209,12 +213,12 @@ class BallotVerificationPageTests(TestCase):
         ballot2.superseded_by = None
         ballot2.save(update_fields=["superseded_by"])
 
-        url = reverse("ballot-verify")
-        resp = self.client.get(url, data={"receipt": ballot1.ballot_hash})
+        resp = self.client.get(reverse("api-ballot-verify"), data={"receipt": ballot1.ballot_hash}, HTTP_ACCEPT="application/json")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "replaced")
+        payload = resp.json()
+        self.assertTrue(payload["is_superseded"])
         # Must not leak the replacement receipt.
-        self.assertNotContains(resp, ballot2.ballot_hash)
+        self.assertNotIn(ballot2.ballot_hash, str(payload))
 
     def test_ballot_verify_does_not_expose_credential_to_unauthenticated(self) -> None:
         now = timezone.now()
@@ -239,16 +243,14 @@ class BallotVerificationPageTests(TestCase):
             created_at=created_at,
         )
 
-        url = reverse("ballot-verify")
-        resp = self.client.get(url, data={"receipt": ballot.ballot_hash})
+        resp = self.client.get(reverse("api-ballot-verify"), data={"receipt": ballot.ballot_hash}, HTTP_ACCEPT="application/json")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "verify-ballot-hash.py")
-        self.assertContains(resp, "Copy/paste")
-        self.assertContains(resp, f"election_id = {election.id}")
-        self.assertNotContains(resp, "credential_public_id =")
-        self.assertNotContains(resp, "cred-1")
-        self.assertContains(resp, f"&quot;alice&quot;: {c1.id}")
-        self.assertContains(resp, f"&quot;bob&quot;: {c2.id}")
+        snippet = resp.json()["verification_snippet"]
+        self.assertIn(f"election_id = {election.id}", snippet)
+        self.assertNotIn("credential_public_id =", snippet)
+        self.assertNotIn("cred-1", snippet)
+        self.assertIn(f'"alice": {c1.id}', snippet)
+        self.assertIn(f'"bob": {c2.id}', snippet)
 
     def test_ballot_verify_does_not_expose_credential_to_authenticated_non_owner(self) -> None:
         now = timezone.now()
@@ -277,11 +279,10 @@ class BallotVerificationPageTests(TestCase):
         session["_freeipa_username"] = "other-user"
         session.save()
 
-        url = reverse("ballot-verify")
-        resp = self.client.get(url, data={"receipt": ballot.ballot_hash})
+        resp = self.client.get(reverse("api-ballot-verify"), data={"receipt": ballot.ballot_hash}, HTTP_ACCEPT="application/json")
         self.assertEqual(resp.status_code, 200)
-        self.assertNotContains(resp, "credential_public_id =")
-        self.assertNotContains(resp, "cred-owner-1")
+        self.assertNotIn("credential_public_id =", resp.json()["verification_snippet"])
+        self.assertNotIn("cred-owner-1", resp.json()["verification_snippet"])
 
     @override_settings(
         ELECTION_RATE_LIMIT_BALLOT_VERIFY_LIMIT=1,
@@ -293,10 +294,14 @@ class BallotVerificationPageTests(TestCase):
         url = reverse("ballot-verify")
         unknown = "a" * 64
 
-        resp1 = self.client.get(url, data={"receipt": unknown})
+        resp1 = self.client.get(reverse("api-ballot-verify"), data={"receipt": unknown}, HTTP_ACCEPT="application/json")
         self.assertEqual(resp1.status_code, 200)
 
-        resp2 = self.client.get(url, data={"receipt": unknown})
+        page_resp = self.client.get(url, data={"receipt": unknown})
+        self.assertEqual(page_resp.status_code, 200)
+        self.assertContains(page_resp, "data-ballot-verify-root")
+
+        resp2 = self.client.get(reverse("api-ballot-verify"), data={"receipt": unknown}, HTTP_ACCEPT="application/json")
         self.assertEqual(resp2.status_code, 429)
-        self.assertContains(resp2, "Too many", status_code=429)
+        self.assertTrue(resp2.json()["rate_limited"])
 

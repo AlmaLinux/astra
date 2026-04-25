@@ -7,6 +7,8 @@ declare module "*.vue" {
   export default component;
 }
 
+declare module "vite/modulepreload-polyfill";
+
 // Chart.js is loaded as a global static asset (not bundled), so we declare
 // a minimal interface here instead of importing from the npm package.
 interface ChartDataset {
@@ -48,8 +50,6 @@ interface ChartConstructor {
   new (canvas: HTMLCanvasElement, config: ChartConfiguration): ChartInstance;
 }
 
-declare global {
-  interface Window {
-    Chart: ChartConstructor | { Chart: ChartConstructor };
-  }
+interface Window {
+  Chart?: ChartConstructor | { Chart: ChartConstructor };
 }

@@ -9,7 +9,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.freeipa.user import FreeIPAUser
-from core.models import Candidate, Election, Organization
+from core.models import Election
 
 
 class ElectionsSidebarLinkTests(TestCase):
@@ -79,13 +79,90 @@ class ElectionsVoteAccessTests(TestCase):
         self.assertIn("return=", location)
 
 
-class ElectionsDetailCandidateCardsTests(TestCase):
+class ElectionsListShellTests(TestCase):
     def _login_as_freeipa_user(self, username: str) -> None:
         session = self.client.session
         session["_freeipa_username"] = username
         session.save()
 
-    def test_election_detail_shows_candidate_cards_with_nominator_and_urls(self) -> None:
+    def test_elections_list_returns_vue_shell_without_querying_rows(self) -> None:
+        self._login_as_freeipa_user("viewer")
+
+        now = timezone.now()
+        Election.objects.create(
+            name="Rendered server election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+        viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "memberof_group": []})
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer),
+            patch("core.views_elections.detail._visible_elections_queryset", return_value=[]) as visible_elections,
+        ):
+            resp = self.client.get(reverse("elections"))
+
+        self.assertEqual(resp.status_code, 200)
+        visible_elections.assert_not_called()
+        self.assertContains(resp, 'data-elections-root')
+        self.assertContains(resp, reverse("api-elections"))
+        self.assertNotContains(resp, "Rendered server election")
+
+
+class ElectionsVoteShellTests(TestCase):
+    def _login_as_freeipa_user(self, username: str) -> None:
+        session = self.client.session
+        session["_freeipa_username"] = username
+        session.save()
+
+    def test_election_vote_returns_vue_shell_without_server_side_ballot_data(self) -> None:
+        self._login_as_freeipa_user("voter")
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Board election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+        voter = FreeIPAUser("voter", {"uid": ["voter"], "memberof_group": []})
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=voter),
+            patch("core.views_elections.vote.block_action_without_coc", return_value=None),
+            patch(
+                "core.views_elections.vote._election_vote_page_context",
+                return_value={
+                    "election": election,
+                    "candidates": [],
+                    "voter_votes": None,
+                    "voter_vote_breakdown": [],
+                    "can_submit_vote": False,
+                },
+            ) as page_context,
+        ):
+            resp = self.client.get(reverse("election-vote", args=[election.id]))
+
+        self.assertEqual(resp.status_code, 200)
+        page_context.assert_not_called()
+        self.assertContains(resp, 'data-election-vote-root')
+        self.assertContains(resp, reverse("api-election-vote", args=[election.id]))
+        self.assertNotContains(resp, "Voting window")
+        self.assertNotContains(resp, "Candidates")
+
+
+class ElectionsDetailShellTests(TestCase):
+    def _login_as_freeipa_user(self, username: str) -> None:
+        session = self.client.session
+        session["_freeipa_username"] = username
+        session.save()
+
+    def test_election_detail_returns_vue_shell_without_server_side_page_data(self) -> None:
         self._login_as_freeipa_user("viewer")
 
         now = timezone.now()
@@ -99,168 +176,27 @@ class ElectionsDetailCandidateCardsTests(TestCase):
             url="https://example.com/elections/board-2026",
         )
 
-        candidate = Candidate.objects.create(
-            election=election,
-            freeipa_username="alice",
-            nominated_by="nominator",
-            description="A short bio.",
-            url="https://example.com/~alice",
-        )
-
         viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "memberof_group": []})
-        alice = FreeIPAUser(
-            "alice",
-            {
-                "uid": ["alice"],
-                "givenname": ["Alice"],
-                "sn": ["User"],
-                "displayname": ["Alice User"],
-                "memberof_group": [],
-            },
-        )
-        nominator = FreeIPAUser(
-            "nominator",
-            {
-                "uid": ["nominator"],
-                "givenname": ["Nominator"],
-                "sn": ["Person"],
-                "displayname": ["Nominator Person"],
-                "memberof_group": [],
-            },
-        )
 
-        def _get_user(username: str):
-            if username == "viewer":
-                return viewer
-            if username == "alice":
-                return alice
-            if username == "nominator":
-                return nominator
-            return None
-
-        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer),
+            patch("core.views_elections.detail._candidate_cards_context") as candidate_cards_context,
+            patch("core.views_elections.detail._election_detail_summary_context") as summary_context,
+            patch("core.views_elections.detail._eligible_voters_context") as eligible_voters_context,
+            patch("core.views_elections.detail._vote_access_context") as vote_access_context,
+        ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, election.url)
-        self.assertContains(resp, candidate.url)
-
-        self.assertContains(resp, reverse("user-profile", args=["alice"]))
-        self.assertContains(resp, "Alice User")
-        self.assertContains(resp, "A short bio")
-
-        self.assertContains(resp, "Nominated by")
-        self.assertContains(resp, reverse("user-profile", args=["nominator"]))
-        self.assertContains(resp, "Nominator Person")
-
-    def test_candidate_card_divider_clears_avatar_when_description_missing(self) -> None:
-        self._login_as_freeipa_user("viewer")
-
-        now = timezone.now()
-        election = Election.objects.create(
-            name="Board election",
-            description="",
-            start_datetime=now - datetime.timedelta(days=1),
-            end_datetime=now + datetime.timedelta(days=1),
-            number_of_seats=2,
-            status=Election.Status.open,
-        )
-
-        Candidate.objects.create(
-            election=election,
-            freeipa_username="adamnelson",
-            nominated_by="benjamingarcia",
-            description="",
-            url="",
-        )
-
-        viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "memberof_group": []})
-        candidate_user = FreeIPAUser(
-            "adamnelson",
-            {
-                "uid": ["adamnelson"],
-                "givenname": ["Adam"],
-                "sn": ["Nelson"],
-                "displayname": ["Adam Nelson"],
-                "memberof_group": [],
-            },
-        )
-        nominator_user = FreeIPAUser(
-            "benjamingarcia",
-            {
-                "uid": ["benjamingarcia"],
-                "givenname": ["Benjamin"],
-                "sn": ["Garcia"],
-                "displayname": ["Benjamin Garcia"],
-                "memberof_group": [],
-            },
-        )
-
-        def _get_user(username: str):
-            if username == "viewer":
-                return viewer
-            if username == "adamnelson":
-                return candidate_user
-            if username == "benjamingarcia":
-                return nominator_user
-            return None
-
-        self.assertIsNotNone(election.pk)
-        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
-            resp = self.client.get(reverse("election-detail", args=[election.pk]))
-
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "class=\"candidate-card-divider\"")
-        self.assertContains(resp, ".candidate-card-divider")
-        self.assertContains(resp, "clear: both;")
-
-    def test_election_detail_renders_organization_nominator_without_profile_link(self) -> None:
-        self._login_as_freeipa_user("viewer")
-
-        now = timezone.now()
-        election = Election.objects.create(
-            name="Board election",
-            description="",
-            start_datetime=now - datetime.timedelta(days=1),
-            end_datetime=now + datetime.timedelta(days=1),
-            number_of_seats=2,
-            status=Election.Status.open,
-        )
-
-        org = Organization.objects.create(name="Infra Foundation", representative="")
-        organization_nominator_id = f"org:{org.id}"
-
-        Candidate.objects.create(
-            election=election,
-            freeipa_username="alice",
-            nominated_by=organization_nominator_id,
-            description="",
-            url="",
-        )
-
-        viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "memberof_group": []})
-        alice = FreeIPAUser(
-            "alice",
-            {
-                "uid": ["alice"],
-                "givenname": ["Alice"],
-                "sn": ["User"],
-                "displayname": ["Alice User"],
-                "memberof_group": [],
-            },
-        )
-
-        def _get_user(username: str):
-            if username == "viewer":
-                return viewer
-            if username == "alice":
-                return alice
-            return None
-
-        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
-            resp = self.client.get(reverse("election-detail", args=[election.id]))
-
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Nominated by")
-        self.assertContains(resp, "Infra Foundation")
-        self.assertNotContains(resp, reverse("user-profile", args=[organization_nominator_id]))
+        candidate_cards_context.assert_not_called()
+        summary_context.assert_not_called()
+        eligible_voters_context.assert_not_called()
+        vote_access_context.assert_not_called()
+        self.assertContains(resp, 'data-election-detail-root')
+        self.assertContains(resp, reverse("api-election-detail-info", args=[election.id]))
+        self.assertContains(resp, reverse("api-election-detail-candidates", args=[election.id]))
+        self.assertNotContains(resp, "data-election-detail-info-json-id")
+        self.assertNotContains(resp, "election-detail-initial-info")
+        self.assertNotContains(resp, "candidate-card-divider")
+        self.assertNotContains(resp, "Elect the board")
+        self.assertNotContains(resp, "https://example.com/elections/board-2026")

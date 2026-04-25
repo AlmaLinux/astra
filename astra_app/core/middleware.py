@@ -444,7 +444,8 @@ class LoginRequiredMiddleware:
             "/register",
             "/password-reset",
             "/admin/",
-            "/elections/ballot/verify/",
+            "/api/v1/elections/ballot/verify",
+            "/elections/ballot/verify",
             "/ses/event-webhook/",
             "/agreements/",
         )
@@ -471,6 +472,9 @@ class LoginRequiredMiddleware:
 
         # Keep election public exports public (auditable public artifacts).
         if path.startswith("/elections/") and "/public/" in path and path.endswith(".json"):
+            return self.get_response(request)
+
+        if path.startswith("/api/v1/elections/") and "/public/" in path:
             return self.get_response(request)
 
         if request.user.is_authenticated:

@@ -216,10 +216,11 @@ class ElectionsTimestampingTests(TestCase):
         ):
             schedule_attestation(entry)
 
-        logger_exception.assert_called_once_with(
-            "Rekor attestation scheduling failed for audit entry id=%s",
-            entry.id,
-        )
+        logger_exception.assert_called_once()
+        args, kwargs = logger_exception.call_args
+        self.assertEqual(args, ("Rekor attestation scheduling failed for audit entry id=%s", entry.id))
+        self.assertEqual(kwargs["extra"]["error_type"], "RuntimeError")
+        self.assertIn("connection state unavailable", kwargs["extra"]["error_message"])
 
     @override_settings(
         ELECTION_REKOR_ENDPOINT="https://rekor.example",

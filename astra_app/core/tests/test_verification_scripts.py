@@ -167,6 +167,47 @@ class VerificationScriptsTests(SimpleTestCase):
 
         self.assertIn("warning", output.getvalue().lower())
 
+    def test_verify_audit_log_script_runs_offline_by_default(self) -> None:
+        module = _load_script_module(
+            name="verify_audit_log",
+            path=Path(__file__).resolve().parents[1] / "static" / "verify-audit-log.py",
+        )
+
+        event_payload = {"chain_head": "abc"}
+        canonical_bytes = module._canonical_bytes(
+            event_type="election_closed",
+            payload=event_payload,
+        )
+        digest = hashlib.sha256(canonical_bytes).hexdigest()
+        audit_data = {
+            "audit_log": [
+                {
+                    "event_type": "election_closed",
+                    "payload": event_payload,
+                    "timestamping": {
+                        "canonical_message_version": 1,
+                        "message_digest_hex": digest,
+                        "rekor_entry_url": "https://rekor.example/api/v1/log/entries/uuid-1",
+                    },
+                }
+            ]
+        }
+
+        output = io.StringIO()
+        with (
+            redirect_stdout(output),
+            patch("urllib.request.urlopen") as urlopen,
+        ):
+            found_any, all_pass = module.verify_rekor_attestations(
+                audit_data=audit_data,
+                verify_online=module.verify_rekor_online,
+            )
+
+        self.assertTrue(found_any)
+        self.assertTrue(all_pass)
+        urlopen.assert_not_called()
+        self.assertNotIn("online:", output.getvalue().lower())
+
     def test_verify_ballot_chain_script_online_warns_for_multi_key_wrapper(self) -> None:
         module = _load_script_module(
             name="verify_audit_log",

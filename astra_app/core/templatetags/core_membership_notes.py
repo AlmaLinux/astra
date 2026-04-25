@@ -1,15 +1,12 @@
 import hashlib
 from datetime import timedelta
-from types import SimpleNamespace
-from typing import Any, cast
-from urllib.parse import urlencode
+from typing import Any
 
 from django import template
 from django.conf import settings
 from django.http import HttpRequest
 from django.template.loader import render_to_string
 from django.urls import reverse
-from django.utils.functional import SimpleLazyObject, empty
 from django.utils.html import escape, format_html, format_html_join
 from django.utils.safestring import SafeString, mark_safe
 from markdownify.templatetags.markdownify import markdownify as render_markdown
@@ -18,8 +15,7 @@ from post_office.models import Email
 from core.freeipa.user import FreeIPAUser
 from core.membership_notes import CUSTOS, last_votes, note_action_icon, note_action_label
 from core.models import MembershipRequest, Note
-from core.tokens import make_membership_notes_aggregate_target_token
-from core.views_utils import get_username, try_get_username_from_user
+from core.views_utils import get_username
 
 register = template.Library()
 
@@ -222,110 +218,6 @@ def _current_username_from_request(http_request: HttpRequest | None) -> str:
     return get_username(http_request, allow_user_fallback=False)
 
 
-def _normalize_username(value: object) -> str:
-    return str(value or "").strip().lower()
-
-
-def _aggregate_author_usernames(notes: list[Note]) -> set[str]:
-    return {
-        _normalize_username(note.username)
-        for note in notes
-        if note.username and note.username != CUSTOS and _normalize_username(note.username)
-    }
-
-
-def _avatar_safe_aggregate_user(user_obj: object | None) -> object | None:
-    if user_obj is None:
-        return None
-
-    if isinstance(user_obj, SimpleLazyObject):
-        # Only reuse an already-evaluated lazy user so this optimization never forces a new fetch.
-        wrapped_user = user_obj._wrapped
-        if wrapped_user is empty or wrapped_user is user_obj:
-            return None
-        if isinstance(wrapped_user, FreeIPAUser):
-            return wrapped_user
-        return None
-
-    if isinstance(user_obj, FreeIPAUser):
-        return user_obj
-
-    candidate_user = cast(Any, user_obj)
-    if not hasattr(candidate_user, "is_authenticated") or not bool(candidate_user.is_authenticated):
-        return None
-    if not hasattr(candidate_user, "username") or not hasattr(candidate_user, "email"):
-        return None
-    if not hasattr(candidate_user, "get_username") or not callable(candidate_user.get_username):
-        return None
-
-    username = _normalize_username(try_get_username_from_user(candidate_user))
-    email = str(candidate_user.email or "").strip()
-    request_get_username = _normalize_username(candidate_user.get_username())
-    if not username or not email or request_get_username != username:
-        return None
-
-    return candidate_user
-
-
-def _avatar_safe_request_user_for_aggregate_notes(http_request: HttpRequest | None) -> object | None:
-    if http_request is None or not hasattr(http_request, "user"):
-        return None
-
-    return _avatar_safe_aggregate_user(http_request.user)
-
-
-def _aggregate_preloaded_target_user(
-    *,
-    context: dict[str, Any],
-    aggregate_target_type: str,
-    aggregate_target: str,
-) -> object | None:
-    if aggregate_target_type != "user":
-        return None
-
-    normalized_target = _normalize_username(aggregate_target)
-    if not normalized_target:
-        return None
-
-    for candidate in (context.get("fu"), context.get("aggregate_preloaded_target_user")):
-        safe_candidate = _avatar_safe_aggregate_user(candidate)
-        if safe_candidate is None:
-            continue
-        candidate_username = _normalize_username(try_get_username_from_user(safe_candidate))
-        if candidate_username == normalized_target:
-            return safe_candidate
-
-    return None
-
-
-def _preloaded_aggregate_avatar_users_by_username(
-    *,
-    context: dict[str, Any],
-    notes: list[Note],
-    http_request: HttpRequest | None,
-    aggregate_target_user: object | None,
-) -> dict[str, object]:
-    aggregate_author_usernames = _aggregate_author_usernames(notes)
-    if not aggregate_author_usernames:
-        return {}
-
-    preloaded_users_by_username: dict[str, object] = {}
-
-    target_user = _avatar_safe_aggregate_user(aggregate_target_user)
-    if target_user is not None:
-        target_username = _normalize_username(try_get_username_from_user(target_user))
-        if target_username in aggregate_author_usernames:
-            preloaded_users_by_username[target_username] = target_user
-
-    request_user = _avatar_safe_request_user_for_aggregate_notes(http_request)
-    if request_user is not None:
-        request_username = _normalize_username(try_get_username_from_user(request_user))
-        if request_username in aggregate_author_usernames and request_username not in preloaded_users_by_username:
-            preloaded_users_by_username[request_username] = request_user
-
-    return preloaded_users_by_username
-
-
 def _avatar_users_by_username(notes: list[Note]) -> dict[str, object]:
     avatar_users_by_username: dict[str, object] = {}
     for username in {str(n.username or "").strip() for n in notes if n.username and n.username != CUSTOS}:
@@ -333,22 +225,6 @@ def _avatar_users_by_username(notes: list[Note]) -> dict[str, object]:
         if user_obj is not None:
             avatar_users_by_username[username.lower()] = user_obj
     return avatar_users_by_username
-
-
-def _aggregate_avatar_users_by_username(
-    notes: list[Note],
-    *,
-    preloaded_users_by_username: dict[str, object] | None = None,
-) -> dict[str, object]:
-    lookup_usernames = _aggregate_author_usernames(notes)
-    if not lookup_usernames:
-        return {}
-
-    resolved_users_by_username = dict(preloaded_users_by_username or {})
-    unresolved_usernames = lookup_usernames - set(resolved_users_by_username)
-    if unresolved_usernames:
-        resolved_users_by_username.update(FreeIPAUser.find_lightweight_by_usernames(unresolved_usernames))
-    return resolved_users_by_username
 
 
 def _note_display_username(note: Note) -> str:
@@ -653,190 +529,6 @@ def _group_timeline_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any
         groups.append(current)
 
     return groups
-
-
-def _render_membership_notes_aggregate(
-    *,
-    context: dict[str, Any],
-    notes: list[Note] | None,
-    dom_key: str,
-    compact: bool,
-    next_url: str | None,
-    aggregate_target_type: str,
-    aggregate_target: str,
-) -> SafeString:
-    request = context.get("request")
-    http_request = request if isinstance(request, HttpRequest) else None
-    membership_can_add = bool(context.get("membership_can_add", False))
-    membership_can_change = bool(context.get("membership_can_change", False))
-    membership_can_delete = bool(context.get("membership_can_delete", False))
-    can_write = membership_can_add or membership_can_change or membership_can_delete
-    resolved_notes = None if notes is None else list(notes)
-
-    dummy_request = SimpleNamespace(pk=_timeline_dom_id(dom_key))
-
-    resolved_next_url = next_url
-    if resolved_next_url is None:
-        resolved_next_url = http_request.get_full_path() if http_request is not None else ""
-
-    post_url = reverse("api-membership-notes-aggregate-add")
-    aggregate_target_user = _aggregate_preloaded_target_user(
-        context=context,
-        aggregate_target_type=aggregate_target_type,
-        aggregate_target=aggregate_target,
-    )
-    aggregate_preloaded_target_token = ""
-    if aggregate_target_user is not None:
-        safe_target_user = cast(Any, aggregate_target_user)
-        aggregate_preloaded_target_username = str(try_get_username_from_user(aggregate_target_user) or "").strip()
-        if aggregate_preloaded_target_username:
-            aggregate_preloaded_target_token = make_membership_notes_aggregate_target_token(
-                {
-                    "target_type": aggregate_target_type,
-                    "target": aggregate_preloaded_target_username,
-                    "email": str(safe_target_user.email or "").strip(),
-                }
-            )
-
-    note_summary_url = ""
-    note_detail_url = ""
-    groups: list[dict[str, Any]] = []
-    note_count = 0
-    approvals = 0
-    disapprovals = 0
-    aggregate_note_query = urlencode(
-        {
-            "target_type": aggregate_target_type,
-            "target": aggregate_target,
-        }
-    )
-    note_summary_url = reverse("api-membership-notes-aggregate-summary") + "?" + aggregate_note_query
-    note_detail_url = reverse("api-membership-notes-aggregate") + "?" + aggregate_note_query
-
-    has_fallback_content = resolved_notes is not None
-    if resolved_notes is not None:
-        votes_by_user = last_votes(resolved_notes)
-        approvals = sum(1 for vote in votes_by_user.values() if vote == "approve")
-        disapprovals = sum(1 for vote in votes_by_user.values() if vote == "disapprove")
-        current_responses_by_request_id = _membership_request_responses_by_id(resolved_notes)
-        request_resubmitted_new_snapshots_by_note_id = _request_resubmitted_new_snapshots_by_note_id(
-            resolved_notes,
-            current_responses_by_request_id=current_responses_by_request_id,
-        )
-        preloaded_users_by_username = _preloaded_aggregate_avatar_users_by_username(
-            context=context,
-            notes=resolved_notes,
-            http_request=http_request,
-            aggregate_target_user=aggregate_target_user,
-        )
-        groups = _group_timeline_entries(
-            _timeline_entries_for_notes(
-                resolved_notes,
-                current_username=_current_username_from_request(http_request),
-                request_resubmitted_new_snapshots_by_note_id=request_resubmitted_new_snapshots_by_note_id,
-                avatar_users_by_username=_aggregate_avatar_users_by_username(
-                    resolved_notes,
-                    preloaded_users_by_username=preloaded_users_by_username,
-                ),
-            )
-        )
-        note_count = len(resolved_notes)
-
-    html = render_to_string(
-        "core/_membership_notes.html",
-        {
-            "compact": compact,
-            "membership_request": dummy_request,
-            "groups": groups,
-            "note_count": note_count,
-            "approvals": approvals,
-            "disapprovals": disapprovals,
-            "current_user_vote": None,
-            "can_vote": False,
-            "can_write": can_write,
-            "has_fallback_content": has_fallback_content,
-            "details_loaded": False,
-            "post_url": post_url,
-            "aggregate_target_type": aggregate_target_type,
-            "aggregate_target": aggregate_target,
-            "aggregate_preloaded_target_token": aggregate_preloaded_target_token,
-            "note_summary_url": note_summary_url,
-            "note_detail_url": note_detail_url,
-            "next_url": resolved_next_url,
-        },
-        request=http_request,
-    )
-    return mark_safe(html)
-
-
-def _membership_notes_aggregate_for_target(
-    context: dict[str, Any],
-    *,
-    notes_filter: dict[str, Any],
-    dom_key: str,
-    compact: bool,
-    next_url: str | None,
-    aggregate_target_type: str,
-    aggregate_target: str,
-) -> SafeString | str:
-    membership_can_view = bool(context.get("membership_can_view", False))
-    if not membership_can_view:
-        return ""
-
-    return _render_membership_notes_aggregate(
-        context=context,
-        notes=None,
-        dom_key=dom_key,
-        compact=compact,
-        next_url=next_url,
-        aggregate_target_type=aggregate_target_type,
-        aggregate_target=aggregate_target,
-    )
-
-
-@register.simple_tag(takes_context=True)
-def membership_notes_aggregate_for_user(
-    context: dict[str, Any],
-    username: str,
-    *,
-    compact: bool = True,
-    next_url: str | None = None,
-) -> SafeString | str:
-    normalized_username = str(username or "").strip()
-    if not normalized_username:
-        return ""
-
-    return _membership_notes_aggregate_for_target(
-        context=context,
-        notes_filter={"membership_request__requested_username": normalized_username},
-        dom_key=f"user:{normalized_username}",
-        compact=compact,
-        next_url=next_url,
-        aggregate_target_type="user",
-        aggregate_target=normalized_username,
-    )
-
-
-@register.simple_tag(takes_context=True)
-def membership_notes_aggregate_for_organization(
-    context: dict[str, Any],
-    organization_id: int,
-    *,
-    compact: bool = True,
-    next_url: str | None = None,
-) -> SafeString | str:
-    if not organization_id:
-        return ""
-
-    return _membership_notes_aggregate_for_target(
-        context=context,
-        notes_filter={"membership_request__requested_organization_id": organization_id},
-        dom_key=f"org:{organization_id}",
-        compact=compact,
-        next_url=next_url,
-        aggregate_target_type="org",
-        aggregate_target=str(organization_id),
-    )
 
 
 @register.simple_tag(takes_context=True)

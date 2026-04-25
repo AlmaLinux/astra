@@ -2846,28 +2846,24 @@ class OrganizationUserViewsTests(TestCase):
         self._login_as_freeipa_user("reviewer")
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
-            resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+            resp = self.client.get(reverse("api-organization-detail", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'data-membership-notes-aggregate-root="org"')
-        self.assertContains(
-            resp,
+        payload = resp.json()
+        notes = payload["organization"]["notes"]
+        self.assertEqual(
+            notes["summaryUrl"],
             reverse("api-membership-notes-aggregate-summary") + f"?target_type=org&target={org.pk}",
         )
-        self.assertContains(
-            resp,
+        self.assertEqual(
+            notes["detailUrl"],
             reverse("api-membership-notes-aggregate") + f"?target_type=org&target={org.pk}",
         )
-        self.assertContains(resp, reverse("api-membership-notes-aggregate-add"))
-        self.assertNotContains(resp, "Org note")
-        self.assertNotContains(resp, f"(req. #{req.pk})")
-        self.assertContains(resp, "<div class=\"font-weight-bold\">Gold Sponsor Member</div>", html=True)
-        self.assertContains(resp, f"Request #{req.pk}")
-        self.assertNotContains(
-            resp,
-            f'<a href="{reverse("membership-request-detail", args=[req.pk])}">Gold Sponsor Member</a>',
-            html=True,
-        )
+        self.assertEqual(notes["addUrl"], reverse("api-membership-notes-aggregate-add"))
+        self.assertTrue(notes["canView"])
+        self.assertFalse(notes["canWrite"])
+        self.assertNotIn("Org note", str(payload))
+        self.assertNotIn(f"(req. #{req.pk})", str(payload))
 
     def test_organization_detail_scopes_request_links_per_membership_type(self) -> None:
         from core.models import Membership, MembershipLog, MembershipRequest, MembershipType, Organization
@@ -3156,20 +3152,23 @@ class OrganizationUserViewsTests(TestCase):
         self._login_as_freeipa_user("reviewer")
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
-            resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+            resp = self.client.get(reverse("api-organization-detail", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'data-membership-notes-aggregate-root="org"')
-        self.assertContains(
-            resp,
+        payload = resp.json()
+        notes = payload["organization"]["notes"]
+        self.assertEqual(
+            notes["summaryUrl"],
             reverse("api-membership-notes-aggregate-summary") + f"?target_type=org&target={org.pk}",
         )
-        self.assertContains(
-            resp,
+        self.assertEqual(
+            notes["detailUrl"],
             reverse("api-membership-notes-aggregate") + f"?target_type=org&target={org.pk}",
         )
-        self.assertContains(resp, reverse("api-membership-notes-aggregate-add"))
-        self.assertNotContains(resp, "Older org note")
+        self.assertEqual(notes["addUrl"], reverse("api-membership-notes-aggregate-add"))
+        self.assertTrue(notes["canView"])
+        self.assertFalse(notes["canWrite"])
+        self.assertNotIn("Older org note", str(payload))
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(

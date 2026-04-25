@@ -1,5 +1,5 @@
 {% extends 'core/base.html' %}
-{% load static %}
+{% load django_vite static %}
 
 {% block title %}Election algorithm{% endblock %}
 
@@ -7,7 +7,19 @@
   <h1 class="m-0">Election algorithm</h1>
 {% endblock %}
 
+{% block extra_head %}
+  {% vite_hmr_client %}
+  {% vite_asset 'src/entrypoints/electionAlgorithm.ts' %}
+{% endblock %}
+
 {% block content %}
+  <div
+    data-election-algorithm-root
+    data-election-algorithm-runbook-url="https://github.com/AlmaLinux/astra/blob/{% if build_sha %}{{ build_sha }}{% else %}master{% endif %}/docs/runbooks/meek-stv-elections.md"
+    data-election-algorithm-verify-ballot-hash-url="{% static 'verify-ballot-hash.py' %}"
+    data-election-algorithm-verify-ballot-chain-url="{% static 'verify-ballot-chain.py' %}"
+    data-election-algorithm-verify-audit-log-url="{% static 'verify-audit-log.py' %}"
+  >
   <div class="row justify-content-center">
     <div class="col-md-10 col-lg-9">
       <div class="card card-outline card-info">
@@ -125,5 +137,6 @@
         </div>
       </div>
     </div>
+  </div>
   </div>
 {% endblock %}

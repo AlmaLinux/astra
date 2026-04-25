@@ -10,6 +10,7 @@ from django.urls import reverse
 from django.views.decorators.http import require_GET, require_http_methods
 
 from core.agreements import missing_required_agreements_for_user_in_group, required_agreements_for_group
+from core.api_pagination import paginate_detail_items, serialize_pagination
 from core.avatar_providers import resolve_avatar_urls_for_users
 from core.forms_groups import GroupEditForm
 from core.freeipa.agreement import FreeIPAFASAgreement
@@ -66,29 +67,6 @@ def _matches_query(group: FreeIPAGroup, query: str) -> bool:
         return True
     desc = (group.description or "").lower()
     return query_lower in desc
-
-
-def _serialize_pagination(page_ctx: dict[str, object]) -> dict[str, object]:
-    paginator = page_ctx["paginator"]
-    page_obj = page_ctx["page_obj"]
-    page_numbers = page_ctx["page_numbers"]
-    show_first = page_ctx["show_first"]
-    show_last = page_ctx["show_last"]
-
-    return {
-        "count": paginator.count,
-        "page": page_obj.number,
-        "num_pages": paginator.num_pages,
-        "page_numbers": page_numbers,
-        "show_first": show_first,
-        "show_last": show_last,
-        "has_previous": page_obj.has_previous(),
-        "has_next": page_obj.has_next(),
-        "previous_page_number": page_obj.previous_page_number() if page_obj.has_previous() else None,
-        "next_page_number": page_obj.next_page_number() if page_obj.has_next() else None,
-        "start_index": page_obj.start_index() if paginator.count else 0,
-        "end_index": page_obj.end_index() if paginator.count else 0,
-    }
 
 
 def _groups_page_context(request: HttpRequest) -> dict[str, object]:
@@ -229,19 +207,6 @@ def _serialize_group_user_items(usernames: list[str]) -> dict[str, dict[str, str
     return items_by_username
 
 
-def _paginate_detail_items(
-    request: HttpRequest,
-    items: list[object],
-    *,
-    page_param: str = "page",
-    per_page: int = 30,
-) -> tuple[list[object], dict[str, object]]:
-    page_number = _normalize_str(request.GET.get(page_param)) or None
-    _, page_prefix = build_page_url_prefix(request.GET, page_param=page_param)
-    page_ctx = paginate_and_build_context(items, page_number, per_page, page_url_prefix=page_prefix)
-    return list(page_ctx["page_obj"].object_list), page_ctx
-
-
 def _serialize_group_user_list_items(
     usernames: list[str],
     *,
@@ -378,7 +343,7 @@ def groups_api(request: HttpRequest) -> JsonResponse:
             }
             for group in groups_list
         ],
-        "pagination": _serialize_pagination(page_context),
+        "pagination": serialize_pagination(page_context),
     }
     return JsonResponse(payload)
 
@@ -406,14 +371,14 @@ def group_detail_leaders_api(request: HttpRequest, name: str) -> JsonResponse:
         for sponsor_username in membership_ctx["sponsors_list"]
     ]
 
-    leaders_page_items, leaders_page_ctx = _paginate_detail_items(request, cast(list[object], leader_entries))
+    leaders_page_items, leaders_page_ctx = paginate_detail_items(request, cast(list[object], leader_entries))
     items = _serialize_group_leader_items(cast(list[dict[str, str]], leaders_page_items))
 
     return JsonResponse(
         {
             "leaders": {
                 "items": items,
-                "pagination": _serialize_pagination(leaders_page_ctx),
+                "pagination": serialize_pagination(leaders_page_ctx),
             }
         }
     )
@@ -432,7 +397,7 @@ def group_detail_members_api(request: HttpRequest, name: str) -> JsonResponse:
         for username in members_all
         if (not members_q) or (members_q.lower() in username.lower())
     ]
-    members_page_items, members_page_ctx = _paginate_detail_items(request, cast(list[object], members_filtered))
+    members_page_items, members_page_ctx = paginate_detail_items(request, cast(list[object], members_filtered))
     sponsor_usernames = set(membership_ctx["sponsors_list"])
 
     return JsonResponse(
@@ -440,7 +405,7 @@ def group_detail_members_api(request: HttpRequest, name: str) -> JsonResponse:
             "members": {
                 "q": members_q,
                 "items": _serialize_group_user_list_items(cast(list[str], members_page_items), leader_usernames=sponsor_usernames),
-                "pagination": _serialize_pagination(members_page_ctx),
+                "pagination": serialize_pagination(members_page_ctx),
             }
         }
     )
