@@ -1,39 +1,12 @@
 import json
 import logging
-from typing import Any
 
 from django.core.cache import cache, caches
 from django.core.management.base import BaseCommand
 
+from core.cache_tools import list_cache_keys_from_backend, safe_cache_preview
+
 logger = logging.getLogger(__name__)
-
-
-def _try_locmem_keys() -> list[str] | None:
-    """Return raw keys if the cache backend exposes them (e.g., LocMemCache)."""
-    # Use the actual backend instance (not the ConnectionProxy).
-    backend = caches["default"]
-    # LocMemCache exposes an internal dict called _cache.
-    internal = getattr(backend, "_cache", None)
-    if isinstance(internal, dict):
-        return sorted(str(k) for k in internal.keys())
-    return None
-
-
-def _safe_serialize(value: Any, *, max_chars: int, pretty: bool) -> str:
-    if value is None:
-        return "<missing>"
-
-    try:
-        if isinstance(value, (dict, list, tuple)):
-            text = json.dumps(value, indent=2 if pretty else None, sort_keys=pretty, default=str)
-        else:
-            text = str(value)
-    except Exception:
-        text = repr(value)
-
-    if max_chars > 0 and len(text) > max_chars:
-        return text[:max_chars] + "…"
-    return text
 
 
 class Command(BaseCommand):
@@ -78,7 +51,14 @@ class Command(BaseCommand):
         get_keys = options.get("get_keys") or []
         for key in get_keys:
             val = cache.get(key)
-            logger.info("%s = %s", key, _safe_serialize(val, max_chars=max_chars, pretty=pretty))
+            if pretty and isinstance(val, (dict, list, tuple)):
+                text = json.dumps(val, indent=2, sort_keys=True, default=str)
+                if max_chars > 0 and len(text) > max_chars:
+                    text = text[:max_chars] + "…"
+            else:
+                preview = safe_cache_preview(val, max_chars=max_chars)
+                text = "<missing>" if preview is None else str(preview)
+            logger.info("%s = %s", key, text)
 
         if options.get("list"):
             # These are the keys used by core/backends.py.
@@ -89,7 +69,7 @@ class Command(BaseCommand):
             logger.info("- freeipa_group_<cn>")
 
         if options.get("keys"):
-            keys = _try_locmem_keys()
+            keys = list_cache_keys_from_backend(caches["default"])
             if keys is None:
                 logger.info(
                     "This cache backend does not expose keys (try LocMemCache or switch to Redis for inspectability)."

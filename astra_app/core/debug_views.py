@@ -1,42 +1,16 @@
-import json
 import uuid
 from typing import Any
 
 from django.contrib.auth.decorators import user_passes_test
-from django.core.cache import caches
 from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_GET, require_http_methods
 
 from core import signals as astra_signals
+from core.cache_tools import inspect_default_cache
 from core.elections_meek import tally_meek
 from core.elections_sankey import build_sankey_flows
 from core.views_utils import _normalize_str
-
-
-def _safe_preview(value: Any, *, max_chars: int) -> Any:
-    if value is None:
-        return None
-
-    try:
-        if isinstance(value, (dict, list, tuple)):
-            text = json.dumps(value, sort_keys=True, default=str)
-        else:
-            text = str(value)
-    except Exception:
-        text = repr(value)
-
-    if max_chars > 0 and len(text) > max_chars:
-        return text[:max_chars] + "…"
-    return text
-
-
-def _list_keys_from_backend(backend) -> list[str] | None:
-    # LocMemCache exposes a per-process dict called _cache.
-    internal = getattr(backend, "_cache", None)
-    if isinstance(internal, dict):
-        return sorted(str(k) for k in internal.keys())
-    return None
 
 
 @require_GET
@@ -46,9 +20,6 @@ def cache_debug_view(request):
 
     This runs inside the live Django process, so it can see LocMemCache keys.
     """
-
-    backend = caches["default"]
-    backend_path = f"{backend.__class__.__module__}.{backend.__class__.__name__}"
 
     max_chars = _normalize_str(request.GET.get("max_chars", "4000"))
     try:
@@ -60,31 +31,7 @@ def cache_debug_view(request):
     prefix = _normalize_str(request.GET.get("prefix")) or None
     key = _normalize_str(request.GET.get("key")) or None
 
-    keys = _list_keys_from_backend(backend)
-    supports_key_listing = keys is not None
-
-    if keys is None:
-        keys = []
-
-    if prefix:
-        keys = [k for k in keys if k.startswith(prefix)]
-
-    payload: dict[str, Any] = {
-        "backend": backend_path,
-        "supports_key_listing": supports_key_listing,
-        "count": len(keys),
-        "keys": keys,
-        "known_freeipa_keys": [
-            "freeipa_users_all",
-            "freeipa_groups_all",
-            "freeipa_user_<username>",
-            "freeipa_group_<cn>",
-        ],
-    }
-
-    if key:
-        payload["key"] = key
-        payload["value_preview"] = _safe_preview(backend.get(key), max_chars=max_chars_i)
+    payload: dict[str, Any] = inspect_default_cache(prefix=prefix, key=key, max_chars=max_chars_i)
 
     return JsonResponse(payload)
 
