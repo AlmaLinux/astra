@@ -50,17 +50,21 @@ class OrganizationDetailVueTests(TestCase):
         self._login_as_freeipa_user("alice")
         user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
 
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=user):
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=user),
+            patch("core.views_organizations._build_organization_detail_page_context") as build_context,
+        ):
             response = self.client.get(reverse("organization-detail", args=[organization.pk]))
 
         self.assertEqual(response.status_code, 200)
+        build_context.assert_not_called()
         self.assertContains(response, "data-organization-detail-root")
         self.assertContains(
             response,
             f'data-organization-detail-api-url="{reverse("api-organization-detail", args=[organization.pk])}"',
         )
         self.assertContains(response, 'src="http://localhost:5173/src/entrypoints/organizationDetail.ts"')
-        self.assertContains(response, '<strong>Membership</strong>', html=True)
+        self.assertNotContains(response, '<strong>Membership</strong>', html=True)
 
     def test_organization_detail_api_returns_summary_payload(self) -> None:
         sponsor_type = self._ensure_sponsor_type()

@@ -1049,10 +1049,37 @@ def organization_representatives_search(request: HttpRequest) -> HttpResponse:
 def organization_detail(request: HttpRequest, organization_id: int) -> HttpResponse:
     organization = get_object_or_404(Organization, pk=organization_id)
     _require_organization_access(request, organization)
+    is_representative = _is_representative(request, organization)
+    can_send_claim_invitation = False
+    send_claim_invitation_url = ""
+    if organization.status == Organization.Status.unclaimed:
+        recipient_email = str(organization.primary_contact_email() or "").strip()
+        if request.user.has_perm(ASTRA_ADD_SEND_MAIL) and recipient_email:
+            can_send_claim_invitation = True
+            send_claim_invitation_url = send_mail_url(
+                to_type="manual",
+                to=recipient_email,
+                template_name=settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME,
+                extra_context={
+                    "invitation_action": "org_claim",
+                    "invitation_org_id": str(organization.pk),
+                    "organization_name": organization.name,
+                    "claim_url": build_organization_claim_url(organization=organization, request=request),
+                },
+                reply_to=settings.MEMBERSHIP_COMMITTEE_EMAIL,
+            )
+
     return render(
         request,
         "core/organization_detail.html",
-        _build_organization_detail_page_context(request, organization=organization),
+        {
+            "organization": organization,
+            "can_edit_organization": _can_edit_organization(request, organization),
+            "can_delete_organization": _can_delete_organization(request, organization),
+            "is_representative": is_representative,
+            "can_send_claim_invitation": can_send_claim_invitation,
+            "send_claim_invitation_url": send_claim_invitation_url,
+        },
     )
 
 
