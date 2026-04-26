@@ -680,7 +680,7 @@ EMAIL_BACKEND = 'post_office.EmailBackend'
 # - non-DEBUG: default delivery backend is AWS SES (django-ses); delivery still
 #   requires running `python manage.py send_queued_mail` (or enabling Celery).
 POST_OFFICE = {
-    'DEFAULT_PRIORITY': 'now', # if DEBUG else 'medium',
+    'DEFAULT_PRIORITY': 'now' if DEBUG else 'medium',
     'MESSAGE_ID_ENABLED': True,
     'LOG_LEVEL': 2,
     'MAX_RETRIES': 4,

@@ -1,0 +1,11 @@
+[Unit]
+Description=Astra queued email sender
+After=astra-app@1.service
+Requires=astra-app@1.service
+
+[Service]
+Type=oneshot
+TimeoutStartSec=300
+ExecStart=/usr/bin/podman exec astra-app-1 python astra_app/manage.py send_queued_mail
+User=root
+Group=root
