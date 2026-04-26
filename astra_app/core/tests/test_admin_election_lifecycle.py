@@ -25,6 +25,92 @@ class AdminElectionLifecycleActionTests(TestCase):
         session["_freeipa_username"] = username
         session.save()
 
+    def test_admin_add_allows_zero_candidate_draft_creation(self) -> None:
+        self._login_as_freeipa_admin("alice")
+        admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})
+
+        now = timezone.now()
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
+            response = self.client.post(
+                reverse("admin:core_election_add"),
+                data={
+                    "name": "Admin draft without candidates",
+                    "description": "",
+                    "url": "",
+                    "start_datetime_0": (now + datetime.timedelta(days=1)).strftime("%Y-%m-%d"),
+                    "start_datetime_1": "09:00:00",
+                    "end_datetime_0": (now + datetime.timedelta(days=2)).strftime("%Y-%m-%d"),
+                    "end_datetime_1": "09:00:00",
+                    "number_of_seats": "1",
+                    "quorum": "10",
+                    "eligible_group_cn": "",
+                    "voting_email_template": "",
+                    "voting_email_subject": "",
+                    "voting_email_html": "",
+                    "voting_email_text": "",
+                    "candidates-TOTAL_FORMS": "0",
+                    "candidates-INITIAL_FORMS": "0",
+                    "candidates-MIN_NUM_FORMS": "0",
+                    "candidates-MAX_NUM_FORMS": "1000",
+                    "_save": "Save",
+                },
+                follow=False,
+            )
+
+        self.assertEqual(response.status_code, 302)
+        election = Election.objects.get(name="Admin draft without candidates")
+        self.assertEqual(election.status, Election.Status.draft)
+        self.assertFalse(Candidate.objects.filter(election=election).exists())
+
+    def test_admin_change_allows_zero_candidate_draft_save(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Admin existing draft",
+            description="",
+            url="",
+            start_datetime=now + datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=2),
+            number_of_seats=1,
+            quorum=10,
+            status=Election.Status.draft,
+        )
+
+        self._login_as_freeipa_admin("alice")
+        admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
+            response = self.client.post(
+                reverse("admin:core_election_change", args=[election.id]),
+                data={
+                    "name": "Admin existing draft updated",
+                    "description": "",
+                    "url": "",
+                    "start_datetime_0": election.start_datetime.strftime("%Y-%m-%d"),
+                    "start_datetime_1": election.start_datetime.strftime("%H:%M:%S"),
+                    "end_datetime_0": election.end_datetime.strftime("%Y-%m-%d"),
+                    "end_datetime_1": election.end_datetime.strftime("%H:%M:%S"),
+                    "number_of_seats": str(election.number_of_seats),
+                    "quorum": str(election.quorum),
+                    "eligible_group_cn": "",
+                    "voting_email_template": "",
+                    "voting_email_subject": "",
+                    "voting_email_html": "",
+                    "voting_email_text": "",
+                    "candidates-TOTAL_FORMS": "0",
+                    "candidates-INITIAL_FORMS": "0",
+                    "candidates-MIN_NUM_FORMS": "0",
+                    "candidates-MAX_NUM_FORMS": "1000",
+                    "_save": "Save",
+                },
+                follow=False,
+            )
+
+        self.assertEqual(response.status_code, 302)
+        election.refresh_from_db()
+        self.assertEqual(election.name, "Admin existing draft updated")
+        self.assertEqual(election.status, Election.Status.draft)
+        self.assertFalse(Candidate.objects.filter(election=election).exists())
+
     def test_admin_action_close_election_closes_and_anonymizes(self) -> None:
         now = timezone.now()
         election = Election.objects.create(

@@ -39,6 +39,12 @@ class ElectionConcludeResult:
     tally_failed: bool = False
 
 
+@dataclass(frozen=True)
+class ElectionTallyResult:
+    ok: bool
+    message: str
+
+
 def _send_mail_credentials_result(*, request: HttpRequest, election: Election, data: Mapping[str, object]) -> ElectionCredentialResendResult:
     if election.status != Election.Status.open:
         return ElectionCredentialResendResult(
@@ -217,6 +223,17 @@ def _conclude_election(*, request: HttpRequest, election: Election, skip_tally: 
     return ElectionConcludeResult(ok=True, message="Election closed and tallied.")
 
 
+def _tally_election(*, request: HttpRequest, election: Election) -> ElectionTallyResult:
+    actor = get_username(request) or None
+
+    try:
+        elections_services.tally_election(election=election, actor=actor)
+    except ElectionError as exc:
+        return ElectionTallyResult(ok=False, message=str(exc))
+
+    return ElectionTallyResult(ok=True, message="Election tallied.")
+
+
 @require_POST
 @permission_required(ASTRA_ADD_ELECTION, raise_exception=True, login_url=reverse_lazy("users"))
 def election_conclude(request, election_id: int):
@@ -307,6 +324,33 @@ def election_conclude_api(request: HttpRequest, election_id: int) -> JsonRespons
             "ok": True,
             "message": result.message,
             "tally_failed": result.tally_failed,
+            "election": {
+                "id": election.id,
+                "status": election.status,
+            },
+        }
+    )
+
+
+@require_POST
+@json_permission_required(ASTRA_ADD_ELECTION)
+def election_tally_api(request: HttpRequest, election_id: int) -> JsonResponse:
+    election = _get_active_election(election_id)
+    data = _request_data(request)
+
+    if not _confirm_election_action(data=data, election=election):
+        return JsonResponse({"ok": False, "errors": ["Confirmation required."]}, status=400)
+
+    result = _tally_election(request=request, election=election)
+    if not result.ok:
+        return JsonResponse({"ok": False, "errors": [result.message]}, status=400)
+
+    election.refresh_from_db(fields=["status"])
+
+    return JsonResponse(
+        {
+            "ok": True,
+            "message": result.message,
             "election": {
                 "id": election.id,
                 "status": election.status,

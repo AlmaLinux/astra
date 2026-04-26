@@ -19,6 +19,7 @@ from core.views_elections.lifecycle import (
     election_conclude_api,
     election_extend_end_api,
     election_send_mail_credentials_api,
+    election_tally_api,
 )
 from core.views_elections.reporting import elections_turnout_report_api
 from core.views_elections.vote import election_vote_api, election_vote_submit
@@ -142,6 +143,11 @@ urlpatterns = [
         "elections/<int:election_id>/conclude",
         election_conclude_api,
         name="api-election-conclude",
+    ),
+    path(
+        "elections/<int:election_id>/tally",
+        election_tally_api,
+        name="api-election-tally",
     ),
     path(
         "elections/<int:election_id>/send-mail-credentials",

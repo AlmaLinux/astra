@@ -1016,7 +1016,7 @@ def tally_election(*, election: Election, actor: str | None = None) -> dict[str,
         with transaction.atomic():
             election = Election.objects.select_for_update().get(pk=election.pk)
             if election.status != Election.Status.closed:
-                raise ElectionError("election must be closed to tally")
+                raise ElectionError("Only closed elections can be tallied.")
 
             candidates_qs = Candidate.objects.filter(election=election).only(
                 "id",
@@ -1148,8 +1148,8 @@ def tally_election(*, election: Election, actor: str | None = None) -> dict[str,
 
         raise ElectionError(
             "Failed to tally election. "
-            "Recovery: Verify ballot data integrity and candidate configuration, then retry from the election detail page. "
-            "The election remains in 'closed' state and can be tallied again. "
-            "Contact an administrator if the issue persists"
-            f": {exc}"
+            "Recovery: Review the ballot data integrity and candidate configuration, then retry from the election detail page. "
+            "The election remains in the closed state and can be tallied again. "
+            "Contact an administrator if the problem persists. "
+            f"Details: {exc}"
         ) from exc

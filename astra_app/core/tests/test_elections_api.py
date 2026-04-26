@@ -975,6 +975,187 @@ class ElectionsApiTests(TestCase):
         election.refresh_from_db()
         self.assertEqual(election.status, Election.Status.closed)
 
+    def test_election_tally_api_tallies_closed_election_for_manager(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="API tally election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=3),
+            end_datetime=now - datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.closed,
+        )
+
+        admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+
+        def _tally_election(*, election: Election, actor: str | None = None) -> None:
+            election.status = Election.Status.tallied
+            election.tally_result = {"elected": []}
+            election.save(update_fields=["status", "tally_result"])
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin),
+            patch("core.views_elections.lifecycle.elections_services.tally_election", side_effect=_tally_election),
+        ):
+            response = self.client.post(
+                reverse("api-election-tally", args=[election.id]),
+                data=json.dumps({"confirm": election.name}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["message"], "Election tallied.")
+        self.assertEqual(payload["election"]["status"], Election.Status.tallied)
+
+        election.refresh_from_db()
+        self.assertEqual(election.status, Election.Status.tallied)
+
+    def test_election_tally_api_rejects_non_closed_election(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="API tally election invalid state",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+
+        admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin):
+            response = self.client.post(
+                reverse("api-election-tally", args=[election.id]),
+                data=json.dumps({"confirm": election.name}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        payload = json.loads(response.content)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["errors"], ["Only closed elections can be tallied."])
+
+    def test_election_tally_api_denied_without_permission(self) -> None:
+        self._login_as_freeipa_user("viewer")
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="API tally election denied",
+            description="",
+            start_datetime=now - datetime.timedelta(days=3),
+            end_datetime=now - datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.closed,
+        )
+
+        viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "memberof_group": []})
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
+            response = self.client.post(
+                reverse("api-election-tally", args=[election.id]),
+                data=json.dumps({"confirm": election.name}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_election_tally_api_retries_after_skip_tally_close_for_committee_group_member(self) -> None:
+        self._login_as_freeipa_user("committee")
+        FreeIPAPermissionGrant.objects.get_or_create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.group,
+            principal_name=settings.FREEIPA_ELECTION_COMMITTEE_GROUP,
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="API retry tally election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=2),
+            end_datetime=now - datetime.timedelta(hours=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+        candidate = Candidate.objects.create(
+            election=election,
+            freeipa_username="alice",
+            nominated_by="nominator",
+        )
+        ballot_hash = Ballot.compute_hash(
+            election_id=election.id,
+            credential_public_id="cred-committee",
+            ranking=[candidate.id],
+            weight=1,
+            nonce="1" * 32,
+        )
+        genesis_hash = election_genesis_chain_hash(election.id)
+        Ballot.objects.create(
+            election=election,
+            credential_public_id="cred-committee",
+            ranking=[candidate.id],
+            weight=1,
+            ballot_hash=ballot_hash,
+            previous_chain_hash=genesis_hash,
+            chain_hash=compute_chain_hash(previous_chain_hash=genesis_hash, ballot_hash=ballot_hash),
+        )
+
+        committee_user = FreeIPAUser(
+            "committee",
+            {
+                "uid": ["committee"],
+                "memberof_group": [settings.FREEIPA_ELECTION_COMMITTEE_GROUP],
+            },
+        )
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=committee_user):
+            conclude_response = self.client.post(
+                reverse("api-election-conclude", args=[election.id]),
+                data=json.dumps({"confirm": election.name, "skip_tally": True}),
+                content_type="application/json",
+            )
+
+            detail_response = self.client.get(reverse("election-detail", args=[election.id]))
+
+            election.refresh_from_db()
+            self.assertEqual(election.status, Election.Status.closed)
+            tally_response = self.client.post(
+                reverse("api-election-tally", args=[election.id]),
+                data=json.dumps({"confirm": election.name}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(conclude_response.status_code, 200)
+        conclude_payload = json.loads(conclude_response.content)
+        self.assertTrue(conclude_payload["ok"])
+        self.assertEqual(conclude_payload["election"]["status"], Election.Status.closed)
+
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertContains(detail_response, "data-election-tally-action-root")
+        self.assertContains(detail_response, reverse("api-election-tally", args=[election.id]))
+
+        self.assertEqual(tally_response.status_code, 200)
+        tally_payload = json.loads(tally_response.content)
+        self.assertTrue(tally_payload["ok"])
+        self.assertEqual(tally_payload["election"]["status"], Election.Status.tallied)
+
+        election.refresh_from_db()
+        self.assertEqual(election.status, Election.Status.tallied)
+        self.assertEqual(election.tally_result["elected"], [candidate.id])
+
     def test_election_send_mail_credentials_api_returns_send_mail_redirect_and_payload(self) -> None:
         self._login_as_freeipa_user("admin")
         FreeIPAPermissionGrant.objects.create(

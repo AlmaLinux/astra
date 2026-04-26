@@ -125,6 +125,11 @@ export interface ElectionConcludeActionBootstrap {
   quorumWarning: string;
 }
 
+export interface ElectionTallyActionBootstrap {
+  tallyApiUrl: string;
+  electionName: string;
+}
+
 export interface ElectionCredentialResendBootstrap {
   sendMailCredentialsApiUrl: string;
   eligibleUsernames: string[];
@@ -201,6 +206,18 @@ export function readElectionConcludeActionBootstrap(root: HTMLElement): Election
     concludeApiUrl,
     electionName,
     quorumWarning,
+  };
+}
+
+export function readElectionTallyActionBootstrap(root: HTMLElement): ElectionTallyActionBootstrap | null {
+  const tallyApiUrl = String(root.dataset.electionTallyApiUrl || "").trim();
+  const electionName = String(root.dataset.electionName || "").trim();
+  if (!tallyApiUrl || !electionName) {
+    return null;
+  }
+  return {
+    tallyApiUrl,
+    electionName,
   };
 }
 

@@ -2,6 +2,7 @@
 import datetime
 from unittest.mock import patch
 
+from django.conf import settings
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -1311,6 +1312,107 @@ class ElectionDetailExtendElectionTests(TestCase):
 
         body = resp.content.decode("utf-8")
         self.assertLess(body.find("data-election-extend-action-root"), body.find("data-election-conclude-action-root"))
+
+
+class ElectionDetailTallyElectionTests(TestCase):
+    def _login_as_freeipa_user(self, username: str) -> None:
+        session = self.client.session
+        session["_freeipa_username"] = username
+        session.save()
+
+    def _grant_manage_permission(self, username: str) -> None:
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name=username,
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+    def _grant_committee_manage_permission(self) -> None:
+        FreeIPAPermissionGrant.objects.get_or_create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.group,
+            principal_name=settings.FREEIPA_ELECTION_COMMITTEE_GROUP,
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+    def test_tally_button_visible_only_to_managers_for_closed_untallied_election(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Closed untallied election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=3),
+            end_datetime=now - datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.closed,
+        )
+
+        self._login_as_freeipa_user("viewer")
+        viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "memberof_group": []})
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
+            response = self.client.get(reverse("election-detail", args=[election.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "data-election-tally-action-root")
+        self.assertNotContains(response, "Tally Election")
+
+        self._login_as_freeipa_user("admin")
+        self._grant_manage_permission("admin")
+        admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin):
+            response = self.client.get(reverse("election-detail", args=[election.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "data-election-tally-action-root")
+        self.assertContains(response, reverse("api-election-tally", args=[election.id]))
+        self.assertContains(response, "Tally Election")
+        self.assertNotContains(response, "data-election-conclude-action-root")
+
+    def test_tally_button_hidden_for_tallied_election(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Tallied election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=3),
+            end_datetime=now - datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.tallied,
+            tally_result={"elected": []},
+        )
+
+        self._login_as_freeipa_user("admin")
+        self._grant_manage_permission("admin")
+        admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin):
+            response = self.client.get(reverse("election-detail", args=[election.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "data-election-tally-action-root")
+        self.assertNotContains(response, "Tally Election")
+
+    def test_tally_button_visible_for_election_committee_group_member(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Closed election for committee",
+            description="",
+            start_datetime=now - datetime.timedelta(days=3),
+            end_datetime=now - datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.closed,
+        )
+
+        self._login_as_freeipa_user("committee")
+        self._grant_committee_manage_permission()
+        committee_user = FreeIPAUser(
+            "committee",
+            {
+                "uid": ["committee"],
+                "memberof_group": [settings.FREEIPA_ELECTION_COMMITTEE_GROUP],
+            },
+        )
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=committee_user):
+            response = self.client.get(reverse("election-detail", args=[election.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "data-election-tally-action-root")
+        self.assertContains(response, reverse("api-election-tally", args=[election.id]))
+        self.assertContains(response, "Tally Election")
 
     def test_extend_post_requires_new_end_after_current_and_logs_quota_status(self) -> None:
         now = timezone.now()

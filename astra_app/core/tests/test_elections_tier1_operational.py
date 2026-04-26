@@ -195,7 +195,7 @@ class ElectionTier1OperationalTests(TestCase):
 
             with self.assertRaisesRegex(
                 Exception,
-                r"Recovery:.*Verify ballot data integrity.*remains in 'closed' state.*can be tallied again",
+                r"Recovery:.*Review the ballot data integrity.*remains in the closed state.*can be tallied again.*Details: Invalid ballot data",
             ):
                 tally_election(election=election, actor="admin")
 

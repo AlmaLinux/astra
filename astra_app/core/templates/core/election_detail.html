@@ -87,6 +87,16 @@
               data-election-name="{{ election.name }}"
               data-election-conclude-quorum-warning=""
             ></div>
+          {% elif can_manage_elections and election.status == 'closed' %}
+            <hr class="my-3" />
+
+            <div
+              data-election-tally-action-root
+              data-election-tally-api-url="{% url 'api-election-tally' election.id %}"
+              data-election-name="{{ election.name }}"
+            >
+              <button type="button" class="btn btn-primary btn-block" disabled>Tally Election</button>
+            </div>
           {% endif %}
         </div>
       </div>
