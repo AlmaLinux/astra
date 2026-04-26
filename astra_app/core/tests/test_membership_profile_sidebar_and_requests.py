@@ -449,7 +449,10 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         [entry] = resp.json()["membership"]["entries"]
         self.assertEqual(entry["membershipType"]["name"], "Individual")
-        self.assertEqual(entry["renewUrl"], reverse("membership-request") + "?membership_type=individual")
+        self.assertTrue(entry["canRenew"])
+        self.assertFalse(entry["canRequestTierChange"])
+        self.assertNotIn("renewUrl", entry)
+        self.assertNotIn("tierChangeUrl", entry)
 
         # Verify prefill: visiting with ?membership_type=individual should select that option.
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
@@ -508,7 +511,10 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         membership = resp.json()["membership"]
         [entry] = membership["entries"]
         self.assertEqual(entry["membershipType"]["name"], "Individual")
-        self.assertEqual(entry["tierChangeUrl"], reverse("membership-request") + "?membership_type=individual")
+        self.assertFalse(entry["canRenew"])
+        self.assertTrue(entry["canRequestTierChange"])
+        self.assertNotIn("renewUrl", entry)
+        self.assertNotIn("tierChangeUrl", entry)
         self.assertFalse(membership["canRequestAny"])
 
     def test_membership_request_prefills_mirror_type(self) -> None:
@@ -1847,7 +1853,8 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         [entry] = resp.json()["membership"]["entries"]
         self.assertEqual(entry["membershipType"]["name"], "Individual")
-        self.assertEqual(entry["renewUrl"], "")
+        self.assertFalse(entry["canRenew"])
+        self.assertNotIn("renewUrl", entry)
 
     def test_profile_hides_renewal_button_when_on_hold_request_exists_for_same_type(self) -> None:
         """Same as above, but with an on_hold request instead of pending."""
@@ -1892,7 +1899,8 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         [entry] = resp.json()["membership"]["entries"]
         self.assertEqual(entry["membershipType"]["name"], "Individual")
-        self.assertEqual(entry["renewUrl"], "")
+        self.assertFalse(entry["canRenew"])
+        self.assertNotIn("renewUrl", entry)
 
     def test_profile_shows_renewal_button_when_no_pending_request_for_type(self) -> None:
         """A pending request for a DIFFERENT type should not suppress the button."""
@@ -1947,7 +1955,9 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         [entry] = resp.json()["membership"]["entries"]
-        self.assertEqual(entry["renewUrl"], reverse("membership-request") + "?membership_type=individual")
+        self.assertTrue(entry["canRenew"])
+        self.assertFalse(entry["canRequestTierChange"])
+        self.assertNotIn("renewUrl", entry)
 
     def test_profile_shows_expiry_in_users_timezone(self) -> None:
         import datetime

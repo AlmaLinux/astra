@@ -230,26 +230,26 @@ def _serialize_membership_audit_log_row(log: MembershipLog) -> dict[str, object]
     if log.target_username:
         target = {
             "kind": "user",
+            "id": None,
             "label": log.target_username,
             "secondary_label": "",
             "deleted": False,
-            "url": reverse("user-profile", args=[log.target_username]),
         }
     elif log.target_organization is not None:
         target = {
             "kind": "organization",
+            "id": log.target_organization.pk,
             "label": log.target_organization.name,
             "secondary_label": "",
             "deleted": False,
-            "url": reverse("organization-detail", args=[log.target_organization.pk]),
         }
     else:
         target = {
             "kind": "organization",
+            "id": None,
             "label": log.target_organization_name,
             "secondary_label": "",
             "deleted": True,
-            "url": "",
         }
 
     request_payload: dict[str, object] | None = None
@@ -265,7 +265,6 @@ def _serialize_membership_audit_log_row(log: MembershipLog) -> dict[str, object]
                 )
         request_payload = {
             "request_id": log.membership_request_id,
-            "url": reverse("membership-request-detail", args=[log.membership_request_id]),
             "responses": responses,
         }
 
@@ -304,6 +303,13 @@ def membership_audit_log(request: HttpRequest) -> HttpResponse:
             "initial_username": username,
             "initial_organization": str(organization_id) if organization_id is not None else "",
             "filter_label": filter_label,
+            "user_profile_url_template": reverse("user-profile", args=["__username__"]),
+            "organization_detail_url_template": reverse("organization-detail", args=[123456789]).replace(
+                "123456789", "__organization_id__"
+            ),
+            "membership_request_detail_url_template": reverse("membership-request-detail", args=[123456789]).replace(
+                "123456789", "__request_id__"
+            ),
         },
     )
 

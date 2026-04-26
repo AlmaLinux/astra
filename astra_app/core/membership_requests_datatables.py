@@ -763,7 +763,6 @@ def serialize_note_group(
     }
     if include_membership_request_links:
         payload["membership_request_id"] = header_entry.get("membership_request_id")
-        payload["membership_request_url"] = str(header_entry.get("membership_request_url") or "")
     return payload
 
 

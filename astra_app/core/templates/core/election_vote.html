@@ -14,5 +14,10 @@
 {% endblock %}
 
 {% block content %}
-  <div data-election-vote-root data-election-vote-api-url="{% url 'api-election-vote' election.id %}"></div>
+  <div
+    data-election-vote-root
+    data-election-vote-api-url="{% url 'api-election-vote' election.id %}"
+    data-election-vote-detail-url-template="{{ election_detail_url_template }}"
+    data-election-vote-verify-url="{{ ballot_verify_url }}"
+  ></div>
 {% endblock %}

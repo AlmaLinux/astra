@@ -139,8 +139,6 @@ def _group_membership_context(request: HttpRequest, group: FreeIPAGroup) -> dict
                 {
                     "cn": agreement_cn,
                     "signed": username in users_signed,
-                    "detail_url": agreement_settings_url(agreement_cn),
-                    "list_url": agreement_settings_url(None),
                 }
             )
 
@@ -270,7 +268,6 @@ def _group_info_payload(group: FreeIPAGroup, membership_ctx: dict[str, object]) 
         "is_sponsor": membership_ctx["is_sponsor"],
         "required_agreements": membership_ctx["required_agreements"],
         "unsigned_usernames": membership_ctx["unsigned_usernames"],
-        "edit_url": reverse("group-edit", args=[group.cn]),
     }
 
 
@@ -279,7 +276,15 @@ def _json_error(message: str, *, status: int) -> JsonResponse:
 
 
 def groups(request: HttpRequest) -> HttpResponse:
-    return render(request, "core/groups.html")
+    return render(
+        request,
+        "core/groups.html",
+        {
+            "group_detail_url_template": reverse("group-detail", args=["placeholder-group"]).replace(
+                "placeholder-group", "__group_name__"
+            ),
+        },
+    )
 
 
 def group_detail(request: HttpRequest, name: str) -> HttpResponse:
@@ -294,7 +299,19 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
     return render(
         request,
         "core/group_detail.html",
-        {"group": group},
+        {
+            "group": group,
+            "group_detail_url_template": reverse("group-detail", args=["placeholder-group"]).replace(
+                "placeholder-group", "__group_name__"
+            ),
+            "group_edit_url_template": reverse("group-edit", args=["placeholder-group"]).replace(
+                "placeholder-group", "__group_name__"
+            ),
+            "agreement_detail_url_template": agreement_settings_url("placeholder-agreement").replace(
+                "placeholder-agreement", "__agreement_cn__"
+            ),
+            "agreements_list_url": agreement_settings_url(None),
+        },
     )
 
 
@@ -339,7 +356,6 @@ def groups_api(request: HttpRequest) -> JsonResponse:
                 "cn": group.cn,
                 "description": group.description or "",
                 "member_count": group.member_count,
-                "detail_url": reverse("group-detail", args=[group.cn]),
             }
             for group in groups_list
         ],

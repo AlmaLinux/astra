@@ -59,14 +59,12 @@ export interface ElectionCandidateItem {
   username: string;
   has_user: boolean;
   full_name: string;
-  profile_url: string;
   avatar_url: string;
   description: string;
   url: string;
   nominated_by: string;
   nominator_display_name: string;
   nominator_profile_username: string | null;
-  nominator_profile_url: string | null;
 }
 
 export interface ElectionCandidatesResponse {

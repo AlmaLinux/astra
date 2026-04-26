@@ -1,6 +1,7 @@
 export interface ElectionsTurnoutReportBootstrap {
   apiUrl: string;
   electionsUrl: string;
+  electionDetailUrlTemplate: string;
 }
 
 export interface ElectionsTurnoutReportRow {
@@ -9,7 +10,6 @@ export interface ElectionsTurnoutReportRow {
     name: string;
     status: string;
     start_date: string;
-    detail_url: string;
   };
   eligible_count: number;
   eligible_weight: number;
@@ -35,10 +35,11 @@ export interface ElectionsTurnoutReportResponse {
 export function readElectionsTurnoutReportBootstrap(root: HTMLElement): ElectionsTurnoutReportBootstrap | null {
   const apiUrl = String(root.dataset.electionsTurnoutReportApiUrl || "").trim();
   const electionsUrl = String(root.dataset.electionsTurnoutReportElectionsUrl || "").trim();
+  const electionDetailUrlTemplate = String(root.dataset.electionsTurnoutReportElectionDetailUrlTemplate || "").trim();
 
-  if (!apiUrl || !electionsUrl) {
+  if (!apiUrl || !electionsUrl || !electionDetailUrlTemplate) {
     return null;
   }
 
-  return { apiUrl, electionsUrl };
+  return { apiUrl, electionsUrl, electionDetailUrlTemplate };
 }

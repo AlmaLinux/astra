@@ -249,6 +249,7 @@ defineSlots<{
             :summary-url="noteSummaryUrl(asRow(row))"
             :detail-url="noteDetailUrl(asRow(row))"
             :add-url="noteAddUrl(asRow(row))"
+            :request-detail-template="bootstrap.requestDetailTemplate"
             :csrf-token="bootstrap.csrfToken || ''"
             :next-url="nextUrl"
             :can-view="bootstrap.notesCanView"

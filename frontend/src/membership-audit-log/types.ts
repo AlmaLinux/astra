@@ -4,14 +4,17 @@ export interface MembershipAuditLogBootstrap {
   initialQ: string;
   initialUsername: string;
   initialOrganization: string;
+  userProfileUrlTemplate: string;
+  organizationDetailUrlTemplate: string;
+  membershipRequestDetailUrlTemplate: string;
 }
 
 export interface AuditLogTarget {
   kind: "user" | "organization";
+  id: number | null;
   label: string;
   secondary_label: string;
   deleted: boolean;
-  url: string;
 }
 
 export interface AuditLogRequestResponseItem {
@@ -21,7 +24,6 @@ export interface AuditLogRequestResponseItem {
 
 export interface AuditLogRequestInfo {
   request_id: number;
-  url: string;
   responses: AuditLogRequestResponseItem[];
 }
 
@@ -68,9 +70,17 @@ export function readMembershipAuditLogBootstrap(root: HTMLElement): MembershipAu
     membershipAuditLogInitialQ,
     membershipAuditLogInitialUsername,
     membershipAuditLogInitialOrganization,
+    membershipAuditLogUserProfileUrlTemplate,
+    membershipAuditLogOrganizationDetailUrlTemplate,
+    membershipAuditLogMembershipRequestDetailUrlTemplate,
   } = root.dataset;
 
-  if (!membershipAuditLogApiUrl) {
+  if (
+    !membershipAuditLogApiUrl
+    || !membershipAuditLogUserProfileUrlTemplate
+    || !membershipAuditLogOrganizationDetailUrlTemplate
+    || !membershipAuditLogMembershipRequestDetailUrlTemplate
+  ) {
     return null;
   }
 
@@ -85,6 +95,9 @@ export function readMembershipAuditLogBootstrap(root: HTMLElement): MembershipAu
     initialQ: String(membershipAuditLogInitialQ || ""),
     initialUsername: String(membershipAuditLogInitialUsername || ""),
     initialOrganization: String(membershipAuditLogInitialOrganization || ""),
+    userProfileUrlTemplate: membershipAuditLogUserProfileUrlTemplate,
+    organizationDetailUrlTemplate: membershipAuditLogOrganizationDetailUrlTemplate,
+    membershipRequestDetailUrlTemplate: membershipAuditLogMembershipRequestDetailUrlTemplate,
   };
 }
 

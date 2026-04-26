@@ -563,12 +563,10 @@ def _build_election_audit_log_context(request: HttpRequest, *, election: Electio
             round_rows: list[dict[str, object]] = []
             for cid, retained_str in sorted(retained_totals.items(), key=_sort_key, reverse=True):
                 username = candidate_username_by_id.get(cid, "")
-                profile_url = reverse("user-profile", args=[username]) if username else ""
                 round_rows.append(
                     {
                         "candidate_id": cid,
                         "candidate_username": username,
-                        "candidate_profile_url": profile_url,
                         "candidate_label": username or str(cid),
                         "retained_total": retained_str,
                         "retention_factor": retention_factors.get(cid, ""),

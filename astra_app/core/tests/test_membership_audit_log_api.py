@@ -128,7 +128,9 @@ class MembershipAuditLogApiTests(TestCase):
         self.assertEqual(row["action_display"], "Requested")
         self.assertEqual(row["target"]["kind"], "user")
         self.assertEqual(row["target"]["label"], "alice")
+        self.assertNotIn("url", row["target"])
         self.assertEqual(row["request"]["request_id"], req.pk)
+        self.assertNotIn("url", row["request"])
         self.assertEqual(row["request"]["responses"][0]["question"], "Contributions")
         self.assertIn("Patch submissions", row["request"]["responses"][0]["answer_html"])
 
@@ -232,6 +234,9 @@ class MembershipAuditLogApiTests(TestCase):
         self.assertContains(response, 'data-membership-audit-log-api-url="/api/v1/membership/audit-log"')
         self.assertContains(response, 'data-membership-audit-log-page-size="50"')
         self.assertContains(response, 'data-membership-audit-log-initial-q="alice"')
+        self.assertContains(response, 'data-membership-audit-log-user-profile-url-template="/user/__username__/"')
+        self.assertContains(response, 'data-membership-audit-log-organization-detail-url-template="/organization/__organization_id__/"')
+        self.assertContains(response, 'data-membership-audit-log-membership-request-detail-url-template="/membership/request/__request_id__/"')
         self.assertContains(response, 'src="http://localhost:5173/src/entrypoints/membershipAuditLog.ts"')
 
     def test_legacy_membership_audit_log_routes_redirect_to_query_params(self) -> None:

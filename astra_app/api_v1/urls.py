@@ -190,6 +190,11 @@ urlpatterns = [
         name="api-membership-request-rescind",
     ),
     path(
+        "membership/requests/<int:pk>/detail",
+        views_membership.membership_request_detail_api,
+        name="api-membership-request-detail",
+    ),
+    path(
         "membership/request/<int:pk>/approve",
         views_membership.membership_request_approve_api,
         name="api-membership-request-approve",

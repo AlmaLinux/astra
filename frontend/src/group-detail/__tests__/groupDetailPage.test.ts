@@ -10,12 +10,27 @@ function flushPromises(): Promise<void> {
   });
 }
 
+function deferredResponse(): {
+  promise: Promise<Response>;
+  resolve: (response: Response) => void;
+} {
+  let resolve!: (response: Response) => void;
+  const promise = new Promise<Response>((innerResolve) => {
+    resolve = innerResolve;
+  });
+  return { promise, resolve };
+}
+
 const bootstrap: GroupDetailBootstrap = {
   infoApiUrl: "/api/v1/groups/infra/info",
   leadersApiUrl: "/api/v1/groups/infra/leaders",
   membersApiUrl: "/api/v1/groups/infra/members",
   actionUrl: "/api/v1/groups/infra/action",
   currentUsername: "admin",
+  detailUrlTemplate: "/group/__group_name__/",
+  editUrlTemplate: "/group/__group_name__/edit/",
+  agreementDetailUrlTemplate: "/settings/?tab=agreements&agreement=__agreement_cn__",
+  agreementsListUrl: "/settings/?tab=agreements",
 };
 
 describe("GroupDetailPage", () => {
@@ -42,7 +57,6 @@ describe("GroupDetailPage", () => {
               sponsor_groups: [{ cn: "ops" }],
               required_agreements: [],
               unsigned_usernames: [],
-              edit_url: "/group/infra/edit/",
             },
           }),
         );
@@ -120,11 +134,58 @@ describe("GroupDetailPage", () => {
     expect(wrapper.find('a[href="/group/infra/edit/"]').exists()).toBe(true);
   });
 
+  it("renders the info card and loading states before leaders and members finish loading", async () => {
+    const leadersDeferred = deferredResponse();
+    const membersDeferred = deferredResponse();
+    const fetchMock = vi.fn((input) => {
+      const url = String(input);
+      if (url.includes("/info")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              group: {
+                cn: "infra",
+                description: "Infrastructure",
+                fas_url: "",
+                fas_mailing_list: "",
+                fas_discussion_url: "",
+                fas_irc_channels: [],
+                member_count: 0,
+                is_member: true,
+                is_sponsor: false,
+                required_agreements: [],
+                unsigned_usernames: [],
+              },
+            }),
+          ),
+        );
+      }
+      if (url.includes("/leaders")) {
+        return leadersDeferred.promise;
+      }
+      return membersDeferred.promise;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const wrapper = mount(GroupDetailPage, {
+      props: { bootstrap },
+    });
+
+    await flushPromises();
+    await flushPromises();
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(wrapper.text()).toContain("Group: infra");
+    expect(wrapper.text()).toContain("Infrastructure");
+    expect(wrapper.text()).toContain("Group info");
+    expect(wrapper.findAll(".spinner-border").length).toBeGreaterThanOrEqual(2);
+  });
+
   it("renders shared user widget grids for team leads and members", async () => {
     const fetchMock = vi.fn(async (input) => {
       const url = String(input);
       if (url.includes("/info")) {
-        return new Response(JSON.stringify({ group: { cn: "infra", description: "Infrastructure", fas_url: "", fas_mailing_list: "", fas_discussion_url: "", fas_irc_channels: [], member_count: 2, is_member: true, is_sponsor: true, sponsor_groups: [], required_agreements: [], unsigned_usernames: ["bob"], edit_url: "/group/infra/edit/" } }));
+        return new Response(JSON.stringify({ group: { cn: "infra", description: "Infrastructure", fas_url: "", fas_mailing_list: "", fas_discussion_url: "", fas_irc_channels: [], member_count: 2, is_member: true, is_sponsor: true, sponsor_groups: [], required_agreements: [], unsigned_usernames: ["bob"] } }));
       }
       if (url.includes("/leaders")) {
         return new Response(JSON.stringify({ leaders: { items: [{ kind: "user", username: "alice", full_name: "Alice Example", avatar_url: "/avatars/alice.png" }], pagination: { count: 1, page: 1, num_pages: 1, page_numbers: [1], show_first: false, show_last: false, has_previous: false, has_next: false, previous_page_number: null, next_page_number: null, start_index: 1, end_index: 1 } } }));
@@ -153,7 +214,7 @@ describe("GroupDetailPage", () => {
     const fetchMock = vi.fn(async (input) => {
       const url = String(input);
       if (url.includes("/info")) {
-        return new Response(JSON.stringify({ group: { cn: "infra", description: "Infrastructure", fas_url: "", fas_mailing_list: "", fas_discussion_url: "", fas_irc_channels: [], member_count: 2, is_member: true, is_sponsor: true, sponsor_groups: [], required_agreements: [], unsigned_usernames: [], edit_url: "/group/infra/edit/" } }));
+        return new Response(JSON.stringify({ group: { cn: "infra", description: "Infrastructure", fas_url: "", fas_mailing_list: "", fas_discussion_url: "", fas_irc_channels: [], member_count: 2, is_member: true, is_sponsor: true, sponsor_groups: [], required_agreements: [], unsigned_usernames: [] } }));
       }
       if (url.includes("/leaders")) {
         return new Response(JSON.stringify({ leaders: { items: [{ kind: "user", username: "alice", full_name: "Alice Example", avatar_url: "/avatars/alice.png" }], pagination: { count: 1, page: 1, num_pages: 1, page_numbers: [1], show_first: false, show_last: false, has_previous: false, has_next: false, previous_page_number: null, next_page_number: null, start_index: 1, end_index: 1 } } }));
@@ -178,7 +239,7 @@ describe("GroupDetailPage", () => {
     const fetchMock = vi.fn(async (input) => {
       const url = String(input);
       if (url.includes("/info")) {
-        return new Response(JSON.stringify({ group: { cn: "infra", description: "Infrastructure", fas_url: "", fas_mailing_list: "", fas_discussion_url: "", fas_irc_channels: [], member_count: 4, is_member: true, is_sponsor: true, required_agreements: [], unsigned_usernames: [], edit_url: "/group/infra/edit/" } }));
+        return new Response(JSON.stringify({ group: { cn: "infra", description: "Infrastructure", fas_url: "", fas_mailing_list: "", fas_discussion_url: "", fas_irc_channels: [], member_count: 4, is_member: true, is_sponsor: true, required_agreements: [], unsigned_usernames: [] } }));
       }
       if (url.includes("/leaders")) {
         return new Response(JSON.stringify({ leaders: { items: [{ kind: "user", username: "alice", full_name: "Alice Example", avatar_url: "/avatars/alice.png" }], pagination: { count: 1, page: 1, num_pages: 1, page_numbers: [1], show_first: false, show_last: false, has_previous: false, has_next: false, previous_page_number: null, next_page_number: null, start_index: 1, end_index: 1 } } }));
@@ -213,7 +274,7 @@ describe("GroupDetailPage", () => {
     const fetchMock = vi.fn(async (input) => {
       const url = String(input);
       if (url.includes("/info")) {
-        return new Response(JSON.stringify({ group: { cn: "infra", description: "Infrastructure", fas_url: "", fas_mailing_list: "", fas_discussion_url: "", fas_irc_channels: [], member_count: 2, is_member: true, is_sponsor: true, required_agreements: [], unsigned_usernames: [], edit_url: "/group/infra/edit/" } }));
+        return new Response(JSON.stringify({ group: { cn: "infra", description: "Infrastructure", fas_url: "", fas_mailing_list: "", fas_discussion_url: "", fas_irc_channels: [], member_count: 2, is_member: true, is_sponsor: true, required_agreements: [], unsigned_usernames: [] } }));
       }
       if (url.includes("leaders?page=2")) {
         return new Response(JSON.stringify({ leaders: { items: [{ kind: "user", username: "carol", full_name: "Carol Lead", avatar_url: "/avatars/carol.png" }], pagination: { count: 3, page: 2, num_pages: 2, page_numbers: [2], show_first: true, show_last: false, has_previous: true, has_next: false, previous_page_number: 1, next_page_number: null, start_index: 3, end_index: 3 } } }));

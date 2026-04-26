@@ -56,6 +56,8 @@ class BallotVerificationPageTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "data-ballot-verify-root")
         self.assertContains(resp, reverse("api-ballot-verify"))
+        self.assertContains(resp, 'data-ballot-verify-election-detail-url-template="/elections/__election_id__/"')
+        self.assertContains(resp, 'data-ballot-verify-audit-log-url-template="/elections/__election_id__/audit/"')
 
         resp2 = self.client.get(reverse("api-ballot-verify"), data={"receipt": "not-a-hash"}, HTTP_ACCEPT="application/json")
         self.assertEqual(resp2.status_code, 200)
@@ -131,7 +133,8 @@ class BallotVerificationPageTests(TestCase):
         payload = resp.json()
         self.assertEqual(payload["election_status"], "closed")
         self.assertEqual(payload["public_ballots_url"], reverse("election-public-ballots", args=[election.id]))
-        self.assertEqual(payload["audit_log_url"], reverse("election-audit-log", args=[election.id]))
+        self.assertNotIn("detail_url", payload["election"])
+        self.assertNotIn("audit_log_url", payload)
         self.assertTrue(payload["is_final_ballot"])
 
     def test_verify_page_tallied_election_links_to_public_exports(self) -> None:
@@ -162,7 +165,8 @@ class BallotVerificationPageTests(TestCase):
         payload = resp.json()
         self.assertEqual(payload["election_status"], "tallied")
         self.assertEqual(payload["public_ballots_url"], reverse("election-public-ballots", args=[election.id]))
-        self.assertEqual(payload["audit_log_url"], reverse("election-audit-log", args=[election.id]))
+        self.assertNotIn("detail_url", payload["election"])
+        self.assertNotIn("audit_log_url", payload)
         self.assertFalse(payload["is_superseded"])
 
     def test_verify_page_superseded_ballot_does_not_reveal_replacement_receipt(self) -> None:

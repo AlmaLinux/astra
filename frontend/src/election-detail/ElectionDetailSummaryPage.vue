@@ -394,7 +394,7 @@ onBeforeUnmount(() => {
                     <div class="card-header">
                       <h3 class="card-title mb-0">
                         <template v-if="candidate.has_user">{{ candidate.full_name }}</template>
-                        (<a :href="candidate.profile_url">{{ candidate.username }}</a>)
+                        (<a :href="profileUrl(candidate.username)">{{ candidate.username }}</a>)
                       </h3>
                     </div>
                     <div class="card-body">
@@ -423,8 +423,8 @@ onBeforeUnmount(() => {
                         <strong>Nominated by</strong>
                         —
                         {{ candidate.nominator_display_name }}
-                        <template v-if="candidate.nominator_profile_username && candidate.nominator_profile_url">
-                          (<a :href="candidate.nominator_profile_url">{{ candidate.nominator_profile_username }}</a>)
+                        <template v-if="candidate.nominator_profile_username">
+                          (<a :href="profileUrl(candidate.nominator_profile_username)">{{ candidate.nominator_profile_username }}</a>)
                         </template>
                       </p>
                     </div>

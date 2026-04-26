@@ -47,6 +47,8 @@ describe("mountElectionsPage", () => {
 
     const root = buildRoot({
       "data-elections-api-url": "/api/v1/elections",
+      "data-elections-detail-url-template": "/elections/__election_id__/",
+      "data-elections-edit-url-template": "/elections/__election_id__/edit/",
     });
 
     const app = mountElectionsPage(root);

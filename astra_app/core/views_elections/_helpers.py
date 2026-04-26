@@ -5,7 +5,6 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 from django.http import Http404
-from django.urls import reverse
 
 from core import elections_services
 from core.elections_services import ElectionError
@@ -92,9 +91,8 @@ def _elected_candidate_display(
 ) -> list[dict[str, str]]:
     """Build display dicts for elected candidates.
 
-    Each dict contains username, profile_url, and full_name.
-    Used by both the detail page and audit log to avoid duplicating
-    the resolution logic.
+    Each dict contains username and full_name so shared election read-model
+    helpers stay free of internal HTML page routes.
     """
     result: list[dict[str, str]] = []
     for cid in elected_ids:
@@ -105,11 +103,7 @@ def _elected_candidate_display(
         if users_by_username is not None:
             user = users_by_username.get(username)
             full_name = user.full_name if user is not None else username
-        result.append({
-            "username": username,
-            "full_name": full_name,
-            "profile_url": reverse("user-profile", args=[username]),
-        })
+        result.append({"username": username, "full_name": full_name})
     return result
 
 

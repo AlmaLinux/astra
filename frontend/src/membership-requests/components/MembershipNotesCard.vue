@@ -4,7 +4,7 @@ import { computed, nextTick, onMounted, ref } from "vue";
 import "./membershipNotes.css";
 
 import { useMembershipNotes } from "../composables/useMembershipNotes";
-import type { NoteEntry, NoteGroup } from "../types";
+import { replaceTemplateToken, type NoteEntry, type NoteGroup } from "../types";
 import ContactedEmailModal from "./ContactedEmailModal.vue";
 
 const props = defineProps<{
@@ -17,6 +17,7 @@ const props = defineProps<{
   canView: boolean;
   canWrite: boolean;
   canVote: boolean;
+  requestDetailTemplate?: string;
   initialOpen?: boolean;
   targetType?: string;
   target?: string;
@@ -212,6 +213,13 @@ function groupAvatarAlt(group: NoteGroup): string {
   }
   return group.avatar_kind === "user" ? "User Avatar" : "Astra Custodia";
 }
+
+function membershipRequestHref(group: NoteGroup): string {
+  if (!props.requestDetailTemplate || group.membership_request_id === undefined) {
+    return "";
+  }
+  return replaceTemplateToken(props.requestDetailTemplate, "__request_id__", group.membership_request_id);
+}
 </script>
 
 <template>
@@ -278,13 +286,13 @@ function groupAvatarAlt(group: NoteGroup): string {
                   <span class="direct-chat-name float-right">{{ group.display_username }}</span>
                   <span class="direct-chat-timestamp float-left">
                     {{ group.timestamp_display }}
-                    <a v-if="group.membership_request_id && group.membership_request_url" :href="group.membership_request_url" class="text-muted ml-1">(req. #{{ group.membership_request_id }})</a>
+                    <a v-if="group.membership_request_id && membershipRequestHref(group)" :href="membershipRequestHref(group)" class="text-muted ml-1">(req. #{{ group.membership_request_id }})</a>
                   </span>
                 </template>
                 <template v-else>
                   <span class="direct-chat-name float-left">{{ group.display_username }}</span>
                   <span class="direct-chat-timestamp float-right">
-                    <a v-if="group.membership_request_id && group.membership_request_url" :href="group.membership_request_url" class="text-muted mr-1">(req. #{{ group.membership_request_id }})</a>
+                    <a v-if="group.membership_request_id && membershipRequestHref(group)" :href="membershipRequestHref(group)" class="text-muted mr-1">(req. #{{ group.membership_request_id }})</a>
                     {{ group.timestamp_display }}
                   </span>
                 </template>

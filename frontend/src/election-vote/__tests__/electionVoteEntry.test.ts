@@ -29,9 +29,7 @@ describe("mountElectionVotePage", () => {
               name: "Board election",
               start_datetime: "2026-04-01T10:00:00+00:00",
               end_datetime: "2026-04-10T10:00:00+00:00",
-              detail_url: "/elections/1/",
               submit_url: "/api/v1/elections/1/vote/submit",
-              verify_url: "/api/v1/elections/ballot/verify",
               can_submit_vote: true,
               voter_votes: 1,
             },
@@ -44,6 +42,8 @@ describe("mountElectionVotePage", () => {
 
     const root = buildRoot({
       "data-election-vote-api-url": "/api/v1/elections/1/vote",
+      "data-election-vote-detail-url-template": "/elections/__election_id__/",
+      "data-election-vote-verify-url": "/elections/ballot/verify/",
     });
 
     const app = mountElectionVotePage(root);
@@ -53,7 +53,10 @@ describe("mountElectionVotePage", () => {
   });
 
   it("does not mount when required vote bootstrap data is missing", () => {
-    const root = buildRoot({});
+    const root = buildRoot({
+      "data-election-vote-api-url": "/api/v1/elections/1/vote",
+      "data-election-vote-detail-url-template": "/elections/__election_id__/",
+    });
 
     const app = mountElectionVotePage(root);
 

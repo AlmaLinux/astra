@@ -71,18 +71,18 @@ class MembershipRequestDetailRequestedForRowTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_kwargs) -> FreeIPAUser | None:
             return {"reviewer": reviewer, "alice": alice}.get(username)
 
         self._login_as_freeipa_user("reviewer")
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
-            resp = self.client.get(reverse("membership-request-detail", args=[req.pk]))
+            resp = self.client.get(reverse("api-membership-request-detail", args=[req.pk]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Requested by")
-        self.assertContains(resp, "Alice User")
-        self.assertContains(resp, "(alice)")
-        self.assertNotContains(resp, "<dt class=\"col-sm-3\">Requested for</dt>", html=True)
+        payload = resp.json()
+        self.assertTrue(payload["request"]["requested_by"]["show"])
+        self.assertEqual(payload["request"]["requested_by"]["full_name"], "Alice User")
+        self.assertFalse(payload["request"]["requested_for"]["show"])
 
     def test_requested_for_row_shown_and_formatted_when_different(self) -> None:
         MembershipType.objects.update_or_create(
@@ -135,17 +135,19 @@ class MembershipRequestDetailRequestedForRowTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_kwargs) -> FreeIPAUser | None:
             return {"reviewer": reviewer, "alice": alice, "bob": bob}.get(username)
 
         self._login_as_freeipa_user("reviewer")
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
-            resp = self.client.get(reverse("membership-request-detail", args=[req.pk]))
+            resp = self.client.get(reverse("api-membership-request-detail", args=[req.pk]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Requested by")
-        self.assertContains(resp, "Alice User")
-        self.assertContains(resp, "(alice)")
-        self.assertContains(resp, "Requested for")
-        self.assertContains(resp, "Bob User")
-        self.assertContains(resp, "(bob)")
+        payload = resp.json()
+        self.assertTrue(payload["request"]["requested_by"]["show"])
+        self.assertEqual(payload["request"]["requested_by"]["full_name"], "Alice User")
+        self.assertTrue(payload["request"]["requested_for"]["show"])
+        self.assertEqual(payload["request"]["requested_for"]["kind"], "user")
+        self.assertEqual(payload["request"]["requested_for"]["label"], "Bob User")
+        self.assertEqual(payload["request"]["requested_for"]["username"], "bob")
+        self.assertNotIn("url", payload["request"]["requested_for"])

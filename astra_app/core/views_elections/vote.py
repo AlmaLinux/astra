@@ -84,7 +84,6 @@ def _election_vote_page_context(request, *, election: Election) -> dict[str, obj
         "can_submit_vote": can_submit_vote,
         "ballot_verify_url": reverse("ballot-verify"),
         "vote_submit_url": reverse("api-election-vote-submit", args=[election.id]),
-        "election_detail_url": reverse("election-detail", args=[election.id]),
     }
 
 
@@ -300,7 +299,13 @@ def election_vote(request, election_id: int):
     return render(
         request,
         "core/election_vote.html",
-        {"election": election},
+        {
+            "election": election,
+            "election_detail_url_template": reverse("election-detail", args=[123456789]).replace(
+                "123456789", "__election_id__"
+            ),
+            "ballot_verify_url": reverse("ballot-verify"),
+        },
     )
 
 
@@ -322,9 +327,7 @@ def election_vote_api(request, election_id: int):
                 "name": election.name,
                 "start_datetime": election.start_datetime.isoformat(),
                 "end_datetime": election.end_datetime.isoformat(),
-                "detail_url": context["election_detail_url"],
                 "submit_url": context["vote_submit_url"],
-                "verify_url": reverse("ballot-verify"),
                 "can_submit_vote": context["can_submit_vote"],
                 "voter_votes": context["voter_votes"],
             },

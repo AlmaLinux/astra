@@ -126,6 +126,16 @@ class MembershipNotesAjaxTests(TestCase):
         self.assertEqual(response.status_code, 200)
         return response.json()
 
+    def _fetch_request_detail_payload(self, membership_request_id: int) -> dict[str, object]:
+        self._login_as_freeipa_user("reviewer")
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer_user()):
+            response = self.client.get(
+                reverse("api-membership-request-detail", args=[membership_request_id]),
+                HTTP_ACCEPT="application/json",
+            )
+        self.assertEqual(response.status_code, 200)
+        return response.json()
+
     def _plain_user(self, username: str, *, memberof_group: list[str] | None = None) -> FreeIPAUser:
         return FreeIPAUser(
             username,
@@ -1274,7 +1284,7 @@ class MembershipNotesAjaxTests(TestCase):
             },
         )
 
-    def test_aggregate_notes_api_returns_grouped_json_with_request_links(self) -> None:
+    def test_aggregate_notes_api_returns_grouped_json_without_request_links(self) -> None:
         first_request = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
         second_request = MembershipRequest.objects.create(
             requested_username="alice",
@@ -1296,10 +1306,7 @@ class MembershipNotesAjaxTests(TestCase):
         payload = response.json()
         self.assertEqual(len(payload["groups"]), 2)
         self.assertEqual(payload["groups"][0]["membership_request_id"], first_request.pk)
-        self.assertEqual(
-            payload["groups"][0]["membership_request_url"],
-            reverse("membership-request-detail", args=[first_request.pk]),
-        )
+        self.assertNotIn("membership_request_url", payload["groups"][0])
         self.assertEqual(payload["groups"][1]["membership_request_id"], second_request.pk)
         self.assertEqual(
             payload["groups"][1]["entries"][0]["rendered_html"],
@@ -1325,20 +1332,22 @@ class MembershipNotesAjaxTests(TestCase):
             viewer_username="reviewer",
             membership_request_id=req.pk,
         )
+        detail_payload = self._fetch_request_detail_payload(req.pk)
 
-        self.assertContains(response, 'data-membership-request-notes-root')
-        self.assertContains(response, f'data-membership-request-id="{req.pk}"')
+        self.assertContains(response, 'data-membership-request-detail-root=""')
+        self.assertContains(response, reverse("api-membership-request-detail", args=[req.pk]))
+        self.assertNotIn("notes", detail_payload)
         self.assertContains(
             response,
-            reverse("api-membership-request-notes-summary", args=[req.pk]),
+            f'data-membership-request-detail-note-summary-url="{reverse("api-membership-request-notes-summary", args=[req.pk])}"',
         )
         self.assertContains(
             response,
-            reverse("api-membership-request-notes", args=[req.pk]),
+            f'data-membership-request-detail-note-detail-url="{reverse("api-membership-request-notes", args=[req.pk])}"',
         )
         self.assertContains(
             response,
-            reverse("api-membership-request-notes-add", args=[req.pk]),
+            f'data-membership-request-detail-note-add-url="{reverse("api-membership-request-notes-add", args=[req.pk])}"',
         )
 
     def test_membership_request_detail_marks_manage_user_as_can_write_and_vote(self) -> None:
@@ -1348,10 +1357,12 @@ class MembershipNotesAjaxTests(TestCase):
             viewer_username="reviewer",
             membership_request_id=req.pk,
         )
+        payload = self._fetch_request_detail_payload(req.pk)
 
-        self.assertContains(response, 'data-can-view="true"')
-        self.assertContains(response, 'data-can-write="true"')
-        self.assertContains(response, 'data-can-vote="true"')
+        self.assertNotIn("notes", payload)
+        self.assertContains(response, 'data-membership-request-detail-notes-can-view="true"')
+        self.assertContains(response, 'data-membership-request-detail-notes-can-write="true"')
+        self.assertContains(response, 'data-membership-request-detail-notes-can-vote="true"')
 
     def test_request_resubmitted_diff_values_are_escaped_and_preserve_linebreaks_in_api_payload(self) -> None:
         req = MembershipRequest.objects.create(
@@ -1421,7 +1432,7 @@ class MembershipNotesAjaxTests(TestCase):
             expected_status=404,
         )
 
-        self.assertNotContains(response, 'data-membership-request-notes-root', status_code=404)
+        self.assertNotContains(response, 'data-membership-request-detail-root', status_code=404)
         self.assertNotContains(response, reverse("api-membership-request-notes-summary", args=[req.pk]), status_code=404)
         self.assertNotContains(response, reverse("api-membership-request-notes", args=[req.pk]), status_code=404)
 
@@ -1437,11 +1448,13 @@ class MembershipNotesAjaxTests(TestCase):
                 viewer_username="reviewer",
                 membership_request_id=req.pk,
             )
+            payload = self._fetch_request_detail_payload(req.pk)
 
-        self.assertContains(response, 'data-membership-request-notes-root')
-        self.assertContains(response, 'data-can-view="true"')
-        self.assertContains(response, 'data-can-write="true"')
-        self.assertContains(response, 'data-can-vote="true"')
+        self.assertContains(response, 'data-membership-request-detail-root=""')
+        self.assertNotIn("notes", payload)
+        self.assertContains(response, 'data-membership-request-detail-notes-can-view="true"')
+        self.assertContains(response, 'data-membership-request-detail-notes-can-write="true"')
+        self.assertContains(response, 'data-membership-request-detail-notes-can-vote="true"')
         self.assertNotContains(response, "Visible note")
 
     def test_membership_request_detail_defaults_to_api_shell_without_direct_query_fallback(self) -> None:
@@ -1456,10 +1469,22 @@ class MembershipNotesAjaxTests(TestCase):
                 viewer_username="reviewer",
                 membership_request_id=req.pk,
             )
+            payload = self._fetch_request_detail_payload(req.pk)
 
-        self.assertContains(response, reverse("api-membership-request-notes-summary", args=[req.pk]))
-        self.assertContains(response, reverse("api-membership-request-notes", args=[req.pk]))
-        self.assertContains(response, reverse("api-membership-request-notes-add", args=[req.pk]))
+        self.assertContains(response, reverse("api-membership-request-detail", args=[req.pk]))
+        self.assertNotIn("notes", payload)
+        self.assertContains(
+            response,
+            f'data-membership-request-detail-note-summary-url="{reverse("api-membership-request-notes-summary", args=[req.pk])}"',
+        )
+        self.assertContains(
+            response,
+            f'data-membership-request-detail-note-detail-url="{reverse("api-membership-request-notes", args=[req.pk])}"',
+        )
+        self.assertContains(
+            response,
+            f'data-membership-request-detail-note-add-url="{reverse("api-membership-request-notes-add", args=[req.pk])}"',
+        )
         self.assertNotContains(response, "Visible note")
         self.assertNotContains(response, 'data-membership-notes-group-username="reviewer"')
 

@@ -200,6 +200,11 @@ urlpatterns = [
         views_membership.membership_request_rescind,
         name="membership-request-rescind",
     ),
+    path(
+        "membership/requests/<int:pk>/",
+        views_membership.membership_request_detail_legacy_redirect,
+        name="membership-request-detail-legacy",
+    ),
     path("membership/requests/", views_membership.membership_requests, name="membership-requests"),
     path(
         "membership/requests/bulk/",

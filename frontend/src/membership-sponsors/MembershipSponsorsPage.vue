@@ -65,6 +65,8 @@ const totalPages = computed(() => Math.max(1, Math.ceil(table.totalRows.value / 
       :q="table.q.value"
       :is-loading="table.isLoading.value"
       :error="table.error.value"
+      :organization-detail-url-template="bootstrap.organizationDetailUrlTemplate"
+      :user-profile-url-template="bootstrap.userProfileUrlTemplate"
       :build-page-href="buildPageHref"
       @page-change="onPageChange"
       @search="onSearch"

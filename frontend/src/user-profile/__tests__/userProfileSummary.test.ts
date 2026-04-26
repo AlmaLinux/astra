@@ -8,7 +8,6 @@ const bootstrap: UserProfileSummaryBootstrap = {
   fullName: "Alice User",
   username: "alice",
   email: "alice@example.com",
-  profileEditUrl: "/settings/?tab=profile",
   avatarUrl: "",
   viewerIsMembershipCommittee: true,
   profileCountry: "United States",
@@ -38,19 +37,18 @@ const bootstrap: UserProfileSummaryBootstrap = {
 describe("UserProfileSummary", () => {
   it("renders the profile identity and attributes", () => {
     const wrapper = mount(UserProfileSummary, {
-      props: { bootstrap },
+      props: { bootstrap, settingsProfileUrl: "/settings/?tab=profile" },
     });
 
     expect(wrapper.text()).toContain("Alice User");
     expect(wrapper.text()).toContain("alice@example.com");
     expect(wrapper.text()).toContain("United States");
-    expect(wrapper.find('a[href="/settings/?tab=profile"]').exists()).toBe(true);
     expect(wrapper.find('a[href="https://github.com/alice"]').exists()).toBe(true);
   });
 
   it("falls back to the placeholder icon when no avatar URL exists", () => {
     const wrapper = mount(UserProfileSummary, {
-      props: { bootstrap },
+      props: { bootstrap, settingsProfileUrl: "/settings/?tab=profile" },
     });
 
     expect(wrapper.find(".fa-user").exists()).toBe(true);

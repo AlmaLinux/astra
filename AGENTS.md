@@ -149,3 +149,9 @@ Pre-change checklist (must answer mentally before finishing):
     Run a specific test like this: `podman-compose exec -T web python manage.py test --noinput -v 2 core.tests.test_elections_eligibility_org_reps`
 - Add ruff after you're done making changes: `podman-compose exec -T web ruff check --fix /app/astra_app`
 - Stop and restart everything: `podman-compose down && podman-compose up -d --build`. NEVER RUN `podman-compose down -v` as that will delete your database!
+
+## APIs
+
+This project should expose a JSON REST API (under `/api/`) to retrieve the data needed by the Vue 3 interface. The REST API should return **data only**, no URLs, no text labels, no UI concerns at all. The Vue 3 layer should take care of formatting the input data as needed, generating URLs using the data from the API, etc. The API should return the minimal data needed by the UI, but it's 100% the UI's job to format it and present it as needed.
+
+The Djange page routes are a thin Vue shell, the REST endpoints are the data source.

@@ -1,9 +1,21 @@
 <script setup lang="ts">
+import { fillUrlTemplate } from "../shared/urlTemplates";
+
 import type { UserProfileGroupsBootstrap } from "./types";
 
 const props = defineProps<{
   bootstrap: UserProfileGroupsBootstrap;
+  groupDetailUrlTemplate: string;
+  agreementsUrlTemplate: string;
 }>();
+
+function groupDetailUrl(groupName: string): string {
+  return fillUrlTemplate(props.groupDetailUrlTemplate, "__group_name__", groupName);
+}
+
+function agreementSettingsUrl(agreementCn: string): string {
+  return fillUrlTemplate(props.agreementsUrlTemplate, "__agreement_cn__", agreementCn);
+}
 </script>
 
 <template>
@@ -25,7 +37,7 @@ const props = defineProps<{
         <div class="d-flex align-items-center">
           <i class="fas fa-exclamation-triangle profile-group-icon" />
           <div class="profile-group-name">
-            <a v-if="bootstrap.isSelf && agreement.settingsUrl" :href="agreement.settingsUrl">{{ agreement.cn }}</a>
+            <a v-if="bootstrap.isSelf" :href="agreementSettingsUrl(agreement.cn)">{{ agreement.cn }}</a>
             <template v-else>{{ agreement.cn }}</template>
             <div v-if="agreement.requiredBy.length" class="small text-muted">Required for: {{ agreement.requiredBy.join(', ') }}</div>
           </div>
@@ -53,7 +65,7 @@ const props = defineProps<{
         <div class="d-flex align-items-center">
           <i class="fas fa-users profile-group-icon" />
           <div class="profile-group-name">
-            <a :href="`/group/${encodeURIComponent(group.cn)}/`">{{ group.cn }}</a>
+            <a :href="groupDetailUrl(group.cn)">{{ group.cn }}</a>
           </div>
         </div>
         <span v-if="group.role === 'Sponsor'" class="badge badge-primary">Team Lead</span>

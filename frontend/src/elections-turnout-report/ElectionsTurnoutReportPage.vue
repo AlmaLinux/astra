@@ -2,6 +2,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef } from "vue";
 
 import type { ElectionsTurnoutReportBootstrap, ElectionsTurnoutReportResponse, ElectionsTurnoutReportRow } from "./types";
+import { fillUrlTemplate } from "../shared/urlTemplates";
 
 const props = defineProps<{
   bootstrap: ElectionsTurnoutReportBootstrap;
@@ -17,6 +18,10 @@ let chartInstance: { destroy?: () => void } | null = null;
 
 function credentialsText(row: ElectionsTurnoutReportRow, value: number): string {
   return row.credentials_issued ? `${value}%` : "";
+}
+
+function electionDetailUrl(electionId: number): string {
+  return fillUrlTemplate(props.bootstrap.electionDetailUrlTemplate, "123456789", electionId);
 }
 
 function destroyChart(): void {
@@ -152,7 +157,7 @@ onBeforeUnmount(() => {
                   </thead>
                   <tbody>
                     <tr v-for="row in rows" :key="row.election.id">
-                      <td><a :href="row.election.detail_url">{{ row.election.name }}</a></td>
+                      <td><a :href="electionDetailUrl(row.election.id)">{{ row.election.name }}</a></td>
                       <td>{{ row.election.start_date }}</td>
                       <td>{{ row.election.status }}</td>
                       <td class="text-right">{{ row.eligible_count }}</td>

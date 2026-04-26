@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 
 import TableBase from "../../shared/components/TableBase.vue";
+import { fillUrlTemplate } from "../../shared/urlTemplates";
 import type { SponsorRow } from "../types";
 
 const props = defineProps<{
@@ -13,6 +14,8 @@ const props = defineProps<{
   q: string;
   isLoading: boolean;
   error: string;
+  organizationDetailUrlTemplate: string;
+  userProfileUrlTemplate: string;
   buildPageHref: (pageNumber: number) => string;
 }>();
 
@@ -54,6 +57,17 @@ function rowId(row: unknown): string | number {
 
 function asRow(row: unknown): SponsorRow {
   return row as SponsorRow;
+}
+
+function organizationHref(row: SponsorRow): string {
+  return fillUrlTemplate(props.organizationDetailUrlTemplate, "__organization_id__", row.organization.id);
+}
+
+function representativeHref(row: SponsorRow): string {
+  if (!row.representative.username) {
+    return "";
+  }
+  return fillUrlTemplate(props.userProfileUrlTemplate, "__username__", row.representative.username);
 }
 
 function submitSearch(): void {
@@ -220,11 +234,11 @@ defineSlots<{
 
     <template #row-cells="{ row }">
       <td v-if="columnState.find((item) => item.key === 'organization')?.visible">
-        <a :href="asRow(row).organization.url">{{ asRow(row).organization.name }}</a>
+        <a :href="organizationHref(asRow(row))">{{ asRow(row).organization.name }}</a>
       </td>
       <td v-if="columnState.find((item) => item.key === 'representative')?.visible">
-        <template v-if="asRow(row).representative.username && asRow(row).representative.url">
-          <a :href="asRow(row).representative.url">{{ asRow(row).representative.display_label }}</a>
+        <template v-if="asRow(row).representative.username">
+          <a :href="representativeHref(asRow(row))">{{ asRow(row).representative.display_label }}</a>
         </template>
         <template v-else>-</template>
       </td>

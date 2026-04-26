@@ -1,5 +1,8 @@
 import logging
+from dataclasses import dataclass
+from typing import Literal
 
+from django import forms
 from django.conf import settings
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -19,12 +22,10 @@ from core.membership_request_workflow import (
     rescind_membership_request,
     resubmit_membership_request,
 )
-from core.membership_response_normalization import (
-    ADDITIONAL_INFORMATION_QUESTION,
-    normalize_membership_request_responses,
-)
+from core.membership_response_normalization import normalize_membership_request_responses
 from core.models import Membership, MembershipRequest, MembershipType, Organization
 from core.permissions import ASTRA_ADD_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP
+from core.templatetags.core_membership_responses import serialize_membership_response
 from core.views_utils import (
     _normalize_str,
     block_action_without_coc,
@@ -34,6 +35,18 @@ from core.views_utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+type MembershipRequestViewerMode = Literal["committee", "self_service"]
+
+
+@dataclass(slots=True)
+class MembershipRequestDetailState:
+    username: str
+    membership_request: MembershipRequest
+    viewer_mode: MembershipRequestViewerMode
+    payload: dict[str, object]
+    bootstrap: dict[str, object]
 
 
 def _renewal_prefill_responses(
@@ -323,92 +336,453 @@ def _load_membership_request_for_detail(*, pk: int) -> MembershipRequest:
     )
 
 
-def _render_membership_request_detail_for_self(
+def _serialize_form_field(*, bound_field: forms.BoundField) -> dict[str, object]:
+    widget_type = "textarea" if isinstance(bound_field.field.widget, forms.Textarea) else "text"
+    value = bound_field.value()
+    return {
+        "name": bound_field.name,
+        "label": str(bound_field.label or ""),
+        "widget": widget_type,
+        "value": "" if value is None else str(value),
+        "required": bool(bound_field.field.required),
+        "disabled": bool(bound_field.field.disabled),
+        "help_text": str(bound_field.help_text or ""),
+        "errors": [str(error) for error in bound_field.errors],
+    }
+
+
+def _serialize_update_form(*, form: MembershipRequestUpdateResponsesForm) -> dict[str, object]:
+    return {
+        "fields": [_serialize_form_field(bound_field=field) for field in form],
+        "non_field_errors": [str(error) for error in form.non_field_errors()],
+    }
+
+
+def _membership_request_detail_title(
     *,
-    request: HttpRequest,
+    membership_request: MembershipRequest,
+    viewer_mode: MembershipRequestViewerMode,
+) -> str:
+    return (
+        f"Membership Request #{membership_request.pk}"
+        if viewer_mode == "committee"
+        else f"Your Membership Request #{membership_request.pk}"
+    )
+
+
+def _membership_request_detail_user_profile_url_template() -> str:
+    return reverse("user-profile", kwargs={"username": "__username__"})
+
+
+def _membership_request_detail_organization_detail_url_template() -> str:
+    sentinel = 987654321
+    return reverse("organization-detail", kwargs={"organization_id": sentinel}).replace(str(sentinel), "__organization_id__")
+
+
+def _membership_request_detail_back_link(
+    *,
     username: str,
     membership_request: MembershipRequest,
-) -> HttpResponse:
-    req = membership_request
-    organization = req.requested_organization
+    viewer_mode: MembershipRequestViewerMode,
+) -> dict[str, str]:
+    if viewer_mode == "committee":
+        return {
+            "url": reverse("membership-requests"),
+            "label": "Back to requests",
+        }
 
-    fu = FreeIPAUser.get(username)
-    user_email = fu.email if fu is not None else ""
-    committee_email = str(settings.MEMBERSHIP_COMMITTEE_EMAIL or "").strip()
+    organization = membership_request.requested_organization
+    if organization is not None:
+        return {
+            "url": reverse("organization-detail", kwargs={"organization_id": organization.pk}),
+            "label": "Back to organization",
+        }
 
-    if request.method == "POST":
-        if req.status != MembershipRequest.Status.on_hold:
-            raise PermissionDenied
+    return {
+        "url": reverse("user-profile", kwargs={"username": username}),
+        "label": "Back to profile",
+    }
 
-        form = MembershipRequestUpdateResponsesForm(request.POST, membership_request=req)
-        if not form.is_valid():
-            messages.error(request, "Invalid request update.")
-            return render(
-                request,
-                "core/membership_request.html",
-                {
-                    "req": req,
-                    "form": form,
-                    "user_email": user_email,
-                    "committee_email": committee_email,
-                },
-            )
 
-        try:
-            resubmit_membership_request(
-                membership_request=req,
-                actor_username=username,
-                updated_responses=form.responses(),
-            )
-        except ValidationError as e:
-            msg = e.messages[0] if e.messages else str(e)
-            form.add_error(None, msg)
-            return render(
-                request,
-                "core/membership_request.html",
-                {
-                    "req": req,
-                    "form": form,
-                    "user_email": user_email,
-                    "committee_email": committee_email,
-                },
-            )
-
-        messages.success(request, "Your request has been resubmitted for review.")
-        return redirect("membership-request-detail", pk=req.pk)
-
-    form = MembershipRequestUpdateResponsesForm(membership_request=req)
-    if req.status != MembershipRequest.Status.on_hold:
-        # For non-editable requests (pending/accepted/etc), render a read-only version of the
-        # responses using the same form visualization as the on-hold update screen.
-        normalized_responses = normalize_membership_request_responses(
-            responses=req.responses,
-            is_mirror_membership=req.membership_type.category_id == MembershipCategoryCode.mirror,
-        )
-        if (
-            not normalized_responses.contains_question(ADDITIONAL_INFORMATION_QUESTION)
-            and "q_additional_information" in form.fields
-        ):
-            del form.fields["q_additional_information"]
-
-        for field in form.fields.values():
-            field.disabled = True
-            field.required = False
-
-    return render(
-        request,
-        "core/membership_request.html",
-        {
-            "req": req,
-            "form": form,
-            "user_email": user_email,
-            "committee_email": committee_email,
-            "organization": organization,
-            "cancel_url": reverse("organization-detail", kwargs={"organization_id": organization.pk})
-            if organization is not None
-            else reverse("user-profile", kwargs={"username": username}),
-        },
+def _serialize_membership_request_target(
+    *,
+    membership_request: MembershipRequest,
+    requested_by_username: str,
+) -> dict[str, object]:
+    show = bool(
+        membership_request.is_organization_target
+        or not requested_by_username
+        or membership_request.target_identifier != requested_by_username
     )
+    if not show:
+        return {
+            "show": False,
+            "kind": "user",
+            "label": "",
+            "username": "",
+            "organization_id": None,
+            "deleted": False,
+        }
+
+    if membership_request.is_organization_target:
+        organization = membership_request.requested_organization
+        return {
+            "show": True,
+            "kind": "organization",
+            "label": membership_request.organization_display_name,
+            "username": "",
+            "organization_id": organization.pk if organization is not None else None,
+            "deleted": organization is None,
+        }
+
+    target_user = FreeIPAUser.get(membership_request.requested_username, respect_privacy=False)
+    target_deleted = target_user is None
+    target_full_name = target_user.full_name if target_user is not None else ""
+    return {
+        "show": True,
+        "kind": "user",
+        "label": target_full_name or membership_request.requested_username,
+        "username": membership_request.requested_username,
+        "organization_id": None,
+        "deleted": target_deleted,
+    }
+
+
+def _serialize_membership_request_responses(*, membership_request: MembershipRequest) -> list[dict[str, object]]:
+    normalized_responses = normalize_membership_request_responses(
+        responses=membership_request.responses,
+        is_mirror_membership=membership_request.membership_type.category_id == MembershipCategoryCode.mirror,
+    )
+    return [
+        serialize_membership_response(answer, question)
+        for question, answer in normalized_responses.entries
+        if str(answer or "").strip()
+    ]
+
+
+def _membership_request_detail_committee_context(*, request: HttpRequest, membership_request: MembershipRequest) -> dict[str, object]:
+    from core.views_membership.committee import (
+        build_membership_request_detail_committee_context,
+    )
+
+    return build_membership_request_detail_committee_context(
+        request=request,
+        membership_request=membership_request,
+    )
+
+
+def _committee_detail_payload(
+    *,
+    request: HttpRequest,
+    membership_request: MembershipRequest,
+    context: dict[str, object],
+) -> dict[str, object]:
+
+    embargoed_country_code = str(context.get("embargoed_country_code") or "")
+    embargoed_country_label = str(context.get("embargoed_country_label") or embargoed_country_code)
+    compliance_warning: dict[str, str] | None = None
+    if embargoed_country_code:
+        compliance_warning = {
+            "country_code": embargoed_country_code,
+            "country_label": embargoed_country_label,
+            "message": f"This user's declared country, {embargoed_country_label}, is on the list of embargoed countries.",
+        }
+
+    requested_by_username = str(context.get("requested_by_username") or "")
+
+    return {
+        "reopen": {
+            "show": membership_request.status == MembershipRequest.Status.ignored and request.user.has_perm(ASTRA_ADD_MEMBERSHIP),
+        },
+        "compliance_warning": compliance_warning,
+        "actions": {
+            "canRequestInfo": bool(context.get("membership_request_can_request_info", False)),
+            "showOnHoldApprove": bool(context.get("show_on_hold_approve", False)),
+        },
+        "requested_by": {
+            "show": bool(requested_by_username),
+            "username": requested_by_username,
+            "full_name": str(context.get("requested_by_full_name") or ""),
+            "deleted": bool(context.get("requested_by_deleted", False)),
+        },
+    }
+
+
+def _committee_detail_bootstrap(
+    *,
+    request: HttpRequest,
+    membership_request: MembershipRequest,
+    context: dict[str, object],
+) -> dict[str, object]:
+    return {
+        "contact_url": str(context.get("contact_url") or ""),
+        "reopen_url": reverse("api-membership-request-reopen", args=[membership_request.pk]),
+        "note_summary_url": reverse("api-membership-request-notes-summary", args=[membership_request.pk]),
+        "note_detail_url": reverse("api-membership-request-notes", args=[membership_request.pk]),
+        "note_add_url": reverse("api-membership-request-notes-add", args=[membership_request.pk]),
+        "note_next_url": request.get_full_path(),
+        "notes_can_view": bool(context.get("membership_can_view", False)),
+        "notes_can_write": bool(context.get("membership_can_write", False)),
+        "notes_can_vote": bool(context.get("membership_can_vote", False)),
+        "approve_url": reverse("api-membership-request-approve", args=[membership_request.pk]),
+        "approve_on_hold_url": reverse("api-membership-request-approve-on-hold", args=[membership_request.pk]),
+        "reject_url": reverse("api-membership-request-reject", args=[membership_request.pk]),
+        "rfi_url": reverse("api-membership-request-rfi", args=[membership_request.pk]),
+        "ignore_url": reverse("api-membership-request-ignore", args=[membership_request.pk]),
+    }
+
+
+def _self_service_detail_payload(
+    *,
+    membership_request: MembershipRequest,
+    username: str,
+) -> dict[str, object]:
+    freeipa_user = FreeIPAUser.get(username)
+    user_email = freeipa_user.email if freeipa_user is not None else ""
+    can_resubmit = membership_request.status == MembershipRequest.Status.on_hold
+    form_payload: dict[str, object] | None = None
+    if can_resubmit:
+        form = MembershipRequestUpdateResponsesForm(membership_request=membership_request)
+        form_payload = _serialize_update_form(form=form)
+
+    return {
+        "can_resubmit": can_resubmit,
+        "can_rescind": membership_request.status in {MembershipRequest.Status.pending, MembershipRequest.Status.on_hold},
+        "committee_email": str(settings.MEMBERSHIP_COMMITTEE_EMAIL or "").strip(),
+        "user_email": user_email,
+        "form": form_payload,
+    }
+
+
+def _self_service_requested_by_payload() -> dict[str, object]:
+    return {
+        "show": False,
+        "username": "",
+        "full_name": "",
+        "deleted": False,
+    }
+
+
+def _self_service_requested_for_payload(*, membership_request: MembershipRequest) -> dict[str, object]:
+    organization = membership_request.requested_organization
+    if organization is None:
+        return {
+            "show": False,
+            "kind": "user",
+            "label": "",
+            "username": "",
+            "organization_id": None,
+            "deleted": False,
+        }
+
+    return {
+        "show": True,
+        "kind": "organization",
+        "label": membership_request.organization_display_name,
+        "username": "",
+        "organization_id": organization.pk,
+        "deleted": False,
+    }
+
+
+def _self_service_detail_bootstrap(*, membership_request: MembershipRequest) -> dict[str, object]:
+    return {
+        "rescind_url": reverse("membership-request-rescind", args=[membership_request.pk]),
+        "form_action_url": reverse("membership-request-detail", args=[membership_request.pk]),
+    }
+
+
+def _build_membership_request_detail_state(request: HttpRequest, *, pk: int) -> MembershipRequestDetailState:
+    username = get_username(request)
+    if not username:
+        raise Http404("User not found")
+
+    membership_request = _load_membership_request_for_detail(pk=pk)
+    can_view_as_committee, can_view_as_self = _membership_request_detail_access_flags(
+        request,
+        username=username,
+        membership_request=membership_request,
+    )
+    if not can_view_as_committee and not can_view_as_self:
+        raise Http404("Not found")
+
+    viewer_mode: MembershipRequestViewerMode = "committee" if can_view_as_committee else "self_service"
+    title = _membership_request_detail_title(
+        membership_request=membership_request,
+        viewer_mode=viewer_mode,
+    )
+    back_link = _membership_request_detail_back_link(
+        username=username,
+        membership_request=membership_request,
+        viewer_mode=viewer_mode,
+    )
+    request_payload: dict[str, object] = {
+        "id": membership_request.pk,
+        "status": membership_request.status,
+        "requested_at": membership_request.requested_at.isoformat() if membership_request.requested_at else None,
+        "on_hold_at": membership_request.on_hold_at.isoformat() if membership_request.on_hold_at else None,
+        "membership_type": {
+            "code": membership_request.membership_type.code,
+            "name": membership_request.membership_type.name,
+            "category": membership_request.membership_type.category_id,
+        },
+        "responses": _serialize_membership_request_responses(membership_request=membership_request),
+    }
+
+    payload: dict[str, object] = {
+        "viewer": {
+            "mode": viewer_mode,
+        },
+        "request": request_payload,
+    }
+    bootstrap: dict[str, object] = {
+        "page_title": title,
+        "back_link_url": back_link["url"],
+        "back_link_label": back_link["label"],
+        "user_profile_url_template": _membership_request_detail_user_profile_url_template(),
+        "organization_detail_url_template": _membership_request_detail_organization_detail_url_template(),
+        "contact_url": "",
+        "reopen_url": "",
+        "note_summary_url": "",
+        "note_detail_url": "",
+        "note_add_url": "",
+        "note_next_url": "",
+        "notes_can_view": False,
+        "notes_can_write": False,
+        "notes_can_vote": False,
+        "approve_url": "",
+        "approve_on_hold_url": "",
+        "reject_url": "",
+        "rfi_url": "",
+        "ignore_url": "",
+        "rescind_url": "",
+        "form_action_url": reverse("membership-request-detail", args=[membership_request.pk]),
+    }
+
+    if viewer_mode == "committee":
+        committee_context = _membership_request_detail_committee_context(request=request, membership_request=membership_request)
+        committee_payload = _committee_detail_payload(
+            request=request,
+            membership_request=membership_request,
+            context=committee_context,
+        )
+        requested_by_payload = committee_payload.pop("requested_by")
+        request_payload["decided_at"] = membership_request.decided_at.isoformat() if membership_request.decided_at else None
+        request_payload["decided_by_username"] = membership_request.decided_by_username
+        request_payload["requested_by"] = requested_by_payload
+        request_payload["requested_for"] = _serialize_membership_request_target(
+            membership_request=membership_request,
+            requested_by_username=str(requested_by_payload["username"]),
+        )
+        payload["committee"] = committee_payload
+        bootstrap.update(
+            _committee_detail_bootstrap(
+                request=request,
+                membership_request=membership_request,
+                context=committee_context,
+            )
+        )
+    else:
+        request_payload["requested_by"] = _self_service_requested_by_payload()
+        request_payload["requested_for"] = _self_service_requested_for_payload(
+            membership_request=membership_request,
+        )
+        payload["self_service"] = _self_service_detail_payload(
+            membership_request=membership_request,
+            username=username,
+        )
+        bootstrap.update(_self_service_detail_bootstrap(membership_request=membership_request))
+
+    return MembershipRequestDetailState(
+        username=username,
+        membership_request=membership_request,
+        viewer_mode=viewer_mode,
+        payload=payload,
+        bootstrap=bootstrap,
+    )
+
+
+def _is_json_compatibility_mode(request: HttpRequest) -> bool:
+    return _normalize_str(request.headers.get("X-Astra-Compatibility-Mode")).lower() == "json"
+
+
+def _compatibility_form_error_payload(*, form: MembershipRequestUpdateResponsesForm) -> dict[str, object]:
+    return {
+        "ok": False,
+        "redirect_url": None,
+        "reread_targets": [],
+        "field_errors": {field.name: [str(error) for error in field.errors] for field in form if field.errors},
+        "non_field_errors": [str(error) for error in form.non_field_errors()],
+        "form": _serialize_update_form(form=form),
+    }
+
+
+def _handle_self_service_detail_post(
+    *,
+    request: HttpRequest,
+    state: MembershipRequestDetailState,
+) -> HttpResponse:
+    membership_request = state.membership_request
+    if membership_request.status != MembershipRequest.Status.on_hold:
+        raise PermissionDenied
+
+    self_service = state.payload["self_service"]
+
+    form = MembershipRequestUpdateResponsesForm(request.POST, membership_request=membership_request)
+    if not form.is_valid():
+        if _is_json_compatibility_mode(request):
+            payload = _compatibility_form_error_payload(form=form)
+            payload["form"] = _serialize_update_form(form=form)
+            return JsonResponse(payload, status=400)
+
+        messages.error(request, "Invalid request update.")
+        return render(
+            request,
+            "core/membership_request.html",
+            {
+                "req": membership_request,
+                "form": form,
+                "user_email": self_service["user_email"],
+                "committee_email": self_service["committee_email"],
+            },
+        )
+
+    try:
+        resubmit_membership_request(
+            membership_request=membership_request,
+            actor_username=state.username,
+            updated_responses=form.responses(),
+        )
+    except ValidationError as error:
+        message = error.messages[0] if error.messages else str(error)
+        form.add_error(None, message)
+        if _is_json_compatibility_mode(request):
+            payload = _compatibility_form_error_payload(form=form)
+            payload["form"] = _serialize_update_form(form=form)
+            return JsonResponse(payload, status=400)
+        return render(
+            request,
+            "core/membership_request.html",
+            {
+                "req": membership_request,
+                "form": form,
+                "user_email": self_service["user_email"],
+                "committee_email": self_service["committee_email"],
+            },
+        )
+
+    if _is_json_compatibility_mode(request):
+        return JsonResponse(
+            {
+                "ok": True,
+                "message": "Your request has been resubmitted for review.",
+                "redirect_url": None,
+                "reread_targets": ["detail"],
+            }
+        )
+
+    messages.success(request, "Your request has been resubmitted for review.")
+    return redirect("membership-request-detail", pk=membership_request.pk)
 
 
 def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
@@ -418,32 +792,45 @@ def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
     Unauthorized viewers receive 404 to avoid request-existence leakage.
     """
 
-    username = get_username(request)
-    if not username:
-        raise Http404("User not found")
+    state = _build_membership_request_detail_state(request, pk=pk)
 
-    req = _load_membership_request_for_detail(pk=pk)
+    if request.method == "POST":
+        if state.viewer_mode != "self_service":
+            raise PermissionDenied
+        return _handle_self_service_detail_post(request=request, state=state)
 
-    can_view_as_committee, can_view_as_self = _membership_request_detail_access_flags(
+    return render(
         request,
-        username=username,
-        membership_request=req,
+        "core/membership_request_detail.html",
+        {
+            "membership_request_detail_api_url": reverse("api-membership-request-detail", args=[state.membership_request.pk]),
+            **state.bootstrap,
+            "membership_request_detail_title": str(state.bootstrap["page_title"]),
+        },
     )
 
-    if not can_view_as_committee and not can_view_as_self:
-        raise Http404("Not found")
 
-    if can_view_as_committee:
-        from core.views_membership.committee import render_membership_request_detail_for_committee
+def membership_request_detail_api(request: HttpRequest, pk: int) -> JsonResponse:
+    if request.method != "GET":
+        response = JsonResponse({"error": "Method not allowed."}, status=405)
+        response["Cache-Control"] = "private, no-cache"
+        return response
 
-        return render_membership_request_detail_for_committee(request=request, membership_request=req)
+    try:
+        state = _build_membership_request_detail_state(request, pk=pk)
+    except Http404:
+        response = JsonResponse({"error": "Not found."}, status=404)
+        response["Cache-Control"] = "private, no-cache"
+        return response
 
-    return _render_membership_request_detail_for_self(request=request, username=username, membership_request=req)
+    response = JsonResponse(state.payload)
+    response["Cache-Control"] = "private, no-cache"
+    return response
 
 
-def membership_request_self(request: HttpRequest, pk: int) -> HttpResponse:
-    """Back-compat alias for the canonical request detail view."""
-    return membership_request_detail(request, pk)
+def membership_request_detail_legacy_redirect(request: HttpRequest, pk: int) -> HttpResponse:
+    _build_membership_request_detail_state(request, pk=pk)
+    return redirect("membership-request-detail", pk=pk)
 
 
 def _membership_request_detail_access_flags(
@@ -514,7 +901,8 @@ def membership_request_rescind_api(request: HttpRequest, pk: int) -> JsonRespons
 __all__ = [
     "membership_request",
     "membership_request_detail",
+    "membership_request_detail_api",
+    "membership_request_detail_legacy_redirect",
     "membership_request_rescind",
     "membership_request_rescind_api",
-    "membership_request_self",
 ]

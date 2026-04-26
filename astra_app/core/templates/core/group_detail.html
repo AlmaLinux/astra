@@ -19,6 +19,10 @@
     data-group-detail-members-api-url="{% url 'api-group-detail-members' group.cn %}"
     data-group-detail-action-url="{% url 'api-group-action' group.cn %}"
     data-group-detail-current-username="{{ request.user.get_username }}"
+    data-group-detail-url-template="{{ group_detail_url_template }}"
+    data-group-detail-edit-url-template="{{ group_edit_url_template }}"
+    data-group-detail-agreement-detail-url-template="{{ agreement_detail_url_template }}"
+    data-group-detail-agreements-list-url="{{ agreements_list_url }}"
   >
     <div class="text-muted">Loading group details...</div>
   </div>

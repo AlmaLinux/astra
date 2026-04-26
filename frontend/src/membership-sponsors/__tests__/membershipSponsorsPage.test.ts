@@ -14,6 +14,8 @@ const bootstrap: MembershipSponsorsBootstrap = {
   apiUrl: "/api/v1/membership/sponsors",
   pageSize: 25,
   initialQ: "",
+  organizationDetailUrlTemplate: "/organization/__organization_id__/",
+  userProfileUrlTemplate: "/user/__username__/",
 };
 
 describe("MembershipSponsorsPage", () => {
@@ -34,13 +36,11 @@ describe("MembershipSponsorsPage", () => {
               organization: {
                 id: 42,
                 name: "Sponsor Org",
-                url: "/organization/42/",
               },
               representative: {
                 username: "repuser",
                 full_name: "Representative User",
                 display_label: "Representative User (repuser)",
-                url: "/user/repuser/",
               },
               sponsorship_level: "Gold Sponsor",
               days_left: 5,

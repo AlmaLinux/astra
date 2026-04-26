@@ -12,6 +12,7 @@ function flushPromises(): Promise<void> {
 
 const bootstrap: GroupsBootstrap = {
   apiUrl: "/api/v1/groups",
+  detailUrlTemplate: "/group/__group_name__/",
 };
 
 describe("GroupsPage", () => {
@@ -29,7 +30,6 @@ describe("GroupsPage", () => {
               cn: "infra",
               description: "Infrastructure",
               member_count: 12,
-              detail_url: "/group/infra/",
             },
           ],
           pagination: {

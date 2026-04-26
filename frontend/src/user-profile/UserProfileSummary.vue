@@ -3,6 +3,7 @@ import type { UserProfileLinkItem, UserProfileSummaryBootstrap } from "./types";
 
 defineProps<{
   bootstrap: UserProfileSummaryBootstrap;
+  settingsProfileUrl: string;
 }>();
 
 function externalLinkTarget(item: UserProfileLinkItem): string | undefined {
@@ -41,8 +42,8 @@ function externalLinkTarget(item: UserProfileLinkItem): string | undefined {
           <a :href="`mailto:${bootstrap.email}`">{{ bootstrap.email }}</a>
         </div>
 
-        <div v-if="bootstrap.isSelf && bootstrap.profileEditUrl" class="mt-3">
-          <a class="btn btn-primary btn-block" :href="bootstrap.profileEditUrl" title="Edit your profile">Edit Profile</a>
+        <div v-if="bootstrap.isSelf && settingsProfileUrl" class="mt-3">
+          <a class="btn btn-primary btn-block" :href="settingsProfileUrl" title="Edit your profile">Edit Profile</a>
         </div>
       </div>
 

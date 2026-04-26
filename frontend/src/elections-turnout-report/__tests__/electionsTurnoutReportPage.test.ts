@@ -13,6 +13,7 @@ function flushPromises(): Promise<void> {
 const bootstrap: ElectionsTurnoutReportBootstrap = {
   apiUrl: "/api/v1/elections/reports/turnout",
   electionsUrl: "/elections/",
+  electionDetailUrlTemplate: "/elections/123456789/",
 };
 
 describe("ElectionsTurnoutReportPage", () => {
@@ -34,7 +35,6 @@ describe("ElectionsTurnoutReportPage", () => {
                   name: "Board election",
                   status: "open",
                   start_date: "2026-04-01",
-                  detail_url: "/elections/1/",
                 },
                 eligible_count: 10,
                 eligible_weight: 12,

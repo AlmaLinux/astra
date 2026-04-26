@@ -12,6 +12,7 @@ import {
   type ElectionAuditSummaryResponse,
 } from "./types";
 import { buildSankeyChart, type SankeyFlow } from "../shared/sankeyChart";
+import { fillUrlTemplate } from "../shared/urlTemplates";
 
 const props = defineProps<{
   bootstrap: ElectionAuditBootstrap;
@@ -22,7 +23,7 @@ const pagination = ref<ElectionAuditLogResponse["audit_log"]["pagination"] | nul
 const jumpLinks = ref<ElectionAuditLogResponse["audit_log"]["jump_links"]>([]);
 const summary = ref<ElectionAuditSummaryResponse["summary"] | null>(null);
 const currentPage = ref(1);
-const isLoading = ref(false);
+const auditLoading = ref(false);
 const error = ref("");
 const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 let sankeyChart: { destroy?: () => void } | null = null;
@@ -68,7 +69,7 @@ function syncUrl(pushState: boolean): void {
 }
 
 function profileUrl(username: string): string {
-  return props.bootstrap.userProfileUrlTemplate.replace("__username__", encodeURIComponent(username));
+  return fillUrlTemplate(props.bootstrap.userProfileUrlTemplate, "__username__", username);
 }
 
 function pageUrl(pageNumber: number | null): string {
@@ -251,26 +252,30 @@ async function loadAuditLog(pushState: boolean): Promise<boolean> {
 }
 
 async function load(pushState: boolean, includeSummary = false): Promise<void> {
-  isLoading.value = true;
+  auditLoading.value = true;
   error.value = "";
-  let shouldRenderSankey = false;
+
+  if (includeSummary) {
+    void loadSummary().then((summaryOk) => {
+      if (summaryOk) {
+        queueSankeyChartRender();
+      }
+    });
+  }
 
   try {
-    const [auditOk, summaryOk] = await Promise.all([
-      loadAuditLog(pushState),
-      includeSummary ? loadSummary() : Promise.resolve(true),
-    ]);
-    if (!auditOk || !summaryOk) {
+    const auditOk = await loadAuditLog(pushState);
+    if (!auditOk) {
       error.value = "Unable to load the election audit log right now.";
       return;
     }
-    shouldRenderSankey = true;
   } catch {
     error.value = "Unable to load the election audit log right now.";
   } finally {
-    isLoading.value = false;
+    auditLoading.value = false;
   }
-  if (shouldRenderSankey) {
+
+  if (!includeSummary && summary.value) {
     queueSankeyChartRender();
   }
 }
@@ -386,7 +391,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <div v-if="isLoading" class="text-muted">Loading audit log...</div>
+            <div v-if="auditLoading" class="text-muted">Loading audit log...</div>
             <div v-else class="timeline">
               <template v-if="groupedItems.length > 0">
                 <template v-for="group in groupedItems" :key="group.dateLabel">

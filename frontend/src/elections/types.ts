@@ -5,8 +5,6 @@ export interface ElectionListItem {
   status: string;
   start_datetime: string;
   end_datetime: string;
-  detail_url: string;
-  edit_url: string | null;
 }
 
 export interface ElectionsPagination {
@@ -32,6 +30,8 @@ export interface ElectionsResponse {
 
 export interface ElectionsBootstrap {
   apiUrl: string;
+  detailUrlTemplate: string;
+  editUrlTemplate: string;
 }
 
 export interface ElectionsRouteState {
@@ -41,10 +41,12 @@ export interface ElectionsRouteState {
 
 export function readElectionsBootstrap(root: HTMLElement): ElectionsBootstrap | null {
   const apiUrl = String(root.dataset.electionsApiUrl || "").trim();
-  if (!apiUrl) {
+  const detailUrlTemplate = String(root.dataset.electionsDetailUrlTemplate || "").trim();
+  const editUrlTemplate = String(root.dataset.electionsEditUrlTemplate || "").trim();
+  if (!apiUrl || !detailUrlTemplate || !editUrlTemplate) {
     return null;
   }
-  return { apiUrl };
+  return { apiUrl, detailUrlTemplate, editUrlTemplate };
 }
 
 export function readElectionsRouteState(currentUrl: string): ElectionsRouteState {

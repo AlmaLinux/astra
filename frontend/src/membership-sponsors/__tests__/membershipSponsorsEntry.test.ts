@@ -28,6 +28,8 @@ describe("mountMembershipSponsorsPage", () => {
       "data-membership-sponsors-api-url": "/api/v1/membership/sponsors",
       "data-membership-sponsors-page-size": "25",
       "data-membership-sponsors-initial-q": "",
+      "data-membership-sponsors-organization-detail-url-template": "/organization/__organization_id__/",
+      "data-membership-sponsors-user-profile-url-template": "/user/__username__/",
     });
 
     const app = mountMembershipSponsorsPage(root);
@@ -39,6 +41,8 @@ describe("mountMembershipSponsorsPage", () => {
   it("does not mount when required bootstrap data is missing", () => {
     const root = buildRoot({
       "data-membership-sponsors-page-size": "25",
+      "data-membership-sponsors-organization-detail-url-template": "/organization/__organization_id__/",
+      "data-membership-sponsors-user-profile-url-template": "/user/__username__/",
     });
 
     const app = mountMembershipSponsorsPage(root);

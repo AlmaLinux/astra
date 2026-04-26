@@ -108,13 +108,26 @@ class MembershipRequestEmailModalTests(TestCase):
             ),
         ):
             resp = self.client.get(reverse("membership-request-detail", args=[req.pk]))
+            detail_payload = self.client.get(reverse("api-membership-request-detail", args=[req.pk]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "data-membership-request-notes-root")
-        self.assertContains(resp, f'data-membership-request-id="{req.pk}"')
-        self.assertContains(resp, reverse("api-membership-request-notes-summary", args=[req.pk]))
-        self.assertContains(resp, reverse("api-membership-request-notes", args=[req.pk]))
-        self.assertContains(resp, reverse("api-membership-request-notes-add", args=[req.pk]))
+        self.assertEqual(detail_payload.status_code, 200)
+        detail_json = detail_payload.json()
+        self.assertContains(resp, 'data-membership-request-detail-root=""')
+        self.assertContains(resp, reverse("api-membership-request-detail", args=[req.pk]))
+        self.assertNotIn("notes", detail_json)
+        self.assertContains(
+            resp,
+            f'data-membership-request-detail-note-summary-url="{reverse("api-membership-request-notes-summary", args=[req.pk])}"',
+        )
+        self.assertContains(
+            resp,
+            f'data-membership-request-detail-note-detail-url="{reverse("api-membership-request-notes", args=[req.pk])}"',
+        )
+        self.assertContains(
+            resp,
+            f'data-membership-request-detail-note-add-url="{reverse("api-membership-request-notes-add", args=[req.pk])}"',
+        )
         self.assertNotContains(resp, "Approval email sent")
         self.assertNotContains(resp, "View email")
         self.assertNotContains(resp, "Approval notice")

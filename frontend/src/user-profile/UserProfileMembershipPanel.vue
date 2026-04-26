@@ -1,15 +1,37 @@
 <script setup lang="ts">
 import { ref } from "vue";
 
-import MembershipNotesCard from "../membership-requests/components/MembershipNotesCard.vue";
+import MembershipCard from "../shared/components/MembershipCard.vue";
+import { fillUrlTemplate } from "../shared/urlTemplates";
 import type { UserProfileMembershipBadge, UserProfileMembershipEntry, UserProfileMembershipSection } from "./types";
 
-defineProps<{
+const props = defineProps<{
   membership: UserProfileMembershipSection;
+  membershipHistoryUrlTemplate: string;
+  membershipRequestUrl: string;
+  membershipRequestDetailUrlTemplate: string;
 }>();
 
-function badgeTag(badge: UserProfileMembershipBadge): "a" | "span" {
-  return badge.url ? "a" : "span";
+function requestDetailUrl(requestId: number | null): string {
+  if (requestId === null) {
+    return "";
+  }
+
+  return fillUrlTemplate(props.membershipRequestDetailUrlTemplate, "__request_id__", requestId);
+}
+
+function historyUrl(username: string): string {
+  return fillUrlTemplate(props.membershipHistoryUrlTemplate, "__username__", username);
+}
+
+function membershipRequestActionUrl(membershipTypeCode: string): string {
+  const url = new URL(props.membershipRequestUrl, window.location.origin);
+  url.searchParams.set("membership_type", membershipTypeCode);
+  return `${url.pathname}${url.search}`;
+}
+
+function badgeTag(requestId: number | null): "a" | "span" {
+  return requestId === null ? "span" : "a";
 }
 
 const terminationConfirmByKey = ref<Record<string, string>>({});
@@ -31,14 +53,16 @@ function resetTermination(entry: UserProfileMembershipEntry): void {
 </script>
 
 <template>
-  <ul v-if="membership.showCard" class="list-group mb-3" data-user-profile-membership-root>
-    <li class="list-group-item d-flex justify-content-between align-items-center">
-      <strong>Membership</strong>
-      <div class="d-flex align-items-center flex-wrap" style="gap: .5rem;">
-        <a v-if="membership.historyUrl" :href="membership.historyUrl" class="btn btn-sm btn-outline-secondary" title="View membership history">History</a>
-        <a v-if="membership.isOwner && membership.canRequestAny" :href="membership.requestUrl" class="btn btn-sm btn-outline-primary" title="Request membership">Request membership</a>
-      </div>
-    </li>
+  <MembershipCard
+    v-if="membership.showCard"
+    data-user-profile-membership-root
+    :notes="membership.notes"
+    :request-detail-template="membershipRequestDetailUrlTemplate"
+  >
+    <template #actions>
+        <a v-if="membership.canViewHistory" :href="historyUrl(membership.username)" class="btn btn-sm btn-outline-secondary" title="View membership history">History</a>
+        <a v-if="membership.isOwner && membership.canRequestAny" :href="props.membershipRequestUrl" class="btn btn-sm btn-outline-primary" title="Request membership">Request membership</a>
+    </template>
 
     <li v-for="entry in membership.entries" :key="entry.key" class="list-group-item d-flex justify-content-between align-items-center">
       <div>
@@ -51,9 +75,9 @@ function resetTermination(entry: UserProfileMembershipEntry): void {
         </div>
       </div>
       <div class="d-flex align-items-center justify-content-end flex-wrap" style="gap: .5rem;">
-        <component :is="badgeTag(entry.badge)" :href="entry.badge.url || undefined" :class="entry.badge.className">{{ entry.badge.label }}</component>
-        <a v-if="entry.renewUrl" :href="entry.renewUrl" class="btn btn-sm btn-primary" title="Request renewal for this membership">Request renewal</a>
-        <a v-if="entry.tierChangeUrl" :href="entry.tierChangeUrl" class="btn btn-sm btn-outline-primary" title="Request a change of tier">Change tier</a>
+        <component :is="badgeTag(entry.requestId)" :href="requestDetailUrl(entry.requestId) || undefined" :class="entry.badge.className">{{ entry.badge.label }}</component>
+        <a v-if="entry.canRenew" :href="membershipRequestActionUrl(entry.membershipType.code)" class="btn btn-sm btn-primary" title="Request renewal for this membership">Request renewal</a>
+        <a v-if="entry.canRequestTierChange" :href="membershipRequestActionUrl(entry.membershipType.code)" class="btn btn-sm btn-outline-primary" title="Request a change of tier">Change tier</a>
         <button
           v-if="entry.management"
           type="button"
@@ -179,36 +203,19 @@ function resetTermination(entry: UserProfileMembershipEntry): void {
 
     <li v-if="!membership.entries.length && !membership.pendingEntries.length" class="list-group-item text-muted">
       No memberships yet.
-      <a v-if="membership.isOwner && membership.canRequestAny" :href="membership.requestUrl">Request membership</a>
+      <a v-if="membership.isOwner && membership.canRequestAny" :href="props.membershipRequestUrl">Request membership</a>
     </li>
 
     <li v-for="entry in membership.pendingEntries" :key="entry.key" class="list-group-item d-flex justify-content-between align-items-center">
       <div>
         <div class="font-weight-bold">{{ entry.membershipType.name }}</div>
         <div class="small text-muted">
-          <a :href="entry.requestUrl">Request #{{ entry.requestId }}</a>
+          <a :href="requestDetailUrl(entry.requestId)">Request #{{ entry.requestId }}</a>
         </div>
         <div v-if="entry.organizationName" class="small text-muted">Organization: {{ entry.organizationName }}</div>
         <div v-if="entry.membershipType.description" class="small text-muted">{{ entry.membershipType.description }}</div>
       </div>
-      <component :is="badgeTag(entry.badge)" :href="entry.badge.url || undefined" :class="entry.badge.className">{{ entry.badge.label }}</component>
+      <component :is="badgeTag(entry.requestId)" :href="requestDetailUrl(entry.requestId) || undefined" :class="entry.badge.className">{{ entry.badge.label }}</component>
     </li>
-
-    <li v-if="membership.notes" class="list-group-item p-0">
-      <MembershipNotesCard
-        :request-id="0"
-        :summary-url="membership.notes.summaryUrl"
-        :detail-url="membership.notes.detailUrl"
-        :add-url="membership.notes.addUrl"
-        :csrf-token="membership.notes.csrfToken"
-        :next-url="membership.notes.nextUrl"
-        :can-view="membership.notes.canView"
-        :can-write="membership.notes.canWrite"
-        :can-vote="false"
-        :target-type="membership.notes.targetType"
-        :target="membership.notes.target"
-        :initial-open="false"
-      />
-    </li>
-  </ul>
+  </MembershipCard>
 </template>

@@ -26,7 +26,7 @@ class UserProfileMembershipActionRequiredAlertTests(TestCase):
             },
         )
 
-        req = MembershipRequest.objects.create(
+        MembershipRequest.objects.create(
             requested_username="alice",
             membership_type_id="individual",
             status=MembershipRequest.Status.on_hold,
@@ -58,8 +58,10 @@ class UserProfileMembershipActionRequiredAlertTests(TestCase):
         action = required_actions["membership-action-required-alert"]
         self.assertEqual(action["label"], "Help us review your membership request")
         self.assertEqual(action["urlLabel"], "Add details")
-        self.assertEqual(action["url"], reverse("membership-request-self", args=[req.pk]))
+        self.assertNotIn("url", action)
         self.assertEqual(payload["membership"]["pendingEntries"][0]["badge"]["label"], "Action required")
+        self.assertNotIn("requestUrl", payload["membership"]["pendingEntries"][0])
+        self.assertNotIn("url", payload["membership"]["pendingEntries"][0]["badge"])
 
     def test_self_profile_shows_action_required_alert_for_on_hold_org_request(self) -> None:
         MembershipType.objects.update_or_create(
@@ -74,7 +76,7 @@ class UserProfileMembershipActionRequiredAlertTests(TestCase):
         )
 
         org = Organization.objects.create(name="Example Org", representative="alice")
-        req = MembershipRequest.objects.create(
+        MembershipRequest.objects.create(
             requested_username="",
             requested_organization=org,
             membership_type_id="org",
@@ -107,9 +109,11 @@ class UserProfileMembershipActionRequiredAlertTests(TestCase):
         action = required_actions["sponsorship-action-required-alert"]
         self.assertEqual(action["label"], "Help us review your sponsorship request")
         self.assertEqual(action["urlLabel"], "Add details")
-        self.assertEqual(action["url"], reverse("membership-request-self", args=[req.pk]))
+        self.assertNotIn("url", action)
         self.assertEqual(payload["membership"]["pendingEntries"][0]["organizationName"], "Example Org")
         self.assertEqual(payload["membership"]["pendingEntries"][0]["badge"]["label"], "Action required")
+        self.assertNotIn("requestUrl", payload["membership"]["pendingEntries"][0])
+        self.assertNotIn("url", payload["membership"]["pendingEntries"][0]["badge"])
 
     def test_other_profile_keeps_on_hold_badge_label(self) -> None:
         MembershipType.objects.update_or_create(

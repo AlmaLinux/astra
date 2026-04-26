@@ -117,7 +117,6 @@ def _candidate_cards_context(election: Election) -> tuple[list[Candidate], list[
     candidate_cards: list[dict[str, object]] = []
     for candidate in candidates:
         candidate_user = users_by_username.get(candidate.freeipa_username)
-        candidate_profile_url = reverse("user-profile", args=[candidate.freeipa_username])
 
         nominator_display_name = ""
         nominator_profile_username = ""
@@ -142,12 +141,8 @@ def _candidate_cards_context(election: Election) -> tuple[list[Candidate], list[
                 "candidate": candidate,
                 "candidate_user": candidate_user,
                 "candidate_full_name": try_get_full_name(candidate_user) or candidate.freeipa_username,
-                "candidate_profile_url": candidate_profile_url,
                 "nominator_display_name": nominator_display_name,
                 "nominator_profile_username": nominator_profile_username,
-                "nominator_profile_url": reverse("user-profile", args=[nominator_profile_username])
-                if nominator_profile_username
-                else None,
             }
         )
 
@@ -162,8 +157,6 @@ def _serialize_election_list_item(election: Election, *, can_manage_elections: b
         "status": election.status,
         "start_datetime": election.start_datetime.isoformat(),
         "end_datetime": election.end_datetime.isoformat(),
-        "detail_url": reverse("election-detail", args=[election.id]),
-        "edit_url": reverse("election-edit", args=[election.id]) if can_manage_elections else None,
     }
 
 
@@ -369,6 +362,12 @@ def elections_list(request):
         "core/elections_list.html",
         {
             "can_manage_elections": can_manage_elections,
+            "election_detail_url_template": reverse("election-detail", args=[123456789]).replace(
+                "123456789", "__election_id__"
+            ),
+            "election_edit_url_template": reverse("election-edit", args=[123456789]).replace(
+                "123456789", "__election_id__"
+            ),
         },
     )
 
@@ -466,14 +465,12 @@ def election_detail_candidates_api(request: HttpRequest, election_id: int) -> Js
                         "username": item["candidate"].freeipa_username,
                         "has_user": item["candidate_user"] is not None,
                         "full_name": item["candidate_full_name"],
-                        "profile_url": item["candidate_profile_url"],
                         "avatar_url": avatar_url_by_username.get(item["candidate"].freeipa_username, ""),
                         "description": item["candidate"].description,
                         "url": item["candidate"].url,
                         "nominated_by": item["candidate"].nominated_by,
                         "nominator_display_name": item["nominator_display_name"],
                         "nominator_profile_username": item["nominator_profile_username"] or None,
-                        "nominator_profile_url": item["nominator_profile_url"],
                     }
                     for item in typed_page_items
                 ],

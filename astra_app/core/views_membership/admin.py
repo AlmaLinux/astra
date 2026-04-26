@@ -141,13 +141,11 @@ def _build_membership_sponsor_rows(*, q: str) -> list[dict[str, object]]:
             "organization": {
                 "id": organization.pk,
                 "name": organization.name,
-                "url": reverse("organization-detail", args=[organization.pk]),
             },
             "representative": {
                 "username": rep_username,
                 "full_name": rep_fullname,
                 "display_label": representative_label,
-                "url": reverse("user-profile", args=[rep_username]) if rep_username else "",
             },
             "sponsorship_level": membership.membership_type.name,
             "days_left": days_left,
@@ -229,6 +227,10 @@ def membership_sponsors_list(request: HttpRequest) -> HttpResponse:
         "core/sponsorship_list.html",
         {
             "initial_q": initial_q,
+            "organization_detail_url_template": reverse("organization-detail", args=[123456789]).replace(
+                "123456789", "__organization_id__"
+            ),
+            "user_profile_url_template": reverse("user-profile", args=["__username__"]),
         },
     )
 

@@ -8,14 +8,18 @@ const bootstrap: UserProfileGroupsBootstrap = {
   username: "alice",
   groups: [{ cn: "infra", role: "Member" }, { cn: "sig-core", role: "Sponsor" }],
   agreements: ["Code of Conduct"],
-  missingAgreements: [{ cn: "Export Policy", requiredBy: ["infra"], settingsUrl: "/settings/?tab=agreements" }],
+  missingAgreements: [{ cn: "Export Policy", requiredBy: ["infra"] }],
   isSelf: true,
 };
 
 describe("UserProfileGroupsPanel", () => {
   it("renders groups and agreement statuses", () => {
     const wrapper = mount(UserProfileGroupsPanel, {
-      props: { bootstrap },
+      props: {
+        bootstrap,
+        groupDetailUrlTemplate: "/group/__group_name__/",
+        agreementsUrlTemplate: "/settings/?tab=agreements&agreement=__agreement_cn__",
+      },
     });
 
     expect(wrapper.text()).toContain("Group");
@@ -24,7 +28,7 @@ describe("UserProfileGroupsPanel", () => {
     expect(wrapper.text()).toContain("infra");
     expect(wrapper.text()).toContain("sig-core");
     expect(wrapper.find('a[href="/group/infra/"]').exists()).toBe(true);
-    expect(wrapper.find('a[href="/settings/?tab=agreements"]').exists()).toBe(true);
+    expect(wrapper.findAll("a").some((link) => link.attributes("href") === "/settings/?tab=agreements&agreement=Export%20Policy")).toBe(true);
   });
 
   it("shows empty state when no groups or agreements exist", () => {
@@ -37,6 +41,8 @@ describe("UserProfileGroupsPanel", () => {
           missingAgreements: [],
           isSelf: false,
         } satisfies UserProfileGroupsBootstrap,
+        groupDetailUrlTemplate: "/group/__group_name__/",
+        agreementsUrlTemplate: "/settings/?tab=agreements&agreement=__agreement_cn__",
       },
     });
 

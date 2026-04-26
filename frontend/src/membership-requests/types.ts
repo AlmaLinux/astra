@@ -141,7 +141,6 @@ export interface NoteGroup {
   avatar_url: string;
   timestamp_display: string;
   membership_request_id?: number;
-  membership_request_url?: string;
   entries: NoteEntry[];
 }
 

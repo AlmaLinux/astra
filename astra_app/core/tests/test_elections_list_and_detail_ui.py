@@ -65,13 +65,16 @@ class ElectionsListDraftVisibilityTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'data-elections-root')
         self.assertContains(resp, reverse("api-elections"))
+        self.assertContains(resp, 'data-elections-detail-url-template="/elections/__election_id__/"')
+        self.assertContains(resp, 'data-elections-edit-url-template="/elections/__election_id__/edit/"')
         self.assertNotContains(resp, "Draft election")
         self.assertNotContains(resp, "Published election")
 
         self.assertEqual(api_resp.status_code, 200)
         payload = api_resp.json()
         self.assertEqual([item["name"] for item in payload["items"]], ["Published election"])
-        self.assertEqual(payload["items"][0]["detail_url"], reverse("election-detail", args=[open_election.id]))
+        self.assertNotIn("detail_url", payload["items"][0])
+        self.assertNotIn("edit_url", payload["items"][0])
 
     def test_elections_list_shows_drafts_for_managers_and_links_to_edit(self) -> None:
         self._login_as_freeipa_user("admin")
@@ -113,6 +116,8 @@ class ElectionsListDraftVisibilityTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'data-elections-root')
         self.assertContains(resp, reverse("election-edit", args=[0]))
+        self.assertContains(resp, 'data-elections-detail-url-template="/elections/__election_id__/"')
+        self.assertContains(resp, 'data-elections-edit-url-template="/elections/__election_id__/edit/"')
         self.assertNotContains(resp, "Draft election")
         self.assertNotContains(resp, "Published election")
 
@@ -120,8 +125,10 @@ class ElectionsListDraftVisibilityTests(TestCase):
         payload = api_resp.json()
         names = [item["name"] for item in payload["items"]]
         self.assertEqual(names, ["Draft election", "Published election"])
-        self.assertEqual(payload["items"][0]["edit_url"], reverse("election-edit", args=[draft_election.id]))
-        self.assertEqual(payload["items"][1]["detail_url"], reverse("election-detail", args=[open_election.id]))
+        self.assertNotIn("detail_url", payload["items"][0])
+        self.assertNotIn("edit_url", payload["items"][0])
+        self.assertNotIn("detail_url", payload["items"][1])
+        self.assertNotIn("edit_url", payload["items"][1])
 
 
 class ElectionsListGroupingTests(TestCase):
@@ -165,7 +172,10 @@ class ElectionsListGroupingTests(TestCase):
         self.assertEqual(api_resp.status_code, 200)
         payload = api_resp.json()
         self.assertEqual([item["name"] for item in payload["items"]], ["Open election", "Past election"])
-        self.assertEqual(payload["items"][1]["detail_url"], reverse("election-detail", args=[past_election.id]))
+        self.assertNotIn("detail_url", payload["items"][0])
+        self.assertNotIn("edit_url", payload["items"][0])
+        self.assertNotIn("detail_url", payload["items"][1])
+        self.assertNotIn("edit_url", payload["items"][1])
 
 
 class ElectionsDeletedVisibilityTests(TestCase):

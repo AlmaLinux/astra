@@ -47,9 +47,10 @@ from core.views_membership.committee import (
 from core.views_membership.user import (
     membership_request,
     membership_request_detail,
+    membership_request_detail_api,
+    membership_request_detail_legacy_redirect,
     membership_request_rescind,
     membership_request_rescind_api,
-    membership_request_self,
 )
 from core.views_utils import block_action_without_coc, block_action_without_country_code
 
@@ -74,6 +75,8 @@ __all__ = [
     "membership_request_approve",
     "membership_request_approve_on_hold",
     "membership_request_detail",
+    "membership_request_detail_api",
+    "membership_request_detail_legacy_redirect",
     "membership_request_ignore_api",
     "membership_request_ignore",
     "membership_request_notes_add_api",
@@ -87,7 +90,6 @@ __all__ = [
     "membership_request_rescind",
     "membership_request_rfi_api",
     "membership_request_rfi",
-    "membership_request_self",
     "membership_requests",
     "membership_requests_on_hold_api",
     "membership_requests_pending_api",

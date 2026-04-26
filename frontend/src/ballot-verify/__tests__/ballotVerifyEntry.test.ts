@@ -47,6 +47,8 @@ describe("mountBallotVerifyPage", () => {
       "data-ballot-verify-hash-script-url": "/static/verify-ballot-hash.py",
       "data-ballot-verify-chain-script-url": "/static/verify-ballot-chain.py",
       "data-ballot-verify-audit-script-url": "/static/verify-audit-log.py",
+      "data-ballot-verify-election-detail-url-template": "/elections/__election_id__/",
+      "data-ballot-verify-audit-log-url-template": "/elections/__election_id__/audit/",
     });
 
     const app = mountBallotVerifyPage(root);

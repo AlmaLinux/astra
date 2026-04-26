@@ -68,6 +68,7 @@ class ElectionsTurnoutReportTests(TestCase):
         build_report.assert_not_called()
         self.assertContains(resp, 'data-elections-turnout-report-root')
         self.assertContains(resp, reverse("api-elections-turnout-report"))
+        self.assertContains(resp, 'data-elections-turnout-report-election-detail-url-template')
 
     def test_turnout_report_excludes_draft_elections(self) -> None:
         draft = self._create_election(name="Draft election", status=Election.Status.draft)
@@ -95,6 +96,7 @@ class ElectionsTurnoutReportTests(TestCase):
 
         self.assertEqual(api_resp.status_code, 200)
         self.assertEqual([row["election"]["name"] for row in api_resp.json()["rows"]], [open_election.name])
+        self.assertNotIn("detail_url", api_resp.json()["rows"][0]["election"])
 
     def test_turnout_report_marks_elections_without_credentials(self) -> None:
         election = self._create_election(name="Closed without credentials", status=Election.Status.closed)
@@ -114,6 +116,7 @@ class ElectionsTurnoutReportTests(TestCase):
 
         self.assertEqual(api_resp.status_code, 200)
         row = next(item for item in api_resp.json()["rows"] if item["election"]["id"] == election.id)
+        self.assertNotIn("detail_url", row["election"])
         self.assertEqual(row["eligible_count"], 0)
         self.assertFalse(row["credentials_issued"])
 
@@ -141,6 +144,7 @@ class ElectionsTurnoutReportTests(TestCase):
 
         self.assertEqual(api_resp.status_code, 200)
         row = next(item for item in api_resp.json()["rows"] if item["election"]["id"] == election.id)
+        self.assertNotIn("detail_url", row["election"])
         self.assertEqual(row["eligible_weight"], 3)
         self.assertEqual(row["participating_weight"], 0)
         self.assertIn("turnout_count_pct", row)

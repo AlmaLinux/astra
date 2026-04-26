@@ -73,6 +73,8 @@ class OrganizationsVueTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "data-organizations-root")
         self.assertContains(response, 'data-organizations-api-url="/api/v1/organizations"')
+        self.assertContains(response, 'data-organizations-detail-url-template="/organization/__organization_id__/"')
+        self.assertContains(response, 'data-organizations-create-url="/organizations/create/"')
         self.assertContains(response, 'src="http://localhost:5173/src/entrypoints/organizations.ts"')
         self.assertContains(response, "Loading organizations...")
         self.assertNotContains(response, "AlmaLinux Sponsor Members")
@@ -110,7 +112,7 @@ class OrganizationsVueTests(TestCase):
         self.assertNotContains(response, "Alice Org")
         self.assertNotContains(response, "Sponsor Org")
         self.assertNotContains(response, "Mirror Org")
-        self.assertNotContains(response, reverse("organization-create"))
+        self.assertContains(response, 'data-organizations-create-url="/organizations/create/"')
 
     def test_organizations_api_returns_split_card_payload_for_regular_user(self) -> None:
         mirror_type, sponsor_type = self._ensure_org_membership_types()
@@ -133,9 +135,12 @@ class OrganizationsVueTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.content)
         self.assertEqual(payload["my_organization"]["name"], "Alice Org")
-        self.assertIsNone(payload["my_organization_create_url"])
+        self.assertNotIn("detail_url", payload["my_organization"])
+        self.assertNotIn("my_organization_create_url", payload)
         self.assertEqual([item["name"] for item in payload["sponsor_card"]["items"]], ["Sponsor Org"])
         self.assertEqual([item["name"] for item in payload["mirror_card"]["items"]], ["Mirror Org"])
+        self.assertNotIn("detail_url", payload["sponsor_card"]["items"][0])
+        self.assertNotIn("detail_url", payload["mirror_card"]["items"][0])
         self.assertFalse(payload["sponsor_card"]["items"][0]["link_to_detail"])
         self.assertFalse(payload["mirror_card"]["items"][0]["link_to_detail"])
         self.assertEqual(payload["sponsor_card"]["empty_label"], "No AlmaLinux sponsor members found.")
@@ -156,7 +161,7 @@ class OrganizationsVueTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.content)
         self.assertIsNone(payload["my_organization"])
-        self.assertEqual(payload["my_organization_create_url"], reverse("organization-create"))
+        self.assertNotIn("my_organization_create_url", payload)
 
     def test_organizations_api_manager_can_filter_claimed_status_token(self) -> None:
         _mirror_type, sponsor_type = self._ensure_org_membership_types()

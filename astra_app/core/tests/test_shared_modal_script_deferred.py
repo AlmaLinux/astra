@@ -69,13 +69,8 @@ class MembershipRequestDetailActionContractsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
 
         content = resp.content.decode()
-        self.assertIn('data-membership-request-actions-root', content)
-        self.assertIn('data-membership-request-id="', content)
-        self.assertIn('data-membership-request-status="', content)
-        self.assertIn('data-membership-request-api-approve-url="', content)
-        self.assertIn('data-membership-request-api-reject-url="', content)
-        self.assertIn('data-membership-request-api-rfi-url="', content)
-        self.assertIn('data-membership-request-api-ignore-url="', content)
+        self.assertIn('data-membership-request-detail-root=""', content)
+        self.assertIn('/api/v1/membership/requests/', content)
         self.assertNotIn('id="shared-approve-modal"', content)
         self.assertNotIn('src="/static/core/js/membership_request_shared_modals.js"', content)
 
@@ -123,6 +118,5 @@ class GroupDetailModalScriptDeferredTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         content = resp.content.decode()
 
-        # The sponsor modal JS must be present and deferred.
-        self.assertIn('id="remove-member-modal"', content)
-        self.assertIn("DOMContentLoaded", content)
+        self.assertIn('data-group-detail-root', content)
+        self.assertIn('src="http://localhost:5173/src/entrypoints/groupDetail.ts"', content)

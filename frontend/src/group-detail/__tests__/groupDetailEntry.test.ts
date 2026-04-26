@@ -67,6 +67,10 @@ describe("mountGroupDetailPage", () => {
       "data-group-detail-leaders-api-url": "/api/v1/groups/infra/leaders",
       "data-group-detail-members-api-url": "/api/v1/groups/infra/members",
       "data-group-detail-action-url": "/api/v1/groups/infra/action",
+      "data-group-detail-url-template": "/group/__group_name__/",
+      "data-group-detail-edit-url-template": "/group/__group_name__/edit/",
+      "data-group-detail-agreement-detail-url-template": "/settings/?tab=agreements&agreement=__agreement_cn__",
+      "data-group-detail-agreements-list-url": "/settings/?tab=agreements",
     });
 
     const app = mountGroupDetailPage(root);

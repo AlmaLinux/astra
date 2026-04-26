@@ -13,6 +13,34 @@ def _is_http_url(url: str) -> bool:
     return parts.scheme in {"http", "https"} and bool(parts.netloc)
 
 
+def membership_response_segments(value: object, question: object) -> list[dict[str, str]]:
+    raw_value = str(value or "").strip()
+    if not raw_value:
+        return []
+
+    question_name = str(question or "").strip()
+    spec = MembershipRequestForm._question_spec_by_name().get(question_name)
+    if spec is None or spec.answer_kind.value != "url":
+        return [{"kind": "text", "text": raw_value}]
+
+    href = raw_value
+    if "://" not in href:
+        href = f"https://{href}"
+
+    if not _is_http_url(href):
+        return [{"kind": "text", "text": raw_value}]
+
+    return [{"kind": "link", "text": raw_value, "url": href}]
+
+
+def serialize_membership_response(value: object, question: object) -> dict[str, object]:
+    return {
+        "question": str(question or "").strip(),
+        "answer_text": str(value or "").strip(),
+        "segments": membership_response_segments(value, question),
+    }
+
+
 @register.filter(name="membership_response_value")
 def membership_response_value(value: object, question: object) -> str:
     """Render a membership-request response value.
@@ -22,20 +50,12 @@ def membership_response_value(value: object, question: object) -> str:
     domains are treated as https URLs when linking.
     """
 
-    raw_value = str(value or "").strip()
-    if not raw_value:
+    segments = membership_response_segments(value, question)
+    if not segments:
         return ""
 
-    question_name = str(question or "").strip()
-    spec = MembershipRequestForm._question_spec_by_name().get(question_name)
-    if spec is None or spec.answer_kind.value != "url":
-        return escape(raw_value)
+    first_segment = segments[0]
+    if first_segment["kind"] == "link":
+        return format_html('<a href="{}">{}</a>', first_segment["url"], first_segment["text"])
 
-    href = raw_value
-    if "://" not in href:
-        href = f"https://{href}"
-
-    if not _is_http_url(href):
-        return escape(raw_value)
-
-    return format_html('<a href="{}">{}</a>', href, raw_value)
+    return escape(first_segment["text"])

@@ -42,7 +42,6 @@ def _ballot_verify_context(request) -> tuple[dict[str, Any], int]:
                 "is_superseded": False,
                 "is_final_ballot": False,
                 "public_ballots_url": "",
-                "audit_log_url": "",
                 "rate_limited": True,
                 "verification_snippet": "",
             },
@@ -84,7 +83,6 @@ def _ballot_verify_context(request) -> tuple[dict[str, Any], int]:
         public_ballots_url = election.public_ballots_file.url if election.public_ballots_file else reverse(
             "election-public-ballots", args=[election.id]
         )
-    audit_log_url = reverse("election-audit-log", args=[election.id]) if election is not None and has_public_verification else ""
 
     verification_snippet = ""
     if found and election is not None and ballot is not None:
@@ -116,7 +114,6 @@ def _ballot_verify_context(request) -> tuple[dict[str, Any], int]:
             "is_superseded": is_superseded,
             "is_final_ballot": is_final_ballot,
             "public_ballots_url": public_ballots_url,
-            "audit_log_url": audit_log_url,
             "rate_limited": False,
             "verification_snippet": verification_snippet,
         },
@@ -126,7 +123,18 @@ def _ballot_verify_context(request) -> tuple[dict[str, Any], int]:
 
 @require_GET
 def ballot_verify(request):
-    return render(request, "core/ballot_verify.html")
+    return render(
+        request,
+        "core/ballot_verify.html",
+        {
+            "election_detail_url_template": reverse("election-detail", args=[123456789]).replace(
+                "123456789", "__election_id__"
+            ),
+            "election_audit_log_url_template": reverse("election-audit-log", args=[123456789]).replace(
+                "123456789", "__election_id__"
+            ),
+        },
+    )
 
 
 @require_GET
@@ -143,7 +151,6 @@ def ballot_verify_api(request):
                 {
                     "id": election.id,
                     "name": election.name,
-                    "detail_url": reverse("election-detail", args=[election.id]),
                 }
                 if election is not None
                 else None
@@ -153,7 +160,6 @@ def ballot_verify_api(request):
             "is_superseded": context["is_superseded"],
             "is_final_ballot": context["is_final_ballot"],
             "public_ballots_url": context["public_ballots_url"],
-            "audit_log_url": context["audit_log_url"],
             "rate_limited": context["rate_limited"],
             "verification_snippet": context["verification_snippet"],
         },

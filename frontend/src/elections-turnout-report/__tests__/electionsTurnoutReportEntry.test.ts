@@ -36,6 +36,7 @@ describe("mountElectionsTurnoutReportPage", () => {
     const root = buildRoot({
       "data-elections-turnout-report-api-url": "/api/v1/elections/reports/turnout",
       "data-elections-turnout-report-elections-url": "/elections/",
+      "data-elections-turnout-report-election-detail-url-template": "/elections/123456789/",
     });
 
     const app = mountElectionsTurnoutReportPage(root);

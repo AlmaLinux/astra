@@ -3,12 +3,13 @@ export interface BallotVerifyBootstrap {
   verifyBallotHashUrl: string;
   verifyBallotChainUrl: string;
   verifyAuditLogUrl: string;
+  electionDetailUrlTemplate: string;
+  auditLogUrlTemplate: string;
 }
 
 export interface BallotVerifyElection {
   id: number;
   name: string;
-  detail_url: string;
 }
 
 export interface BallotVerifyResponse {
@@ -22,7 +23,6 @@ export interface BallotVerifyResponse {
   is_superseded: boolean;
   is_final_ballot: boolean;
   public_ballots_url: string;
-  audit_log_url: string;
   rate_limited: boolean;
   verification_snippet: string;
 }
@@ -32,8 +32,17 @@ export function readBallotVerifyBootstrap(root: HTMLElement): BallotVerifyBootst
   const verifyBallotHashUrl = String(root.dataset.ballotVerifyHashScriptUrl || "").trim();
   const verifyBallotChainUrl = String(root.dataset.ballotVerifyChainScriptUrl || "").trim();
   const verifyAuditLogUrl = String(root.dataset.ballotVerifyAuditScriptUrl || "").trim();
+  const electionDetailUrlTemplate = String(root.dataset.ballotVerifyElectionDetailUrlTemplate || "").trim();
+  const auditLogUrlTemplate = String(root.dataset.ballotVerifyAuditLogUrlTemplate || "").trim();
 
-  if (!apiUrl || !verifyBallotHashUrl || !verifyBallotChainUrl || !verifyAuditLogUrl) {
+  if (
+    !apiUrl
+    || !verifyBallotHashUrl
+    || !verifyBallotChainUrl
+    || !verifyAuditLogUrl
+    || !electionDetailUrlTemplate
+    || !auditLogUrlTemplate
+  ) {
     return null;
   }
 
@@ -42,6 +51,8 @@ export function readBallotVerifyBootstrap(root: HTMLElement): BallotVerifyBootst
     verifyBallotHashUrl,
     verifyBallotChainUrl,
     verifyAuditLogUrl,
+    electionDetailUrlTemplate,
+    auditLogUrlTemplate,
   };
 }
 

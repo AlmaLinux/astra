@@ -26,6 +26,7 @@ describe("mountGroupsPage", () => {
 
     const root = buildRoot({
       "data-groups-api-url": "/api/v1/groups",
+      "data-groups-detail-url-template": "/group/__group_name__/",
     });
 
     const app = mountGroupsPage(root);

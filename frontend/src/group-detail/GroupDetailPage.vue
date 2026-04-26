@@ -16,6 +16,7 @@ import {
   type GroupMemberItem,
   type GroupDetailRouteState,
 } from "./types";
+import { fillUrlTemplate } from "../shared/urlTemplates";
 
 const props = defineProps<{
   bootstrap: GroupDetailBootstrap;
@@ -58,6 +59,10 @@ function asLeaderUser(row: unknown): GroupLeaderUserItem {
   return row as GroupLeaderUserItem;
 }
 
+function asLeaderGroup(row: unknown): GroupLeaderGroupItem {
+  return row as GroupLeaderGroupItem;
+}
+
 function isLeaderGroup(item: GroupLeaderItem): item is GroupLeaderGroupItem {
   return item.kind === "group";
 }
@@ -96,6 +101,18 @@ function buildLeadersPageHref(pageNumber: number): string {
   const routeState = currentRouteState();
   routeState.leadersPage = pageNumber;
   return buildGroupDetailRouteUrl(routeState);
+}
+
+function groupDetailHref(groupName: string): string {
+  return fillUrlTemplate(props.bootstrap.detailUrlTemplate, "__group_name__", groupName);
+}
+
+function groupEditHref(groupName: string): string {
+  return fillUrlTemplate(props.bootstrap.editUrlTemplate, "__group_name__", groupName);
+}
+
+function agreementDetailHref(agreementCn: string): string {
+  return fillUrlTemplate(props.bootstrap.agreementDetailUrlTemplate, "__agreement_cn__", agreementCn);
 }
 
 function isUnsigned(username: string): boolean {
@@ -207,13 +224,13 @@ async function load(pushState: boolean): Promise<void> {
   error.value = "";
 
   try {
-    const loaded = await Promise.all([
+    const [groupInfoLoaded] = await Promise.all([
       loadGroupInfo(),
       loadLeaders(false),
       loadMembers(false),
     ]);
 
-    if (loaded.includes(false)) {
+    if (!groupInfoLoaded) {
       error.value = "Unable to load group details right now.";
       return;
     }
@@ -499,7 +516,7 @@ onMounted(async () => {
   <div data-group-detail-vue-root>
     <div v-if="error" class="text-danger mb-3">{{ error }}</div>
     <div v-else-if="isLoading && !groupInfo" class="text-muted mb-3">Loading group details...</div>
-    <template v-else-if="groupInfo && leadersPayload && membersPayload">
+    <template v-else-if="groupInfo">
       <!-- Header: Group name with member count and Leave button -->
       <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
         <h1 class="m-0">
@@ -525,8 +542,8 @@ onMounted(async () => {
           <div class="card">
             <div class="card-header d-flex align-items-center" style="gap: .5rem;">
               <h3 class="card-title mb-0">Group info</h3>
-              <div v-if="groupInfo.edit_url && groupInfo.is_sponsor" class="card-tools ml-auto">
-                <a :href="groupInfo.edit_url" class="btn btn-sm btn-outline-primary" title="Edit group details">
+              <div v-if="groupInfo.is_sponsor" class="card-tools ml-auto">
+                <a :href="groupEditHref(groupInfo.cn)" class="btn btn-sm btn-outline-primary" title="Edit group details">
                   <i class="fas fa-edit mr-1"></i> Edit group
                 </a>
               </div>
@@ -564,10 +581,10 @@ onMounted(async () => {
                 <div class="profile-attr-value text-end">
                   <div v-for="a in groupInfo.required_agreements" :key="a.cn" class="mb-1">
                     <span v-if="a.signed" class="badge badge-success">{{ a.cn }} (Signed)</span>
-                    <a v-else :href="a.detail_url" class="badge badge-warning">{{ a.cn }} (Unsigned)</a>
+                    <a v-else :href="agreementDetailHref(a.cn)" class="badge badge-warning">{{ a.cn }} (Unsigned)</a>
                   </div>
                   <div class="small text-muted mt-1">
-                    Sign agreements in <a href="/settings/#agreements">Settings → Agreements</a>.
+                    Sign agreements in <a :href="bootstrap.agreementsListUrl">Settings → Agreements</a>.
                   </div>
                 </div>
               </li>
@@ -623,7 +640,7 @@ onMounted(async () => {
       </div>
 
       <!-- Team Leads section (full width below columns) -->
-      <div v-if="leaderItems.length" class="card">
+      <div class="card">
         <div class="card-header">
           <h3 class="card-title">Team Lead{{ (leadersPagination?.count || 0) === 1 ? "" : "s" }}</h3>
         </div>
@@ -638,9 +655,9 @@ onMounted(async () => {
             @page-change="onLeaderPageChange"
           >
             <template #item="{ item }">
-              <a v-if="isLeaderGroup(asLeaderItem(item))" :href="`/group/${asLeaderItem(item).cn}/`" class="card" style="text-decoration: none; color: inherit;">
+              <a v-if="isLeaderGroup(asLeaderItem(item))" :href="groupDetailHref(asLeaderGroup(item).cn)" class="card" style="text-decoration: none; color: inherit;">
                 <div class="card-body">
-                  <h5 class="card-title">{{ asLeaderItem(item).cn }}</h5>
+                  <h5 class="card-title">{{ asLeaderGroup(item).cn }}</h5>
                   <p class="card-text small text-muted">Group</p>
                 </div>
               </a>

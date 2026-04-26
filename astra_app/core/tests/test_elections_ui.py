@@ -152,6 +152,8 @@ class ElectionsVoteShellTests(TestCase):
         page_context.assert_not_called()
         self.assertContains(resp, 'data-election-vote-root')
         self.assertContains(resp, reverse("api-election-vote", args=[election.id]))
+        self.assertContains(resp, 'data-election-vote-detail-url-template="/elections/__election_id__/"')
+        self.assertContains(resp, f'data-election-vote-verify-url="{reverse("ballot-verify")}"')
         self.assertNotContains(resp, "Voting window")
         self.assertNotContains(resp, "Candidates")
 

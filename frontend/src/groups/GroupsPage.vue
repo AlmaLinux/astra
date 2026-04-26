@@ -10,6 +10,7 @@ import {
   type GroupsResponse,
   type GroupsRouteState,
 } from "./types";
+import { fillUrlTemplate } from "../shared/urlTemplates";
 
 const props = defineProps<{
   bootstrap: GroupsBootstrap;
@@ -63,6 +64,10 @@ function buildPageHref(pageNumber: number): string {
   const routeState = currentRouteState();
   routeState.page = pageNumber;
   return buildGroupsRouteUrl(routeState);
+}
+
+function groupDetailHref(groupName: string): string {
+  return fillUrlTemplate(props.bootstrap.detailUrlTemplate, "__group_name__", groupName);
 }
 
 async function load(pushState: boolean): Promise<void> {
@@ -173,7 +178,7 @@ onMounted(async () => {
 
       <template #row-cells="{ row }">
         <td>
-          <a :href="asRow(row).detail_url">{{ asRow(row).cn }}</a>
+          <a :href="groupDetailHref(asRow(row).cn)">{{ asRow(row).cn }}</a>
         </td>
         <td class="text-muted">{{ asRow(row).description }}</td>
         <td class="text-right">

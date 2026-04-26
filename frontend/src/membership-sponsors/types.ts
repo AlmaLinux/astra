@@ -2,6 +2,8 @@ export interface MembershipSponsorsBootstrap {
   apiUrl: string;
   pageSize: number;
   initialQ: string;
+  organizationDetailUrlTemplate: string;
+  userProfileUrlTemplate: string;
 }
 
 export interface SponsorRow {
@@ -9,13 +11,11 @@ export interface SponsorRow {
   organization: {
     id: number;
     name: string;
-    url: string;
   };
   representative: {
     username: string;
     full_name: string;
     display_label: string;
-    url: string;
   };
   sponsorship_level: string;
   days_left: number | null;
@@ -50,9 +50,11 @@ export function readMembershipSponsorsBootstrap(root: HTMLElement): MembershipSp
     membershipSponsorsApiUrl,
     membershipSponsorsPageSize,
     membershipSponsorsInitialQ,
+    membershipSponsorsOrganizationDetailUrlTemplate,
+    membershipSponsorsUserProfileUrlTemplate,
   } = root.dataset;
 
-  if (!membershipSponsorsApiUrl) {
+  if (!membershipSponsorsApiUrl || !membershipSponsorsOrganizationDetailUrlTemplate || !membershipSponsorsUserProfileUrlTemplate) {
     return null;
   }
 
@@ -65,6 +67,8 @@ export function readMembershipSponsorsBootstrap(root: HTMLElement): MembershipSp
     apiUrl: membershipSponsorsApiUrl,
     pageSize,
     initialQ: String(membershipSponsorsInitialQ || ""),
+    organizationDetailUrlTemplate: membershipSponsorsOrganizationDetailUrlTemplate,
+    userProfileUrlTemplate: membershipSponsorsUserProfileUrlTemplate,
   };
 }
 

@@ -30,6 +30,9 @@ describe("mountMembershipAuditLogPage", () => {
       "data-membership-audit-log-initial-q": "",
       "data-membership-audit-log-initial-username": "",
       "data-membership-audit-log-initial-organization": "",
+      "data-membership-audit-log-user-profile-url-template": "/user/__username__/",
+      "data-membership-audit-log-organization-detail-url-template": "/organization/__organization_id__/",
+      "data-membership-audit-log-membership-request-detail-url-template": "/membership/request/__request_id__/",
     });
 
     const app = mountMembershipAuditLogPage(root);
@@ -41,6 +44,9 @@ describe("mountMembershipAuditLogPage", () => {
   it("does not mount when required bootstrap data is missing", () => {
     const root = buildRoot({
       "data-membership-audit-log-page-size": "50",
+      "data-membership-audit-log-user-profile-url-template": "/user/__username__/",
+      "data-membership-audit-log-organization-detail-url-template": "/organization/__organization_id__/",
+      "data-membership-audit-log-membership-request-detail-url-template": "/membership/request/__request_id__/",
     });
 
     const app = mountMembershipAuditLogPage(root);
@@ -52,6 +58,9 @@ describe("mountMembershipAuditLogPage", () => {
   it("does not mount when page-size bootstrap data is missing", () => {
     const root = buildRoot({
       "data-membership-audit-log-api-url": "/api/v1/membership/audit-log",
+      "data-membership-audit-log-user-profile-url-template": "/user/__username__/",
+      "data-membership-audit-log-organization-detail-url-template": "/organization/__organization_id__/",
+      "data-membership-audit-log-membership-request-detail-url-template": "/membership/request/__request_id__/",
     });
 
     const app = mountMembershipAuditLogPage(root);

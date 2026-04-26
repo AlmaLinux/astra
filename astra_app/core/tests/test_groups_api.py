@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
@@ -58,8 +59,16 @@ class GroupsApiTests(TestCase):
         self.assertEqual(payload["q"], "alpha")
         self.assertEqual([item["cn"] for item in payload["items"]], ["alpha-team"])
         self.assertEqual(payload["items"][0]["member_count"], 2)
-        self.assertTrue(payload["items"][0]["detail_url"].endswith("/group/alpha-team/"))
+        self.assertNotIn("detail_url", payload["items"][0])
         self.assertEqual(payload["pagination"]["page"], 1)
+
+    def test_groups_page_renders_route_templates_for_vue_shell(self) -> None:
+        self._login_as_freeipa_user("alice")
+        response = self.client.get(reverse("groups"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-groups-api-url="/api/v1/groups"')
+        self.assertContains(response, 'data-groups-detail-url-template="/group/__group_name__/"')
 
     def test_group_info_api_returns_group_info_without_paging(self) -> None:
         self._login_as_freeipa_user("alice")
@@ -93,7 +102,49 @@ class GroupsApiTests(TestCase):
         self.assertNotIn("sponsor_groups", payload["group"])
         self.assertEqual(payload["group"]["required_agreements"], [])
         self.assertEqual(payload["group"]["unsigned_usernames"], [])
-        self.assertEqual(payload["group"]["edit_url"], "/group/infra-team/edit/")
+        self.assertNotIn("edit_url", payload["group"])
+
+    def test_group_info_api_omits_agreement_page_urls_from_required_agreements(self) -> None:
+        self._login_as_freeipa_user("alice")
+        viewer = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
+
+        group = self._make_group(
+            "infra-team",
+            description="Infra Team",
+            members=["alice", "bob"],
+            sponsors=["alice"],
+        )
+        group.member_count_recursive = MagicMock(return_value=2)
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
+            with patch("core.views_groups.FreeIPAGroup.get", return_value=group):
+                with patch("core.views_groups.required_agreements_for_group", return_value=["almalinux-coc"]):
+                    with patch(
+                        "core.views_groups.FreeIPAFASAgreement.get",
+                        return_value=SimpleNamespace(users=["alice"]),
+                    ):
+                        response = self.client.get(
+                            reverse("api-group-detail-info", args=["infra-team"]),
+                            HTTP_ACCEPT="application/json",
+                        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        self.assertEqual(payload["group"]["required_agreements"], [{"cn": "almalinux-coc", "signed": True}])
+        self.assertEqual(payload["group"]["unsigned_usernames"], ["bob"])
+
+    def test_group_detail_page_renders_route_templates_for_vue_shell(self) -> None:
+        self._login_as_freeipa_user("alice")
+        group = self._make_group("infra-team", description="Infra Team")
+
+        with patch("core.views_groups.FreeIPAGroup.get", return_value=group):
+            response = self.client.get(reverse("group-detail", args=["infra-team"]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-group-detail-url-template="/group/__group_name__/"')
+        self.assertContains(response, 'data-group-detail-edit-url-template="/group/__group_name__/edit/"')
+        self.assertContains(response, 'data-group-detail-agreement-detail-url-template="/settings/?tab=agreements&amp;agreement=__agreement_cn__"')
+        self.assertContains(response, 'data-group-detail-agreements-list-url="/settings/?tab=agreements"')
 
     def test_group_leaders_api_returns_paginated_mixed_leader_items(self) -> None:
         self._login_as_freeipa_user("alice")

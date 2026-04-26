@@ -12,6 +12,14 @@ function flushPromises(): Promise<void> {
 
 const bootstrap: UserProfileBootstrap = {
   apiUrl: "/api/v1/users/alice/profile",
+  settingsProfileUrl: "/settings/?tab=profile",
+  settingsCountryCodeUrl: "/settings/?tab=profile&highlight=country_code",
+  settingsEmailsUrl: "/settings/?tab=emails",
+  membershipHistoryUrlTemplate: "/membership/log/__username__/?username=__username__",
+  membershipRequestUrl: "/membership/request/",
+  membershipRequestDetailUrlTemplate: "/membership/request/__request_id__/",
+  groupDetailUrlTemplate: "/group/__group_name__/",
+  agreementsUrlTemplate: "/settings/?tab=agreements&agreement=__agreement_cn__",
 };
 
 function makePayload(overrides: Partial<UserProfileResponse> = {}): UserProfileResponse {
@@ -20,7 +28,6 @@ function makePayload(overrides: Partial<UserProfileResponse> = {}): UserProfileR
       fullName: "Alice User",
       username: "alice",
       email: "alice@example.test",
-      profileEditUrl: "/settings/?tab=profile",
       avatarUrl: "",
       viewerIsMembershipCommittee: false,
       profileCountry: "",
@@ -49,20 +56,21 @@ function makePayload(overrides: Partial<UserProfileResponse> = {}): UserProfileR
     membership: {
       showCard: true,
       username: "alice",
-      historyUrl: "/membership/history/user/alice/",
-      requestUrl: "/membership/request/",
+      canViewHistory: true,
       canRequestAny: true,
+      isOwner: true,
       entries: [
         {
           kind: "membership",
           key: "membership-individual",
+          requestId: null,
           membershipType: { name: "Individual", code: "individual", description: "", className: "membership-standard" },
-          badge: { label: "Individual", className: "badge alx-status-badge membership-standard alx-status-badge--active", url: null },
+          badge: { label: "Individual", className: "badge alx-status-badge membership-standard alx-status-badge--active" },
           memberSinceLabel: "January 2024",
           expiresLabel: "",
           expiresTone: "muted",
-          renewUrl: "",
-          tierChangeUrl: "",
+          canRenew: false,
+          canRequestTierChange: false,
           management: null,
         },
       ],
@@ -70,7 +78,7 @@ function makePayload(overrides: Partial<UserProfileResponse> = {}): UserProfileR
       notes: null,
     },
     accountSetup: {
-      requiredActions: [{ id: "country-code-missing-alert", label: "Add your country", url: "/settings/?tab=profile", urlLabel: "Set country code" }],
+      requiredActions: [{ id: "country-code-missing-alert", label: "Add your country", urlLabel: "Set country code" }],
       requiredIsRfi: false,
       recommendedActions: [],
       recommendedDismissKey: "",
@@ -118,6 +126,9 @@ describe("UserProfilePage", () => {
     expect(wrapper.text()).toContain("Individual");
     expect(wrapper.text()).toContain("infra");
     expect(wrapper.find('a[href="/settings/?tab=profile"]').exists()).toBe(true);
+    expect(wrapper.find('a[href="/membership/log/alice/?username=alice"]').exists()).toBe(true);
+    expect(wrapper.find('a[href="/membership/request/"]').exists()).toBe(true);
+    expect(wrapper.find('a[href="/group/infra/"]').exists()).toBe(true);
   });
 
   it("hides the recommended alert when it was previously dismissed", async () => {
@@ -128,7 +139,7 @@ describe("UserProfilePage", () => {
         accountSetup: {
           requiredActions: [],
           requiredIsRfi: false,
-          recommendedActions: [{ id: "membership-request-recommended-alert", label: "Request membership", url: "/membership/request/", urlLabel: "Request" }],
+          recommendedActions: [{ id: "membership-request-recommended-alert", label: "Request membership", urlLabel: "Request" }],
           recommendedDismissKey: dismissKey,
         },
       }),

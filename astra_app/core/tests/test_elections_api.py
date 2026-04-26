@@ -95,8 +95,8 @@ class ElectionsApiTests(TestCase):
         self.assertEqual([item["name"] for item in payload["items"]], ["Published election"])
         self.assertEqual(payload["items"][0]["id"], open_election.id)
         self.assertEqual(payload["items"][0]["status"], Election.Status.open)
-        self.assertTrue(payload["items"][0]["detail_url"].endswith(reverse("election-detail", args=[open_election.id])))
-        self.assertIsNone(payload["items"][0]["edit_url"])
+        self.assertNotIn("detail_url", payload["items"][0])
+        self.assertNotIn("edit_url", payload["items"][0])
         self.assertEqual(payload["pagination"]["page"], 1)
 
     def test_election_detail_info_api_returns_data_only_for_draft_manager(self) -> None:
@@ -733,8 +733,9 @@ class ElectionsApiTests(TestCase):
         self.assertEqual(payload["election"]["name"], "Vote page election")
         self.assertTrue(payload["election"]["can_submit_vote"])
         self.assertEqual(payload["election"]["voter_votes"], 2)
+        self.assertNotIn("detail_url", payload["election"])
+        self.assertNotIn("verify_url", payload["election"])
         self.assertTrue(payload["election"]["submit_url"].endswith(reverse("api-election-vote-submit", args=[election.id])))
-        self.assertTrue(payload["election"]["verify_url"].endswith(reverse("ballot-verify")))
         self.assertEqual(payload["candidates"][0]["id"], candidate.id)
         self.assertIn("Alice User", payload["candidates"][0]["label"])
         self.assertEqual(
@@ -798,7 +799,7 @@ class ElectionsApiTests(TestCase):
         self.assertFalse(payload["is_superseded"])
         self.assertTrue(payload["is_final_ballot"])
         self.assertTrue(payload["public_ballots_url"].endswith(reverse("election-public-ballots", args=[election.id])))
-        self.assertTrue(payload["audit_log_url"].endswith(reverse("election-audit-log", args=[election.id])))
+        self.assertNotIn("audit_log_url", payload)
         self.assertIn(f"election_id = {election.id}", payload["verification_snippet"])
 
     def test_election_vote_submit_api_alias_uses_existing_submission_contract(self) -> None:

@@ -7,6 +7,7 @@ import {
   type BallotVerifyBootstrap,
   type BallotVerifyResponse,
 } from "./types";
+import { fillUrlTemplate } from "../shared/urlTemplates";
 
 const props = defineProps<{
   bootstrap: BallotVerifyBootstrap;
@@ -56,6 +57,14 @@ async function onSubmit(): Promise<void> {
 function onPopState(): void {
   receipt.value = readBallotVerifyReceipt(window.location.href);
   void load(false);
+}
+
+function electionDetailHref(electionId: number): string {
+  return fillUrlTemplate(props.bootstrap.electionDetailUrlTemplate, "__election_id__", electionId);
+}
+
+function auditLogHref(electionId: number): string {
+  return fillUrlTemplate(props.bootstrap.auditLogUrlTemplate, "__election_id__", electionId);
 }
 
 onMounted(async () => {
@@ -154,17 +163,17 @@ onBeforeUnmount(() => {
                     <p v-else>This ballot was included in the final tally.</p>
                   </template>
 
-                  <template v-if="result.public_ballots_url || result.audit_log_url">
+                  <template v-if="result.public_ballots_url || result.election">
                     <h5>Public verification</h5>
                     <ul>
                       <li v-if="result.public_ballots_url"><a :href="result.public_ballots_url">Public ballots ledger (JSON)</a></li>
-                      <li v-if="result.audit_log_url"><a :href="result.audit_log_url">Audit log</a></li>
+                      <li v-if="result.election"><a :href="auditLogHref(result.election.id)">Audit log</a></li>
                     </ul>
                   </template>
 
                   <h5>Ballot Information</h5>
                   <ul>
-                    <li><strong>Election:</strong> <a v-if="result.election" :href="result.election.detail_url">{{ result.election.name }}</a></li>
+                    <li><strong>Election:</strong> <a v-if="result.election" :href="electionDetailHref(result.election.id)">{{ result.election.name }}</a></li>
                     <li><strong>Election status:</strong> {{ result.election_status }}</li>
                     <li><strong>Submission date:</strong> {{ result.submitted_date }}</li>
                     <li>

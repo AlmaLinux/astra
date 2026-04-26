@@ -12,6 +12,8 @@ function flushPromises(): Promise<void> {
 
 const bootstrap: OrganizationsBootstrap = {
   apiUrl: "/api/v1/organizations",
+  detailUrlTemplate: "/organization/__organization_id__/",
+  createUrl: "/organizations/create/",
 };
 
 describe("OrganizationsPage", () => {
@@ -24,7 +26,6 @@ describe("OrganizationsPage", () => {
       return new Response(
         JSON.stringify({
           my_organization: null,
-          my_organization_create_url: "/organizations/create/",
           sponsor_card: {
             title: "AlmaLinux Sponsor Members",
             q: "",
@@ -34,7 +35,6 @@ describe("OrganizationsPage", () => {
                 id: 10,
                 name: "Sponsor Org",
                 status: "active",
-                detail_url: "/organization/10/",
                 logo_url: "",
                 link_to_detail: false,
                 memberships: [{ label: "Sponsor", class_name: "membership-standard", request_url: null }],
@@ -51,7 +51,6 @@ describe("OrganizationsPage", () => {
                 id: 20,
                 name: "Mirror Org",
                 status: "active",
-                detail_url: "/organization/20/",
                 logo_url: "",
                 link_to_detail: false,
                 memberships: [{ label: "Mirror", class_name: "membership-standard", request_url: null }],
@@ -89,7 +88,6 @@ describe("OrganizationsPage", () => {
             id: 1,
             name: "Alice Org",
             status: "active",
-            detail_url: "/organization/1/",
             logo_url: "",
             link_to_detail: true,
             memberships: [
@@ -97,7 +95,6 @@ describe("OrganizationsPage", () => {
               { label: "Mirror", class_name: "membership-standard", request_url: null },
             ],
           },
-          my_organization_create_url: null,
           sponsor_card: {
             title: "AlmaLinux Sponsor Members",
             q: "",
@@ -107,7 +104,6 @@ describe("OrganizationsPage", () => {
                 id: 10,
                 name: "Sponsor Org",
                 status: "active",
-                detail_url: "/organization/10/",
                 logo_url: "",
                 link_to_detail: true,
                 memberships: [
@@ -152,7 +148,6 @@ describe("OrganizationsPage", () => {
         return new Response(
           JSON.stringify({
             my_organization: null,
-            my_organization_create_url: "/organizations/create/",
             sponsor_card: {
               title: "AlmaLinux Sponsor Members",
               q: "",
@@ -162,7 +157,6 @@ describe("OrganizationsPage", () => {
                   id: 10,
                   name: "Sponsor Org",
                   status: "active",
-                  detail_url: "/organization/10/",
                   logo_url: "",
                   link_to_detail: false,
                   memberships: [{ label: "Sponsor", class_name: "membership-standard", request_url: null }],
@@ -179,7 +173,6 @@ describe("OrganizationsPage", () => {
                   id: 20,
                   name: "Mirror Org",
                   status: "active",
-                  detail_url: "/organization/20/",
                   logo_url: "",
                   link_to_detail: false,
                   memberships: [{ label: "Mirror", class_name: "membership-standard", request_url: null }],
@@ -197,7 +190,6 @@ describe("OrganizationsPage", () => {
             new Response(
               JSON.stringify({
                 my_organization: null,
-                my_organization_create_url: "/organizations/create/",
                 sponsor_card: {
                   title: "AlmaLinux Sponsor Members",
                   q: "acme",
@@ -214,7 +206,6 @@ describe("OrganizationsPage", () => {
                       id: 20,
                       name: "Mirror Org",
                       status: "active",
-                      detail_url: "/organization/20/",
                       logo_url: "",
                       link_to_detail: false,
                       memberships: [{ label: "Mirror", class_name: "membership-standard", request_url: null }],

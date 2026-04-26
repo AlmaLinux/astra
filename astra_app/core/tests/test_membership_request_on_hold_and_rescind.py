@@ -75,6 +75,152 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
         self._freeipa_users[username] = user
         return user
 
+    def _detail_api_payload(self, request_pk: int) -> dict[str, object]:
+        response = self.client.get(reverse("api-membership-request-detail", args=[request_pk]))
+        self.assertEqual(response.status_code, 200)
+        return response.json()
+
+    def test_self_service_detail_api_exposes_on_hold_form_metadata(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror",
+                "group_cn": "almalinux-mirror",
+                "category_id": "mirror",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="mirror",
+            status=MembershipRequest.Status.on_hold,
+            responses=[
+                {"Domain": "mirror.example.org"},
+                {"Pull request": "https://github.com/AlmaLinux/mirrors/pull/123"},
+            ],
+        )
+
+        self._add_freeipa_user(
+            username="alice",
+            email="alice@example.com",
+            groups=[],
+            first_name="Alice",
+            last_name="User",
+        )
+        self._login_as_freeipa_user("alice")
+
+        response = self.client.get(reverse("api-membership-request-detail", args=[req.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["viewer"]["mode"], "self_service")
+        self.assertTrue(payload["self_service"]["can_resubmit"])
+        self.assertNotIn("action_url", payload["self_service"]["form"])
+        self.assertEqual(
+            [field["name"] for field in payload["self_service"]["form"]["fields"]],
+            ["q_domain", "q_pull_request", "q_additional_information"],
+        )
+
+    def test_self_service_on_hold_post_compatibility_mode_returns_field_errors(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror",
+                "group_cn": "almalinux-mirror",
+                "category_id": "mirror",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="mirror",
+            status=MembershipRequest.Status.on_hold,
+            responses=[
+                {"Domain": "mirror.example.org"},
+                {"Pull request": "https://github.com/AlmaLinux/mirrors/pull/123"},
+            ],
+        )
+
+        self._add_freeipa_user(
+            username="alice",
+            email="alice@example.com",
+            groups=[],
+            first_name="Alice",
+            last_name="User",
+        )
+        self._login_as_freeipa_user("alice")
+
+        response = self.client.post(
+            reverse("membership-request-detail", args=[req.pk]),
+            data={
+                "q_domain": "not a url",
+                "q_pull_request": "https://github.com/AlmaLinux/mirrors/pull/123",
+                "q_additional_information": "Updated details.",
+            },
+            HTTP_X_ASTRA_COMPATIBILITY_MODE="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        payload = response.json()
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["redirect_url"], None)
+        self.assertIn("q_domain", payload["field_errors"])
+        self.assertEqual(payload["non_field_errors"], [])
+
+    def test_self_service_on_hold_post_compatibility_mode_returns_reread_on_success(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror",
+                "group_cn": "almalinux-mirror",
+                "category_id": "mirror",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="mirror",
+            status=MembershipRequest.Status.on_hold,
+            responses=[
+                {"Domain": "mirror.example.org"},
+                {"Pull request": "https://github.com/AlmaLinux/mirrors/pull/123"},
+            ],
+        )
+
+        self._add_freeipa_user(
+            username="alice",
+            email="alice@example.com",
+            groups=[],
+            first_name="Alice",
+            last_name="User",
+        )
+        self._login_as_freeipa_user("alice")
+
+        response = self.client.post(
+            reverse("membership-request-detail", args=[req.pk]),
+            data={
+                "q_domain": "mirror.example.org",
+                "q_pull_request": "https://github.com/AlmaLinux/mirrors/pull/456",
+                "q_additional_information": "Updated details.",
+            },
+            HTTP_X_ASTRA_COMPATIBILITY_MODE="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["redirect_url"], None)
+        self.assertEqual(payload["reread_targets"], ["detail"])
+
     def test_committee_can_rfi_request_sets_on_hold_sends_email_and_logs(self) -> None:
         from core.models import MembershipLog, MembershipType, Note
 
@@ -332,7 +478,10 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
         self._login_as_freeipa_user("alice")
         resp_get = self.client.get(reverse("membership-request-self", args=[req.pk]))
         self.assertEqual(resp_get.status_code, 200)
-        self.assertContains(resp_get, 'title="Cancel your membership request"')
+        self.assertContains(resp_get, 'data-membership-request-detail-root=""')
+        payload = self._detail_api_payload(req.pk)
+        self.assertTrue(payload["self_service"]["can_rescind"])
+        self.assertIsNone(payload["self_service"]["form"])
 
         resp_post = self.client.post(
             reverse("membership-request-self", args=[req.pk]),
@@ -374,11 +523,13 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
         resp = self.client.get(reverse("membership-request-self", args=[req.pk]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "core/js/form_validation_bootstrap44.js")
-        self.assertContains(resp, 'id="membership-request-form"')
-        self.assertContains(resp, "needs-validation")
-        self.assertContains(resp, "novalidate")
-        self.assertContains(resp, 'data-validation-hook="membership-mirror"')
+        self.assertContains(resp, 'data-membership-request-detail-root=""')
+        payload = self._detail_api_payload(req.pk)
+        self.assertTrue(payload["self_service"]["can_resubmit"])
+        self.assertEqual(
+            [field["name"] for field in payload["self_service"]["form"]["fields"]],
+            ["q_domain", "q_pull_request", "q_additional_information"],
+        )
 
     def test_reject_preserves_original_request_responses(self) -> None:
         from core.models import MembershipType
@@ -434,8 +585,9 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
 
         resp_detail = self.client.get(reverse("membership-request-detail", args=[req.pk]))
         self.assertEqual(resp_detail.status_code, 200)
-        self.assertContains(resp_detail, "Request responses")
-        self.assertContains(resp_detail, "Contributions")
+        detail_payload = self._detail_api_payload(req.pk)
+        self.assertEqual(detail_payload["request"]["responses"][0]["question"], "Contributions")
+        self.assertEqual(detail_payload["request"]["responses"][0]["answer_text"], "Old")
 
     def test_committee_approve_is_idempotent_for_approved(self) -> None:
         from core.models import MembershipType
@@ -735,8 +887,17 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
         resp = self.client.get(reverse("membership-request-detail", args=[req.pk]))
 
         self.assertEqual(resp.status_code, 200)
-        approve_url = reverse("membership-request-approve-on-hold", args=[req.pk])
-        self.assertContains(resp, f'data-action-url="{approve_url}"')
+        payload = self._detail_api_payload(req.pk)
+        approve_url = reverse("api-membership-request-approve-on-hold", args=[req.pk])
+        self.assertContains(resp, 'data-membership-request-detail-root=""')
+        self.assertEqual(
+            payload["committee"]["actions"],
+            {
+                "canRequestInfo": True,
+                "showOnHoldApprove": True,
+            },
+        )
+        self.assertContains(resp, f'data-membership-request-detail-approve-on-hold-url="{approve_url}"')
 
     def test_committee_cannot_use_on_hold_override_for_pending_request(self) -> None:
         from core.models import MembershipType
@@ -928,9 +1089,13 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
 
         resp_detail = self.client.get(reverse("membership-request-detail", args=[req.pk]))
         self.assertEqual(resp_detail.status_code, 200)
-        self.assertContains(resp_detail, "Request responses")
-        self.assertContains(resp_detail, "Additional Information")
-        self.assertContains(resp_detail, "Org answers")
+        detail_payload = self._detail_api_payload(req.pk)
+        matching_row = next(
+            row
+            for row in detail_payload["request"]["responses"]
+            if row["question"].strip().lower() == "additional information"
+        )
+        self.assertEqual(matching_row["answer_text"], "Org answers")
 
     def test_org_rfi_resubmit_replaces_additional_information(self) -> None:
         from core.models import MembershipType, Organization
@@ -1108,12 +1273,14 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
         self._add_freeipa_user(username="alice", email="alice@example.com")
         self._login_as_freeipa_user("alice")
 
-        resp_get = self.client.get(reverse("membership-request-self", args=[req.pk]))
-        self.assertEqual(resp_get.status_code, 200)
-        form = resp_get.context["form"]
-        self.assertIn("q_additional_information", form.fields)
-        self.assertNotIn("q_additional_info", form.fields)
-        self.assertEqual(form["q_additional_information"].value(), "Newer note")
+        detail_payload = self._detail_api_payload(req.pk)
+        form_fields = {
+            field["name"]: field
+            for field in detail_payload["self_service"]["form"]["fields"]
+        }
+        self.assertIn("q_additional_information", form_fields)
+        self.assertNotIn("q_additional_info", form_fields)
+        self.assertEqual(form_fields["q_additional_information"]["value"], "Newer note")
 
         resp_post = self.client.post(
             reverse("membership-request-self", args=[req.pk]),
@@ -1171,12 +1338,14 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
         self._add_freeipa_user(username="alice", email="alice@example.com")
         self._login_as_freeipa_user("alice")
 
-        resp_get = self.client.get(reverse("membership-request-self", args=[req.pk]))
-        self.assertEqual(resp_get.status_code, 200)
-        form = resp_get.context["form"]
-        self.assertIn("q_additional_information", form.fields)
-        self.assertNotIn("q_additional_info", form.fields)
-        self.assertEqual(form["q_additional_information"].value(), "Primary EU mirror")
+        detail_payload = self._detail_api_payload(req.pk)
+        form_fields = {
+            field["name"]: field
+            for field in detail_payload["self_service"]["form"]["fields"]
+        }
+        self.assertIn("q_additional_information", form_fields)
+        self.assertNotIn("q_additional_info", form_fields)
+        self.assertEqual(form_fields["q_additional_information"]["value"], "Primary EU mirror")
 
     def test_membership_request_self_readonly_shows_legacy_additional_information_key(self) -> None:
         from core.models import MembershipType, Organization
@@ -1204,10 +1373,13 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
         self._add_freeipa_user(username="bob", email="bob@example.com")
         self._login_as_freeipa_user("bob")
 
-        resp = self.client.get(reverse("membership-request-self", args=[req.pk]))
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Additional information")
-        self.assertContains(resp, "Legacy details")
+        detail_payload = self._detail_api_payload(req.pk)
+        matching_row = next(
+            row
+            for row in detail_payload["request"]["responses"]
+            if row["question"].strip().lower() == "additional information"
+        )
+        self.assertEqual(matching_row["answer_text"], "Legacy details")
 
     def test_membership_request_self_readonly_prefers_canonical_additional_information_without_rewriting_rows(self) -> None:
         from core.models import MembershipType, Organization
@@ -1239,12 +1411,11 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
         self._add_freeipa_user(username="bob-canonical", email="bob-canonical@example.com")
         self._login_as_freeipa_user("bob-canonical")
 
-        resp = self.client.get(reverse("membership-request-self", args=[req.pk]))
-
-        self.assertEqual(resp.status_code, 200)
-        form = resp.context["form"]
-        self.assertIn("q_additional_information", form.fields)
-        self.assertEqual(form["q_additional_information"].value(), "Canonical details")
+        detail_payload = self._detail_api_payload(req.pk)
+        matching_row = next(
+            row for row in detail_payload["request"]["responses"] if row["question"] == "Additional information"
+        )
+        self.assertEqual(matching_row["answer_text"], "Canonical details")
 
         req.refresh_from_db()
         self.assertEqual(req.responses, original_responses)
@@ -1425,9 +1596,14 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
 
         resp = self.client.get(reverse("membership-request-self", args=[req.pk]))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Rescind request")
-        self.assertContains(resp, 'title="Cancel your membership request"')
-        self.assertContains(resp, f'action="{reverse("membership-request-rescind", args=[req.pk])}"')
+        payload = self._detail_api_payload(req.pk)
+        self.assertContains(resp, 'data-membership-request-detail-root=""')
+        self.assertTrue(payload["self_service"]["can_rescind"])
+        self.assertNotIn("rescind_url", payload["self_service"])
+        self.assertContains(
+            resp,
+            f'data-membership-request-detail-rescind-url="{reverse("membership-request-rescind", args=[req.pk])}"',
+        )
 
     def test_on_hold_self_service_page_shows_committee_contact_email(self) -> None:
         from core.models import MembershipType
@@ -1456,11 +1632,12 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
 
         resp = self.client.get(reverse("membership-request-self", args=[req.pk]))
         self.assertEqual(resp.status_code, 200)
+        payload = self._detail_api_payload(req.pk)
+        self.assertEqual(payload["self_service"]["committee_email"], settings.MEMBERSHIP_COMMITTEE_EMAIL)
         self.assertContains(
             resp,
-            f'mailto:{settings.MEMBERSHIP_COMMITTEE_EMAIL}',
+            f'data-membership-request-detail-form-action-url="{reverse("membership-request-detail", args=[req.pk])}"',
         )
-        self.assertContains(resp, settings.MEMBERSHIP_COMMITTEE_EMAIL)
 
     def test_on_hold_self_service_page_uses_modal_confirmation_for_rescind(self) -> None:
         from core.models import MembershipType
@@ -1489,10 +1666,13 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
 
         resp = self.client.get(reverse("membership-request-self", args=[req.pk]))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'data-target="#rescind-confirm-modal"')
-        self.assertContains(resp, 'id="rescind-confirm-modal"')
-        self.assertContains(resp, "Rescind membership request?")
-        self.assertContains(resp, f'action="{reverse("membership-request-rescind", args=[req.pk])}"')
+        payload = self._detail_api_payload(req.pk)
+        self.assertTrue(payload["self_service"]["can_rescind"])
+        self.assertNotIn("rescind_url", payload["self_service"])
+        self.assertContains(
+            resp,
+            f'data-membership-request-detail-rescind-url="{reverse("membership-request-rescind", args=[req.pk])}"',
+        )
 
     def test_rfi_custom_email_redirects_to_send_mail_with_recipient_and_template(self) -> None:
         from core.models import MembershipType

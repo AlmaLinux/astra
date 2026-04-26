@@ -525,7 +525,7 @@ def _profile_context_for_user(
                 {
                     "id": "coc-not-signed-alert",
                     "label": f"Sign the {settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN}",
-                    "url": coc_settings_url,
+                    "agreement_cn": settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN,
                     "url_label": "Review & sign",
                 }
             )
@@ -535,7 +535,6 @@ def _profile_context_for_user(
                 {
                     "id": "country-code-missing-alert",
                     "label": "Add a valid ISO 3166-1 alpha-2 country code",
-                    "url": settings_url(tab="profile", highlight="country_code"),
                     "url_label": "Set country code",
                 }
             )
@@ -545,7 +544,6 @@ def _profile_context_for_user(
                 {
                     "id": "email-blacklisted-alert",
                     "label": "We're having trouble delivering your emails: your address may have bounced or been marked as spam",
-                    "url": settings_url(tab="emails"),
                     "url_label": "Update your email address",
                 }
             )
@@ -559,7 +557,7 @@ def _profile_context_for_user(
                 {
                     "id": "membership-action-required-alert",
                     "label": "Help us review your membership request",
-                    "url": reverse("membership-request-detail", args=[request_id]),
+                    "request_id": str(request_id),
                     "url_label": "Add details",
                 }
             )
@@ -573,7 +571,7 @@ def _profile_context_for_user(
                 {
                     "id": "sponsorship-action-required-alert",
                     "label": "Help us review your sponsorship request",
-                    "url": reverse("membership-request-detail", args=[request_id]),
+                    "request_id": str(request_id),
                     "url_label": "Add details",
                 }
             )
@@ -588,7 +586,6 @@ def _profile_context_for_user(
                 {
                     "id": "membership-request-recommended-alert",
                     "label": "Request an individual membership",
-                    "url": membership_request_url,
                     "url_label": "Request a membership",
                 }
             )
@@ -664,7 +661,6 @@ def _build_user_profile_summary_bootstrap(context: dict[str, object]) -> dict[st
         "fullName": fu.get_full_name(),
         "username": fu.username,
         "email": str(context["profile_email"]),
-        "profileEditUrl": settings_url(tab="profile") if bool(context["is_self"]) else "",
         "avatarUrl": avatar_url_by_username.get(fu.username, ""),
         "viewerIsMembershipCommittee": bool(context["viewer_is_membership_committee"]),
         "profileCountry": str(context["profile_country"]) if bool(context["viewer_is_membership_committee"]) else "",
@@ -705,7 +701,6 @@ def _build_user_profile_groups_bootstrap(context: dict[str, object]) -> dict[str
             {
                 "cn": str(agreement["cn"]),
                 "requiredBy": [str(group_cn) for group_cn in cast(list[str], agreement["required_by"])],
-                "settingsUrl": str(agreement["settings_url"] or ""),
             }
             for agreement in missing_agreements
         ],
@@ -733,13 +728,21 @@ def _profile_context_for_request(request: HttpRequest, username: str) -> dict[st
     )
 
 
-def _serialize_user_profile_action(action: dict[str, str]) -> dict[str, str]:
-    return {
+def _serialize_user_profile_action(action: dict[str, str]) -> dict[str, object]:
+    payload: dict[str, str | int] = {
         "id": action["id"],
         "label": action["label"],
-        "url": action["url"],
         "urlLabel": action["url_label"],
     }
+    request_id = action.get("request_id")
+    if request_id:
+        payload["requestId"] = int(request_id)
+
+    agreement_cn = action.get("agreement_cn")
+    if agreement_cn:
+        payload["agreementCn"] = agreement_cn
+
+    return payload
 
 
 def _serialize_user_profile_account_setup(context: dict[str, object]) -> dict[str, object]:
@@ -778,28 +781,15 @@ def _serialize_user_profile_membership_type(membership_type: MembershipType) -> 
     }
 
 
-def _serialize_user_profile_membership_badge(
-    membership_type: MembershipType,
-    *,
-    request_id: object,
-    can_link: bool,
-) -> dict[str, object]:
+def _serialize_user_profile_membership_badge(membership_type: MembershipType) -> dict[str, object]:
     tier_class = membership_tier_class(membership_type.code)
-    request_url = reverse("membership-request-detail", args=[request_id]) if request_id and can_link else None
     return {
         "label": membership_type.name,
         "className": f"badge alx-status-badge {tier_class} alx-status-badge--active",
-        "url": request_url,
     }
 
 
-def _serialize_user_profile_pending_badge(
-    status: str,
-    *,
-    is_owner: bool,
-    can_view: bool,
-    request_id: int,
-) -> dict[str, object]:
+def _serialize_user_profile_pending_badge(status: str, *, is_owner: bool) -> dict[str, object]:
     is_on_hold = status == MembershipRequest.Status.on_hold
     label = "Action required" if is_on_hold and is_owner else "On hold" if is_on_hold else "Under review"
     status_class = "alx-status-badge--action" if is_on_hold else "alx-status-badge--review"
@@ -807,7 +797,6 @@ def _serialize_user_profile_pending_badge(
     return {
         "label": label,
         "className": f"badge {legacy_class} alx-status-badge {status_class}",
-        "url": reverse("membership-request-detail", args=[request_id]) if is_owner or can_view else None,
     }
 
 
@@ -856,12 +845,9 @@ def _serialize_user_profile_membership_entry(
     return {
         "kind": "membership",
         "key": f"membership-{membership_type.code}",
+        "requestId": int(request_id) if request_id and (is_owner or can_view) else None,
         "membershipType": _serialize_user_profile_membership_type(membership_type),
-        "badge": _serialize_user_profile_membership_badge(
-            membership_type,
-            request_id=request_id,
-            can_link=is_owner or can_view,
-        ),
+        "badge": _serialize_user_profile_membership_badge(membership_type),
         "memberSinceLabel": _format_profile_membership_date(
             entry["created_at"],
             timezone_name=timezone_name,
@@ -869,8 +855,8 @@ def _serialize_user_profile_membership_entry(
         ),
         "expiresLabel": expires_label if is_owner or can_view else "",
         "expiresTone": "danger" if is_expiring_soon else "muted",
-        "renewUrl": str(entry["extend_url"]) if is_owner and is_expiring_soon and not bool(entry["has_pending_request_in_category"]) else "",
-        "tierChangeUrl": str(entry["extend_url"]) if is_owner and bool(entry["can_request_tier_change"]) else "",
+        "canRenew": bool(is_owner and is_expiring_soon and not bool(entry["has_pending_request_in_category"])),
+        "canRequestTierChange": bool(is_owner and bool(entry["can_request_tier_change"])),
         "management": management,
     }
 
@@ -889,14 +875,11 @@ def _serialize_user_profile_pending_membership_entry(
         "key": f"pending-{request_id}",
         "membershipType": _serialize_user_profile_membership_type(membership_type),
         "requestId": request_id,
-        "requestUrl": reverse("membership-request-detail", args=[request_id]),
         "status": status,
         "organizationName": str(entry["organization_name"]),
         "badge": _serialize_user_profile_pending_badge(
             status,
             is_owner=is_owner,
-            can_view=can_view,
-            request_id=request_id,
         ),
     }
 
@@ -915,7 +898,6 @@ def _serialize_user_profile_membership(context: dict[str, object], request: Http
     timezone_name = str(context["timezone_name"])
     membership_entries = cast(list[dict[str, object]], context["memberships"])
     pending_entries = cast(list[dict[str, object]], context["membership_pending_requests"])
-    history_url = f"{reverse('membership-audit-log')}?{urlencode({'username': fu.username})}"
     target_params = urlencode({"target_type": "user", "target": fu.username})
     csrf_token = get_token(request)
 
@@ -937,8 +919,7 @@ def _serialize_user_profile_membership(context: dict[str, object], request: Http
     return {
         "showCard": bool(context["show_membership_card"]),
         "username": fu.username,
-        "historyUrl": history_url if membership_can_view else "",
-        "requestUrl": str(context["membership_request_url"]),
+        "canViewHistory": membership_can_view,
         "canRequestAny": bool(context["membership_can_request_any"]),
         "isOwner": is_owner,
         "entries": [
@@ -987,7 +968,23 @@ def user_profile(request: HttpRequest, username: str) -> HttpResponse:
 
     viewer_username = get_username(request)
     logger.debug("User profile shell view: username=%s viewer=%s", username, viewer_username)
-    return render(request, "core/user_profile.html", {"profile_username": username})
+    return render(
+        request,
+        "core/user_profile.html",
+        {
+            "profile_username": username,
+            "settings_profile_url": settings_url(tab="profile"),
+            "membership_history_url_template": f"{reverse('membership-audit-log-user', args=['__username__'])}?{urlencode({'username': '__username__'})}",
+            "membership_request_url": reverse("membership-request"),
+            "membership_request_detail_url_template": reverse("membership-request-detail", args=[123456789]).replace(
+                "123456789", "__request_id__"
+            ),
+            "group_detail_url_template": reverse("group-detail", args=["__group_name__"]),
+            "agreements_url_template": f"{settings_url(tab='agreements')}&agreement=__agreement_cn__",
+            "settings_country_code_url": settings_url(tab="profile", highlight="country_code"),
+            "settings_emails_url": settings_url(tab="emails"),
+        },
+    )
 
 
 def user_profile_api(request: HttpRequest, username: str) -> JsonResponse:

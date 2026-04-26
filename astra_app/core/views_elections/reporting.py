@@ -4,7 +4,7 @@ from django.contrib.auth.decorators import permission_required
 from django.db.models import Count
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
-from django.urls import reverse_lazy
+from django.urls import reverse, reverse_lazy
 from django.views.decorators.http import require_GET
 
 from core.elections_services import election_quorum_status
@@ -89,7 +89,6 @@ def _serialize_turnout_report_row(row: dict[str, object]) -> dict[str, object]:
             "name": election.name,
             "status": election.status,
             "start_date": election.start_datetime.date().isoformat() if election.start_datetime else "",
-            "detail_url": reverse_lazy("election-detail", args=[election.id]),
         },
         "eligible_count": row["eligible_count"],
         "eligible_weight": row["eligible_weight"],
@@ -107,7 +106,13 @@ def _serialize_turnout_report_row(row: dict[str, object]) -> dict[str, object]:
 @require_GET
 @permission_required(ASTRA_ADD_ELECTION, raise_exception=True, login_url=reverse_lazy("users"))
 def elections_turnout_report(request: HttpRequest) -> HttpResponse:
-    return render(request, "core/elections_turnout_report.html")
+    return render(
+        request,
+        "core/elections_turnout_report.html",
+        {
+            "election_detail_url_template": reverse("election-detail", args=[123456789]),
+        },
+    )
 
 
 @require_GET

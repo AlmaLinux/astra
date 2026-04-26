@@ -14,7 +14,6 @@ export interface UserProfileSummaryBootstrap {
   fullName: string;
   username: string;
   email: string;
-  profileEditUrl: string;
   avatarUrl: string;
   viewerIsMembershipCommittee: boolean;
   profileCountry: string;
@@ -42,7 +41,6 @@ export interface UserProfileGroupItem {
 export interface UserProfileMissingAgreementItem {
   cn: string;
   requiredBy: string[];
-  settingsUrl: string;
 }
 
 export interface UserProfileGroupsBootstrap {
@@ -56,8 +54,9 @@ export interface UserProfileGroupsBootstrap {
 export interface UserProfileActionItem {
   id: string;
   label: string;
-  url: string;
   urlLabel: string;
+  requestId?: number;
+  agreementCn?: string;
 }
 
 export interface UserProfileAccountSetup {
@@ -77,7 +76,6 @@ export interface UserProfileMembershipType {
 export interface UserProfileMembershipBadge {
   label: string;
   className: string;
-  url: string | null;
 }
 
 export interface UserProfileMembershipManagementAction {
@@ -96,13 +94,14 @@ export interface UserProfileMembershipManagementAction {
 export interface UserProfileMembershipEntry {
   kind: "membership";
   key: string;
+  requestId: number | null;
   membershipType: UserProfileMembershipType;
   badge: UserProfileMembershipBadge;
   memberSinceLabel: string;
   expiresLabel: string;
   expiresTone: "danger" | "muted";
-  renewUrl: string;
-  tierChangeUrl: string;
+  canRenew: boolean;
+  canRequestTierChange: boolean;
   management: UserProfileMembershipManagementAction | null;
 }
 
@@ -111,7 +110,6 @@ export interface UserProfilePendingMembershipEntry {
   key: string;
   membershipType: UserProfileMembershipType;
   requestId: number;
-  requestUrl: string;
   status: string;
   organizationName: string;
   badge: UserProfileMembershipBadge;
@@ -132,8 +130,7 @@ export interface UserProfileMembershipNotes {
 export interface UserProfileMembershipSection {
   showCard: boolean;
   username: string;
-  historyUrl: string;
-  requestUrl: string;
+  canViewHistory: boolean;
   canRequestAny: boolean;
   isOwner: boolean;
   entries: UserProfileMembershipEntry[];
@@ -150,12 +147,48 @@ export interface UserProfileResponse {
 
 export interface UserProfileBootstrap {
   apiUrl: string;
+  settingsProfileUrl: string;
+  settingsCountryCodeUrl: string;
+  settingsEmailsUrl: string;
+  membershipHistoryUrlTemplate: string;
+  membershipRequestUrl: string;
+  membershipRequestDetailUrlTemplate: string;
+  groupDetailUrlTemplate: string;
+  agreementsUrlTemplate: string;
 }
 
 export function readUserProfileBootstrap(root: HTMLElement): UserProfileBootstrap | null {
   const apiUrl = String(root.dataset.userProfileApiUrl || "").trim();
-  if (!apiUrl) {
+  const settingsProfileUrl = String(root.dataset.userProfileSettingsProfileUrl || "").trim();
+  const settingsCountryCodeUrl = String(root.dataset.userProfileSettingsCountryCodeUrl || "").trim();
+  const settingsEmailsUrl = String(root.dataset.userProfileSettingsEmailsUrl || "").trim();
+  const membershipHistoryUrlTemplate = String(root.dataset.userProfileMembershipHistoryUrlTemplate || "").trim();
+  const membershipRequestUrl = String(root.dataset.userProfileMembershipRequestUrl || "").trim();
+  const membershipRequestDetailUrlTemplate = String(root.dataset.userProfileMembershipRequestDetailUrlTemplate || "").trim();
+  const groupDetailUrlTemplate = String(root.dataset.userProfileGroupDetailUrlTemplate || "").trim();
+  const agreementsUrlTemplate = String(root.dataset.userProfileAgreementsUrlTemplate || "").trim();
+  if (
+    !apiUrl
+    || !settingsProfileUrl
+    || !settingsCountryCodeUrl
+    || !settingsEmailsUrl
+    || !membershipHistoryUrlTemplate
+    || !membershipRequestUrl
+    || !membershipRequestDetailUrlTemplate
+    || !groupDetailUrlTemplate
+    || !agreementsUrlTemplate
+  ) {
     return null;
   }
-  return { apiUrl };
+  return {
+    apiUrl,
+    settingsProfileUrl,
+    settingsCountryCodeUrl,
+    settingsEmailsUrl,
+    membershipHistoryUrlTemplate,
+    membershipRequestUrl,
+    membershipRequestDetailUrlTemplate,
+    groupDetailUrlTemplate,
+    agreementsUrlTemplate,
+  };
 }

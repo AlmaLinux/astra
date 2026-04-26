@@ -26,6 +26,8 @@ describe("mountOrganizationsPage", () => {
 
     const root = buildRoot({
       "data-organizations-api-url": "/api/v1/organizations",
+      "data-organizations-detail-url-template": "/organization/__organization_id__/",
+      "data-organizations-create-url": "/organizations/create/",
     });
 
     const app = mountOrganizationsPage(root);

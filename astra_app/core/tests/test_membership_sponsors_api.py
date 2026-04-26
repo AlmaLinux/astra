@@ -157,8 +157,8 @@ class MembershipSponsorsApiTests(TestCase):
         self.assertEqual(first["sponsorship_level"], "Sponsor Standard")
         self.assertTrue(first["is_expiring_soon"])
         self.assertIn("days left", first["expires_display"])
-        self.assertIn(reverse("organization-detail", args=[sponsor_org.pk]), first["organization"]["url"])
-        self.assertIn(reverse("user-profile", args=["repuser"]), first["representative"]["url"])
+        self.assertNotIn("url", first["organization"])
+        self.assertNotIn("url", first["representative"])
 
         self.assertEqual(second["organization"]["name"], "Fallback Org")
         self.assertEqual(second["representative"]["username"], "repfallback")
@@ -205,4 +205,6 @@ class MembershipSponsorsApiTests(TestCase):
         self.assertContains(response, 'data-membership-sponsors-api-url="/api/v1/membership/sponsors"')
         self.assertContains(response, 'data-membership-sponsors-page-size="25"')
         self.assertContains(response, 'data-membership-sponsors-initial-q="sponsor"')
+        self.assertContains(response, 'data-membership-sponsors-organization-detail-url-template="/organization/__organization_id__/"')
+        self.assertContains(response, 'data-membership-sponsors-user-profile-url-template="/user/__username__/"')
         self.assertContains(response, 'src="http://localhost:5173/src/entrypoints/membershipSponsors.ts"')

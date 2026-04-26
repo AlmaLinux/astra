@@ -8,7 +8,6 @@ export interface OrganizationCardItem {
   id: number;
   name: string;
   status: string;
-  detail_url: string;
   logo_url: string;
   link_to_detail: boolean;
   memberships: OrganizationMembershipBadge[];
@@ -39,13 +38,14 @@ export interface OrganizationsCardPayload {
 
 export interface OrganizationsResponse {
   my_organization: OrganizationCardItem | null;
-  my_organization_create_url: string | null;
   sponsor_card: OrganizationsCardPayload;
   mirror_card: OrganizationsCardPayload;
 }
 
 export interface OrganizationsBootstrap {
   apiUrl: string;
+  detailUrlTemplate: string;
+  createUrl: string;
 }
 
 export interface OrganizationsRouteState {
@@ -58,10 +58,12 @@ export interface OrganizationsRouteState {
 
 export function readOrganizationsBootstrap(root: HTMLElement): OrganizationsBootstrap | null {
   const apiUrl = String(root.dataset.organizationsApiUrl || "").trim();
-  if (!apiUrl) {
+  const detailUrlTemplate = String(root.dataset.organizationsDetailUrlTemplate || "").trim();
+  const createUrl = String(root.dataset.organizationsCreateUrl || "").trim();
+  if (!apiUrl || !detailUrlTemplate || !createUrl) {
     return null;
   }
-  return { apiUrl };
+  return { apiUrl, detailUrlTemplate, createUrl };
 }
 
 export function readOrganizationsRouteState(currentUrl: string): OrganizationsRouteState {

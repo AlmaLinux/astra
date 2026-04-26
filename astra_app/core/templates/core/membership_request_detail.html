@@ -2,7 +2,7 @@
 
 {% load django_vite %}
 
-{% block title %}Membership Request #{{ req.pk }}{% endblock %}
+{% block title %}{{ membership_request_detail_title }}{% endblock %}
 
 {% block extra_head %}
   {{ block.super }}
@@ -10,120 +10,33 @@
   {% vite_asset 'src/entrypoints/membershipRequestDetail.ts' %}
 {% endblock %}
 
-{% block header %}
-  <div class="d-flex align-items-center justify-content-between flex-wrap" style="gap: .5rem;">
-    <h1 class="m-0">Membership Request #{{ req.pk }}</h1>
-    <div class="d-flex align-items-center" style="gap: .5rem;">
-      {% if contact_url %}
-        <a href="{{ contact_url }}" class="btn btn-sm btn-outline-primary" title="Contact the requester">Contact</a>
-      {% endif %}
-      <a href="{% url 'membership-requests' %}" class="btn btn-sm btn-outline-secondary" title="Return to request list">Back to requests</a>
-    </div>
-  </div>
-{% endblock %}
+{% block header %}{% endblock %}
 
 {% block content %}
-  <div class="card">
-    <div class="card-body">
-      {% if embargoed_country_code %}
-        <div class="alert alert-warning" role="alert">
-          <strong>Compliance warning:</strong>
-          This user's declared country, {{ embargoed_country_label|default:embargoed_country_code }}, is on the list of embargoed countries.
-        </div>
-      {% endif %}
-
-      <dl class="row mb-0">
-        <dt class="col-sm-3">Status</dt>
-        <dd class="col-sm-9">{{ req.get_status_display }}</dd>
-
-        <dt class="col-sm-3">Requested at</dt>
-        <dd class="col-sm-9">{{ req.requested_at }}</dd>
-
-        {% if requested_by_username %}
-          <dt class="col-sm-3">Requested by</dt>
-          <dd class="col-sm-9">
-            <a href="{% url 'user-profile' requested_by_username %}">
-              {% if requested_by_full_name %}
-                {{ requested_by_full_name }} <span class="text-muted">({{ requested_by_username }})</span>
-              {% else %}
-                {{ requested_by_username }}
-              {% endif %}
-            </a>
-            {% if requested_by_deleted %}
-              <span class="text-muted">(deleted)</span>
-            {% endif %}
-          </dd>
-        {% endif %}
-
-        {% if req.is_organization_target or not requested_by_username or req.target_identifier != requested_by_username %}
-          <dt class="col-sm-3">Requested for</dt>
-          <dd class="col-sm-9">
-            {% include 'core/_membership_request_target_display.html' with req=req full_name=target_full_name target_deleted=target_deleted %}
-          </dd>
-        {% endif %}
-
-        <dt class="col-sm-3">Type</dt>
-        <dd class="col-sm-9">{{ req.membership_type.name }}</dd>
-
-        {% if req.decided_at %}
-          <dt class="col-sm-3">Decided at</dt>
-          <dd class="col-sm-9">{{ req.decided_at }}</dd>
-        {% endif %}
-
-        {% if req.decided_by_username %}
-          <dt class="col-sm-3">Decided by</dt>
-          <dd class="col-sm-9">{{ req.decided_by_username }}</dd>
-        {% endif %}
-      </dl>
-
-      {% if req.responses %}
-        <hr>
-        <h6 class="text-muted">Request responses</h6>
-        {% include 'core/_membership_request_responses.html' with request_obj=req organization=None as_details=False %}
-      {% endif %}
-
-      {% if membership_can_view %}
-        <hr>
-        <div
-          data-membership-request-notes-root
-          data-membership-request-id="{{ req.pk }}"
-          data-membership-request-notes-summary-url="{{ membership_request_notes_summary_url }}"
-          data-membership-request-notes-detail-url="{{ membership_request_notes_detail_url }}"
-          data-membership-request-notes-add-url="{{ membership_request_notes_add_url }}"
-          data-csrf-token="{{ csrf_token }}"
-          data-next-url="{{ request.get_full_path }}"
-          data-can-view="{% if membership_can_view %}true{% else %}false{% endif %}"
-          data-can-write="{% if membership_can_write %}true{% else %}false{% endif %}"
-          data-can-vote="{% if membership_can_vote %}true{% else %}false{% endif %}"
-        ></div>
-      {% endif %}
-
-      {% if req.status == 'pending' or req.status == 'on_hold' %}
-        <hr>
-        <div
-          data-membership-request-actions-root
-          data-membership-request-id="{{ req.pk }}"
-          data-membership-request-status="{{ req.status }}"
-          data-membership-request-membership-type-name="{{ req.membership_type.name }}"
-          data-membership-request-target="{{ membership_request_target_label }}"
-          data-membership-request-api-approve-url="{{ membership_request_api_approve_url }}"
-          data-membership-request-api-approve-on-hold-url="{{ membership_request_api_approve_on_hold_url }}"
-          data-membership-request-api-reject-url="{{ membership_request_api_reject_url }}"
-          data-membership-request-api-rfi-url="{{ membership_request_api_rfi_url }}"
-          data-membership-request-api-ignore-url="{{ membership_request_api_ignore_url }}"
-          data-membership-request-can-request-info="{% if membership_request_can_request_info %}true{% else %}false{% endif %}"
-          data-membership-request-show-on-hold-approve="{% if show_on_hold_approve %}true{% else %}false{% endif %}"
-          data-membership-request-csrf-token="{{ csrf_token }}"
-        ></div>
-      {% endif %}
-
-      {% if req.status == 'ignored' and membership_can_add %}
-        <hr>
-        <form method="post" action="{% url 'membership-request-reopen' req.pk %}">
-          {% csrf_token %}
-          <button type="submit" class="btn btn-sm btn-outline-secondary">Reopen</button>
-        </form>
-      {% endif %}
-    </div>
-  </div>
+  <div
+    data-membership-request-detail-root=""
+    data-membership-request-detail-api-url="{{ membership_request_detail_api_url }}"
+    data-membership-request-detail-csrf-token="{{ csrf_token }}"
+    data-membership-request-detail-page-title="{{ page_title }}"
+    data-membership-request-detail-back-link-url="{{ back_link_url }}"
+    data-membership-request-detail-back-link-label="{{ back_link_label }}"
+    data-membership-request-detail-user-profile-url-template="{{ user_profile_url_template }}"
+    data-membership-request-detail-organization-detail-url-template="{{ organization_detail_url_template }}"
+    data-membership-request-detail-contact-url="{{ contact_url }}"
+    data-membership-request-detail-reopen-url="{{ reopen_url }}"
+    data-membership-request-detail-note-summary-url="{{ note_summary_url }}"
+    data-membership-request-detail-note-detail-url="{{ note_detail_url }}"
+    data-membership-request-detail-note-add-url="{{ note_add_url }}"
+    data-membership-request-detail-note-next-url="{{ note_next_url }}"
+    data-membership-request-detail-notes-can-view="{{ notes_can_view|yesno:'true,false' }}"
+    data-membership-request-detail-notes-can-write="{{ notes_can_write|yesno:'true,false' }}"
+    data-membership-request-detail-notes-can-vote="{{ notes_can_vote|yesno:'true,false' }}"
+    data-membership-request-detail-approve-url="{{ approve_url }}"
+    data-membership-request-detail-approve-on-hold-url="{{ approve_on_hold_url }}"
+    data-membership-request-detail-reject-url="{{ reject_url }}"
+    data-membership-request-detail-rfi-url="{{ rfi_url }}"
+    data-membership-request-detail-ignore-url="{{ ignore_url }}"
+    data-membership-request-detail-rescind-url="{{ rescind_url }}"
+    data-membership-request-detail-form-action-url="{{ form_action_url }}"
+  ></div>
 {% endblock %}

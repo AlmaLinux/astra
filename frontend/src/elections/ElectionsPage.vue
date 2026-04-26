@@ -9,6 +9,7 @@ import {
   type ElectionsRouteState,
   type ElectionListItem,
 } from "./types";
+import { fillUrlTemplate } from "../shared/urlTemplates";
 
 const props = defineProps<{
   bootstrap: ElectionsBootstrap;
@@ -44,10 +45,10 @@ function syncUrl(pushState: boolean): void {
 }
 
 function electionHref(row: ElectionListItem): string {
-  if (row.status === "draft" && canManageElections.value && row.edit_url) {
-    return row.edit_url;
+  if (row.status === "draft" && canManageElections.value) {
+    return fillUrlTemplate(props.bootstrap.editUrlTemplate, "__election_id__", row.id);
   }
-  return row.detail_url;
+  return fillUrlTemplate(props.bootstrap.detailUrlTemplate, "__election_id__", row.id);
 }
 
 function formatWindow(row: ElectionListItem): string {
@@ -161,7 +162,7 @@ onMounted(async () => {
                   v-for="election in pastRows"
                   :key="election.id"
                   class="list-group-item list-group-item-action d-flex justify-content-between align-items-center"
-                  :href="election.detail_url"
+                  :href="electionHref(election)"
                 >
                   <div>
                     <div class="font-weight-bold">{{ election.name }}</div>

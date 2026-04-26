@@ -17,6 +17,8 @@
   <div
     data-organizations-root
     data-organizations-api-url="{% url 'api-organizations' %}"
+    data-organizations-detail-url-template="{{ organization_detail_url_template }}"
+    data-organizations-create-url="{{ organization_create_url }}"
   >
     <div class="text-muted">Loading organizations...</div>
   </div>

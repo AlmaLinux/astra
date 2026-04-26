@@ -52,6 +52,24 @@
     <div
       data-organization-detail-root
       data-organization-detail-api-url="{% url 'api-organization-detail' organization.pk %}"
+      data-organization-detail-membership-request-detail-template="{{ membership_request_detail_template }}"
+      data-organization-detail-membership-request-url="{{ membership_request_url }}"
+      data-organization-detail-sponsorship-set-expiry-url-template="{{ sponsorship_set_expiry_url_template }}"
+      data-organization-detail-sponsorship-terminate-url-template="{{ sponsorship_terminate_url_template }}"
+      data-organization-detail-csrf-token="{{ csrf_token }}"
+      data-organization-detail-next-url="{{ next_url }}"
+      data-organization-detail-expiry-min-date="{{ expiry_min_date }}"
+      data-organization-detail-user-profile-url-template="{{ user_profile_url_template }}"
+      data-organization-detail-send-mail-url-template="{{ send_mail_url_template }}"
+      {% if membership_notes %}
+        data-organization-detail-membership-notes-summary-url="{{ membership_notes.summary_url }}"
+        data-organization-detail-membership-notes-detail-url="{{ membership_notes.detail_url }}"
+        data-organization-detail-membership-notes-add-url="{{ membership_notes.add_url }}"
+        data-organization-detail-membership-notes-csrf-token="{{ membership_notes.csrf_token }}"
+        data-organization-detail-membership-notes-next-url="{{ membership_notes.next_url }}"
+        data-organization-detail-membership-notes-can-view="{% if membership_notes.can_view %}true{% else %}false{% endif %}"
+        data-organization-detail-membership-notes-can-write="{% if membership_notes.can_write %}true{% else %}false{% endif %}"
+      {% endif %}
     ></div>
   </div>
 

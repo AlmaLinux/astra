@@ -10,6 +10,17 @@ function flushPromises(): Promise<void> {
   });
 }
 
+function deferredResponse(): {
+  promise: Promise<Response>;
+  resolve: (response: Response) => void;
+} {
+  let resolve!: (response: Response) => void;
+  const promise = new Promise<Response>((innerResolve) => {
+    resolve = innerResolve;
+  });
+  return { promise, resolve };
+}
+
 const bootstrap: ElectionAuditBootstrap = {
   apiUrl: "/api/v1/elections/1/audit-log",
   summaryApiUrl: "/api/v1/elections/1/audit-summary",
@@ -125,6 +136,64 @@ describe("ElectionAuditLogPage", () => {
     expect(wrapper.text()).toContain("12 ballots submitted.");
     expect(wrapper.find('a[href="/elections/1/"]').exists()).toBe(true);
     expect(wrapper.find('a[href="/user/alice/"]').exists()).toBe(true);
+  });
+
+  it("renders the timeline before the summary request finishes", async () => {
+    const summaryDeferred = deferredResponse();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string | URL | Request) => {
+        if (String(url).includes("audit-summary")) {
+          return summaryDeferred.promise;
+        }
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              audit_log: {
+                items: [
+                  {
+                    timestamp: "2026-04-11T10:15:00+00:00",
+                    event_type: "tally_completed",
+                    title: "Tally completed",
+                    icon: "fas fa-flag-checkered",
+                    icon_bg: "bg-success",
+                    anchor: "jump-tally-completed",
+                    payload: {},
+                    elected_users: [{ username: "alice", full_name: "Alice Example" }],
+                  },
+                ],
+                pagination: {
+                  count: 1,
+                  page: 1,
+                  num_pages: 1,
+                  page_numbers: [1],
+                  has_previous: false,
+                  has_next: false,
+                  previous_page_number: null,
+                  next_page_number: null,
+                  start_index: 1,
+                  end_index: 1,
+                },
+                jump_links: [{ anchor: "jump-tally-completed", label: "Results" }],
+              },
+            }),
+          ),
+        );
+      }),
+    );
+
+    const wrapper = mount(ElectionAuditLogPage, {
+      props: { bootstrap },
+      attachTo: document.body,
+    });
+
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Board election");
+    expect(wrapper.text()).toContain("Timeline");
+    expect(wrapper.text()).toContain("Tally completed");
+    expect(wrapper.text()).not.toContain("Loading audit log...");
   });
 
   it("matches the legacy audit-log navigation, summary, and event detail UI", async () => {
@@ -328,31 +397,9 @@ describe("ElectionAuditLogPage", () => {
     const scrollIntoView = vi.fn();
     vi.stubGlobal(
       "fetch",
-      vi.fn()
-        .mockResolvedValueOnce(
-          new Response(
-            JSON.stringify({
-              audit_log: {
-                items: [
-                  {
-                    timestamp: "2026-04-11T10:15:00+00:00",
-                    event_type: "tally_completed",
-                    title: "Tally completed",
-                    icon: "fas fa-flag-checkered",
-                    icon_bg: "bg-success",
-                    anchor: "jump-tally-completed",
-                    payload: {},
-                    elected_users: [],
-                  },
-                ],
-                pagination: { count: 1, page: 1, num_pages: 1, page_numbers: [1], has_previous: false, has_next: false, previous_page_number: null, next_page_number: null, start_index: 1, end_index: 1 },
-                jump_links: [{ anchor: "jump-tally-completed", label: "Results" }],
-              },
-            }),
-          ),
-        )
-        .mockResolvedValueOnce(
-          new Response(
+      vi.fn(async (url: string | URL | Request) => {
+        if (String(url).includes("audit-summary")) {
+          return new Response(
             JSON.stringify({
               summary: {
                 ballots_cast: 0,
@@ -365,8 +412,30 @@ describe("ElectionAuditLogPage", () => {
                 sankey_eliminated_nodes: [],
               },
             }),
-          ),
-        ),
+          );
+        }
+
+        return new Response(
+          JSON.stringify({
+            audit_log: {
+              items: [
+                {
+                  timestamp: "2026-04-11T10:15:00+00:00",
+                  event_type: "tally_completed",
+                  title: "Tally completed",
+                  icon: "fas fa-flag-checkered",
+                  icon_bg: "bg-success",
+                  anchor: "jump-tally-completed",
+                  payload: {},
+                  elected_users: [],
+                },
+              ],
+              pagination: { count: 1, page: 1, num_pages: 1, page_numbers: [1], has_previous: false, has_next: false, previous_page_number: null, next_page_number: null, start_index: 1, end_index: 1 },
+              jump_links: [{ anchor: "jump-tally-completed", label: "Results" }],
+            },
+          }),
+        );
+      }),
     );
 
     const wrapper = mount(ElectionAuditLogPage, {

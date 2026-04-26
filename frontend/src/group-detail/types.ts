@@ -33,8 +33,6 @@ export type GroupLeaderItem = GroupLeaderGroupItem | GroupLeaderUserItem;
 export interface GroupAgreementItem {
   cn: string;
   signed: boolean;
-  detail_url: string;
-  list_url: string;
 }
 
 export interface GroupDetailPagination {
@@ -75,7 +73,6 @@ export interface GroupInfoPayload {
   is_sponsor: boolean;
   required_agreements: GroupAgreementItem[];
   unsigned_usernames: string[];
-  edit_url: string;
 }
 
 export interface GroupInfoResponse {
@@ -96,6 +93,10 @@ export interface GroupDetailBootstrap {
   membersApiUrl: string;
   actionUrl: string;
   currentUsername: string;
+  detailUrlTemplate: string;
+  editUrlTemplate: string;
+  agreementDetailUrlTemplate: string;
+  agreementsListUrl: string;
 }
 
 export interface GroupDetailRouteState {
@@ -111,10 +112,33 @@ export function readGroupDetailBootstrap(root: HTMLElement): GroupDetailBootstra
   const membersApiUrl = String(root.dataset.groupDetailMembersApiUrl || "").trim();
   const actionUrl = String(root.dataset.groupDetailActionUrl || "").trim();
   const currentUsername = String(root.dataset.groupDetailCurrentUsername || "").trim();
-  if (!infoApiUrl || !leadersApiUrl || !membersApiUrl || !actionUrl) {
+  const detailUrlTemplate = String(root.dataset.groupDetailUrlTemplate || "").trim();
+  const editUrlTemplate = String(root.dataset.groupDetailEditUrlTemplate || "").trim();
+  const agreementDetailUrlTemplate = String(root.dataset.groupDetailAgreementDetailUrlTemplate || "").trim();
+  const agreementsListUrl = String(root.dataset.groupDetailAgreementsListUrl || "").trim();
+  if (
+    !infoApiUrl
+    || !leadersApiUrl
+    || !membersApiUrl
+    || !actionUrl
+    || !detailUrlTemplate
+    || !editUrlTemplate
+    || !agreementDetailUrlTemplate
+    || !agreementsListUrl
+  ) {
     return null;
   }
-  return { infoApiUrl, leadersApiUrl, membersApiUrl, actionUrl, currentUsername };
+  return {
+    infoApiUrl,
+    leadersApiUrl,
+    membersApiUrl,
+    actionUrl,
+    currentUsername,
+    detailUrlTemplate,
+    editUrlTemplate,
+    agreementDetailUrlTemplate,
+    agreementsListUrl,
+  };
 }
 
 export function readGroupDetailRouteState(currentUrl: string): GroupDetailRouteState {

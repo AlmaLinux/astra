@@ -16,6 +16,9 @@ const bootstrap: MembershipAuditLogBootstrap = {
   initialQ: "",
   initialUsername: "",
   initialOrganization: "",
+  userProfileUrlTemplate: "/user/__username__/",
+  organizationDetailUrlTemplate: "/organization/__organization_id__/",
+  membershipRequestDetailUrlTemplate: "/membership/request/__request_id__/",
 };
 
 describe("MembershipAuditLogPage", () => {
@@ -38,10 +41,10 @@ describe("MembershipAuditLogPage", () => {
               actor_username: "reviewer",
               target: {
                 kind: "user",
+                id: null,
                 label: "alice",
                 secondary_label: "",
                 deleted: false,
-                url: "/user/alice/",
               },
               membership_name: "Individual",
               action: "requested",
@@ -49,7 +52,6 @@ describe("MembershipAuditLogPage", () => {
               expires_display: "",
               request: {
                 request_id: 7,
-                url: "/membership/request/7/",
                 responses: [
                   {
                     question: "Contributions",

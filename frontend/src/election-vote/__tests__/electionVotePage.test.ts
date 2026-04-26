@@ -12,6 +12,8 @@ function flushPromises(): Promise<void> {
 
 const bootstrap: ElectionVoteBootstrap = {
   apiUrl: "/api/v1/elections/1/vote",
+  detailUrlTemplate: "/elections/__election_id__/",
+  verifyUrl: "/elections/ballot/verify/",
 };
 
 describe("ElectionVotePage", () => {
@@ -35,9 +37,7 @@ describe("ElectionVotePage", () => {
               name: "Board election",
               start_datetime: "2026-04-01T10:00:00+00:00",
               end_datetime: "2026-04-10T10:00:00+00:00",
-              detail_url: "/elections/1/",
               submit_url: "/api/v1/elections/1/vote/submit",
-              verify_url: "/api/v1/elections/ballot/verify",
               can_submit_vote: true,
               voter_votes: 2,
             },
@@ -95,9 +95,7 @@ describe("ElectionVotePage", () => {
               name: "Board election",
               start_datetime: "2026-04-01T10:00:00+00:00",
               end_datetime: "2026-04-10T10:00:00+00:00",
-              detail_url: "/elections/1/",
               submit_url: "/api/v1/elections/1/vote/submit",
-              verify_url: "/api/v1/elections/ballot/verify",
               can_submit_vote: true,
               voter_votes: 1,
             },
@@ -150,9 +148,7 @@ describe("ElectionVotePage", () => {
               name: "Board election",
               start_datetime: "2026-04-01T10:00:00+00:00",
               end_datetime: "2026-04-10T10:00:00+00:00",
-              detail_url: "/elections/1/",
               submit_url: "/api/v1/elections/1/vote/submit",
-              verify_url: "/api/v1/elections/ballot/verify",
               can_submit_vote: true,
               voter_votes: 2,
             },
@@ -189,9 +185,7 @@ describe("ElectionVotePage", () => {
               name: "Board election",
               start_datetime: "2026-04-01T10:00:00+00:00",
               end_datetime: "2026-04-10T10:00:00+00:00",
-              detail_url: "/elections/1/",
               submit_url: "/api/v1/elections/1/vote/submit",
-              verify_url: "/api/v1/elections/ballot/verify",
               can_submit_vote: true,
               voter_votes: 1,
             },

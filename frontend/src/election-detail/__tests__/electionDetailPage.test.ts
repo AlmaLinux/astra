@@ -77,14 +77,12 @@ describe("ElectionDetailSummaryPage", () => {
                 username: "alice",
                 has_user: true,
                 full_name: "Alice Example",
-                profile_url: "/user/alice/",
                 avatar_url: "/avatars/alice.png",
                 description: "Experienced candidate",
                 url: "https://example.org/alice",
                 nominated_by: "bob",
                 nominator_display_name: "Bob Example",
                 nominator_profile_username: "bob",
-                nominator_profile_url: "/user/bob/",
               },
             ],
             pagination: {
@@ -124,6 +122,7 @@ describe("ElectionDetailSummaryPage", () => {
     expect(wrapper.text()).toContain("Empty seats: 1");
     expect(wrapper.text()).toContain("Ballots submitted over time");
     expect(wrapper.find('a[href="/user/alice/"]').exists()).toBe(true);
+    expect(wrapper.find('a[href="/user/bob/"]').exists()).toBe(true);
     expect(wrapper.find("canvas").exists()).toBe(true);
     expect(chartMock).toHaveBeenCalledOnce();
     expect(wrapper.find("table").exists()).toBe(false);

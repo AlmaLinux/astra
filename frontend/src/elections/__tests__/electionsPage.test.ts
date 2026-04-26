@@ -12,6 +12,8 @@ function flushPromises(): Promise<void> {
 
 const bootstrap: ElectionsBootstrap = {
   apiUrl: "/api/v1/elections",
+  detailUrlTemplate: "/elections/__election_id__/",
+  editUrlTemplate: "/elections/__election_id__/edit/",
 };
 
 describe("ElectionsPage", () => {
@@ -32,8 +34,6 @@ describe("ElectionsPage", () => {
               status: "open",
               start_datetime: "2026-04-01T10:00:00+00:00",
               end_datetime: "2026-04-10T10:00:00+00:00",
-              detail_url: "/elections/1/",
-              edit_url: "/elections/1/edit/",
             },
             {
               id: 2,
@@ -42,8 +42,6 @@ describe("ElectionsPage", () => {
               status: "tallied",
               start_datetime: "2026-03-01T10:00:00+00:00",
               end_datetime: "2026-03-05T10:00:00+00:00",
-              detail_url: "/elections/2/",
-              edit_url: null,
             },
           ],
           pagination: {
@@ -100,8 +98,6 @@ describe("ElectionsPage", () => {
                 status: "draft",
                 start_datetime: "2026-04-01T10:00:00+00:00",
                 end_datetime: "2026-04-10T10:00:00+00:00",
-                detail_url: "/elections/9/",
-                edit_url: "/elections/9/edit/",
               },
             ],
             pagination: {

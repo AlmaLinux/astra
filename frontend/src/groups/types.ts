@@ -2,7 +2,6 @@ export interface GroupListItem {
   cn: string;
   description: string;
   member_count: number;
-  detail_url: string;
 }
 
 export interface GroupsPagination {
@@ -28,6 +27,7 @@ export interface GroupsResponse {
 
 export interface GroupsBootstrap {
   apiUrl: string;
+  detailUrlTemplate: string;
 }
 
 export interface GroupsRouteState {
@@ -38,10 +38,11 @@ export interface GroupsRouteState {
 
 export function readGroupsBootstrap(root: HTMLElement): GroupsBootstrap | null {
   const apiUrl = String(root.dataset.groupsApiUrl || "").trim();
-  if (!apiUrl) {
+  const detailUrlTemplate = String(root.dataset.groupsDetailUrlTemplate || "").trim();
+  if (!apiUrl || !detailUrlTemplate) {
     return null;
   }
-  return { apiUrl };
+  return { apiUrl, detailUrlTemplate };
 }
 
 export function readGroupsRouteState(currentUrl: string): GroupsRouteState {

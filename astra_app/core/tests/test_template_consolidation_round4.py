@@ -17,19 +17,18 @@ class Round4TemplateConsolidationTests(SimpleTestCase):
 
         self.assertNotIn("{% elif organization %}", source)
 
-    def test_membership_request_detail_uses_vue_actions_root_contract(self) -> None:
+    def test_membership_request_detail_uses_vue_thin_shell_contract(self) -> None:
         source = self._template_source("membership_request_detail.html")
 
-        self.assertIn("data-membership-request-actions-root", source)
-        self.assertNotIn("_membership_request_actions.html", source)
+        self.assertIn("data-membership-request-detail-root", source)
+        self.assertIn("data-membership-request-detail-api-url", source)
+        self.assertNotIn("data-membership-request-actions-root", source)
 
     def test_membership_request_target_display_is_shared_include(self) -> None:
         requester_cell_source = self._template_source("_membership_request_requester_cell.html")
-        detail_source = self._template_source("membership_request_detail.html")
 
         include_stmt = "{% include 'core/_membership_request_target_display.html'"
         self.assertIn(include_stmt, requester_cell_source)
-        self.assertIn(include_stmt, detail_source)
 
     def test_membership_request_detail_does_not_include_shared_modals_partial(self) -> None:
         source = self._template_source("membership_request_detail.html")

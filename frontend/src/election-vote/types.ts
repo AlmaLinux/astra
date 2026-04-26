@@ -16,9 +16,7 @@ export interface ElectionVotePayload {
     name: string;
     start_datetime: string;
     end_datetime: string;
-    detail_url: string;
     submit_url: string;
-    verify_url: string;
     can_submit_vote: boolean;
     voter_votes: number | null;
   };
@@ -28,6 +26,8 @@ export interface ElectionVotePayload {
 
 export interface ElectionVoteBootstrap {
   apiUrl: string;
+  detailUrlTemplate: string;
+  verifyUrl: string;
 }
 
 export interface VoteSubmitSuccess {
@@ -47,9 +47,11 @@ export interface VoteSubmitError {
 
 export function readElectionVoteBootstrap(root: HTMLElement): ElectionVoteBootstrap | null {
   const apiUrl = root.dataset.electionVoteApiUrl?.trim() ?? "";
-  if (apiUrl === "") {
+  const detailUrlTemplate = root.dataset.electionVoteDetailUrlTemplate?.trim() ?? "";
+  const verifyUrl = root.dataset.electionVoteVerifyUrl?.trim() ?? "";
+  if (apiUrl === "" || detailUrlTemplate === "" || verifyUrl === "") {
     return null;
   }
 
-  return { apiUrl };
+  return { apiUrl, detailUrlTemplate, verifyUrl };
 }

@@ -25,5 +25,7 @@
   <div
     data-elections-root
     data-elections-api-url="{% url 'api-elections' %}"
+    data-elections-detail-url-template="{{ election_detail_url_template }}"
+    data-elections-edit-url-template="{{ election_edit_url_template }}"
   ></div>
 {% endblock %}

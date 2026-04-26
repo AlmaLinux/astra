@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 
 import TableBase from "../../shared/components/TableBase.vue";
+import { fillUrlTemplate } from "../../shared/urlTemplates";
 import type { AuditLogRow } from "../types";
 
 const props = defineProps<{
@@ -13,6 +14,9 @@ const props = defineProps<{
   q: string;
   isLoading: boolean;
   error: string;
+  userProfileUrlTemplate: string;
+  organizationDetailUrlTemplate: string;
+  membershipRequestDetailUrlTemplate: string;
   buildPageHref: (pageNumber: number) => string;
 }>();
 
@@ -48,6 +52,26 @@ function submitSearch(): void {
 function clearSearch(): void {
   searchText.value = "";
   submitSearch();
+}
+
+function targetHref(row: AuditLogRow): string {
+  if (row.target.deleted) {
+    return "";
+  }
+  if (row.target.kind === "user") {
+    return fillUrlTemplate(props.userProfileUrlTemplate, "__username__", row.target.label);
+  }
+  if (row.target.id === null) {
+    return "";
+  }
+  return fillUrlTemplate(props.organizationDetailUrlTemplate, "__organization_id__", row.target.id);
+}
+
+function requestHref(row: AuditLogRow): string {
+  if (!row.request) {
+    return "";
+  }
+  return fillUrlTemplate(props.membershipRequestDetailUrlTemplate, "__request_id__", row.request.request_id);
 }
 </script>
 
@@ -101,14 +125,14 @@ function clearSearch(): void {
     <template #row-cells="{ row }">
       <td class="text-muted text-nowrap" style="width: 1%;">
         <div v-if="asRow(row).request">
-          <a :href="asRow(row).request?.url">Request #{{ asRow(row).request?.request_id }}</a>
+          <a :href="requestHref(asRow(row))">Request #{{ asRow(row).request?.request_id }}</a>
         </div>
         <div>{{ asRow(row).created_at_display }}</div>
       </td>
       <td>{{ asRow(row).actor_username }}</td>
       <td>
-        <template v-if="asRow(row).target.url">
-          <a :href="asRow(row).target.url">{{ asRow(row).target.label }}</a>
+        <template v-if="targetHref(asRow(row))">
+          <a :href="targetHref(asRow(row))">{{ asRow(row).target.label }}</a>
         </template>
         <template v-else>
           <span>{{ asRow(row).target.label }}</span>

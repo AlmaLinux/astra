@@ -69,7 +69,7 @@ class MembershipRequestCanonicalDetailUrlTests(TestCase):
             },
         )
 
-        def _freeipa_get_side_effect(username: str) -> FreeIPAUser | None:
+        def _freeipa_get_side_effect(username: str, **_kwargs) -> FreeIPAUser | None:
             return {
                 "reviewer": reviewer,
                 "alice": alice,
@@ -80,8 +80,8 @@ class MembershipRequestCanonicalDetailUrlTests(TestCase):
             resp = self.client.get(f"/membership/request/{req.pk}/")
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, reverse("membership-requests"))
-        self.assertContains(resp, reverse("membership-request-approve", args=[req.pk]))
+        self.assertContains(resp, 'data-membership-request-detail-root=""')
+        self.assertContains(resp, reverse("api-membership-request-detail", args=[req.pk]))
 
     def test_legacy_detail_redirects_to_canonical_for_committee(self) -> None:
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
@@ -95,7 +95,7 @@ class MembershipRequestCanonicalDetailUrlTests(TestCase):
             },
         )
 
-        def _freeipa_get_side_effect(username: str) -> FreeIPAUser | None:
+        def _freeipa_get_side_effect(username: str, **_kwargs) -> FreeIPAUser | None:
             return {
                 "reviewer": reviewer,
             }.get(username)
@@ -119,7 +119,7 @@ class MembershipRequestCanonicalDetailUrlTests(TestCase):
             },
         )
 
-        def _freeipa_get_side_effect(username: str) -> FreeIPAUser | None:
+        def _freeipa_get_side_effect(username: str, **_kwargs) -> FreeIPAUser | None:
             return {
                 "bob": bob,
             }.get(username)

@@ -12,6 +12,7 @@ from core.models import AuditLogEntry, Ballot, Candidate, Election, FreeIPAPermi
 from core.permissions import ASTRA_ADD_ELECTION
 from core.tests.ballot_chain import compute_chain_hash
 from core.tokens import election_genesis_chain_hash
+from core.views_elections._helpers import _elected_candidate_display
 
 
 class ElectionAuditLogPageTests(TestCase):
@@ -285,6 +286,20 @@ class ElectionAuditLogPageTests(TestCase):
 
         self.assertTrue(candidate_row["is_elected"])
         self.assertFalse(candidate_row["is_eliminated"])
+        self.assertNotIn("candidate_profile_url", candidate_row)
+
+    def test_elected_candidate_display_returns_only_identity_fields(self) -> None:
+        users_by_username = {
+            "alice": FreeIPAUser("alice", {"uid": ["alice"], "cn": ["Alice Candidate"], "memberof_group": []})
+        }
+
+        winners = _elected_candidate_display(
+            [1],
+            candidate_username_by_id={1: "alice"},
+            users_by_username=users_by_username,
+        )
+
+        self.assertEqual(winners, [{"username": "alice", "full_name": "Alice Candidate"}])
 
     def test_audit_log_page_renders_tally_sankey_chart(self) -> None:
         self._login_as_freeipa_user("viewer")

@@ -69,6 +69,11 @@ from core.permissions import (
     membership_review_permissions,
 )
 from core.templatetags.core_dict import membership_tier_class
+from core.views_users import (
+    _format_profile_membership_date,
+    _serialize_user_profile_membership_type,
+    _serialize_user_profile_pending_badge,
+)
 from core.views_utils import (
     _normalize_str,
     block_action_without_coc,
@@ -551,10 +556,9 @@ def _build_organizations_page_context(request: HttpRequest) -> dict[str, object]
         "sponsor_grid_items": sponsor_card_context["grid_items"],
         "mirror_grid_items": mirror_card_context["grid_items"],
         "my_organization": my_organization,
-        "my_organization_create_url": (
-            reverse("organization-create")
-            if username and my_organization is None
-            else None
+        "organization_create_url": reverse("organization-create"),
+        "organization_detail_url_template": reverse("organization-detail", args=[123456789]).replace(
+            "123456789", "__organization_id__"
         ),
         "q_sponsor": sponsor_card_context["q"],
         "q_mirror": mirror_card_context["q"],
@@ -609,7 +613,6 @@ def _serialize_organization_card_item(
         "id": organization.pk,
         "name": organization.name,
         "status": organization.status,
-        "detail_url": reverse("organization-detail", args=[organization.pk]),
         "logo_url": logo_url,
         "link_to_detail": bool(grid_item.get("link_to_detail", True)),
         "memberships": [_serialize_organization_membership_badge(membership) for membership in memberships],
@@ -670,7 +673,6 @@ def organizations_api(request: HttpRequest) -> JsonResponse:
             "id": my_organization.pk,
             "name": my_organization.name,
             "status": my_organization.status,
-            "detail_url": reverse("organization-detail", args=[my_organization.pk]),
             "logo_url": my_organization.logo.url if my_organization.logo else "",
             "link_to_detail": True,
             "memberships": [
@@ -681,7 +683,6 @@ def organizations_api(request: HttpRequest) -> JsonResponse:
 
     payload = {
         "my_organization": my_organization_payload,
-        "my_organization_create_url": context["my_organization_create_url"],
         "sponsor_card": _serialize_organizations_card(
             title="AlmaLinux Sponsor Members",
             q=cast(str, context["q_sponsor"]),
@@ -774,11 +775,7 @@ def _build_organization_detail_page_context(
                 )
                 and not has_pending_request_in_category
             ),
-            "tier_change_url": (
-                reverse("organization-membership-request", kwargs={"organization_id": organization.pk})
-                + "?"
-                + urlencode({"membership_type": suggested_tier_code})
-            ),
+            "tier_change_membership_type_code": suggested_tier_code,
             "request_id": sponsorship_request_id_by_type.get(sponsorship.membership_type_id),
         })
 
@@ -854,52 +851,60 @@ def _build_organization_detail_page_context(
     }
 
 
-def _serialize_organization_detail_payload(context: dict[str, object], request: HttpRequest) -> dict[str, object]:
+def _serialize_organization_detail_payload(context: dict[str, object]) -> dict[str, object]:
     organization = context["organization"]
     if not isinstance(organization, Organization):
         raise TypeError("Expected organization in detail context")
 
     sponsorships = cast(list[Membership], context["sponsorships"])
+    sponsorship_entries = cast(list[dict[str, object]], context["sponsorship_entries"])
+    pending_requests = cast(list[dict[str, object]], context["pending_requests"])
     representative_username = cast(str, context["representative_username"])
     representative_full_name = cast(str, context["representative_full_name"])
     contact_display_groups = cast(list[dict[str, object]], context["contact_display_groups"])
-    review_permissions = membership_review_permissions(request.user)
-    membership_can_view = bool(review_permissions["membership_can_view"])
-    membership_can_write = bool(
-        review_permissions["membership_can_add"]
-        or review_permissions["membership_can_change"]
-        or review_permissions["membership_can_delete"]
-    )
-    notes = None
-    if membership_can_view:
-        target_params = urlencode({"target_type": "org", "target": str(organization.pk)})
-        notes = {
-            "summaryUrl": f"{reverse('api-membership-notes-aggregate-summary')}?{target_params}",
-            "detailUrl": f"{reverse('api-membership-notes-aggregate')}?{target_params}",
-            "addUrl": reverse("api-membership-notes-aggregate-add"),
-            "csrfToken": get_token(request),
-            "nextUrl": request.get_full_path(),
-            "canView": membership_can_view,
-            "canWrite": membership_can_write,
-            "targetType": "org",
-            "target": str(organization.pk),
-        }
-
+    is_representative = bool(context["is_representative"])
     return {
         "organization": {
             "id": organization.pk,
             "name": organization.name,
             "status": organization.status,
             "website": organization.website,
-            "detail_url": reverse("organization-detail", args=[organization.pk]),
             "logo_url": organization.logo.url if organization.logo else "",
             "memberships": [
                 {
                     "label": membership.membership_type.name,
                     "class_name": membership_tier_class(membership.membership_type.code),
                     "request_url": None,
+                    "description": membership.membership_type.description,
+                    "member_since_label": _format_profile_membership_date(
+                        membership.created_at,
+                        timezone_name="",
+                        fmt="F Y",
+                    ),
+                    "expires_label": _format_profile_membership_date(
+                        membership.expires_at,
+                        timezone_name="",
+                        fmt="M j, Y",
+                    ),
+                    "expires_tone": "danger" if bool(entry["is_expiring_soon"]) else "muted",
                 }
-                for membership in sponsorships
+                for membership, entry in zip(sponsorships, sponsorship_entries, strict=True)
+            ],
+            "pending_memberships": [
+                {
+                    "request_id": cast(int, entry["request_id"]),
+                    "status": str(entry["status"]),
+                    "membership_type": _serialize_user_profile_membership_type(cast(MembershipType, entry["membership_type"])),
+                    "badge_label": _serialize_user_profile_pending_badge(
+                        str(entry["status"]),
+                        is_owner=is_representative,
+                    )["label"],
+                    "badge_class_name": _serialize_user_profile_pending_badge(
+                        str(entry["status"]),
+                        is_owner=is_representative,
+                    )["className"],
+                }
+                for entry in pending_requests
             ],
             "representative": {
                 "username": representative_username,
@@ -913,8 +918,48 @@ def _serialize_organization_detail_payload(context: dict[str, object], request: 
                 "postal_code": organization.postal_code,
                 "country_code": organization.country_code,
             },
-            "notes": notes,
         },
+    }
+
+
+def _serialize_organization_detail_membership_entry(
+    entry: dict[str, object],
+    *,
+    can_request_membership: bool,
+    can_manage: bool,
+) -> dict[str, object]:
+    sponsorship = cast(Membership, entry["sponsorship"])
+    is_expiring_soon = bool(entry["is_expiring_soon"])
+    expires_label = _format_profile_membership_date(
+        sponsorship.expires_at,
+        timezone_name="",
+        fmt="M j, Y",
+    )
+    request_id = entry["request_id"]
+    return {
+        "label": sponsorship.membership_type.name,
+        "class_name": membership_tier_class(sponsorship.membership_type.code),
+        "request_url": None,
+        "request_id": cast(int, request_id) if request_id else None,
+        "membership_type": _serialize_user_profile_membership_type(sponsorship.membership_type),
+        "description": sponsorship.membership_type.description,
+        "member_since_label": _format_profile_membership_date(
+            sponsorship.created_at,
+            timezone_name="",
+            fmt="F Y",
+        ),
+        "expires_on": _format_profile_membership_date(
+            sponsorship.expires_at,
+            timezone_name="UTC",
+            fmt="Y-m-d",
+        ),
+        "expires_label": expires_label,
+        "expires_tone": "danger" if is_expiring_soon else "muted",
+        "can_request_tier_change": bool(can_request_membership and entry["can_request_tier_change"]),
+        "tier_change_membership_type_code": str(entry["tier_change_membership_type_code"])
+        if bool(can_request_membership and entry["can_request_tier_change"])
+        else "",
+        "can_manage_expiration": can_manage,
     }
 
 
@@ -923,7 +968,19 @@ def organization_detail_api(request: HttpRequest, organization_id: int) -> JsonR
     organization = get_object_or_404(Organization, pk=organization_id)
     _require_organization_access(request, organization)
     context = _build_organization_detail_page_context(request, organization=organization)
-    return JsonResponse(_serialize_organization_detail_payload(context, request))
+    review_permissions = membership_review_permissions(request.user)
+    can_manage = bool(review_permissions["membership_can_change"] and review_permissions["membership_can_delete"])
+    payload = _serialize_organization_detail_payload(context)
+    organization_payload = cast(dict[str, object], payload["organization"])
+    organization_payload["memberships"] = [
+        _serialize_organization_detail_membership_entry(
+            entry,
+            can_request_membership=bool(context["can_request_membership"]),
+            can_manage=can_manage,
+        )
+        for entry in cast(list[dict[str, object]], context["sponsorship_entries"])
+    ]
+    return JsonResponse(payload)
 
 
 def organization_create(request: HttpRequest) -> HttpResponse:
@@ -1065,7 +1122,28 @@ def organization_representatives_search(request: HttpRequest) -> HttpResponse:
 def organization_detail(request: HttpRequest, organization_id: int) -> HttpResponse:
     organization = get_object_or_404(Organization, pk=organization_id)
     _require_organization_access(request, organization)
+    membership_request_id_sentinel = 123456789
+    membership_type_code_sentinel = "__membership_type_code__sentinel__"
+    username_sentinel = "__username__sentinel__"
+    email_sentinel = "__email__"
     is_representative = _is_representative(request, organization)
+    review_permissions = membership_review_permissions(request.user)
+    membership_notes = None
+    if review_permissions["membership_can_view"]:
+        target_params = urlencode({"target_type": "org", "target": str(organization.pk)})
+        membership_notes = {
+            "summary_url": f"{reverse('api-membership-notes-aggregate-summary')}?{target_params}",
+            "detail_url": f"{reverse('api-membership-notes-aggregate')}?{target_params}",
+            "add_url": reverse("api-membership-notes-aggregate-add"),
+            "csrf_token": get_token(request),
+            "next_url": request.get_full_path(),
+            "can_view": True,
+            "can_write": bool(
+                review_permissions["membership_can_add"]
+                or review_permissions["membership_can_change"]
+                or review_permissions["membership_can_delete"]
+            ),
+        }
     can_send_claim_invitation = False
     send_claim_invitation_url = ""
     if organization.status == Organization.Status.unclaimed:
@@ -1095,6 +1173,28 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
             "is_representative": is_representative,
             "can_send_claim_invitation": can_send_claim_invitation,
             "send_claim_invitation_url": send_claim_invitation_url,
+            "membership_request_detail_template": reverse(
+                "membership-request-detail",
+                args=[membership_request_id_sentinel],
+            ).replace(str(membership_request_id_sentinel), "__request_id__"),
+            "membership_request_url": reverse("organization-membership-request", args=[organization.pk]),
+            "sponsorship_set_expiry_url_template": reverse(
+                "organization-sponsorship-set-expiry",
+                args=[organization.pk, membership_type_code_sentinel],
+            ).replace(membership_type_code_sentinel, "__membership_type_code__"),
+            "sponsorship_terminate_url_template": reverse(
+                "organization-sponsorship-terminate",
+                args=[organization.pk, membership_type_code_sentinel],
+            ).replace(membership_type_code_sentinel, "__membership_type_code__"),
+            "csrf_token": get_token(request),
+            "next_url": reverse("organization-detail", args=[organization.pk]),
+            "user_profile_url_template": reverse("user-profile", args=[username_sentinel]).replace(
+                username_sentinel,
+                "__username__",
+            ),
+            "send_mail_url_template": f"{reverse('send-mail')}?type=manual&to={email_sentinel}",
+            "expiry_min_date": timezone.now().date().isoformat(),
+            "membership_notes": membership_notes,
         },
     )
 

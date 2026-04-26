@@ -48,10 +48,10 @@ const submitLabel = computed(() => {
   return "Submit vote";
 });
 const verifyReceiptHref = computed(() => {
-  if (election.value === null || ballotHash.value === "") {
-    return election.value?.verify_url ?? "#";
+  if (ballotHash.value === "") {
+    return props.bootstrap.verifyUrl;
   }
-  return `${election.value.verify_url}?receipt=${encodeURIComponent(ballotHash.value)}`;
+  return `${props.bootstrap.verifyUrl}?receipt=${encodeURIComponent(ballotHash.value)}`;
 });
 
 function formatWindow(rawDateTime: string): string {
@@ -286,7 +286,7 @@ onMounted(async () => {
                 Note: Election administrators may extend the end date if quorum is not reached.
               </div>
 
-              <form id="election-vote-form" method="post" :action="election.submit_url" :data-verify-url="election.verify_url" @keydown.enter="validateRanking" @submit.prevent="submitVote">
+              <form id="election-vote-form" method="post" :action="election.submit_url" :data-verify-url="props.bootstrap.verifyUrl" @keydown.enter="validateRanking" @submit.prevent="submitVote">
               <div class="form-group">
                 <label for="election-credential">Voting credential</label>
                 <input

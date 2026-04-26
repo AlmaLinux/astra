@@ -32,6 +32,7 @@ describe("MembershipNotesCard", () => {
         summaryUrl: "/api/v1/membership/notes/15/summary",
         detailUrl: "/api/v1/membership/notes/15",
         addUrl: "/membership/requests/15/notes/add/",
+        requestDetailTemplate: "/membership/request/__request_id__/",
         csrfToken: "csrf-token",
         nextUrl: "/membership/requests/",
         canView: true,
@@ -104,6 +105,7 @@ describe("MembershipNotesCard", () => {
         summaryUrl: "/api/v1/membership/notes/10/summary",
         detailUrl: "/api/v1/membership/notes/10",
         addUrl: "/membership/requests/10/notes/add/",
+        requestDetailTemplate: "/membership/request/__request_id__/",
         csrfToken: "csrf-token",
         nextUrl: "/membership/requests/",
         canView: true,
@@ -182,6 +184,7 @@ describe("MembershipNotesCard", () => {
         summaryUrl: "/api/v1/membership/notes/11/summary",
         detailUrl: "/api/v1/membership/notes/11",
         addUrl: "/membership/requests/11/notes/add/",
+        requestDetailTemplate: "/membership/request/__request_id__/",
         csrfToken: "csrf-token",
         nextUrl: "/membership/requests/",
         canView: true,
@@ -197,7 +200,7 @@ describe("MembershipNotesCard", () => {
     await wrapper.get('button[data-note-action="message"]').trigger("click");
     await flushPromises();
 
-    expect(wrapper.find('[data-membership-notes-approvals="11"]').classes()).toContain("badge-success");
+    expect(wrapper.find('[data-membership-notes-approvals="11"]').exists()).toBe(false);
     expect(wrapper.text()).toContain("Failed to add note.");
     expect(wrapper.text()).toContain("No notes yet.");
     expect(wrapper.find(".card-footer .alert .close").exists()).toBe(true);
@@ -215,6 +218,7 @@ describe("MembershipNotesCard", () => {
         summaryUrl: "/api/v1/membership/notes/12/summary",
         detailUrl: "/api/v1/membership/notes/12",
         addUrl: "/membership/requests/12/notes/add/",
+        requestDetailTemplate: "/membership/request/__request_id__/",
         csrfToken: "csrf-token",
         nextUrl: "/membership/requests/",
         canView: true,
@@ -248,6 +252,7 @@ describe("MembershipNotesCard", () => {
         summaryUrl: "/api/v1/membership/notes/99/summary",
         detailUrl: "/api/v1/membership/notes/99",
         addUrl: "/membership/requests/99/notes/add/",
+        requestDetailTemplate: "/membership/request/__request_id__/",
         csrfToken: "csrf-token",
         nextUrl: "/membership/requests/",
         canView: true,
@@ -286,6 +291,7 @@ describe("MembershipNotesCard", () => {
         summaryUrl: "/api/v1/membership/notes/13/summary",
         detailUrl: "/api/v1/membership/notes/13",
         addUrl: "/membership/requests/13/notes/add/",
+        requestDetailTemplate: "/membership/request/__request_id__/",
         csrfToken: "csrf-token",
         nextUrl: "/membership/requests/",
         canView: true,
@@ -331,7 +337,6 @@ describe("MembershipNotesCard", () => {
                 avatar_url: "/static/core/images/almalinux-logo.svg",
                 timestamp_display: "April 21, 2026, noon",
                 membership_request_id: 123,
-                membership_request_url: "/membership/request/123/",
                 entries: [
                   {
                     kind: "message",
@@ -367,6 +372,7 @@ describe("MembershipNotesCard", () => {
         summaryUrl: "/api/v1/membership/notes/16/summary",
         detailUrl: "/api/v1/membership/notes/16",
         addUrl: "/membership/requests/16/notes/add/",
+        requestDetailTemplate: "/membership/request/__request_id__/",
         csrfToken: "csrf-token",
         nextUrl: "/membership/requests/",
         canView: true,
@@ -389,7 +395,7 @@ describe("MembershipNotesCard", () => {
     expect(wrapper.findAll(".membership-notes-bubbles .direct-chat-text").at(1)?.attributes("style")).toContain("background-color: rgb(240, 240, 240)");
     expect(wrapper.find('[data-request-resubmitted-old]').html()).toContain("Line one<br>");
     expect(wrapper.find('[data-request-resubmitted-new]').html()).toContain("Updated one<br>");
-    expect(wrapper.find('[data-membership-notes-disapprovals="16"]').classes()).toContain("badge-warning");
+    expect(wrapper.find('[data-membership-notes-disapprovals="16"]').exists()).toBe(false);
   });
 
   it("restores the legacy contacted-email diagnostics without rendering raw html in the modal body", async () => {
@@ -453,6 +459,7 @@ describe("MembershipNotesCard", () => {
         summaryUrl: "/api/v1/membership/notes/14/summary",
         detailUrl: "/api/v1/membership/notes/14",
         addUrl: "/membership/requests/14/notes/add/",
+        requestDetailTemplate: "/membership/request/__request_id__/",
         csrfToken: "csrf-token",
         nextUrl: "/membership/requests/",
         canView: true,

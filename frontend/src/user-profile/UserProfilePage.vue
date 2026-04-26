@@ -4,6 +4,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import UserProfileGroupsPanel from "./UserProfileGroupsPanel.vue";
 import UserProfileMembershipPanel from "./UserProfileMembershipPanel.vue";
 import UserProfileSummary from "./UserProfileSummary.vue";
+import { fillUrlTemplate } from "../shared/urlTemplates";
 import type { UserProfileActionItem, UserProfileBootstrap, UserProfileResponse, UserProfileSummaryBootstrap } from "./types";
 
 const props = defineProps<{
@@ -114,6 +115,28 @@ function actionKey(action: UserProfileActionItem): string {
   return action.id || action.label;
 }
 
+function actionHref(action: UserProfileActionItem): string {
+  switch (action.id) {
+    case "coc-not-signed-alert":
+      return action.agreementCn
+        ? fillUrlTemplate(props.bootstrap.agreementsUrlTemplate, "__agreement_cn__", action.agreementCn)
+        : "";
+    case "country-code-missing-alert":
+      return props.bootstrap.settingsCountryCodeUrl;
+    case "email-blacklisted-alert":
+      return props.bootstrap.settingsEmailsUrl;
+    case "membership-action-required-alert":
+    case "sponsorship-action-required-alert":
+      return typeof action.requestId === "number"
+        ? fillUrlTemplate(props.bootstrap.membershipRequestDetailUrlTemplate, "__request_id__", action.requestId)
+        : "";
+    case "membership-request-recommended-alert":
+      return props.bootstrap.membershipRequestUrl;
+    default:
+      return "";
+  }
+}
+
 onMounted(async () => {
   await load();
 });
@@ -141,7 +164,7 @@ onBeforeUnmount(() => {
         <ul class="mb-0 pl-3">
           <li v-for="action in payload.accountSetup.requiredActions" :key="actionKey(action)">
             {{ action.label }}
-            <a :href="action.url">{{ action.urlLabel }}</a>
+            <a :href="actionHref(action)">{{ action.urlLabel }}</a>
           </li>
         </ul>
       </div>
@@ -160,18 +183,27 @@ onBeforeUnmount(() => {
         <ul class="mb-0 pl-3">
           <li v-for="action in payload.accountSetup.recommendedActions" :key="actionKey(action)">
             {{ action.label }}
-            <a :href="action.url">{{ action.urlLabel }}</a>
+            <a :href="actionHref(action)">{{ action.urlLabel }}</a>
           </li>
         </ul>
       </div>
 
       <div class="row">
         <div class="col-md-4">
-          <UserProfileSummary :bootstrap="summary" />
+          <UserProfileSummary :bootstrap="summary" :settings-profile-url="bootstrap.settingsProfileUrl" />
         </div>
         <div class="col-md-8">
-          <UserProfileMembershipPanel :membership="payload.membership" />
-          <UserProfileGroupsPanel :bootstrap="payload.groups" />
+          <UserProfileMembershipPanel
+            :membership="payload.membership"
+            :membership-history-url-template="bootstrap.membershipHistoryUrlTemplate"
+            :membership-request-url="bootstrap.membershipRequestUrl"
+            :membership-request-detail-url-template="bootstrap.membershipRequestDetailUrlTemplate"
+          />
+          <UserProfileGroupsPanel
+            :bootstrap="payload.groups"
+            :group-detail-url-template="bootstrap.groupDetailUrlTemplate"
+            :agreements-url-template="bootstrap.agreementsUrlTemplate"
+          />
         </div>
       </div>
     </template>

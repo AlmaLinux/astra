@@ -3,6 +3,7 @@ import { onMounted, ref } from "vue";
 
 import WidgetGrid from "../shared/components/WidgetGrid.vue";
 import WidgetOrganization from "../shared/components/WidgetOrganization.vue";
+import { fillUrlTemplate } from "../shared/urlTemplates";
 import {
   buildOrganizationsRouteUrl,
   readOrganizationsRouteState,
@@ -18,7 +19,6 @@ const props = defineProps<{
 }>();
 
 const myOrganization = ref<OrganizationCardItem | null>(null);
-const myOrganizationCreateUrl = ref<string | null>(null);
 const sponsorCard = ref<OrganizationsCardPayload | null>(null);
 const mirrorCard = ref<OrganizationsCardPayload | null>(null);
 const isSponsorLoading = ref(false);
@@ -57,6 +57,10 @@ function syncUrl(pushState: boolean): void {
 
 type OrganizationsLoadTarget = "all" | "sponsor" | "mirror";
 
+function organizationDetailHref(organizationId: number): string {
+  return fillUrlTemplate(props.bootstrap.detailUrlTemplate, "__organization_id__", organizationId);
+}
+
 async function load(target: OrganizationsLoadTarget, pushState: boolean): Promise<void> {
   if (target === "all" || target === "sponsor") {
     isSponsorLoading.value = true;
@@ -83,7 +87,6 @@ async function load(target: OrganizationsLoadTarget, pushState: boolean): Promis
     const payload = (await response.json()) as OrganizationsResponse;
     if (target === "all") {
       myOrganization.value = payload.my_organization;
-      myOrganizationCreateUrl.value = payload.my_organization_create_url;
       sponsorCard.value = payload.sponsor_card;
       mirrorCard.value = payload.mirror_card;
       sponsorQ.value = payload.sponsor_card.q;
@@ -173,12 +176,12 @@ onMounted(async () => {
           v-if="myOrganization"
           :name="myOrganization.name"
           :status="myOrganization.status"
-          :detail-url="myOrganization.detail_url"
+          :detail-url="organizationDetailHref(myOrganization.id)"
           :logo-url="myOrganization.logo_url"
           :link-to-detail="myOrganization.link_to_detail"
           :memberships="myOrganization.memberships"
         />
-        <a v-else-if="myOrganizationCreateUrl" :href="myOrganizationCreateUrl" class="btn btn-primary" title="Create a new organization">Create organization</a>
+        <a v-else :href="bootstrap.createUrl" class="btn btn-primary" title="Create a new organization">Create organization</a>
       </div>
     </div>
 
@@ -222,7 +225,7 @@ onMounted(async () => {
             <WidgetOrganization
               :name="(item as OrganizationCardItem).name"
               :status="(item as OrganizationCardItem).status"
-              :detail-url="(item as OrganizationCardItem).detail_url"
+              :detail-url="organizationDetailHref((item as OrganizationCardItem).id)"
               :logo-url="(item as OrganizationCardItem).logo_url"
               :link-to-detail="(item as OrganizationCardItem).link_to_detail"
               :memberships="(item as OrganizationCardItem).memberships"
@@ -270,7 +273,7 @@ onMounted(async () => {
             <WidgetOrganization
               :name="(item as OrganizationCardItem).name"
               :status="(item as OrganizationCardItem).status"
-              :detail-url="(item as OrganizationCardItem).detail_url"
+              :detail-url="organizationDetailHref((item as OrganizationCardItem).id)"
               :logo-url="(item as OrganizationCardItem).logo_url"
               :link-to-detail="(item as OrganizationCardItem).link_to_detail"
               :memberships="(item as OrganizationCardItem).memberships"
