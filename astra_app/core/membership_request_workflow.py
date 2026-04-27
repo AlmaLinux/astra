@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 import logging
-from typing import Any
+from typing import Any, Callable
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -647,6 +647,7 @@ def approve_membership_request(
     on_hold_override_justification: str = "",
     approved_email_template_name: str | None = None,
     decided_at: datetime.datetime | None = None,
+    on_group_add_success: Callable[[], None] | None = None,
 ) -> MembershipLog:
     """Approve a membership request using the same code path as the UI.
 
@@ -916,6 +917,7 @@ def approve_membership_request(
         username_to_add, group_cn_to_add = group_add_payload
 
         def _on_commit_add_user_to_group() -> None:
+            callback_should_run = False
             try:
                 user_for_group_add = FreeIPAUser.get(username_to_add)
             except Exception:
@@ -941,6 +943,7 @@ def approve_membership_request(
                 user_for_group_add.add_to_group(group_name=group_cn_to_add)
             except Exception as exc:
                 if _is_freeipa_noop_error(error=exc, is_add=True):
+                    callback_should_run = True
                     logger.info(
                         "astra.membership.freeipa_group.already_member group_cn=%s outcome=noop",
                         group_cn_to_add,
@@ -959,8 +962,26 @@ def approve_membership_request(
                         group_cn_to_add,
                         extra=current_exception_log_fields(),
                     )
+                    return
+            else:
+                callback_should_run = True
+
+            if callback_should_run and on_group_add_success is not None:
+                try:
+                    on_group_add_success()
+                except Exception:
+                    logger.exception(
+                        "%s: on_commit post-group-add callback failed request_id=%s target=%r group_cn=%r",
+                        log_prefix,
+                        membership_request.pk,
+                        username_to_add,
+                        group_cn_to_add,
+                        extra=current_exception_log_fields(),
+                    )
 
         transaction.on_commit(_on_commit_add_user_to_group)
+    elif on_group_add_success is not None:
+        on_group_add_success()
 
     if representative_sync_payload is not None:
         representative_username, group_cns, old_group_cn_to_remove = representative_sync_payload

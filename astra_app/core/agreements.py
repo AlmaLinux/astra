@@ -14,6 +14,18 @@ class AgreementForUser:
     groups: tuple[str, ...]
 
 
+def _normalize_agreement_username(username: str) -> str:
+    return username.strip().lower()
+
+
+def _normalized_agreement_users(users: Iterable[object]) -> set[str]:
+    return {
+        normalized
+        for normalized in (_normalize_agreement_username(str(user)) for user in users)
+        if normalized
+    }
+
+
 def has_enabled_agreements() -> bool:
     for agreement in FreeIPAFASAgreement.all():
         if agreement.enabled:
@@ -28,7 +40,7 @@ def list_agreements_for_user(
     include_disabled: bool = False,
     applicable_only: bool = False,
 ) -> list[AgreementForUser]:
-    username = username.strip()
+    username = _normalize_agreement_username(username)
     groups_set = {g.lower() for g in user_groups}
 
     out: list[AgreementForUser] = []
@@ -51,7 +63,7 @@ def list_agreements_for_user(
 
         groups = tuple(sorted(groups_source, key=str.lower))
 
-        users = list(agreement.users)
+        users = _normalized_agreement_users(agreement.users)
 
         description = str(agreement.description)
 
@@ -67,6 +79,29 @@ def list_agreements_for_user(
         )
 
     return sorted(out, key=lambda a: a.cn.lower())
+
+
+def get_agreement_for_user(
+    username: str,
+    agreement_cn: str,
+    *,
+    user_groups: Iterable[str] = (),
+    include_disabled: bool = False,
+) -> AgreementForUser | None:
+    agreement_key = agreement_cn.strip().lower()
+    if not agreement_key:
+        return None
+
+    for agreement in list_agreements_for_user(
+        username,
+        user_groups=user_groups,
+        include_disabled=include_disabled,
+        applicable_only=False,
+    ):
+        if agreement.cn.lower() == agreement_key:
+            return agreement
+
+    return None
 
 
 def required_agreements_for_group(group_cn: str) -> list[str]:
@@ -105,7 +140,7 @@ def required_agreements_for_group(group_cn: str) -> list[str]:
 def missing_required_agreements_for_user_in_group(username: str, group_cn: str) -> list[str]:
     """Return agreement CNs the user must sign before joining a group."""
 
-    username = username.strip()
+    username = _normalize_agreement_username(username)
     if not username:
         return []
 
@@ -130,7 +165,7 @@ def missing_required_agreements_for_user_in_group(username: str, group_cn: str) 
         if group_key not in agreement_groups:
             continue
 
-        users = list(agreement.users)
+        users = _normalized_agreement_users(agreement.users)
 
         if username not in users:
             missing.append(agreement_cn)

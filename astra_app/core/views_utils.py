@@ -17,9 +17,8 @@ from django.shortcuts import redirect
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 
-from core.agreements import has_enabled_agreements
+from core.agreements import get_agreement_for_user, has_enabled_agreements
 from core.country_codes import country_code_status_from_user_data
-from core.freeipa.agreement import FreeIPAFASAgreement
 from core.logging_extras import current_exception_log_fields
 from core.settings_tabs import (
     SETTINGS_TAB_REGISTRY,
@@ -114,6 +113,14 @@ def post_only_404[**P, R](view_func: Callable[P, R]) -> Callable[P, R]:
     return _wrapped
 
 
+def normalize_freeipa_username(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
+def normalize_freeipa_group_name(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
 def try_get_username_from_user(user: object) -> str:
     """Best-effort username extraction for user-like objects.
 
@@ -129,7 +136,7 @@ def try_get_username_from_user(user: object) -> str:
             username_obj = user.username
         except Exception:
             username_obj = ""
-        username = str(username_obj or "").strip()
+        username = normalize_freeipa_username(username_obj)
         if username:
             return username
 
@@ -140,7 +147,7 @@ def try_get_username_from_user(user: object) -> str:
             username_func = None
         if callable(username_func):
             try:
-                username = str(username_func() or "").strip()
+                username = normalize_freeipa_username(username_func())
             except Exception:
                 username = ""
             if username:
@@ -157,7 +164,7 @@ def get_username(request: HttpRequest, *, allow_user_fallback: bool = True) -> s
     object may be loaded from cache with a different casing or format.
     """
     session = request.session if hasattr(request, "session") else None
-    username = str((session.get("_freeipa_username") if session else None) or "").strip()
+    username = normalize_freeipa_username(session.get("_freeipa_username") if session else None)
     if username or not allow_user_fallback:
         return username
     return try_get_username_from_user(request.user)
@@ -259,25 +266,21 @@ def block_action_without_country_code(
     return redirect(settings_url(tab="profile", highlight="country_code", return_to=request.get_full_path()))
 
 
-def _coc_agreement_for_user(username: str) -> FreeIPAFASAgreement | None:
-    agreement_cn = str(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN or "").strip()
-    if not agreement_cn:
-        return None
-    try:
-        return FreeIPAFASAgreement.get(agreement_cn)
-    except Exception:
-        logger.exception("Failed to load Code of Conduct agreement", extra=current_exception_log_fields())
-        return None
-
-
 def has_signed_coc(username: str) -> bool:
     username = username.strip()
     if not username:
         return False
-    agreement = _coc_agreement_for_user(username)
-    if agreement is None or not agreement.enabled:
+    agreement_cn = str(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN or "").strip()
+    if not agreement_cn:
         return False
-    return username in set(agreement.users)
+    try:
+        agreement = get_agreement_for_user(username, agreement_cn)
+    except Exception:
+        logger.exception("Failed to load Code of Conduct agreement", extra=current_exception_log_fields())
+        return False
+    if agreement is None:
+        return False
+    return bool(agreement.signed)
 
 
 def block_action_without_coc(

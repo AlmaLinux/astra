@@ -22,6 +22,18 @@ from core.logging_extras import current_exception_log_fields
 logger = logging.getLogger("core.backends")
 
 
+def _normalize_agreement_username(username: str) -> str:
+    return username.strip().lower()
+
+
+def _normalized_agreement_users(users: list[str]) -> set[str]:
+    return {
+        normalized
+        for normalized in (_normalize_agreement_username(user) for user in users)
+        if normalized
+    }
+
+
 class FreeIPAFASAgreement(_FreeIPAClientMixin):
     """A non-persistent User Agreement object backed by FreeIPA.
 
@@ -267,6 +279,8 @@ class FreeIPAFASAgreement(_FreeIPAClientMixin):
 
     def add_user(self, username: str) -> None:
         try:
+            normalized_username = _normalize_agreement_username(username)
+
             def _do(client: ClientMeta):
                 try:
                     return self._rpc(client, "fasagreement_add_user", [self.cn], {"user": username})
@@ -279,7 +293,7 @@ class FreeIPAFASAgreement(_FreeIPAClientMixin):
             _invalidate_agreements_list_cache()
 
             fresh = type(self).get(self.cn)
-            if not fresh or username not in set(fresh.users):
+            if not fresh or normalized_username not in _normalized_agreement_users(fresh.users):
                 raise FreeIPAOperationFailed(
                     f"FreeIPA fasagreement_add_user did not persist (agreement={self.cn} user={username})"
                 )
@@ -296,6 +310,8 @@ class FreeIPAFASAgreement(_FreeIPAClientMixin):
 
     def remove_user(self, username: str) -> None:
         try:
+            normalized_username = _normalize_agreement_username(username)
+
             def _do(client: ClientMeta):
                 try:
                     return self._rpc(client, "fasagreement_remove_user", [self.cn], {"user": username})
@@ -308,7 +324,7 @@ class FreeIPAFASAgreement(_FreeIPAClientMixin):
             _invalidate_agreements_list_cache()
 
             fresh = type(self).get(self.cn)
-            if fresh and username in set(fresh.users):
+            if fresh and normalized_username in _normalized_agreement_users(fresh.users):
                 raise FreeIPAOperationFailed(
                     f"FreeIPA fasagreement_remove_user did not persist (agreement={self.cn} user={username})"
                 )

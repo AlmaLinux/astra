@@ -16,6 +16,8 @@ class FreeIPAAuthBackend(BaseBackend):
         if not username or not password:
             return None
 
+        normalized_username = str(username).strip().lower()
+
         logger.debug("authenticate: username=%s", username)
 
         try:
@@ -26,7 +28,7 @@ class FreeIPAAuthBackend(BaseBackend):
                 logger.debug("authenticate: success username=%s", username)
                 user = FreeIPAUser(username, user_data)
                 if request is not None and hasattr(request, 'session'):
-                    request.session['_freeipa_username'] = username
+                    request.session['_freeipa_username'] = normalized_username
                 return user
             return None
         except exceptions.PasswordExpired:

@@ -29,7 +29,14 @@ from python_freeipa import ClientMeta, exceptions
 
 from core import signals as astra_signals
 from core.account_deletion import get_account_deletion_blockers
-from core.agreements import has_enabled_agreements, list_agreements_for_user
+from core.agreements import (
+    AgreementForUser,
+    _normalize_agreement_username,
+    _normalized_agreement_users,
+    get_agreement_for_user,
+    has_enabled_agreements,
+    list_agreements_for_user,
+)
 from core.avatar_storage import avatar_path_handler
 from core.country_codes import is_valid_country_alpha2, normalize_country_alpha2
 from core.email_context import system_email_context, user_email_context
@@ -50,6 +57,8 @@ from core.forms_selfservice import (
 from core.freeipa.agreement import FreeIPAFASAgreement
 from core.freeipa.circuit_breaker import _freeipa_circuit_open
 from core.freeipa.client import _build_freeipa_client, _get_freeipa_client
+from core.freeipa.exceptions import FreeIPAOperationFailed
+from core.freeipa.utils import _is_benign_membership_message
 from core.freeipa.user import DegradedFreeIPAUser, FreeIPAUser
 from core.ipa_user_attrs import (
     _add_change,
@@ -1354,7 +1363,7 @@ def _build_settings_request_context(
             img.save(buf, "PNG")
             otp_qr_png_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
 
-    agreement: FreeIPAFASAgreement | None = None
+    agreement: AgreementForUser | None = None
     agreement_signed = False
     agreements = []
 
@@ -1373,10 +1382,11 @@ def _build_settings_request_context(
                 applicable_only=False,
             )
             if agreement_cn:
-                agreement = FreeIPAFASAgreement.get(agreement_cn)
-                if not agreement or not agreement.enabled:
+                agreement_key = agreement_cn.lower()
+                agreement = next((item for item in agreements if item.cn.lower() == agreement_key), None)
+                if agreement is None:
                     raise Http404("Agreement not found")
-                agreement_signed = get_username(request) in set(agreement.users)
+                agreement_signed = bool(agreement.signed)
         except Http404:
             raise
         except Exception:
@@ -1949,10 +1959,24 @@ def settings_root(request: HttpRequest) -> HttpResponse:
         action = _normalize_str(request.POST.get("action")).lower()
         cn = _normalize_str(request.POST.get("cn"))
         if action == "sign" and cn:
+            normalized_username = _normalize_agreement_username(username)
+            shared_agreement = get_agreement_for_user(
+                username,
+                cn,
+                user_groups=fu.groups_list if hasattr(fu, "groups_list") else [],
+            )
+            if shared_agreement is not None and shared_agreement.signed:
+                messages.info(request, "You have already signed this agreement.")
+                if safe_relative_return_target:
+                    return redirect(return_target)
+                if return_target == "profile":
+                    return redirect(reverse("user-profile", kwargs={"username": username}))
+                return redirect(settings_url(tab="agreements"))
+
             agreement_obj = FreeIPAFASAgreement.get(cn)
             if not agreement_obj or not agreement_obj.enabled:
                 raise Http404("Agreement not found")
-            if username in set(agreement_obj.users):
+            if normalized_username in _normalized_agreement_users(agreement_obj.users):
                 messages.info(request, "You have already signed this agreement.")
                 if safe_relative_return_target:
                     return redirect(return_target)
@@ -1964,16 +1988,31 @@ def settings_root(request: HttpRequest) -> HttpResponse:
                 agreement_obj.add_user(username)
                 messages.success(request, "Agreement signed.")
             except Exception as e:
-                logger.exception(
-                    "Failed to sign agreement username=%s agreement=%s",
-                    username,
-                    cn,
-                    extra=exception_log_fields(e),
-                )
-                if settings.DEBUG:
-                    messages.error(request, f"Failed to sign agreement (debug): {e}")
+                signed_after_attempt = False
+                if isinstance(e, FreeIPAOperationFailed) or _is_benign_membership_message(e, is_add=True):
+                    try:
+                        refreshed_agreement = FreeIPAFASAgreement.get(cn)
+                    except Exception:
+                        refreshed_agreement = None
+                    else:
+                        signed_after_attempt = (
+                            refreshed_agreement is not None
+                            and normalized_username in _normalized_agreement_users(refreshed_agreement.users)
+                        )
+
+                if signed_after_attempt:
+                    messages.info(request, "You have already signed this agreement.")
                 else:
-                    messages.error(request, "Failed to sign agreement due to an internal error.")
+                    logger.exception(
+                        "Failed to sign agreement username=%s agreement=%s",
+                        username,
+                        cn,
+                        extra=exception_log_fields(e),
+                    )
+                    if settings.DEBUG:
+                        messages.error(request, f"Failed to sign agreement (debug): {e}")
+                    else:
+                        messages.error(request, "Failed to sign agreement due to an internal error.")
 
         if safe_relative_return_target:
             return redirect(return_target)

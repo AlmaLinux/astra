@@ -44,6 +44,7 @@ from core.views_utils import (
     _normalize_str,
     _resolve_post_redirect,
     get_username,
+    normalize_freeipa_username,
     parse_datatables_request_base,
     post_only_404,
 )
@@ -351,7 +352,7 @@ def _load_user_membership(
     Returns ``(normalized_username, membership_type, ipa_user)`` on success,
     or an ``HttpResponse`` redirect on validation failure.
     """
-    username = _normalize_str(username)
+    username = normalize_freeipa_username(username)
     if not username:
         raise Http404("Not found")
 

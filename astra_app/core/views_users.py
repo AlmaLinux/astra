@@ -45,6 +45,7 @@ from core.views_utils import (
     _normalize_str,
     agreement_settings_url,
     get_username,
+    normalize_freeipa_username,
     settings_url,
     try_get_username_from_user,
 )
@@ -758,7 +759,7 @@ def _build_user_profile_groups_data(context: dict[str, object]) -> dict[str, obj
 
 
 def _profile_context_for_request(request: HttpRequest, username: str) -> dict[str, object]:
-    username = _normalize_str(username)
+    username = normalize_freeipa_username(username)
     if not username:
         raise Http404("User not found")
 
@@ -769,10 +770,12 @@ def _profile_context_for_request(request: HttpRequest, username: str) -> dict[st
     if not fu:
         raise Http404("User not found")
 
+    resolved_username = normalize_freeipa_username(fu.username)
+
     return _profile_context_for_user(
         request,
         fu=fu,
-        is_self=username == viewer_username,
+        is_self=resolved_username == viewer_username,
         viewer_is_membership_committee=_is_membership_committee_viewer(request),
     )
 
@@ -1164,7 +1167,7 @@ def home(request: HttpRequest) -> HttpResponse:
 
 
 def user_profile(request: HttpRequest, username: str) -> HttpResponse:
-    username = _normalize_str(username)
+    username = normalize_freeipa_username(username)
     if not username:
         raise Http404("User not found")
 

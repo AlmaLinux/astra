@@ -26,6 +26,7 @@ from core.views_utils import (
     agreement_settings_url,
     build_page_url_prefix,
     get_username,
+    normalize_freeipa_group_name,
     paginate_and_build_context,
 )
 
@@ -89,7 +90,7 @@ def _groups_page_context(request: HttpRequest) -> dict[str, object]:
 
 
 def _is_fas_group(cn: str) -> bool:
-    group_obj = FreeIPAGroup.get(cn)
+    group_obj = FreeIPAGroup.get(normalize_freeipa_group_name(cn))
     return bool(group_obj and group_obj.fas_group)
 
 
@@ -244,7 +245,7 @@ def _serialize_group_leader_items(leader_entries: list[dict[str, str]]) -> list[
 
 
 def _group_or_404(name: str) -> FreeIPAGroup:
-    cn = _normalize_str(name)
+    cn = normalize_freeipa_group_name(name)
     if not cn:
         raise Http404("Group not found")
 
@@ -288,13 +289,7 @@ def groups(request: HttpRequest) -> HttpResponse:
 
 
 def group_detail(request: HttpRequest, name: str) -> HttpResponse:
-    cn = _normalize_str(name)
-    if not cn:
-        raise Http404("Group not found")
-
-    group = FreeIPAGroup.get(cn)
-    if not group or not group.fas_group:
-        raise Http404("Group not found")
+    group = _group_or_404(name)
 
     return render(
         request,
@@ -316,13 +311,7 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
 
 
 def group_edit(request: HttpRequest, name: str) -> HttpResponse:
-    cn = _normalize_str(name)
-    if not cn:
-        raise Http404("Group not found")
-
-    group = FreeIPAGroup.get(cn)
-    if not group or not group.fas_group:
-        raise Http404("Group not found")
+    group = _group_or_404(name)
 
     username = get_username(request)
     sponsors = set(group.sponsors)
