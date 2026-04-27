@@ -11,7 +11,7 @@ function flushPromises(): Promise<void> {
 }
 
 const bootstrap: MembershipAuditLogBootstrap = {
-  apiUrl: "/api/v1/membership/audit-log",
+  apiUrl: "/api/v1/membership/audit-log/detail",
   pageSize: 50,
   initialQ: "",
   initialUsername: "",
@@ -36,8 +36,7 @@ describe("MembershipAuditLogPage", () => {
           data: [
             {
               log_id: 10,
-              created_at_display: "Thu, 23 Apr 2026 12:00:00 +0000",
-              created_at_iso: "2026-04-23T12:00:00+00:00",
+              created_at: "2026-04-23T12:00:00+00:00",
               actor_username: "reviewer",
               target: {
                 kind: "user",
@@ -48,14 +47,14 @@ describe("MembershipAuditLogPage", () => {
               },
               membership_name: "Individual",
               action: "requested",
-              action_display: "Requested",
-              expires_display: "",
+              expires_at: null,
               request: {
                 request_id: 7,
                 responses: [
                   {
                     question: "Contributions",
-                    answer_html: "Patch submissions",
+                    answer_text: "Patch submissions",
+                    segments: [{ kind: "text", text: "Patch submissions" }],
                   },
                 ],
               },
@@ -78,10 +77,68 @@ describe("MembershipAuditLogPage", () => {
     expect(wrapper.text()).toContain("alice");
     expect(wrapper.text()).toContain("Individual");
     expect(wrapper.text()).toContain("Requested");
+    expect(wrapper.text()).toContain("Thu, 23 Apr 2026 12:00:00 +0000");
     expect(wrapper.text()).toContain("Request responses");
     expect(wrapper.text()).toContain("Contributions");
     expect(wrapper.text()).toContain("Patch submissions");
     expect(wrapper.find('a[href="/membership/request/7/"]').exists()).toBe(true);
+  });
+
+  it("renders canonical request-response link segments as anchors", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        return new Response(
+          JSON.stringify({
+            draw: 1,
+            recordsTotal: 1,
+            recordsFiltered: 1,
+            data: [
+              {
+                log_id: 11,
+                created_at: "2026-04-23T12:00:00+00:00",
+                actor_username: "reviewer",
+                target: {
+                  kind: "user",
+                  id: null,
+                  label: "alice",
+                  secondary_label: "",
+                  deleted: false,
+                },
+                membership_name: "Individual",
+                action: "requested",
+                expires_at: null,
+                request: {
+                  request_id: 8,
+                  responses: [
+                    {
+                      question: "Portfolio",
+                      answer_text: "Profile: https://example.com/work",
+                      segments: [
+                        { kind: "text", text: "Profile: " },
+                        { kind: "link", text: "https://example.com/work", url: "https://example.com/work" },
+                      ],
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+        );
+      }),
+    );
+
+    const wrapper = mount(MembershipAuditLogPage, {
+      props: { bootstrap },
+    });
+
+    await flushPromises();
+    await flushPromises();
+
+    const responseLink = wrapper.find('a[href="https://example.com/work"]');
+    expect(responseLink.exists()).toBe(true);
+    expect(responseLink.text()).toBe("https://example.com/work");
+    expect(wrapper.text()).toContain("Profile:");
   });
 
   it("sends q to API and keeps username/organization filters in page URL", async () => {

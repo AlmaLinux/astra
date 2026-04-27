@@ -446,6 +446,111 @@ class ElectionsApiTests(TestCase):
         self.assertEqual(payload["candidates"]["pagination"]["count"], 2)
         self.assertEqual(payload["candidates"]["items"][0]["avatar_url"], "/avatars/alice.png")
 
+    def test_election_detail_page_api_returns_data_only_payload(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Board election",
+            description="Elect the board",
+            start_datetime=now - datetime.timedelta(days=3),
+            end_datetime=now + datetime.timedelta(days=2),
+            number_of_seats=2,
+            quorum=25,
+            eligible_group_cn="board-voters",
+            status=Election.Status.tallied,
+        )
+        alice_candidate = Candidate.objects.create(
+            election=election,
+            freeipa_username="alice",
+            nominated_by="nominator",
+        )
+        Candidate.objects.create(
+            election=election,
+            freeipa_username="bob",
+            nominated_by="nominator",
+        )
+        election.tally_result = {
+            "quota": "1",
+            "elected": [alice_candidate.id],
+            "eliminated": [],
+            "forced_excluded": [],
+            "rounds": [],
+        }
+        election.save(update_fields=["tally_result"])
+        turnout_entry = AuditLogEntry.objects.create(
+            election=election,
+            event_type="ballot_submitted",
+            payload={},
+            is_public=False,
+        )
+        AuditLogEntry.objects.filter(pk=turnout_entry.pk).update(timestamp=now - datetime.timedelta(days=1))
+        exclusion_group = ExclusionGroup.objects.create(
+            election=election,
+            name="Employees of X",
+            max_elected=1,
+        )
+        exclusion_group.candidates.add(*Candidate.objects.filter(election=election))
+
+        admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+        alice = FreeIPAUser(
+            "alice",
+            {"uid": ["alice"], "displayname": ["Alice User"], "memberof_group": []},
+        )
+        bob = FreeIPAUser(
+            "bob",
+            {"uid": ["bob"], "displayname": ["Bob User"], "memberof_group": []},
+        )
+
+        def _get_user(username: str):
+            if username == "admin":
+                return admin
+            if username == "alice":
+                return alice
+            if username == "bob":
+                return bob
+            return None
+
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
+            response = self.client.get(
+                reverse("api-election-detail-page", args=[election.id]),
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["election"]
+        self.assertEqual(payload["id"], election.id)
+        self.assertEqual(payload["start_datetime"], election.start_datetime.isoformat())
+        self.assertEqual(payload["end_datetime"], election.end_datetime.isoformat())
+        self.assertNotIn("start_datetime_display", payload)
+        self.assertNotIn("end_datetime_display", payload)
+        self.assertNotIn("exclusion_group_messages", payload)
+        self.assertEqual(
+            payload["turnout_rows"],
+            [
+                {"day": (now - datetime.timedelta(days=1)).date().isoformat(), "count": 1},
+            ],
+        )
+        self.assertNotIn("turnout_chart_data", payload)
+        self.assertEqual(
+            payload["exclusion_groups"],
+            [
+                {
+                    "name": "Employees of X",
+                    "max_elected": 1,
+                    "candidates": [
+                        {"username": "alice", "full_name": "Alice User"},
+                        {"username": "bob", "full_name": "Bob User"},
+                    ],
+                }
+            ],
+        )
+
     def test_election_eligible_voters_api_returns_filtered_paginated_user_items_for_manager(self) -> None:
         self._login_as_freeipa_user("admin")
         FreeIPAPermissionGrant.objects.create(
@@ -861,6 +966,46 @@ class ElectionsApiTests(TestCase):
         self.assertFalse(payload["rows"][0]["credentials_issued"] is False)
         self.assertEqual(payload["chart_data"]["labels"][0].split(": ", 1)[1], election.name)
         self.assertEqual(payload["chart_data"]["weight_turnout"][0], 0.0)
+
+    def test_elections_turnout_report_detail_api_returns_data_only_rows(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Turnout election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=2),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=2,
+            status=Election.Status.open,
+        )
+        VotingCredential.objects.create(
+            election=election,
+            public_id="cred-turnout-1",
+            freeipa_username="voter1",
+            weight=3,
+        )
+
+        admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin):
+            response = self.client.get(
+                reverse("api-elections-turnout-report-detail"),
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertNotIn("chart_data", payload)
+        self.assertEqual(len(payload["rows"]), 1)
+        self.assertEqual(payload["rows"][0]["election"]["id"], election.id)
+        self.assertEqual(payload["rows"][0]["election"]["name"], election.name)
+        self.assertEqual(payload["rows"][0]["election"]["start_datetime"], election.start_datetime.isoformat())
+        self.assertNotIn("start_date", payload["rows"][0]["election"])
 
     def test_election_extend_end_api_updates_open_election_for_manager(self) -> None:
         self._login_as_freeipa_user("admin")

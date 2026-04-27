@@ -197,7 +197,7 @@
     <div class="row">
       <div class="col-lg-12">
         {% url 'send-mail-render-preview' as compose_preview_url %}
-        {% include "core/_templated_email_compose.html" with card_title="Compose email" templates=templates form=form rendered_preview=rendered_preview available_variables=preview.variables compose_description="Use recipient variables to personalize the subject and content." force_email_template_id=created_template_id compose_preview_url=compose_preview_url %}
+        {% include "core/_templated_email_compose.html" with card_title="Compose email" templates=templates form=form rendered_preview=rendered_preview available_variables=preview.variables compose_description="Use recipient variables to personalize the subject and content." force_email_template_id=created_template_id compose_preview_url=compose_preview_url compose_skip_initial_preview_refresh=compose_skip_initial_preview_refresh %}
       </div>
     </div>
 

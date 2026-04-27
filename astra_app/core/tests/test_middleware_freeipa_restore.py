@@ -383,6 +383,110 @@ class FreeIPAMiddlewareRestoreTests(TestCase):
         self.assertEqual(extra["error_type"], "RuntimeError")
         self.assertEqual(extra["error_message"], "middleware boom")
 
+    def test_structured_access_log_middleware_redacts_password_reset_confirm_tokens(self):
+        factory = RequestFactory()
+        html_request = factory.get(
+            "/password-reset/confirm/?token=secret-reset-token&foo=bar",
+            HTTP_USER_AGENT="pytest-agent",
+            REMOTE_ADDR="198.51.100.16",
+        )
+        html_request.user = AnonymousUser()
+        api_request = factory.get(
+            "/api/v1/password-reset/confirm/detail?token=secret-reset-token&foo=bar",
+            HTTP_USER_AGENT="pytest-agent",
+            REMOTE_ADDR="198.51.100.17",
+        )
+        api_request.user = AnonymousUser()
+
+        with (
+            patch(
+                "core.middleware.time.monotonic",
+                side_effect=[30.0, 30.05, 31.0, 31.05],
+                autospec=True,
+            ),
+            patch(
+                "core.middleware._format_access_log_timestamp",
+                side_effect=[
+                    "[14/Mar/2026:19:32:00 +0000]",
+                    "[14/Mar/2026:19:32:01 +0000]",
+                ],
+            ),
+            patch("core.middleware.access_logger.info", autospec=True) as mocked_info,
+        ):
+            middleware = StructuredAccessLogMiddleware(lambda _req: HttpResponse("ok", status=200))
+            middleware(html_request)
+            middleware(api_request)
+
+        self.assertEqual(mocked_info.call_count, 2)
+
+        first_atoms = mocked_info.call_args_list[0].args[1]
+        first_extra = mocked_info.call_args_list[0].kwargs["extra"]
+        self.assertEqual(first_atoms["q"], "token=[redacted]&foo=bar")
+        self.assertIn("token=[redacted]", first_atoms["r"])
+        self.assertEqual(first_extra["request_query"], "token=[redacted]&foo=bar")
+        self.assertNotIn("secret-reset-token", first_atoms["r"])
+        self.assertNotIn("secret-reset-token", str(first_extra))
+
+        second_atoms = mocked_info.call_args_list[1].args[1]
+        second_extra = mocked_info.call_args_list[1].kwargs["extra"]
+        self.assertEqual(second_atoms["q"], "token=[redacted]&foo=bar")
+        self.assertIn("token=[redacted]", second_atoms["r"])
+        self.assertEqual(second_extra["request_query"], "token=[redacted]&foo=bar")
+        self.assertNotIn("secret-reset-token", second_atoms["r"])
+        self.assertNotIn("secret-reset-token", str(second_extra))
+
+    def test_structured_access_log_middleware_redacts_settings_email_validation_tokens(self):
+        factory = RequestFactory()
+        html_request = factory.get(
+            "/settings/emails/validate/?token=secret-settings-token&foo=bar",
+            HTTP_USER_AGENT="pytest-agent",
+            REMOTE_ADDR="198.51.100.18",
+        )
+        html_request.user = AnonymousUser()
+        api_request = factory.get(
+            "/api/v1/settings/emails/validate/detail?token=secret-settings-token&foo=bar",
+            HTTP_USER_AGENT="pytest-agent",
+            REMOTE_ADDR="198.51.100.19",
+        )
+        api_request.user = AnonymousUser()
+
+        with (
+            patch(
+                "core.middleware.time.monotonic",
+                side_effect=[40.0, 40.05, 41.0, 41.05],
+                autospec=True,
+            ),
+            patch(
+                "core.middleware._format_access_log_timestamp",
+                side_effect=[
+                    "[14/Mar/2026:19:33:00 +0000]",
+                    "[14/Mar/2026:19:33:01 +0000]",
+                ],
+            ),
+            patch("core.middleware.access_logger.info", autospec=True) as mocked_info,
+        ):
+            middleware = StructuredAccessLogMiddleware(lambda _req: HttpResponse("ok", status=200))
+            middleware(html_request)
+            middleware(api_request)
+
+        self.assertEqual(mocked_info.call_count, 2)
+
+        first_atoms = mocked_info.call_args_list[0].args[1]
+        first_extra = mocked_info.call_args_list[0].kwargs["extra"]
+        self.assertEqual(first_atoms["q"], "token=[redacted]&foo=bar")
+        self.assertIn("token=[redacted]", first_atoms["r"])
+        self.assertEqual(first_extra["request_query"], "token=[redacted]&foo=bar")
+        self.assertNotIn("secret-settings-token", first_atoms["r"])
+        self.assertNotIn("secret-settings-token", str(first_extra))
+
+        second_atoms = mocked_info.call_args_list[1].args[1]
+        second_extra = mocked_info.call_args_list[1].kwargs["extra"]
+        self.assertEqual(second_atoms["q"], "token=[redacted]&foo=bar")
+        self.assertIn("token=[redacted]", second_atoms["r"])
+        self.assertEqual(second_extra["request_query"], "token=[redacted]&foo=bar")
+        self.assertNotIn("secret-settings-token", second_atoms["r"])
+        self.assertNotIn("secret-settings-token", str(second_extra))
+
     def test_structured_access_log_middleware_skips_sentry_tunnel_requests(self):
         factory = RequestFactory()
         request = factory.post("/_ci/envelope/", data=b"{}", content_type="application/x-sentry-envelope")

@@ -1,0 +1,39 @@
+{% extends "core/base.html" %}
+
+{% load static %}
+{% load django_vite %}
+
+{% block title %}Send Mail{% endblock %}
+
+{% block extra_head %}
+  {{ block.super }}
+  {% vite_hmr_client %}
+  {% vite_asset 'src/entrypoints/sendMail.ts' %}
+  <link rel="stylesheet" href="{% static 'admin/css/vendor/select2/select2.css' %}">
+  <link rel="stylesheet" href="{% static 'core/css/select2_overrides.css' %}">
+  {% include 'core/_templated_email_compose_assets_head.html' %}
+{% endblock %}
+
+{% block header %}
+  <h1 class="m-0">Send Mail</h1>
+{% endblock %}
+
+{% block content %}
+  <div
+    data-send-mail-root=""
+    data-send-mail-api-url="{{ send_mail_api_url }}"
+    data-send-mail-submit-url="{{ send_mail_submit_url }}"
+    data-send-mail-preview-url="{{ send_mail_preview_url }}"
+    data-send-mail-csrf-token="{{ csrf_token }}"
+  >
+    {{ send_mail_initial_payload|json_script:"send-mail-initial-payload" }}
+    <div class="text-muted">Loading send mail...</div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ block.super }}
+  <script src="{% static 'admin/js/vendor/select2/select2.full.js' %}"></script>
+  {% include 'core/_templated_email_compose_assets_scripts.html' %}
+  <script src="{% static 'core/js/send_mail.js' %}"></script>
+{% endblock %}

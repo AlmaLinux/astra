@@ -18,7 +18,7 @@ def _percent(part: int, whole: int) -> float:
     return round((part * 100.0) / whole, 2)
 
 
-def _build_elections_turnout_report() -> tuple[list[dict[str, object]], dict[str, list[float] | list[str]]]:
+def _build_elections_turnout_report_rows() -> list[dict[str, object]]:
     elections = list(
         Election.objects.active()
         .filter(status__in=[Election.Status.open, Election.Status.closed, Election.Status.tallied])
@@ -28,9 +28,6 @@ def _build_elections_turnout_report() -> tuple[list[dict[str, object]], dict[str
     )
 
     report_rows: list[dict[str, object]] = []
-    chart_labels: list[str] = []
-    chart_count_turnout: list[float] = []
-    chart_weight_turnout: list[float] = []
 
     for election in elections:
         status = election_quorum_status(election=election)
@@ -63,33 +60,53 @@ def _build_elections_turnout_report() -> tuple[list[dict[str, object]], dict[str
             }
         )
 
+    return report_rows
+
+
+def _build_elections_turnout_chart_data(report_rows: list[dict[str, object]]) -> dict[str, list[float] | list[str]]:
+    chart_labels: list[str] = []
+    chart_count_turnout: list[float] = []
+    chart_weight_turnout: list[float] = []
+
+    for row in report_rows:
+        election = row["election"]
+        if not isinstance(election, Election):
+            raise TypeError("row['election'] must be an Election")
+
         start_date = election.start_datetime.date().isoformat() if election.start_datetime else "unknown"
         chart_labels.append(f"{start_date}: {election.name or f'Election {election.id}'}")
-        chart_count_turnout.append(turnout_count_pct)
-        chart_weight_turnout.append(turnout_weight_pct)
+        chart_count_turnout.append(float(row["turnout_count_pct"]))
+        chart_weight_turnout.append(float(row["turnout_weight_pct"]))
 
-    return (
-        report_rows,
-        {
-            "labels": chart_labels,
-            "count_turnout": chart_count_turnout,
-            "weight_turnout": chart_weight_turnout,
-        },
-    )
+    return {
+        "labels": chart_labels,
+        "count_turnout": chart_count_turnout,
+        "weight_turnout": chart_weight_turnout,
+    }
 
 
-def _serialize_turnout_report_row(row: dict[str, object]) -> dict[str, object]:
+def _build_elections_turnout_report() -> tuple[list[dict[str, object]], dict[str, list[float] | list[str]]]:
+    report_rows = _build_elections_turnout_report_rows()
+    return report_rows, _build_elections_turnout_chart_data(report_rows)
+
+
+def _serialize_turnout_report_row(row: dict[str, object], *, canonical_detail: bool = False) -> dict[str, object]:
     election = row["election"]
     if not isinstance(election, Election):
         raise TypeError("row['election'] must be an Election")
 
+    serialized_election: dict[str, object] = {
+        "id": election.id,
+        "name": election.name,
+        "status": election.status,
+    }
+    if canonical_detail:
+        serialized_election["start_datetime"] = election.start_datetime.isoformat() if election.start_datetime else ""
+    else:
+        serialized_election["start_date"] = election.start_datetime.date().isoformat() if election.start_datetime else ""
+
     return {
-        "election": {
-            "id": election.id,
-            "name": election.name,
-            "status": election.status,
-            "start_date": election.start_datetime.date().isoformat() if election.start_datetime else "",
-        },
+        "election": serialized_election,
         "eligible_count": row["eligible_count"],
         "eligible_weight": row["eligible_weight"],
         "participating_count": row["participating_count"],
@@ -123,5 +140,16 @@ def elections_turnout_report_api(request: HttpRequest) -> JsonResponse:
         {
             "rows": [_serialize_turnout_report_row(row) for row in report_rows],
             "chart_data": chart_data,
+        }
+    )
+
+
+@require_GET
+@json_permission_required(ASTRA_ADD_ELECTION)
+def elections_turnout_report_detail_api(request: HttpRequest) -> JsonResponse:
+    report_rows = _build_elections_turnout_report_rows()
+    return JsonResponse(
+        {
+            "rows": [_serialize_turnout_report_row(row, canonical_detail=True) for row in report_rows],
         }
     )

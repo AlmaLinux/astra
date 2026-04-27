@@ -11,7 +11,7 @@ function flushPromises(): Promise<void> {
 }
 
 const bootstrap: OrganizationDetailBootstrap = {
-  apiUrl: "/api/v1/organizations/1",
+  apiUrl: "/api/v1/organizations/1/detail",
   membershipRequestDetailTemplate: "/membership/request/__request_id__/",
   userProfileUrlTemplate: "/user/__username__/",
   sendMailUrlTemplate: "/email-tools/send-mail/?type=manual&to=__email__",
@@ -49,31 +49,32 @@ describe("OrganizationDetailPage", () => {
             logo_url: "",
             memberships: [
               {
-                label: "Gold Sponsor Member",
-                class_name: "membership-standard",
-                request_url: null,
-                description: "Annual sponsorship tier",
-                member_since_label: "January 2024",
-                expires_label: "Apr 30, 2026",
-                expires_tone: "danger",
+                request_id: null,
+                membership_type: {
+                  name: "Gold Sponsor Member",
+                  code: "gold",
+                  description: "Annual sponsorship tier",
+                },
+                created_at: "2024-01-15T12:00:00Z",
+                expires_at: "2026-04-30T00:00:00Z",
+                is_expiring_soon: true,
+                can_request_tier_change: false,
+                can_manage_expiration: false,
               },
             ],
             pending_memberships: [
               {
                 request_id: 17,
                 status: "pending",
-                badge_label: "Under review",
-                badge_class_name: "badge membership-under-review alx-status-badge alx-status-badge--review",
                 membership_type: {
                   name: "Silver Sponsor Member",
                   code: "silver",
                   description: "Pending sponsor tier",
-                  className: "membership-standard",
                 },
               },
             ],
             representative: { username: "alice", full_name: "Alice Example" },
-            contact_groups: [{ key: "business", label: "Business", name: "Business Person", email: "biz@example.com", phone: "" }],
+            contact_groups: [{ key: "business", name: "Business Person", email: "biz@example.com", phone: "" }],
             address: { street: "", city: "Durham", state: "", postal_code: "", country_code: "US" },
           },
         }),
@@ -103,7 +104,113 @@ describe("OrganizationDetailPage", () => {
     expect(wrapper.text()).toContain("Request #17");
     expect(wrapper.text()).toContain("Pending sponsor tier");
     expect(wrapper.text()).toContain("Under review");
+    expect(wrapper.find(".membership-under-review.alx-status-badge--review").exists()).toBe(true);
     expect(wrapper.find('a[href="/membership/request/17/"]').exists()).toBe(true);
+  });
+
+  it("preserves representative action-required copy for on-hold pending sponsorships", async () => {
+    const fetchMock = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          organization: {
+            id: 1,
+            name: "Acme Org",
+            status: "active",
+            is_representative: true,
+            website: "https://example.com",
+            logo_url: "",
+            memberships: [],
+            pending_memberships: [
+              {
+                request_id: 17,
+                status: "on_hold",
+                membership_type: {
+                  name: "Silver Sponsor Member",
+                  code: "silver",
+                  description: "Pending sponsor tier",
+                },
+              },
+            ],
+            representative: { username: "alice", full_name: "Alice Example" },
+            contact_groups: [],
+            address: { street: "", city: "Durham", state: "", postal_code: "", country_code: "US" },
+          },
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const wrapper = mount(OrganizationDetailPage, {
+      props: { bootstrap },
+      global: {
+        stubs: {
+          MembershipNotesCard: {
+            props: ["targetType", "target", "requestDetailTemplate"],
+            template: '<div data-test="notes-card">notes</div>',
+          },
+        },
+      },
+    });
+
+    await flushPromises();
+    await flushPromises();
+
+    expect(fetchMock).toHaveBeenCalled();
+    expect(wrapper.text()).toContain("Action required");
+    expect(wrapper.find(".membership-action-required.alx-status-badge--action").exists()).toBe(true);
+  });
+
+  it("renders on-hold copy for non-representative viewers", async () => {
+    const fetchMock = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          organization: {
+            id: 1,
+            name: "Acme Org",
+            status: "active",
+            is_representative: false,
+            website: "https://example.com",
+            logo_url: "",
+            memberships: [],
+            pending_memberships: [
+              {
+                request_id: 17,
+                status: "on_hold",
+                membership_type: {
+                  name: "Silver Sponsor Member",
+                  code: "silver",
+                  description: "Pending sponsor tier",
+                },
+              },
+            ],
+            representative: { username: "alice", full_name: "Alice Example" },
+            contact_groups: [],
+            address: { street: "", city: "Durham", state: "", postal_code: "", country_code: "US" },
+          },
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const wrapper = mount(OrganizationDetailPage, {
+      props: { bootstrap },
+      global: {
+        stubs: {
+          MembershipNotesCard: {
+            props: ["targetType", "target", "requestDetailTemplate"],
+            template: '<div data-test="notes-card">notes</div>',
+          },
+        },
+      },
+    });
+
+    await flushPromises();
+    await flushPromises();
+
+    expect(fetchMock).toHaveBeenCalled();
+    expect(wrapper.text()).toContain("On hold");
+    expect(wrapper.text()).not.toContain("Action required");
+    expect(wrapper.find(".membership-action-required.alx-status-badge--action").exists()).toBe(true);
   });
 
   it("renders tier-change and expiration-management controls for active sponsorships", async () => {
@@ -118,29 +225,24 @@ describe("OrganizationDetailPage", () => {
             logo_url: "",
             memberships: [
               {
-                label: "Gold Sponsor Member",
-                class_name: "membership-standard",
-                request_url: null,
-                description: "Annual sponsorship tier",
-                member_since_label: "January 2024",
-                expires_label: "Apr 30, 2026",
-                expires_tone: "muted",
                 request_id: null,
-                expires_on: "2026-04-30",
-                can_request_tier_change: true,
-                tier_change_membership_type_code: "ruby",
-                can_manage_expiration: true,
                 membership_type: {
                   name: "Gold Sponsor Member",
                   code: "gold",
                   description: "Annual sponsorship tier",
-                  className: "membership-standard",
                 },
+                created_at: "2024-01-15T12:00:00Z",
+                expires_at: "2026-04-30T00:00:00Z",
+                is_expiring_soon: false,
+                request_id: null,
+                can_request_tier_change: true,
+                tier_change_membership_type_code: "ruby",
+                can_manage_expiration: true,
               },
             ],
             pending_memberships: [],
             representative: { username: "alice", full_name: "Alice Example" },
-            contact_groups: [{ key: "business", label: "Business", name: "Business Person", email: "biz@example.com", phone: "" }],
+            contact_groups: [{ key: "business", name: "Business Person", email: "biz@example.com", phone: "" }],
             address: { street: "", city: "Durham", state: "", postal_code: "", country_code: "US" },
           },
         }),
@@ -184,9 +286,10 @@ describe("OrganizationDetailPage", () => {
             website: "https://example.com",
             logo_url: "",
             memberships: [{ label: "Gold Sponsor Member", class_name: "membership-standard", request_url: null, description: "", member_since_label: "", expires_label: "", expires_tone: "muted" }],
+            memberships: [{ request_id: null, membership_type: { name: "Gold Sponsor Member", code: "gold", description: "" }, created_at: null, expires_at: null, is_expiring_soon: false, can_request_tier_change: false, can_manage_expiration: false }],
             pending_memberships: [],
             representative: { username: "alice", full_name: "Alice Example" },
-            contact_groups: [{ key: "business", label: "Business", name: "Business Person", email: "biz@example.com", phone: "" }],
+            contact_groups: [{ key: "business", name: "Business Person", email: "biz@example.com", phone: "" }],
             address: { street: "", city: "Durham", state: "", postal_code: "", country_code: "US" },
           },
         }),
@@ -236,10 +339,10 @@ describe("OrganizationDetailPage", () => {
               status: "active",
               website: "https://example.com",
               logo_url: "",
-              memberships: [{ label: "Gold Sponsor Member", class_name: "membership-standard", request_url: null, description: "", member_since_label: "", expires_label: "", expires_tone: "muted" }],
+              memberships: [{ request_id: null, membership_type: { name: "Gold Sponsor Member", code: "gold", description: "" }, created_at: null, expires_at: null, is_expiring_soon: false, can_request_tier_change: false, can_manage_expiration: false }],
               pending_memberships: [],
               representative: { username: "alice", full_name: "Alice Example" },
-              contact_groups: [{ key: "business", label: "Business", name: "Business Person", email: "biz@example.com", phone: "" }],
+              contact_groups: [{ key: "business", name: "Business Person", email: "biz@example.com", phone: "" }],
               address: { street: "", city: "Durham", state: "", postal_code: "", country_code: "US" },
             },
           }),

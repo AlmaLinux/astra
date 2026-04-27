@@ -2,7 +2,10 @@ import { mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import MembershipStatsPage from "../MembershipStatsPage.vue";
+import { compositionChartsFromApi } from "../types";
 import { readMembershipStatsBootstrap } from "../types";
+import { retentionChartsFromApi } from "../types";
+import { trendsChartsFromApi } from "../types";
 import type { MembershipStatsBootstrap } from "../types";
 
 function flushPromises(): Promise<void> {
@@ -13,10 +16,10 @@ function flushPromises(): Promise<void> {
 
 const BOOTSTRAP: MembershipStatsBootstrap = {
   currentDays: "365",
-  apiSummaryUrl: "/api/v1/stats/membership/summary",
-  apiCompositionUrl: "/api/v1/stats/membership/charts/composition",
-  apiTrendsUrl: "/api/v1/stats/membership/charts/trends",
-  apiRetentionUrl: "/api/v1/stats/membership/charts/retention",
+  apiSummaryUrl: "/api/v1/stats/membership/summary/detail",
+  apiCompositionUrl: "/api/v1/stats/membership/charts/composition/detail",
+  apiTrendsUrl: "/api/v1/stats/membership/charts/trends/detail",
+  apiRetentionUrl: "/api/v1/stats/membership/charts/retention/detail",
 };
 
 const SUMMARY_PAYLOAD = {
@@ -42,30 +45,25 @@ const SUMMARY_PAYLOAD = {
 const COMPOSITION_PAYLOAD = {
   generated_at: "2026-01-01T00:00:00+00:00",
   charts: {
-    membership_types: { labels: ["Individual"], counts: [87] },
-    nationality_all_users: { labels: ["US", "DE"], counts: [80, 62] },
-    nationality_active_members: { labels: ["US"], counts: [50] },
+    membership_types: [{ membership_type: { code: "individual", name: "Individual" }, count: 87 }],
+    nationality_all_users: [{ country_code: "US", count: 80 }, { country_code: "DE", count: 62 }],
+    nationality_active_members: [{ country_code: "US", count: 50 }],
   },
 };
 
 const TRENDS_PAYLOAD = {
   generated_at: "2026-01-01T00:00:00+00:00",
   charts: {
-    requests_trend: { labels: ["2025-12"], counts: [10] },
-    decisions_trend: { labels: ["2025-12"], datasets: [{ label: "approved", data: [8] }] },
-    expirations_upcoming: { labels: ["2026-02"], counts: [5] },
+    requests_trend: [{ period: "2025-12", count: 10 }],
+    decisions_trend: [{ period: "2025-12", status: "approved", count: 8 }],
+    expirations_upcoming: [{ period: "2026-02", count: 5 }],
   },
 };
 
 const RETENTION_PAYLOAD = {
   generated_at: "2026-01-01T00:00:00+00:00",
   charts: {
-    retention_cohorts_12m: {
-      labels: ["2025-01"],
-      retained: [5],
-      lapsed_then_renewed: [2],
-      lapsed_not_renewed: [1],
-    },
+    retention_cohorts_12m: [{ cohort_month: "2025-01", retained: 5, lapsed_then_renewed: 2, lapsed_not_renewed: 1 }],
   },
 };
 
@@ -254,5 +252,82 @@ describe("MembershipStatsPage", () => {
     await flushPromises();
 
     expect(nestedChartCtor).toHaveBeenCalled();
+  });
+
+  it("preserves the legacy fixed decision-status datasets with zero-filled missing series", () => {
+    const charts = trendsChartsFromApi({
+      requests_trend: [],
+      decisions_trend: [
+        { period: "2025-12", status: "approved", count: 8 },
+        { period: "2025-12", status: "rejected", count: 2 },
+      ],
+      expirations_upcoming: [],
+    });
+
+    expect(charts.decisions_trend.labels).toEqual(["2025-12"]);
+    expect(charts.decisions_trend.datasets).toEqual([
+      { label: "approved", data: [8] },
+      { label: "rejected", data: [2] },
+      { label: "ignored", data: [0] },
+      { label: "rescinded", data: [0] },
+    ]);
+  });
+
+  it("rebuilds composition charts from canonical row payloads", () => {
+    const charts = compositionChartsFromApi({
+      membership_types: [
+        { membership_type: { code: "individual", name: "Individual" }, count: 87 },
+        { membership_type: { code: "sustaining", name: "Sustaining" }, count: 12 },
+      ],
+      nationality_all_users: [
+        { country_code: "US", count: 80 },
+        { country_code: "DE", count: 62 },
+      ],
+      nationality_active_members: [
+        { country_code: "US", count: 50 },
+        { country_code: "DE", count: 20 },
+      ],
+    });
+
+    expect(charts.membership_types).toEqual({
+      labels: ["Individual", "Sustaining"],
+      counts: [87, 12],
+    });
+    expect(charts.nationality_all_users).toEqual({
+      labels: ["US", "DE"],
+      counts: [80, 62],
+    });
+    expect(charts.nationality_active_members).toEqual({
+      labels: ["US", "DE"],
+      counts: [50, 20],
+    });
+  });
+
+  it("rebuilds retention charts from canonical cohort rows", () => {
+    const charts = retentionChartsFromApi({
+      retention_cohorts_12m: [
+        {
+          cohort_month: "2025-01",
+          cohort_size: 8,
+          retained: 5,
+          lapsed_then_renewed: 2,
+          lapsed_not_renewed: 1,
+        },
+        {
+          cohort_month: "2025-02",
+          cohort_size: 6,
+          retained: 4,
+          lapsed_then_renewed: 1,
+          lapsed_not_renewed: 1,
+        },
+      ],
+    });
+
+    expect(charts.retention_cohorts_12m).toEqual({
+      labels: ["2025-01", "2025-02"],
+      retained: [5, 4],
+      lapsed_then_renewed: [2, 1],
+      lapsed_not_renewed: [1, 1],
+    });
   });
 });

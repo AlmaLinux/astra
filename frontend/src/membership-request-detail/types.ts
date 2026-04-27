@@ -1,5 +1,6 @@
 export interface MembershipRequestDetailBootstrap {
   apiUrl: string;
+  initialPayload?: MembershipRequestDetailPayload | null;
   csrfToken: string;
   pageTitle: string;
   backLinkUrl: string;
@@ -123,11 +124,16 @@ export function readMembershipRequestDetailBootstrap(root: HTMLElement): Members
   const backLinkLabel = String(root.dataset.membershipRequestDetailBackLinkLabel || "").trim();
   const userProfileUrlTemplate = String(root.dataset.membershipRequestDetailUserProfileUrlTemplate || "").trim();
   const organizationDetailUrlTemplate = String(root.dataset.membershipRequestDetailOrganizationDetailUrlTemplate || "").trim();
-  if (!apiUrl || !csrfToken || !pageTitle || !backLinkUrl || !backLinkLabel || !userProfileUrlTemplate || !organizationDetailUrlTemplate) {
+  const initialPayloadScript = root.querySelector<HTMLScriptElement>("script[data-membership-request-detail-initial-payload]");
+  const initialPayload = initialPayloadScript?.textContent
+    ? (JSON.parse(initialPayloadScript.textContent) as MembershipRequestDetailPayload)
+    : null;
+  if ((!apiUrl && initialPayload === null) || !csrfToken || !pageTitle || !backLinkUrl || !backLinkLabel || !userProfileUrlTemplate || !organizationDetailUrlTemplate) {
     return null;
   }
   return {
     apiUrl,
+    initialPayload,
     csrfToken,
     pageTitle,
     backLinkUrl,

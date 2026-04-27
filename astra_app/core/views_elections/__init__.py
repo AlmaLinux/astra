@@ -16,6 +16,7 @@ from core.views_elections.detail import (
     election_detail,
     election_detail_candidates_api,
     election_detail_info_api,
+    election_detail_page_api,
     elections_api,
     elections_list,
 )
@@ -25,7 +26,7 @@ from core.views_elections.lifecycle import (
     election_extend_end,
     election_send_mail_credentials,
 )
-from core.views_elections.reporting import elections_turnout_report
+from core.views_elections.reporting import elections_turnout_report, elections_turnout_report_detail_api
 from core.views_elections.search import (
     election_eligible_users_search,
     election_email_render_preview,
@@ -38,6 +39,7 @@ __all__ = [
     "ballot_verify_api",
     "election_detail_candidates_api",
     "election_detail_info_api",
+    "election_detail_page_api",
     "election_algorithm",
     "election_audit_log",
     "election_audit_log_api",
@@ -56,5 +58,6 @@ __all__ = [
     "election_vote_submit",
     "elections_api",
     "elections_turnout_report",
+    "elections_turnout_report_detail_api",
     "elections_list",
 ]

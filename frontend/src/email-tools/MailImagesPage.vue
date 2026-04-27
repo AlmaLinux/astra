@@ -1,0 +1,205 @@
+<script setup lang="ts">
+import { computed, onMounted, ref } from "vue";
+
+import { fetchMailImagesPayload, type MailImageItem, type MailImagesBootstrap, type MailImagesPayload } from "./types";
+
+const props = defineProps<{
+  bootstrap: MailImagesBootstrap;
+}>();
+
+const payload = ref<MailImagesPayload | null>(props.bootstrap.initialPayload);
+const loadError = ref("");
+const deleteTarget = ref<MailImageItem | null>(null);
+
+const inlineExampleMarkup = computed(() => {
+  if (payload.value === null) {
+    return "";
+  }
+  return `<img src=\"{% inline_image '${payload.value.exampleImageUrl}' %}\" />`;
+});
+
+const externalExampleMarkup = computed(() => {
+  if (payload.value === null) {
+    return "";
+  }
+  return `<img src=\"${payload.value.exampleImageUrl}\" />`;
+});
+
+async function loadPayload(): Promise<void> {
+  if (payload.value !== null || !props.bootstrap.apiUrl) {
+    return;
+  }
+
+  try {
+    payload.value = await fetchMailImagesPayload(props.bootstrap.apiUrl);
+  } catch {
+    loadError.value = "Unable to load images right now.";
+  }
+}
+
+function formatModifiedAt(value: string): string {
+  const match = value.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})(?:\.\d+)?([+-]\d{2}:\d{2}|Z)$/);
+  if (!match) {
+    return value;
+  }
+
+  const zone = match[3] === "Z" || match[3] === "+00:00" ? "UTC" : `UTC${match[3]}`;
+  return `${match[1]} ${match[2]} ${zone}`;
+}
+
+function openDeleteModal(image: MailImageItem): void {
+  deleteTarget.value = image;
+}
+
+onMounted(async () => {
+  await loadPayload();
+});
+</script>
+
+<template>
+  <div data-mail-images-vue-root>
+    <div v-if="loadError" class="alert alert-danger" role="alert">{{ loadError }}</div>
+    <div v-else-if="!payload" class="text-muted">Loading images...</div>
+    <template v-else>
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title mb-0">How To Use Images in Email Templates</h3>
+        </div>
+        <div class="card-body">
+          <div class="mb-2">Upload images for use in email templates.</div>
+          <div class="mb-0">
+            You can reference an image in two ways:
+            <ul class="mb-0">
+              <li>
+                Inline (embedded) image:
+                <code>{{ inlineExampleMarkup }}</code>
+                <span class="text-muted">
+                  (requires <code>{% load post_office %}</code> in the template;
+                  when sending, the app embeds the image by reading it from storage, so the URL does not need to be reachable from the Django server via HTTP)
+                </span>
+              </li>
+              <li>
+                External URL:
+                <code>{{ externalExampleMarkup }}</code>
+              </li>
+            </ul>
+            <div class="text-muted mt-2">
+              Notes: previews rewrite <code>{% inline_image ... %}</code> to a plain URL so your browser can display it.
+              Plain-text previews drop images and any <code>{% ... %}</code> tags.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title mb-0">Upload</h3>
+        </div>
+        <div class="card-body">
+          <form :action="bootstrap.submitUrl" method="post" enctype="multipart/form-data" class="mb-0">
+            <input type="hidden" name="csrfmiddlewaretoken" :value="bootstrap.csrfToken">
+            <input type="hidden" name="action" value="upload">
+
+            <div class="form-row">
+              <div class="form-group col-md-5">
+                <label for="mail-images-upload-path" class="mb-1">Folder (optional)</label>
+                <input id="mail-images-upload-path" type="text" class="form-control" name="upload_path" placeholder="e.g. logos" autocomplete="off">
+                <small class="form-text text-muted">Stored under <code>{{ payload.mailImagesPrefix }}</code>. Do not include <code>..</code>.</small>
+              </div>
+
+              <div class="form-group col-md-5">
+                <label for="mail-images-upload-files" class="mb-1">Files</label>
+                <input id="mail-images-upload-files" type="file" class="form-control" name="files" multiple accept="image/*">
+              </div>
+
+              <div class="form-group col-md-2 d-flex align-items-end">
+                <div class="w-100">
+                  <div class="custom-control custom-checkbox mb-2">
+                    <input id="mail-images-overwrite" type="checkbox" class="custom-control-input" name="overwrite" value="1">
+                    <label class="custom-control-label" for="mail-images-overwrite">Overwrite</label>
+                  </div>
+                  <button type="submit" class="btn btn-primary btn-block" title="Upload selected images">Upload</button>
+                </div>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title mb-0">Stored Images</h3>
+        </div>
+        <div class="card-body p-0">
+          <table class="table table-striped mb-0">
+            <thead>
+              <tr>
+                <th style="width: 140px;">Preview</th>
+                <th>Key</th>
+                <th style="width: 140px;">Size</th>
+                <th style="width: 220px;">Modified</th>
+                <th style="width: 420px;">URL</th>
+                <th class="text-right" style="width: 160px;">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="image in payload.images" :key="image.key">
+                <td>
+                  <img :src="image.url" :alt="image.relativeKey" style="max-width: 120px; max-height: 64px; object-fit: contain; background: #fff;">
+                </td>
+                <td>
+                  <div class="small text-muted">{{ payload.mailImagesPrefix }}</div>
+                  <div class="font-weight-bold">{{ image.relativeKey }}</div>
+                </td>
+                <td class="text-muted">{{ image.sizeBytes }} bytes</td>
+                <td class="text-muted">{{ formatModifiedAt(image.modifiedAt) }}</td>
+                <td>
+                  <input type="text" class="form-control form-control-sm" :value="image.url" readonly>
+                </td>
+                <td class="text-right">
+                  <a class="btn btn-sm btn-outline-secondary" :href="image.url" target="_blank" rel="noopener" title="Download this image">Download</a>
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-outline-danger"
+                    data-toggle="modal"
+                    data-target="#delete-mail-image-modal"
+                    title="Delete this image"
+                    @click="openDeleteModal(image)"
+                  >Delete</button>
+                </td>
+              </tr>
+              <tr v-if="payload.images.length === 0">
+                <td colspan="6" class="p-3 text-muted">No images found.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="modal fade" id="delete-mail-image-modal" tabindex="-1" role="dialog" aria-hidden="true">
+        <div class="modal-dialog" role="document">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title">Delete image</h5>
+              <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog">
+                <span aria-hidden="true">&times;</span>
+              </button>
+            </div>
+            <div class="modal-body">
+              <div class="mb-3 text-left">Delete <strong>{{ deleteTarget?.relativeKey || "" }}</strong>?</div>
+              <form :action="bootstrap.submitUrl" method="post" class="m-0">
+                <input type="hidden" name="csrfmiddlewaretoken" :value="bootstrap.csrfToken">
+                <input type="hidden" name="action" value="delete">
+                <input type="hidden" name="key" :value="deleteTarget?.key || ''">
+                <div class="d-flex justify-content-between">
+                  <button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel" title="Close dialog without deleting">Cancel</button>
+                  <button type="submit" class="btn btn-danger" title="Delete this image">Delete</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+  </div>
+</template>

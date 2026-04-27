@@ -1,5 +1,4 @@
 
-import re
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -64,11 +63,12 @@ class SelfServiceSettingsPagesTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         content = response.content.decode("utf-8")
+        self.assertIn("data-settings-root", content)
+        self.assertIn('id="settings-initial-payload"', content)
+        self.assertIn('id="settings-route-config"', content)
         for tab_id in ("profile", "emails", "keys", "security", "agreements"):
-            self.assertIn(f'data-settings-tab="{tab_id}"', content)
-            self.assertIn(f'data-settings-tab-pane="{tab_id}"', content)
-        self.assertNotIn("var allowedTabs = ['profile', 'emails', 'keys', 'security', 'agreements'];", content)
-        self.assertIn("document.querySelectorAll('a[data-settings-tab]')", content)
+            self.assertIn(f'"{tab_id}"', content)
+        self.assertIn('data-settings-api-url="/api/v1/settings/detail?tab=security"', content)
 
     def test_settings_profile_get_populates_initial_values(self):
         factory = RequestFactory()
@@ -166,15 +166,10 @@ class SelfServiceSettingsPagesTests(TestCase):
         self.assertEqual(response.status_code, 200)
         content = response.content.decode("utf-8")
 
-        # The label should only render once; the textarea fallback should not repeat it.
-        self.assertIn("Chat Nicknames", content)
-        label_for_re = re.compile(r'<label\b[^>]*\bfor="id_fasIRCNick"', re.IGNORECASE)
-        self.assertEqual(len(label_for_re.findall(content)), 1)
-
-        # The progressive-enhancement widget should be present with the expected hooks.
-        self.assertIn('id="chat-nicks-widget"', content)
-        self.assertIn('js-chat-nicks-editor', content)
-        self.assertIn('data-textarea-id="id_fasIRCNick"', content)
+        # The thin shell must bootstrap the chat nickname field and enhancement script for the Vue mount.
+        self.assertIn('id="settings-initial-payload"', content)
+        self.assertIn('"name": "fasIRCNick"', content)
+        self.assertIn('"chat_defaults"', content)
         self.assertIn("core/js/chat_nicknames_editor.js", content)
 
     def test_settings_privacy_get_accepts_boolean_fasisprivate(self):

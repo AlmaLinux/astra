@@ -1,3 +1,5 @@
+import { formatDjangoDateTime } from "../shared/djangoDateFormatting";
+
 /**
  * Types and bootstrap configuration for account invitations table.
  * Mirrors the membership requests structure for consistency.
@@ -159,10 +161,10 @@ export function replaceTemplateToken(url: string, token: string): (id: number | 
 }
 
 /**
- * Format a date string to ISO format.
+ * Format a raw ISO date string using the current Django DATETIME_FORMAT parity.
  */
 export function formatDateTime(dateStr: string | null): string {
-  return dateStr || "";
+  return formatDjangoDateTime(dateStr);
 }
 
 /**

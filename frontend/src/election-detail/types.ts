@@ -5,6 +5,17 @@ export interface ElectionWinnerItem {
   full_name: string;
 }
 
+export interface ElectionExclusionGroupCandidate {
+  username: string;
+  full_name: string;
+}
+
+export interface ElectionExclusionGroup {
+  name: string;
+  max_elected: number;
+  candidates: ElectionExclusionGroupCandidate[];
+}
+
 export interface ElectionTurnoutStats {
   participating_voter_count: number;
   participating_vote_weight_total: number;
@@ -24,6 +35,11 @@ export interface ElectionTurnoutChartData {
   counts: number[];
 }
 
+export interface ElectionTurnoutRow {
+  day: string;
+  count: number;
+}
+
 export interface ElectionInfoPayload {
   id: number;
   name: string;
@@ -32,8 +48,7 @@ export interface ElectionInfoPayload {
   status: string;
   start_datetime: string;
   end_datetime: string;
-  start_datetime_display: string;
-  end_datetime_display: string;
+  viewer_timezone: string;
   number_of_seats: number;
   quorum: number;
   eligible_group_cn: string;
@@ -43,8 +58,8 @@ export interface ElectionInfoPayload {
   eligibility_min_membership_age_days: number;
   show_turnout_chart: boolean;
   turnout_stats: ElectionTurnoutStats;
-  turnout_chart_data: ElectionTurnoutChartData;
-  exclusion_group_messages: string[];
+  turnout_rows: ElectionTurnoutRow[];
+  exclusion_groups: ElectionExclusionGroup[];
   election_is_finished: boolean;
   tally_winners: ElectionWinnerItem[];
   empty_seats: number;

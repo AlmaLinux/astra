@@ -1,10 +1,13 @@
 {% extends "core/base.html" %}
 {% load static %}
+{% load django_vite %}
 
 {% block title %}{% if is_create %}New template{% else %}Edit template{% endif %}{% endblock %}
 
 {% block extra_head %}
   {{ block.super }}
+  {% vite_hmr_client %}
+  {% vite_asset 'src/entrypoints/emailTemplateEditor.ts' %}
   {% include 'core/_templated_email_compose_assets_head.html' %}
 {% endblock %}
 
@@ -13,62 +16,18 @@
 {% endblock %}
 
 {% block content %}
-  <form method="post">
-    {% csrf_token %}
-
-    <div class="row">
-      <div class="col-lg-12">
-        <div class="card card-outline card-secondary">
-          <div class="card-header">
-            <h3 class="card-title">Template details</h3>
-          </div>
-          <div class="card-body">
-            {% include 'core/_form_field.html' with field=form.name %}
-            {% if is_locked %}
-              <div class="text-muted small mt-1">This template is referenced by the app configuration and cannot be renamed.</div>
-            {% endif %}
-
-            {% include 'core/_form_field.html' with field=form.description wrapper_class='mb-0' %}
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="row">
-      <div class="col-lg-12">
-        {% url 'email-template-render-preview' as compose_preview_url %}
-        {% include "core/_templated_email_compose.html" with card_title="Compose" templates=compose_templates form=form rendered_preview=rendered_preview available_variables=available_variables compose_description="Edit the template subject and body." show_save_buttons=False force_email_template_id=force_email_template_id compose_preview_url=compose_preview_url %}
-      </div>
-    </div>
-
-    <div class="row">
-      <div class="col-lg-12">
-        <div class="card card-outline card-primary">
-          <div class="card-body d-flex align-items-center flex-wrap" style="gap: .75rem;">
-            <a class="btn btn-outline-secondary" href="{% url 'email-templates' %}" title="Back to the template list">Back</a>
-
-            <div class="flex-grow-1 text-center">
-              {% if template and not is_locked %}
-                <button type="button" class="btn btn-outline-danger" data-toggle="modal" data-target="#email-template-delete-modal" title="Delete this template">
-                  Delete
-                </button>
-              {% elif template and is_locked %}
-                <button type="button" class="btn btn-outline-danger" disabled aria-disabled="true" title="This template is referenced by the app configuration and cannot be deleted.">
-                  Delete
-                </button>
-              {% endif %}
-            </div>
-
-            <button type="submit" class="btn btn-success ml-auto" title="Save template changes">Save</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </form>
-
-  {% if template and not is_locked %}
-    {% include 'core/_modal_confirm.html' with modal_id='email-template-delete-modal' title='Delete email template?' body_prefix='Delete template:' body_emphasis=template.name body_suffix='<p>This cannot be undone.</p>' action_url=template_delete_url submit_label='Delete' submit_class='btn-danger' %}
-  {% endif %}
+  <div
+    data-email-template-editor-root=""
+    data-email-template-editor-api-url="{{ email_template_editor_api_url }}"
+    data-email-template-list-url="{{ email_template_list_url }}"
+    data-email-template-submit-url="{{ email_template_submit_url }}"
+    data-email-template-preview-url="{{ email_template_preview_url }}"
+    {% if email_template_delete_url %}data-email-template-delete-url="{{ email_template_delete_url }}"{% endif %}
+    data-email-template-csrf-token="{{ csrf_token }}"
+  >
+    {{ email_template_editor_initial_payload|json_script:"email-template-editor-initial-payload" }}
+    <div class="text-muted">Loading template editor...</div>
+  </div>
 {% endblock %}
 
 {% block scripts %}

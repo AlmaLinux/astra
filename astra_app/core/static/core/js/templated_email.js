@@ -905,6 +905,14 @@
     return String(compose.container.getAttribute('data-compose-preview-url') || '').trim();
   }
 
+  function shouldSkipInitialPreviewRefresh(compose) {
+    if (!compose || !compose.container) return false;
+
+    // Some shells already hydrate the first preview server-side and only need
+    // the shared preview helper for subsequent edits.
+    return compose.container.getAttribute('data-compose-skip-initial-preview-refresh') === '1';
+  }
+
   async function refreshPreview(compose) {
     if (!compose) return;
 
@@ -1011,6 +1019,7 @@
 
       var instances = reg.getAll();
       for (var i = 0; i < instances.length; i++) {
+        if (shouldSkipInitialPreviewRefresh(instances[i])) continue;
         schedulePreviewRefresh(instances[i], 0);
       }
     }, 0);

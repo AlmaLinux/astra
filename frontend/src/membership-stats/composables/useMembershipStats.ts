@@ -4,11 +4,14 @@ import type {
   MembershipStatsBootstrap,
   SummaryData,
   CompositionChartsData,
+  CompositionChartsApiData,
   TrendsChartsData,
+  TrendsChartsApiData,
   RetentionChartsData,
+  RetentionChartsApiData,
   DaysPreset,
 } from "../types";
-import { isDaysPreset } from "../types";
+import { compositionChartsFromApi, isDaysPreset, retentionChartsFromApi, trendsChartsFromApi } from "../types";
 
 export interface MembershipStatsState {
   summary: Ref<SummaryData | null>;
@@ -52,15 +55,15 @@ export function useMembershipStats(bootstrap: MembershipStatsBootstrap): Members
 
       const [summaryData, compositionData, trendsData, retentionData] = await Promise.all([
         summaryResp.json() as Promise<{ summary: SummaryData }>,
-        compositionResp.json() as Promise<{ charts: CompositionChartsData }>,
-        trendsResp.json() as Promise<{ charts: TrendsChartsData }>,
-        retentionResp.json() as Promise<{ charts: RetentionChartsData }>,
+        compositionResp.json() as Promise<{ charts: CompositionChartsApiData }>,
+        trendsResp.json() as Promise<{ charts: TrendsChartsApiData }>,
+        retentionResp.json() as Promise<{ charts: RetentionChartsApiData }>,
       ]);
 
       summary.value = summaryData.summary;
-      compositionCharts.value = compositionData.charts;
-      trendsCharts.value = trendsData.charts;
-      retentionCharts.value = retentionData.charts;
+      compositionCharts.value = compositionChartsFromApi(compositionData.charts);
+      trendsCharts.value = trendsChartsFromApi(trendsData.charts);
+      retentionCharts.value = retentionChartsFromApi(retentionData.charts);
     } catch {
       error.value = "Network error loading statistics.";
     } finally {

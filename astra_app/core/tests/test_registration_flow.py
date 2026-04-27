@@ -2,11 +2,12 @@
 import re
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 import requests
 from django.contrib.messages import get_messages
 from django.test import Client, TestCase, override_settings
+from django.urls import reverse
 from python_freeipa import exceptions
 
 from core import views_registration
@@ -299,6 +300,161 @@ class RegistrationFlowTests(TestCase):
         resp = client.get("/register/")
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Create account")
+
+    @override_settings(REGISTRATION_OPEN=True)
+    def test_register_get_renders_vue_shell_contract(self) -> None:
+        response = self.client.get(reverse("register"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-register-root=""')
+        self.assertContains(response, f'data-register-api-url="{reverse("api-register-detail")}"')
+        self.assertContains(response, f'data-register-login-url="{reverse("login")}"')
+        self.assertContains(response, f'data-register-register-url="{reverse("register")}"')
+        self.assertContains(response, f'data-register-submit-url="{reverse("register")}"')
+        self.assertNotContains(response, 'id="id_username"')
+
+    @override_settings(REGISTRATION_OPEN=True)
+    def test_register_detail_api_returns_data_only_payload(self) -> None:
+        response = self.client.get(reverse("api-register-detail"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["registration_open"])
+        self.assertFalse(payload["form"]["is_bound"])
+        self.assertEqual(payload["form"]["fields"][0]["name"], "username")
+        self.assertEqual(payload["form"]["fields"][-1]["name"], "invitation_token")
+        self.assertNotIn("login_url", payload)
+        self.assertNotIn("submit_url", payload)
+        self.assertNotIn("step_label", payload)
+
+    @override_settings(REGISTRATION_OPEN=True)
+    def test_registration_detail_endpoints_are_public_but_neighboring_register_api_paths_still_require_auth(self) -> None:
+        token = make_registration_activation_token({"u": "alice", "e": "alice@example.com"})
+        ipa_client = SimpleNamespace()
+        ipa_client.stageuser_show = lambda *args, **kwargs: {
+            "result": {
+                "uid": ["alice"],
+                "mail": ["alice@example.com"],
+            }
+        }
+
+        with patch("core.views_registration.FreeIPAUser.get_client", autospec=True, return_value=ipa_client):
+            register_response = self.client.get(reverse("api-register-detail"), HTTP_ACCEPT="application/json")
+            confirm_response = self.client.get(
+                f'{reverse("api-register-confirm-detail")}?username=alice',
+                HTTP_ACCEPT="application/json",
+            )
+            activate_response = self.client.get(
+                f'{reverse("api-register-activate-detail")}?token={token}',
+                HTTP_ACCEPT="application/json",
+            )
+
+        blocked_response = self.client.get("/api/v1/register/probe", HTTP_ACCEPT="application/json")
+
+        self.assertEqual(register_response.status_code, 200)
+        self.assertEqual(confirm_response.status_code, 200)
+        self.assertEqual(activate_response.status_code, 200)
+        self.assertEqual(blocked_response.status_code, 403)
+        self.assertEqual(blocked_response.json(), {"ok": False, "error": "Authentication required."})
+
+    @override_settings(REGISTRATION_OPEN=True)
+    def test_confirm_get_renders_vue_shell_contract(self) -> None:
+        ipa_client = SimpleNamespace()
+        ipa_client.stageuser_show = lambda *args, **kwargs: {
+            "result": {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["alice@example.com"],
+            }
+        }
+
+        with patch("core.views_registration.FreeIPAUser.get_client", autospec=True, return_value=ipa_client):
+            response = self.client.get(f'{reverse("register-confirm")}?username=alice')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-register-confirm-root=""')
+        self.assertContains(
+            response,
+            f'data-register-confirm-api-url="{reverse("api-register-confirm-detail")}?username=alice"',
+        )
+        self.assertContains(response, f'data-register-confirm-submit-url="{reverse("register-confirm")}?username=alice"')
+        self.assertContains(response, f'data-register-confirm-login-url="{reverse("login")}"')
+        self.assertNotContains(response, 'type="submit" class="btn btn-secondary"')
+
+    @override_settings(REGISTRATION_OPEN=True)
+    def test_confirm_detail_api_returns_data_only_payload(self) -> None:
+        ipa_client = SimpleNamespace()
+        ipa_client.stageuser_show = lambda *args, **kwargs: {
+            "result": {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["alice@example.com"],
+            }
+        }
+
+        with patch("core.views_registration.FreeIPAUser.get_client", autospec=True, return_value=ipa_client):
+            response = self.client.get(f'{reverse("api-register-confirm-detail")}?username=alice')
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["username"], "alice")
+        self.assertEqual(payload["email"], "alice@example.com")
+        self.assertFalse(payload["form"]["is_bound"])
+        self.assertEqual(payload["form"]["fields"][0]["name"], "username")
+        self.assertNotIn("login_url", payload)
+        self.assertNotIn("submit_url", payload)
+
+    @override_settings(REGISTRATION_OPEN=True)
+    def test_activate_get_renders_vue_shell_contract(self) -> None:
+        token = make_registration_activation_token({"u": "alice", "e": "alice@example.com"})
+        ipa_client = SimpleNamespace()
+        ipa_client.stageuser_show = lambda *args, **kwargs: {
+            "result": {
+                "uid": ["alice"],
+                "mail": ["alice@example.com"],
+            }
+        }
+
+        with patch("core.views_registration.FreeIPAUser.get_client", autospec=True, return_value=ipa_client):
+            response = self.client.get(f'{reverse("register-activate")}?token={token}')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-register-activate-root=""')
+        self.assertContains(
+            response,
+            f'data-register-activate-api-url="{reverse("api-register-activate-detail")}?token={quote(token)}"',
+        )
+        self.assertContains(
+            response,
+            f'data-register-activate-submit-url="{reverse("register-activate")}?token={token}"',
+        )
+        self.assertContains(response, f'data-register-activate-start-over-url="{reverse("register")}"')
+        self.assertNotContains(response, 'id="id_password"')
+
+    @override_settings(REGISTRATION_OPEN=True)
+    def test_activate_detail_api_returns_data_only_payload(self) -> None:
+        token = make_registration_activation_token({"u": "alice", "e": "alice@example.com"})
+        ipa_client = SimpleNamespace()
+        ipa_client.stageuser_show = lambda *args, **kwargs: {
+            "result": {
+                "uid": ["alice"],
+                "mail": ["alice@example.com"],
+            }
+        }
+
+        with patch("core.views_registration.FreeIPAUser.get_client", autospec=True, return_value=ipa_client):
+            response = self.client.get(f'{reverse("api-register-activate-detail")}?token={token}')
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["username"], "alice")
+        self.assertFalse(payload["form"]["is_bound"])
+        self.assertEqual(payload["form"]["fields"][0]["name"], "password")
+        self.assertEqual(payload["form"]["fields"][1]["name"], "password_confirm")
+        self.assertNotIn("start_over_url", payload)
+        self.assertNotIn("submit_url", payload)
 
     @override_settings(REGISTRATION_OPEN=True, DEFAULT_FROM_EMAIL="noreply@example.com")
     def test_register_post_creates_stage_user_and_sends_email(self):
@@ -854,7 +1010,12 @@ class RegistrationFlowTests(TestCase):
         with patch("core.views_registration.FreeIPAUser.get_client", autospec=True, return_value=ipa_client2):
             activation_get = client.get(f"/register/activate/?token={token}")
         self.assertEqual(activation_get.status_code, 200)
-        self.assertContains(activation_get, "Choose a password")
+        self.assertContains(activation_get, 'data-register-activate-root=""')
+        self.assertContains(
+            activation_get,
+            f'data-register-activate-api-url="{reverse("api-register-activate-detail")}?token={token}"',
+        )
+        self.assertNotContains(activation_get, 'id="id_password"')
 
         # Activation POST activates stage user and sets password.
 

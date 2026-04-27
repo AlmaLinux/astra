@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timedelta, timezone as datetime_timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 from django.test import TestCase, override_settings
@@ -7,9 +7,15 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.freeipa.user import FreeIPAUser
-from core.models import FreeIPAPermissionGrant, Membership, MembershipRequest, MembershipType, MembershipTypeCategory, Organization
-from core.permissions import ASTRA_VIEW_MEMBERSHIP
-from core.permissions import ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP
+from core.models import (
+    FreeIPAPermissionGrant,
+    Membership,
+    MembershipRequest,
+    MembershipType,
+    MembershipTypeCategory,
+    Organization,
+)
+from core.permissions import ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP
 
 
 class OrganizationDetailVueTests(TestCase):
@@ -71,7 +77,7 @@ class OrganizationDetailVueTests(TestCase):
         self.assertContains(response, "data-organization-detail-root")
         self.assertContains(
             response,
-            f'data-organization-detail-api-url="{reverse("api-organization-detail", args=[organization.pk])}"',
+            f'data-organization-detail-api-url="{reverse("api-organization-detail-page", args=[organization.pk])}"',
         )
         self.assertContains(response, 'data-organization-detail-membership-request-detail-template="/membership/request/__request_id__/"')
         self.assertContains(response, 'data-organization-detail-user-profile-url-template="/user/__username__/"')
@@ -110,8 +116,8 @@ class OrganizationDetailVueTests(TestCase):
 
     def test_organization_detail_api_returns_summary_payload(self) -> None:
         sponsor_type = self._ensure_sponsor_type()
-        created_at = datetime(2026, 1, 15, 12, 0, tzinfo=datetime_timezone.utc)
-        expires_at = datetime(2026, 9, 26, 12, 0, tzinfo=datetime_timezone.utc)
+        created_at = datetime(2026, 1, 15, 12, 0, tzinfo=UTC)
+        expires_at = datetime(2026, 9, 26, 12, 0, tzinfo=UTC)
         organization = Organization.objects.create(
             name="Acme Org",
             representative="alice",
@@ -164,6 +170,127 @@ class OrganizationDetailVueTests(TestCase):
         self.assertNotIn("notes", payload["organization"])
         self.assertNotIn("actions", payload)
         self.assertNotIn("permissions", payload)
+
+    def test_organization_detail_page_api_returns_data_only_payload(self) -> None:
+        sponsor_type = self._ensure_sponsor_type()
+        organization = Organization.objects.create(name="Acme Org", representative="alice")
+        self._login_as_freeipa_user("alice")
+
+        context = {
+            "organization": organization,
+            "sponsorships": [],
+            "sponsorship_entries": [
+                {
+                    "sponsorship": {
+                        "membership_type": sponsor_type,
+                    },
+                    "request_id": None,
+                    "created_at": "2024-01-15T12:00:00+00:00",
+                    "expires_at": "2026-04-30T00:00:00+00:00",
+                    "is_expiring_soon": True,
+                    "can_request_tier_change": True,
+                    "tier_change_membership_type_code": "ruby",
+                }
+            ],
+            "pending_requests": [
+                {
+                    "request_id": 17,
+                    "status": "on_hold",
+                    "membership_type": sponsor_type,
+                }
+            ],
+            "representative_username": "alice",
+            "representative_full_name": "Alice Example",
+            "contact_display_groups": [
+                {
+                    "key": "business",
+                    "label": "Business",
+                    "name": "Business Person",
+                    "email": "biz@example.com",
+                    "phone": "",
+                }
+            ],
+            "is_representative": True,
+            "can_request_membership": True,
+        }
+
+        with (
+            patch("core.views_organizations._build_organization_detail_page_context", return_value=context),
+            patch(
+                "core.views_organizations.membership_review_permissions",
+                return_value={
+                    "membership_can_view": True,
+                    "membership_can_change": True,
+                    "membership_can_delete": True,
+                },
+            ),
+        ):
+            response = self.client.get(reverse("api-organization-detail-page", args=[organization.pk]), HTTP_ACCEPT="application/json")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        self.assertTrue(payload["organization"]["is_representative"])
+        membership = payload["organization"]["memberships"][0]
+        pending_membership = payload["organization"]["pending_memberships"][0]
+        self.assertEqual(membership["membership_type"]["code"], sponsor_type.code)
+        self.assertEqual(membership["created_at"], "2024-01-15T12:00:00+00:00")
+        self.assertEqual(membership["expires_at"], "2026-04-30T00:00:00+00:00")
+        self.assertTrue(membership["is_expiring_soon"])
+        self.assertNotIn("label", membership)
+        self.assertNotIn("class_name", membership)
+        self.assertNotIn("member_since_label", membership)
+        self.assertNotIn("expires_label", membership)
+        self.assertNotIn("expires_tone", membership)
+        self.assertEqual(pending_membership["status"], "on_hold")
+        self.assertNotIn("badge_label", pending_membership)
+        self.assertNotIn("badge_class_name", pending_membership)
+        self.assertNotIn("label", payload["organization"]["contact_groups"][0])
+
+    def test_organization_detail_page_api_preserves_non_representative_on_hold_payload(self) -> None:
+        sponsor_type = self._ensure_sponsor_type()
+        organization = Organization.objects.create(name="Acme Org", representative="alice")
+        MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=organization,
+            membership_type=sponsor_type,
+            status=MembershipRequest.Status.on_hold,
+        )
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_VIEW_MEMBERSHIP,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="bob",
+        )
+
+        self._login_as_freeipa_user("bob")
+
+        with patch(
+            "core.freeipa.user.FreeIPAUser.get",
+            side_effect=lambda username: FreeIPAUser(
+                username,
+                {
+                    "uid": [username],
+                    "cn": ["Alice Example"] if username == "alice" else ["Bob Reviewer"],
+                    "memberof_group": [],
+                    "c": ["US"],
+                },
+            ),
+        ):
+            response = self.client.get(reverse("api-organization-detail-page", args=[organization.pk]), HTTP_ACCEPT="application/json")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        self.assertFalse(payload["organization"]["is_representative"])
+        self.assertEqual(payload["organization"]["pending_memberships"], [
+            {
+                "request_id": payload["organization"]["pending_memberships"][0]["request_id"],
+                "status": "on_hold",
+                "membership_type": {
+                    "name": sponsor_type.name,
+                    "code": sponsor_type.code,
+                    "description": sponsor_type.description,
+                },
+            }
+        ])
 
     def test_organization_detail_api_includes_sponsorship_management_capabilities(self) -> None:
         for permission in (ASTRA_VIEW_MEMBERSHIP, ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP):
@@ -222,6 +349,6 @@ class OrganizationDetailVueTests(TestCase):
         self.assertEqual(entry["tier_change_membership_type_code"], ruby_type.code)
         self.assertEqual(entry["request_id"], None)
         self.assertTrue(entry["can_manage_expiration"])
-        self.assertEqual(entry["expires_on"], membership.expires_at.astimezone(datetime_timezone.utc).strftime("%Y-%m-%d"))
+        self.assertEqual(entry["expires_on"], membership.expires_at.astimezone(UTC).strftime("%Y-%m-%d"))
         self.assertNotIn("tier_change_url", entry)
         self.assertNotIn("management", entry)

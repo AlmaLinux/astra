@@ -1,3 +1,4 @@
+import json
 import logging
 from dataclasses import dataclass
 from typing import Literal
@@ -7,6 +8,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
+from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.html import format_html
@@ -47,6 +49,332 @@ class MembershipRequestDetailState:
     viewer_mode: MembershipRequestViewerMode
     payload: dict[str, object]
     bootstrap: dict[str, object]
+
+
+@dataclass(slots=True)
+class MembershipRequestCreateAccessContext:
+    username: str
+    organization: Organization | None
+    is_org_request: bool
+    target_username: str | None
+
+
+@dataclass(slots=True)
+class MembershipRequestFormPageState:
+    form: MembershipRequestForm
+    payload: dict[str, object]
+    bootstrap: dict[str, str]
+
+
+def _membership_request_form_json(value: object) -> str:
+    return json.dumps(value, separators=(",", ":")).replace("</", "<\\/")
+
+
+def _membership_request_json_response(payload: dict[str, object], *, status: int = 200) -> JsonResponse:
+    response = JsonResponse(payload, status=status)
+    response["Cache-Control"] = "private, no-cache"
+    return response
+
+
+def _membership_request_cancel_url(*, username: str, organization: Organization | None) -> str:
+    if organization is not None:
+        return reverse("organization-detail", kwargs={"organization_id": organization.pk})
+    return reverse("user-profile", kwargs={"username": username})
+
+
+def _serialize_membership_request_form_option_groups(
+    *,
+    bound_field: forms.BoundField,
+) -> list[dict[str, object]]:
+    category_map_raw = str(bound_field.field.widget.attrs.get("data-category-map") or "").strip()
+    category_map: dict[str, str] = {}
+    if category_map_raw:
+        category_map = json.loads(category_map_raw)
+
+    groups: list[dict[str, object]] = []
+    current_value = "" if bound_field.value() is None else str(bound_field.value())
+    for choice in bound_field.field.choices:
+        group_label = choice[0]
+        group_choices = choice[1]
+        if isinstance(group_choices, (list, tuple)) and group_choices and isinstance(group_choices[0], (list, tuple)):
+            options = [
+                {
+                    "value": str(option_value),
+                    "label": str(option_label),
+                    "selected": str(option_value) == current_value,
+                    "disabled": False,
+                    "category": str(category_map.get(str(option_value)) or ""),
+                }
+                for option_value, option_label in group_choices
+            ]
+            groups.append({"label": str(group_label) or None, "options": options})
+            continue
+
+        option_value = str(group_label)
+        option_label = str(group_choices)
+        groups.append(
+            {
+                "label": None,
+                "options": [
+                    {
+                        "value": option_value,
+                        "label": option_label,
+                        "selected": option_value == current_value,
+                        "disabled": False,
+                        "category": str(category_map.get(option_value) or ""),
+                    }
+                ],
+            }
+        )
+
+    return groups
+
+
+def _serialize_membership_request_form_field(*, bound_field: forms.BoundField) -> dict[str, object]:
+    widget = bound_field.field.widget
+    if isinstance(widget, forms.Textarea):
+        widget_type = "textarea"
+    elif isinstance(widget, forms.Select):
+        widget_type = "select"
+    else:
+        widget_type = "text"
+
+    value = bound_field.value()
+    attrs = {key: str(attr_value) for key, attr_value in widget.attrs.items() if attr_value is not None}
+    payload: dict[str, object] = {
+        "name": bound_field.name,
+        "id": bound_field.id_for_label,
+        "label": str(bound_field.label or ""),
+        "widget": widget_type,
+        "value": "" if value is None else str(value),
+        "required": bool(bound_field.field.required),
+        "disabled": bool(bound_field.field.disabled),
+        "help_text": str(bound_field.help_text or ""),
+        "errors": [str(error) for error in bound_field.errors],
+        "attrs": attrs,
+    }
+    if widget_type == "select":
+        payload["option_groups"] = _serialize_membership_request_form_option_groups(bound_field=bound_field)
+    return payload
+
+
+def _serialize_membership_request_form(*, form: MembershipRequestForm) -> dict[str, object]:
+    return {
+        "is_bound": form.is_bound,
+        "non_field_errors": [str(error) for error in form.non_field_errors()],
+        "fields": [_serialize_membership_request_form_field(bound_field=field) for field in form],
+    }
+
+
+def _build_membership_request_form_page_payload(
+    *,
+    form: MembershipRequestForm,
+    organization: Organization | None,
+    no_types_available: bool,
+    prefill_type_unavailable_name: str | None,
+) -> dict[str, object]:
+    return {
+        "organization": None if organization is None else {"id": organization.pk, "name": organization.name},
+        "no_types_available": no_types_available,
+        "prefill_type_unavailable_name": prefill_type_unavailable_name,
+        "form": _serialize_membership_request_form(form=form),
+    }
+
+
+def _build_membership_request_form_page_state(
+    *,
+    request: HttpRequest,
+    access_context: MembershipRequestCreateAccessContext,
+    form: MembershipRequestForm,
+    no_types_available: bool,
+    prefill_type_unavailable_name: str | None,
+) -> MembershipRequestFormPageState:
+    organization = access_context.organization
+    if organization is not None:
+        api_url = reverse("api-organization-membership-request-form-detail", args=[organization.pk])
+        submit_url = reverse("organization-membership-request", args=[organization.pk])
+    else:
+        api_url = reverse("api-membership-request-form-detail")
+        submit_url = reverse("membership-request")
+
+    return MembershipRequestFormPageState(
+        form=form,
+        payload=_build_membership_request_form_page_payload(
+            form=form,
+            organization=organization,
+            no_types_available=no_types_available,
+            prefill_type_unavailable_name=prefill_type_unavailable_name,
+        ),
+        bootstrap={
+            "api_url": api_url,
+            "cancel_url": _membership_request_cancel_url(
+                username=access_context.username,
+                organization=organization,
+            ),
+            "submit_url": submit_url,
+            "page_title": "Request Membership",
+            "privacy_policy_url": reverse("privacy-policy"),
+        },
+    )
+
+
+def _render_membership_request_form_page(
+    request: HttpRequest,
+    *,
+    state: MembershipRequestFormPageState,
+    initial_payload: dict[str, object] | None = None,
+) -> HttpResponse:
+    return render(
+        request,
+        "core/membership_request.html",
+        {
+            "membership_request_form_title": state.bootstrap["page_title"],
+            "membership_request_form_api_url": state.bootstrap["api_url"],
+            "membership_request_form_cancel_url": state.bootstrap["cancel_url"],
+            "membership_request_form_submit_url": state.bootstrap["submit_url"],
+            "membership_request_form_privacy_policy_url": state.bootstrap["privacy_policy_url"],
+            "membership_request_form_csrf_token": get_token(request),
+            "membership_request_form_initial_payload_json": None
+            if initial_payload is None
+            else _membership_request_form_json(initial_payload),
+            "form": state.form,
+        },
+    )
+
+
+def _load_membership_request_create_access_context(
+    request: HttpRequest,
+    *,
+    organization_id: int | None = None,
+    api_mode: bool = False,
+) -> MembershipRequestCreateAccessContext | HttpResponse:
+    username = get_username(request)
+    if not username:
+        raise Http404("User not found")
+
+    organization = None
+    can_request_for_organization = request.user.has_perm(ASTRA_ADD_MEMBERSHIP)
+    if organization_id is not None:
+        organization = get_object_or_404(Organization, pk=organization_id)
+        if username != organization.representative and not can_request_for_organization:
+            raise Http404("Not found")
+
+    is_org_request = organization is not None
+
+    fu = FreeIPAUser.get(username)
+    if fu is None:
+        messages.error(request, "Unable to load your FreeIPA profile.")
+        if api_mode:
+            raise Http404("User not found")
+        return redirect("user-profile", username=username)
+
+    representative_user: FreeIPAUser | None = fu
+    if is_org_request:
+        representative_username = str(organization.representative or "").strip() if organization is not None else ""
+        representative_user = FreeIPAUser.get(representative_username) if representative_username else None
+
+    action_label = "request or renew memberships"
+    if is_org_request:
+        action_label = "request or renew organization memberships"
+
+    blocked = block_action_without_coc(
+        request,
+        username=username,
+        action_label=action_label,
+    )
+    if blocked is not None:
+        if api_mode:
+            raise PermissionDenied
+        return blocked
+
+    representative_user_data = representative_user._user_data if representative_user is not None else None
+    requester_user_data = fu._user_data
+    user_data_for_country_check = requester_user_data
+    if is_org_request:
+        is_requester_representative = organization is not None and username == organization.representative
+        user_data_for_country_check = representative_user_data if is_requester_representative else requester_user_data
+
+    blocked = block_action_without_country_code(
+        request,
+        user_data=user_data_for_country_check,
+        action_label=action_label,
+    )
+    if blocked is not None:
+        if api_mode:
+            raise PermissionDenied
+        return blocked
+
+    return MembershipRequestCreateAccessContext(
+        username=username,
+        organization=organization,
+        is_org_request=is_org_request,
+        target_username=None if is_org_request else username,
+    )
+
+
+def _build_membership_request_get_form_state(
+    request: HttpRequest,
+    *,
+    access_context: MembershipRequestCreateAccessContext,
+) -> MembershipRequestFormPageState:
+    prefill_membership_type = str(request.GET.get("membership_type") or "").strip()
+    organization = access_context.organization
+    if access_context.is_org_request and not prefill_membership_type:
+        prefill_membership_type = (
+            Membership.objects.filter(target_organization=organization)
+            .select_related("membership_type", "membership_type__category")
+            .order_by(
+                "membership_type__category__sort_order",
+                "membership_type__sort_order",
+                "membership_type__code",
+            )
+            .values_list("membership_type_id", flat=True)
+            .first()
+            or ""
+        )
+
+    initial = {"membership_type": prefill_membership_type}
+    initial.update(
+        _renewal_prefill_responses(
+            membership_type_code=prefill_membership_type,
+            username=access_context.target_username,
+            organization=organization,
+        )
+    )
+
+    form = MembershipRequestForm(
+        username=access_context.target_username,
+        organization=organization,
+        initial=initial,
+    )
+
+    no_types_available = (
+        not access_context.is_org_request
+        and not form.fields["membership_type"].queryset.exists()
+    )
+
+    prefill_type_unavailable_name: str | None = None
+    if prefill_membership_type and not access_context.is_org_request and not no_types_available:
+        if not form.fields["membership_type"].queryset.filter(pk=prefill_membership_type).exists():
+            blocked_type = (
+                MembershipType.objects.filter(
+                    pk=prefill_membership_type,
+                    enabled=True,
+                    category__is_individual=True,
+                )
+                .select_related("category")
+                .first()
+            )
+            if blocked_type is not None:
+                prefill_type_unavailable_name = blocked_type.name
+
+    return _build_membership_request_form_page_state(
+        request=request,
+        access_context=access_context,
+        form=form,
+        no_types_available=no_types_available,
+        prefill_type_unavailable_name=prefill_type_unavailable_name,
+    )
 
 
 def _renewal_prefill_responses(
@@ -92,61 +420,14 @@ def _renewal_prefill_responses(
 
 
 def membership_request(request: HttpRequest, organization_id: int | None = None) -> HttpResponse:
-    username = get_username(request)
-    if not username:
-        raise Http404("User not found")
+    access_context = _load_membership_request_create_access_context(request, organization_id=organization_id)
+    if isinstance(access_context, HttpResponse):
+        return access_context
 
-    organization = None
-    can_request_for_organization = request.user.has_perm(ASTRA_ADD_MEMBERSHIP)
-    if organization_id is not None:
-        organization = get_object_or_404(Organization, pk=organization_id)
-        if username != organization.representative and not can_request_for_organization:
-            raise Http404("Not found")
-
-    is_org_request = organization is not None
-
-    prefill_membership_type = str(request.GET.get("membership_type") or "").strip()
-
-    fu = FreeIPAUser.get(username)
-    if fu is None:
-        messages.error(request, "Unable to load your FreeIPA profile.")
-        return redirect("user-profile", username=username)
-
-    representative_user: FreeIPAUser | None = fu
-    if is_org_request:
-        representative_username = str(organization.representative or "").strip() if organization is not None else ""
-        representative_user = FreeIPAUser.get(representative_username) if representative_username else None
-
-    action_label = "request or renew memberships"
-    if is_org_request:
-        action_label = "request or renew organization memberships"
-
-    blocked = block_action_without_coc(
-        request,
-        username=username,
-        action_label=action_label,
-    )
-    if blocked is not None:
-        return blocked
-
-    representative_user_data = representative_user._user_data if representative_user is not None else None
-    requester_user_data = fu._user_data
-    user_data_for_country_check = requester_user_data
-    if is_org_request:
-        is_requester_representative = organization is not None and username == organization.representative
-        # Committee users can request on behalf of an organization; in that case,
-        # validate the actor's own country code because they are initiating the action.
-        user_data_for_country_check = representative_user_data if is_requester_representative else requester_user_data
-
-    blocked = block_action_without_country_code(
-        request,
-        user_data=user_data_for_country_check,
-        action_label=action_label,
-    )
-    if blocked is not None:
-        return blocked
-
-    target_username = None if is_org_request else username
+    username = access_context.username
+    organization = access_context.organization
+    is_org_request = access_context.is_org_request
+    target_username = access_context.target_username
 
     if request.method == "POST":
         form = MembershipRequestForm(request.POST, username=target_username, organization=organization)
@@ -244,74 +525,55 @@ def membership_request(request: HttpRequest, organization_id: int | None = None)
                             existing_request.pk,
                         ),
                     )
-    else:
-        if is_org_request and not prefill_membership_type:
-            prefill_membership_type = (
-                Membership.objects.filter(target_organization=organization)
-                .select_related("membership_type", "membership_type__category")
-                .order_by(
-                    "membership_type__category__sort_order",
-                    "membership_type__sort_order",
-                    "membership_type__code",
-                )
-                .values_list("membership_type_id", flat=True)
-                .first()
-                or ""
-            )
-
-        initial = {"membership_type": prefill_membership_type}
-        initial.update(
-            _renewal_prefill_responses(
-                membership_type_code=prefill_membership_type,
-                username=target_username,
-                organization=organization,
-            )
+        no_types_available = (
+            not is_org_request
+            and not form.fields["membership_type"].queryset.exists()
+        )
+        prefill_type_unavailable_name = None
+        state = _build_membership_request_form_page_state(
+            request=request,
+            access_context=access_context,
+            form=form,
+            no_types_available=no_types_available,
+            prefill_type_unavailable_name=prefill_type_unavailable_name,
+        )
+        return _render_membership_request_form_page(
+            request,
+            state=state,
+            initial_payload=state.payload,
         )
 
-        form = MembershipRequestForm(
-            username=target_username,
-            organization=organization,
-            initial=initial,
-        )
-
-    cancel_url = reverse("user-profile", kwargs={"username": username})
-    if is_org_request:
-        cancel_url = reverse("organization-detail", kwargs={"organization_id": organization.pk})
-
-    no_types_available = (
-        not is_org_request
-        and not form.fields["membership_type"].queryset.exists()
-    )
-
-    # If a specific type was requested via ?membership_type= but it is not available to this
-    # user (blocked by active membership or pending request), surface its name so
-    # the template can explain why and still show the form for other types.
-    prefill_type_unavailable_name: str | None = None
-    if request.method == "GET" and not is_org_request and prefill_membership_type and not no_types_available:
-        if not form.fields["membership_type"].queryset.filter(pk=prefill_membership_type).exists():
-            blocked_type = (
-                MembershipType.objects.filter(
-                    pk=prefill_membership_type,
-                    enabled=True,
-                    category__is_individual=True,
-                )
-                .select_related("category")
-                .first()
-            )
-            if blocked_type is not None:
-                prefill_type_unavailable_name = blocked_type.name
-
-    return render(
+    state = _build_membership_request_get_form_state(
         request,
-        "core/membership_request.html",
-        {
-            "form": form,
-            "organization": organization,
-            "cancel_url": cancel_url,
-            "no_types_available": no_types_available,
-            "prefill_type_unavailable_name": prefill_type_unavailable_name,
-        },
+        access_context=access_context,
     )
+    return _render_membership_request_form_page(request, state=state)
+
+
+def membership_request_form_detail_api(
+    request: HttpRequest,
+    organization_id: int | None = None,
+) -> JsonResponse:
+    if request.method != "GET":
+        return _membership_request_json_response({"error": "Method not allowed."}, status=405)
+
+    try:
+        access_context = _load_membership_request_create_access_context(
+            request,
+            organization_id=organization_id,
+            api_mode=True,
+        )
+    except (Http404, PermissionDenied):
+        return _membership_request_json_response({"error": "Not found."}, status=404)
+
+    if isinstance(access_context, HttpResponse):
+        return _membership_request_json_response({"error": "Not found."}, status=404)
+
+    state = _build_membership_request_get_form_state(
+        request,
+        access_context=access_context,
+    )
+    return _membership_request_json_response(state.payload)
 
 
 def _user_can_access_membership_request(*, username: str, membership_request: MembershipRequest) -> bool:
@@ -736,14 +998,15 @@ def _handle_self_service_detail_post(
             return JsonResponse(payload, status=400)
 
         messages.error(request, "Invalid request update.")
+        self_service["form"] = _serialize_update_form(form=form)
         return render(
             request,
-            "core/membership_request.html",
+            "core/membership_request_detail.html",
             {
-                "req": membership_request,
-                "form": form,
-                "user_email": self_service["user_email"],
-                "committee_email": self_service["committee_email"],
+                "membership_request_detail_api_url": reverse("api-membership-request-detail", args=[state.membership_request.pk]),
+                **state.bootstrap,
+                "membership_request_detail_title": str(state.bootstrap["page_title"]),
+                "membership_request_detail_initial_payload_json": _membership_request_form_json(state.payload),
             },
         )
 
@@ -760,14 +1023,15 @@ def _handle_self_service_detail_post(
             payload = _compatibility_form_error_payload(form=form)
             payload["form"] = _serialize_update_form(form=form)
             return JsonResponse(payload, status=400)
+        self_service["form"] = _serialize_update_form(form=form)
         return render(
             request,
-            "core/membership_request.html",
+            "core/membership_request_detail.html",
             {
-                "req": membership_request,
-                "form": form,
-                "user_email": self_service["user_email"],
-                "committee_email": self_service["committee_email"],
+                "membership_request_detail_api_url": reverse("api-membership-request-detail", args=[state.membership_request.pk]),
+                **state.bootstrap,
+                "membership_request_detail_title": str(state.bootstrap["page_title"]),
+                "membership_request_detail_initial_payload_json": _membership_request_form_json(state.payload),
             },
         )
 

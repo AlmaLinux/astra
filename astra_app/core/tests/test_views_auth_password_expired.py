@@ -13,6 +13,41 @@ from core.views_auth import password_expired
 
 
 class PasswordExpiredViewTests(TestCase):
+    def test_get_renders_vue_shell_contract(self) -> None:
+        response = self.client.get(reverse("password-expired"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-auth-recovery-password-expired-root=""')
+        self.assertContains(
+            response,
+            f'data-auth-recovery-password-expired-api-url="{reverse("api-password-expired-detail")}"',
+        )
+        self.assertContains(
+            response,
+            f'data-auth-recovery-password-expired-submit-url="{reverse("password-expired")}"',
+        )
+        self.assertContains(
+            response,
+            f'data-auth-recovery-password-expired-login-url="{reverse("login")}"',
+        )
+        self.assertNotContains(response, 'id="id_username"')
+
+    def test_password_expired_detail_api_returns_data_only_payload(self) -> None:
+        session = self.client.session
+        session["_freeipa_pwexp_username"] = "alice"
+        session.save()
+
+        response = self.client.get(reverse("api-password-expired-detail"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload["form"]["is_bound"])
+        self.assertEqual(payload["form"]["fields"][0]["name"], "username")
+        self.assertEqual(payload["form"]["fields"][0]["value"], "alice")
+        self.assertNotIn("submit_url", payload)
+        self.assertNotIn("login_url", payload)
+        self.assertEqual(response["Cache-Control"], "private, no-cache")
+
     def _add_session_and_messages(self, request):
         SessionMiddleware(lambda r: None).process_request(request)
         request.session.save()
@@ -65,12 +100,12 @@ class PasswordExpiredViewTests(TestCase):
 
         captured = {}
 
-        def fake_render(req, template, context):
+        def fake_render(req, template, context, status=200):
             captured["form"] = context["form"]
             # Any HttpResponse is fine; we only care about the form errors.
             from django.http import HttpResponse
 
-            return HttpResponse("ok")
+            return HttpResponse("ok", status=status)
 
         with patch("core.views_auth.render", side_effect=fake_render, autospec=True):
             with patch("core.views_auth._build_freeipa_client", autospec=True) as mocked_build:
@@ -100,11 +135,11 @@ class PasswordExpiredViewTests(TestCase):
 
         captured = {}
 
-        def fake_render(req, template, context):
+        def fake_render(req, template, context, status=200):
             captured["form"] = context["form"]
             from django.http import HttpResponse
 
-            return HttpResponse("ok")
+            return HttpResponse("ok", status=status)
 
         with patch("core.views_auth.render", side_effect=fake_render, autospec=True):
             with patch("core.views_auth._build_freeipa_client", autospec=True) as mocked_build:
@@ -133,11 +168,11 @@ class PasswordExpiredViewTests(TestCase):
 
         captured = {}
 
-        def fake_render(req, template, context):
+        def fake_render(req, template, context, status=200):
             captured["form"] = context["form"]
             from django.http import HttpResponse
 
-            return HttpResponse("ok")
+            return HttpResponse("ok", status=status)
 
         with (
             patch("core.views_auth.render", side_effect=fake_render, autospec=True),
@@ -161,6 +196,44 @@ class PasswordExpiredViewTests(TestCase):
         self.assertIn("service down", log_kwargs["extra"]["error_repr"])
         self.assertEqual(log_kwargs["extra"]["error_args"], "('service down',)")
 
+    def test_rate_limit_denial_returns_429_and_skips_freeipa_call(self) -> None:
+        with (
+            patch("core.views_auth.allow_request", return_value=False, create=True) as allow_mock,
+            patch("core.views_auth._build_freeipa_client", autospec=True) as build_client_mock,
+            patch("core.views_auth.logger.warning", autospec=True) as warning_mock,
+        ):
+            response = self.client.post(
+                reverse("password-expired"),
+                data={
+                    "username": "alice",
+                    "current_password": "oldpw",
+                    "new_password": "newpw12345",
+                    "confirm_new_password": "newpw12345",
+                },
+                REMOTE_ADDR="198.51.100.41",
+                HTTP_X_FORWARDED_FOR="203.0.113.41, 198.51.100.41",
+            )
+
+        self.assertEqual(response.status_code, 429)
+        self.assertContains(response, "Too many password change attempts", status_code=429)
+        build_client_mock.assert_not_called()
+        allow_mock.assert_called_once()
+        warning_mock.assert_called_once()
+
+        allow_kwargs = allow_mock.call_args.kwargs
+        self.assertEqual(allow_kwargs["scope"], "auth.password_expired")
+        self.assertEqual(allow_kwargs["key_parts"], ["203.0.113.41", "alice"])
+
+        log_extra = warning_mock.call_args.kwargs["extra"]
+        self.assertEqual(log_extra["event"], "astra.security.rate_limit.denied")
+        self.assertEqual(log_extra["component"], "auth")
+        self.assertEqual(log_extra["outcome"], "denied")
+        self.assertEqual(log_extra["http_method"], "POST")
+        self.assertIn("ip_hash", log_extra)
+        self.assertIn("subject_hash", log_extra)
+        self.assertNotIn("203.0.113.41", str(log_extra))
+        self.assertNotIn("alice", str(log_extra).lower())
+
     def test_unexpected_error_logs_structured_extra(self):
         factory = RequestFactory()
         request = factory.post(
@@ -177,11 +250,11 @@ class PasswordExpiredViewTests(TestCase):
 
         captured = {}
 
-        def fake_render(req, template, context):
+        def fake_render(req, template, context, status=200):
             captured["form"] = context["form"]
             from django.http import HttpResponse
 
-            return HttpResponse("ok")
+            return HttpResponse("ok", status=status)
 
         with (
             patch("core.views_auth.render", side_effect=fake_render, autospec=True),

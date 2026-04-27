@@ -9,6 +9,7 @@ from typing import Any, Final
 from urllib.parse import quote
 
 import requests
+from django import forms
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -16,7 +17,8 @@ from django.core import signing
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.db import IntegrityError, transaction
-from django.http import Http404, HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
+from django.middleware.csrf import get_token
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -95,6 +97,11 @@ logger = logging.getLogger(__name__)
 # For maximum compatibility, must be a multiple of 5.
 OTP_KEY_LENGTH: Final[int] = 35
 AVATAR_MAX_SIZE: Final[int] = 512
+
+
+class _SettingsImmediateResponse(Exception):
+    def __init__(self, response: HttpResponse) -> None:
+        self.response = response
 
 
 def _block_settings_change_without_country_code(request: HttpRequest, *, user_data: dict | None) -> HttpResponse | None:
@@ -595,7 +602,7 @@ def _settings_update_error_response(
         else:
             messages.error(request, f"Failed to update {tab_label} due to an internal error.")
     context["force_tab"] = tab
-    return render(request, "core/settings.html", context)
+    return _render_settings_shell(request, context=context)
 
 
 def _apply_and_report_profile_update(
@@ -806,6 +813,711 @@ def _active_account_deletion_request(username: str) -> AccountDeletionRequest | 
     )
 
 
+_SETTINGS_ALLOWED_WIDGET_ATTRS: Final[frozenset[str]] = frozenset(
+    {
+        "accept",
+        "autocomplete",
+        "autocapitalize",
+        "autocorrect",
+        "class",
+        "inputmode",
+        "list",
+        "maxlength",
+        "minlength",
+        "multiple",
+        "pattern",
+        "placeholder",
+        "readonly",
+        "rows",
+        "spellcheck",
+        "step",
+    }
+)
+
+
+def _settings_json_response(payload: dict[str, object], *, status: int = 200) -> JsonResponse:
+    response = JsonResponse(payload, status=status)
+    response["Cache-Control"] = "private, no-cache"
+    return response
+
+
+def _build_settings_email_validation_payload(*, attr: str, value: str) -> dict[str, object]:
+    return {
+        "email": value,
+        "email_type": "primary" if attr == "mail" else "bugzilla",
+        "is_valid": True,
+    }
+
+
+def _settings_email_validate_error_response(
+    request: HttpRequest,
+    *,
+    api: bool,
+    message: str,
+    status: int,
+) -> HttpResponse:
+    if api:
+        return _settings_json_response({"error": message}, status=status)
+    messages.warning(request, message)
+    return redirect(settings_url(tab="emails"))
+
+
+def _load_settings_email_validation_state(
+    request: HttpRequest,
+    *,
+    api: bool = False,
+) -> dict[str, str] | HttpResponse:
+    username = get_username(request)
+    token_string = _normalize_str(request.GET.get("token"))
+    if not token_string:
+        return _settings_email_validate_error_response(
+            request,
+            api=api,
+            message="No token provided, please check your email validation link.",
+            status=400,
+        )
+
+    try:
+        token = read_settings_email_validation_token(token_string)
+    except signing.SignatureExpired:
+        return _settings_email_validate_error_response(
+            request,
+            api=api,
+            message="This token is no longer valid, please request a new validation email.",
+            status=400,
+        )
+    except signing.BadSignature:
+        return _settings_email_validate_error_response(
+            request,
+            api=api,
+            message="The token is invalid, please request a new validation email.",
+            status=400,
+        )
+
+    token_user = _normalize_str(token.get("u"))
+    attr = _normalize_str(token.get("a"))
+    value = _normalize_str(token.get("v")).lower()
+
+    if token_user != username:
+        if api:
+            return _settings_json_response({"error": "This token does not belong to you."}, status=403)
+        messages.warning(request, "This token does not belong to you.")
+        return redirect(settings_url(tab="emails"))
+
+    if attr not in {"mail", "fasRHBZEmail"}:
+        return _settings_email_validate_error_response(
+            request,
+            api=api,
+            message="The token is invalid, please request a validation email.",
+            status=400,
+        )
+
+    try:
+        fu = _get_full_user(username)
+    except requests.exceptions.ConnectionError:
+        if api:
+            return _settings_json_response({"error": "Unable to load settings."}, status=503)
+        messages.error(request, MSG_SERVICE_UNAVAILABLE)
+        return redirect(settings_url(tab="emails"))
+    if not fu:
+        if api:
+            return _settings_json_response({"error": "Unable to load settings."}, status=503)
+        messages.error(request, "Unable to load your FreeIPA profile.")
+        return redirect("home")
+
+    return {
+        "username": username,
+        "token_string": token_string,
+        "attr": attr,
+        "value": value,
+    }
+
+
+def _render_settings_email_validation_shell(
+    request: HttpRequest,
+    *,
+    state: dict[str, str],
+    status: int = 200,
+) -> HttpResponse:
+    context = settings_context("emails")
+    shell_context = {
+        **context,
+        "settings_email_validation_api_url": (
+            f'{reverse("api-settings-email-validate-detail")}?token={quote(state["token_string"])}'
+        ),
+        "settings_email_validation_submit_url": request.get_full_path(),
+        "settings_email_validation_cancel_url": settings_url(tab="emails"),
+        "settings_email_validation_csrf_token": get_token(request),
+        "settings_email_validation_username": state["username"],
+        "settings_email_validation_initial_payload": _build_settings_email_validation_payload(
+            attr=state["attr"],
+            value=state["value"],
+        ),
+        "settings_email_validation_route_config": _build_settings_route_config(request, context=context),
+        "settings_email_validation_tabs": [tab.tab_id for tab in context["settings_tabs"]],
+    }
+    if status == 200:
+        return render(request, "core/settings_email_validation.html", shell_context)
+    return render(request, "core/settings_email_validation.html", shell_context, status=status)
+
+
+def _settings_form_widget_type(widget: forms.Widget) -> str:
+    if isinstance(widget, forms.HiddenInput):
+        return "hidden"
+    if isinstance(widget, forms.PasswordInput):
+        return "password"
+    if isinstance(widget, forms.EmailInput):
+        return "email"
+    if isinstance(widget, forms.Textarea):
+        return "textarea"
+    if isinstance(widget, forms.Select):
+        return "select"
+    if isinstance(widget, forms.CheckboxInput):
+        return "checkbox"
+    if isinstance(widget, forms.ClearableFileInput):
+        return "file"
+    return "text"
+
+
+def _serialize_settings_form_field(*, bound_field: forms.BoundField) -> dict[str, object]:
+    widget = bound_field.field.widget
+    widget_attrs = bound_field.build_widget_attrs(widget.attrs)
+    widget_context = widget.get_context(bound_field.html_name, bound_field.value(), widget_attrs)["widget"]
+    attrs = {
+        key: str(value)
+        for key, value in widget_context["attrs"].items()
+        if value is not None and key in _SETTINGS_ALLOWED_WIDGET_ATTRS
+    }
+    payload: dict[str, object] = {
+        "name": bound_field.name,
+        "id": bound_field.id_for_label,
+        "widget": _settings_form_widget_type(widget),
+        "value": widget_context.get("value") if widget_context.get("value") is not None else "",
+        "required": bool(bound_field.field.required),
+        "disabled": bool(bound_field.field.disabled),
+        "errors": [str(error) for error in bound_field.errors],
+        "attrs": attrs,
+    }
+    if isinstance(widget, forms.CheckboxInput):
+        payload["checked"] = bool(bound_field.value())
+    if isinstance(widget, forms.Select):
+        payload["options"] = [
+            {"value": str(option_value), "label": str(option_label)}
+            for option_value, option_label in bound_field.field.choices
+        ]
+    return payload
+
+
+def _serialize_settings_form(*, form: forms.Form) -> dict[str, object]:
+    return {
+        "is_bound": form.is_bound,
+        "non_field_errors": [str(error) for error in form.non_field_errors()],
+        "fields": [_serialize_settings_form_field(bound_field=field) for field in form],
+    }
+
+
+def _serialize_settings_profile_tab(context: dict[str, object]) -> dict[str, object]:
+    profile_form = context["profile_form"]
+    return {
+        "form": _serialize_settings_form(form=profile_form),
+        "avatar_url": context["avatar_url"],
+        "avatar_provider": context["avatar_provider"],
+        "avatar_is_local": bool(context["avatar_is_local"]),
+        "avatar_manage_url": _normalize_str(context.get("avatar_manage_url")),
+        "highlight": _normalize_str(context.get("highlight")),
+        "chat_defaults": {
+            "mattermost_server": settings.CHAT_NETWORKS["mattermost"]["default_server"],
+            "mattermost_team": settings.CHAT_NETWORKS["mattermost"]["default_team"],
+            "irc_server": settings.CHAT_NETWORKS["irc"]["default_server"],
+            "matrix_server": settings.CHAT_NETWORKS["matrix"]["default_server"],
+        },
+        "locale_options": [value for value, _label in profile_form.fields["fasLocale"].choices if value],
+        "timezone_options": [value for value, _label in profile_form.fields["fasTimezone"].choices if value],
+    }
+
+
+def _serialize_settings_emails_tab(context: dict[str, object]) -> dict[str, object]:
+    return {
+        "form": _serialize_settings_form(form=context["emails_form"]),
+        "email_is_blacklisted": bool(context["email_is_blacklisted"]),
+    }
+
+
+def _serialize_settings_keys_tab(context: dict[str, object]) -> dict[str, object]:
+    return {"form": _serialize_settings_form(form=context["keys_form"])}
+
+
+def _serialize_settings_security_tab(context: dict[str, object]) -> dict[str, object]:
+    otp_tokens = []
+    for token in context["otp_tokens"]:
+        token_id = token.get("ipatokenuniqueid") or []
+        otp_tokens.append(
+            {
+                "description": str(token.get("description") or ""),
+                "unique_id": token_id[0] if token_id else "",
+                "disabled": bool(token.get("ipatokendisabled")),
+            }
+        )
+    return {
+        "using_otp": bool(context["using_otp"]),
+        "password": {"form": _serialize_settings_form(form=context["password_form"])},
+        "otp_add": {"form": _serialize_settings_form(form=context["otp_add_form"])},
+        "otp_confirm": {
+            "form": _serialize_settings_form(form=context["otp_confirm_form"]),
+            "otp_uri": context["otp_uri"],
+            "otp_qr_png_b64": context["otp_qr_png_b64"],
+        },
+        "otp_tokens": otp_tokens,
+    }
+
+
+def _serialize_settings_privacy_tab(context: dict[str, object]) -> dict[str, object]:
+    active_request = context["active_deletion_request"]
+    return {
+        "form": _serialize_settings_form(form=context["privacy_form"]),
+        "account_deletion_form": None
+        if context["account_deletion_form"] is None
+        else _serialize_settings_form(form=context["account_deletion_form"]),
+        "active_deletion_request": None
+        if active_request is None
+        else {"status": active_request.status},
+        "privacy_warnings": [str(warning) for warning in context["privacy_warnings"]],
+    }
+
+
+def _serialize_settings_agreements_tab(context: dict[str, object]) -> dict[str, object]:
+    agreement = context["agreement"]
+    return {
+        "agreement": None
+        if agreement is None
+        else {
+            "cn": agreement.cn,
+            "description_markdown": agreement.description,
+            "groups": list(agreement.groups),
+            "signed": bool(context["agreement_signed"]),
+        },
+        "agreements": [
+            {
+                "cn": item.cn,
+                "groups": list(item.groups),
+                "signed": bool(item.signed),
+            }
+            for item in context["agreements"]
+        ],
+    }
+
+
+def _serialize_settings_membership_tab(context: dict[str, object]) -> dict[str, object]:
+    return {
+        "active_memberships": [
+            {
+                "membership_type_code": row["membership"].membership_type.code,
+                "membership_type_name": row["membership"].membership_type.name,
+                "created_at": row["membership"].created_at.isoformat(),
+                "expires_at": None if row["membership"].expires_at is None else row["membership"].expires_at.isoformat(),
+                "termination_form": _serialize_settings_form(form=row["termination_form"]),
+            }
+            for row in context["membership_rows"]
+        ],
+        "history": [
+            {
+                "membership_type_name": entry.membership_type.name,
+                "created_at": entry.created_at.isoformat(),
+                "action": entry.action,
+            }
+            for entry in context["membership_history"]
+        ],
+    }
+
+
+def _build_settings_request_context(
+    request: HttpRequest,
+    *,
+    requested_tab: str,
+    highlight: str,
+    agreement_cn: str | None,
+    is_save_all: bool,
+    fu: FreeIPAUser | DegradedFreeIPAUser | Any,
+) -> dict[str, object]:
+    data = fu._user_data
+
+    email_is_blacklisted = False
+    current_email = str(_first(data, "mail", "") or "").strip()
+    if current_email:
+        try:
+            from django_ses.models import BlacklistedEmail
+
+            email_is_blacklisted = BlacklistedEmail.objects.filter(email__iexact=current_email).exists()
+        except ImportError:
+            pass
+
+    country_attr = str(settings.SELF_SERVICE_ADDRESS_COUNTRY_ATTR).strip()
+    country_attr_lower = country_attr.lower()
+
+    profile_initial = {
+        "givenname": _first(data, "givenname", "") or "",
+        "sn": _first(data, "sn", "") or "",
+        "country_code": _first(data, country_attr, "") or "",
+        "fasPronoun": _value_to_csv(_data_get(data, "fasPronoun", "")),
+        "fasLocale": normalize_locale_tag(_first(data, "fasLocale", "") or ""),
+        "fasTimezone": _first(data, "fasTimezone", "") or "",
+        "fasWebsiteUrl": _value_to_text(_data_get(data, "fasWebsiteUrl", "")),
+        "fasRssUrl": _value_to_text(_data_get(data, "fasRssUrl", "")),
+        "fasIRCNick": _value_to_text(_data_get(data, "fasIRCNick", "")),
+        "fasGitHubUsername": _first(data, "fasGitHubUsername", "") or "",
+        "fasGitLabUsername": _first(data, "fasGitLabUsername", "") or "",
+        "fasIsPrivate": bool_from_ipa(_data_get(data, "fasIsPrivate", "FALSE"), default=False),
+    }
+    profile_form = ProfileForm(
+        request.POST if request.method == "POST" and (is_save_all or requested_tab == "profile") else None,
+        request.FILES if request.method == "POST" and (is_save_all or requested_tab == "profile") else None,
+        initial=profile_initial,
+    )
+    privacy_form = PrivacySettingsForm(
+        request.POST if request.method == "POST" and requested_tab == "privacy" else None,
+        initial={"fasIsPrivate": profile_initial["fasIsPrivate"]},
+    )
+
+    emails_initial = {
+        "mail": _first(data, "mail", "") or "",
+        "fasRHBZEmail": _first(data, "fasRHBZEmail", "") or "",
+    }
+    emails_form = EmailsForm(
+        request.POST if request.method == "POST" and (is_save_all or requested_tab == "emails") else None,
+        initial=emails_initial,
+    )
+
+    gpg = _data_get(data, "fasGPGKeyId", [])
+    ssh = _data_get(data, "ipasshpubkey", [])
+    if isinstance(gpg, str):
+        gpg = [gpg]
+    if isinstance(ssh, str):
+        ssh = [ssh]
+    keys_initial = {
+        "fasGPGKeyId": "\n".join(gpg or []),
+        "ipasshpubkey": "\n".join(ssh or []),
+    }
+    keys_form = KeysForm(
+        request.POST if request.method == "POST" and (is_save_all or requested_tab == "keys") else None,
+        initial=keys_initial,
+    )
+
+    password_form = PasswordChangeFreeIPAForm(
+        request.POST if request.method == "POST" and requested_tab == "security" else None
+    )
+
+    using_otp = False
+    try:
+        res = FreeIPAUser.get_client().otptoken_find(o_ipatokenowner=get_username(request), o_all=True)
+        using_otp = bool((res or {}).get("result"))
+    except Exception:
+        using_otp = False
+
+    is_add = requested_tab == "security" and request.method == "POST" and "add-submit" in request.POST
+    is_confirm = requested_tab == "security" and request.method == "POST" and "confirm-submit" in request.POST
+    otp_add_form = OTPAddForm(request.POST if is_add else None, prefix="add")
+    otp_confirm_form = OTPConfirmForm(request.POST if is_confirm else None, prefix="confirm")
+
+    tokens: list[TokenDict] = []
+    otp_uri: str | None = None
+    otp_qr_png_b64: str | None = None
+
+    def _service_client() -> ClientMeta:
+        return _get_freeipa_client(settings.FREEIPA_SERVICE_USER, settings.FREEIPA_SERVICE_PASSWORD)
+
+    def _user_can_reauth(password: str) -> bool:
+        _get_freeipa_client(get_username(request), password)
+        return True
+
+    try:
+        svc = _service_client()
+        res = svc.otptoken_find(o_ipatokenowner=get_username(request), o_all=True)
+        tokens = res.get("result", []) if isinstance(res, dict) else []
+    except Exception:
+        tokens = []
+
+    normalized_tokens: list[TokenDict] = []
+    for raw in tokens:
+        if not isinstance(raw, dict):
+            continue
+        token_dict: TokenDict = dict(raw)
+
+        description = token_dict.get("description")
+        if isinstance(description, list):
+            description = description[0] if description else ""
+        token_dict["description"] = str(description).strip() if description else ""
+
+        token_id = token_dict.get("ipatokenuniqueid")
+        if isinstance(token_id, list):
+            out: list[str] = []
+            for value in token_id:
+                normalized_value = str(value).strip()
+                if normalized_value:
+                    out.append(normalized_value)
+            token_dict["ipatokenuniqueid"] = out
+        elif token_id:
+            token_dict["ipatokenuniqueid"] = [str(token_id).strip()]
+        else:
+            token_dict["ipatokenuniqueid"] = []
+
+        normalized_tokens.append(token_dict)
+    tokens = normalized_tokens
+    tokens.sort(key=lambda token: str(token.get("description") or "").casefold())
+
+    secret: str | None = None
+    if is_add and otp_add_form.is_valid():
+        description = _normalize_str(otp_add_form.cleaned_data.get("description"))
+        password = otp_add_form.cleaned_data.get("password") or ""
+        otp = _normalize_str(otp_add_form.cleaned_data.get("otp"))
+        if otp:
+            password = f"{password}{otp}"
+
+        try:
+            _user_can_reauth(password)
+        except exceptions.InvalidSessionPassword:
+            otp_add_form.add_error("password", "Incorrect password")
+        except exceptions.Unauthorized:
+            otp_add_form.add_error("password", "Incorrect password")
+        except Exception as error:
+            if settings.DEBUG:
+                otp_add_form.add_error(None, f"Unable to reauthenticate (debug): {error}")
+            else:
+                otp_add_form.add_error(None, "Unable to reauthenticate due to an internal error.")
+        else:
+            secret = b32encode(os.urandom(OTP_KEY_LENGTH)).decode("ascii")
+            otp_confirm_form = OTPConfirmForm(
+                initial={
+                    "secret": secret,
+                    "description": description,
+                },
+                prefix="confirm",
+            )
+
+    if is_confirm:
+        secret = _normalize_str(request.POST.get("confirm-secret")) or None
+
+        if otp_confirm_form.is_valid():
+            blocked = _block_settings_change_without_country_code(request, user_data=data)
+            if blocked is not None:
+                raise _SettingsImmediateResponse(blocked)
+
+            description = _normalize_str(otp_confirm_form.cleaned_data.get("description"))
+            try:
+                svc = _service_client()
+                svc.otptoken_add(
+                    o_ipatokenowner=get_username(request),
+                    o_description=description,
+                    o_type="totp",
+                    o_ipatokenotpkey=otp_confirm_form.cleaned_data["secret"],
+                )
+            except exceptions.FreeIPAError:
+                otp_confirm_form.add_error(None, "Cannot create the token.")
+            except Exception as error:
+                if settings.DEBUG:
+                    otp_confirm_form.add_error(None, f"Cannot create the token (debug): {error}")
+                else:
+                    otp_confirm_form.add_error(None, "Cannot create the token.")
+            else:
+                messages.success(request, "The token has been created.")
+                raise _SettingsImmediateResponse(redirect(settings_url(tab="security")))
+
+    if secret:
+        try:
+            import pyotp
+            import qrcode
+        except Exception:
+            pyotp = None
+            qrcode = None
+
+        if pyotp and qrcode:
+            host = settings.FREEIPA_HOST
+            parts = host.split(".")
+            realm = ".".join(parts[1:]).upper() if len(parts) > 1 else host.upper()
+            issuer = f"{get_username(request)}@{realm}" if realm else get_username(request)
+
+            if is_confirm:
+                description = _normalize_str(request.POST.get("confirm-description"))
+            elif is_add:
+                description = _normalize_str(otp_add_form.cleaned_data.get("description"))
+            else:
+                description = (otp_confirm_form.initial or {}).get("description") or ""
+                description = _normalize_str(description)
+
+            totp = pyotp.TOTP(secret)
+            otp_uri = str(totp.provisioning_uri(name=description or "(no name)", issuer_name=issuer))
+
+            qr = qrcode.QRCode(box_size=6, border=2)
+            qr.add_data(otp_uri)
+            qr.make(fit=True)
+            img = qr.make_image(fill_color="black", back_color="white")
+            buf = io.BytesIO()
+            img.save(buf, "PNG")
+            otp_qr_png_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+
+    agreement: FreeIPAFASAgreement | None = None
+    agreement_signed = False
+    agreements = []
+
+    try:
+        show_agreements_tab = has_enabled_agreements()
+    except Exception:
+        show_agreements_tab = False
+
+    if show_agreements_tab:
+        user_groups = fu.groups_list if hasattr(fu, "groups_list") else []
+        try:
+            agreements = list_agreements_for_user(
+                get_username(request),
+                user_groups=user_groups,
+                include_disabled=False,
+                applicable_only=False,
+            )
+            if agreement_cn:
+                agreement = FreeIPAFASAgreement.get(agreement_cn)
+                if not agreement or not agreement.enabled:
+                    raise Http404("Agreement not found")
+                agreement_signed = get_username(request) in set(agreement.users)
+        except Http404:
+            raise
+        except Exception:
+            show_agreements_tab = False
+            agreements = []
+            agreement = None
+            agreement_signed = False
+
+    effective_requested_tab = requested_tab
+    if not show_agreements_tab and (requested_tab == "agreements" or agreement_cn):
+        effective_requested_tab = "profile"
+
+    active_memberships = list(get_valid_memberships(username=get_username(request)))
+    membership_rows = [
+        {
+            "membership": membership,
+            "termination_form": MembershipTerminationForm(auto_id=f"id_membership_{membership.membership_type.code}_%s"),
+        }
+        for membership in active_memberships
+    ]
+    membership_history = list(
+        MembershipLog.objects.filter(target_username=get_username(request))
+        .select_related("membership_type")
+        .order_by("-created_at", "-pk")[:25]
+    )
+    active_deletion_request = _active_account_deletion_request(get_username(request))
+    privacy_blocker_codes, privacy_warnings = get_account_deletion_blockers(get_username(request))
+    account_deletion_form = None if active_deletion_request is not None else AccountDeletionRequestForm()
+
+    avatar_provider_path, avatar_url = _detect_avatar_provider(request.user, size=96)
+    context = {
+        **settings_context(effective_requested_tab, show_agreements_tab=show_agreements_tab),
+        "profile_form": profile_form,
+        "privacy_form": privacy_form,
+        "emails_form": emails_form,
+        "keys_form": keys_form,
+        "password_form": password_form,
+        "active_memberships": active_memberships,
+        "membership_rows": membership_rows,
+        "membership_history": membership_history,
+        "active_deletion_request": active_deletion_request,
+        "account_deletion_form": account_deletion_form,
+        "privacy_blocker_codes": privacy_blocker_codes,
+        "privacy_warnings": privacy_warnings,
+        "using_otp": using_otp,
+        "otp_add_form": otp_add_form,
+        "otp_confirm_form": otp_confirm_form,
+        "otp_tokens": tokens,
+        "otp_uri": otp_uri,
+        "otp_qr_png_b64": otp_qr_png_b64,
+        "agreements": agreements,
+        "agreement": agreement,
+        "agreement_signed": agreement_signed,
+        "agreement_cn": agreement_cn,
+        "rename_form": OTPTokenRenameForm(prefix="rename"),
+        "highlight": highlight,
+        "avatar_provider": _avatar_provider_label(avatar_provider_path),
+        "avatar_url": avatar_url,
+        "avatar_is_local": bool(avatar_provider_path and avatar_provider_path.endswith("LocalS3AvatarProvider")),
+        "avatar_manage_url": _avatar_manage_url_for_provider(avatar_provider_path),
+        "email_is_blacklisted": email_is_blacklisted,
+        "fu": fu,
+        "user_data": data,
+        "profile_initial": profile_initial,
+        "emails_initial": emails_initial,
+        "keys_initial": keys_initial,
+        "country_attr": country_attr,
+        "country_attr_lower": country_attr_lower,
+        "show_agreements_tab": show_agreements_tab,
+    }
+
+    context["form"] = {
+        "profile": profile_form,
+        "membership": None,
+        "privacy": privacy_form,
+        "emails": emails_form,
+        "keys": keys_form,
+        "security": password_form,
+        "agreements": None,
+    }.get(str(context["active_tab"]))
+
+    return context
+
+
+def _build_settings_payload(*, context: dict[str, object]) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "active_tab": context["active_tab"],
+        "tabs": [tab.tab_id for tab in context["settings_tabs"]],
+        "profile": _serialize_settings_profile_tab(context),
+        "emails": _serialize_settings_emails_tab(context),
+        "keys": _serialize_settings_keys_tab(context),
+        "security": _serialize_settings_security_tab(context),
+        "privacy": _serialize_settings_privacy_tab(context),
+        "membership": _serialize_settings_membership_tab(context),
+    }
+    if any(tab.tab_id == "agreements" for tab in context["settings_tabs"]):
+        payload["agreements"] = _serialize_settings_agreements_tab(context)
+    return payload
+
+
+def _build_settings_route_config(request: HttpRequest, *, context: dict[str, object]) -> dict[str, object]:
+    username = get_username(request)
+    return {
+        "profile_url": settings_url(tab="profile"),
+        "emails_url": settings_url(tab="emails"),
+        "keys_url": settings_url(tab="keys"),
+        "security_url": settings_url(tab="security"),
+        "privacy_url": settings_url(tab="privacy"),
+        "membership_url": settings_url(tab="membership"),
+        "agreements_url": settings_url(tab="agreements"),
+        "user_profile_url": reverse("user-profile", kwargs={"username": username}),
+        "avatar_upload_url": reverse("settings-avatar-upload"),
+        "avatar_delete_url": reverse("settings-avatar-delete"),
+        "account_deletion_submit_url": reverse("settings-account-deletion-request"),
+        "otp_enable_url": reverse("security-otp-enable"),
+        "otp_disable_url": reverse("security-otp-disable"),
+        "otp_delete_url": reverse("security-otp-delete"),
+        "otp_rename_url": reverse("security-otp-rename"),
+        "membership_terminate_url_template": reverse(
+            "settings-membership-terminate",
+            kwargs={"membership_type_code": "__membership_type_code__"},
+        ),
+        "group_detail_url_template": reverse("group-detail", kwargs={"name": "__group_name__"}),
+        "agreement_detail_url_template": settings_url(tab="agreements", agreement="__agreement_cn__"),
+    }
+
+
+def _render_settings_shell(request: HttpRequest, *, context: dict[str, object], status: int = 200) -> HttpResponse:
+    shell_context = {
+        **context,
+        "settings_api_url": f'{reverse("api-settings-detail")}?tab={context["active_tab"]}',
+        "settings_submit_url": reverse("settings"),
+        "settings_csrf_token": get_token(request),
+        "settings_initial_payload": _build_settings_payload(context=context),
+        "settings_route_config": _build_settings_route_config(request, context=context),
+    }
+    if status == 200:
+        return render(request, "core/settings_shell.html", shell_context)
+    return render(request, "core/settings_shell.html", shell_context, status=status)
+
+
 def settings_root(request: HttpRequest) -> HttpResponse:
     """Unified settings page.
 
@@ -816,6 +1528,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
     username = get_username(request)
     requested_tab = _normalize_str(request.POST.get("tab") or request.GET.get("tab")) or "profile"
     highlight = _normalize_str(request.GET.get("highlight"))
+    agreement_cn = _normalize_str(request.GET.get("agreement")) or None
     return_target = _normalize_str(request.GET.get("return"))
     safe_relative_return_target = (
         return_target.startswith("/")
@@ -854,78 +1567,31 @@ def settings_root(request: HttpRequest) -> HttpResponse:
         messages.error(request, "Unable to load your FreeIPA profile.")
         return redirect("home")
 
-    data = fu._user_data
+    try:
+        context = _build_settings_request_context(
+            request,
+            requested_tab=requested_tab,
+            highlight=highlight,
+            agreement_cn=agreement_cn,
+            is_save_all=is_save_all,
+            fu=fu,
+        )
+    except _SettingsImmediateResponse as immediate_response:
+        return immediate_response.response
+    if not context["show_agreements_tab"] and (requested_tab == "agreements" or agreement_cn):
+        return redirect(settings_url(tab="profile"))
 
-    email_is_blacklisted = False
-    current_email = str(_first(data, "mail", "") or "").strip()
-    if current_email:
-        try:
-            from django_ses.models import BlacklistedEmail
-
-            email_is_blacklisted = BlacklistedEmail.objects.filter(email__iexact=current_email).exists()
-        except ImportError:
-            pass
-
-    country_attr = str(settings.SELF_SERVICE_ADDRESS_COUNTRY_ATTR).strip()
-    country_attr_lower = country_attr.lower()
-
-    # --- Profile ---
-    # Use the FreeIPA attribute data as the source of truth. This avoids relying on
-    # extra convenience properties that may not exist on mocked/user objects.
-    profile_initial = {
-        "givenname": _first(data, "givenname", "") or "",
-        "sn": _first(data, "sn", "") or "",
-        "country_code": _first(data, country_attr, "") or "",
-        "fasPronoun": _value_to_csv(_data_get(data, "fasPronoun", "")),
-        "fasLocale": normalize_locale_tag(_first(data, "fasLocale", "") or ""),
-        "fasTimezone": _first(data, "fasTimezone", "") or "",
-        "fasWebsiteUrl": _value_to_text(_data_get(data, "fasWebsiteUrl", "")),
-        "fasRssUrl": _value_to_text(_data_get(data, "fasRssUrl", "")),
-        "fasIRCNick": _value_to_text(_data_get(data, "fasIRCNick", "")),
-        "fasGitHubUsername": _first(data, "fasGitHubUsername", "") or "",
-        "fasGitLabUsername": _first(data, "fasGitLabUsername", "") or "",
-        "fasIsPrivate": bool_from_ipa(_data_get(data, "fasIsPrivate", "FALSE"), default=False),
-    }
-    profile_form = ProfileForm(
-        request.POST if request.method == "POST" and (is_save_all or requested_tab == "profile") else None,
-        request.FILES if request.method == "POST" and (is_save_all or requested_tab == "profile") else None,
-        initial=profile_initial,
-    )
-    privacy_form = PrivacySettingsForm(
-        request.POST if request.method == "POST" and requested_tab == "privacy" else None,
-        initial={"fasIsPrivate": profile_initial["fasIsPrivate"]},
-    )
-
-    # --- Emails ---
-    emails_initial = {
-        "mail": _first(data, "mail", "") or "",
-        "fasRHBZEmail": _first(data, "fasRHBZEmail", "") or "",
-    }
-    emails_form = EmailsForm(
-        request.POST if request.method == "POST" and (is_save_all or requested_tab == "emails") else None,
-        initial=emails_initial,
-    )
-
-    # --- Keys ---
-    gpg = _data_get(data, "fasGPGKeyId", [])
-    ssh = _data_get(data, "ipasshpubkey", [])
-    if isinstance(gpg, str):
-        gpg = [gpg]
-    if isinstance(ssh, str):
-        ssh = [ssh]
-    keys_initial = {
-        "fasGPGKeyId": "\n".join(gpg or []),
-        "ipasshpubkey": "\n".join(ssh or []),
-    }
-    keys_form = KeysForm(
-        request.POST if request.method == "POST" and (is_save_all or requested_tab == "keys") else None,
-        initial=keys_initial,
-    )
-
-    # --- Security (Password + OTP) ---
-    password_form = PasswordChangeFreeIPAForm(
-        request.POST if request.method == "POST" and requested_tab == "security" else None
-    )
+    data = context["user_data"]
+    country_attr = str(context["country_attr"])
+    country_attr_lower = str(context["country_attr_lower"])
+    profile_initial = context["profile_initial"]
+    emails_initial = context["emails_initial"]
+    keys_initial = context["keys_initial"]
+    profile_form = context["profile_form"]
+    privacy_form = context["privacy_form"]
+    emails_form = context["emails_form"]
+    keys_form = context["keys_form"]
+    password_form = context["password_form"]
 
     # Fast-path: for password-change posts we should not touch OTP/agreement code.
     # Those code paths can trigger FreeIPA service-account network calls, and they
@@ -981,261 +1647,6 @@ def settings_root(request: HttpRequest) -> HttpResponse:
             messages.error(request, "Failed to change password due to an internal error.")
             return redirect(settings_url(tab="security"))
 
-    using_otp = False
-    try:
-        res = FreeIPAUser.get_client().otptoken_find(o_ipatokenowner=username, o_all=True)
-        using_otp = bool((res or {}).get("result"))
-    except Exception:
-        using_otp = False
-
-    is_add = requested_tab == "security" and request.method == "POST" and "add-submit" in request.POST
-    is_confirm = requested_tab == "security" and request.method == "POST" and "confirm-submit" in request.POST
-    otp_add_form = OTPAddForm(request.POST if is_add else None, prefix="add")
-    otp_confirm_form = OTPConfirmForm(request.POST if is_confirm else None, prefix="confirm")
-
-    tokens: list[TokenDict] = []
-    otp_uri: str | None = None
-    otp_qr_png_b64: str | None = None
-
-    def _service_client() -> ClientMeta:
-        return _get_freeipa_client(settings.FREEIPA_SERVICE_USER, settings.FREEIPA_SERVICE_PASSWORD)
-
-    def _user_can_reauth(password: str) -> bool:
-        _get_freeipa_client(username, password)
-        return True
-
-    try:
-        svc = _service_client()
-        res = svc.otptoken_find(o_ipatokenowner=username, o_all=True)
-        tokens = res.get("result", []) if isinstance(res, dict) else []
-    except Exception:
-        tokens = []
-
-    normalized_tokens: list[TokenDict] = []
-    for raw in tokens:
-        if not isinstance(raw, dict):
-            continue
-        token_dict: TokenDict = dict(raw)
-
-        description = token_dict.get("description")
-        if isinstance(description, list):
-            description = description[0] if description else ""
-        token_dict["description"] = str(description).strip() if description else ""
-
-        token_id = token_dict.get("ipatokenuniqueid")
-        if isinstance(token_id, list):
-            out: list[str] = []
-            for v in token_id:
-                s = str(v).strip()
-                if s:
-                    out.append(s)
-            token_dict["ipatokenuniqueid"] = out
-        elif token_id:
-            token_dict["ipatokenuniqueid"] = [str(token_id).strip()]
-        else:
-            token_dict["ipatokenuniqueid"] = []
-
-        normalized_tokens.append(token_dict)
-    tokens = normalized_tokens
-    tokens.sort(key=lambda t: str(t.get("description") or "").casefold())
-
-    secret: str | None = None
-    if is_add and otp_add_form.is_valid():
-        description = _normalize_str(otp_add_form.cleaned_data.get("description"))
-        password = otp_add_form.cleaned_data.get("password") or ""
-        otp = _normalize_str(otp_add_form.cleaned_data.get("otp"))
-        if otp:
-            password = f"{password}{otp}"
-
-        try:
-            _user_can_reauth(password)
-        except exceptions.InvalidSessionPassword:
-            otp_add_form.add_error("password", "Incorrect password")
-        except exceptions.Unauthorized:
-            otp_add_form.add_error("password", "Incorrect password")
-        except Exception as e:
-            if settings.DEBUG:
-                otp_add_form.add_error(None, f"Unable to reauthenticate (debug): {e}")
-            else:
-                otp_add_form.add_error(None, "Unable to reauthenticate due to an internal error.")
-        else:
-            # Must match KEY_LENGTH in ipaserver/plugins/otptoken.py (multiple of 5).
-            secret = b32encode(os.urandom(OTP_KEY_LENGTH)).decode("ascii")
-            otp_confirm_form = OTPConfirmForm(
-                initial={
-                    "secret": secret,
-                    "description": description,
-                },
-                prefix="confirm",
-            )
-
-    if is_confirm:
-        secret = _normalize_str(request.POST.get("confirm-secret")) or None
-
-        if otp_confirm_form.is_valid():
-            blocked = _block_settings_change_without_country_code(request, user_data=data)
-            if blocked is not None:
-                return blocked
-
-            description = _normalize_str(otp_confirm_form.cleaned_data.get("description"))
-            try:
-                svc = _service_client()
-                svc.otptoken_add(
-                    o_ipatokenowner=username,
-                    o_description=description,
-                    o_type="totp",
-                    o_ipatokenotpkey=otp_confirm_form.cleaned_data["secret"],
-                )
-            except exceptions.FreeIPAError:
-                otp_confirm_form.add_error(None, "Cannot create the token.")
-            except Exception as e:
-                if settings.DEBUG:
-                    otp_confirm_form.add_error(None, f"Cannot create the token (debug): {e}")
-                else:
-                    otp_confirm_form.add_error(None, "Cannot create the token.")
-            else:
-                messages.success(request, "The token has been created.")
-                return redirect(settings_url(tab="security"))
-
-    if secret:
-        try:
-            import pyotp
-            import qrcode
-        except Exception:
-            pyotp = None
-            qrcode = None
-
-        if pyotp and qrcode:
-            host = settings.FREEIPA_HOST
-            parts = host.split(".")
-            realm = ".".join(parts[1:]).upper() if len(parts) > 1 else host.upper()
-            issuer = f"{username}@{realm}" if realm else username
-
-            if is_confirm:
-                description = _normalize_str(request.POST.get("confirm-description"))
-            elif is_add:
-                description = _normalize_str(otp_add_form.cleaned_data.get("description"))
-            else:
-                description = (otp_confirm_form.initial or {}).get("description") or ""
-                description = _normalize_str(description)
-
-            totp = pyotp.TOTP(secret)
-            otp_uri = str(totp.provisioning_uri(name=description or "(no name)", issuer_name=issuer))
-
-            qr = qrcode.QRCode(box_size=6, border=2)
-            qr.add_data(otp_uri)
-            qr.make(fit=True)
-            img = qr.make_image(fill_color="black", back_color="white")
-            buf = io.BytesIO()
-            img.save(buf, "PNG")
-            otp_qr_png_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-
-    # --- Agreements ---
-    agreement_cn = _normalize_str(request.GET.get("agreement")) or None
-    agreement: FreeIPAFASAgreement | None = None
-    agreement_signed = False
-    agreements = []
-
-    try:
-        show_agreements_tab = has_enabled_agreements()
-    except Exception:
-        # If FreeIPA is unreachable, degrade gracefully (e.g. tests, dev).
-        show_agreements_tab = False
-
-    if show_agreements_tab:
-        # In unit tests `_get_full_user` is sometimes patched with a lightweight
-        # object; group membership is optional for agreement applicability.
-        user_groups = fu.groups_list if hasattr(fu, "groups_list") else []
-        try:
-            agreements = list_agreements_for_user(
-                username,
-                user_groups=user_groups,
-                include_disabled=False,
-                applicable_only=False,
-            )
-            if agreement_cn:
-                agreement = FreeIPAFASAgreement.get(agreement_cn)
-                if not agreement or not agreement.enabled:
-                    raise Http404("Agreement not found")
-                agreement_signed = username in set(agreement.users)
-        except Http404:
-            raise
-        except Exception:
-            # Same rationale as above: failing to fetch agreements should not
-            # prevent users from managing other settings.
-            show_agreements_tab = False
-            agreements = []
-            agreement = None
-            agreement_signed = False
-
-    if not show_agreements_tab and (requested_tab == "agreements" or agreement_cn):
-        # If agreements are not available (disabled or FreeIPA unreachable),
-        # do not render a broken/empty tab. Keep the user on a safe tab.
-        return redirect(settings_url(tab="profile"))
-
-    active_memberships = list(get_valid_memberships(username=username))
-    membership_rows = [
-        {
-            "membership": membership,
-            "termination_form": MembershipTerminationForm(auto_id=f"id_membership_{membership.membership_type.code}_%s"),
-        }
-        for membership in active_memberships
-    ]
-    membership_history = list(
-        MembershipLog.objects.filter(target_username=username)
-        .select_related("membership_type")
-        .order_by("-created_at", "-pk")[:25]
-    )
-    active_deletion_request = _active_account_deletion_request(username)
-    privacy_blocker_codes, privacy_warnings = get_account_deletion_blockers(username)
-    account_deletion_form = None if active_deletion_request is not None else AccountDeletionRequestForm()
-
-    # Context
-    avatar_provider_path, avatar_url = _detect_avatar_provider(request.user, size=96)
-    context = {
-        **settings_context(requested_tab, show_agreements_tab=show_agreements_tab),
-        "profile_form": profile_form,
-        "privacy_form": privacy_form,
-        "emails_form": emails_form,
-        "keys_form": keys_form,
-        "password_form": password_form,
-        "active_memberships": active_memberships,
-        "membership_rows": membership_rows,
-        "membership_history": membership_history,
-        "active_deletion_request": active_deletion_request,
-        "account_deletion_form": account_deletion_form,
-        "privacy_blocker_codes": privacy_blocker_codes,
-        "privacy_warnings": privacy_warnings,
-        "using_otp": using_otp,
-        "otp_add_form": otp_add_form,
-        "otp_confirm_form": otp_confirm_form,
-        "otp_tokens": tokens,
-        "otp_uri": otp_uri,
-        "otp_qr_png_b64": otp_qr_png_b64,
-        "agreements": agreements,
-        "agreement": agreement,
-        "agreement_signed": agreement_signed,
-        "agreement_cn": agreement_cn,
-        "rename_form": OTPTokenRenameForm(prefix="rename"),
-        "highlight": highlight,
-        "avatar_provider": _avatar_provider_label(avatar_provider_path),
-        "avatar_url": avatar_url,
-        "avatar_is_local": bool(avatar_provider_path and avatar_provider_path.endswith("LocalS3AvatarProvider")),
-        "avatar_manage_url": _avatar_manage_url_for_provider(avatar_provider_path),
-        "email_is_blacklisted": email_is_blacklisted,
-    }
-
-    # Compatibility: some tests and older code expect `form` to be the active tab's primary form.
-    context["form"] = {
-        "profile": profile_form,
-        "membership": None,
-        "privacy": privacy_form,
-        "emails": emails_form,
-        "keys": keys_form,
-        "security": password_form,
-        "agreements": None,
-    }.get(str(context["active_tab"]))
-
     profile_form_invalid = profile_form.is_bound and not profile_form.is_valid()
     emails_form_invalid = emails_form.is_bound and not emails_form.is_valid()
     keys_form_invalid = keys_form.is_bound and not keys_form.is_valid()
@@ -1260,7 +1671,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
         _log_invalid_keys_form(username=username, keys_form=keys_form)
 
     if request.method != "POST":
-        return render(request, "core/settings.html", context)
+        return _render_settings_shell(request, context=context)
 
     if is_save_all:
         # Validate only the forms that have actually changed. Otherwise, a user
@@ -1298,7 +1709,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
                 "security": password_form,
                 "agreements": None,
             }.get(invalid_tab)
-            return render(request, "core/settings.html", context)
+            return _render_settings_shell(request, context=context)
 
         # --- Build changes for each tab using shared helpers ---
         old_country = str(profile_initial.get("country_code") or "").strip().upper()
@@ -1441,7 +1852,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
             context["active_tab"] = "profile"
             context["form"] = profile_form
             context["force_tab"] = "profile"
-            return render(request, "core/settings.html", context)
+            return _render_settings_shell(request, context=context)
         if safe_relative_return_target:
             return redirect(return_target)
         return redirect(settings_url(tab="profile", highlight=highlight, status="saved"))
@@ -1526,10 +1937,10 @@ def settings_root(request: HttpRequest) -> HttpResponse:
     if requested_tab == "security":
         if is_add or is_confirm:
             context["force_tab"] = "security"
-            return render(request, "core/settings.html", context)
+            return _render_settings_shell(request, context=context)
 
         context["force_tab"] = "security"
-        return render(request, "core/settings.html", context)
+        return _render_settings_shell(request, context=context)
 
     if requested_tab == "agreements":
         if not has_enabled_agreements():
@@ -1571,7 +1982,43 @@ def settings_root(request: HttpRequest) -> HttpResponse:
         return redirect(settings_url(tab="agreements"))
 
     context["force_tab"] = requested_tab
-    return render(request, "core/settings.html", context)
+    return _render_settings_shell(request, context=context)
+
+
+@login_required
+def settings_detail_api(request: HttpRequest) -> HttpResponse:
+    if request.method != "GET":
+        return _settings_json_response({"error": "Method not allowed."}, status=405)
+
+    requested_tab = _normalize_str(request.GET.get("tab")) or "profile"
+    highlight = _normalize_str(request.GET.get("highlight"))
+    agreement_cn = _normalize_str(request.GET.get("agreement")) or None
+    if highlight != "country_code":
+        highlight = ""
+    if not is_settings_tab(requested_tab):
+        requested_tab = "profile"
+
+    username = get_username(request)
+    try:
+        fu = _get_full_user(username)
+    except requests.exceptions.ConnectionError:
+        return _settings_json_response({"error": "Unable to load settings."}, status=503)
+    if not fu:
+        return _settings_json_response({"error": "Unable to load settings."}, status=503)
+
+    try:
+        context = _build_settings_request_context(
+            request,
+            requested_tab=requested_tab,
+            highlight=highlight,
+            agreement_cn=agreement_cn,
+            is_save_all=False,
+            fu=fu,
+        )
+    except Http404:
+        return _settings_json_response({"error": "Agreement not found."}, status=404)
+
+    return _settings_json_response(_build_settings_payload(context=context))
 
 
 @login_required
@@ -1833,46 +2280,13 @@ def security_otp_rename(request: HttpRequest) -> HttpResponse:
 
 
 def settings_email_validate(request: HttpRequest) -> HttpResponse:
-    username = get_username(request)
-    token_string = _normalize_str(request.GET.get("token"))
-    if not token_string:
-        messages.warning(request, "No token provided, please check your email validation link.")
-        return redirect(settings_url(tab="emails"))
+    state = _load_settings_email_validation_state(request)
+    if isinstance(state, HttpResponse):
+        return state
 
-    try:
-        token = read_settings_email_validation_token(token_string)
-    except signing.SignatureExpired:
-        messages.warning(request, "This token is no longer valid, please request a new validation email.")
-        return redirect(settings_url(tab="emails"))
-    except signing.BadSignature:
-        messages.warning(request, "The token is invalid, please request a new validation email.")
-        return redirect(settings_url(tab="emails"))
-
-    token_user = _normalize_str(token.get("u"))
-    attr = _normalize_str(token.get("a"))
-    value = _normalize_str(token.get("v")).lower()
-
-    if token_user != username:
-        messages.warning(request, "This token does not belong to you.")
-        return redirect(settings_url(tab="emails"))
-
-    if attr not in {"mail", "fasRHBZEmail"}:
-        messages.warning(request, "The token is invalid, please request a validation email.")
-        return redirect(settings_url(tab="emails"))
-
-    try:
-        fu = _get_full_user(username)
-    except requests.exceptions.ConnectionError:
-        messages.error(
-            request,
-            MSG_SERVICE_UNAVAILABLE,
-        )
-        return redirect(settings_url(tab="emails"))
-    if not fu:
-        messages.error(request, "Unable to load your FreeIPA profile.")
-        return redirect("home")
-
-    attr_label = "E-mail Address" if attr == "mail" else "Red Hat Bugzilla Email"
+    username = state["username"]
+    attr = state["attr"]
+    value = state["value"]
 
     if request.method == "POST":
         direct_updates: dict[str, object] = {}
@@ -1908,8 +2322,18 @@ def settings_email_validate(request: HttpRequest) -> HttpResponse:
         messages.success(request, "Your email address has been validated.")
         return redirect(settings_url(tab="emails"))
 
-    return render(
-        request,
-        "core/settings_email_validation.html",
-        {"attr": attr, "attr_label": attr_label, "value": value, **settings_context("emails")},
+    return _render_settings_email_validation_shell(request, state=state)
+
+
+@login_required
+def settings_email_validate_detail_api(request: HttpRequest) -> HttpResponse:
+    if request.method != "GET":
+        return _settings_json_response({"error": "Method not allowed."}, status=405)
+
+    state = _load_settings_email_validation_state(request, api=True)
+    if isinstance(state, HttpResponse):
+        return state
+
+    return _settings_json_response(
+        _build_settings_email_validation_payload(attr=state["attr"], value=state["value"])
     )

@@ -96,6 +96,38 @@ def _candidate_display_name(*, username: str, users_by_username: dict[str, objec
     return f"{full_name} ({username})"
 
 
+def _natural_join(items: list[str]) -> str:
+    if not items:
+        return ""
+    if len(items) == 1:
+        return items[0]
+    if len(items) == 2:
+        return f"{items[0]} and {items[1]}"
+    return ", ".join(items[:-1]) + f", and {items[-1]}"
+
+
+def _serialize_exclusion_group_messages(exclusion_groups: list[dict[str, object]]) -> list[str]:
+    messages: list[str] = []
+    for exclusion_group in exclusion_groups:
+        candidates = cast(list[dict[str, str]], exclusion_group["candidates"])
+        if not candidates:
+            continue
+        who = _natural_join(
+            [
+                f"{candidate['full_name']} ({candidate['username']})"
+                if candidate["full_name"] != candidate["username"]
+                else candidate["username"]
+                for candidate in candidates
+            ]
+        )
+        max_elected = int(exclusion_group["max_elected"])
+        candidate_word = "candidate" if max_elected == 1 else "candidates"
+        messages.append(
+            f"{who} belong to the {exclusion_group['name']} exclusion group: only {max_elected} {candidate_word} of the group can be elected."
+        )
+    return messages
+
+
 def _candidate_cards_context(election: Election) -> tuple[list[Candidate], list[dict[str, object]], dict[str, object]]:
     candidates = list(Candidate.objects.filter(election=election).order_by("freeipa_username", "id"))
 
@@ -170,6 +202,7 @@ def _serialize_election_info_payload(
 ) -> dict[str, object]:
     start_datetime_local = timezone.localtime(election.start_datetime)
     end_datetime_local = timezone.localtime(election.end_datetime)
+    exclusion_groups = cast(list[dict[str, object]], summary_context["exclusion_groups"])
 
     return {
         "id": election.id,
@@ -191,7 +224,47 @@ def _serialize_election_info_payload(
         "show_turnout_chart": summary_context["show_turnout_chart"],
         "turnout_stats": summary_context["turnout_stats"],
         "turnout_chart_data": summary_context["turnout_chart_data"],
-        "exclusion_group_messages": summary_context["exclusion_group_messages"],
+        "exclusion_group_messages": _serialize_exclusion_group_messages(exclusion_groups),
+        "election_is_finished": summary_context["election_is_finished"],
+        "tally_winners": [
+            {
+                "username": winner["username"],
+                "full_name": winner["full_name"],
+            }
+            for winner in summary_context["tally_winners"]
+        ],
+        "empty_seats": summary_context["empty_seats"],
+    }
+
+
+def _serialize_election_detail_page_payload(
+    election: Election,
+    *,
+    request: HttpRequest,
+    can_vote: bool,
+    credential_issued_at: datetime.datetime | None,
+    summary_context: dict[str, object],
+) -> dict[str, object]:
+    return {
+        "id": election.id,
+        "name": election.name,
+        "description": election.description,
+        "url": election.url,
+        "status": election.status,
+        "start_datetime": election.start_datetime.isoformat(),
+        "end_datetime": election.end_datetime.isoformat(),
+        "viewer_timezone": timezone.get_current_timezone_name(),
+        "number_of_seats": election.number_of_seats,
+        "quorum": election.quorum,
+        "eligible_group_cn": election.eligible_group_cn,
+        "can_vote": can_vote,
+        "viewer_email": str(request.user.email or "").strip() or None,
+        "credential_issued_at": credential_issued_at.isoformat() if credential_issued_at is not None else None,
+        "eligibility_min_membership_age_days": settings.ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS,
+        "show_turnout_chart": summary_context["show_turnout_chart"],
+        "turnout_stats": summary_context["turnout_stats"],
+        "turnout_rows": summary_context["turnout_rows"],
+        "exclusion_groups": summary_context["exclusion_groups"],
         "election_is_finished": summary_context["election_is_finished"],
         "tally_winners": [
             {
@@ -211,16 +284,7 @@ def _election_detail_summary_context(
     users_by_username: dict[str, object],
     can_manage_elections: bool,
 ) -> dict[str, object]:
-    def _natural_join(items: list[str]) -> str:
-        if not items:
-            return ""
-        if len(items) == 1:
-            return items[0]
-        if len(items) == 2:
-            return f"{items[0]} and {items[1]}"
-        return ", ".join(items[:-1]) + f", and {items[-1]}"
-
-    exclusion_group_messages: list[str] = []
+    exclusion_groups_payload: list[dict[str, object]] = []
     exclusion_groups = list(
         ExclusionGroup.objects.filter(election=election)
         .prefetch_related(
@@ -233,17 +297,21 @@ def _election_detail_summary_context(
     )
     for group in exclusion_groups:
         group_candidates = [candidate for candidate in group.candidates.all() if candidate.freeipa_username]
-        names = [
-            _candidate_display_name(username=candidate.freeipa_username, users_by_username=users_by_username)
+        candidates_payload = [
+            {
+                "username": candidate.freeipa_username,
+                "full_name": try_get_full_name(users_by_username.get(candidate.freeipa_username)) or candidate.freeipa_username,
+            }
             for candidate in group_candidates
         ]
-        if not names:
+        if not candidates_payload:
             continue
-
-        who = _natural_join(names)
-        candidate_word = "candidate" if group.max_elected == 1 else "candidates"
-        exclusion_group_messages.append(
-            f"{who} belong to the {group.name} exclusion group: only {group.max_elected} {candidate_word} of the group can be elected."
+        exclusion_groups_payload.append(
+            {
+                "name": group.name,
+                "max_elected": group.max_elected,
+                "candidates": candidates_payload,
+            }
         )
 
     elected_ids, empty_seats = _tally_elected_ids(election)
@@ -260,6 +328,7 @@ def _election_detail_summary_context(
     )
 
     turnout_stats: dict[str, object] = {}
+    turnout_rows: list[dict[str, object]] = []
     turnout_chart_data: dict[str, object] = {}
     show_turnout_stats = election.status in {Election.Status.open, Election.Status.closed, Election.Status.tallied} and (
         can_manage_elections or election.status == Election.Status.tallied
@@ -320,7 +389,14 @@ def _election_detail_summary_context(
                 day = row.get("day")
                 if not isinstance(day, datetime.date):
                     continue
-                counts_by_day[day] = int(row.get("count") or 0)
+                count = int(row.get("count") or 0)
+                counts_by_day[day] = count
+                turnout_rows.append(
+                    {
+                        "day": day.isoformat(),
+                        "count": count,
+                    }
+                )
 
             start_day = timezone.localdate(election.start_datetime)
             if election.status == Election.Status.open:
@@ -346,8 +422,9 @@ def _election_detail_summary_context(
     return {
         "show_turnout_chart": show_turnout_chart,
         "turnout_stats": turnout_stats,
+        "turnout_rows": turnout_rows,
         "turnout_chart_data": turnout_chart_data,
-        "exclusion_group_messages": exclusion_group_messages,
+        "exclusion_groups": exclusion_groups_payload,
         "election_is_finished": election.status in {Election.Status.closed, Election.Status.tallied},
         "tally_winners": tally_winners,
         "empty_seats": empty_seats,
@@ -428,6 +505,33 @@ def election_detail_info_api(request: HttpRequest, election_id: int) -> JsonResp
     return JsonResponse(
         {
             "election": _serialize_election_info_payload(
+                election,
+                request=request,
+                can_vote=bool(vote_access["can_vote"]),
+                credential_issued_at=vote_access["credential_issued_at"],
+                summary_context=summary_context,
+            )
+        }
+    )
+
+
+@require_GET
+def election_detail_page_api(request: HttpRequest, election_id: int) -> JsonResponse:
+    election = _get_active_election(election_id)
+    can_manage_elections = _can_manage_elections(request)
+    _enforce_election_detail_visibility(request, election, can_manage_elections=can_manage_elections)
+    vote_access = _vote_access_context(request=request, election=election)
+    candidates, _candidate_cards, users_by_username = _candidate_cards_context(election)
+    summary_context = _election_detail_summary_context(
+        election=election,
+        candidates=candidates,
+        users_by_username=users_by_username,
+        can_manage_elections=can_manage_elections,
+    )
+
+    return JsonResponse(
+        {
+            "election": _serialize_election_detail_page_payload(
                 election,
                 request=request,
                 can_vote=bool(vote_access["can_vote"]),

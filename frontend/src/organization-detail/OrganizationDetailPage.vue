@@ -2,10 +2,12 @@
 import { computed, onMounted, ref } from "vue";
 
 import MembershipCard from "../shared/components/MembershipCard.vue";
+import { formatDateInputValue, formatMonthYear, formatShortDate, membershipTierClass, pendingMembershipBadge } from "../shared/membershipPresentation";
 import { fillUrlTemplate } from "../shared/urlTemplates";
 import type {
   OrganizationDetailBootstrap,
   OrganizationDetailContactGroup,
+  OrganizationDetailMembership,
   OrganizationDetailResponse,
 } from "./types";
 
@@ -18,6 +20,12 @@ const error = ref("");
 const isLoading = ref(false);
 const activeContactKey = ref("representative");
 const terminationConfirmByLabel = ref<Record<string, string>>({});
+
+const CONTACT_LABELS: Record<string, string> = {
+  business: "Business",
+  marketing: "PR and marketing",
+  technical: "Technical",
+};
 
 const visibleContactGroup = computed<OrganizationDetailContactGroup | null>(() => {
   if (!payload.value) {
@@ -72,7 +80,7 @@ function sendMailUrl(email: string): string {
 }
 
 function membershipTypeCode(membership: OrganizationDetailResponse["organization"]["memberships"][number]): string {
-  return membership.membership_type?.code || "";
+  return membership.membership_type.code || "";
 }
 
 function tierChangeUrl(membership: OrganizationDetailResponse["organization"]["memberships"][number]): string {
@@ -83,7 +91,7 @@ function tierChangeUrl(membership: OrganizationDetailResponse["organization"]["m
 }
 
 function canManageExpiration(membership: OrganizationDetailResponse["organization"]["memberships"][number]): boolean {
-  return Boolean(membership.can_manage_expiration && membershipTypeCode(membership) && membership.expires_on);
+  return Boolean(membership.can_manage_expiration && membershipTypeCode(membership) && membership.expires_at);
 }
 
 function managementModalId(membership: OrganizationDetailResponse["organization"]["memberships"][number]): string {
@@ -108,11 +116,44 @@ function organizationName(): string {
   return payload.value?.organization.name || "";
 }
 
-function expirationCurrentText(membership: OrganizationDetailResponse["organization"]["memberships"][number]): string {
-  if (!membership.expires_label) {
+function membershipLabel(membership: OrganizationDetailMembership): string {
+  return membership.membership_type.name;
+}
+
+function membershipDescription(membership: OrganizationDetailMembership): string {
+  return membership.membership_type.description;
+}
+
+function membershipBadgeClass(membership: OrganizationDetailMembership): string {
+  return `badge alx-status-badge badge-pill p-2 ${membershipTierClass(membershipTypeCode(membership))} alx-status-badge--active`;
+}
+
+function memberSinceLabel(membership: OrganizationDetailMembership): string {
+  return formatMonthYear(membership.created_at);
+}
+
+function expiresLabel(membership: OrganizationDetailMembership): string {
+  return formatShortDate(membership.expires_at);
+}
+
+function expiresToneClass(membership: OrganizationDetailMembership): string {
+  return membership.is_expiring_soon ? "text-danger" : "text-muted";
+}
+
+function expirationCurrentText(membership: OrganizationDetailMembership): string {
+  const label = expiresLabel(membership);
+  if (!label) {
     return "";
   }
-  return `Current expiration: ${membership.expires_label} (UTC)`;
+  return `Current expiration: ${label} (UTC)`;
+}
+
+function contactLabel(key: string): string {
+  return CONTACT_LABELS[key] || key;
+}
+
+function pendingBadge(status: string): { label: string; className: string } {
+  return pendingMembershipBadge(status, Boolean(payload.value?.organization.is_representative));
 }
 
 function normalized(value: string): string {
@@ -196,7 +237,7 @@ onMounted(async () => {
                   <button type="button" class="nav-link" :class="{ active: activeContactKey === 'representative' }" @click="activeContactKey = 'representative'">Representative</button>
                 </li>
                 <li v-for="group in payload.organization.contact_groups" :key="group.key" class="nav-item">
-                  <button type="button" class="nav-link" :class="{ active: activeContactKey === group.key }" @click="activeContactKey = group.key">{{ group.label }}</button>
+                  <button type="button" class="nav-link" :class="{ active: activeContactKey === group.key }" @click="activeContactKey = group.key">{{ contactLabel(group.key) }}</button>
                 </li>
               </ul>
             </div>
@@ -281,21 +322,21 @@ onMounted(async () => {
           >
             <li
               v-for="membership in payload.organization.memberships"
-              :key="membership.label"
+              :key="membershipTypeCode(membership) || membershipLabel(membership)"
               class="list-group-item d-flex justify-content-between align-items-center"
             >
               <div>
-                <div class="font-weight-bold">{{ membership.label }}</div>
-                <div v-if="membership.description" class="text-muted small">{{ membership.description }}</div>
-                <div v-if="membership.member_since_label" class="text-muted small">Member since {{ membership.member_since_label }}</div>
-                <div v-if="membership.expires_label" class="small" :class="membership.expires_tone === 'danger' ? 'text-danger' : 'text-muted'">
-                  <i v-if="membership.expires_tone === 'danger'" class="fas fa-exclamation-triangle mr-1" />
-                  Expires {{ membership.expires_label }}
+                <div class="font-weight-bold">{{ membershipLabel(membership) }}</div>
+                <div v-if="membershipDescription(membership)" class="text-muted small">{{ membershipDescription(membership) }}</div>
+                <div v-if="memberSinceLabel(membership)" class="text-muted small">Member since {{ memberSinceLabel(membership) }}</div>
+                <div v-if="expiresLabel(membership)" class="small" :class="expiresToneClass(membership)">
+                  <i v-if="membership.is_expiring_soon" class="fas fa-exclamation-triangle mr-1" />
+                  Expires {{ expiresLabel(membership) }}
                 </div>
               </div>
 
               <div class="d-flex align-items-center justify-content-end flex-wrap" style="gap: .5rem;">
-                <span :class="`badge alx-status-badge badge-pill p-2 ${membership.class_name} alx-status-badge--active`">{{ membership.label }}</span>
+                <span :class="membershipBadgeClass(membership)">{{ membershipLabel(membership) }}</span>
                 <a
                   v-if="tierChangeUrl(membership)"
                   :href="tierChangeUrl(membership)"
@@ -325,7 +366,7 @@ onMounted(async () => {
                   <div class="modal-content">
                     <div class="modal-header">
                       <div class="mr-3">
-                        <h5 class="modal-title mb-0" :id="`${managementModalId(membership)}-label`">Manage membership: {{ membership.membership_type?.name || membership.label }} for {{ organizationName() }}</h5>
+                        <h5 class="modal-title mb-0" :id="`${managementModalId(membership)}-label`">Manage membership: {{ membershipLabel(membership) }} for {{ organizationName() }}</h5>
                       </div>
                       <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog">
                         <span aria-hidden="true">&times;</span>
@@ -346,7 +387,7 @@ onMounted(async () => {
                             name="expires_on"
                             type="date"
                             class="form-control"
-                            :value="membership.expires_on"
+                            :value="formatDateInputValue(membership.expires_at)"
                             :min="bootstrap.expiryMinDate"
                             required
                           >
@@ -388,13 +429,13 @@ onMounted(async () => {
                                 <label :for="`${managementModalId(membership)}-terminate-confirm-input`">Type the name to confirm</label>
                                 <input
                                   :id="`${managementModalId(membership)}-terminate-confirm-input`"
-                                  v-model="terminationConfirmByLabel[membership.label]"
+                                  v-model="terminationConfirmByLabel[membershipTypeCode(membership)]"
                                   name="confirm"
                                   type="text"
                                   class="form-control"
                                   :class="{
-                                    'is-valid': Boolean(terminationConfirmByLabel[membership.label]) && terminationMatches(membership.label, organizationName()),
-                                    'is-invalid': Boolean(terminationConfirmByLabel[membership.label]) && !terminationMatches(membership.label, organizationName()),
+                                    'is-valid': Boolean(terminationConfirmByLabel[membershipTypeCode(membership)]) && terminationMatches(membershipTypeCode(membership), organizationName()),
+                                    'is-invalid': Boolean(terminationConfirmByLabel[membershipTypeCode(membership)]) && !terminationMatches(membershipTypeCode(membership), organizationName()),
                                   }"
                                   :placeholder="organizationName()"
                                   autocomplete="off"
@@ -405,13 +446,13 @@ onMounted(async () => {
                               </div>
 
                               <div class="d-flex justify-content-end">
-                                <button type="button" class="btn btn-outline-secondary" data-terminate-action="cancel" title="Cancel termination and collapse this section" @click="resetTermination(membership.label)">Cancel termination</button>
+                                <button type="button" class="btn btn-outline-secondary" data-terminate-action="cancel" title="Cancel termination and collapse this section" @click="resetTermination(membershipTypeCode(membership))">Cancel termination</button>
                                 <button
                                   type="submit"
                                   class="btn btn-danger ml-2"
                                   :id="`${managementModalId(membership)}-terminate-submit`"
-                                  :disabled="!terminationMatches(membership.label, organizationName())"
-                                  :aria-disabled="terminationMatches(membership.label, organizationName()) ? 'false' : 'true'"
+                                  :disabled="!terminationMatches(membershipTypeCode(membership), organizationName())"
+                                  :aria-disabled="terminationMatches(membershipTypeCode(membership), organizationName()) ? 'false' : 'true'"
                                   title="Terminate membership (enabled after confirmation)"
                                 >Terminate membership</button>
                               </div>
@@ -439,7 +480,7 @@ onMounted(async () => {
                   {{ pendingMembership.membership_type.description }}
                 </div>
               </div>
-              <span :class="pendingMembership.badge_class_name">{{ pendingMembership.badge_label }}</span>
+              <span :class="pendingBadge(pendingMembership.status).className">{{ pendingBadge(pendingMembership.status).label }}</span>
             </li>
 
             <li v-if="!payload.organization.memberships.length && !payload.organization.pending_memberships.length" class="list-group-item text-muted">

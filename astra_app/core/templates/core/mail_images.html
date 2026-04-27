@@ -1,6 +1,14 @@
 {% extends 'core/base.html' %}
 
+{% load django_vite %}
+
 {% block title %}Images{% endblock %}
+
+{% block extra_head %}
+  {{ block.super }}
+  {% vite_hmr_client %}
+  {% vite_asset 'src/entrypoints/mailImages.ts' %}
+{% endblock %}
 
 {% block header %}
   <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
@@ -9,178 +17,13 @@
 {% endblock %}
 
 {% block content %}
-  <div class="card">
-    <div class="card-header">
-      <h3 class="card-title mb-0">How To Use Images in Email Templates</h3>
-    </div>
-    <div class="card-body">
-      <div class="mb-2">
-        Upload images for use in email templates.
-      </div>
-      <div class="mb-0">
-        You can reference an image in two ways:
-        <ul class="mb-0">
-          <li>
-            Inline (embedded) image:
-            <code>&lt;img src=&quot;{% templatetag openblock %} inline_image '{{ mail_images_external_example_url }}' {% templatetag closeblock %}&quot; /&gt;</code>
-            <span class="text-muted">
-              (requires <code>{% templatetag openblock %} load post_office {% templatetag closeblock %}</code> in the template;
-              when sending, the app embeds the image by reading it from storage, so the URL does not need to be reachable from the Django server via HTTP)
-            </span>
-          </li>
-          <li>
-            External URL:
-            <code>&lt;img src=&quot;{{ mail_images_external_example_url }}&quot; /&gt;</code>
-          </li>
-        </ul>
-        <div class="text-muted mt-2">
-          Notes: previews rewrite <code>{% templatetag openblock %} inline_image ... {% templatetag closeblock %}</code> to a plain URL so your browser can display it.
-          Plain-text previews drop images and any <code>{% templatetag openblock %} ... {% templatetag closeblock %}</code> tags.
-        </div>
-      </div>
-    </div>
+  <div
+    data-mail-images-root=""
+    data-mail-images-api-url="{{ mail_images_api_url }}"
+    data-mail-images-submit-url="{{ mail_images_submit_url }}"
+    data-mail-images-csrf-token="{{ csrf_token }}"
+  >
+    {{ mail_images_initial_payload|json_script:"mail-images-initial-payload" }}
+    <div class="text-muted">Loading images...</div>
   </div>
-
-  <div class="card">
-    <div class="card-header">
-      <h3 class="card-title mb-0">Upload</h3>
-    </div>
-    <div class="card-body">
-      <form method="post" enctype="multipart/form-data" class="mb-0">
-        {% csrf_token %}
-        <input type="hidden" name="action" value="upload" />
-
-        <div class="form-row">
-          <div class="form-group col-md-5">
-            <label for="mail-images-upload-path" class="mb-1">Folder (optional)</label>
-            <input
-              id="mail-images-upload-path"
-              type="text"
-              class="form-control"
-              name="upload_path"
-              placeholder="e.g. logos"
-              autocomplete="off"
-            />
-            <small class="form-text text-muted">Stored under <code>{{ mail_images_prefix }}</code>. Do not include <code>..</code>.</small>
-          </div>
-
-          <div class="form-group col-md-5">
-            <label for="mail-images-upload-files" class="mb-1">Files</label>
-            <input id="mail-images-upload-files" type="file" class="form-control" name="files" multiple accept="image/*" />
-          </div>
-
-          <div class="form-group col-md-2 d-flex align-items-end">
-            <div class="w-100">
-              <div class="custom-control custom-checkbox mb-2">
-                <input type="checkbox" class="custom-control-input" id="mail-images-overwrite" name="overwrite" value="1" />
-                <label class="custom-control-label" for="mail-images-overwrite">Overwrite</label>
-              </div>
-              <button type="submit" class="btn btn-primary btn-block" title="Upload selected images">Upload</button>
-            </div>
-          </div>
-        </div>
-      </form>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-header">
-      <h3 class="card-title mb-0">Stored Images</h3>
-    </div>
-    <div class="card-body p-0">
-      <table class="table table-striped mb-0">
-        <thead>
-          <tr>
-            <th style="width: 140px;">Preview</th>
-            <th>Key</th>
-            <th style="width: 140px;">Size</th>
-            <th style="width: 220px;">Modified</th>
-            <th style="width: 420px;">URL</th>
-            <th class="text-right" style="width: 160px;">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for img in images %}
-            <tr>
-              <td>
-                <img
-                  src="{{ img.url }}"
-                  alt="{{ img.relative_key }}"
-                  style="max-width: 120px; max-height: 64px; object-fit: contain; background: #fff;"
-                />
-              </td>
-              <td>
-                <div class="small text-muted">{{ mail_images_prefix }}</div>
-                <div class="font-weight-bold">{{ img.relative_key }}</div>
-              </td>
-              <td class="text-muted">{{ img.size_bytes }} bytes</td>
-              <td class="text-muted">{{ img.modified_at }}</td>
-              <td>
-                <input type="text" class="form-control form-control-sm" value="{{ img.url }}" readonly />
-              </td>
-              <td class="text-right">
-                <a class="btn btn-sm btn-outline-secondary" href="{{ img.url }}" target="_blank" rel="noopener" title="Download this image">Download</a>
-
-                <button
-                  type="button"
-                  class="btn btn-sm btn-outline-danger"
-                  data-toggle="modal"
-                  data-target="#delete-mail-image-modal"
-                  data-img-key="{{ img.key }}"
-                  data-img-name="{{ img.relative_key }}"
-                  title="Delete this image"
-                >Delete</button>
-              </td>
-            </tr>
-          {% empty %}
-            <tr>
-              <td colspan="6" class="p-3 text-muted">No images found.</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  {# Shared delete confirmation modal — populated by JS from the triggering button's data attrs #}
-  <div class="modal fade" id="delete-mail-image-modal" tabindex="-1" role="dialog" aria-hidden="true">
-    <div class="modal-dialog" role="document">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title">Delete image</h5>
-          <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog">
-            <span aria-hidden="true">&times;</span>
-          </button>
-        </div>
-        <div class="modal-body">
-          <div class="mb-3 text-left">
-            Delete <strong id="delete-mail-image-name"></strong>?
-          </div>
-          <form method="post" action="{{ request.path }}" class="m-0">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="delete" />
-            <input type="hidden" name="key" id="delete-mail-image-key" value="" />
-            <div class="d-flex justify-content-between">
-              <button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel" title="Close dialog without deleting">Cancel</button>
-              <button type="submit" class="btn btn-danger" title="Delete this image">Delete</button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <script>
-    (function () {
-      'use strict';
-      document.addEventListener('click', function (e) {
-        var btn = e.target.closest && e.target.closest('button[data-img-key][data-target="#delete-mail-image-modal"]');
-        if (!btn) return;
-        var nameEl = document.getElementById('delete-mail-image-name');
-        var keyEl = document.getElementById('delete-mail-image-key');
-        if (nameEl) nameEl.textContent = btn.getAttribute('data-img-name') || '';
-        if (keyEl) keyEl.value = btn.getAttribute('data-img-key') || '';
-      });
-    })();
-  </script>
 {% endblock %}

@@ -2,14 +2,15 @@
 
 import json
 import logging
+from collections.abc import Callable
+from functools import wraps
 from typing import Any
 
 from django.conf import settings
-from django.contrib.auth.decorators import permission_required
-from django.db.models import Q
-from django.http import HttpRequest, JsonResponse
-from django.utils.formats import date_format
+from django.db.models import Q, QuerySet
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils import timezone
+from django.utils.formats import date_format
 from django.utils.timezone import localtime
 from django.views.decorators.http import require_http_methods
 
@@ -35,9 +36,29 @@ def _display_datetime(value: timezone.datetime | None) -> str | None:
     return date_format(localtime(value), format="DATETIME_FORMAT", use_l10n=True)
 
 
+def _raw_datetime(value: timezone.datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat()
+
+
 def _permission_denied_response() -> JsonResponse:
     """Return 403 JSON response for permission denied."""
     return JsonResponse({"ok": False, "error": "Permission denied"}, status=403)
+
+
+def _json_membership_permission_required[**P, R: HttpResponse](
+    view_func: Callable[P, R],
+) -> Callable[P, HttpResponse]:
+    """Return JSON 403 responses instead of redirects for invitation APIs."""
+
+    @wraps(view_func)
+    def wrapper(request: HttpRequest, *args: P.args, **kwargs: P.kwargs) -> HttpResponse:
+        if not request.user.is_authenticated or not request.user.has_perm(ASTRA_ADD_MEMBERSHIP):
+            return _permission_denied_response()
+        return view_func(request, *args, **kwargs)
+
+    return wrapper
 
 
 def _not_found_response() -> JsonResponse:
@@ -50,17 +71,18 @@ def _bad_request_response(error: str) -> JsonResponse:
     return JsonResponse({"ok": False, "error": error}, status=400)
 
 
-def _format_invitation_row(invitation: AccountInvitation) -> dict[str, Any]:
+def _format_invitation_row(invitation: AccountInvitation, *, data_only: bool) -> dict[str, Any]:
     """Format an invitation for DataTables response."""
+    date_formatter = _raw_datetime if data_only else _display_datetime
     row: dict[str, Any] = {
         "invitation_id": invitation.pk,
         "email": invitation.email,
         "full_name": invitation.full_name or "",
         "note": invitation.note or "",
         "invited_by_username": invitation.invited_by_username,
-        "invited_at": _display_datetime(invitation.invited_at),
+        "invited_at": date_formatter(invitation.invited_at),
         "send_count": invitation.send_count,
-        "last_sent_at": _display_datetime(invitation.last_sent_at),
+        "last_sent_at": date_formatter(invitation.last_sent_at),
     }
 
     # Pending-specific fields
@@ -70,7 +92,7 @@ def _format_invitation_row(invitation: AccountInvitation) -> dict[str, Any]:
     # Accepted-specific fields
     if invitation.accepted_at and not invitation.dismissed_at:
         row["status"] = "accepted"
-        row["accepted_at"] = _display_datetime(invitation.accepted_at)
+        row["accepted_at"] = date_formatter(invitation.accepted_at)
         row["accepted_username"] = invitation.accepted_username
         row["freeipa_matched_usernames"] = invitation.freeipa_matched_usernames or []
 
@@ -90,7 +112,9 @@ def _format_invitation_row(invitation: AccountInvitation) -> dict[str, Any]:
 
 def _build_datatables_response(
     request: HttpRequest,
-    queryset: "QuerySet[AccountInvitation]",
+    queryset: QuerySet[AccountInvitation],
+    *,
+    data_only: bool,
 ) -> dict[str, Any]:
     """Build a DataTables-compatible response envelope."""
     try:
@@ -111,6 +135,8 @@ def _build_datatables_response(
     # Clamp length to reasonable values
     length = max(1, min(length, 500))
 
+    records_total = queryset.count()
+
     # Apply search filter if provided
     search_value = request.GET.get("search[value]", "").strip()
     if search_value:
@@ -118,8 +144,6 @@ def _build_datatables_response(
             Q(email__icontains=search_value) | Q(full_name__icontains=search_value)
         )
 
-    # Get total count before pagination
-    records_total = AccountInvitation.objects.count()
     records_filtered = queryset.count()
 
     # Apply pagination
@@ -127,7 +151,7 @@ def _build_datatables_response(
     paginated_queryset = queryset[start:end]
 
     # Format rows
-    data = [_format_invitation_row(inv) for inv in paginated_queryset]
+    data = [_format_invitation_row(inv, data_only=data_only) for inv in paginated_queryset]
 
     return {
         "draw": draw,
@@ -138,7 +162,7 @@ def _build_datatables_response(
 
 
 @require_http_methods(["GET"])
-@permission_required(ASTRA_ADD_MEMBERSHIP, raise_exception=False)
+@_json_membership_permission_required
 def account_invitations_pending_api(request: HttpRequest) -> JsonResponse:
     """
     List pending invitations in DataTables format.
@@ -158,12 +182,24 @@ def account_invitations_pending_api(request: HttpRequest) -> JsonResponse:
         dismissed_at__isnull=True,
     ).order_by("-invited_at")
 
-    response = _build_datatables_response(request, queryset)
+    response = _build_datatables_response(request, queryset, data_only=False)
     return JsonResponse(response)
 
 
 @require_http_methods(["GET"])
-@permission_required(ASTRA_ADD_MEMBERSHIP, raise_exception=False)
+@_json_membership_permission_required
+def account_invitations_pending_detail_api(request: HttpRequest) -> JsonResponse:
+    queryset = AccountInvitation.objects.filter(
+        accepted_at__isnull=True,
+        dismissed_at__isnull=True,
+    ).order_by("-invited_at")
+
+    response = _build_datatables_response(request, queryset, data_only=True)
+    return JsonResponse(response)
+
+
+@require_http_methods(["GET"])
+@_json_membership_permission_required
 def account_invitations_accepted_api(request: HttpRequest) -> JsonResponse:
     """
     List accepted invitations in DataTables format.
@@ -183,12 +219,24 @@ def account_invitations_accepted_api(request: HttpRequest) -> JsonResponse:
         dismissed_at__isnull=True,
     ).order_by("-accepted_at")
 
-    response = _build_datatables_response(request, queryset)
+    response = _build_datatables_response(request, queryset, data_only=False)
+    return JsonResponse(response)
+
+
+@require_http_methods(["GET"])
+@_json_membership_permission_required
+def account_invitations_accepted_detail_api(request: HttpRequest) -> JsonResponse:
+    queryset = AccountInvitation.objects.filter(
+        accepted_at__isnull=False,
+        dismissed_at__isnull=True,
+    ).order_by("-accepted_at")
+
+    response = _build_datatables_response(request, queryset, data_only=True)
     return JsonResponse(response)
 
 
 @require_http_methods(["POST"])
-@permission_required(ASTRA_ADD_MEMBERSHIP, raise_exception=False)
+@_json_membership_permission_required
 def account_invitations_refresh_api(request: HttpRequest) -> JsonResponse:
     """
     Refresh invitation statuses by checking FreeIPA for matches.
@@ -196,9 +244,6 @@ def account_invitations_refresh_api(request: HttpRequest) -> JsonResponse:
     This endpoint checks all pending invitations against FreeIPA to detect
     if emails have been registered and automatically marks them as accepted.
     """
-    if not request.user.is_authenticated:
-        return _permission_denied_response()
-
     try:
         username = get_username(request)
         now = timezone.now()
@@ -207,7 +252,7 @@ def account_invitations_refresh_api(request: HttpRequest) -> JsonResponse:
             "ok": True,
             "message": "Invitations refreshed successfully",
         })
-    except Exception as e:
+    except Exception:
         logger.exception(
             "Failed to refresh invitations",
             extra=current_exception_log_fields(),
@@ -219,7 +264,7 @@ def account_invitations_refresh_api(request: HttpRequest) -> JsonResponse:
 
 
 @require_http_methods(["POST"])
-@permission_required(ASTRA_ADD_MEMBERSHIP, raise_exception=False)
+@_json_membership_permission_required
 def account_invitations_resend_api(request: HttpRequest, pk: int) -> JsonResponse:
     """
     Resend an invitation email.
@@ -227,9 +272,6 @@ def account_invitations_resend_api(request: HttpRequest, pk: int) -> JsonRespons
     Path Parameters:
         - pk: Invitation ID
     """
-    if not request.user.is_authenticated:
-        return _permission_denied_response()
-
     try:
         invitation = AccountInvitation.objects.get(pk=pk)
     except AccountInvitation.DoesNotExist:
@@ -292,7 +334,7 @@ def account_invitations_resend_api(request: HttpRequest, pk: int) -> JsonRespons
             "message": f"Invitation resent to {invitation.email}",
         })
 
-    except Exception as e:
+    except Exception:
         logger.exception(
             f"Failed to resend invitation {pk}",
             extra=current_exception_log_fields(),
@@ -321,7 +363,7 @@ def _mark_invitation_accepted_from_email_match(invitation: AccountInvitation) ->
 
 
 @require_http_methods(["POST"])
-@permission_required(ASTRA_ADD_MEMBERSHIP, raise_exception=False)
+@_json_membership_permission_required
 def account_invitations_dismiss_api(request: HttpRequest, pk: int) -> JsonResponse:
     """
     Dismiss an invitation.
@@ -329,9 +371,6 @@ def account_invitations_dismiss_api(request: HttpRequest, pk: int) -> JsonRespon
     Path Parameters:
         - pk: Invitation ID
     """
-    if not request.user.is_authenticated:
-        return _permission_denied_response()
-
     try:
         invitation = AccountInvitation.objects.get(pk=pk)
     except AccountInvitation.DoesNotExist:
@@ -345,9 +384,9 @@ def account_invitations_dismiss_api(request: HttpRequest, pk: int) -> JsonRespon
 
         return JsonResponse({
             "ok": True,
-            "message": f"Invitation dismissed",
+            "message": "Invitation dismissed",
         })
-    except Exception as e:
+    except Exception:
         logger.exception(
             f"Failed to dismiss invitation {pk}",
             extra=current_exception_log_fields(),
@@ -359,7 +398,7 @@ def account_invitations_dismiss_api(request: HttpRequest, pk: int) -> JsonRespon
 
 
 @require_http_methods(["POST"])
-@permission_required(ASTRA_ADD_MEMBERSHIP, raise_exception=False)
+@_json_membership_permission_required
 def account_invitations_bulk_api(request: HttpRequest) -> JsonResponse:
     """
     Perform bulk actions on invitations.
@@ -369,9 +408,6 @@ def account_invitations_bulk_api(request: HttpRequest) -> JsonResponse:
         - bulk_scope: "pending" or "accepted"
         - selected: JSON list of invitation IDs
     """
-    if not request.user.is_authenticated:
-        return _permission_denied_response()
-
     try:
         # Accept both JSON payloads (Vue fetch) and form payloads (legacy).
         if request.content_type and request.content_type.startswith("application/json"):
@@ -485,7 +521,7 @@ def account_invitations_bulk_api(request: HttpRequest) -> JsonResponse:
                         result=AccountInvitationSend.Result.queued,
                     )
                     resent_count += 1
-                except Exception as e:
+                except Exception:
                     logger.exception(
                         f"Failed to resend invitation {invitation.pk} in bulk",
                         extra=current_exception_log_fields(),
@@ -496,7 +532,7 @@ def account_invitations_bulk_api(request: HttpRequest) -> JsonResponse:
                 "message": f"Resent {resent_count} invitation(s)",
             })
 
-    except Exception as e:
+    except Exception:
         logger.exception(
             "Bulk invitation action failed",
             extra=current_exception_log_fields(),

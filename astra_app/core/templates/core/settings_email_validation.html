@@ -1,37 +1,29 @@
 {% extends "core/base.html" %}
 
+{% load django_vite %}
+
 {% block title %}Settings - Emails{% endblock %}
 
-{% block header %}
-  <h1 class="m-0">Settings for <a href="{% url 'user-profile' request.user.get_username %}">{{ request.user.get_username }}</a></h1>
+{% block extra_head %}
+  {{ block.super }}
+  {% vite_hmr_client %}
+  {% vite_asset 'src/entrypoints/settingsEmailValidation.ts' %}
 {% endblock %}
 
-{% block content %}
-<div class="settings-page">
-  <div class="card card-primary card-tabs settings-card mt-3">
-    <div class="card-header p-0 pt-1">
-      {% include 'core/_settings_tabs.html' %}
-    </div>
-    <div class="card-body">
-      <h3 class="card-title mb-3">Confirm email address change</h3>
-      <p class="mb-2">
-        You requested to update your <strong>{{ attr_label }}</strong> to <strong>{{ value }}</strong>.
-      </p>
-      <p class="text-muted mb-0">
-        Click <strong>Confirm</strong> to save the new address. A brief verification may take effect immediately.
-        If you did not request this change, you can cancel below.
-      </p>
-    </div>
+{% block header %}{% endblock %}
 
-    <div class="card-footer">
-      <form action="{{ request.get_full_path }}" method="post" class="m-0">
-        {% csrf_token %}
-        <div class="d-flex justify-content-between">
-          <a class="btn btn-secondary" href="{% url 'settings' %}#emails" title="Cancel email change">Cancel</a>
-          <button class="btn btn-primary" type="submit" title="Confirm email change">Confirm</button>
-        </div>
-      </form>
-    </div>
+{% block content %}
+  <div
+    data-settings-email-validation-root=""
+    data-settings-email-validation-api-url="{{ settings_email_validation_api_url }}"
+    data-settings-email-validation-submit-url="{{ settings_email_validation_submit_url }}"
+    data-settings-email-validation-cancel-url="{{ settings_email_validation_cancel_url }}"
+    data-settings-email-validation-csrf-token="{{ settings_email_validation_csrf_token }}"
+    data-settings-email-validation-username="{{ settings_email_validation_username }}"
+  >
+    {{ settings_email_validation_initial_payload|json_script:"settings-email-validation-initial-payload" }}
+    {{ settings_email_validation_route_config|json_script:"settings-email-validation-route-config" }}
+    {{ settings_email_validation_tabs|json_script:"settings-email-validation-tabs" }}
+    <div class="text-muted">Loading email validation...</div>
   </div>
-</div>
 {% endblock %}

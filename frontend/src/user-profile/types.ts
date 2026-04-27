@@ -1,13 +1,6 @@
-export interface UserProfileLinkItem {
-  href: string | null;
-  text: string;
-}
-
 export interface UserProfileSocialProfile {
-  label: string;
-  title: string;
-  icon: string;
-  urls: UserProfileLinkItem[];
+  platform: string;
+  urls: string[];
 }
 
 export interface UserProfileSummaryBootstrap {
@@ -16,15 +9,14 @@ export interface UserProfileSummaryBootstrap {
   email: string;
   avatarUrl: string;
   viewerIsMembershipCommittee: boolean;
-  profileCountry: string;
+  countryCode: string;
   pronouns: string;
   locale: string;
   timezoneName: string;
-  currentTimeLabel: string;
   ircNicks: string[];
   socialProfiles: UserProfileSocialProfile[];
-  websiteUrls: UserProfileLinkItem[];
-  rssUrls: UserProfileLinkItem[];
+  websiteUrls: string[];
+  rssUrls: string[];
   rhbzEmail: string;
   githubUsername: string;
   gitlabUsername: string;
@@ -35,7 +27,7 @@ export interface UserProfileSummaryBootstrap {
 
 export interface UserProfileGroupItem {
   cn: string;
-  role: string;
+  role: "member" | "sponsor";
 }
 
 export interface UserProfileMissingAgreementItem {
@@ -53,8 +45,6 @@ export interface UserProfileGroupsBootstrap {
 
 export interface UserProfileActionItem {
   id: string;
-  label: string;
-  urlLabel: string;
   requestId?: number;
   agreementCn?: string;
 }
@@ -70,25 +60,13 @@ export interface UserProfileMembershipType {
   name: string;
   code: string;
   description: string;
-  className: string;
-}
-
-export interface UserProfileMembershipBadge {
-  label: string;
-  className: string;
 }
 
 export interface UserProfileMembershipManagementAction {
-  modalId: string;
-  inputId: string;
-  expiryActionUrl: string;
-  terminateActionUrl: string;
+  expiryUrlTemplate: string;
+  terminateUrlTemplate: string;
   csrfToken: string;
   nextUrl: string;
-  initialValue: string;
-  minValue: string;
-  currentText: string;
-  terminator: string;
 }
 
 export interface UserProfileMembershipEntry {
@@ -96,13 +74,12 @@ export interface UserProfileMembershipEntry {
   key: string;
   requestId: number | null;
   membershipType: UserProfileMembershipType;
-  badge: UserProfileMembershipBadge;
-  memberSinceLabel: string;
-  expiresLabel: string;
-  expiresTone: "danger" | "muted";
+  createdAt: string | null;
+  expiresAt: string | null;
+  isExpiringSoon: boolean;
   canRenew: boolean;
   canRequestTierChange: boolean;
-  management: UserProfileMembershipManagementAction | null;
+  canManage: boolean;
 }
 
 export interface UserProfilePendingMembershipEntry {
@@ -112,7 +89,6 @@ export interface UserProfilePendingMembershipEntry {
   requestId: number;
   status: string;
   organizationName: string;
-  badge: UserProfileMembershipBadge;
 }
 
 export interface UserProfileMembershipNotes {
@@ -135,7 +111,6 @@ export interface UserProfileMembershipSection {
   isOwner: boolean;
   entries: UserProfileMembershipEntry[];
   pendingEntries: UserProfilePendingMembershipEntry[];
-  notes: UserProfileMembershipNotes | null;
 }
 
 export interface UserProfileResponse {
@@ -153,8 +128,14 @@ export interface UserProfileBootstrap {
   membershipHistoryUrlTemplate: string;
   membershipRequestUrl: string;
   membershipRequestDetailUrlTemplate: string;
+  membershipManagement: UserProfileMembershipManagementAction;
+  membershipNotes: UserProfileMembershipNotes;
   groupDetailUrlTemplate: string;
   agreementsUrlTemplate: string;
+}
+
+function readBoolean(value: string): boolean {
+  return value === "true";
 }
 
 export function readUserProfileBootstrap(root: HTMLElement): UserProfileBootstrap | null {
@@ -165,6 +146,15 @@ export function readUserProfileBootstrap(root: HTMLElement): UserProfileBootstra
   const membershipHistoryUrlTemplate = String(root.dataset.userProfileMembershipHistoryUrlTemplate || "").trim();
   const membershipRequestUrl = String(root.dataset.userProfileMembershipRequestUrl || "").trim();
   const membershipRequestDetailUrlTemplate = String(root.dataset.userProfileMembershipRequestDetailUrlTemplate || "").trim();
+  const membershipSetExpiryUrlTemplate = String(root.dataset.userProfileMembershipSetExpiryUrlTemplate || "").trim();
+  const membershipTerminateUrlTemplate = String(root.dataset.userProfileMembershipTerminateUrlTemplate || "").trim();
+  const csrfToken = String(root.dataset.userProfileCsrfToken || "").trim();
+  const nextUrl = String(root.dataset.userProfileNextUrl || "").trim();
+  const membershipNotesSummaryUrl = String(root.dataset.userProfileMembershipNotesSummaryUrl || "").trim();
+  const membershipNotesDetailUrl = String(root.dataset.userProfileMembershipNotesDetailUrl || "").trim();
+  const membershipNotesAddUrl = String(root.dataset.userProfileMembershipNotesAddUrl || "").trim();
+  const membershipNotesCanView = readBoolean(String(root.dataset.userProfileMembershipNotesCanView || "").trim());
+  const membershipNotesCanWrite = readBoolean(String(root.dataset.userProfileMembershipNotesCanWrite || "").trim());
   const groupDetailUrlTemplate = String(root.dataset.userProfileGroupDetailUrlTemplate || "").trim();
   const agreementsUrlTemplate = String(root.dataset.userProfileAgreementsUrlTemplate || "").trim();
   if (
@@ -175,6 +165,13 @@ export function readUserProfileBootstrap(root: HTMLElement): UserProfileBootstra
     || !membershipHistoryUrlTemplate
     || !membershipRequestUrl
     || !membershipRequestDetailUrlTemplate
+    || !membershipSetExpiryUrlTemplate
+    || !membershipTerminateUrlTemplate
+    || !csrfToken
+    || !nextUrl
+    || !membershipNotesSummaryUrl
+    || !membershipNotesDetailUrl
+    || !membershipNotesAddUrl
     || !groupDetailUrlTemplate
     || !agreementsUrlTemplate
   ) {
@@ -188,6 +185,23 @@ export function readUserProfileBootstrap(root: HTMLElement): UserProfileBootstra
     membershipHistoryUrlTemplate,
     membershipRequestUrl,
     membershipRequestDetailUrlTemplate,
+    membershipManagement: {
+      expiryUrlTemplate: membershipSetExpiryUrlTemplate,
+      terminateUrlTemplate: membershipTerminateUrlTemplate,
+      csrfToken,
+      nextUrl,
+    },
+    membershipNotes: {
+      summaryUrl: membershipNotesSummaryUrl,
+      detailUrl: membershipNotesDetailUrl,
+      addUrl: membershipNotesAddUrl,
+      csrfToken,
+      nextUrl,
+      canView: membershipNotesCanView,
+      canWrite: membershipNotesCanWrite,
+      targetType: "user",
+      target: "",
+    },
     groupDetailUrlTemplate,
     agreementsUrlTemplate,
   };

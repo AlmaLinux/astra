@@ -1847,11 +1847,24 @@ class OrganizationUserViewsTests(TestCase):
             patch("core.views_membership.user.block_action_without_coc", return_value=None),
         ):
             resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
+            api_resp = self.client.get(reverse("api-organization-membership-request-form-detail", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertNotContains(resp, 'value="gold" selected')
-        self.assertNotContains(resp, 'value="gold"')
-        self.assertContains(resp, 'value="silver"')
+        self.assertContains(resp, 'data-membership-request-form-root=""')
+        self.assertContains(
+            resp,
+            f'data-membership-request-form-api-url="{reverse("api-organization-membership-request-form-detail", args=[org.pk])}"',
+        )
+        self.assertEqual(api_resp.status_code, 200)
+        payload = api_resp.json()
+        self.assertEqual(payload["form"]["fields"][0]["value"], "gold")
+        option_values = [
+            option["value"]
+            for group in payload["form"]["fields"][0]["option_groups"]
+            for option in group["options"]
+        ]
+        self.assertNotIn("gold", option_values)
+        self.assertIn("silver", option_values)
 
     def test_org_membership_request_requires_representative(self) -> None:
         from core.models import FreeIPAPermissionGrant, MembershipType, Organization
@@ -2003,6 +2016,16 @@ class OrganizationUserViewsTests(TestCase):
                 "enabled": True,
             },
         )
+        MembershipType.objects.update_or_create(
+            code="platinum",
+            defaults={
+                "name": "Platinum Sponsor Member",
+                "description": "Platinum Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
 
         org = Organization.objects.create(name="Acme", representative="bob")
 
@@ -2018,13 +2041,19 @@ class OrganizationUserViewsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+            api_resp = self.client.get(reverse("api-organization-detail-page", args=[org.pk]), HTTP_ACCEPT="application/json")
 
         self.assertEqual(resp.status_code, 200)
         self.assertNotContains(resp, reverse("organization-sponsorship-extend", args=[org.pk]))
         self.assertContains(
             resp,
-            reverse("organization-membership-request", args=[org.pk]) + "?membership_type=gold",
+            f'data-organization-detail-membership-request-url="{reverse("organization-membership-request", args=[org.pk])}"',
         )
+        payload = api_resp.json()
+        membership = payload["organization"]["memberships"][0]
+        self.assertEqual(membership["membership_type"]["code"], "gold")
+        self.assertTrue(membership["can_request_tier_change"])
+        self.assertEqual(membership["tier_change_membership_type_code"], "platinum")
 
     def test_sponsorship_extend_endpoint_redirects_to_canonical_request_form(self) -> None:
         from core.models import Membership, MembershipRequest, MembershipType, Organization
@@ -2108,32 +2137,21 @@ class OrganizationUserViewsTests(TestCase):
             patch("core.views_membership.user.block_action_without_coc", return_value=None),
         ):
             resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
+            api_resp = self.client.get(reverse("api-organization-membership-request-form-detail", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
-        body = resp.content.decode("utf-8")
-
-        mirror_label = 'value="mirror">Mirror Member<'
-        silver_label = 'value="silver">Silver Sponsor Member<'
-        gold_label = 'value="gold">Gold Sponsor Member<'
-
-        self.assertIn(mirror_label, body)
-        self.assertIn(silver_label, body)
-        self.assertIn(gold_label, body)
-        self.assertNotIn("Sponsorship ->", body)
-        self.assertNotIn("Mirror ->", body)
-
-        mirror_idx = body.find(mirror_label)
-        silver_idx = body.find(silver_label)
-        gold_idx = body.find(gold_label)
-        self.assertGreater(mirror_idx, -1)
-        self.assertLess(mirror_idx, silver_idx)
-        self.assertLess(silver_idx, gold_idx)
-
-        self.assertNotIn('<optgroup label="Mirror">', body)
-        self.assertIn('<optgroup label="Sponsorship">', body)
-
-        self.assertContains(resp, 'id="id_q_sponsorship_details"')
-        self.assertContains(resp, 'id="id_q_domain"')
+        self.assertContains(resp, 'data-membership-request-form-root=""')
+        self.assertEqual(api_resp.status_code, 200)
+        payload = api_resp.json()
+        groups = payload["form"]["fields"][0]["option_groups"]
+        self.assertEqual(groups[0]["label"], None)
+        self.assertEqual([option["value"] for option in groups[0]["options"]], ["mirror"])
+        self.assertEqual(groups[1]["label"], "Sponsorship")
+        sponsorship_values = [option["value"] for option in groups[1]["options"]]
+        self.assertEqual(sponsorship_values[:2], ["silver", "gold"])
+        field_names = [field["name"] for field in payload["form"]["fields"]]
+        self.assertIn("q_sponsorship_details", field_names)
+        self.assertIn("q_domain", field_names)
 
     def test_org_membership_request_blocks_category_with_pending_request(self) -> None:
         from core.models import MembershipRequest, MembershipType, MembershipTypeCategory, Organization
@@ -2185,12 +2203,18 @@ class OrganizationUserViewsTests(TestCase):
             patch("core.views_membership.user.block_action_without_coc", return_value=None),
         ):
             resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
+            api_resp = self.client.get(reverse("api-organization-membership-request-form-detail", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
-        body = resp.content.decode("utf-8")
-        self.assertNotIn('value="silver"', body)
-        self.assertNotIn('value="gold"', body)
-        self.assertIn('value="mirror"', body)
+        payload = api_resp.json()
+        option_values = [
+            option["value"]
+            for group in payload["form"]["fields"][0]["option_groups"]
+            for option in group["options"]
+        ]
+        self.assertNotIn("silver", option_values)
+        self.assertNotIn("gold", option_values)
+        self.assertIn("mirror", option_values)
 
     def test_org_membership_request_blocks_category_with_on_hold_request(self) -> None:
         from core.models import MembershipRequest, MembershipType, MembershipTypeCategory, Organization
@@ -2242,12 +2266,18 @@ class OrganizationUserViewsTests(TestCase):
             patch("core.views_membership.user.block_action_without_coc", return_value=None),
         ):
             resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
+            api_resp = self.client.get(reverse("api-organization-membership-request-form-detail", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
-        body = resp.content.decode("utf-8")
-        self.assertNotIn('value="silver"', body)
-        self.assertNotIn('value="gold"', body)
-        self.assertIn('value="mirror"', body)
+        payload = api_resp.json()
+        option_values = [
+            option["value"]
+            for group in payload["form"]["fields"][0]["option_groups"]
+            for option in group["options"]
+        ]
+        self.assertNotIn("silver", option_values)
+        self.assertNotIn("gold", option_values)
+        self.assertIn("mirror", option_values)
 
     def test_org_membership_request_allows_other_type_in_category_when_active(self) -> None:
         from core.models import Membership, MembershipType, MembershipTypeCategory, Organization
@@ -2288,11 +2318,17 @@ class OrganizationUserViewsTests(TestCase):
             patch("core.views_membership.user.block_action_without_coc", return_value=None),
         ):
             resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
+            api_resp = self.client.get(reverse("api-organization-membership-request-form-detail", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
-        body = resp.content.decode("utf-8")
-        self.assertNotIn('value="silver"', body)
-        self.assertIn('value="gold"', body)
+        payload = api_resp.json()
+        option_values = [
+            option["value"]
+            for group in payload["form"]["fields"][0]["option_groups"]
+            for option in group["options"]
+        ]
+        self.assertNotIn("silver", option_values)
+        self.assertIn("gold", option_values)
 
     def test_org_membership_request_allows_renewal_when_expiring_soon(self) -> None:
         from core.models import Membership, MembershipType, MembershipTypeCategory, Organization
@@ -2324,9 +2360,16 @@ class OrganizationUserViewsTests(TestCase):
             patch("core.views_membership.user.block_action_without_coc", return_value=None),
         ):
             resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
+            api_resp = self.client.get(reverse("api-organization-membership-request-form-detail", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'value="silver"')
+        payload = api_resp.json()
+        option_values = [
+            option["value"]
+            for group in payload["form"]["fields"][0]["option_groups"]
+            for option in group["options"]
+        ]
+        self.assertIn("silver", option_values)
 
     def test_org_membership_request_renewal_prefills_last_request_answers(self) -> None:
         from core.models import Membership, MembershipRequest, MembershipType, MembershipTypeCategory, Organization

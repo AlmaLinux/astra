@@ -12,6 +12,7 @@ from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.formats import date_format
+from django.views.decorators.http import require_GET
 
 from core.agreements import (
     has_enabled_agreements,
@@ -623,6 +624,14 @@ def _profile_context_for_user(
         "show_membership_card": show_membership_card,
         "viewer_is_membership_committee": viewer_is_membership_committee,
         "profile_country": profile_country,
+        "social_profile_urls": [
+            {
+                "platform": platform_key,
+                "urls": [url for url in platform_urls if url.strip()],
+            }
+            for platform_key, platform_urls in social_urls_by_platform.items()
+            if platform_urls
+        ],
         "membership_can_request_any": membership_can_request_any,
         "memberships": memberships,
         "membership_pending_requests": pending_requests,
@@ -637,7 +646,9 @@ def _profile_context_for_user(
         "irc_nicks": irc_nicks,
         "social_profiles": social_profiles,
         "website_urls": website_urls,
+        "website_url_values": [url.strip() for url in website_url_values if url.strip()],
         "rss_urls": rss_urls,
+        "rss_url_values": [url.strip() for url in _as_list(_data_get(data, "fasRssUrl", [])) if url.strip()],
         "rhbz_email": _first(data, "fasRHBZEmail", "") or "",
         "github_username": _first(data, "fasGitHubUsername", "") or "",
         "gitlab_username": _first(data, "fasGitLabUsername", "") or "",
@@ -681,6 +692,17 @@ def _build_user_profile_summary_bootstrap(context: dict[str, object]) -> dict[st
     }
 
 
+def _build_user_profile_summary_data(context: dict[str, object]) -> dict[str, object]:
+    summary = _build_user_profile_summary_bootstrap(context)
+    summary.pop("currentTimeLabel", None)
+    summary.pop("profileCountry", None)
+    summary["countryCode"] = str(context["country_code"]) if bool(context["viewer_is_membership_committee"]) else ""
+    summary["socialProfiles"] = cast(list[dict[str, object]], context["social_profile_urls"])
+    summary["websiteUrls"] = cast(list[str], context["website_url_values"])
+    summary["rssUrls"] = cast(list[str], context["rss_url_values"])
+    return summary
+
+
 def _build_user_profile_groups_bootstrap(context: dict[str, object]) -> dict[str, object]:
     fu = cast(FreeIPAUser, context["fu"])
     groups = cast(list[dict[str, str]], context["groups"])
@@ -693,6 +715,33 @@ def _build_user_profile_groups_bootstrap(context: dict[str, object]) -> dict[str
             {
                 "cn": str(group["cn"]),
                 "role": str(group["role"]),
+            }
+            for group in groups
+        ],
+        "agreements": [str(agreement) for agreement in agreements],
+        "missingAgreements": [
+            {
+                "cn": str(agreement["cn"]),
+                "requiredBy": [str(group_cn) for group_cn in cast(list[str], agreement["required_by"])],
+            }
+            for agreement in missing_agreements
+        ],
+        "isSelf": bool(context["is_self"]),
+    }
+
+
+def _build_user_profile_groups_data(context: dict[str, object]) -> dict[str, object]:
+    fu = cast(FreeIPAUser, context["fu"])
+    groups = cast(list[dict[str, str]], context["groups"])
+    agreements = cast(list[str], context["agreements"])
+    missing_agreements = cast(list[dict[str, object]], context["missing_agreements"])
+
+    return {
+        "username": fu.username,
+        "groups": [
+            {
+                "cn": str(group["cn"]),
+                "role": "sponsor" if str(group["role"]).strip().lower() == "sponsor" else "member",
             }
             for group in groups
         ],
@@ -745,6 +794,21 @@ def _serialize_user_profile_action(action: dict[str, str]) -> dict[str, object]:
     return payload
 
 
+def _serialize_user_profile_action_data(action: dict[str, str]) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "id": action["id"],
+    }
+    request_id = action.get("request_id")
+    if request_id:
+        payload["requestId"] = int(request_id)
+
+    agreement_cn = action.get("agreement_cn")
+    if agreement_cn:
+        payload["agreementCn"] = agreement_cn
+
+    return payload
+
+
 def _serialize_user_profile_account_setup(context: dict[str, object]) -> dict[str, object]:
     required_actions = cast(list[dict[str, str]], context["account_setup_required_actions"])
     recommended_actions = cast(list[dict[str, str]], context["account_setup_recommended_actions"])
@@ -755,6 +819,43 @@ def _serialize_user_profile_account_setup(context: dict[str, object]) -> dict[st
         "recommendedActions": [_serialize_user_profile_action(action) for action in recommended_actions],
         "recommendedDismissKey": f"astra:profile-recommended-dismissed:{cast(FreeIPAUser, context['fu']).username}",
     }
+
+
+def _serialize_user_profile_account_setup_data(context: dict[str, object]) -> dict[str, object]:
+    required_actions = cast(list[dict[str, str]], context["account_setup_required_actions"])
+    recommended_actions = cast(list[dict[str, str]], context["account_setup_recommended_actions"])
+
+    return {
+        "requiredActions": [_serialize_user_profile_action_data(action) for action in required_actions],
+        "requiredIsRfi": bool(context["account_setup_required_is_rfi"]),
+        "recommendedActions": [_serialize_user_profile_action_data(action) for action in recommended_actions],
+        "recommendedDismissKey": f"astra:profile-recommended-dismissed:{cast(FreeIPAUser, context['fu']).username}",
+    }
+
+
+def _serialize_profile_datetime(value: object) -> str | None:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, str):
+        normalized = value.strip()
+        return normalized or None
+    return None
+
+
+def _serialize_user_profile_membership_type_data(membership_type: MembershipType | dict[str, object]) -> dict[str, str]:
+    if isinstance(membership_type, MembershipType):
+        return {
+            "name": membership_type.name,
+            "code": membership_type.code,
+            "description": membership_type.description,
+        }
+    if isinstance(membership_type, dict):
+        return {
+            "name": str(membership_type.get("name", "")),
+            "code": str(membership_type.get("code", "")),
+            "description": str(membership_type.get("description", "")),
+        }
+    raise TypeError("Expected MembershipType data")
 
 
 def _format_profile_membership_date(value: object, *, timezone_name: str, fmt: str) -> str:
@@ -774,9 +875,7 @@ def _format_profile_membership_date(value: object, *, timezone_name: str, fmt: s
 
 def _serialize_user_profile_membership_type(membership_type: MembershipType) -> dict[str, str]:
     return {
-        "name": membership_type.name,
-        "code": membership_type.code,
-        "description": membership_type.description,
+        **_serialize_user_profile_membership_type_data(membership_type),
         "className": membership_tier_class(membership_type.code),
     }
 
@@ -884,8 +983,7 @@ def _serialize_user_profile_pending_membership_entry(
     }
 
 
-def _serialize_user_profile_membership(context: dict[str, object], request: HttpRequest) -> dict[str, object]:
-    fu = cast(FreeIPAUser, context["fu"])
+def _user_profile_membership_permissions(request: HttpRequest) -> tuple[bool, bool, bool]:
     review_permissions = membership_review_permissions(request.user)
     membership_can_view = bool(review_permissions["membership_can_view"])
     membership_can_write = bool(
@@ -894,26 +992,47 @@ def _serialize_user_profile_membership(context: dict[str, object], request: Http
         or review_permissions["membership_can_delete"]
     )
     membership_can_manage = bool(review_permissions["membership_can_change"] and review_permissions["membership_can_delete"])
+    return membership_can_view, membership_can_write, membership_can_manage
+
+
+def _build_user_profile_membership_notes_bootstrap(
+    *,
+    request: HttpRequest,
+    username: str,
+    membership_can_view: bool,
+    membership_can_write: bool,
+) -> dict[str, object]:
+    target_params = urlencode({"target_type": "user", "target": username})
+    return {
+        "summaryUrl": f"{reverse('api-membership-notes-aggregate-summary')}?{target_params}",
+        "detailUrl": f"{reverse('api-membership-notes-aggregate')}?{target_params}",
+        "addUrl": reverse("api-membership-notes-aggregate-add"),
+        "csrfToken": get_token(request),
+        "nextUrl": request.get_full_path(),
+        "canView": membership_can_view,
+        "canWrite": membership_can_write,
+        "targetType": "user",
+        "target": username,
+    }
+
+
+def _serialize_user_profile_membership(context: dict[str, object], request: HttpRequest) -> dict[str, object]:
+    fu = cast(FreeIPAUser, context["fu"])
+    membership_can_view, membership_can_write, membership_can_manage = _user_profile_membership_permissions(request)
     is_owner = bool(context["is_self"])
     timezone_name = str(context["timezone_name"])
     membership_entries = cast(list[dict[str, object]], context["memberships"])
     pending_entries = cast(list[dict[str, object]], context["membership_pending_requests"])
-    target_params = urlencode({"target_type": "user", "target": fu.username})
     csrf_token = get_token(request)
 
     notes = None
     if membership_can_view:
-        notes = {
-            "summaryUrl": f"{reverse('api-membership-notes-aggregate-summary')}?{target_params}",
-            "detailUrl": f"{reverse('api-membership-notes-aggregate')}?{target_params}",
-            "addUrl": reverse("api-membership-notes-aggregate-add"),
-            "csrfToken": csrf_token,
-            "nextUrl": request.get_full_path(),
-            "canView": membership_can_view,
-            "canWrite": membership_can_write,
-            "targetType": "user",
-            "target": fu.username,
-        }
+        notes = _build_user_profile_membership_notes_bootstrap(
+            request=request,
+            username=fu.username,
+            membership_can_view=membership_can_view,
+            membership_can_write=membership_can_write,
+        )
 
     visible_pending_entries = pending_entries if is_owner or membership_can_view else []
     return {
@@ -944,12 +1063,95 @@ def _serialize_user_profile_membership(context: dict[str, object], request: Http
     }
 
 
+def _serialize_user_profile_membership_entry_data(
+    entry: dict[str, object],
+    *,
+    is_owner: bool,
+    can_view: bool,
+    can_manage: bool,
+) -> dict[str, object]:
+    membership_type = cast(MembershipType | dict[str, object], entry["membership_type"])
+    membership_type_data = _serialize_user_profile_membership_type_data(membership_type)
+    request_id = entry["request_id"]
+
+    return {
+        "kind": "membership",
+        "key": f"membership-{membership_type_data['code']}",
+        "requestId": int(request_id) if request_id and (is_owner or can_view) else None,
+        "membershipType": membership_type_data,
+        "createdAt": _serialize_profile_datetime(entry.get("created_at")),
+        "expiresAt": _serialize_profile_datetime(entry.get("expires_at")),
+        "isExpiringSoon": bool(entry["is_expiring_soon"]),
+        "canRenew": bool(is_owner and bool(entry["is_expiring_soon"]) and not bool(entry["has_pending_request_in_category"])),
+        "canRequestTierChange": bool(is_owner and bool(entry["can_request_tier_change"])),
+        "canManage": can_manage,
+    }
+
+
+def _serialize_user_profile_pending_membership_entry_data(
+    entry: dict[str, object],
+    *,
+    is_owner: bool,
+    can_view: bool,
+) -> dict[str, object]:
+    membership_type = cast(MembershipType | dict[str, object], entry["membership_type"])
+    request_id = int(entry["request_id"])
+    status = str(entry["status"])
+    return {
+        "kind": "pending",
+        "key": f"pending-{request_id}",
+        "membershipType": _serialize_user_profile_membership_type_data(membership_type),
+        "requestId": request_id,
+        "status": status,
+        "organizationName": str(entry["organization_name"]),
+    }
+
+
+def _serialize_user_profile_membership_data(context: dict[str, object], request: HttpRequest) -> dict[str, object]:
+    fu = cast(FreeIPAUser, context["fu"])
+    membership_can_view, _membership_can_write, membership_can_manage = _user_profile_membership_permissions(request)
+    is_owner = bool(context["is_self"])
+    membership_entries = cast(list[dict[str, object]], context["memberships"])
+    pending_entries = cast(list[dict[str, object]], context["membership_pending_requests"])
+
+    visible_pending_entries = pending_entries if is_owner or membership_can_view else []
+    return {
+        "showCard": bool(context["show_membership_card"]),
+        "username": fu.username,
+        "canViewHistory": membership_can_view,
+        "canRequestAny": bool(context["membership_can_request_any"]),
+        "isOwner": is_owner,
+        "entries": [
+            _serialize_user_profile_membership_entry_data(
+                entry,
+                is_owner=is_owner,
+                can_view=membership_can_view,
+                can_manage=membership_can_manage,
+            )
+            for entry in membership_entries
+        ],
+        "pendingEntries": [
+            _serialize_user_profile_pending_membership_entry_data(entry, is_owner=is_owner, can_view=membership_can_view)
+            for entry in visible_pending_entries
+        ],
+    }
+
+
 def _build_user_profile_payload(context: dict[str, object], request: HttpRequest) -> dict[str, object]:
     return {
         "summary": _build_user_profile_summary_bootstrap(context),
         "groups": _build_user_profile_groups_bootstrap(context),
         "membership": _serialize_user_profile_membership(context, request),
         "accountSetup": _serialize_user_profile_account_setup(context),
+    }
+
+
+def _build_user_profile_detail_payload(context: dict[str, object], request: HttpRequest) -> dict[str, object]:
+    return {
+        "summary": _build_user_profile_summary_data(context),
+        "groups": _build_user_profile_groups_data(context),
+        "membership": _serialize_user_profile_membership_data(context, request),
+        "accountSetup": _serialize_user_profile_account_setup_data(context),
     }
 
 
@@ -968,6 +1170,7 @@ def user_profile(request: HttpRequest, username: str) -> HttpResponse:
 
     viewer_username = get_username(request)
     logger.debug("User profile shell view: username=%s viewer=%s", username, viewer_username)
+    membership_can_view, membership_can_write, _membership_can_manage = _user_profile_membership_permissions(request)
     return render(
         request,
         "core/user_profile.html",
@@ -979,10 +1182,23 @@ def user_profile(request: HttpRequest, username: str) -> HttpResponse:
             "membership_request_detail_url_template": reverse("membership-request-detail", args=[123456789]).replace(
                 "123456789", "__request_id__"
             ),
+            "membership_set_expiry_url_template": reverse(
+                "membership-set-expiry", args=["__username__", "__membership_type_code__"]
+            ),
+            "membership_terminate_url_template": reverse(
+                "membership-terminate", args=["__username__", "__membership_type_code__"]
+            ),
             "group_detail_url_template": reverse("group-detail", args=["__group_name__"]),
             "agreements_url_template": f"{settings_url(tab='agreements')}&agreement=__agreement_cn__",
             "settings_country_code_url": settings_url(tab="profile", highlight="country_code"),
             "settings_emails_url": settings_url(tab="emails"),
+            "csrf_token": get_token(request),
+            "next_url": request.get_full_path(),
+            "membership_notes_summary_url": f"{reverse('api-membership-notes-aggregate-summary')}?{urlencode({'target_type': 'user', 'target': username})}",
+            "membership_notes_detail_url": f"{reverse('api-membership-notes-aggregate')}?{urlencode({'target_type': 'user', 'target': username})}",
+            "membership_notes_add_url": reverse("api-membership-notes-aggregate-add"),
+            "membership_notes_can_view": membership_can_view,
+            "membership_notes_can_write": membership_can_write,
         },
     )
 
@@ -990,6 +1206,12 @@ def user_profile(request: HttpRequest, username: str) -> HttpResponse:
 def user_profile_api(request: HttpRequest, username: str) -> JsonResponse:
     context = _profile_context_for_request(request, username)
     return JsonResponse(_build_user_profile_payload(context, request))
+
+
+@require_GET
+def user_profile_detail_api(request: HttpRequest, username: str) -> JsonResponse:
+    context = _profile_context_for_request(request, username)
+    return JsonResponse(_build_user_profile_detail_payload(context, request))
 
 
 def users(request: HttpRequest) -> HttpResponse:

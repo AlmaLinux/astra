@@ -71,7 +71,9 @@ from core.permissions import (
 from core.templatetags.core_dict import membership_tier_class
 from core.views_users import (
     _format_profile_membership_date,
+    _serialize_profile_datetime,
     _serialize_user_profile_membership_type,
+    _serialize_user_profile_membership_type_data,
     _serialize_user_profile_pending_badge,
 )
 from core.views_utils import (
@@ -868,6 +870,7 @@ def _serialize_organization_detail_payload(context: dict[str, object]) -> dict[s
             "id": organization.pk,
             "name": organization.name,
             "status": organization.status,
+            "is_representative": bool(context["is_representative"]),
             "website": organization.website,
             "logo_url": organization.logo.url if organization.logo else "",
             "memberships": [
@@ -963,6 +966,101 @@ def _serialize_organization_detail_membership_entry(
     }
 
 
+def _serialize_organization_detail_page_membership_entry(
+    entry: dict[str, object],
+    *,
+    can_request_membership: bool,
+    can_manage: bool,
+) -> dict[str, object]:
+    sponsorship = entry["sponsorship"]
+    if isinstance(sponsorship, Membership):
+        membership_type = sponsorship.membership_type
+        created_at = sponsorship.created_at
+        expires_at = sponsorship.expires_at
+    else:
+        sponsorship_data = cast(dict[str, object], sponsorship)
+        membership_type = cast(MembershipType | dict[str, object], sponsorship_data["membership_type"])
+        created_at = entry.get("created_at")
+        expires_at = entry.get("expires_at")
+
+    request_id = entry["request_id"]
+    return {
+        "request_id": cast(int, request_id) if request_id else None,
+        "membership_type": _serialize_user_profile_membership_type_data(membership_type),
+        "created_at": _serialize_profile_datetime(created_at),
+        "expires_at": _serialize_profile_datetime(expires_at),
+        "is_expiring_soon": bool(entry["is_expiring_soon"]),
+        "can_request_tier_change": bool(can_request_membership and entry["can_request_tier_change"]),
+        "tier_change_membership_type_code": str(entry["tier_change_membership_type_code"])
+        if bool(can_request_membership and entry["can_request_tier_change"])
+        else "",
+        "can_manage_expiration": can_manage,
+    }
+
+
+def _serialize_organization_detail_page_payload(
+    context: dict[str, object],
+    *,
+    can_manage: bool,
+) -> dict[str, object]:
+    organization = context["organization"]
+    if not isinstance(organization, Organization):
+        raise TypeError("Expected organization in detail context")
+
+    pending_requests = cast(list[dict[str, object]], context["pending_requests"])
+    representative_username = cast(str, context["representative_username"])
+    representative_full_name = cast(str, context["representative_full_name"])
+    contact_display_groups = cast(list[dict[str, object]], context["contact_display_groups"])
+    return {
+        "organization": {
+            "id": organization.pk,
+            "name": organization.name,
+            "status": organization.status,
+            "is_representative": bool(context["is_representative"]),
+            "website": organization.website,
+            "logo_url": organization.logo.url if organization.logo else "",
+            "memberships": [
+                _serialize_organization_detail_page_membership_entry(
+                    entry,
+                    can_request_membership=bool(context["can_request_membership"]),
+                    can_manage=can_manage,
+                )
+                for entry in cast(list[dict[str, object]], context["sponsorship_entries"])
+            ],
+            "pending_memberships": [
+                {
+                    "request_id": cast(int, entry["request_id"]),
+                    "status": str(entry["status"]),
+                    "membership_type": _serialize_user_profile_membership_type_data(
+                        cast(MembershipType | dict[str, object], entry["membership_type"])
+                    ),
+                }
+                for entry in pending_requests
+            ],
+            "representative": {
+                "username": representative_username,
+                "full_name": representative_full_name or representative_username,
+            },
+            "contact_groups": [
+                {
+                    "key": str(group["key"]),
+                    "name": str(group["name"]),
+                    "email": str(group["email"]),
+                    "phone": str(group["phone"]),
+                }
+                for group in contact_display_groups
+            ],
+            "address": {
+                "street": organization.street,
+                "city": organization.city,
+                "state": organization.state,
+                "postal_code": organization.postal_code,
+                "country_code": organization.country_code,
+            },
+        },
+    }
+
+
 @require_GET
 def organization_detail_api(request: HttpRequest, organization_id: int) -> JsonResponse:
     organization = get_object_or_404(Organization, pk=organization_id)
@@ -980,6 +1078,17 @@ def organization_detail_api(request: HttpRequest, organization_id: int) -> JsonR
         )
         for entry in cast(list[dict[str, object]], context["sponsorship_entries"])
     ]
+    return JsonResponse(payload)
+
+
+@require_GET
+def organization_detail_page_api(request: HttpRequest, organization_id: int) -> JsonResponse:
+    organization = get_object_or_404(Organization, pk=organization_id)
+    _require_organization_access(request, organization)
+    context = _build_organization_detail_page_context(request, organization=organization)
+    review_permissions = membership_review_permissions(request.user)
+    can_manage = bool(review_permissions["membership_can_change"] and review_permissions["membership_can_delete"])
+    payload = _serialize_organization_detail_page_payload(context, can_manage=can_manage)
     return JsonResponse(payload)
 
 

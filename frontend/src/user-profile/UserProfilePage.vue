@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
+import { formatFixedCurrentTime } from "../shared/membershipPresentation";
 import UserProfileGroupsPanel from "./UserProfileGroupsPanel.vue";
 import UserProfileMembershipPanel from "./UserProfileMembershipPanel.vue";
 import UserProfileSummary from "./UserProfileSummary.vue";
@@ -22,11 +23,17 @@ const summary = computed<UserProfileSummaryBootstrap | null>(() => {
   if (!payload.value) {
     return null;
   }
-  return {
-    ...payload.value.summary,
-    currentTimeLabel: currentTimeLabel.value || payload.value.summary.currentTimeLabel,
-  };
+  return payload.value.summary;
 });
+
+const ACTION_COPY: Record<string, { label: string; urlLabel: string }> = {
+  "coc-not-signed-alert": { label: "Sign the Code of Conduct", urlLabel: "Review agreement" },
+  "country-code-missing-alert": { label: "Add your country", urlLabel: "Set country code" },
+  "email-blacklisted-alert": { label: "Fix your email address", urlLabel: "Review emails" },
+  "membership-action-required-alert": { label: "Respond to the membership request", urlLabel: "Open request" },
+  "sponsorship-action-required-alert": { label: "Respond to the sponsorship request", urlLabel: "Open request" },
+  "membership-request-recommended-alert": { label: "Request membership", urlLabel: "Request" },
+};
 
 function updateCurrentTime(): void {
   const timezoneName = payload.value?.summary.timezoneName || "";
@@ -35,15 +42,9 @@ function updateCurrentTime(): void {
   }
 
   try {
-    currentTimeLabel.value = new Date().toLocaleString(undefined, {
-      timeZone: timezoneName,
-      weekday: "long",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    });
+    currentTimeLabel.value = formatFixedCurrentTime(new Date(), timezoneName);
   } catch {
-    currentTimeLabel.value = payload.value?.summary.currentTimeLabel || "";
+    currentTimeLabel.value = "";
   }
 }
 
@@ -101,7 +102,6 @@ async function load(): Promise<void> {
       return;
     }
     payload.value = (await response.json()) as UserProfileResponse;
-    currentTimeLabel.value = payload.value.summary.currentTimeLabel;
     startClock();
     loadRecommendedDismissalState();
   } catch {
@@ -112,7 +112,15 @@ async function load(): Promise<void> {
 }
 
 function actionKey(action: UserProfileActionItem): string {
-  return action.id || action.label;
+  return action.id;
+}
+
+function actionLabel(action: UserProfileActionItem): string {
+  return ACTION_COPY[action.id]?.label || action.id;
+}
+
+function actionUrlLabel(action: UserProfileActionItem): string {
+  return ACTION_COPY[action.id]?.urlLabel || "Open";
 }
 
 function actionHref(action: UserProfileActionItem): string {
@@ -163,8 +171,8 @@ onBeforeUnmount(() => {
         <div class="font-weight-bold mb-1">Action required</div>
         <ul class="mb-0 pl-3">
           <li v-for="action in payload.accountSetup.requiredActions" :key="actionKey(action)">
-            {{ action.label }}
-            <a :href="actionHref(action)">{{ action.urlLabel }}</a>
+            {{ actionLabel(action) }}
+            <a :href="actionHref(action)">{{ actionUrlLabel(action) }}</a>
           </li>
         </ul>
       </div>
@@ -182,22 +190,25 @@ onBeforeUnmount(() => {
         <div class="font-weight-bold mb-1">Recommended</div>
         <ul class="mb-0 pl-3">
           <li v-for="action in payload.accountSetup.recommendedActions" :key="actionKey(action)">
-            {{ action.label }}
-            <a :href="actionHref(action)">{{ action.urlLabel }}</a>
+            {{ actionLabel(action) }}
+            <a :href="actionHref(action)">{{ actionUrlLabel(action) }}</a>
           </li>
         </ul>
       </div>
 
       <div class="row">
         <div class="col-md-4">
-          <UserProfileSummary :bootstrap="summary" :settings-profile-url="bootstrap.settingsProfileUrl" />
+          <UserProfileSummary :bootstrap="summary" :current-time-label="currentTimeLabel" :settings-profile-url="bootstrap.settingsProfileUrl" />
         </div>
         <div class="col-md-8">
           <UserProfileMembershipPanel
             :membership="payload.membership"
+            :timezone-name="summary.timezoneName"
             :membership-history-url-template="bootstrap.membershipHistoryUrlTemplate"
             :membership-request-url="bootstrap.membershipRequestUrl"
             :membership-request-detail-url-template="bootstrap.membershipRequestDetailUrlTemplate"
+            :membership-management="bootstrap.membershipManagement"
+            :membership-notes="bootstrap.membershipNotes"
           />
           <UserProfileGroupsPanel
             :bootstrap="payload.groups"

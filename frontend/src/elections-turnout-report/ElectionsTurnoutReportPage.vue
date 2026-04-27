@@ -9,7 +9,7 @@ const props = defineProps<{
 }>();
 
 const rows = ref<ElectionsTurnoutReportRow[]>([]);
-const chartData = ref<ElectionsTurnoutReportResponse["chart_data"] | null>(null);
+const chartData = ref<{ labels: string[]; count_turnout: number[]; weight_turnout: number[] } | null>(null);
 const isLoading = ref(false);
 const error = ref("");
 const chartCanvas = useTemplateRef<HTMLCanvasElement>("chartCanvas");
@@ -22,6 +22,26 @@ function credentialsText(row: ElectionsTurnoutReportRow, value: number): string 
 
 function electionDetailUrl(electionId: number): string {
   return fillUrlTemplate(props.bootstrap.electionDetailUrlTemplate, "123456789", electionId);
+}
+
+function startDateText(row: ElectionsTurnoutReportRow): string {
+  return row.election.start_datetime.slice(0, 10);
+}
+
+function chartLabel(row: ElectionsTurnoutReportRow): string {
+  return `${startDateText(row)}: ${row.election.name}`;
+}
+
+function chartPayloadFromRows(nextRows: ElectionsTurnoutReportRow[]): {
+  labels: string[];
+  count_turnout: number[];
+  weight_turnout: number[];
+} {
+  return {
+    labels: nextRows.map(chartLabel),
+    count_turnout: nextRows.map((row) => row.turnout_count_pct),
+    weight_turnout: nextRows.map((row) => row.turnout_weight_pct),
+  };
 }
 
 function destroyChart(): void {
@@ -107,7 +127,7 @@ async function load(): Promise<void> {
 
     const payload = (await response.json()) as ElectionsTurnoutReportResponse;
     rows.value = payload.rows;
-    chartData.value = payload.chart_data;
+    chartData.value = chartPayloadFromRows(payload.rows);
     await nextTick();
     renderChart();
   } catch {
@@ -158,7 +178,7 @@ onBeforeUnmount(() => {
                   <tbody>
                     <tr v-for="row in rows" :key="row.election.id">
                       <td><a :href="electionDetailUrl(row.election.id)">{{ row.election.name }}</a></td>
-                      <td>{{ row.election.start_date }}</td>
+                      <td>{{ startDateText(row) }}</td>
                       <td>{{ row.election.status }}</td>
                       <td class="text-right">{{ row.eligible_count }}</td>
                       <td class="text-right">{{ row.eligible_weight }}</td>

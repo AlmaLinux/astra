@@ -29,11 +29,11 @@
 {% block content %}
   <div
     data-account-invitations-root
-    data-account-invitations-pending-api-url="{% url 'api-account-invitations-pending' %}"
-    data-account-invitations-accepted-api-url="{% url 'api-account-invitations-accepted' %}"
+    data-account-invitations-pending-api-url="{% url 'api-account-invitations-pending-detail' %}"
+    data-account-invitations-accepted-api-url="{% url 'api-account-invitations-accepted-detail' %}"
     data-account-invitations-refresh-api-url="{% url 'api-account-invitations-refresh' %}"
-    data-account-invitations-resend-api-url="/api/v1/membership/invitations/123456789/resend"
-    data-account-invitations-dismiss-api-url="/api/v1/membership/invitations/123456789/dismiss"
+    data-account-invitations-resend-api-url="{% url 'api-account-invitations-resend' invitation_id_sentinel %}"
+    data-account-invitations-dismiss-api-url="{% url 'api-account-invitations-dismiss' invitation_id_sentinel %}"
     data-account-invitations-bulk-api-url="{% url 'api-account-invitations-bulk' %}"
     data-account-invitations-list-page-url="{% url 'account-invitations' %}"
     data-account-invitations-upload-page-url="{% url 'account-invitations-upload' %}"

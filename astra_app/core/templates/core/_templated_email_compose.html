@@ -4,6 +4,7 @@
   class="templated-email-compose"
   data-templated-email-compose
   {% if compose_preview_url %}data-compose-preview-url="{{ compose_preview_url }}"{% endif %}
+  {% if compose_skip_initial_preview_refresh %}data-compose-skip-initial-preview-refresh="1"{% endif %}
 >
   <div class="card card-outline card-success">
     <div class="card-header">

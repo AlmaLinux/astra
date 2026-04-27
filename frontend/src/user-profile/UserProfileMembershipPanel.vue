@@ -1,16 +1,37 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 
 import MembershipCard from "../shared/components/MembershipCard.vue";
+import { formatDateInputValue, formatMonthYear, formatPreciseDateTime, formatShortDate, membershipTierClass, pendingMembershipBadge } from "../shared/membershipPresentation";
 import { fillUrlTemplate } from "../shared/urlTemplates";
-import type { UserProfileMembershipBadge, UserProfileMembershipEntry, UserProfileMembershipSection } from "./types";
+import type {
+  UserProfileMembershipEntry,
+  UserProfileMembershipManagementAction,
+  UserProfileMembershipNotes,
+  UserProfileMembershipSection,
+} from "./types";
 
 const props = defineProps<{
   membership: UserProfileMembershipSection;
+  timezoneName: string;
   membershipHistoryUrlTemplate: string;
   membershipRequestUrl: string;
   membershipRequestDetailUrlTemplate: string;
+  membershipManagement: UserProfileMembershipManagementAction;
+  membershipNotes: UserProfileMembershipNotes;
 }>();
+
+const notes = computed(() => {
+  if (!props.membershipNotes.canView) {
+    return null;
+  }
+
+  return {
+    ...props.membershipNotes,
+    targetType: "user",
+    target: props.membership.username,
+  };
+});
 
 function requestDetailUrl(requestId: number | null): string {
   if (requestId === null) {
@@ -34,6 +55,61 @@ function badgeTag(requestId: number | null): "a" | "span" {
   return requestId === null ? "span" : "a";
 }
 
+function membershipBadgeClass(entry: UserProfileMembershipEntry): string {
+  return `badge alx-status-badge ${membershipTierClass(entry.membershipType.code)} alx-status-badge--active`;
+}
+
+function memberSinceLabel(entry: UserProfileMembershipEntry): string {
+  return formatMonthYear(entry.createdAt);
+}
+
+function expiresLabel(entry: UserProfileMembershipEntry): string {
+  if (entry.isExpiringSoon) {
+    return formatPreciseDateTime(entry.expiresAt, props.timezoneName);
+  }
+  return formatShortDate(entry.expiresAt);
+}
+
+function expiresToneClass(entry: UserProfileMembershipEntry): string {
+  return entry.isExpiringSoon ? "text-danger" : "text-muted";
+}
+
+function pendingBadge(status: string): { label: string; className: string } {
+  return pendingMembershipBadge(status, props.membership.isOwner);
+}
+
+function managementModalId(index: number): string {
+  return `expiry-modal-${index}`;
+}
+
+function managementInputId(index: number): string {
+  return `expires-on-${index}`;
+}
+
+function managementCollapseId(index: number): string {
+  return `${managementModalId(index)}-terminate-collapse`;
+}
+
+function managementTerminationInputId(index: number): string {
+  return `${managementModalId(index)}-terminate-confirm-input`;
+}
+
+function managementTerminationSubmitId(index: number): string {
+  return `${managementModalId(index)}-terminate-submit`;
+}
+
+function managementActionUrl(template: string, membershipTypeCode: string): string {
+  return fillUrlTemplate(
+    fillUrlTemplate(template, "__username__", props.membership.username),
+    "__membership_type_code__",
+    membershipTypeCode,
+  );
+}
+
+function managementMinValue(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 const terminationConfirmByKey = ref<Record<string, string>>({});
 
 function normalized(value: string): string {
@@ -41,10 +117,10 @@ function normalized(value: string): string {
 }
 
 function terminationMatches(entry: UserProfileMembershipEntry): boolean {
-  if (!entry.management) {
+  if (!entry.canManage) {
     return false;
   }
-  return normalized(terminationConfirmByKey.value[entry.key] || "") === normalized(entry.management.terminator);
+  return normalized(terminationConfirmByKey.value[entry.key] || "") === normalized(props.membership.username);
 }
 
 function resetTermination(entry: UserProfileMembershipEntry): void {
@@ -56,7 +132,7 @@ function resetTermination(entry: UserProfileMembershipEntry): void {
   <MembershipCard
     v-if="membership.showCard"
     data-user-profile-membership-root
-    :notes="membership.notes"
+    :notes="notes"
     :request-detail-template="membershipRequestDetailUrlTemplate"
   >
     <template #actions>
@@ -64,44 +140,44 @@ function resetTermination(entry: UserProfileMembershipEntry): void {
         <a v-if="membership.isOwner && membership.canRequestAny" :href="props.membershipRequestUrl" class="btn btn-sm btn-outline-primary" title="Request membership">Request membership</a>
     </template>
 
-    <li v-for="entry in membership.entries" :key="entry.key" class="list-group-item d-flex justify-content-between align-items-center">
+    <li v-for="(entry, index) in membership.entries" :key="entry.key" class="list-group-item d-flex justify-content-between align-items-center">
       <div>
         <div class="font-weight-bold">{{ entry.membershipType.name }}</div>
         <div v-if="entry.membershipType.description" class="text-muted small">{{ entry.membershipType.description }}</div>
-        <div v-if="entry.memberSinceLabel" class="text-muted small">Member since {{ entry.memberSinceLabel }}</div>
-        <div v-if="entry.expiresLabel" class="small" :class="entry.expiresTone === 'danger' ? 'text-danger' : 'text-muted'">
-          <i v-if="entry.expiresTone === 'danger'" class="fas fa-exclamation-triangle mr-1" />
-          Expires {{ entry.expiresLabel }}
+        <div v-if="memberSinceLabel(entry)" class="text-muted small">Member since {{ memberSinceLabel(entry) }}</div>
+        <div v-if="expiresLabel(entry)" class="small" :class="expiresToneClass(entry)">
+          <i v-if="entry.isExpiringSoon" class="fas fa-exclamation-triangle mr-1" />
+          Expires {{ expiresLabel(entry) }}
         </div>
       </div>
       <div class="d-flex align-items-center justify-content-end flex-wrap" style="gap: .5rem;">
-        <component :is="badgeTag(entry.requestId)" :href="requestDetailUrl(entry.requestId) || undefined" :class="entry.badge.className">{{ entry.badge.label }}</component>
+        <component :is="badgeTag(entry.requestId)" :href="requestDetailUrl(entry.requestId) || undefined" :class="membershipBadgeClass(entry)">{{ entry.membershipType.name }}</component>
         <a v-if="entry.canRenew" :href="membershipRequestActionUrl(entry.membershipType.code)" class="btn btn-sm btn-primary" title="Request renewal for this membership">Request renewal</a>
         <a v-if="entry.canRequestTierChange" :href="membershipRequestActionUrl(entry.membershipType.code)" class="btn btn-sm btn-outline-primary" title="Request a change of tier">Change tier</a>
         <button
-          v-if="entry.management"
+          v-if="entry.canManage"
           type="button"
           class="btn btn-sm btn-outline-secondary"
           data-toggle="modal"
-          :data-target="`#${entry.management.modalId}`"
+          :data-target="`#${managementModalId(index + 1)}`"
           title="Edit membership expiration date"
         >Edit expiration</button>
       </div>
 
       <div
-        v-if="entry.management"
+        v-if="entry.canManage"
         class="modal fade"
-        :id="entry.management.modalId"
+        :id="managementModalId(index + 1)"
         tabindex="-1"
         role="dialog"
-        :aria-labelledby="`${entry.management.modalId}-label`"
+        :aria-labelledby="`${managementModalId(index + 1)}-label`"
         aria-hidden="true"
       >
         <div class="modal-dialog" role="document">
           <div class="modal-content">
             <div class="modal-header">
               <div class="mr-3">
-                <h5 class="modal-title mb-0" :id="`${entry.management.modalId}-label`">Manage membership: {{ entry.membershipType.name }} for {{ entry.management.terminator }}</h5>
+                <h5 class="modal-title mb-0" :id="`${managementModalId(index + 1)}-label`">Manage membership: {{ entry.membershipType.name }} for {{ membership.username }}</h5>
               </div>
               <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog">
                 <span aria-hidden="true">&times;</span>
@@ -109,21 +185,21 @@ function resetTermination(entry: UserProfileMembershipEntry): void {
             </div>
 
             <div class="modal-body">
-              <div v-if="entry.management.currentText" class="mb-3">{{ entry.management.currentText }}</div>
+              <div v-if="expiresLabel(entry)" class="mb-3">Current expiration: {{ expiresLabel(entry) }}</div>
 
-              <form method="post" :action="entry.management.expiryActionUrl" novalidate>
-                <input type="hidden" name="csrfmiddlewaretoken" :value="entry.management.csrfToken">
-                <input v-if="entry.management.nextUrl" type="hidden" name="next" :value="entry.management.nextUrl">
+              <form method="post" :action="managementActionUrl(membershipManagement.expiryUrlTemplate, entry.membershipType.code)" novalidate>
+                <input type="hidden" name="csrfmiddlewaretoken" :value="membershipManagement.csrfToken">
+                <input v-if="membershipManagement.nextUrl" type="hidden" name="next" :value="membershipManagement.nextUrl">
 
                 <div class="form-group">
-                  <label :for="entry.management.inputId">Expiration date</label>
+                  <label :for="managementInputId(index + 1)">Expiration date</label>
                   <input
-                    :id="entry.management.inputId"
+                    :id="managementInputId(index + 1)"
                     name="expires_on"
                     type="date"
                     class="form-control"
-                    :value="entry.management.initialValue"
-                    :min="entry.management.minValue"
+                    :value="formatDateInputValue(entry.expiresAt)"
+                    :min="managementMinValue()"
                     required
                   >
                 </div>
@@ -146,24 +222,24 @@ function resetTermination(entry: UserProfileMembershipEntry): void {
                       type="button"
                       class="btn btn-outline-danger"
                       data-toggle="collapse"
-                      :data-target="`#${entry.management.modalId}-terminate-collapse`"
+                      :data-target="`#${managementCollapseId(index + 1)}`"
                       aria-expanded="false"
-                      :aria-controls="`${entry.management.modalId}-terminate-collapse`"
+                      :aria-controls="managementCollapseId(index + 1)"
                       title="Show termination confirmation"
                     >Terminate membership&hellip;</button>
                   </div>
 
-                  <div class="collapse mt-3" :id="`${entry.management.modalId}-terminate-collapse`">
+                  <div class="collapse mt-3" :id="managementCollapseId(index + 1)">
                     <div class="alert alert-danger mb-3" role="alert">This will end the membership early and cannot be undone.</div>
 
-                    <form method="post" :action="entry.management.terminateActionUrl" class="m-0" novalidate>
-                      <input type="hidden" name="csrfmiddlewaretoken" :value="entry.management.csrfToken">
-                      <input v-if="entry.management.nextUrl" type="hidden" name="next" :value="entry.management.nextUrl">
+                    <form method="post" :action="managementActionUrl(membershipManagement.terminateUrlTemplate, entry.membershipType.code)" class="m-0" novalidate>
+                      <input type="hidden" name="csrfmiddlewaretoken" :value="membershipManagement.csrfToken">
+                      <input v-if="membershipManagement.nextUrl" type="hidden" name="next" :value="membershipManagement.nextUrl">
 
                       <div class="form-group">
-                        <label :for="`${entry.management.modalId}-terminate-confirm-input`">Type the name to confirm</label>
+                        <label :for="managementTerminationInputId(index + 1)">Type the name to confirm</label>
                         <input
-                          :id="`${entry.management.modalId}-terminate-confirm-input`"
+                          :id="managementTerminationInputId(index + 1)"
                           v-model="terminationConfirmByKey[entry.key]"
                           name="confirm"
                           type="text"
@@ -172,9 +248,9 @@ function resetTermination(entry: UserProfileMembershipEntry): void {
                             'is-valid': Boolean(terminationConfirmByKey[entry.key]) && terminationMatches(entry),
                             'is-invalid': Boolean(terminationConfirmByKey[entry.key]) && !terminationMatches(entry),
                           }"
-                          :placeholder="entry.management.terminator"
+                          :placeholder="membership.username"
                           autocomplete="off"
-                          :data-terminate-target="entry.management.terminator"
+                          :data-terminate-target="membership.username"
                           required
                         >
                         <div class="invalid-feedback">Does not match. Type the name to enable termination (case-insensitive).</div>
@@ -185,7 +261,7 @@ function resetTermination(entry: UserProfileMembershipEntry): void {
                         <button
                           type="submit"
                           class="btn btn-danger ml-2"
-                          :id="`${entry.management.modalId}-terminate-submit`"
+                          :id="managementTerminationSubmitId(index + 1)"
                           :disabled="!terminationMatches(entry)"
                           :aria-disabled="terminationMatches(entry) ? 'false' : 'true'"
                           title="Terminate membership (enabled after confirmation)"
@@ -215,7 +291,7 @@ function resetTermination(entry: UserProfileMembershipEntry): void {
         <div v-if="entry.organizationName" class="small text-muted">Organization: {{ entry.organizationName }}</div>
         <div v-if="entry.membershipType.description" class="small text-muted">{{ entry.membershipType.description }}</div>
       </div>
-      <component :is="badgeTag(entry.requestId)" :href="requestDetailUrl(entry.requestId) || undefined" :class="entry.badge.className">{{ entry.badge.label }}</component>
+      <component :is="badgeTag(entry.requestId)" :href="requestDetailUrl(entry.requestId) || undefined" :class="pendingBadge(entry.status).className">{{ pendingBadge(entry.status).label }}</component>
     </li>
   </MembershipCard>
 </template>

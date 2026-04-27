@@ -18,6 +18,7 @@ accounts.almalinux.org {
     reverse_proxy 127.0.0.1:8001 127.0.0.1:8002 {
         lb_policy least_conn
         lb_retries 2
+        header_up X-Forwarded-For {http.request.remote.host}
         header_up sentry-trace {http.request.header.sentry-trace}
         header_up baggage {http.request.header.baggage}
         health_uri /readyz

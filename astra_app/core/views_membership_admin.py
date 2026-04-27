@@ -27,7 +27,7 @@ from core.permissions import (
     has_any_membership_permission,
     json_permission_required_any,
 )
-from core.templatetags.core_membership_responses import membership_response_value
+from core.templatetags.core_membership_responses import membership_response_value, serialize_membership_response
 from core.views_utils import _normalize_str, parse_datatables_request_base
 
 logger = logging.getLogger(__name__)
@@ -227,6 +227,10 @@ def _membership_audit_log_queryset(
 
 
 def _serialize_membership_audit_log_row(log: MembershipLog) -> dict[str, object]:
+    return _serialize_membership_audit_log_row_contract(log, data_only=False)
+
+
+def _serialize_membership_audit_log_row_contract(log: MembershipLog, *, data_only: bool) -> dict[str, object]:
     if log.target_username:
         target = {
             "kind": "user",
@@ -254,32 +258,41 @@ def _serialize_membership_audit_log_row(log: MembershipLog) -> dict[str, object]
 
     request_payload: dict[str, object] | None = None
     if log.membership_request_id is not None and log.membership_request is not None:
-        responses: list[dict[str, str]] = []
+        responses: list[dict[str, object]] = []
         for response_row in list(log.membership_request.responses or []):
             for question, value in response_row.items():
-                responses.append(
-                    {
-                        "question": str(question),
-                        "answer_html": str(membership_response_value(value, str(question))),
-                    }
-                )
+                if data_only:
+                    responses.append(serialize_membership_response(value, question))
+                else:
+                    responses.append(
+                        {
+                            "question": str(question),
+                            "answer_html": str(membership_response_value(value, str(question))),
+                        }
+                    )
         request_payload = {
             "request_id": log.membership_request_id,
             "responses": responses,
         }
 
-    return {
+    row: dict[str, object] = {
         "log_id": log.pk,
-        "created_at_display": format_date(log.created_at, "r"),
-        "created_at_iso": log.created_at.isoformat(),
         "actor_username": log.actor_username,
         "target": target,
         "membership_name": log.membership_type.name,
         "action": log.action,
-        "action_display": log.get_action_display(),
-        "expires_display": format_date(log.expires_at, "M j, Y") if log.expires_at is not None else "",
         "request": request_payload,
     }
+    if data_only:
+        row["created_at"] = log.created_at.isoformat()
+        row["expires_at"] = log.expires_at.isoformat() if log.expires_at is not None else None
+        return row
+
+    row["created_at_display"] = format_date(log.created_at, "r")
+    row["created_at_iso"] = log.created_at.isoformat()
+    row["action_display"] = log.get_action_display()
+    row["expires_display"] = format_date(log.expires_at, "M j, Y") if log.expires_at is not None else ""
+    return row
 
 
 @permission_required(ASTRA_VIEW_MEMBERSHIP, login_url=reverse_lazy("users"))
@@ -340,6 +353,32 @@ def membership_audit_log_api(request: HttpRequest) -> JsonResponse:
     return JsonResponse(payload)
 
 
+@json_permission_required_any({ASTRA_VIEW_MEMBERSHIP})
+def membership_audit_log_detail_api(request: HttpRequest) -> JsonResponse:
+    try:
+        draw, start, length, q, username, organization_id = _parse_membership_audit_log_datatables_request(
+            request
+        )
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+
+    logs = _membership_audit_log_queryset(
+        q=q,
+        username=username,
+        organization_id=organization_id,
+    )
+    records_total = logs.count()
+    sliced_logs = list(logs[start : start + length])
+
+    payload = {
+        "draw": draw,
+        "recordsTotal": records_total,
+        "recordsFiltered": records_total,
+        "data": [_serialize_membership_audit_log_row_contract(log, data_only=True) for log in sliced_logs],
+    }
+    return JsonResponse(payload)
+
+
 @permission_required(ASTRA_VIEW_MEMBERSHIP, login_url=reverse_lazy("users"))
 def membership_audit_log_organization(request: HttpRequest, organization_id: int) -> HttpResponse:
     query = urlencode({"organization": str(organization_id)})
@@ -377,10 +416,10 @@ def membership_stats(request: HttpRequest) -> HttpResponse:
         {
             "current_days": days,
             "days_presets": days_presets,
-            "api_summary_url": reverse("api-stats-membership-summary"),
-            "api_composition_charts_url": reverse("api-stats-membership-composition-charts"),
-            "api_trends_charts_url": reverse("api-stats-membership-trends-charts"),
-            "api_retention_chart_url": reverse("api-stats-membership-retention-chart"),
+            "api_summary_url": reverse("api-stats-membership-summary-detail"),
+            "api_composition_charts_url": reverse("api-stats-membership-composition-charts-detail"),
+            "api_trends_charts_url": reverse("api-stats-membership-trends-charts-detail"),
+            "api_retention_chart_url": reverse("api-stats-membership-retention-chart-detail"),
         },
     )
 
@@ -501,72 +540,236 @@ def stats_membership_summary_api(request: HttpRequest) -> HttpResponse:
     return JsonResponse(payload)
 
 
+def _build_membership_stats_composition_payloads(*, now: datetime.datetime) -> tuple[dict[str, object], dict[str, object]]:
+    def membership_type_rows(active_memberships: object) -> list[dict[str, object]]:
+        rows = (
+            active_memberships.values("membership_type_id", "membership_type__name")
+            .annotate(count=Count("id"))
+            .order_by("membership_type__name")
+        )
+        return [
+            {
+                "membership_type": {
+                    "code": str(row["membership_type_id"]),
+                    "name": str(row["membership_type__name"]),
+                },
+                "count": int(row["count"]),
+            }
+            for row in rows
+        ]
+
+    def nationality_rows(users: list[FreeIPAUser]) -> list[dict[str, object]]:
+        counts: dict[str, int] = {}
+        for user in users:
+            status = country_code_status_from_user_data(user._user_data)
+            code = status.code if status.is_valid and status.code else "Unknown/Unset"
+            counts[code] = counts.get(code, 0) + 1
+        ordered = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+        return [{"country_code": code, "count": count} for code, count in ordered]
+
+    all_freeipa_users = FreeIPAUser.all(respect_privacy=False)
+    users_by_username = {u.username: u for u in all_freeipa_users if u.username}
+    active_freeipa_users = [u for u in all_freeipa_users if u.is_active]
+
+    active_memberships = Membership.objects.active()
+    membership_types = membership_type_rows(active_memberships)
+
+    active_individual_usernames = list(
+        active_memberships.filter(membership_type__category__is_individual=True)
+        .exclude(target_username="")
+        .order_by()
+        .values_list("target_username", flat=True)
+        .distinct()
+    )
+    active_member_users: list[FreeIPAUser] = []
+    for username in sorted(set(active_individual_usernames)):
+        user = users_by_username.get(username)
+        if user is None:
+            user = FreeIPAUser.get(username)
+        if user is not None and user.is_active:
+            active_member_users.append(user)
+
+    nationality_all_users = nationality_rows(active_freeipa_users)
+    nationality_active_members = nationality_rows(active_member_users)
+    generated_at = timezone.localtime(now).isoformat()
+
+    return (
+        {
+            "generated_at": generated_at,
+            "charts": {
+                "membership_types": {
+                    "labels": [row["membership_type"]["name"] for row in membership_types],
+                    "counts": [row["count"] for row in membership_types],
+                },
+                "nationality_all_users": {
+                    "labels": [row["country_code"] for row in nationality_all_users],
+                    "counts": [row["count"] for row in nationality_all_users],
+                },
+                "nationality_active_members": {
+                    "labels": [row["country_code"] for row in nationality_active_members],
+                    "counts": [row["count"] for row in nationality_active_members],
+                },
+            },
+        },
+        {
+            "generated_at": generated_at,
+            "charts": {
+                "membership_types": membership_types,
+                "nationality_all_users": nationality_all_users,
+                "nationality_active_members": nationality_active_members,
+            },
+        },
+    )
+
+
 @json_permission_required_any(MEMBERSHIP_PERMISSIONS)
 def stats_membership_composition_charts_api(request: HttpRequest) -> HttpResponse:
     """Days-independent composition charts: membership types and nationality distributions."""
     now = timezone.now()
 
     def compute() -> dict[str, object]:
-        all_freeipa_users = FreeIPAUser.all(respect_privacy=False)
-        users_by_username = {u.username: u for u in all_freeipa_users if u.username}
-        active_freeipa_users = [u for u in all_freeipa_users if u.is_active]
-
-        active_memberships = Membership.objects.active()
-        membership_type_rows = (
-            active_memberships.values("membership_type_id", "membership_type__name")
-            .annotate(count=Count("id"))
-            .order_by("membership_type__name")
-        )
-        membership_type_labels: list[str] = [r["membership_type__name"] for r in membership_type_rows]
-        membership_type_counts: list[int] = [int(r["count"]) for r in membership_type_rows]
-
-        active_individual_usernames = list(
-            active_memberships.filter(membership_type__category__is_individual=True)
-            .exclude(target_username="")
-            .order_by()
-            .values_list("target_username", flat=True)
-            .distinct()
-        )
-
-        def nationality_distribution(users: list[FreeIPAUser]) -> dict[str, list[object]]:
-            counts: dict[str, int] = {}
-            for user in users:
-                status = country_code_status_from_user_data(user._user_data)
-                if not status.is_valid or not status.code:
-                    code = "Unknown/Unset"
-                else:
-                    code = status.code
-                counts[code] = counts.get(code, 0) + 1
-            ordered = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
-            return {
-                "labels": [k for k, _v in ordered],
-                "counts": [v for _k, v in ordered],
-            }
-
-        active_member_usernames = set(active_individual_usernames)
-        active_member_users: list[FreeIPAUser] = []
-        for username in sorted(active_member_usernames):
-            user = users_by_username.get(username)
-            if user is None:
-                user = FreeIPAUser.get(username)
-            if user is not None and user.is_active:
-                active_member_users.append(user)
-
-        return {
-            "generated_at": timezone.localtime(now).isoformat(),
-            "charts": {
-                "membership_types": {
-                    "labels": membership_type_labels,
-                    "counts": membership_type_counts,
-                },
-                "nationality_all_users": nationality_distribution(active_freeipa_users),
-                "nationality_active_members": nationality_distribution(active_member_users),
-            },
-        }
+        legacy_payload, _detail_payload = _build_membership_stats_composition_payloads(now=now)
+        return legacy_payload
 
     cache_key = "membership_stats:composition:v1"
     payload = cache.get_or_set(cache_key, compute, timeout=300)
     return JsonResponse(payload)
+
+
+@json_permission_required_any(MEMBERSHIP_PERMISSIONS)
+def stats_membership_composition_charts_detail_api(request: HttpRequest) -> HttpResponse:
+    now = timezone.now()
+
+    def compute() -> dict[str, object]:
+        _legacy_payload, detail_payload = _build_membership_stats_composition_payloads(now=now)
+        return detail_payload
+
+    cache_key = "membership_stats:composition:v2:detail"
+    payload = cache.get_or_set(cache_key, compute, timeout=300)
+    return JsonResponse(payload)
+
+
+def _build_membership_stats_trends_payloads(
+    *,
+    now: datetime.datetime,
+    days_param: str,
+    days_window: int | None,
+) -> tuple[dict[str, object], dict[str, object]]:
+    trend_start = now - datetime.timedelta(days=days_window) if days_window is not None else None
+    decision_statuses = [
+        MembershipRequest.Status.approved,
+        MembershipRequest.Status.rejected,
+        MembershipRequest.Status.ignored,
+        MembershipRequest.Status.rescinded,
+    ]
+
+    def period_label(value: datetime.datetime | None) -> str | None:
+        if value is None:
+            return None
+        return timezone.localtime(value).strftime("%Y-%m")
+
+    requests_qs = MembershipRequest.objects.all()
+    if trend_start is not None:
+        requests_qs = requests_qs.filter(requested_at__gte=trend_start)
+    request_rows = (
+        requests_qs.annotate(period=TruncMonth("requested_at")).values("period").annotate(count=Count("id")).order_by("period")
+    )
+    requests_rows = [
+        {"period": label, "count": int(row["count"])}
+        for row in request_rows
+        for label in [period_label(row["period"])]
+        if label is not None
+    ]
+
+    decisions_qs = MembershipRequest.objects.filter(decided_at__isnull=False).filter(status__in=decision_statuses)
+    if trend_start is not None:
+        decisions_qs = decisions_qs.filter(decided_at__gte=trend_start)
+    decision_rows = (
+        decisions_qs.annotate(period=TruncMonth("decided_at"))
+        .values("period", "status")
+        .annotate(count=Count("id"))
+        .order_by("period", "status")
+    )
+    decisions_rows = [
+        {"period": label, "status": str(row["status"]), "count": int(row["count"])}
+        for row in decision_rows
+        for label in [period_label(row["period"])]
+        if label is not None
+    ]
+    decision_periods = sorted({row["period"] for row in decisions_rows})
+    decision_index = {(row["period"], row["status"]): int(row["count"]) for row in decisions_rows}
+
+    exp_rows = (
+        Membership.objects.filter(
+            expires_at__isnull=False,
+            expires_at__gt=now,
+            expires_at__lte=now + datetime.timedelta(days=365),
+        )
+        .annotate(period=TruncMonth("expires_at"))
+        .values("period")
+        .annotate(count=Count("id"))
+        .order_by("period")
+    )
+
+    def next_month(period: datetime.datetime) -> datetime.datetime:
+        year = period.year
+        month = period.month
+        if month == 12:
+            return period.replace(year=year + 1, month=1, day=1)
+        return period.replace(month=month + 1, day=1)
+
+    exp_index = {row["period"]: int(row["count"]) for row in exp_rows if row["period"]}
+    exp_periods = sorted(exp_index)
+    expirations_rows: list[dict[str, object]] = []
+    if exp_periods:
+        current_local = timezone.localtime(now)
+        current = current_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        end = exp_periods[-1]
+        while current <= end:
+            expirations_rows.append(
+                {
+                    "period": timezone.localtime(current).strftime("%Y-%m"),
+                    "count": exp_index.get(current, 0),
+                }
+            )
+            current = next_month(current)
+
+    generated_at = timezone.localtime(now).isoformat()
+    return (
+        {
+            "generated_at": generated_at,
+            "days_param": days_param,
+            "charts": {
+                "requests_trend": {
+                    "labels": [row["period"] for row in requests_rows],
+                    "counts": [row["count"] for row in requests_rows],
+                },
+                "decisions_trend": {
+                    "labels": decision_periods,
+                    "datasets": [
+                        {
+                            "label": str(status),
+                            "data": [decision_index.get((period, status), 0) for period in decision_periods],
+                        }
+                        for status in decision_statuses
+                    ],
+                },
+                "expirations_upcoming": {
+                    "labels": [row["period"] for row in expirations_rows],
+                    "counts": [row["count"] for row in expirations_rows],
+                },
+            },
+        },
+        {
+            "generated_at": generated_at,
+            "days_param": days_param,
+            "charts": {
+                "requests_trend": requests_rows,
+                "decisions_trend": decisions_rows,
+                "expirations_upcoming": expirations_rows,
+            },
+        },
+    )
 
 
 @json_permission_required_any(MEMBERSHIP_PERMISSIONS)
@@ -578,107 +781,78 @@ def stats_membership_trends_charts_api(request: HttpRequest) -> HttpResponse:
         return JsonResponse({"error": str(exc)}, status=400)
 
     now = timezone.now()
-    trend_start = now - datetime.timedelta(days=days_window) if days_window is not None else None
 
     def compute() -> dict[str, object]:
-        requests_qs = MembershipRequest.objects.all()
-        if trend_start is not None:
-            requests_qs = requests_qs.filter(requested_at__gte=trend_start)
-        request_rows = (
-            requests_qs
-            .annotate(period=TruncMonth("requested_at"))
-            .values("period")
-            .annotate(count=Count("id"))
-            .order_by("period")
+        legacy_payload, _detail_payload = _build_membership_stats_trends_payloads(
+            now=now,
+            days_param=days_param,
+            days_window=days_window,
         )
-        requests_labels = [timezone.localtime(r["period"]).strftime("%Y-%m") for r in request_rows if r["period"]]
-        requests_counts = [int(r["count"]) for r in request_rows]
-
-        decision_statuses = [
-            MembershipRequest.Status.approved,
-            MembershipRequest.Status.rejected,
-            MembershipRequest.Status.ignored,
-            MembershipRequest.Status.rescinded,
-        ]
-        decisions_qs = MembershipRequest.objects.filter(decided_at__isnull=False).filter(status__in=decision_statuses)
-        if trend_start is not None:
-            decisions_qs = decisions_qs.filter(decided_at__gte=trend_start)
-        decision_rows = (
-            decisions_qs
-            .annotate(period=TruncMonth("decided_at"))
-            .values("period", "status")
-            .annotate(count=Count("id"))
-            .order_by("period", "status")
-        )
-        decision_periods = sorted({r["period"] for r in decision_rows if r["period"]})
-        decision_labels = [timezone.localtime(p).strftime("%Y-%m") for p in decision_periods]
-        decision_index = {(r["period"], r["status"]): int(r["count"]) for r in decision_rows}
-        decision_datasets: list[dict[str, object]] = []
-        for status in decision_statuses:
-            decision_datasets.append(
-                {
-                    "label": str(status),
-                    "data": [decision_index.get((p, status), 0) for p in decision_periods],
-                }
-            )
-
-        exp_rows = (
-            Membership.objects.filter(
-                expires_at__isnull=False,
-                expires_at__gt=now,
-                expires_at__lte=now + datetime.timedelta(days=365),
-            )
-            .annotate(period=TruncMonth("expires_at"))
-            .values("period")
-            .annotate(count=Count("id"))
-            .order_by("period")
-        )
-
-        def _next_month(period: datetime.datetime) -> datetime.datetime:
-            year = period.year
-            month = period.month
-            if month == 12:
-                year += 1
-                month = 1
-            else:
-                month += 1
-            return period.replace(year=year, month=month, day=1)
-
-        exp_index = {r["period"]: int(r["count"]) for r in exp_rows if r["period"]}
-        exp_periods = sorted(exp_index)
-        exp_labels: list[str] = []
-        exp_counts: list[int] = []
-        if exp_periods:
-            current_local = timezone.localtime(now)
-            current = current_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            end = exp_periods[-1]
-            while current <= end:
-                exp_labels.append(timezone.localtime(current).strftime("%Y-%m"))
-                exp_counts.append(exp_index.get(current, 0))
-                current = _next_month(current)
-
-        return {
-            "generated_at": timezone.localtime(now).isoformat(),
-            "days_param": days_param,
-            "charts": {
-                "requests_trend": {
-                    "labels": requests_labels,
-                    "counts": requests_counts,
-                },
-                "decisions_trend": {
-                    "labels": decision_labels,
-                    "datasets": decision_datasets,
-                },
-                "expirations_upcoming": {
-                    "labels": exp_labels,
-                    "counts": exp_counts,
-                },
-            },
-        }
+        return legacy_payload
 
     cache_key = f"membership_stats:trends:v1:days={days_param}"
     payload = cache.get_or_set(cache_key, compute, timeout=300)
     return JsonResponse(payload)
+
+
+@json_permission_required_any(MEMBERSHIP_PERMISSIONS)
+def stats_membership_trends_charts_detail_api(request: HttpRequest) -> HttpResponse:
+    try:
+        days_param, days_window = _parse_membership_stats_days_param(request)
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+
+    now = timezone.now()
+
+    def compute() -> dict[str, object]:
+        _legacy_payload, detail_payload = _build_membership_stats_trends_payloads(
+            now=now,
+            days_param=days_param,
+            days_window=days_window,
+        )
+        return detail_payload
+
+    cache_key = f"membership_stats:trends:v2:detail:days={days_param}"
+    payload = cache.get_or_set(cache_key, compute, timeout=300)
+    return JsonResponse(payload)
+
+
+def _build_membership_stats_retention_payloads(*, now: datetime.datetime) -> tuple[dict[str, object], dict[str, object]]:
+    configured_cohort_limit = int(settings.MEMBERSHIP_STATS_RETENTION_COHORTS_LIMIT)
+    _retention_summary, retention_chart = _compute_retention_cohort_12m(
+        now=now,
+        cohort_limit=max(0, min(configured_cohort_limit, 12)),
+    )
+    labels = list(retention_chart["labels"])
+    cohort_sizes = list(retention_chart["cohort_sizes"])
+    retained = list(retention_chart["retained"])
+    lapsed_then_renewed = list(retention_chart["lapsed_then_renewed"])
+    lapsed_not_renewed = list(retention_chart["lapsed_not_renewed"])
+    rows = [
+        {
+            "cohort_month": str(labels[index]),
+            "cohort_size": int(cohort_sizes[index]),
+            "retained": int(retained[index]),
+            "lapsed_then_renewed": int(lapsed_then_renewed[index]),
+            "lapsed_not_renewed": int(lapsed_not_renewed[index]),
+        }
+        for index in range(len(labels))
+    ]
+    generated_at = timezone.localtime(now).isoformat()
+    return (
+        {
+            "generated_at": generated_at,
+            "charts": {
+                "retention_cohorts_12m": retention_chart,
+            },
+        },
+        {
+            "generated_at": generated_at,
+            "charts": {
+                "retention_cohorts_12m": rows,
+            },
+        },
+    )
 
 
 @json_permission_required_any(MEMBERSHIP_PERMISSIONS)
@@ -687,19 +861,23 @@ def stats_membership_retention_chart_api(request: HttpRequest) -> HttpResponse:
     now = timezone.now()
 
     def compute() -> dict[str, object]:
-        configured_cohort_limit = int(settings.MEMBERSHIP_STATS_RETENTION_COHORTS_LIMIT)
-        _retention_summary, retention_chart = _compute_retention_cohort_12m(
-            now=now,
-            cohort_limit=max(0, min(configured_cohort_limit, 12)),
-        )
-        return {
-            "generated_at": timezone.localtime(now).isoformat(),
-            "charts": {
-                "retention_cohorts_12m": retention_chart,
-            },
-        }
+        legacy_payload, _detail_payload = _build_membership_stats_retention_payloads(now=now)
+        return legacy_payload
 
     cache_key = "membership_stats:retention:v1"
+    payload = cache.get_or_set(cache_key, compute, timeout=300)
+    return JsonResponse(payload)
+
+
+@json_permission_required_any(MEMBERSHIP_PERMISSIONS)
+def stats_membership_retention_chart_detail_api(request: HttpRequest) -> HttpResponse:
+    now = timezone.now()
+
+    def compute() -> dict[str, object]:
+        _legacy_payload, detail_payload = _build_membership_stats_retention_payloads(now=now)
+        return detail_payload
+
+    cache_key = "membership_stats:retention:v2:detail"
     payload = cache.get_or_set(cache_key, compute, timeout=300)
     return JsonResponse(payload)
 

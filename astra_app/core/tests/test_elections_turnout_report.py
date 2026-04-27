@@ -67,7 +67,7 @@ class ElectionsTurnoutReportTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         build_report.assert_not_called()
         self.assertContains(resp, 'data-elections-turnout-report-root')
-        self.assertContains(resp, reverse("api-elections-turnout-report"))
+        self.assertContains(resp, reverse("api-elections-turnout-report-detail"))
         self.assertContains(resp, 'data-elections-turnout-report-election-detail-url-template')
 
     def test_turnout_report_excludes_draft_elections(self) -> None:

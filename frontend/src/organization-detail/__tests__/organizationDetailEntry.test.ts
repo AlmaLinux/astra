@@ -44,7 +44,7 @@ describe("mountOrganizationDetailPage", () => {
     );
 
     const root = buildRoot({
-      "data-organization-detail-api-url": "/api/v1/organizations/1",
+      "data-organization-detail-api-url": "/api/v1/organizations/1/detail",
       "data-organization-detail-membership-request-detail-template": "/membership/request/__request_id__/",
       "data-organization-detail-membership-request-url": "/organization/1/membership/request/",
       "data-organization-detail-sponsorship-set-expiry-url-template": "/organization/1/sponsorship/__membership_type_code__/expiry/",

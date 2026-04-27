@@ -3,14 +3,17 @@ import hmac
 import logging
 import secrets
 from typing import cast, override
+from urllib.parse import quote
 
 import requests
+from django import forms
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import views as auth_views
 from django.core import signing
 from django.forms.forms import NON_FIELD_ERRORS
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.middleware.csrf import get_token
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -23,6 +26,7 @@ from core.account_invitation_reconcile import (
 from core.freeipa.client import _build_freeipa_client
 from core.freeipa.user import FreeIPAUser
 from core.logging_extras import exception_log_fields
+from core.middleware import _request_client_ip
 from core.rate_limit import allow_request
 from core.tokens import make_password_reset_token, read_password_reset_token
 from core.views_utils import _normalize_str, get_username
@@ -43,10 +47,377 @@ from .password_reset import (
 
 logger = logging.getLogger(__name__)
 PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY = "pending_account_invitation_token"
+_AUTH_RECOVERY_ALLOWED_FIELD_ATTRS = {
+    "autocomplete",
+    "autocapitalize",
+    "autocorrect",
+    "inputmode",
+    "maxlength",
+    "minlength",
+    "pattern",
+    "placeholder",
+    "spellcheck",
+}
+
+
+def _auth_recovery_json(value: object) -> str:
+    return signing.json.dumps(value, separators=(",", ":")).replace("</", "<\\/")
+
+
+def _auth_recovery_json_response(payload: dict[str, object], *, status: int = 200) -> JsonResponse:
+    response = JsonResponse(payload, status=status)
+    response["Cache-Control"] = "private, no-cache"
+    return response
+
+
+def _auth_recovery_field_widget_type(widget: forms.Widget) -> str:
+    if isinstance(widget, forms.HiddenInput):
+        return "hidden"
+    if isinstance(widget, forms.EmailInput):
+        return "email"
+    if isinstance(widget, forms.PasswordInput):
+        return "password"
+    return "text"
+
+
+def _serialize_auth_recovery_form_field(*, bound_field: forms.BoundField) -> dict[str, object]:
+    widget = bound_field.field.widget
+    widget_attrs = bound_field.build_widget_attrs(widget.attrs)
+    widget_context = widget.get_context(bound_field.html_name, bound_field.value(), widget_attrs)["widget"]
+    attrs = {
+        name: str(value)
+        for name, value in widget_context["attrs"].items()
+        if value is not None and name in _AUTH_RECOVERY_ALLOWED_FIELD_ATTRS
+    }
+    payload: dict[str, object] = {
+        "name": bound_field.name,
+        "id": bound_field.id_for_label,
+        "widget": _auth_recovery_field_widget_type(widget),
+        "value": "" if widget_context.get("value") is None else str(widget_context.get("value")),
+        "required": bool(bound_field.field.required),
+        "disabled": bool(bound_field.field.disabled),
+        "errors": [str(error) for error in bound_field.errors],
+        "attrs": attrs,
+    }
+    return payload
+
+
+def _serialize_auth_recovery_form(
+    *,
+    form: PasswordResetRequestForm | PasswordResetSetForm | ExpiredPasswordChangeForm | SyncTokenForm,
+    exclude_hidden_fields: bool = False,
+) -> dict[str, object]:
+    fields = [_serialize_auth_recovery_form_field(bound_field=field) for field in form]
+    if exclude_hidden_fields:
+        fields = [field for field in fields if field["widget"] != "hidden"]
+    return {
+        "is_bound": form.is_bound,
+        "non_field_errors": [str(error) for error in form.non_field_errors()],
+        "fields": fields,
+    }
+
+
+def _build_password_reset_request_payload(*, form: PasswordResetRequestForm) -> dict[str, object]:
+    return {"form": _serialize_auth_recovery_form(form=form)}
+
+
+def _build_password_reset_confirm_payload(
+    *,
+    username: str,
+    has_otp: bool,
+    form: PasswordResetSetForm,
+) -> dict[str, object]:
+    return {
+        "username": username,
+        "has_otp": has_otp,
+        "form": _serialize_auth_recovery_form(form=form, exclude_hidden_fields=True),
+    }
+
+
+def _build_password_expired_payload(*, form: ExpiredPasswordChangeForm) -> dict[str, object]:
+    return {"form": _serialize_auth_recovery_form(form=form)}
+
+
+def _build_otp_sync_payload(*, form: SyncTokenForm) -> dict[str, object]:
+    return {"form": _serialize_auth_recovery_form(form=form)}
+
+
+def _render_password_reset_request_page(
+    request: HttpRequest,
+    *,
+    form: PasswordResetRequestForm,
+    status: int = 200,
+) -> HttpResponse:
+    return render(
+        request,
+        "core/password_reset_request.html",
+        {
+            "form": form,
+            "auth_recovery_password_reset_api_url": reverse("api-password-reset-detail"),
+            "auth_recovery_password_reset_submit_url": reverse("password-reset"),
+            "auth_recovery_password_reset_login_url": reverse("login"),
+            "auth_recovery_password_reset_csrf_token": get_token(request),
+            "auth_recovery_password_reset_initial_payload_json": _auth_recovery_json(
+                _build_password_reset_request_payload(form=form)
+            ),
+        },
+        status=status,
+    )
+
+
+def _password_reset_confirm_submit_url(*, token_string: str) -> str:
+    return f'{reverse("password-reset-confirm")}?token={quote(token_string)}'
+
+
+def _render_password_reset_confirm_page(
+    request: HttpRequest,
+    *,
+    username: str,
+    token_string: str,
+    has_otp: bool,
+    form: PasswordResetSetForm,
+) -> HttpResponse:
+    return render(
+        request,
+        "core/password_reset_confirm.html",
+        {
+            "form": form,
+            "username": username,
+            "token": token_string,
+            "auth_recovery_password_reset_confirm_api_url": (
+                f'{reverse("api-password-reset-confirm-detail")}?token={quote(token_string)}'
+            ),
+            "auth_recovery_password_reset_confirm_submit_url": _password_reset_confirm_submit_url(token_string=token_string),
+            "auth_recovery_password_reset_confirm_login_url": reverse("login"),
+            "auth_recovery_password_reset_confirm_csrf_token": get_token(request),
+            "auth_recovery_password_reset_confirm_token": token_string,
+            "auth_recovery_password_reset_confirm_initial_payload_json": _auth_recovery_json(
+                _build_password_reset_confirm_payload(username=username, has_otp=has_otp, form=form)
+            ),
+        },
+    )
+
+
+def _render_password_expired_page(
+    request: HttpRequest,
+    *,
+    form: ExpiredPasswordChangeForm,
+    status: int = 200,
+) -> HttpResponse:
+    return render(
+        request,
+        "core/password_expired.html",
+        {
+            "form": form,
+            "auth_recovery_password_expired_api_url": reverse("api-password-expired-detail"),
+            "auth_recovery_password_expired_submit_url": reverse("password-expired"),
+            "auth_recovery_password_expired_login_url": reverse("login"),
+            "auth_recovery_password_expired_csrf_token": get_token(request),
+            "auth_recovery_password_expired_initial_payload_json": _auth_recovery_json(
+                _build_password_expired_payload(form=form)
+            ),
+        },
+        status=status,
+    )
+
+
+def _render_otp_sync_page(
+    request: HttpRequest,
+    *,
+    form: SyncTokenForm,
+    status: int = 200,
+) -> HttpResponse:
+    return render(
+        request,
+        "core/sync_token.html",
+        {
+            "form": form,
+            "auth_recovery_otp_sync_api_url": reverse("api-otp-sync-detail"),
+            "auth_recovery_otp_sync_submit_url": reverse("otp-sync"),
+            "auth_recovery_otp_sync_login_url": reverse("login"),
+            "auth_recovery_otp_sync_csrf_token": get_token(request),
+            "auth_recovery_otp_sync_initial_payload_json": _auth_recovery_json(_build_otp_sync_payload(form=form)),
+        },
+        status=status,
+    )
+
+
+def _password_reset_confirm_has_otp_tokens(username: str) -> bool:
+    try:
+        svc = FreeIPAUser.get_client()
+        res = svc.otptoken_find(o_ipatokenowner=username, o_all=True)
+        tokens = res.get("result", []) if isinstance(res, dict) else []
+        return bool(tokens)
+    except exceptions.NotFound:
+        return False
+    except AttributeError:
+        return False
+    except Exception:
+        logger.debug("Password reset: OTP token lookup failed username=%s", username, exc_info=True)
+        return False
+
+
+def _load_password_reset_confirm_state(
+    token_string: str,
+) -> tuple[dict[str, object] | None, tuple[int, str] | None]:
+    normalized_token = _normalize_str(token_string)
+    if not normalized_token:
+        logger.warning("Password reset confirm rejected: missing token")
+        return None, (400, "No token provided.")
+
+    try:
+        token = read_password_reset_token(normalized_token)
+    except signing.SignatureExpired:
+        logger.warning("Password reset confirm rejected: token expired")
+        return None, (400, "This password reset link has expired. Please request a new one.")
+    except signing.BadSignature:
+        logger.warning("Password reset confirm rejected: invalid token signature")
+        return None, (400, "This password reset link is invalid. Please request a new one.")
+
+    username = _normalize_str(token.get("u"))
+    token_email = _normalize_str(token.get("e")).lower()
+    token_lpc = normalize_last_password_change(token.get("lpc"))
+    logger.info(
+        "Password reset confirm token parsed username=%s token_email=%s has_lpc=%s",
+        username,
+        token_email,
+        bool(token_lpc),
+    )
+    if not username:
+        logger.warning(
+            "Password reset confirm rejected: token missing username token_email=%s",
+            token_email,
+        )
+        return None, (400, "This password reset link is invalid. Please request a new one.")
+
+    user = find_user_for_password_reset(username)
+    if user is None:
+        logger.warning(
+            "Password reset confirm rejected: user lookup failed username=%s token_email=%s",
+            username,
+            token_email,
+        )
+        return None, (400, "This password reset link is invalid. Please request a new one.")
+
+    user_email = _normalize_str(user.email).lower()
+    if token_email and user_email and token_email != user_email:
+        logger.warning(
+            "Password reset confirm rejected: token/user email mismatch username=%s token_email=%s user_email=%s",
+            username,
+            token_email,
+            user_email,
+        )
+        return None, (400, "This password reset link is no longer valid. Please request a new one.")
+
+    user_lpc = normalize_last_password_change(user.last_password_change)
+    if token_lpc != user_lpc:
+        logger.warning(
+            "Password reset confirm rejected: token/user lpc mismatch "
+            "username=%s token_email=%s user_email=%s token_lpc=%s user_lpc=%s",
+            username,
+            token_email,
+            user_email,
+            token_lpc,
+            user_lpc,
+        )
+        return None, (400, "Your password has changed since you requested this link. Please request a new password reset email.")
+
+    return {
+        "token": token,
+        "username": username,
+        "user_email": user_email,
+        "has_otp": _password_reset_confirm_has_otp_tokens(username),
+    }, None
+
+
+def password_reset_detail_api(request: HttpRequest) -> JsonResponse:
+    if request.method != "GET":
+        return _auth_recovery_json_response({"error": "Method not allowed."}, status=405)
+
+    form = PasswordResetRequestForm()
+    return _auth_recovery_json_response(_build_password_reset_request_payload(form=form))
+
+
+def password_reset_confirm_detail_api(request: HttpRequest) -> JsonResponse:
+    if request.method != "GET":
+        return _auth_recovery_json_response({"error": "Method not allowed."}, status=405)
+
+    rate_limit_error = _password_reset_confirm_rate_limit_error(request, token_string=request.GET.get("token") or "")
+    if rate_limit_error is not None:
+        return _auth_recovery_json_response({"error": rate_limit_error[1]}, status=rate_limit_error[0])
+
+    state, error = _load_password_reset_confirm_state(request.GET.get("token") or "")
+    if error is not None:
+        return _auth_recovery_json_response({"error": error[1]}, status=error[0])
+
+    if state is None:
+        return _auth_recovery_json_response({"error": "Unable to load password reset form."}, status=400)
+
+    form = PasswordResetSetForm(require_otp=bool(state["has_otp"]))
+    return _auth_recovery_json_response(
+        _build_password_reset_confirm_payload(
+            username=str(state["username"]),
+            has_otp=bool(state["has_otp"]),
+            form=form,
+        )
+    )
+
+
+def password_expired_detail_api(request: HttpRequest) -> JsonResponse:
+    if request.method != "GET":
+        return _auth_recovery_json_response({"error": "Method not allowed."}, status=405)
+
+    initial_username = None
+    try:
+        initial_username = request.session.get("_freeipa_pwexp_username")
+    except Exception:
+        initial_username = None
+
+    form = ExpiredPasswordChangeForm(initial={"username": initial_username} if initial_username else None)
+    return _auth_recovery_json_response(_build_password_expired_payload(form=form))
+
+
+def otp_sync_detail_api(request: HttpRequest) -> JsonResponse:
+    if request.method != "GET":
+        return _auth_recovery_json_response({"error": "Method not allowed."}, status=405)
+
+    form = SyncTokenForm()
+    return _auth_recovery_json_response(_build_otp_sync_payload(form=form))
 
 
 def _rate_limit_client_ip(request: HttpRequest) -> str:
-    return _normalize_str(request.META.get("REMOTE_ADDR"))
+    return _normalize_str(_request_client_ip(request))
+
+
+def _login_style_rate_limit_error(
+    request: HttpRequest,
+    *,
+    scope: str,
+    subject: str,
+    endpoint: str,
+    message: str,
+) -> tuple[int, str] | None:
+    normalized_subject = _normalize_str(subject).lower()
+    client_ip = _rate_limit_client_ip(request)
+
+    limit = settings.AUTH_RATE_LIMIT_LOGIN_LIMIT
+    window_seconds = settings.AUTH_RATE_LIMIT_LOGIN_WINDOW_SECONDS
+    if allow_request(
+        scope=scope,
+        key_parts=[client_ip, normalized_subject],
+        limit=limit,
+        window_seconds=window_seconds,
+    ):
+        return None
+
+    _emit_rate_limit_denial_log(
+        request,
+        endpoint=endpoint,
+        limit=limit,
+        window_seconds=window_seconds,
+        subject=normalized_subject,
+    )
+    return 429, message
 
 
 def _emit_rate_limit_denial_log(
@@ -64,7 +435,7 @@ def _emit_rate_limit_denial_log(
         "component": "auth",
         "outcome": "denied",
         "endpoint": endpoint,
-        "http_method": "POST",
+        "http_method": request.method,
         "limit": limit,
         "window_seconds": window_seconds,
     }
@@ -93,6 +464,37 @@ def _emit_rate_limit_denial_log(
         ).hexdigest()
 
     logger.warning("Rate limit denied", extra=log_payload)
+
+
+def _password_reset_confirm_rate_limit_error(
+    request: HttpRequest,
+    *,
+    token_string: str,
+) -> tuple[int, str] | None:
+    normalized_token = _normalize_str(token_string)
+    if not normalized_token:
+        return None
+
+    client_ip = _rate_limit_client_ip(request)
+    limit = settings.AUTH_RATE_LIMIT_PASSWORD_RESET_LIMIT
+    window_seconds = settings.AUTH_RATE_LIMIT_PASSWORD_RESET_WINDOW_SECONDS
+    if allow_request(
+        scope="auth.password_reset_confirm_get",
+        key_parts=[client_ip, normalized_token],
+        limit=limit,
+        window_seconds=window_seconds,
+    ):
+        return None
+
+    endpoint = request.resolver_match.view_name if request.resolver_match is not None else request.path
+    _emit_rate_limit_denial_log(
+        request,
+        endpoint=endpoint,
+        limit=limit,
+        window_seconds=window_seconds,
+        subject=normalized_token,
+    )
+    return 429, "Too many password reset attempts. Please try again later."
 
 
 def _auth_log_extra(
@@ -296,7 +698,7 @@ def password_reset_request(request: HttpRequest) -> HttpResponse:
                 subject=submitted_identifier,
             )
 
-            return render(request, "core/password_reset_request.html", {"form": form}, status=429)
+            return _render_password_reset_request_page(request, form=form, status=429)
 
     if request.method == "POST" and form.is_valid():
         identifier = form.cleaned_data["username_or_email"]
@@ -340,7 +742,7 @@ def password_reset_request(request: HttpRequest) -> HttpResponse:
         )
         return redirect("login")
 
-    return render(request, "core/password_reset_request.html", {"form": form})
+    return _render_password_reset_request_page(request, form=form)
 
 
 def password_reset_confirm(request: HttpRequest) -> HttpResponse:
@@ -348,76 +750,24 @@ def password_reset_confirm(request: HttpRequest) -> HttpResponse:
         return redirect("home")
 
     token_string = _normalize_str(request.POST.get("token") or request.GET.get("token"))
-    if not token_string:
-        logger.warning("Password reset confirm rejected: missing token")
-        messages.warning(request, "No token provided.")
-        return redirect("login")
-
-    try:
-        token = read_password_reset_token(token_string)
-    except signing.SignatureExpired:
-        logger.warning("Password reset confirm rejected: token expired")
-        messages.warning(request, "This password reset link has expired. Please request a new one.")
+    rate_limit_error = _password_reset_confirm_rate_limit_error(request, token_string=token_string)
+    if rate_limit_error is not None:
+        messages.warning(request, rate_limit_error[1])
         return redirect("password-reset")
-    except signing.BadSignature:
-        logger.warning("Password reset confirm rejected: invalid token signature")
+
+    state, error = _load_password_reset_confirm_state(token_string)
+    if error is not None:
+        messages.warning(request, error[1])
+        return redirect("login" if error[1] == "No token provided." else "password-reset")
+
+    if state is None:
         messages.warning(request, "This password reset link is invalid. Please request a new one.")
         return redirect("password-reset")
 
-    username = _normalize_str(token.get("u"))
-    token_email = _normalize_str(token.get("e")).lower()
+    token = cast(dict[str, object], state["token"])
+    username = str(state["username"])
+    user_email = str(state["user_email"])
     token_lpc = normalize_last_password_change(token.get("lpc"))
-    logger.info(
-        "Password reset confirm token parsed username=%s token_email=%s has_lpc=%s",
-        username,
-        token_email,
-        bool(token_lpc),
-    )
-    if not username:
-        logger.warning(
-            "Password reset confirm rejected: token missing username token_email=%s",
-            token_email,
-        )
-        messages.warning(request, "This password reset link is invalid. Please request a new one.")
-        return redirect("password-reset")
-
-    user = find_user_for_password_reset(username)
-    if user is None:
-        logger.warning(
-            "Password reset confirm rejected: user lookup failed username=%s token_email=%s",
-            username,
-            token_email,
-        )
-        messages.warning(request, "This password reset link is invalid. Please request a new one.")
-        return redirect("password-reset")
-
-    user_email = _normalize_str(user.email).lower()
-    if token_email and user_email and token_email != user_email:
-        logger.warning(
-            "Password reset confirm rejected: token/user email mismatch username=%s token_email=%s user_email=%s",
-            username,
-            token_email,
-            user_email,
-        )
-        messages.warning(request, "This password reset link is no longer valid. Please request a new one.")
-        return redirect("password-reset")
-
-    user_lpc = normalize_last_password_change(user.last_password_change)
-    if token_lpc != user_lpc:
-        logger.warning(
-            "Password reset confirm rejected: token/user lpc mismatch "
-            "username=%s token_email=%s user_email=%s token_lpc=%s user_lpc=%s",
-            username,
-            token_email,
-            user_email,
-            token_lpc,
-            user_lpc,
-        )
-        messages.warning(
-            request,
-            "Your password has changed since you requested this link. Please request a new password reset email.",
-        )
-        return redirect("password-reset")
 
     logger.info(
         "Password reset confirm accepted username=%s method=%s has_lpc=%s",
@@ -426,24 +776,7 @@ def password_reset_confirm(request: HttpRequest) -> HttpResponse:
         bool(token_lpc),
     )
 
-    def _user_has_otp_tokens() -> bool:
-        try:
-            svc = FreeIPAUser.get_client()
-            res = svc.otptoken_find(o_ipatokenowner=username, o_all=True)
-            tokens = res.get("result", []) if isinstance(res, dict) else []
-            return bool(tokens)
-        except exceptions.NotFound:
-            # User might not exist (or be visible) in some environments; treat
-            # as no OTP so the reset UI remains usable.
-            return False
-        except AttributeError:
-            # Some client versions/environments may not expose the OTP API.
-            return False
-        except Exception:
-            logger.debug("Password reset: OTP token lookup failed username=%s", username, exc_info=True)
-            return False
-
-    has_otp = _user_has_otp_tokens()
+    has_otp = bool(state["has_otp"])
 
     form = PasswordResetSetForm(request.POST or None, require_otp=has_otp)
     if request.method == "POST" and form.is_valid():
@@ -452,10 +785,12 @@ def password_reset_confirm(request: HttpRequest) -> HttpResponse:
 
         if has_otp and not otp:
             form.add_error("otp", "One-Time Password is required for this account.")
-            return render(
+            return _render_password_reset_confirm_page(
                 request,
-                "core/password_reset_confirm.html",
-                {"form": form, "username": username, "token": token_string},
+                username=username,
+                token_string=token_string,
+                has_otp=has_otp,
+                form=form,
             )
 
         # Noggin-style safety: set a random temporary password first, then use the
@@ -492,10 +827,12 @@ def password_reset_confirm(request: HttpRequest) -> HttpResponse:
 
             next_token = make_password_reset_token(next_token_payload)
             form.add_error("otp" if has_otp else None, "Incorrect value.")
-            return render(
+            return _render_password_reset_confirm_page(
                 request,
-                "core/password_reset_confirm.html",
-                {"form": form, "username": username, "token": next_token},
+                username=username,
+                token_string=next_token,
+                has_otp=has_otp,
+                form=form,
             )
         except exceptions.FreeIPAError as error:
             logger.exception(
@@ -557,10 +894,12 @@ def password_reset_confirm(request: HttpRequest) -> HttpResponse:
             logger.info("Password reset confirm completed username=%s", username)
             return redirect("login")
 
-    return render(
+    return _render_password_reset_confirm_page(
         request,
-        "core/password_reset_confirm.html",
-        {"form": form, "username": username, "token": token_string},
+        username=username,
+        token_string=token_string,
+        has_otp=has_otp,
+        form=form,
     )
 
 
@@ -586,6 +925,17 @@ def password_expired(request: HttpRequest) -> HttpResponse:
         current_password = form.cleaned_data["current_password"]
         otp = _normalize_str(form.cleaned_data.get("otp")) or None
         new_password = form.cleaned_data["new_password"]
+
+        rate_limit_error = _login_style_rate_limit_error(
+            request,
+            scope="auth.password_expired",
+            subject=username,
+            endpoint=request.resolver_match.view_name if request.resolver_match is not None else "password-expired",
+            message="Too many password change attempts. Please try again later.",
+        )
+        if rate_limit_error is not None:
+            form.add_error(None, rate_limit_error[1])
+            return _render_password_expired_page(request, form=form, status=rate_limit_error[0])
 
         try:
             client = _build_freeipa_client()
@@ -641,7 +991,7 @@ def password_expired(request: HttpRequest) -> HttpResponse:
             else:
                 form.add_error(None, "Unable to change password due to an internal error.")
 
-    return render(request, "core/password_expired.html", {"form": form})
+    return _render_password_expired_page(request, form=form)
 
 
 def otp_sync(request: HttpRequest) -> HttpResponse:
@@ -666,6 +1016,17 @@ def otp_sync(request: HttpRequest) -> HttpResponse:
         first_code = form.cleaned_data["first_code"]
         second_code = form.cleaned_data["second_code"]
         token = _normalize_str(form.cleaned_data.get("token")) or None
+
+        rate_limit_error = _login_style_rate_limit_error(
+            request,
+            scope="auth.otp_sync",
+            subject=username,
+            endpoint=request.resolver_match.view_name if request.resolver_match is not None else "otp-sync",
+            message="Too many OTP sync attempts. Please try again later.",
+        )
+        if rate_limit_error is not None:
+            form.add_error(None, rate_limit_error[1])
+            return _render_otp_sync_page(request, form=form, status=rate_limit_error[0])
 
         url = f"https://{settings.FREEIPA_HOST}/ipa/session/sync_token"
         data = {
@@ -708,4 +1069,4 @@ def otp_sync(request: HttpRequest) -> HttpResponse:
             else:
                 form.add_error(None, "Something went wrong")
 
-    return render(request, "core/sync_token.html", {"form": form})
+    return _render_otp_sync_page(request, form=form)

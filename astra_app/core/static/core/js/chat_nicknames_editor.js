@@ -302,10 +302,21 @@
     root.classList.remove('d-none');
   }
 
-  onReady(function () {
-    const roots = document.querySelectorAll('.js-chat-nicks-editor');
-    for (const root of roots) {
-      initChatNicknamesEditor(root);
+  window.ChatNicknamesEditor = {
+    initAll: function (scope) {
+      const rootScope = scope || document;
+      const roots = rootScope.querySelectorAll ? rootScope.querySelectorAll('.js-chat-nicks-editor') : [];
+      for (const root of roots) {
+        if (root.dataset.chatNicknamesEnhanced === '1') {
+          continue;
+        }
+        root.dataset.chatNicknamesEnhanced = '1';
+        initChatNicknamesEditor(root);
+      }
     }
+  };
+
+  onReady(function () {
+    window.ChatNicknamesEditor.initAll(document);
   });
 })();

@@ -5,12 +5,13 @@ from dataclasses import dataclass
 from django.contrib import messages
 from django.contrib.auth.decorators import permission_required
 from django.core.files.storage import default_storage
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
-from django.urls import reverse_lazy
+from django.urls import reverse, reverse_lazy
 from django.utils import timezone
+from django.views.decorators.http import require_GET
 
-from core.permissions import ASTRA_ADD_SEND_MAIL
+from core.permissions import ASTRA_ADD_SEND_MAIL, json_permission_required_any
 
 _MAIL_IMAGES_DIR = "mail-images"
 _MAIL_IMAGES_PREFIX = f"{_MAIL_IMAGES_DIR}/"
@@ -23,6 +24,9 @@ class MailImage:
     url: str
     size_bytes: int
     modified_at: str
+
+
+_MAIL_IMAGE_PERMISSIONS: frozenset[str] = frozenset({ASTRA_ADD_SEND_MAIL})
 
 
 def _normalize_relative_path(raw: str) -> str:
@@ -62,6 +66,35 @@ def _iter_image_keys(*, base_dir: str) -> list[str]:
 
     walk(base_dir)
     return sorted(keys)
+
+
+def _build_mail_images_payload() -> dict[str, object]:
+    images: list[dict[str, object]] = []
+    for key in _iter_image_keys(base_dir=_MAIL_IMAGES_DIR):
+        relative_key = key.removeprefix(_MAIL_IMAGES_PREFIX)
+        url = default_storage.url(key)
+        size_bytes = int(default_storage.size(key))
+
+        modified_dt = default_storage.get_modified_time(key)
+        if timezone.is_naive(modified_dt):
+            modified_dt = timezone.make_aware(modified_dt, timezone=timezone.utc)
+        modified_dt = timezone.localtime(modified_dt)
+
+        images.append(
+            {
+                "key": key,
+                "relative_key": relative_key,
+                "url": url,
+                "size_bytes": size_bytes,
+                "modified_at": modified_dt.isoformat(),
+            }
+        )
+
+    return {
+        "mail_images_prefix": _MAIL_IMAGES_PREFIX,
+        "example_image_url": default_storage.url(f"{_MAIL_IMAGES_DIR}/path/to/image.png"),
+        "images": images,
+    }
 
 
 @permission_required(ASTRA_ADD_SEND_MAIL, login_url=reverse_lazy("users"))
@@ -143,27 +176,13 @@ def email_images(request: HttpRequest) -> HttpResponse:
         messages.error(request, "Unknown action.")
         return redirect("email-images")
 
-    images: list[MailImage] = []
+    payload: dict[str, object] = {
+        "mail_images_prefix": _MAIL_IMAGES_PREFIX,
+        "example_image_url": default_storage.url(f"{_MAIL_IMAGES_DIR}/path/to/image.png"),
+        "images": [],
+    }
     try:
-        for key in _iter_image_keys(base_dir=_MAIL_IMAGES_DIR):
-            relative_key = key.removeprefix(_MAIL_IMAGES_PREFIX)
-            url = default_storage.url(key)
-            size_bytes = int(default_storage.size(key))
-
-            modified_dt = default_storage.get_modified_time(key)
-            if timezone.is_naive(modified_dt):
-                modified_dt = timezone.make_aware(modified_dt, timezone=timezone.utc)
-            modified_at = timezone.localtime(modified_dt).strftime("%Y-%m-%d %H:%M:%S %Z")
-
-            images.append(
-                MailImage(
-                    key=key,
-                    relative_key=relative_key,
-                    url=url,
-                    size_bytes=size_bytes,
-                    modified_at=modified_at,
-                )
-            )
+        payload = _build_mail_images_payload()
     except Exception as e:
         logging.exception(f"Failed to list mail images: {e}")
         messages.error(request, "Unable to list mail images")
@@ -172,8 +191,14 @@ def email_images(request: HttpRequest) -> HttpResponse:
         request,
         "core/mail_images.html",
         {
-            "images": images,
-            "mail_images_prefix": _MAIL_IMAGES_PREFIX,
-            "mail_images_external_example_url": default_storage.url(f"{_MAIL_IMAGES_DIR}/path/to/image.png"),
+            "mail_images_api_url": reverse("api-email-images-detail"),
+            "mail_images_submit_url": request.path,
+            "mail_images_initial_payload": payload,
         },
     )
+
+
+@require_GET
+@json_permission_required_any(_MAIL_IMAGE_PERMISSIONS)
+def email_images_detail_api(request: HttpRequest) -> JsonResponse:
+    return JsonResponse(_build_mail_images_payload())

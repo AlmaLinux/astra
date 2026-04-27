@@ -49,6 +49,7 @@ from core.views_membership.user import (
     membership_request_detail,
     membership_request_detail_api,
     membership_request_detail_legacy_redirect,
+    membership_request_form_detail_api,
     membership_request_rescind,
     membership_request_rescind_api,
 )
@@ -70,6 +71,7 @@ __all__ = [
     "membership_notes_aggregate_add_api",
     "membership_notes_aggregate_summary_api",
     "membership_request",
+    "membership_request_form_detail_api",
     "membership_request_approve_api",
     "membership_request_approve_on_hold_api",
     "membership_request_approve",

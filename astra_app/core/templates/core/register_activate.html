@@ -1,34 +1,26 @@
 {% extends 'core/base.html' %}
 
+{% load django_vite %}
+
 {% block title %}Activate your account{% endblock %}
+
+{% block extra_head %}
+  {{ block.super }}
+  {% vite_hmr_client %}
+  {% vite_asset 'src/entrypoints/registration.ts' %}
+{% endblock %}
 
 {% block header %}<h1 class="m-0">Activate your account</h1>{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center">
-  <div class="col-md-8 col-lg-7">
-    <div class="card card-primary">
-      <small class="text-muted d-block px-3 pt-2 pb-1">Step 3 of 3: Choose a password</small>
-
-      <form method="post" novalidate>
-        {% csrf_token %}
-        <div class="card-body">
-          <p>Hello <strong>{{ username }}</strong>. To activate your account, please choose a password.</p>
-
-          {% if form.non_field_errors %}
-            <div class="alert alert-danger">{{ form.non_field_errors }}</div>
-          {% endif %}
-
-          {% include 'core/_form_field.html' with field=form.password %}
-
-          {% include 'core/_form_field.html' with field=form.password_confirm %}
-        </div>
-        <div class="card-footer d-flex justify-content-between align-items-center">
-          <button type="submit" class="btn btn-primary" title="Activate account and set password">Activate</button>
-          <a href="{% url 'register' %}" class="btn btn-link" title="Return to registration">Start over</a>
-        </div>
-      </form>
-    </div>
-  </div>
+<div
+  data-register-activate-root=""
+  data-register-activate-api-url="{{ register_activate_api_url }}"
+  data-register-activate-submit-url="{{ register_activate_submit_url }}"
+  data-register-activate-start-over-url="{{ register_activate_start_over_url }}"
+  data-register-activate-csrf-token="{{ register_activate_csrf_token }}"
+>
+  <script type="application/json" data-registration-initial-payload>{{ register_activate_initial_payload_json|safe }}</script>
+  <div class="text-muted">Loading activation form...</div>
 </div>
 {% endblock %}

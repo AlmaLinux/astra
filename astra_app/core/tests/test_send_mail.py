@@ -59,6 +59,16 @@ class SendMailTests(TestCase):
             principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
         )
 
+    def _send_mail_initial_payload(self, response) -> dict[str, object]:
+        html = response.content.decode("utf-8")
+        match = re.search(
+            r'<script id="send-mail-initial-payload" type="application/json">(?P<payload>.*?)</script>',
+            html,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(match)
+        return json.loads(match.group("payload"))
+
     def test_parse_csv_upload_supports_cr_separated_rows_with_multiline_quoted_fields(self) -> None:
         csv_file = io.BytesIO(b'Email,Display Name\ruser@example.com,"Alice\rUser"\r')
 
@@ -76,6 +86,91 @@ class SendMailTests(TestCase):
             resp = self.client.get(reverse("send-mail"))
 
         self.assertEqual(resp.status_code, 302)
+
+    def test_send_mail_get_renders_vue_shell_contract(self) -> None:
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]},
+        )
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.all", return_value=[]),
+        ):
+            resp = self.client.get(reverse("send-mail"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'data-send-mail-root=""')
+        self.assertContains(resp, 'data-send-mail-api-url="/api/v1/email-tools/send-mail/detail"')
+        self.assertContains(resp, f'data-send-mail-submit-url="{reverse("send-mail")}"')
+        self.assertContains(resp, f'data-send-mail-preview-url="{reverse("send-mail-render-preview")}"')
+        self.assertContains(resp, "Loading send mail...")
+        self.assertNotContains(resp, 'id="send-mail-form"')
+
+    def test_send_mail_detail_api_returns_data_only_payload(self) -> None:
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]},
+        )
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
+            patch("core.freeipa.user.FreeIPAUser.all", return_value=[]),
+        ):
+            resp = self.client.get("/api/v1/email-tools/send-mail/detail")
+
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["selected_recipient_mode"], "")
+        self.assertEqual(payload["action_status"], "")
+        self.assertTrue(payload["templates"])
+        self.assertTrue(any(template["name"] == "account-invite" for template in payload["templates"]))
+        self.assertTrue(all(set(template.keys()) == {"id", "name"} for template in payload["templates"]))
+        self.assertEqual(
+            payload["recipient_preview"],
+            {
+                "variables": [],
+                "recipient_count": 0,
+                "first_context": {},
+                "skipped_count": 0,
+            },
+        )
+        self.assertEqual(
+            {field["name"] for field in payload["form"]["fields"]},
+            {
+                "recipient_mode",
+                "group_cn",
+                "user_usernames",
+                "csv_file",
+                "manual_to",
+                "cc",
+                "bcc",
+                "reply_to",
+                "email_template_id",
+                "subject",
+                "html_content",
+                "text_content",
+                "action",
+                "save_as_name",
+                "invitation_action",
+                "invitation_org_id",
+                "extra_context_json",
+            },
+        )
+        self.assertEqual(
+            payload["compose"]["preview"],
+            {"subject": "", "html": "", "text": ""},
+        )
+        self.assertNotIn("submit_url", payload)
+        self.assertNotIn("preview_url", payload)
+        self.assertNotIn("back_url", payload)
+        self.assertNotIn("page_title", payload)
+        recipient_mode_field = next(field for field in payload["form"]["fields"] if field["name"] == "recipient_mode")
+        self.assertNotIn("options", recipient_mode_field)
 
     def test_group_recipients_show_variables_and_count(self) -> None:
         self._login_as_freeipa_user("reviewer")
@@ -240,12 +335,13 @@ class SendMailTests(TestCase):
             resp = self.client.get(reverse("send-mail") + "?type=group&to=example-group")
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'id="send-mail-recipient-mode" value="group"')
-        # Deep-link should auto-load recipients on GET.
-        self.assertContains(resp, "Recipient count")
-        self.assertContains(resp, "2")
-        self.assertContains(resp, "{{ full_name }}")
-        self.assertContains(resp, "alice@example.com")
+        payload = self._send_mail_initial_payload(resp)
+        self.assertEqual(payload["selected_recipient_mode"], "group")
+        self.assertEqual(payload["recipient_preview"]["recipient_count"], 2)
+        self.assertIn({"name": "full_name", "example": "Alice User"}, payload["recipient_preview"]["variables"])
+        self.assertIn({"name": "email", "example": "alice@example.com"}, payload["recipient_preview"]["variables"])
+        group_field = next(field for field in payload["form"]["fields"] if field["name"] == "group_cn")
+        self.assertEqual(group_field["value"], "example-group")
 
     def test_get_prefills_cc_from_query_params(self) -> None:
         self._login_as_freeipa_user("reviewer")
@@ -262,13 +358,9 @@ class SendMailTests(TestCase):
             resp = self.client.get(url)
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'id="id_cc"')
-        self.assertContains(resp, f'value="{cc_raw}"')
-        # When cc is prefilled, open the Additional recipients section by default.
-        self.assertContains(resp, 'id="send-mail-extra-options-toggle"')
-        self.assertContains(resp, 'aria-expanded="true"')
-        self.assertContains(resp, 'id="send-mail-extra-options"')
-        self.assertContains(resp, 'class="collapse mt-2 show"')
+        payload = self._send_mail_initial_payload(resp)
+        cc_field = next(field for field in payload["form"]["fields"] if field["name"] == "cc")
+        self.assertEqual(cc_field["value"], cc_raw)
 
     def test_get_prefills_reply_to_from_query_params(self) -> None:
         self._login_as_freeipa_user("reviewer")
@@ -285,12 +377,9 @@ class SendMailTests(TestCase):
             resp = self.client.get(url)
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'id="id_reply_to"')
-        self.assertContains(resp, f'value="{reply_to_raw}"')
-        self.assertContains(resp, 'id="send-mail-extra-options-toggle"')
-        self.assertContains(resp, 'aria-expanded="true"')
-        self.assertContains(resp, 'id="send-mail-extra-options"')
-        self.assertContains(resp, 'class="collapse mt-2 show"')
+        payload = self._send_mail_initial_payload(resp)
+        reply_to_field = next(field for field in payload["form"]["fields"] if field["name"] == "reply_to")
+        self.assertEqual(reply_to_field["value"], reply_to_raw)
 
     def test_get_prefills_bcc_from_query_params_and_does_not_treat_bcc_as_extra_context(self) -> None:
         self._login_as_freeipa_user("reviewer")
@@ -308,15 +397,13 @@ class SendMailTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
 
-        form = resp.context["form"]
-        self.assertEqual(form["bcc"].value(), bcc_raw)
+        payload = self._send_mail_initial_payload(resp)
+        bcc_field = next(field for field in payload["form"]["fields"] if field["name"] == "bcc")
+        self.assertEqual(bcc_field["value"], bcc_raw)
 
-        # Ensure the rendered input itself is prefilled (avoid false positives from hidden fields).
-        content = resp.content.decode("utf-8")
-        pattern = rf'<input(?=[^>]*\bname="bcc")(?=[^>]*\bid="id_bcc")(?=[^>]*\bvalue="{re.escape(bcc_raw)}")[^>]*>'
-        self.assertTrue(re.search(pattern, content), msg="Rendered BCC input is not prefilled")
-
-        extra_context_raw = str(form["extra_context_json"].value() or "").strip()
+        extra_context_raw = next(
+            field["value"] for field in payload["form"]["fields"] if field["name"] == "extra_context_json"
+        ).strip()
         self.assertTrue(extra_context_raw)
         extra_context = json.loads(extra_context_raw)
         self.assertNotIn("bcc", extra_context)
@@ -340,20 +427,13 @@ class SendMailTests(TestCase):
             resp = self.client.get(reverse("send-mail") + "?type=group&to=empty-group")
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Recipient count")
-        self.assertContains(resp, ">0<")
-
-        # Even with no recipients, show useful example placeholders.
-        self.assertContains(resp, "{{ username }}")
-        self.assertContains(resp, "{{ first_name }}")
-        self.assertContains(resp, "{{ last_name }}")
-        self.assertContains(resp, "{{ email }}")
-        self.assertContains(resp, "{{ full_name }}")
-        self.assertContains(resp, "-username-")
-        self.assertContains(resp, "-first_name-")
-        self.assertContains(resp, "-last_name-")
-        self.assertContains(resp, "-email-")
-        self.assertContains(resp, "-full_name-")
+        payload = self._send_mail_initial_payload(resp)
+        self.assertEqual(payload["recipient_preview"]["recipient_count"], 0)
+        self.assertIn({"name": "username", "example": "-username-"}, payload["recipient_preview"]["variables"])
+        self.assertIn({"name": "first_name", "example": "-first_name-"}, payload["recipient_preview"]["variables"])
+        self.assertIn({"name": "last_name", "example": "-last_name-"}, payload["recipient_preview"]["variables"])
+        self.assertIn({"name": "email", "example": "-email-"}, payload["recipient_preview"]["variables"])
+        self.assertIn({"name": "full_name", "example": "-full_name-"}, payload["recipient_preview"]["variables"])
 
     def test_get_prefills_manual_recipients_from_query_params(self) -> None:
         self._login_as_freeipa_user("reviewer")
@@ -366,13 +446,12 @@ class SendMailTests(TestCase):
             resp = self.client.get(reverse("send-mail") + "?type=manual&to=jim@example.com")
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'id="send-mail-recipient-mode" value="manual"')
-        self.assertContains(resp, 'name="manual_to"')
-        # Deep-link should auto-load recipients on GET.
-        self.assertContains(resp, "Recipient count")
-        self.assertContains(resp, "1")
-        self.assertContains(resp, "{{ email }}")
-        self.assertContains(resp, "jim@example.com")
+        payload = self._send_mail_initial_payload(resp)
+        self.assertEqual(payload["selected_recipient_mode"], "manual")
+        self.assertEqual(payload["recipient_preview"]["recipient_count"], 1)
+        self.assertIn({"name": "email", "example": "jim@example.com"}, payload["recipient_preview"]["variables"])
+        manual_to_field = next(field for field in payload["form"]["fields"] if field["name"] == "manual_to")
+        self.assertEqual(manual_to_field["value"], "jim@example.com")
 
     def test_get_shows_membership_action_notice(self) -> None:
         self._login_as_freeipa_user("reviewer")
@@ -385,9 +464,11 @@ class SendMailTests(TestCase):
             resp = self.client.get(reverse("send-mail") + "?type=manual&to=alice@example.com&action_status=approved")
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "already been approved")
-        self.assertContains(resp, "No email has been sent yet")
-        self.assertContains(resp, "notify the requester")
+        payload = self._send_mail_initial_payload(resp)
+        self.assertEqual(payload["selected_recipient_mode"], "manual")
+        self.assertEqual(payload["action_status"], "approved")
+        manual_to_field = next(field for field in payload["form"]["fields"] if field["name"] == "manual_to")
+        self.assertEqual(manual_to_field["value"], "alice@example.com")
 
     def test_post_send_clears_membership_action_notice(self) -> None:
         self._login_as_freeipa_user("reviewer")
@@ -432,11 +513,11 @@ class SendMailTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 200)
-        # Extra params become template variables.
-        self.assertContains(resp, "{{ foo }}")
-        self.assertContains(resp, "bar")
-        self.assertContains(resp, "{{ project_name }}")
-        self.assertContains(resp, "Atomic SIG")
+        payload = self._send_mail_initial_payload(resp)
+        self.assertIn({"name": "foo", "example": "bar"}, payload["recipient_preview"]["variables"])
+        self.assertIn({"name": "project_name", "example": "Atomic SIG"}, payload["recipient_preview"]["variables"])
+        self.assertEqual(payload["recipient_preview"]["first_context"]["foo"], "bar")
+        self.assertEqual(payload["recipient_preview"]["first_context"]["project_name"], "Atomic SIG")
 
     def test_get_prefills_users_recipients_from_query_params(self) -> None:
         self._login_as_freeipa_user("reviewer")
@@ -487,15 +568,12 @@ class SendMailTests(TestCase):
             resp = self.client.get(reverse("send-mail") + "?type=users&to=alice,bob")
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'id="send-mail-recipient-mode" value="users"')
-        # Deep-link should auto-load recipients on GET.
-        self.assertContains(resp, "Recipient count")
-        self.assertContains(resp, "2")
-        self.assertContains(resp, "{{ email }}")
-        self.assertContains(resp, "alice@example.com")
-        # Should preselect the users in the multi-select.
-        self.assertContains(resp, '<option value="alice" selected>')
-        self.assertContains(resp, '<option value="bob" selected>')
+        payload = self._send_mail_initial_payload(resp)
+        self.assertEqual(payload["selected_recipient_mode"], "users")
+        self.assertEqual(payload["recipient_preview"]["recipient_count"], 2)
+        self.assertIn({"name": "email", "example": "alice@example.com"}, payload["recipient_preview"]["variables"])
+        user_field = next(field for field in payload["form"]["fields"] if field["name"] == "user_usernames")
+        self.assertEqual(user_field["value"], ["alice", "bob"])
 
     def test_get_prefills_users_includes_private_profile_recipient_email(self) -> None:
         self._login_as_freeipa_user("reviewer")
@@ -553,9 +631,10 @@ class SendMailTests(TestCase):
             resp = self.client.get(reverse("send-mail") + "?type=users&to=bob")
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Recipient count")
-        self.assertContains(resp, "1")
-        self.assertContains(resp, "bob@example.com")
+        payload = self._send_mail_initial_payload(resp)
+        self.assertEqual(payload["selected_recipient_mode"], "users")
+        self.assertEqual(payload["recipient_preview"]["recipient_count"], 1)
+        self.assertIn({"name": "email", "example": "bob@example.com"}, payload["recipient_preview"]["variables"])
 
     def test_get_prefills_users_logs_warning_when_selected_user_has_no_email(self) -> None:
         self._login_as_freeipa_user("reviewer")
@@ -593,8 +672,10 @@ class SendMailTests(TestCase):
             resp = self.client.get(reverse("send-mail") + "?type=users&to=bob")
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Recipient count")
-        self.assertContains(resp, "0")
+        payload = self._send_mail_initial_payload(resp)
+        self.assertEqual(payload["selected_recipient_mode"], "users")
+        self.assertEqual(payload["recipient_preview"]["recipient_count"], 0)
+        self.assertEqual(payload["recipient_preview"]["skipped_count"], 1)
         self.assertTrue(any("skipped recipients" in line.lower() for line in captured.output))
 
     def test_variable_examples_choose_best_context_and_placeholder_missing(self) -> None:
@@ -646,12 +727,9 @@ class SendMailTests(TestCase):
             resp = self.client.get(reverse("send-mail") + "?type=group&to=example-group")
 
         self.assertEqual(resp.status_code, 200)
-        # Examples should be taken from Bob (more fields filled) rather than Alice.
-        self.assertContains(resp, "{{ first_name }}")
-        self.assertContains(resp, "Bob")
-        # Missing values in the chosen example context should use a placeholder.
-        self.assertContains(resp, "{{ last_name }}")
-        self.assertContains(resp, "-last_name-")
+        payload = self._send_mail_initial_payload(resp)
+        self.assertIn({"name": "first_name", "example": "Bob"}, payload["recipient_preview"]["variables"])
+        self.assertIn({"name": "last_name", "example": "-last_name-"}, payload["recipient_preview"]["variables"])
 
     def test_get_prefills_email_template_from_query_param(self) -> None:
         from post_office.models import EmailTemplate
@@ -673,11 +751,19 @@ class SendMailTests(TestCase):
             resp = self.client.get(reverse("send-mail") + "?type=manual&to=jim@example.com&template=send-mail-prefill")
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, f'<option value="{tpl.pk}" selected>')
-        self.assertContains(resp, 'value="Hello {{ email }}"')
-        self.assertContains(resp, "Text body for {{ email }}")
-        # HTML bodies are shown in a textarea, so they appear HTML-escaped in the page source.
-        self.assertContains(resp, "&lt;p&gt;HTML body for {{ email }}&lt;/p&gt;")
+        payload = self._send_mail_initial_payload(resp)
+        self.assertEqual(payload["compose"]["selected_template_id"], tpl.pk)
+        subject_field = next(field for field in payload["form"]["fields"] if field["name"] == "subject")
+        text_field = next(field for field in payload["form"]["fields"] if field["name"] == "text_content")
+        html_field = next(field for field in payload["form"]["fields"] if field["name"] == "html_content")
+        template_field = next(field for field in payload["form"]["fields"] if field["name"] == "email_template_id")
+        self.assertEqual(template_field["value"], str(tpl.pk))
+        self.assertEqual(subject_field["value"], "Hello {{ email }}")
+        self.assertEqual(text_field["value"], "Text body for {{ email }}")
+        self.assertEqual(html_field["value"], "<p>HTML body for {{ email }}</p>")
+        self.assertEqual(payload["compose"]["preview"]["subject"], "Hello jim@example.com")
+        self.assertEqual(payload["compose"]["preview"]["text"], "Text body for jim@example.com")
+        self.assertEqual(payload["compose"]["preview"]["html"], "<p>HTML body for jim@example.com</p>")
 
     def test_csv_mode_hides_org_claim_template_choice(self) -> None:
         from post_office.models import EmailTemplate
@@ -1615,10 +1701,11 @@ class SendMailTests(TestCase):
             response = self.client.get(url)
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'name="invitation_action"')
-        self.assertContains(response, 'value="org_claim"')
-        self.assertContains(response, 'name="invitation_org_id"')
-        self.assertContains(response, 'value="123"')
+        payload = self._send_mail_initial_payload(response)
+        invitation_action_field = next(field for field in payload["form"]["fields"] if field["name"] == "invitation_action")
+        invitation_org_id_field = next(field for field in payload["form"]["fields"] if field["name"] == "invitation_org_id")
+        self.assertEqual(invitation_action_field["value"], "org_claim")
+        self.assertEqual(invitation_org_id_field["value"], "123")
 
 
 class UnifiedEmailPreviewSendMailTests(TestCase):

@@ -68,7 +68,7 @@ function agreementSettingsUrl(agreementCn: string): string {
             <a :href="groupDetailUrl(group.cn)">{{ group.cn }}</a>
           </div>
         </div>
-        <span v-if="group.role === 'Sponsor'" class="badge badge-primary">Team Lead</span>
+        <span v-if="group.role === 'sponsor'" class="badge badge-primary">Team Lead</span>
         <span v-else class="badge badge-secondary">Member</span>
       </li>
     </template>

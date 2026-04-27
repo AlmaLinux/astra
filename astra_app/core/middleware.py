@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import time
 from zoneinfo import ZoneInfo
 
@@ -29,6 +30,13 @@ from core.views_utils import get_username, try_get_username_from_user
 logger = logging.getLogger(__name__)
 access_logger = logging.getLogger("astra.access")
 _ACCESS_LOG_TEMPLATE = '%({x-forwarded-for}i)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s"'
+_TOKEN_REDACTION_LOG_PATHS = frozenset({
+    "/password-reset/confirm",
+    "/api/v1/password-reset/confirm/detail",
+    "/settings/emails/validate",
+    "/api/v1/settings/emails/validate/detail",
+})
+_PASSWORD_RESET_TOKEN_QUERY_RE = re.compile(r"(^|&)token=[^&]*")
 
 
 def _should_skip_access_log(request_path: str) -> bool:
@@ -53,6 +61,13 @@ def _response_body_size(response: HttpResponse | None) -> str:
         return "-"
 
 
+def _sanitize_access_log_query(request_path: str, query_string: str) -> str:
+    normalized_path = request_path.rstrip("/") or "/"
+    if normalized_path not in _TOKEN_REDACTION_LOG_PATHS or not query_string:
+        return query_string
+    return _PASSWORD_RESET_TOKEN_QUERY_RE.sub(r"\1token=[redacted]", query_string)
+
+
 def _build_access_log_atoms(
     request,
     *,
@@ -61,9 +76,9 @@ def _build_access_log_atoms(
     client_ip: str | None,
     user_id: str | None,
 ) -> dict[str, object]:
-    query_string = str(request.META.get("QUERY_STRING") or "")
+    query_string = _sanitize_access_log_query(request.path, str(request.META.get("QUERY_STRING") or ""))
     request_path = request.path
-    full_path = request.get_full_path()
+    full_path = request_path if not query_string else f"{request_path}?{query_string}"
     request_line = f"{request.method} {full_path} HTTP/1.1"
     referer = str(request.META.get("HTTP_REFERER") or "-")
     user_agent = str(request.META.get("HTTP_USER_AGENT") or "-")
@@ -101,11 +116,12 @@ def _build_access_log_atoms(
     for key, value in request.META.items():
         key_str = str(key)
         key_lower = key_str.lower()
-        atoms[f"{{{key_lower}}}e"] = value
+        meta_value = query_string if key_str == "QUERY_STRING" else value
+        atoms[f"{{{key_lower}}}e"] = meta_value
 
         if key_str.startswith("HTTP_"):
             header_name = key_str[5:].lower().replace("_", "-")
-            atoms[f"{{{header_name}}}i"] = value
+            atoms[f"{{{header_name}}}i"] = meta_value
 
     for meta_key, header_name in (("CONTENT_TYPE", "content-type"), ("CONTENT_LENGTH", "content-length")):
         meta_value = request.META.get(meta_key)
@@ -392,7 +408,10 @@ class StructuredAccessLogMiddleware:
                     "duration_ms": duration_ms,
                 }
 
-                request_query = str(request.META.get("QUERY_STRING") or "").strip()
+                request_query = _sanitize_access_log_query(
+                    request.path,
+                    str(request.META.get("QUERY_STRING") or "").strip(),
+                )
                 if request_query:
                     extra["request_query"] = request_query
 
@@ -426,7 +445,7 @@ class LoginRequiredMiddleware:
 
     Exemptions:
     - Auth flows (login/logout/password reset)
-    - Registration flow
+    - Registration pages and canonical read endpoints
     - SES webhook
     - Django admin and static/media
     - Election public exports (ballots/audit JSON)
@@ -455,6 +474,13 @@ class LoginRequiredMiddleware:
             "/logout",
             "/otp/sync",
             "/password-expired",
+            "/api/v1/password-reset/detail",
+            "/api/v1/password-reset/confirm/detail",
+            "/api/v1/password-expired/detail",
+            "/api/v1/otp/sync/detail",
+            "/api/v1/register/detail",
+            "/api/v1/register/confirm/detail",
+            "/api/v1/register/activate/detail",
             "/robots.txt",
             "/favicon.ico",
             "/healthz",

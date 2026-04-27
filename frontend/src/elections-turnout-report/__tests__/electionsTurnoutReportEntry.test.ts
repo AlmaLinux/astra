@@ -26,7 +26,6 @@ describe("mountElectionsTurnoutReportPage", () => {
         new Response(
           JSON.stringify({
             rows: [],
-            chart_data: { labels: [], count_turnout: [], weight_turnout: [] },
           }),
         ),
       ),
@@ -34,7 +33,7 @@ describe("mountElectionsTurnoutReportPage", () => {
     (window as Window & { Chart?: new (...args: unknown[]) => object }).Chart = vi.fn(() => ({ destroy: vi.fn() })) as never;
 
     const root = buildRoot({
-      "data-elections-turnout-report-api-url": "/api/v1/elections/reports/turnout",
+      "data-elections-turnout-report-api-url": "/api/v1/elections/reports/turnout/detail",
       "data-elections-turnout-report-elections-url": "/elections/",
       "data-elections-turnout-report-election-detail-url-template": "/elections/123456789/",
     });

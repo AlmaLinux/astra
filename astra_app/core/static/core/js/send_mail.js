@@ -295,7 +295,12 @@
     return false;
   }
 
-  function onReady() {
+  function initSendMailPage() {
+    var formEl = $('send-mail-form');
+    if (!formEl) return false;
+    if (formEl.getAttribute('data-send-mail-js-initialized') === '1') return true;
+    formEl.setAttribute('data-send-mail-js-initialized', '1');
+
     document.addEventListener('templated-email-compose:save-confirmed', function () {
       setAction('save');
       var form = $('send-mail-form');
@@ -601,11 +606,16 @@
       var uel = $('id_user_usernames');
       if (uel && uel.selectedOptions) setRecipientCount(uel.selectedOptions.length);
     }
+
+    return true;
   }
 
+  window.SendMailPage = window.SendMailPage || {};
+  window.SendMailPage.init = initSendMailPage;
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', onReady);
+    document.addEventListener('DOMContentLoaded', initSendMailPage);
   } else {
-    onReady();
+    initSendMailPage();
   }
 })(window, document);

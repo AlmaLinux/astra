@@ -38,5 +38,9 @@
     data-membership-request-detail-ignore-url="{{ ignore_url }}"
     data-membership-request-detail-rescind-url="{{ rescind_url }}"
     data-membership-request-detail-form-action-url="{{ form_action_url }}"
-  ></div>
+  >
+    {% if membership_request_detail_initial_payload_json %}
+      <script type="application/json" data-membership-request-detail-initial-payload>{{ membership_request_detail_initial_payload_json|safe }}</script>
+    {% endif %}
+  </div>
 {% endblock %}

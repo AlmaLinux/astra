@@ -1,6 +1,12 @@
 from django.urls import path
 
 from core import views_membership
+from core.views_auth import (
+    otp_sync_detail_api,
+    password_expired_detail_api,
+    password_reset_confirm_detail_api,
+    password_reset_detail_api,
+)
 from core.views_elections.audit import (
     election_audit_log_api,
     election_audit_summary_api,
@@ -13,6 +19,7 @@ from core.views_elections.detail import (
     election_detail_eligible_voters_api,
     election_detail_ineligible_voters_api,
     election_detail_info_api,
+    election_detail_page_api,
     elections_api,
 )
 from core.views_elections.lifecycle import (
@@ -21,7 +28,7 @@ from core.views_elections.lifecycle import (
     election_send_mail_credentials_api,
     election_tally_api,
 )
-from core.views_elections.reporting import elections_turnout_report_api
+from core.views_elections.reporting import elections_turnout_report_api, elections_turnout_report_detail_api
 from core.views_elections.vote import election_vote_api, election_vote_submit
 from core.views_groups import (
     group_action_api,
@@ -33,20 +40,41 @@ from core.views_groups import (
 )
 from core.views_invitations_api import (
     account_invitations_accepted_api,
+    account_invitations_accepted_detail_api,
     account_invitations_bulk_api,
     account_invitations_dismiss_api,
     account_invitations_pending_api,
+    account_invitations_pending_detail_api,
     account_invitations_refresh_api,
     account_invitations_resend_api,
 )
+from core.views_mail_images import email_images_detail_api
 from core.views_membership.admin import (
     stats_membership_composition_charts_api,
     stats_membership_retention_chart_api,
     stats_membership_summary_api,
     stats_membership_trends_charts_api,
 )
-from core.views_organizations import organization_detail_api, organizations_api
-from core.views_users import user_profile_api, users_api
+from core.views_membership_admin import (
+    membership_audit_log_detail_api,
+    stats_membership_composition_charts_detail_api,
+    stats_membership_retention_chart_detail_api,
+    stats_membership_trends_charts_detail_api,
+)
+from core.views_organizations import organization_detail_api, organization_detail_page_api, organizations_api
+from core.views_registration import (
+    register_activate_detail_api,
+    register_confirm_detail_api,
+    register_detail_api,
+)
+from core.views_send_mail import send_mail_detail_api
+from core.views_settings import settings_detail_api, settings_email_validate_detail_api
+from core.views_templated_email import (
+    email_template_create_detail_api,
+    email_template_edit_detail_api,
+    email_templates_detail_api,
+)
+from core.views_users import user_profile_api, user_profile_detail_api, users_api
 
 urlpatterns = [
     path(
@@ -60,9 +88,19 @@ urlpatterns = [
         name="api-user-profile",
     ),
     path(
+        "users/<str:username>/profile/detail",
+        user_profile_detail_api,
+        name="api-user-profile-detail",
+    ),
+    path(
         "organizations/<int:organization_id>",
         organization_detail_api,
         name="api-organization-detail",
+    ),
+    path(
+        "organizations/<int:organization_id>/detail",
+        organization_detail_page_api,
+        name="api-organization-detail-page",
     ),
     path(
         "organizations",
@@ -108,6 +146,11 @@ urlpatterns = [
         "elections/<int:election_id>/info",
         election_detail_info_api,
         name="api-election-detail-info",
+    ),
+    path(
+        "elections/<int:election_id>/detail",
+        election_detail_page_api,
+        name="api-election-detail-page",
     ),
     path(
         "elections/<int:election_id>/candidates",
@@ -170,6 +213,11 @@ urlpatterns = [
         name="api-elections-turnout-report",
     ),
     path(
+        "elections/reports/turnout/detail",
+        elections_turnout_report_detail_api,
+        name="api-elections-turnout-report-detail",
+    ),
+    path(
         "elections/<int:election_id>/vote",
         election_vote_api,
         name="api-election-vote",
@@ -183,6 +231,86 @@ urlpatterns = [
         "elections/ballot/verify",
         ballot_verify_api,
         name="api-ballot-verify",
+    ),
+    path(
+        "membership/request/detail",
+        views_membership.membership_request_form_detail_api,
+        name="api-membership-request-form-detail",
+    ),
+    path(
+        "settings/detail",
+        settings_detail_api,
+        name="api-settings-detail",
+    ),
+    path(
+        "settings/emails/validate/detail",
+        settings_email_validate_detail_api,
+        name="api-settings-email-validate-detail",
+    ),
+    path(
+        "password-reset/detail",
+        password_reset_detail_api,
+        name="api-password-reset-detail",
+    ),
+    path(
+        "password-reset/confirm/detail",
+        password_reset_confirm_detail_api,
+        name="api-password-reset-confirm-detail",
+    ),
+    path(
+        "password-expired/detail",
+        password_expired_detail_api,
+        name="api-password-expired-detail",
+    ),
+    path(
+        "otp/sync/detail",
+        otp_sync_detail_api,
+        name="api-otp-sync-detail",
+    ),
+    path(
+        "register/detail",
+        register_detail_api,
+        name="api-register-detail",
+    ),
+    path(
+        "register/confirm/detail",
+        register_confirm_detail_api,
+        name="api-register-confirm-detail",
+    ),
+    path(
+        "register/activate/detail",
+        register_activate_detail_api,
+        name="api-register-activate-detail",
+    ),
+    path(
+        "email-tools/templates/detail",
+        email_templates_detail_api,
+        name="api-email-templates-detail",
+    ),
+    path(
+        "email-tools/templates/new/detail",
+        email_template_create_detail_api,
+        name="api-email-template-create-detail",
+    ),
+    path(
+        "email-tools/templates/<int:template_id>/detail",
+        email_template_edit_detail_api,
+        name="api-email-template-edit-detail",
+    ),
+    path(
+        "email-tools/images/detail",
+        email_images_detail_api,
+        name="api-email-images-detail",
+    ),
+    path(
+        "email-tools/send-mail/detail",
+        send_mail_detail_api,
+        name="api-send-mail-detail",
+    ),
+    path(
+        "organizations/<int:organization_id>/membership/request/detail",
+        views_membership.membership_request_form_detail_api,
+        name="api-organization-membership-request-form-detail",
     ),
     path(
         "membership/request/<int:pk>/rescind",
@@ -245,6 +373,11 @@ urlpatterns = [
         name="api-membership-audit-log",
     ),
     path(
+        "membership/audit-log/detail",
+        membership_audit_log_detail_api,
+        name="api-membership-audit-log-detail",
+    ),
+    path(
         "membership/sponsors",
         views_membership.membership_sponsors_api,
         name="api-membership-sponsors",
@@ -286,9 +419,19 @@ urlpatterns = [
         name="api-account-invitations-pending",
     ),
     path(
+        "membership/invitations/pending/detail",
+        account_invitations_pending_detail_api,
+        name="api-account-invitations-pending-detail",
+    ),
+    path(
         "membership/invitations/accepted",
         account_invitations_accepted_api,
         name="api-account-invitations-accepted",
+    ),
+    path(
+        "membership/invitations/accepted/detail",
+        account_invitations_accepted_detail_api,
+        name="api-account-invitations-accepted-detail",
     ),
     path(
         "membership/invitations/refresh",
@@ -317,9 +460,19 @@ urlpatterns = [
         name="api-stats-membership-summary",
     ),
     path(
+        "stats/membership/summary/detail",
+        stats_membership_summary_api,
+        name="api-stats-membership-summary-detail",
+    ),
+    path(
         "stats/membership/charts/composition",
         stats_membership_composition_charts_api,
         name="api-stats-membership-composition-charts",
+    ),
+    path(
+        "stats/membership/charts/composition/detail",
+        stats_membership_composition_charts_detail_api,
+        name="api-stats-membership-composition-charts-detail",
     ),
     path(
         "stats/membership/charts/trends",
@@ -327,8 +480,18 @@ urlpatterns = [
         name="api-stats-membership-trends-charts",
     ),
     path(
+        "stats/membership/charts/trends/detail",
+        stats_membership_trends_charts_detail_api,
+        name="api-stats-membership-trends-charts-detail",
+    ),
+    path(
         "stats/membership/charts/retention",
         stats_membership_retention_chart_api,
         name="api-stats-membership-retention-chart",
+    ),
+    path(
+        "stats/membership/charts/retention/detail",
+        stats_membership_retention_chart_detail_api,
+        name="api-stats-membership-retention-chart-detail",
     ),
 ]

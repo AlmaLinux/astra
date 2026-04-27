@@ -48,7 +48,7 @@
     <div class="col-lg-8">
       <div
         data-election-detail-root
-        data-election-detail-info-api-url="{% url 'api-election-detail-info' election.id %}"
+        data-election-detail-info-api-url="{% url 'api-election-detail-page' election.id %}"
         data-election-detail-candidates-api-url="{% url 'api-election-detail-candidates' election.id %}"
         data-election-detail-user-profile-url-template="{% url 'user-profile' '__username__' %}"
       ></div>
@@ -62,7 +62,7 @@
         <div class="card-body">
           <div
             data-election-detail-action-root
-            data-election-detail-info-api-url="{% url 'api-election-detail-info' election.id %}"
+            data-election-detail-info-api-url="{% url 'api-election-detail-page' election.id %}"
             data-election-vote-url="{% url 'election-vote' election.id %}"
             data-election-membership-request-url="{% url 'membership-request' %}"
             data-election-audit-log-url="{% url 'election-audit-log' election.id %}"

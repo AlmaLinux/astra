@@ -1,12 +1,15 @@
 import datetime
+import json
 import logging
 from smtplib import SMTPRecipientsRefused
 from urllib.parse import quote
 
+from django import forms
 from django.conf import settings
 from django.contrib import messages
 from django.core import signing
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.middleware.csrf import get_token
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -35,6 +38,18 @@ from .forms_registration import PasswordSetForm, RegistrationForm, ResendRegistr
 from .tokens import make_registration_activation_token, read_registration_activation_token
 
 logger = logging.getLogger(__name__)
+
+_REGISTRATION_ALLOWED_FIELD_ATTRS = {
+    "autocomplete",
+    "autocapitalize",
+    "autocorrect",
+    "inputmode",
+    "maxlength",
+    "minlength",
+    "pattern",
+    "placeholder",
+    "spellcheck",
+}
 
 REGISTRATION_TEMPORARILY_UNAVAILABLE_MESSAGE = (
     "Registration is temporarily unavailable. Please try again in a few minutes. "
@@ -196,15 +211,29 @@ def _send_registration_email(
     )
 
 
-def register(request: HttpRequest) -> HttpResponse:
-    if request.user.is_authenticated:
-        return redirect("home")
+def _registration_json(value: object) -> str:
+    return json.dumps(value, separators=(",", ":")).replace("</", "<\\/")
 
-    if request.method == "POST" and not settings.REGISTRATION_OPEN:
-        messages.warning(request, "Registration is closed at the moment.")
-        return redirect("login")
 
-    invite_token = _normalize_str(request.GET.get("invite"))
+def _registration_json_response(payload: dict[str, object], *, status: int = 200) -> JsonResponse:
+    response = JsonResponse(payload, status=status)
+    response["Cache-Control"] = "private, no-cache"
+    return response
+
+
+def _register_query_invite_token(request: HttpRequest) -> str:
+    return _normalize_str(request.GET.get("invite"))
+
+
+def _build_register_tab_url(*, route_name: str, invite_token: str) -> str:
+    base_url = reverse(route_name)
+    if not invite_token:
+        return base_url
+    return f"{base_url}?invite={quote(invite_token)}"
+
+
+def _load_registration_invitation_token(request: HttpRequest) -> str:
+    invite_token = _register_query_invite_token(request)
     invitation_token = ""
     if invite_token:
         invitation = load_account_invitation_from_token(invite_token)
@@ -215,6 +244,239 @@ def register(request: HttpRequest) -> HttpResponse:
         session_invite_token = _normalize_str(request.session.get(PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY))
         if session_invite_token and load_account_invitation_from_token(session_invite_token) is not None:
             invitation_token = session_invite_token
+    return invitation_token
+
+
+def _registration_field_widget_type(widget: forms.Widget) -> str:
+    if isinstance(widget, forms.HiddenInput):
+        return "hidden"
+    if isinstance(widget, forms.CheckboxInput):
+        return "checkbox"
+    if isinstance(widget, forms.EmailInput):
+        return "email"
+    if isinstance(widget, forms.PasswordInput):
+        return "password"
+    return "text"
+
+
+def _serialize_registration_form_field(*, bound_field: forms.BoundField) -> dict[str, object]:
+    widget = bound_field.field.widget
+    widget_attrs = bound_field.build_widget_attrs(widget.attrs)
+    widget_context = widget.get_context(bound_field.html_name, bound_field.value(), widget_attrs)["widget"]
+    attrs = {
+        name: str(value)
+        for name, value in widget_context["attrs"].items()
+        if value is not None and name in _REGISTRATION_ALLOWED_FIELD_ATTRS
+    }
+    payload: dict[str, object] = {
+        "name": bound_field.name,
+        "id": bound_field.id_for_label,
+        "widget": _registration_field_widget_type(widget),
+        "value": "" if widget_context.get("value") is None else str(widget_context.get("value")),
+        "required": bool(bound_field.field.required),
+        "disabled": bool(bound_field.field.disabled),
+        "errors": [str(error) for error in bound_field.errors],
+        "attrs": attrs,
+    }
+    if isinstance(widget, forms.CheckboxInput):
+        payload["checked"] = bool(widget_context["attrs"].get("checked"))
+    return payload
+
+
+def _serialize_registration_form(*, form: RegistrationForm | ResendRegistrationEmailForm | PasswordSetForm) -> dict[str, object]:
+    return {
+        "is_bound": form.is_bound,
+        "non_field_errors": [str(error) for error in form.non_field_errors()],
+        "fields": [_serialize_registration_form_field(bound_field=field) for field in form],
+    }
+
+
+def _build_register_payload(*, form: RegistrationForm, registration_open: bool) -> dict[str, object]:
+    return {
+        "registration_open": registration_open,
+        "form": _serialize_registration_form(form=form),
+    }
+
+
+def _build_register_confirm_payload(*, username: str, email: str | None, form: ResendRegistrationEmailForm) -> dict[str, object]:
+    return {
+        "username": username,
+        "email": email,
+        "form": _serialize_registration_form(form=form),
+    }
+
+
+def _build_register_activate_payload(*, username: str, form: PasswordSetForm) -> dict[str, object]:
+    return {
+        "username": username,
+        "form": _serialize_registration_form(form=form),
+    }
+
+
+def _render_register_page(
+    request: HttpRequest,
+    *,
+    form: RegistrationForm,
+    registration_open: bool,
+    status: int = 200,
+) -> HttpResponse:
+    invite_token = _register_query_invite_token(request)
+    return render(
+        request,
+        "core/register.html",
+        {
+            "form": form,
+            "registration_open": registration_open,
+            "register_api_url": reverse("api-register-detail"),
+            "register_login_url": _build_register_tab_url(route_name="login", invite_token=invite_token),
+            "register_register_url": _build_register_tab_url(route_name="register", invite_token=invite_token),
+            "register_submit_url": reverse("register"),
+            "register_csrf_token": get_token(request),
+            "register_initial_payload_json": _registration_json(
+                _build_register_payload(form=form, registration_open=registration_open)
+            ),
+        },
+        status=status,
+    )
+
+
+def _render_register_confirm_page(
+    request: HttpRequest,
+    *,
+    username: str,
+    email: str | None,
+    first_name: str | None,
+    last_name: str | None,
+    form: ResendRegistrationEmailForm,
+) -> HttpResponse:
+    return render(
+        request,
+        "core/register_confirm.html",
+        {
+            "username": username,
+            "email": email,
+            "first_name": first_name,
+            "last_name": last_name,
+            "form": form,
+            "register_confirm_api_url": f'{reverse("api-register-confirm-detail")}?username={quote(username)}',
+            "register_confirm_submit_url": request.get_full_path(),
+            "register_confirm_login_url": reverse("login"),
+            "register_confirm_csrf_token": get_token(request),
+            "register_confirm_initial_payload_json": _registration_json(
+                _build_register_confirm_payload(username=username, email=email, form=form)
+            ),
+        },
+    )
+
+
+def _render_register_activate_page(
+    request: HttpRequest,
+    *,
+    username: str,
+    form: PasswordSetForm,
+) -> HttpResponse:
+    token_string = _normalize_str(request.GET.get("token"))
+    return render(
+        request,
+        "core/register_activate.html",
+        {
+            "form": form,
+            "username": username,
+            "register_activate_api_url": f'{reverse("api-register-activate-detail")}?token={quote(token_string)}',
+            "register_activate_submit_url": request.get_full_path(),
+            "register_activate_start_over_url": reverse("register"),
+            "register_activate_csrf_token": get_token(request),
+            "register_activate_initial_payload_json": _registration_json(
+                _build_register_activate_payload(username=username, form=form)
+            ),
+        },
+    )
+
+
+def register_detail_api(request: HttpRequest) -> JsonResponse:
+    if request.method != "GET":
+        return _registration_json_response({"error": "Method not allowed."}, status=405)
+
+    invitation_token = _load_registration_invitation_token(request)
+    form = RegistrationForm(initial={"invitation_token": invitation_token})
+    return _registration_json_response(
+        _build_register_payload(form=form, registration_open=settings.REGISTRATION_OPEN)
+    )
+
+
+def register_confirm_detail_api(request: HttpRequest) -> JsonResponse:
+    if request.method != "GET":
+        return _registration_json_response({"error": "Method not allowed."}, status=405)
+
+    username = _normalize_str(request.GET.get("username"))
+    if not username:
+        return _registration_json_response({"error": "Username is required."}, status=400)
+
+    try:
+        stage_data = _load_registration_stage_data(username)
+    except Exception as exc:
+        if isinstance(exc, FreeIPAUnavailableError) or _is_freeipa_availability_error(exc):
+            raise
+        return _registration_json_response({"error": "Unable to verify registration."}, status=400)
+
+    email = None
+    if isinstance(stage_data, dict):
+        raw_email = stage_data.get("mail")
+        email = (raw_email[0] if raw_email else None) if isinstance(raw_email, list) else raw_email
+
+    form = ResendRegistrationEmailForm(initial={"username": username})
+    return _registration_json_response(
+        _build_register_confirm_payload(username=username, email=email, form=form)
+    )
+
+
+def register_activate_detail_api(request: HttpRequest) -> JsonResponse:
+    if request.method != "GET":
+        return _registration_json_response({"error": "Method not allowed."}, status=405)
+
+    token_string = _normalize_str(request.GET.get("token"))
+    if not token_string:
+        return _registration_json_response({"error": "Token is required."}, status=400)
+
+    try:
+        token = read_registration_activation_token(token_string)
+    except signing.SignatureExpired:
+        return _registration_json_response({"error": "Token expired."}, status=400)
+    except signing.BadSignature:
+        return _registration_json_response({"error": "Token invalid."}, status=400)
+
+    username = _normalize_str(token.get("u"))
+    token_email = _normalize_str(token.get("e")).lower()
+    try:
+        _client, stage_data = _load_registration_stage_data(username, include_client=True)
+    except Exception as exc:
+        if isinstance(exc, FreeIPAUnavailableError) or _is_freeipa_availability_error(exc):
+            raise
+        return _registration_json_response({"error": "Unable to verify registration."}, status=400)
+
+    if stage_data is None:
+        return _registration_json_response({"error": "User not found."}, status=404)
+
+    user_email = None
+    if isinstance(stage_data, dict):
+        raw_email = stage_data.get("mail")
+        user_email = (raw_email[0] if raw_email else None) if isinstance(raw_email, list) else raw_email
+    if _normalize_str(user_email).lower() != token_email:
+        return _registration_json_response({"error": "Token email mismatch."}, status=400)
+
+    form = PasswordSetForm()
+    return _registration_json_response(_build_register_activate_payload(username=username, form=form))
+
+
+def register(request: HttpRequest) -> HttpResponse:
+    if request.user.is_authenticated:
+        return redirect("home")
+
+    if request.method == "POST" and not settings.REGISTRATION_OPEN:
+        messages.warning(request, "Registration is closed at the moment.")
+        return redirect("login")
+
+    invitation_token = _load_registration_invitation_token(request)
 
     form = RegistrationForm(request.POST or None, initial={"invitation_token": invitation_token})
 
@@ -243,12 +505,7 @@ def register(request: HttpRequest) -> HttpResponse:
                 subject=subject,
             )
 
-            return render(
-                request,
-                "core/register.html",
-                {"form": form, "registration_open": settings.REGISTRATION_OPEN},
-                status=429,
-            )
+            return _render_register_page(request, form=form, registration_open=settings.REGISTRATION_OPEN, status=429)
 
     if request.method == "POST" and form.is_valid():
         username = form.cleaned_data["username"]
@@ -300,12 +557,12 @@ def register(request: HttpRequest) -> HttpResponse:
             _ = result
         except exceptions.DuplicateEntry:
             form.add_error(None, f"The username '{username}' or the email address '{email}' are already taken.")
-            return render(request, "core/register.html", {"form": form, "registration_open": settings.REGISTRATION_OPEN})
+            return _render_register_page(request, form=form, registration_open=settings.REGISTRATION_OPEN)
         except exceptions.ValidationError as e:
             # FreeIPA often encodes field name inside the message; keep it generic.
             logger.info("Registration validation error username=%s error=%s", username, e)
             form.add_error(None, str(e))
-            return render(request, "core/register.html", {"form": form, "registration_open": settings.REGISTRATION_OPEN})
+            return _render_register_page(request, form=form, registration_open=settings.REGISTRATION_OPEN)
         except exceptions.Unauthorized as e:
             retry_attempted = get_client_calls > 1 or stageuser_add_calls > 1
             logged_freeipa_phase = last_unauthorized_phase or freeipa_phase
@@ -321,14 +578,14 @@ def register(request: HttpRequest) -> HttpResponse:
                 | exception_log_fields(e),
             )
             form.add_error(None, REGISTRATION_TEMPORARILY_UNAVAILABLE_MESSAGE)
-            return render(request, "core/register.html", {"form": form, "registration_open": settings.REGISTRATION_OPEN})
+            return _render_register_page(request, form=form, registration_open=settings.REGISTRATION_OPEN)
         except exceptions.FreeIPAError as e:
             logger.warning("Registration FreeIPA error username=%s error=%s", username, e)
             if settings.DEBUG:
                 form.add_error(None, f"An error occurred while creating the account (debug): {e}")
             else:
                 form.add_error(None, "An error occurred while creating the account, please try again.")
-            return render(request, "core/register.html", {"form": form, "registration_open": settings.REGISTRATION_OPEN})
+            return _render_register_page(request, form=form, registration_open=settings.REGISTRATION_OPEN)
         except Exception as e:
             logger.exception(
                 "Registration unexpected error username=%s",
@@ -339,7 +596,7 @@ def register(request: HttpRequest) -> HttpResponse:
                 form.add_error(None, f"Unable to create account (debug): {e}")
             else:
                 form.add_error(None, "Unable to create account due to an internal error.")
-            return render(request, "core/register.html", {"form": form, "registration_open": settings.REGISTRATION_OPEN})
+            return _render_register_page(request, form=form, registration_open=settings.REGISTRATION_OPEN)
 
         retry_attempted = get_client_calls > 1 or stageuser_add_calls > 1
         if retry_attempted:
@@ -381,7 +638,7 @@ def register(request: HttpRequest) -> HttpResponse:
 
         return redirect(f"{reverse('register-confirm')}?username={username}")
 
-    return render(request, "core/register.html", {"form": form, "registration_open": settings.REGISTRATION_OPEN})
+    return _render_register_page(request, form=form, registration_open=settings.REGISTRATION_OPEN)
 
 
 def confirm(request: HttpRequest) -> HttpResponse:
@@ -450,16 +707,13 @@ def confirm(request: HttpRequest) -> HttpResponse:
             )
         return redirect(request.get_full_path())
 
-    return render(
+    return _render_register_confirm_page(
         request,
-        "core/register_confirm.html",
-        {
-            "username": username,
-            "email": email,
-            "first_name": first_name,
-            "last_name": last_name,
-            "form": form,
-        },
+        username=username,
+        email=email,
+        first_name=first_name,
+        last_name=last_name,
+        form=form,
     )
 
 
@@ -609,4 +863,4 @@ def activate(request: HttpRequest) -> HttpResponse:
                 messages.warning(request, follow_up_warning)
             return redirect("login")
 
-    return render(request, "core/register_activate.html", {"form": form, "username": username})
+    return _render_register_activate_page(request, username=username, form=form)

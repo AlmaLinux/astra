@@ -1,13 +1,183 @@
 <script setup lang="ts">
-import type { UserProfileLinkItem, UserProfileSummaryBootstrap } from "./types";
+import { computed } from "vue";
 
-defineProps<{
+import type { UserProfileSummaryBootstrap } from "./types";
+
+const props = defineProps<{
   bootstrap: UserProfileSummaryBootstrap;
+  currentTimeLabel: string;
   settingsProfileUrl: string;
 }>();
 
-function externalLinkTarget(item: UserProfileLinkItem): string | undefined {
-  return item.href ? "_blank" : undefined;
+const SOCIAL_PLATFORM_COPY: Record<string, { label: string; title: string; icon: string }> = {
+  bluesky: { label: "Bluesky", title: "Bluesky URLs", icon: "fab fa-bluesky" },
+  mastodon: { label: "Mastodon", title: "Mastodon URLs", icon: "fab fa-mastodon" },
+  x: { label: "X (Twitter)", title: "X (Twitter) URLs", icon: "fab fa-x-twitter" },
+  linkedin: { label: "LinkedIn", title: "LinkedIn URLs", icon: "fab fa-linkedin" },
+  facebook: { label: "Facebook", title: "Facebook URLs", icon: "fab fa-facebook" },
+  instagram: { label: "Instagram", title: "Instagram URLs", icon: "fab fa-instagram" },
+  youtube: { label: "YouTube", title: "YouTube URLs", icon: "fab fa-youtube" },
+  reddit: { label: "Reddit", title: "Reddit URLs", icon: "fab fa-reddit" },
+  tiktok: { label: "TikTok", title: "TikTok URLs", icon: "fab fa-tiktok" },
+  signal: { label: "Signal", title: "Signal URLs", icon: "fab fa-signal-messenger" },
+};
+
+function hostForUrl(url: string): string {
+  const value = String(url || "").trim();
+  if (!value) {
+    return "";
+  }
+
+  try {
+    return new URL(value).hostname.toLowerCase().replace(/\.$/, "");
+  } catch {
+    try {
+      return new URL(`https://${value}`).hostname.toLowerCase().replace(/\.$/, "");
+    } catch {
+      return "";
+    }
+  }
+}
+
+function safeExternalHref(url: string): string | null {
+  const value = String(url || "").trim();
+  if (!value) {
+    return null;
+  }
+
+  if (value.startsWith("//")) {
+    try {
+      const parsed = new URL(`https:${value}`);
+      return parsed.hostname ? `https:${value}` : null;
+    } catch {
+      return null;
+    }
+  }
+
+  try {
+    const parsed = new URL(value);
+    if ((parsed.protocol === "http:" || parsed.protocol === "https:") && parsed.hostname) {
+      return value;
+    }
+    return null;
+  } catch {
+    try {
+      const parsed = new URL(`https://${value}`);
+      return parsed.hostname ? `https://${value}` : null;
+    } catch {
+      return null;
+    }
+  }
+}
+
+function socialDisplayText(platform: string, url: string): string {
+  const value = String(url || "").trim();
+  const host = hostForUrl(value);
+  const fallback = host || value;
+  if (!value) {
+    return fallback;
+  }
+
+  let parsed: URL | null = null;
+  try {
+    parsed = new URL(value);
+  } catch {
+    try {
+      parsed = new URL(`https://${value}`);
+    } catch {
+      parsed = null;
+    }
+  }
+
+  const segments = (parsed?.pathname || "").split("/").filter(Boolean);
+
+  switch (platform) {
+    case "bluesky": {
+      const profileIndex = segments.indexOf("profile");
+      if (profileIndex !== -1 && segments[profileIndex + 1]) {
+        return `@${segments[profileIndex + 1].replace(/^@/, "")}`;
+      }
+      if (host.endsWith(".bsky.social") && host !== "bsky.social") {
+        return `@${host}`;
+      }
+      return fallback;
+    }
+    case "x":
+    case "instagram":
+    case "tiktok":
+      return segments[0] ? `@${segments[0].replace(/^@/, "")}` : fallback;
+    case "reddit":
+      if ((segments[0] === "u" || segments[0] === "user") && segments[1]) {
+        return `u/${segments[1]}`;
+      }
+      if (segments[0] === "r" && segments[1]) {
+        return `r/${segments[1]}`;
+      }
+      return fallback;
+    case "mastodon": {
+      const atSegment = segments.find((segment) => segment.startsWith("@") && segment.replace(/^@/, ""));
+      if (atSegment && host) {
+        return `@${atSegment.replace(/^@/, "")}@${host}`;
+      }
+      return fallback;
+    }
+    case "signal":
+      return host || "Signal link";
+    case "youtube":
+      return segments[0]?.startsWith("@") ? segments[0] : fallback;
+    case "linkedin":
+      return segments[0] === "in" && segments[1] ? segments[1] : fallback;
+    default:
+      return fallback;
+  }
+}
+
+function countryDisplayName(countryCode: string): string {
+  const normalizedCode = String(countryCode || "").trim().toUpperCase();
+  if (!normalizedCode) {
+    return "Not provided";
+  }
+
+  try {
+    const displayNames = new Intl.DisplayNames(["en"], { type: "region" });
+    return displayNames.of(normalizedCode) || normalizedCode;
+  } catch {
+    return normalizedCode;
+  }
+}
+
+const socialProfiles = computed(() => {
+  return props.bootstrap.socialProfiles
+    .map((profile) => {
+      const copy = SOCIAL_PLATFORM_COPY[profile.platform];
+      if (!copy) {
+        return null;
+      }
+
+      return {
+        ...copy,
+        platform: profile.platform,
+        urls: profile.urls.map((url) => ({
+          href: safeExternalHref(url),
+          text: socialDisplayText(profile.platform, url),
+        })),
+      };
+    })
+    .filter((profile): profile is { label: string; title: string; icon: string; platform: string; urls: Array<{ href: string | null; text: string }> } => profile !== null);
+});
+
+const websiteLinks = computed(() => props.bootstrap.websiteUrls.map((url) => ({
+  href: safeExternalHref(url),
+  text: String(url || "").trim(),
+})).filter((item) => item.text));
+
+const rssLinks = computed(() => props.bootstrap.rssUrls.map((url) => ({
+  href: safeExternalHref(url),
+  text: String(url || "").trim(),
+})).filter((item) => item.text));
+
+function externalLinkTarget(href: string | null): string | undefined {
+  return href ? "_blank" : undefined;
 }
 </script>
 
@@ -50,7 +220,7 @@ function externalLinkTarget(item: UserProfileLinkItem): string | undefined {
       <ul id="user_attributes" class="list-group list-group-flush">
         <li v-if="bootstrap.viewerIsMembershipCommittee" class="list-group-item d-flex justify-content-between align-items-center">
           <strong class="profile-attr-label" title="Country"><i class="fas fa-flag" /> Country</strong>
-          <div class="profile-attr-value text-end">{{ bootstrap.profileCountry }}</div>
+          <div class="profile-attr-value text-end">{{ countryDisplayName(bootstrap.countryCode) }}</div>
         </li>
 
         <li v-if="bootstrap.pronouns" class="list-group-item d-flex justify-content-between align-items-center">
@@ -71,7 +241,7 @@ function externalLinkTarget(item: UserProfileLinkItem): string | undefined {
           <li id="user-timezone" class="list-group-item" :data-timezone="bootstrap.timezoneName">
             <div class="d-flex justify-content-between align-items-center">
               <strong class="profile-attr-label" title="Current Time"><i class="far fa-clock" /> Current Time</strong>
-              <div id="user-time" class="profile-attr-value text-end">{{ bootstrap.currentTimeLabel }}</div>
+              <div id="user-time" class="profile-attr-value text-end">{{ currentTimeLabel }}</div>
             </div>
           </li>
         </template>
@@ -83,31 +253,31 @@ function externalLinkTarget(item: UserProfileLinkItem): string | undefined {
           </div>
         </li>
 
-        <li v-for="profile in bootstrap.socialProfiles" :key="profile.label" class="list-group-item d-flex justify-content-between">
+        <li v-for="profile in socialProfiles" :key="profile.platform" class="list-group-item d-flex justify-content-between">
           <strong class="profile-attr-label" :title="profile.title"><i :class="profile.icon" /> {{ profile.label }}</strong>
           <div class="profile-attr-value text-end">
             <div v-for="item in profile.urls" :key="`${profile.label}-${item.text}`" class="mb-0 text-monospace">
-              <a v-if="item.href" :href="item.href" :target="externalLinkTarget(item)" rel="noopener noreferrer">{{ item.text }}</a>
+              <a v-if="item.href" :href="item.href" :target="externalLinkTarget(item.href)" rel="noopener noreferrer">{{ item.text }}</a>
               <template v-else>{{ item.text }}</template>
             </div>
           </div>
         </li>
 
-        <li v-if="bootstrap.websiteUrls.length" class="list-group-item d-flex justify-content-between">
+        <li v-if="websiteLinks.length" class="list-group-item d-flex justify-content-between">
           <strong class="profile-attr-label" title="Website URLs"><i class="fas fa-link" /> Website</strong>
           <div class="profile-attr-value text-end">
-            <div v-for="item in bootstrap.websiteUrls" :key="`website-${item.text}`" class="mb-0 text-monospace">
-              <a v-if="item.href" :href="item.href" :target="externalLinkTarget(item)" rel="noopener noreferrer">{{ item.text }}</a>
+            <div v-for="item in websiteLinks" :key="`website-${item.text}`" class="mb-0 text-monospace">
+              <a v-if="item.href" :href="item.href" :target="externalLinkTarget(item.href)" rel="noopener noreferrer">{{ item.text }}</a>
               <template v-else>{{ item.text }}</template>
             </div>
           </div>
         </li>
 
-        <li v-if="bootstrap.rssUrls.length" class="list-group-item d-flex justify-content-between">
+        <li v-if="rssLinks.length" class="list-group-item d-flex justify-content-between">
           <strong class="profile-attr-label" title="RSS URL"><i class="fas fa-rss" /> RSS</strong>
           <div class="profile-attr-value text-end">
-            <div v-for="item in bootstrap.rssUrls" :key="`rss-${item.text}`" class="mb-0 text-monospace">
-              <a v-if="item.href" :href="item.href" :target="externalLinkTarget(item)" rel="noopener noreferrer">{{ item.text }}</a>
+            <div v-for="item in rssLinks" :key="`rss-${item.text}`" class="mb-0 text-monospace">
+              <a v-if="item.href" :href="item.href" :target="externalLinkTarget(item.href)" rel="noopener noreferrer">{{ item.text }}</a>
               <template v-else>{{ item.text }}</template>
             </div>
           </div>

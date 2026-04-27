@@ -1693,6 +1693,40 @@ class MembershipStatsSplitApiTests(TestCase):
         self.assertIn("nationality_all_users", payload["charts"])
         self.assertIn("nationality_active_members", payload["charts"])
 
+    def test_composition_endpoints_share_the_same_builder_boundary(self) -> None:
+        legacy_payload = {
+            "generated_at": "2026-01-01T00:00:00+00:00",
+            "charts": {
+                "membership_types": {"labels": ["Individual"], "counts": [2]},
+                "nationality_all_users": {"labels": ["US"], "counts": [2]},
+                "nationality_active_members": {"labels": ["US"], "counts": [1]},
+            },
+        }
+        detail_payload = {
+            "generated_at": "2026-01-01T00:00:00+00:00",
+            "charts": {
+                "membership_types": [
+                    {"membership_type": {"code": "individual", "name": "Individual"}, "count": 2}
+                ],
+                "nationality_all_users": [{"country_code": "US", "count": 2}],
+                "nationality_active_members": [{"country_code": "US", "count": 1}],
+            },
+        }
+
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
+            with patch(
+                "core.views_membership_admin._build_membership_stats_composition_payloads",
+                return_value=(legacy_payload, detail_payload),
+            ) as builder:
+                legacy_resp = self.client.get(reverse("api-stats-membership-composition-charts"))
+                detail_resp = self.client.get(reverse("api-stats-membership-composition-charts-detail"))
+
+        self.assertEqual(legacy_resp.status_code, 200)
+        self.assertEqual(detail_resp.status_code, 200)
+        self.assertEqual(builder.call_count, 2)
+        self.assertEqual(legacy_resp.json(), legacy_payload)
+        self.assertEqual(detail_resp.json(), detail_payload)
+
     def test_trends_charts_endpoint_requires_permission(self) -> None:
         FreeIPAPermissionGrant.objects.all().delete()
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
@@ -1710,6 +1744,51 @@ class MembershipStatsSplitApiTests(TestCase):
         self.assertIn("decisions_trend", payload["charts"])
         self.assertIn("expirations_upcoming", payload["charts"])
         self.assertIn("days_param", payload)
+
+    def test_trends_endpoints_share_the_same_builder_boundary(self) -> None:
+        legacy_payload = {
+            "generated_at": "2026-01-01T00:00:00+00:00",
+            "days_param": "365",
+            "charts": {
+                "requests_trend": {"labels": ["2025-12"], "counts": [4]},
+                "decisions_trend": {
+                    "labels": ["2025-12"],
+                    "datasets": [
+                        {"label": "approved", "data": [3]},
+                        {"label": "rejected", "data": [1]},
+                        {"label": "ignored", "data": [0]},
+                        {"label": "rescinded", "data": [0]},
+                    ],
+                },
+                "expirations_upcoming": {"labels": ["2026-02"], "counts": [1]},
+            },
+        }
+        detail_payload = {
+            "generated_at": "2026-01-01T00:00:00+00:00",
+            "days_param": "365",
+            "charts": {
+                "requests_trend": [{"period": "2025-12", "count": 4}],
+                "decisions_trend": [
+                    {"period": "2025-12", "status": "approved", "count": 3},
+                    {"period": "2025-12", "status": "rejected", "count": 1},
+                ],
+                "expirations_upcoming": [{"period": "2026-02", "count": 1}],
+            },
+        }
+
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
+            with patch(
+                "core.views_membership_admin._build_membership_stats_trends_payloads",
+                return_value=(legacy_payload, detail_payload),
+            ) as builder:
+                legacy_resp = self.client.get(reverse("api-stats-membership-trends-charts"), {"days": "365"})
+                detail_resp = self.client.get(reverse("api-stats-membership-trends-charts-detail"), {"days": "365"})
+
+        self.assertEqual(legacy_resp.status_code, 200)
+        self.assertEqual(detail_resp.status_code, 200)
+        self.assertEqual(builder.call_count, 2)
+        self.assertEqual(legacy_resp.json(), legacy_payload)
+        self.assertEqual(detail_resp.json(), detail_payload)
 
     def test_trends_charts_endpoint_invalid_days_returns_400(self) -> None:
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
@@ -1736,6 +1815,48 @@ class MembershipStatsSplitApiTests(TestCase):
         self.assertIn("lapsed_then_renewed", cohorts)
         self.assertIn("lapsed_not_renewed", cohorts)
 
+    def test_retention_endpoints_share_the_same_builder_boundary(self) -> None:
+        legacy_payload = {
+            "generated_at": "2026-01-01T00:00:00+00:00",
+            "charts": {
+                "retention_cohorts_12m": {
+                    "labels": ["2025-01"],
+                    "cohort_sizes": [8],
+                    "retained": [5],
+                    "lapsed_then_renewed": [2],
+                    "lapsed_not_renewed": [1],
+                }
+            },
+        }
+        detail_payload = {
+            "generated_at": "2026-01-01T00:00:00+00:00",
+            "charts": {
+                "retention_cohorts_12m": [
+                    {
+                        "cohort_month": "2025-01",
+                        "cohort_size": 8,
+                        "retained": 5,
+                        "lapsed_then_renewed": 2,
+                        "lapsed_not_renewed": 1,
+                    }
+                ]
+            },
+        }
+
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
+            with patch(
+                "core.views_membership_admin._build_membership_stats_retention_payloads",
+                return_value=(legacy_payload, detail_payload),
+            ) as builder:
+                legacy_resp = self.client.get(reverse("api-stats-membership-retention-chart"))
+                detail_resp = self.client.get(reverse("api-stats-membership-retention-chart-detail"))
+
+        self.assertEqual(legacy_resp.status_code, 200)
+        self.assertEqual(detail_resp.status_code, 200)
+        self.assertEqual(builder.call_count, 2)
+        self.assertEqual(legacy_resp.json(), legacy_payload)
+        self.assertEqual(detail_resp.json(), detail_payload)
+
     def test_stats_page_renders_vue_root_with_new_api_urls(self) -> None:
         session = self.client.session
         session["_freeipa_username"] = "reviewer"
@@ -1744,7 +1865,51 @@ class MembershipStatsSplitApiTests(TestCase):
             resp = self.client.get(reverse("membership-stats"))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "data-membership-stats-root")
-        self.assertContains(resp, reverse("api-stats-membership-summary"))
-        self.assertContains(resp, reverse("api-stats-membership-composition-charts"))
-        self.assertContains(resp, reverse("api-stats-membership-trends-charts"))
-        self.assertContains(resp, reverse("api-stats-membership-retention-chart"))
+        self.assertContains(resp, reverse("api-stats-membership-summary-detail"))
+        self.assertContains(resp, reverse("api-stats-membership-composition-charts-detail"))
+        self.assertContains(resp, reverse("api-stats-membership-trends-charts-detail"))
+        self.assertContains(resp, reverse("api-stats-membership-retention-chart-detail"))
+
+    def test_summary_detail_endpoint_returns_same_data_only_shape(self) -> None:
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
+            with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
+                resp = self.client.get(reverse("api-stats-membership-summary-detail"))
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertIn("summary", payload)
+        self.assertIn("generated_at", payload)
+        self.assertIn("days_param", payload)
+        self.assertNotIn("labels", payload)
+
+    def test_composition_detail_endpoint_returns_raw_rows_instead_of_chart_labels(self) -> None:
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
+            with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
+                resp = self.client.get(reverse("api-stats-membership-composition-charts-detail"))
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        charts = payload["charts"]
+        self.assertIn("membership_types", charts)
+        self.assertIn("nationality_all_users", charts)
+        self.assertIn("nationality_active_members", charts)
+        self.assertEqual(charts["membership_types"], [])
+        self.assertEqual(charts["nationality_all_users"], [])
+        self.assertEqual(charts["nationality_active_members"], [])
+
+    def test_trends_detail_endpoint_returns_raw_period_rows_instead_of_chart_labels(self) -> None:
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
+            with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
+                resp = self.client.get(reverse("api-stats-membership-trends-charts-detail"))
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        charts = payload["charts"]
+        self.assertEqual(charts["requests_trend"], [])
+        self.assertEqual(charts["decisions_trend"], [])
+        self.assertEqual(charts["expirations_upcoming"], [])
+
+    def test_retention_detail_endpoint_returns_raw_cohort_rows_instead_of_chart_labels(self) -> None:
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
+            with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
+                resp = self.client.get(reverse("api-stats-membership-retention-chart-detail"))
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["charts"]["retention_cohorts_12m"], [])

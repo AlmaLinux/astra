@@ -3,10 +3,11 @@ import re
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 from django.contrib.messages import get_messages
 from django.contrib.staticfiles import finders
+from django.core.cache import cache
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from python_freeipa import exceptions
@@ -18,6 +19,66 @@ from core.views_auth import PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY
 
 
 class PasswordResetFlowTests(TestCase):
+    def test_password_reset_get_renders_vue_shell_contract(self) -> None:
+        response = self.client.get(reverse("password-reset"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-auth-recovery-password-reset-root=""')
+        self.assertContains(
+            response,
+            f'data-auth-recovery-password-reset-api-url="{reverse("api-password-reset-detail")}"',
+        )
+        self.assertContains(
+            response,
+            f'data-auth-recovery-password-reset-submit-url="{reverse("password-reset")}"',
+        )
+        self.assertContains(
+            response,
+            f'data-auth-recovery-password-reset-login-url="{reverse("login")}"',
+        )
+        self.assertNotContains(response, 'id="id_username_or_email"')
+
+    def test_password_reset_detail_api_returns_data_only_payload(self) -> None:
+        response = self.client.get(reverse("api-password-reset-detail"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload["form"]["is_bound"])
+        self.assertEqual(payload["form"]["fields"][0]["name"], "username_or_email")
+        self.assertNotIn("submit_url", payload)
+        self.assertNotIn("login_url", payload)
+        self.assertNotIn("title", payload)
+        self.assertEqual(response["Cache-Control"], "private, no-cache")
+
+    def test_password_reset_detail_endpoints_are_public_but_neighboring_password_reset_api_paths_require_auth(self) -> None:
+        token = make_password_reset_token({"u": "alice", "e": "alice@example.com", "lpc": ""})
+        current_user = SimpleNamespace(
+            username="alice",
+            email="alice@example.com",
+            last_password_change="",
+            first_name="Alice",
+            last_name="User",
+            full_name="Alice User",
+        )
+        otp_lookup_client = SimpleNamespace(otptoken_find=lambda **_kwargs: {"result": []})
+
+        with (
+            patch("core.views_auth.find_user_for_password_reset", autospec=True, return_value=current_user),
+            patch("core.views_auth.FreeIPAUser.get_client", autospec=True, return_value=otp_lookup_client),
+        ):
+            request_response = self.client.get(reverse("api-password-reset-detail"), HTTP_ACCEPT="application/json")
+            confirm_response = self.client.get(
+                f'{reverse("api-password-reset-confirm-detail")}?token={token}',
+                HTTP_ACCEPT="application/json",
+            )
+
+        blocked_response = self.client.get("/api/v1/password-reset/probe", HTTP_ACCEPT="application/json")
+
+        self.assertEqual(request_response.status_code, 200)
+        self.assertEqual(confirm_response.status_code, 200)
+        self.assertEqual(blocked_response.status_code, 403)
+        self.assertEqual(blocked_response.json(), {"ok": False, "error": "Authentication required."})
+
     def test_normalize_last_password_change_noncanonical_dict_repr_returns_original(self) -> None:
         noncanonical_repr = "{'__datetime__': '20260323074752Z',}"
         self.assertEqual(normalize_last_password_change(noncanonical_repr), noncanonical_repr)
@@ -569,6 +630,240 @@ class PasswordResetFlowTests(TestCase):
             "Your password has changed since you requested this link. Please request a new password reset email.",
             msgs,
         )
+
+    @override_settings(PASSWORD_RESET_TOKEN_TTL_SECONDS=60 * 60)
+    def test_password_reset_confirm_get_renders_vue_shell_contract(self) -> None:
+        token = make_password_reset_token(
+            {
+                "u": "alice",
+                "e": "alice@example.com",
+                "lpc": "",
+            }
+        )
+        current_user = SimpleNamespace(
+            username="alice",
+            email="alice@example.com",
+            last_password_change="",
+            first_name="Alice",
+            last_name="User",
+            full_name="Alice User",
+        )
+        otp_lookup_client = SimpleNamespace(otptoken_find=lambda **_kwargs: {"result": []})
+
+        with (
+            patch("core.views_auth.find_user_for_password_reset", autospec=True, return_value=current_user),
+            patch("core.views_auth.FreeIPAUser.get_client", autospec=True, return_value=otp_lookup_client),
+        ):
+            response = self.client.get(f'{reverse("password-reset-confirm")}?token={token}', follow=False)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-auth-recovery-password-reset-confirm-root=""')
+        self.assertContains(
+            response,
+                f'data-auth-recovery-password-reset-confirm-api-url="{reverse("api-password-reset-confirm-detail")}?token={quote(token)}"',
+        )
+        self.assertContains(
+            response,
+                f'data-auth-recovery-password-reset-confirm-submit-url="{reverse("password-reset-confirm")}?token={quote(token)}"',
+        )
+        self.assertContains(
+            response,
+            f'data-auth-recovery-password-reset-confirm-login-url="{reverse("login")}"',
+        )
+        self.assertNotContains(response, 'id="id_password"')
+
+    @override_settings(PASSWORD_RESET_TOKEN_TTL_SECONDS=60 * 60)
+    def test_password_reset_confirm_detail_api_returns_data_only_payload(self) -> None:
+        token = make_password_reset_token(
+            {
+                "u": "alice",
+                "e": "alice@example.com",
+                "lpc": "",
+            }
+        )
+        current_user = SimpleNamespace(
+            username="alice",
+            email="alice@example.com",
+            last_password_change="",
+            first_name="Alice",
+            last_name="User",
+            full_name="Alice User",
+        )
+        otp_lookup_client = SimpleNamespace(otptoken_find=lambda **_kwargs: {"result": []})
+
+        with (
+            patch("core.views_auth.find_user_for_password_reset", autospec=True, return_value=current_user),
+            patch("core.views_auth.FreeIPAUser.get_client", autospec=True, return_value=otp_lookup_client),
+        ):
+            response = self.client.get(f'{reverse("api-password-reset-confirm-detail")}?token={token}')
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["username"], "alice")
+        self.assertFalse(payload["has_otp"])
+        self.assertFalse(payload["form"]["is_bound"])
+        self.assertEqual(payload["form"]["fields"][0]["name"], "password")
+        self.assertEqual(payload["form"]["fields"][1]["name"], "password_confirm")
+        self.assertEqual(payload["form"]["fields"][2]["name"], "otp")
+        self.assertNotIn("submit_url", payload)
+        self.assertNotIn("login_url", payload)
+        self.assertEqual(response["Cache-Control"], "private, no-cache")
+
+    @override_settings(
+        PASSWORD_RESET_TOKEN_TTL_SECONDS=60 * 60,
+        AUTH_RATE_LIMIT_PASSWORD_RESET_LIMIT=1,
+        AUTH_RATE_LIMIT_PASSWORD_RESET_WINDOW_SECONDS=60,
+    )
+    def test_password_reset_confirm_detail_api_rate_limits_repeated_gets_before_repeated_ipa_lookups(self) -> None:
+        cache.clear()
+        token = make_password_reset_token(
+            {
+                "u": "alice",
+                "e": "alice@example.com",
+                "lpc": "",
+            }
+        )
+        current_user = SimpleNamespace(
+            username="alice",
+            email="alice@example.com",
+            last_password_change="",
+            first_name="Alice",
+            last_name="User",
+            full_name="Alice User",
+        )
+        otp_lookup_client = SimpleNamespace(otptoken_find=Mock(return_value={"result": []}))
+
+        with (
+            patch("core.views_auth.find_user_for_password_reset", autospec=True, return_value=current_user) as find_user_mock,
+            patch("core.views_auth.FreeIPAUser.get_client", autospec=True, return_value=otp_lookup_client),
+        ):
+            first_response = self.client.get(
+                f'{reverse("api-password-reset-confirm-detail")}?token={token}',
+                REMOTE_ADDR="198.51.100.31",
+            )
+            second_response = self.client.get(
+                f'{reverse("api-password-reset-confirm-detail")}?token={token}',
+                REMOTE_ADDR="198.51.100.31",
+            )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 429)
+        self.assertEqual(
+            second_response.json(),
+            {"error": "Too many password reset attempts. Please try again later."},
+        )
+        self.assertEqual(find_user_mock.call_count, 1)
+        self.assertEqual(otp_lookup_client.otptoken_find.call_count, 1)
+
+    @override_settings(
+        PASSWORD_RESET_TOKEN_TTL_SECONDS=60 * 60,
+        AUTH_RATE_LIMIT_PASSWORD_RESET_LIMIT=1,
+        AUTH_RATE_LIMIT_PASSWORD_RESET_WINDOW_SECONDS=60,
+    )
+    def test_password_reset_confirm_html_get_rate_limits_repeated_requests_before_repeated_ipa_lookups(self) -> None:
+        cache.clear()
+        token = make_password_reset_token(
+            {
+                "u": "alice",
+                "e": "alice@example.com",
+                "lpc": "",
+            }
+        )
+        current_user = SimpleNamespace(
+            username="alice",
+            email="alice@example.com",
+            last_password_change="",
+            first_name="Alice",
+            last_name="User",
+            full_name="Alice User",
+        )
+        otp_lookup_client = SimpleNamespace(otptoken_find=Mock(return_value={"result": []}))
+
+        with (
+            patch("core.views_auth.find_user_for_password_reset", autospec=True, return_value=current_user) as find_user_mock,
+            patch("core.views_auth.FreeIPAUser.get_client", autospec=True, return_value=otp_lookup_client),
+        ):
+            first_response = self.client.get(
+                f'{reverse("password-reset-confirm")}?token={token}',
+                REMOTE_ADDR="198.51.100.32",
+                follow=False,
+            )
+            second_response = self.client.get(
+                f'{reverse("password-reset-confirm")}?token={token}',
+                REMOTE_ADDR="198.51.100.32",
+                follow=False,
+            )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 302)
+        self.assertEqual(second_response["Location"], reverse("password-reset"))
+        self.assertEqual(find_user_mock.call_count, 1)
+        self.assertEqual(otp_lookup_client.otptoken_find.call_count, 1)
+
+        follow_response = self.client.get(second_response["Location"])
+        messages = [message.message for message in get_messages(follow_response.wsgi_request)]
+        self.assertIn("Too many password reset attempts. Please try again later.", messages)
+
+    @override_settings(
+        PASSWORD_RESET_TOKEN_TTL_SECONDS=60 * 60,
+        AUTH_RATE_LIMIT_PASSWORD_RESET_LIMIT=1,
+        AUTH_RATE_LIMIT_PASSWORD_RESET_WINDOW_SECONDS=60,
+    )
+    def test_password_reset_confirm_html_post_rate_limits_repeated_requests_before_repeated_ipa_lookups(self) -> None:
+        cache.clear()
+        token = make_password_reset_token(
+            {
+                "u": "alice",
+                "e": "alice@example.com",
+                "lpc": "",
+            }
+        )
+        current_user = SimpleNamespace(
+            username="alice",
+            email="alice@example.com",
+            last_password_change="",
+            first_name="Alice",
+            last_name="User",
+            full_name="Alice User",
+        )
+        otp_lookup_client = SimpleNamespace(otptoken_find=Mock(return_value={"result": []}))
+
+        with (
+            patch("core.views_auth.find_user_for_password_reset", autospec=True, return_value=current_user) as find_user_mock,
+            patch("core.views_auth.FreeIPAUser.get_client", autospec=True, return_value=otp_lookup_client),
+        ):
+            first_response = self.client.post(
+                reverse("password-reset-confirm"),
+                data={
+                    "token": token,
+                    "password": "S3curePassword!",
+                    "password_confirm": "MismatchPassword!",
+                    "otp": "",
+                },
+                REMOTE_ADDR="198.51.100.33",
+                follow=False,
+            )
+            second_response = self.client.post(
+                reverse("password-reset-confirm"),
+                data={
+                    "token": token,
+                    "password": "S3curePassword!",
+                    "password_confirm": "MismatchPassword!",
+                    "otp": "",
+                },
+                REMOTE_ADDR="198.51.100.33",
+                follow=False,
+            )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 302)
+        self.assertEqual(second_response["Location"], reverse("password-reset"))
+        self.assertEqual(find_user_mock.call_count, 1)
+        self.assertEqual(otp_lookup_client.otptoken_find.call_count, 1)
+
+        follow_response = self.client.get(second_response["Location"])
+        messages = [message.message for message in get_messages(follow_response.wsgi_request)]
+        self.assertIn("Too many password reset attempts. Please try again later.", messages)
 
     @override_settings(PASSWORD_RESET_TOKEN_TTL_SECONDS=60 * 60)
     def test_password_reset_confirm_sets_new_password(self):

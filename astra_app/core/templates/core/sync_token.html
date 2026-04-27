@@ -1,43 +1,26 @@
 {% extends 'core/base.html' %}
 
+{% load django_vite %}
+
 {% block title %}Sync OTP Token{% endblock %}
+
+{% block extra_head %}
+  {{ block.super }}
+  {% vite_hmr_client %}
+  {% vite_asset 'src/entrypoints/authRecovery.ts' %}
+{% endblock %}
 
 {% block header %}<h1 class="m-0">Sync OTP Token</h1>{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center">
-  <div class="col-md-7 col-lg-6">
-    <div class="card card-primary">
-      <div class="card-header">
-        <h3 class="card-title">Synchronize OTP Token</h3>
-      </div>
-
-      <form method="post" novalidate>
-        {% csrf_token %}
-
-        <div class="card-body">
-          {% if form.non_field_errors %}
-            <div class="alert alert-danger">{{ form.non_field_errors }}</div>
-          {% endif %}
-
-          <p class="text-muted">
-            Use this when your OTP token is out of sync and you cannot log in.
-            Enter two consecutive OTP codes from your authenticator app.
-          </p>
-
-          {% include "core/_form_field.html" with field=form.username %}
-          {% include "core/_form_field.html" with field=form.password %}
-          {% include "core/_form_field.html" with field=form.first_code %}
-          {% include "core/_form_field.html" with field=form.second_code %}
-          {% include "core/_form_field.html" with field=form.token %}
-        </div>
-
-        <div class="card-footer d-flex justify-content-between">
-          <a href="{% url 'login' %}" class="btn btn-outline-secondary" title="Return to login">Back to login</a>
-          <button type="submit" class="btn btn-primary" title="Sync your OTP token">Sync</button>
-        </div>
-      </form>
-    </div>
-  </div>
+<div
+  data-auth-recovery-otp-sync-root=""
+  data-auth-recovery-otp-sync-api-url="{{ auth_recovery_otp_sync_api_url }}"
+  data-auth-recovery-otp-sync-submit-url="{{ auth_recovery_otp_sync_submit_url }}"
+  data-auth-recovery-otp-sync-login-url="{{ auth_recovery_otp_sync_login_url }}"
+  data-auth-recovery-otp-sync-csrf-token="{{ auth_recovery_otp_sync_csrf_token }}"
+>
+  <script type="application/json" data-auth-recovery-initial-payload>{{ auth_recovery_otp_sync_initial_payload_json|safe }}</script>
+  <div class="text-muted">Loading OTP sync form...</div>
 </div>
 {% endblock %}

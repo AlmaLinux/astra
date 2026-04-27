@@ -15,7 +15,7 @@ const props = defineProps<{
   bootstrap: MembershipRequestDetailBootstrap;
 }>();
 
-const payload = ref<MembershipRequestDetailPayload | null>(null);
+const payload = ref<MembershipRequestDetailPayload | null>(props.bootstrap.initialPayload ?? null);
 const error = ref("");
 const actionError = ref("");
 const isLoading = ref(false);
@@ -121,6 +121,10 @@ function applyCompatibilityErrors(result: MembershipRequestCompatibilityResponse
 }
 
 async function load(): Promise<void> {
+  if (!props.bootstrap.apiUrl) {
+    return;
+  }
+
   isLoading.value = true;
   error.value = "";
   actionError.value = "";
@@ -225,7 +229,9 @@ function segmentKey(segment: MembershipRequestResponseSegment, index: number): s
 }
 
 onMounted(async () => {
-  await load();
+  if (payload.value === null) {
+    await load();
+  }
 });
 </script>
 

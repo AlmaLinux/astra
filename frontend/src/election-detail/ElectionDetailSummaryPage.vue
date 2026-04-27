@@ -4,6 +4,7 @@ import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import {
   buildElectionDetailRouteUrl,
   readElectionDetailRouteState,
+  type ElectionExclusionGroup,
   type ElectionCandidateItem,
   type ElectionCandidatesResponse,
   type ElectionDetailBootstrap,
@@ -28,6 +29,10 @@ let turnoutChart: { destroy?: () => void } | null = null;
 let popStateHandler: (() => void) | null = null;
 
 type ChartConstructor = new (...args: unknown[]) => { destroy?: () => void };
+type TurnoutChartPayload = {
+  labels: string[];
+  counts: number[];
+};
 
 function currentRouteState(): ElectionDetailRouteState {
   return {
@@ -62,6 +67,135 @@ function statusLabel(status: string): string {
   return status;
 }
 
+function safeTimeZone(timezoneName: string): string {
+  return String(timezoneName || "").trim() || "UTC";
+}
+
+function formatElectionDay(value: string, timezoneName: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+
+  const resolvedTimeZone = safeTimeZone(timezoneName);
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      timeZone: resolvedTimeZone,
+    }).formatToParts(parsed);
+
+    const year = parts.find((part) => part.type === "year")?.value || "";
+    const month = parts.find((part) => part.type === "month")?.value || "";
+    const day = parts.find((part) => part.type === "day")?.value || "";
+    return `${year}-${month}-${day}`;
+  } catch {
+    return value.slice(0, 10);
+  }
+}
+
+function addOneDay(day: string): string {
+  const parsed = new Date(`${day}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) {
+    return day;
+  }
+  parsed.setUTCDate(parsed.getUTCDate() + 1);
+  return parsed.toISOString().slice(0, 10);
+}
+
+function turnoutChartPayload(payload: ElectionInfoPayload | null): TurnoutChartPayload {
+  if (!payload?.show_turnout_chart) {
+    return { labels: [], counts: [] };
+  }
+
+  const countsByDay = new Map<string, number>();
+  for (const row of payload.turnout_rows) {
+    countsByDay.set(row.day, row.count);
+  }
+
+  const startDay = formatElectionDay(payload.start_datetime, payload.viewer_timezone);
+  const endSource = payload.status === "open" ? new Date().toISOString() : payload.end_datetime;
+  const endDay = formatElectionDay(endSource, payload.viewer_timezone);
+  if (!startDay || !endDay || endDay < startDay) {
+    return { labels: [], counts: [] };
+  }
+
+  const labels: string[] = [];
+  const counts: number[] = [];
+  let cursor = startDay;
+  while (cursor <= endDay) {
+    labels.push(cursor);
+    counts.push(countsByDay.get(cursor) ?? 0);
+    const nextCursor = addOneDay(cursor);
+    if (nextCursor === cursor) {
+      break;
+    }
+    cursor = nextCursor;
+  }
+
+  return { labels, counts };
+}
+
+function formatElectionDateTime(value: string, timezoneName: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+
+  const resolvedTimeZone = safeTimeZone(timezoneName);
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+      timeZone: resolvedTimeZone,
+    }).formatToParts(parsed);
+
+    const year = parts.find((part) => part.type === "year")?.value || "";
+    const month = parts.find((part) => part.type === "month")?.value || "";
+    const day = parts.find((part) => part.type === "day")?.value || "";
+    const hour = parts.find((part) => part.type === "hour")?.value || "";
+    const minute = parts.find((part) => part.type === "minute")?.value || "";
+
+    return `${year}-${month}-${day} ${hour}:${minute} ${resolvedTimeZone}`;
+  } catch {
+    return `${value.replace("T", " ").replace(/([+-]\d\d:\d\d|Z)$/, "").slice(0, 16)} UTC`;
+  }
+}
+
+function formatVotingWindow(payload: ElectionInfoPayload): string {
+  return `${formatElectionDateTime(payload.start_datetime, payload.viewer_timezone)} → ${formatElectionDateTime(payload.end_datetime, payload.viewer_timezone)}`;
+}
+
+function naturalJoin(items: string[]): string {
+  if (items.length === 0) {
+    return "";
+  }
+  if (items.length === 1) {
+    return items[0] || "";
+  }
+  if (items.length === 2) {
+    return `${items[0]} and ${items[1]}`;
+  }
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
+}
+
+function exclusionGroupMessage(group: ElectionExclusionGroup): string {
+  const who = naturalJoin(
+    group.candidates.map((candidate) =>
+      candidate.full_name !== candidate.username
+        ? `${candidate.full_name} (${candidate.username})`
+        : candidate.username,
+    ),
+  );
+  const candidateWord = group.max_elected === 1 ? "candidate" : "candidates";
+  return `${who} belong to the ${group.name} exclusion group: only ${group.max_elected} ${candidateWord} of the group can be elected.`;
+}
+
 function descriptionLines(value: string): string[] {
   return value.split(/\r?\n/);
 }
@@ -77,7 +211,7 @@ function destroyTurnoutChart(): void {
 
 async function renderTurnoutChart(): Promise<void> {
   destroyTurnoutChart();
-  const payload = election.value?.turnout_chart_data;
+  const payload = turnoutChartPayload(election.value);
   if (!election.value?.show_turnout_chart || !payload || payload.labels.length === 0) {
     return;
   }
@@ -228,7 +362,7 @@ onBeforeUnmount(() => {
             <dd class="col-sm-8">{{ statusLabel(election.status) }}</dd>
             <dt class="col-sm-4">Voting window</dt>
             <dd class="col-sm-8">
-              {{ election.start_datetime_display }} → {{ election.end_datetime_display }}
+              {{ formatVotingWindow(election) }}
               <i
                 v-if="election.status === 'open'"
                 class="fas fa-info-circle text-muted"
@@ -323,7 +457,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div v-if="election.show_turnout_chart && election.turnout_chart_data.labels.length > 0" class="row">
+      <div v-if="turnoutChartPayload(election).labels.length > 0" class="row">
         <div class="col-12">
           <div class="card card-outline card-secondary">
             <div class="card-header">
@@ -432,9 +566,9 @@ onBeforeUnmount(() => {
                 </div>
               </div>
 
-              <div v-if="election.exclusion_group_messages.length > 0" class="card card-outline card-danger mt-3">
+              <div v-if="election.exclusion_groups.length > 0" class="card card-outline card-danger mt-3">
                 <div class="card-body">
-                  <p v-for="message in election.exclusion_group_messages" :key="message" class="mb-2">{{ message }}</p>
+                  <p v-for="group in election.exclusion_groups" :key="group.name" class="mb-2">{{ exclusionGroupMessage(group) }}</p>
                 </div>
               </div>
             </div>

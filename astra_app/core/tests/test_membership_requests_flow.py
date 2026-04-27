@@ -482,10 +482,20 @@ class MembershipRequestsFlowTests(TestCase):
             patch("core.views_utils.has_signed_coc", return_value=True),
         ):
             resp = self.client.get(reverse("membership-request"))
+            api_resp = self.client.get(reverse("api-membership-request-form-detail"))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'value="individual"')
-        self.assertContains(resp, 'value="mirror"')
+        self.assertContains(
+            resp,
+            f'data-membership-request-form-api-url="{reverse("api-membership-request-form-detail")}"',
+        )
+        payload = api_resp.json()
+        option_values = [
+            option["value"]
+            for group in payload["form"]["fields"][0]["option_groups"]
+            for option in group["options"]
+        ]
+        self.assertEqual(option_values, ["individual", "mirror"])
 
     def test_membership_request_post_blocks_when_eligibility_marks_category_under_review(self) -> None:
         from core.models import MembershipRequest, MembershipType
@@ -612,11 +622,23 @@ class MembershipRequestsFlowTests(TestCase):
             patch("core.views_membership.user.block_action_without_country_code", return_value=None),
         ):
             resp = self.client.get(f"{reverse('membership-request')}?membership_type=individual")
+            api_resp = self.client.get(f"{reverse('api-membership-request-form-detail')}?membership_type=individual")
 
         self.assertEqual(resp.status_code, 200)
-        self.assertNotContains(resp, 'value="individual"')
-        self.assertNotContains(resp, 'value="individual_plus"')
-        self.assertContains(resp, 'value="mirror"')
+        self.assertContains(
+            resp,
+            f'data-membership-request-form-api-url="{reverse("api-membership-request-form-detail")}"',
+        )
+        payload = api_resp.json()
+        option_values = [
+            option["value"]
+            for group in payload["form"]["fields"][0]["option_groups"]
+            for option in group["options"]
+        ]
+        self.assertEqual(payload["prefill_type_unavailable_name"], "Individual")
+        self.assertNotIn("individual", option_values)
+        self.assertNotIn("individual_plus", option_values)
+        self.assertEqual(option_values, ["mirror"])
 
     def test_membership_request_allows_other_type_in_category_when_active(self) -> None:
         from core.models import Membership, MembershipType, MembershipTypeCategory
@@ -669,10 +691,21 @@ class MembershipRequestsFlowTests(TestCase):
             patch("core.views_membership.user.block_action_without_country_code", return_value=None),
         ):
             resp = self.client.get(f"{reverse('membership-request')}?membership_type=individual")
+            api_resp = self.client.get(f"{reverse('api-membership-request-form-detail')}?membership_type=individual")
 
         self.assertEqual(resp.status_code, 200)
-        self.assertNotContains(resp, 'value="individual"')
-        self.assertContains(resp, 'value="individual_plus"')
+        self.assertContains(
+            resp,
+            f'data-membership-request-form-api-url="{reverse("api-membership-request-form-detail")}"',
+        )
+        payload = api_resp.json()
+        option_values = [
+            option["value"]
+            for group in payload["form"]["fields"][0]["option_groups"]
+            for option in group["options"]
+        ]
+        self.assertNotIn("individual", option_values)
+        self.assertIn("individual_plus", option_values)
 
     def test_membership_request_allows_renewal_when_expiring_soon(self) -> None:
         from core.models import Membership, MembershipType, MembershipTypeCategory
@@ -715,9 +748,20 @@ class MembershipRequestsFlowTests(TestCase):
             patch("core.views_membership.user.block_action_without_country_code", return_value=None),
         ):
             resp = self.client.get(reverse("membership-request"))
+            api_resp = self.client.get(reverse("api-membership-request-form-detail"))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'value="individual"')
+        self.assertContains(
+            resp,
+            f'data-membership-request-form-api-url="{reverse("api-membership-request-form-detail")}"',
+        )
+        payload = api_resp.json()
+        option_values = [
+            option["value"]
+            for group in payload["form"]["fields"][0]["option_groups"]
+            for option in group["options"]
+        ]
+        self.assertIn("individual", option_values)
 
     def test_membership_request_renewal_prefills_last_request_answers(self) -> None:
         from core.models import Membership, MembershipRequest, MembershipType, MembershipTypeCategory

@@ -82,4 +82,50 @@ describe("mountMembershipRequestDetailPage", () => {
 
     expect(app).toBeNull();
   });
+
+  it("mounts from an initial detail payload without fetching", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const root = buildRoot({
+      "data-membership-request-detail-csrf-token": "csrf-token",
+      "data-membership-request-detail-page-title": "Your Membership Request #42",
+      "data-membership-request-detail-back-link-url": "/user/alice/",
+      "data-membership-request-detail-back-link-label": "Back to profile",
+      "data-membership-request-detail-user-profile-url-template": "/user/__username__/",
+      "data-membership-request-detail-organization-detail-url-template": "/organization/__organization_id__/",
+    });
+    const script = document.createElement("script");
+    script.type = "application/json";
+    script.setAttribute("data-membership-request-detail-initial-payload", "");
+    script.textContent = JSON.stringify({
+      viewer: { mode: "self_service" },
+      request: {
+        id: 42,
+        status: "on_hold",
+        requested_at: "2026-04-27T10:00:00+00:00",
+        requested_by: { show: false, username: "", full_name: "", deleted: false },
+        requested_for: { show: false, kind: "user", label: "", username: "", organization_id: null, deleted: false },
+        membership_type: { name: "Mirror", code: "mirror", category: "mirror" },
+        responses: [],
+      },
+      self_service: {
+        can_resubmit: true,
+        can_rescind: true,
+        committee_email: "committee@example.com",
+        user_email: "alice@example.com",
+        form: {
+          fields: [],
+          non_field_errors: ["Enter a valid URL."],
+        },
+      },
+    });
+    root.appendChild(script);
+
+    const app = mountMembershipRequestDetailPage(root);
+
+    expect(app).not.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(root.querySelector("[data-membership-request-detail-vue-root]"))?.not.toBeNull();
+  });
 });

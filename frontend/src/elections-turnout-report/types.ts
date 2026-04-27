@@ -9,7 +9,7 @@ export interface ElectionsTurnoutReportRow {
     id: number;
     name: string;
     status: string;
-    start_date: string;
+    start_datetime: string;
   };
   eligible_count: number;
   eligible_weight: number;
@@ -25,11 +25,6 @@ export interface ElectionsTurnoutReportRow {
 
 export interface ElectionsTurnoutReportResponse {
   rows: ElectionsTurnoutReportRow[];
-  chart_data: {
-    labels: string[];
-    count_turnout: number[];
-    weight_turnout: number[];
-  };
 }
 
 export function readElectionsTurnoutReportBootstrap(root: HTMLElement): ElectionsTurnoutReportBootstrap | null {

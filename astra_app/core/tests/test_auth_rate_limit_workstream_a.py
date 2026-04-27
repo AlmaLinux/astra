@@ -119,7 +119,7 @@ class RateLimitTtlBehaviorTests(TestCase):
 
 
 class AuthRateLimitEndpointTests(TestCase):
-    def test_login_rate_limit_key_uses_remote_addr_when_x_forwarded_for_present(self) -> None:
+    def test_login_rate_limit_key_uses_forwarded_for_when_present(self) -> None:
         client = Client()
 
         with (
@@ -137,7 +137,7 @@ class AuthRateLimitEndpointTests(TestCase):
         self.assertEqual(response.status_code, 429)
         allow_kwargs = allow_mock.call_args.kwargs
         self.assertEqual(allow_kwargs["scope"], "auth.login")
-        self.assertEqual(allow_kwargs["key_parts"][0], "198.51.100.99")
+        self.assertEqual(allow_kwargs["key_parts"][0], "203.0.113.7")
 
     def test_login_denial_returns_error_and_emits_structured_log(self) -> None:
         client = Client()

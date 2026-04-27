@@ -182,7 +182,6 @@ class Phase9ServerRenderedContractsTests(TestCase):
         for html in (
             send_mail_resp.content.decode("utf-8"),
             election_edit_resp.content.decode("utf-8"),
-            template_edit_resp.content.decode("utf-8"),
         ):
             self.assertIn("data-templated-email-compose", html)
             self.assertIn("data-compose-action", html)
@@ -190,3 +189,9 @@ class Phase9ServerRenderedContractsTests(TestCase):
             self.assertIn("data-compose-preview-iframe", html)
             self.assertIn("core/vendor/codemirror/codemirror.min.css", html)
             self.assertIn("core/js/templated_email_compose_init.js", html)
+
+        template_edit_html = template_edit_resp.content.decode("utf-8")
+        self.assertIn("data-email-template-editor-root", template_edit_html)
+        self.assertIn("email-template-editor-initial-payload", template_edit_html)
+        self.assertIn("core/vendor/codemirror/codemirror.min.css", template_edit_html)
+        self.assertIn("core/js/templated_email_compose_init.js", template_edit_html)

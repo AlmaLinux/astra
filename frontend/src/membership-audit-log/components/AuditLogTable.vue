@@ -3,7 +3,8 @@ import { computed, ref } from "vue";
 
 import TableBase from "../../shared/components/TableBase.vue";
 import { fillUrlTemplate } from "../../shared/urlTemplates";
-import type { AuditLogRow } from "../types";
+import { formatAuditLogAction, formatAuditLogDateTime, formatAuditLogExpiresAt } from "../types";
+import type { AuditLogRequestResponseSegment, AuditLogRow } from "../types";
 
 const props = defineProps<{
   rows: AuditLogRow[];
@@ -73,6 +74,10 @@ function requestHref(row: AuditLogRow): string {
   }
   return fillUrlTemplate(props.membershipRequestDetailUrlTemplate, "__request_id__", row.request.request_id);
 }
+
+function segmentKey(segment: AuditLogRequestResponseSegment, index: number): string {
+  return `${segment.kind}:${segment.url || segment.text}:${index}`;
+}
 </script>
 
 <template>
@@ -127,7 +132,7 @@ function requestHref(row: AuditLogRow): string {
         <div v-if="asRow(row).request">
           <a :href="requestHref(asRow(row))">Request #{{ asRow(row).request?.request_id }}</a>
         </div>
-        <div>{{ asRow(row).created_at_display }}</div>
+        <div>{{ formatAuditLogDateTime(asRow(row).created_at) }}</div>
       </td>
       <td>{{ asRow(row).actor_username }}</td>
       <td>
@@ -141,18 +146,23 @@ function requestHref(row: AuditLogRow): string {
       </td>
       <td>{{ asRow(row).membership_name }}</td>
       <td>
-        {{ asRow(row).action_display }}
+        {{ formatAuditLogAction(asRow(row).action) }}
         <details v-if="asRow(row).request" class="mt-1">
           <summary class="small text-muted">Request responses</summary>
           <div class="mt-2">
             <div v-for="responseItem in asRow(row).request?.responses || []" :key="responseItem.question">
               <div class="small text-muted font-weight-bold">{{ responseItem.question }}</div>
-              <div class="small" style="white-space: pre-wrap;" v-html="responseItem.answer_html" />
+              <div class="small" style="white-space: pre-wrap;">
+                <template v-for="(segment, index) in responseItem.segments" :key="segmentKey(segment, index)">
+                  <a v-if="segment.kind === 'link' && segment.url" :href="segment.url">{{ segment.text }}</a>
+                  <template v-else>{{ segment.text }}</template>
+                </template>
+              </div>
             </div>
           </div>
         </details>
       </td>
-      <td class="text-muted text-nowrap" style="width: 1%;">{{ asRow(row).expires_display }}</td>
+      <td class="text-muted text-nowrap" style="width: 1%;">{{ formatAuditLogExpiresAt(asRow(row).expires_at) }}</td>
     </template>
   </TableBase>
 </template>

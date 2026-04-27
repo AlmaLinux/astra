@@ -91,7 +91,7 @@ class UnifiedSettingsTests(TestCase):
             response = settings_root(request)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(captured.get("template"), "core/settings.html")
+        self.assertEqual(captured.get("template"), "core/settings_shell.html")
         ctx = captured.get("context")
         self.assertIsNotNone(ctx)
         tabs = captured["context"].get("tabs")
@@ -101,6 +101,8 @@ class UnifiedSettingsTests(TestCase):
         # OTP + Password are merged into Security.
         self.assertNotIn("otp", tabs)
         self.assertNotIn("password", tabs)
+        self.assertIn("settings_initial_payload", captured["context"])
+        self.assertIn("settings_route_config", captured["context"])
 
     def test_settings_root_context_sets_email_is_blacklisted_flag(self):
         from django_ses.models import BlacklistedEmail

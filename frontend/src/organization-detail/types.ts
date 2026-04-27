@@ -1,32 +1,24 @@
-export interface OrganizationDetailMembershipBadge {
-  label: string;
-  class_name: string;
-  request_url: string | null;
-  request_id?: number | null;
-  membership_type?: OrganizationDetailMembershipType;
-  description: string;
-  member_since_label: string;
-  expires_on?: string;
-  expires_label: string;
-  expires_tone: "danger" | "muted";
-  can_request_tier_change?: boolean;
-  tier_change_membership_type_code?: string;
-  can_manage_expiration?: boolean;
-}
-
 export interface OrganizationDetailMembershipType {
   name: string;
   code: string;
   description: string;
-  className: string;
+}
+
+export interface OrganizationDetailMembership {
+  request_id: number | null;
+  membership_type: OrganizationDetailMembershipType;
+  created_at: string | null;
+  expires_at: string | null;
+  is_expiring_soon: boolean;
+  can_request_tier_change?: boolean;
+  tier_change_membership_type_code?: string;
+  can_manage_expiration?: boolean;
 }
 
 export interface OrganizationDetailPendingMembership {
   request_id: number;
   status: string;
   membership_type: OrganizationDetailMembershipType;
-  badge_label: string;
-  badge_class_name: string;
 }
 
 export interface OrganizationDetailRepresentative {
@@ -36,7 +28,6 @@ export interface OrganizationDetailRepresentative {
 
 export interface OrganizationDetailContactGroup {
   key: string;
-  label: string;
   name: string;
   email: string;
   phone: string;
@@ -64,9 +55,10 @@ export interface OrganizationDetailOrganization {
   id: number;
   name: string;
   status: string;
+  is_representative?: boolean;
   website: string;
   logo_url: string;
-  memberships: OrganizationDetailMembershipBadge[];
+  memberships: OrganizationDetailMembership[];
   pending_memberships: OrganizationDetailPendingMembership[];
   representative: OrganizationDetailRepresentative;
   contact_groups: OrganizationDetailContactGroup[];

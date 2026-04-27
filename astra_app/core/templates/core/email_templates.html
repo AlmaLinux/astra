@@ -1,127 +1,29 @@
 {% extends "core/base.html" %}
 
+{% load django_vite %}
+
 {% block title %}Templates{% endblock %}
+
+{% block extra_head %}
+  {{ block.super }}
+  {% vite_hmr_client %}
+  {% vite_asset 'src/entrypoints/emailTemplates.ts' %}
+{% endblock %}
 
 {% block header %}
   <h1 class="m-0">Templates</h1>
 {% endblock %}
 
 {% block content %}
-  <div class="row">
-    <div class="col-lg-12">
-      <div class="card card-outline card-primary">
-        <div class="card-header d-flex align-items-center">
-          <h3 class="card-title mb-0">Email Templates</h3>
-          <a class="btn btn-primary btn-sm ml-auto" href="{% url 'email-template-create' %}" title="Create a new email template">New template</a>
-        </div>
-        <div class="card-body p-0">
-          <div class="table-responsive">
-            <table class="table table-striped mb-0">
-              <thead>
-                <tr>
-                  <th style="width: 30%">Name</th>
-                  <th>Description</th>
-                  <th style="width: 18%">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for t in templates %}
-                  <tr>
-                    <td>
-                      <span class="text-monospace">{{ t.name }}</span>
-                      {% if t.name in locked_names %}
-                        <span class="badge badge-secondary ml-2" title="Referenced by app configuration">Locked</span>
-                      {% endif %}
-                    </td>
-                    <td class="text-muted">{{ t.description }}</td>
-                    <td>
-                      <a class="btn btn-outline-primary btn-sm" href="{% url 'email-template-edit' t.pk %}" title="Edit this template">Edit</a>
-                      {% if t.name in locked_names %}
-                        <button
-                          type="button"
-                          class="btn btn-outline-danger btn-sm"
-                          disabled
-                          aria-disabled="true"
-                          title="This template is referenced by the app configuration and cannot be deleted."
-                        >
-                          Delete
-                        </button>
-                      {% else %}
-                        <button
-                          type="button"
-                          class="btn btn-outline-danger btn-sm"
-                          data-toggle="modal"
-                          data-target="#email-template-delete-modal"
-                          data-delete-url="{% url 'email-template-delete' t.pk %}"
-                          data-template-name="{{ t.name }}"
-                          title="Delete this template"
-                        >
-                          Delete
-                        </button>
-                      {% endif %}
-                    </td>
-                  </tr>
-                {% empty %}
-                  <tr>
-                    <td colspan="3" class="p-3 text-muted">No templates yet.</td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </div>
+  <div
+    data-email-templates-root=""
+    data-email-templates-api-url="{{ email_templates_api_url }}"
+    data-email-template-create-url="{{ email_template_create_url }}"
+    data-email-template-edit-url-template="{{ email_template_edit_url_template }}"
+    data-email-template-delete-url-template="{{ email_template_delete_url_template }}"
+    data-email-template-csrf-token="{{ csrf_token }}"
+  >
+    {{ email_templates_initial_payload|json_script:"email-templates-initial-payload" }}
+    <div class="text-muted">Loading templates...</div>
   </div>
-
-  {% include 'core/_modal_confirm.html' with modal_id='email-template-delete-modal' title='Delete email template?' body_prefix='Delete template: ' body_emphasis='' body_suffix='<p>This cannot be undone.</p>' action_url='#' submit_label='Delete' submit_class='btn-danger' %}
-
-  <script>
-    (function (document) {
-      'use strict';
-
-      var modal = document.getElementById('email-template-delete-modal');
-      if (!modal) return;
-
-      var form = modal.querySelector('form');
-      var strong = modal.querySelector('.modal-body strong');
-      var submitBtn = form ? form.querySelector('button[type="submit"]') : null;
-
-      function configureFromButton(btn) {
-        if (!btn) return;
-
-        var url = (btn.getAttribute('data-delete-url') || '').trim();
-        var name = btn.getAttribute('data-template-name') || '';
-
-        if (strong) strong.textContent = name;
-        if (form) form.setAttribute('action', url);
-        if (submitBtn) submitBtn.disabled = !url || url === '#';
-      }
-
-      // Start disabled because the modal form is included with action="#".
-      // We enable it when a row delete button configures the modal.
-      if (submitBtn) submitBtn.disabled = true;
-
-      document.addEventListener('click', function (e) {
-        var t = e && e.target;
-        if (!t) return;
-
-        var btn = t.closest && t.closest(
-          'button[data-delete-url][data-target="#email-template-delete-modal"], '
-          + 'button[data-delete-url][data-bs-target="#email-template-delete-modal"]'
-        );
-        if (btn) configureFromButton(btn);
-      });
-
-      if (form) {
-        form.addEventListener('submit', function (e) {
-          var action = (form.getAttribute('action') || '').trim();
-          if (!action || action === '#') {
-            e.preventDefault();
-          }
-        });
-      }
-
-    })(document);
-  </script>
 {% endblock %}

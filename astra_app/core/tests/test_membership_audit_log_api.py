@@ -207,6 +207,64 @@ class MembershipAuditLogApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error"], "Invalid query parameters.")
 
+    def test_membership_audit_log_detail_api_returns_data_only_row_contract(self) -> None:
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            responses=[{"Domain": "mirror.example.org"}],
+        )
+        created_at = timezone.now()
+        expires_at = created_at + datetime.timedelta(days=30)
+        MembershipLog.objects.create(
+            actor_username="reviewer",
+            target_username="alice",
+            membership_type_id="individual",
+            membership_request=req,
+            requested_group_cn="almalinux-individual",
+            action=MembershipLog.Action.requested,
+            created_at=created_at,
+            expires_at=expires_at,
+        )
+        log = MembershipLog.objects.get()
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = self._make_freeipa_user(
+            "reviewer",
+            email="reviewer@example.com",
+            groups=[settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+        )
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            response = self.client.get(
+                reverse("api-membership-audit-log-detail"),
+                data=self._datatables_query(),
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        row = response.json()["data"][0]
+        self.assertEqual(row["created_at"], log.created_at.isoformat())
+        self.assertEqual(row["expires_at"], log.expires_at.isoformat())
+        self.assertEqual(row["action"], MembershipLog.Action.requested)
+        self.assertNotIn("created_at_display", row)
+        self.assertNotIn("action_display", row)
+        self.assertNotIn("expires_display", row)
+        self.assertEqual(
+            row["request"]["responses"][0],
+            {
+                "question": "Domain",
+                "answer_text": "mirror.example.org",
+                "segments": [
+                    {
+                        "kind": "link",
+                        "text": "mirror.example.org",
+                        "url": "https://mirror.example.org",
+                    }
+                ],
+            },
+        )
+        self.assertNotIn("answer_html", row["request"]["responses"][0])
+
     @override_settings(
         DJANGO_VITE={
             "default": {
@@ -231,7 +289,7 @@ class MembershipAuditLogApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "data-membership-audit-log-root")
-        self.assertContains(response, 'data-membership-audit-log-api-url="/api/v1/membership/audit-log"')
+        self.assertContains(response, f'data-membership-audit-log-api-url="{reverse("api-membership-audit-log-detail")}"')
         self.assertContains(response, 'data-membership-audit-log-page-size="50"')
         self.assertContains(response, 'data-membership-audit-log-initial-q="alice"')
         self.assertContains(response, 'data-membership-audit-log-user-profile-url-template="/user/__username__/"')

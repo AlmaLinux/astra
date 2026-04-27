@@ -1,0 +1,33 @@
+{% extends "core/base.html" %}
+
+{% load static %}
+{% load django_vite %}
+
+{% block title %}Settings{% endblock %}
+
+{% block extra_head %}
+  {{ block.super }}
+  {% vite_hmr_client %}
+  {% vite_asset 'src/entrypoints/settings.ts' %}
+{% endblock %}
+
+{% block header %}{% endblock %}
+
+{% block content %}
+  <div
+    data-settings-root=""
+    data-settings-api-url="{{ settings_api_url }}"
+    data-settings-submit-url="{{ settings_submit_url }}"
+    data-settings-csrf-token="{{ settings_csrf_token }}"
+  >
+    {{ settings_initial_payload|json_script:"settings-initial-payload" }}
+    {{ settings_route_config|json_script:"settings-route-config" }}
+    <div class="text-muted">Loading settings...</div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ block.super }}
+  <script src="{% static 'core/js/row_editor.js' %}"></script>
+  <script src="{% static 'core/js/chat_nicknames_editor.js' %}"></script>
+{% endblock %}

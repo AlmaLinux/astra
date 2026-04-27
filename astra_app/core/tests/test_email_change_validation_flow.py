@@ -1,4 +1,5 @@
 
+import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -7,6 +8,7 @@ from django.contrib.messages.storage.fallback import FallbackStorage
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.core.cache import cache
 from django.test import RequestFactory, TestCase, override_settings
+from django.urls import reverse
 
 from core.freeipa.user import FreeIPAUser
 from core.tests.utils_test_data import ensure_core_categories, ensure_email_templates
@@ -208,7 +210,10 @@ class EmailChangeValidationFlowTests(TestCase):
 
         self.assertEqual(resp_get.status_code, 200)
         html = resp_get.content.decode("utf-8")
-        self.assertIn("new@example.org", html)
+        self.assertIn('data-settings-email-validation-root=""', html)
+        self.assertIn(reverse("api-settings-email-validate-detail"), html)
+        self.assertIn('data-settings-email-validation-cancel-url="/settings/?tab=emails"', html)
+        self.assertIn('type="application/json"', html)
 
         request_post = self.factory.post(f"/settings/emails/validate/?token={token}")
         self._add_session_and_messages(request_post)
@@ -220,6 +225,40 @@ class EmailChangeValidationFlowTests(TestCase):
 
         self.assertEqual(resp_post.status_code, 302)
         update_mock.assert_called_once()
+
+    @override_settings(SECRET_KEY="test-secret", EMAIL_VALIDATION_TOKEN_TTL_SECONDS=3600)
+    def test_settings_email_validate_detail_api_returns_data_only_payload(self):
+        from core import views_settings
+        from core.tokens import make_settings_email_validation_token
+
+        token = make_settings_email_validation_token(
+            {"p": "settings-email-validate", "u": "alice", "a": "fasRHBZEmail", "v": "new-bz@example.org"}
+        )
+
+        request = self.factory.get(f"{reverse('api-settings-email-validate-detail')}?token={token}")
+        self._add_session_and_messages(request)
+        request.user = self._auth_user("alice")
+
+        fu = SimpleNamespace(
+            username="alice",
+            email="old@example.org",
+            is_authenticated=True,
+            _user_data={"mail": ["old@example.org"], "fasstatusnote": ["US"]},
+        )
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
+            response = views_settings.settings_email_validate_detail_api(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/json")
+        self.assertEqual(
+            json.loads(response.content),
+            {
+                "email": "new-bz@example.org",
+                "email_type": "bugzilla",
+                "is_valid": True,
+            },
+        )
 
     @override_settings(SECRET_KEY="test-secret", EMAIL_VALIDATION_TOKEN_TTL_SECONDS=3600)
     def test_settings_email_validate_rejects_wrong_user(self):

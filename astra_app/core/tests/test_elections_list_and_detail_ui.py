@@ -34,7 +34,7 @@ class ElectionsListDraftVisibilityTests(TestCase):
         self._login_as_freeipa_user("viewer")
 
         now = timezone.now()
-        open_election = Election.objects.create(
+        Election.objects.create(
             name="Published election",
             description="",
             start_datetime=now - datetime.timedelta(days=1),
@@ -85,7 +85,7 @@ class ElectionsListDraftVisibilityTests(TestCase):
         )
 
         now = timezone.now()
-        open_election = Election.objects.create(
+        Election.objects.create(
             name="Published election",
             description="",
             start_datetime=now - datetime.timedelta(days=1),
@@ -93,7 +93,7 @@ class ElectionsListDraftVisibilityTests(TestCase):
             number_of_seats=1,
             status=Election.Status.open,
         )
-        draft_election = Election.objects.create(
+        Election.objects.create(
             name="Draft election",
             description="",
             start_datetime=now + datetime.timedelta(days=10),
@@ -149,7 +149,7 @@ class ElectionsListGroupingTests(TestCase):
             number_of_seats=1,
             status=Election.Status.open,
         )
-        past_election = Election.objects.create(
+        Election.objects.create(
             name="Past election",
             description="",
             start_datetime=now - datetime.timedelta(days=10),
@@ -376,7 +376,7 @@ class ElectionDetailManagerUIStatsTests(TestCase):
         ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, reverse("api-election-detail-info", args=[election.id]))
+        self.assertContains(resp, reverse("api-election-detail-page", args=[election.id]))
 
         # ChartJS is still loaded for the Vue turnout timeline, but legacy static hooks are gone.
         self.assertContains(resp, 'src="/static/core/vendor/chartjs/chart.umd.min.js"')
@@ -425,7 +425,7 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             api_resp = self.client.get(reverse("api-election-detail-info", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, reverse("api-election-detail-info", args=[election.id]))
+        self.assertContains(resp, reverse("api-election-detail-page", args=[election.id]))
 
         self.assertEqual(api_resp.status_code, 200)
         payload = api_resp.json()["election"]
@@ -1098,7 +1098,7 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             api_resp = self.client.get(reverse("api-election-detail-info", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, reverse("api-election-detail-info", args=[election.id]))
+        self.assertContains(resp, reverse("api-election-detail-page", args=[election.id]))
 
         self.assertEqual(api_resp.status_code, 200)
         messages = api_resp.json()["election"]["exclusion_group_messages"]

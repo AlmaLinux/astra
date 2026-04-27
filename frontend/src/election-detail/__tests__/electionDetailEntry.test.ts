@@ -23,7 +23,7 @@ describe("mountElectionDetailPage", () => {
       "fetch",
       vi.fn(async (input) => {
         const url = String(input);
-        if (url.includes("/info")) {
+        if (url.includes("/detail")) {
           return new Response(
             JSON.stringify({
               election: {
@@ -34,6 +34,7 @@ describe("mountElectionDetailPage", () => {
                 status: "open",
                 start_datetime: "2026-04-01T10:00:00+00:00",
                 end_datetime: "2026-04-10T10:00:00+00:00",
+                viewer_timezone: "UTC",
                 number_of_seats: 2,
                 quorum: 10,
                 eligible_group_cn: "board-voters",
@@ -42,7 +43,7 @@ describe("mountElectionDetailPage", () => {
                 show_turnout_chart: false,
                 turnout_stats: {},
                 turnout_chart_data: { labels: [], counts: [] },
-                exclusion_group_messages: [],
+                exclusion_groups: [],
                 election_is_finished: false,
                 tally_winners: [],
                 empty_seats: 0,
@@ -75,7 +76,7 @@ describe("mountElectionDetailPage", () => {
     );
 
     const root = buildRoot({
-      "data-election-detail-info-api-url": "/api/v1/elections/1/info",
+      "data-election-detail-info-api-url": "/api/v1/elections/1/detail",
       "data-election-detail-candidates-api-url": "/api/v1/elections/1/candidates",
       "data-election-detail-user-profile-url-template": "/user/__username__/",
     });

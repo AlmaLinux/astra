@@ -1,7 +1,7 @@
 import datetime
 import json
-from unittest.mock import patch
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.conf import settings
 from django.test import TestCase
@@ -9,7 +9,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.freeipa.user import FreeIPAUser
-from core.models import AccountInvitation, AccountInvitationSend, FreeIPAPermissionGrant, Organization
+from core.models import AccountInvitation, FreeIPAPermissionGrant, Organization
 from core.permissions import ASTRA_ADD_MEMBERSHIP
 from core.tests.utils_test_data import ensure_core_categories
 
@@ -72,6 +72,34 @@ class AccountInvitationsApiTests(TestCase):
             "columns[0][search][regex]": "false",
         }
 
+    def _assert_authenticated_permission_denied(
+        self,
+        *,
+        method: str,
+        url: str,
+        data: dict[str, object] | None = None,
+        content_type: str | None = None,
+    ) -> None:
+        self._login_as_freeipa_user("unprivileged")
+        unprivileged_user = self._make_freeipa_user(
+            "unprivileged",
+            email="unprivileged@example.com",
+            groups=[],
+        )
+
+        client_method = getattr(self.client, method)
+        request_kwargs: dict[str, object] = {"HTTP_ACCEPT": "application/json"}
+        if data is not None:
+            request_kwargs["data"] = data
+        if content_type is not None:
+            request_kwargs["content_type"] = content_type
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=unprivileged_user):
+            response = client_method(url, **request_kwargs)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json(), {"ok": False, "error": "Permission denied"})
+
     # === Pending Invitations List Endpoint ===
 
     def test_pending_invitations_endpoint_requires_authentication(self) -> None:
@@ -85,26 +113,23 @@ class AccountInvitationsApiTests(TestCase):
 
     def test_pending_invitations_endpoint_requires_astra_add_membership_permission(self) -> None:
         """Users without ASTRA_ADD_MEMBERSHIP must be rejected with 403."""
-        self._login_as_freeipa_user("unprivileged")
-        unprivileged_user = self._make_freeipa_user(
-            "unprivileged",
-            email="unprivileged@example.com",
-            groups=[],
+        self._assert_authenticated_permission_denied(
+            method="get",
+            url="/api/v1/membership/invitations/pending",
+            data=self._datatables_query(length=50),
         )
 
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=unprivileged_user):
-            response = self.client.get(
-                "/api/v1/membership/invitations/pending",
-                data=self._datatables_query(length=50),
-                HTTP_ACCEPT="application/json",
-            )
-
-        self.assertEqual(response.status_code, 403)
+    def test_pending_invitations_detail_endpoint_requires_permission(self) -> None:
+        self._assert_authenticated_permission_denied(
+            method="get",
+            url=reverse("api-account-invitations-pending-detail"),
+            data=self._datatables_query(length=50),
+        )
 
     def test_pending_invitations_endpoint_returns_datatables_envelope(self) -> None:
         """Pending invitations list must return DataTables-format JSON."""
         self._login_as_freeipa_user("committee")
-        invitation = AccountInvitation.objects.create(
+        AccountInvitation.objects.create(
             email="pending@example.com",
             full_name="Pending User",
             note="Test invitation",
@@ -137,13 +162,13 @@ class AccountInvitationsApiTests(TestCase):
             email="pending@example.com",
             invited_by_username="committee",
         )
-        accepted = AccountInvitation.objects.create(
+        AccountInvitation.objects.create(
             email="accepted@example.com",
             invited_by_username="committee",
             accepted_at=timezone.now(),
             accepted_username="accepteduser",
         )
-        dismissed = AccountInvitation.objects.create(
+        AccountInvitation.objects.create(
             email="dismissed@example.com",
             invited_by_username="committee",
             dismissed_at=timezone.now(),
@@ -198,6 +223,73 @@ class AccountInvitationsApiTests(TestCase):
             self.assertEqual(row["organization_id"], organization.pk)
             self.assertEqual(row["organization_name"], "Test Org")
 
+    def test_pending_invitations_detail_endpoint_returns_raw_datetime_contract(self) -> None:
+        self._login_as_freeipa_user("committee")
+        invited_at = timezone.now()
+        last_sent_at = invited_at + datetime.timedelta(hours=2)
+        invitation = AccountInvitation.objects.create(
+            email="pending@example.com",
+            full_name="Full Name",
+            note="Test note",
+            invited_by_username="committee",
+            invited_at=invited_at,
+            last_sent_at=last_sent_at,
+        )
+        invitation.refresh_from_db()
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()):
+            response = self.client.get(
+                reverse("api-account-invitations-pending-detail"),
+                data=self._datatables_query(length=50),
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        row = response.json()["data"][0]
+        self.assertEqual(row["invitation_id"], invitation.pk)
+        self.assertEqual(row["invited_at"], invitation.invited_at.isoformat())
+        self.assertEqual(row["last_sent_at"], invitation.last_sent_at.isoformat())
+
+    def test_pending_invitations_detail_endpoint_scopes_records_total_before_search(self) -> None:
+        self._login_as_freeipa_user("committee")
+        AccountInvitation.objects.create(
+            email="pending-match@example.com",
+            invited_by_username="committee",
+        )
+        AccountInvitation.objects.create(
+            email="pending-other@example.com",
+            invited_by_username="committee",
+        )
+        AccountInvitation.objects.create(
+            email="accepted@example.com",
+            invited_by_username="committee",
+            accepted_at=timezone.now(),
+            accepted_username="accepteduser",
+        )
+        AccountInvitation.objects.create(
+            email="dismissed@example.com",
+            invited_by_username="committee",
+            dismissed_at=timezone.now(),
+            dismissed_by_username="committee",
+        )
+
+        query = self._datatables_query(length=50)
+        query["search[value]"] = "pending-match"
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()):
+            response = self.client.get(
+                reverse("api-account-invitations-pending-detail"),
+                data=query,
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["recordsTotal"], 2)
+        self.assertEqual(payload["recordsFiltered"], 1)
+        self.assertEqual(len(payload["data"]), 1)
+        self.assertEqual(payload["data"][0]["email"], "pending-match@example.com")
+
     # === Accepted Invitations List Endpoint ===
 
     def test_accepted_invitations_endpoint_requires_authentication(self) -> None:
@@ -209,10 +301,17 @@ class AccountInvitationsApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 403)
 
+    def test_accepted_invitations_endpoint_requires_permission(self) -> None:
+        self._assert_authenticated_permission_denied(
+            method="get",
+            url="/api/v1/membership/invitations/accepted",
+            data=self._datatables_query(length=50),
+        )
+
     def test_accepted_invitations_endpoint_returns_datatables_envelope(self) -> None:
         """Accepted invitations list must return DataTables-format JSON."""
         self._login_as_freeipa_user("committee")
-        invitation = AccountInvitation.objects.create(
+        AccountInvitation.objects.create(
             email="accepted@example.com",
             full_name="Accepted User",
             invited_by_username="committee",
@@ -237,7 +336,7 @@ class AccountInvitationsApiTests(TestCase):
         """Accepted endpoint must exclude pending and dismissed invitations."""
         self._login_as_freeipa_user("committee")
 
-        pending = AccountInvitation.objects.create(
+        AccountInvitation.objects.create(
             email="pending@example.com",
             invited_by_username="committee",
         )
@@ -247,7 +346,7 @@ class AccountInvitationsApiTests(TestCase):
             accepted_at=timezone.now(),
             accepted_username="accepteduser",
         )
-        dismissed = AccountInvitation.objects.create(
+        AccountInvitation.objects.create(
             email="dismissed@example.com",
             invited_by_username="committee",
             dismissed_at=timezone.now(),
@@ -294,6 +393,106 @@ class AccountInvitationsApiTests(TestCase):
         self.assertEqual(row["freeipa_matched_usernames"], ["accepteduser", "alternative"])
         self.assertIsNotNone(row["accepted_at"])
 
+    def test_accepted_invitations_detail_endpoint_returns_raw_datetime_contract(self) -> None:
+        self._login_as_freeipa_user("committee")
+        accepted_at = timezone.now()
+        invitation = AccountInvitation.objects.create(
+            email="accepted@example.com",
+            full_name="Accepted User",
+            invited_by_username="committee",
+            accepted_at=accepted_at,
+            accepted_username="accepteduser",
+            freeipa_matched_usernames=["accepteduser", "alternative"],
+        )
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()):
+            response = self.client.get(
+                reverse("api-account-invitations-accepted-detail"),
+                data=self._datatables_query(length=50),
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        row = response.json()["data"][0]
+        self.assertEqual(row["invitation_id"], invitation.pk)
+        self.assertEqual(row["accepted_at"], accepted_at.isoformat())
+
+    def test_accepted_invitations_detail_endpoint_requires_permission(self) -> None:
+        self._assert_authenticated_permission_denied(
+            method="get",
+            url=reverse("api-account-invitations-accepted-detail"),
+            data=self._datatables_query(length=50),
+        )
+
+    def test_accepted_invitations_detail_endpoint_scopes_records_total_before_search(self) -> None:
+        self._login_as_freeipa_user("committee")
+        AccountInvitation.objects.create(
+            email="accepted-match@example.com",
+            invited_by_username="committee",
+            accepted_at=timezone.now(),
+            accepted_username="accepted-match",
+        )
+        AccountInvitation.objects.create(
+            email="accepted-other@example.com",
+            invited_by_username="committee",
+            accepted_at=timezone.now(),
+            accepted_username="accepted-other",
+        )
+        AccountInvitation.objects.create(
+            email="pending@example.com",
+            invited_by_username="committee",
+        )
+        AccountInvitation.objects.create(
+            email="dismissed@example.com",
+            invited_by_username="committee",
+            dismissed_at=timezone.now(),
+            dismissed_by_username="committee",
+        )
+
+        query = self._datatables_query(length=50)
+        query["search[value]"] = "accepted-match"
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()):
+            response = self.client.get(
+                reverse("api-account-invitations-accepted-detail"),
+                data=query,
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["recordsTotal"], 2)
+        self.assertEqual(payload["recordsFiltered"], 1)
+        self.assertEqual(len(payload["data"]), 1)
+        self.assertEqual(payload["data"][0]["email"], "accepted-match@example.com")
+
+    def test_account_invitations_page_uses_canonical_detail_endpoints(self) -> None:
+        self._login_as_freeipa_user("committee")
+
+        with (
+            self.settings(FORCE_SCRIPT_NAME="/astra"),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
+        ):
+            response = self.client.get(reverse("account-invitations"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            f'data-account-invitations-pending-api-url="{reverse("api-account-invitations-pending-detail")}"',
+        )
+        self.assertContains(
+            response,
+            f'data-account-invitations-accepted-api-url="{reverse("api-account-invitations-accepted-detail")}"',
+        )
+        self.assertContains(
+            response,
+            f'data-account-invitations-resend-api-url="{reverse("api-account-invitations-resend", args=[123456789])}"',
+        )
+        self.assertContains(
+            response,
+            f'data-account-invitations-dismiss-api-url="{reverse("api-account-invitations-dismiss", args=[123456789])}"',
+        )
+
     # === Refresh Action Endpoint ===
 
     def test_refresh_endpoint_requires_authentication(self) -> None:
@@ -306,21 +505,15 @@ class AccountInvitationsApiTests(TestCase):
 
     def test_refresh_endpoint_requires_permission(self) -> None:
         """Users without ASTRA_ADD_MEMBERSHIP must be rejected."""
-        self._login_as_freeipa_user("unprivileged")
-        unprivileged_user = self._make_freeipa_user("unprivileged")
-
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=unprivileged_user):
-            response = self.client.post(
-                "/api/v1/membership/invitations/refresh",
-                HTTP_ACCEPT="application/json",
-            )
-
-        self.assertEqual(response.status_code, 403)
+        self._assert_authenticated_permission_denied(
+            method="post",
+            url="/api/v1/membership/invitations/refresh",
+        )
 
     def test_refresh_endpoint_returns_ok_json(self) -> None:
         """Refresh must return {ok: true, message: ...} on success."""
         self._login_as_freeipa_user("committee")
-        invitation = AccountInvitation.objects.create(
+        AccountInvitation.objects.create(
             email="pending@example.com",
             invited_by_username="committee",
         )
@@ -392,6 +585,17 @@ class AccountInvitationsApiTests(TestCase):
         self.assertFalse(payload.get("ok"))
         self.assertIn("error", payload)
 
+    def test_resend_endpoint_requires_permission(self) -> None:
+        invitation = AccountInvitation.objects.create(
+            email="pending@example.com",
+            invited_by_username="committee",
+        )
+
+        self._assert_authenticated_permission_denied(
+            method="post",
+            url=reverse("api-account-invitations-resend", args=[invitation.pk]),
+        )
+
     # === Dismiss Action Endpoint ===
 
     def test_dismiss_endpoint_returns_ok_json(self) -> None:
@@ -414,6 +618,17 @@ class AccountInvitationsApiTests(TestCase):
         self.assertIn("message", payload)
         invitation.refresh_from_db()
         self.assertIsNotNone(invitation.dismissed_at)
+
+    def test_dismiss_endpoint_requires_permission(self) -> None:
+        invitation = AccountInvitation.objects.create(
+            email="pending@example.com",
+            invited_by_username="committee",
+        )
+
+        self._assert_authenticated_permission_denied(
+            method="post",
+            url=reverse("api-account-invitations-dismiss", args=[invitation.pk]),
+        )
 
     # === Bulk Action Endpoint ===
 
@@ -470,17 +685,11 @@ class AccountInvitationsApiTests(TestCase):
 
     def test_bulk_endpoint_requires_permission(self) -> None:
         """Bulk action must reject unauthorized users."""
-        self._login_as_freeipa_user("unprivileged")
-        unprivileged_user = self._make_freeipa_user("unprivileged")
-
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=unprivileged_user):
-            response = self.client.post(
-                "/api/v1/membership/invitations/bulk",
-                data={
-                    "bulk_action": "dismiss",
-                    "selected": ["1"],
-                },
-                HTTP_ACCEPT="application/json",
-            )
-
-        self.assertEqual(response.status_code, 403)
+        self._assert_authenticated_permission_denied(
+            method="post",
+            url="/api/v1/membership/invitations/bulk",
+            data={
+                "bulk_action": "dismiss",
+                "selected": ["1"],
+            },
+        )

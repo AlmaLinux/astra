@@ -17,9 +17,16 @@ export interface AuditLogTarget {
   deleted: boolean;
 }
 
+export interface AuditLogRequestResponseSegment {
+  kind: "text" | "link";
+  text: string;
+  url?: string;
+}
+
 export interface AuditLogRequestResponseItem {
   question: string;
-  answer_html: string;
+  answer_text: string;
+  segments: AuditLogRequestResponseSegment[];
 }
 
 export interface AuditLogRequestInfo {
@@ -29,14 +36,12 @@ export interface AuditLogRequestInfo {
 
 export interface AuditLogRow {
   log_id: number;
-  created_at_display: string;
-  created_at_iso: string;
+  created_at: string;
   actor_username: string;
   target: AuditLogTarget;
   membership_name: string;
   action: string;
-  action_display: string;
-  expires_display: string;
+  expires_at: string | null;
   request: AuditLogRequestInfo | null;
 }
 
@@ -128,4 +133,64 @@ export function buildMembershipAuditLogRouteUrl(state: MembershipAuditLogRouteSt
     url.searchParams.set("organization", state.organization);
   }
   return `${url.pathname}${url.search}`;
+}
+
+const SHORT_WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const SHORT_MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const ACTION_LABELS: Record<string, string> = {
+  requested: "Requested",
+  on_hold: "On Hold",
+  resubmitted: "Resubmitted",
+  approved: "Approved",
+  rejected: "Rejected",
+  ignored: "Ignored",
+  reopened: "Reopened",
+  rescinded: "Rescinded",
+  representative_changed: "Representative changed",
+  expiry_changed: "Expiry changed",
+  terminated: "Terminated",
+};
+
+function parseDate(value: string | null | undefined): Date | null {
+  if (!value) {
+    return null;
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed;
+}
+
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+export function formatAuditLogDateTime(value: string): string {
+  const parsed = parseDate(value);
+  if (!parsed) {
+    return "";
+  }
+  const weekday = SHORT_WEEKDAY_NAMES[parsed.getUTCDay()] || "";
+  const day = pad2(parsed.getUTCDate());
+  const month = SHORT_MONTH_NAMES[parsed.getUTCMonth()] || "";
+  const year = parsed.getUTCFullYear();
+  const hour = pad2(parsed.getUTCHours());
+  const minute = pad2(parsed.getUTCMinutes());
+  const second = pad2(parsed.getUTCSeconds());
+  return `${weekday}, ${day} ${month} ${year} ${hour}:${minute}:${second} +0000`;
+}
+
+export function formatAuditLogAction(action: string): string {
+  const normalized = String(action || "").trim().toLowerCase();
+  return ACTION_LABELS[normalized] || normalized.replace(/_/g, " ");
+}
+
+export function formatAuditLogExpiresAt(value: string | null): string {
+  const parsed = parseDate(value);
+  if (!parsed) {
+    return "";
+  }
+  const month = SHORT_MONTH_NAMES[parsed.getUTCMonth()] || "";
+  return `${month} ${parsed.getUTCDate()}, ${parsed.getUTCFullYear()}`;
 }

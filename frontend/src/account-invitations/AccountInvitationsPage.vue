@@ -76,6 +76,17 @@ function readPageParam(name: string): number {
   return Number.isNaN(rawValue) || rawValue < 1 ? 1 : rawValue;
 }
 
+function buildPageHref(paramName: string, pageNumber: number): string {
+  const params = new URLSearchParams(window.location.search);
+  if (pageNumber <= 1) {
+    params.delete(paramName);
+  } else {
+    params.set(paramName, String(pageNumber));
+  }
+  const query = params.toString();
+  return `${window.location.pathname}${query ? `?${query}` : ""}`;
+}
+
 /**
  * Load both tables on mount.
  */
@@ -106,28 +117,14 @@ async function onAcceptedPageChange(page: number): Promise<void> {
  * Build pagination URL for pending invitations.
  */
 function pendingPageHref(pageNumber: number): string {
-  const params = new URLSearchParams(window.location.search);
-  if (pageNumber <= 1) {
-    params.delete("pending_page");
-  } else {
-    params.set("pending_page", String(pageNumber));
-  }
-  const query = params.toString();
-  return `${window.location.pathname}${query ? `?${query}` : ""}`;
+  return buildPageHref("pending_page", pageNumber);
 }
 
 /**
  * Build pagination URL for accepted invitations.
  */
 function acceptedPageHref(pageNumber: number): string {
-  const params = new URLSearchParams(window.location.search);
-  if (pageNumber <= 1) {
-    params.delete("accepted_page");
-  } else {
-    params.set("accepted_page", String(pageNumber));
-  }
-  const query = params.toString();
-  return `${window.location.pathname}${query ? `?${query}` : ""}`;
+  return buildPageHref("accepted_page", pageNumber);
 }
 
 /**
@@ -184,8 +181,23 @@ function onOpenAction(action: any): void {
  * Sync current page state to URL (for future implementation).
  */
 function syncUrl(): void {
-  // TODO: Update URL params with current pagination state
-  // window.history.replaceState({}, "", newUrl);
+  const params = new URLSearchParams(window.location.search);
+
+  if (pendingTable.currentPage.value <= 1) {
+    params.delete("pending_page");
+  } else {
+    params.set("pending_page", String(pendingTable.currentPage.value));
+  }
+
+  if (acceptedTable.currentPage.value <= 1) {
+    params.delete("accepted_page");
+  } else {
+    params.set("accepted_page", String(acceptedTable.currentPage.value));
+  }
+
+  const query = params.toString();
+  const newUrl = `${window.location.pathname}${query ? `?${query}` : ""}`;
+  window.history.replaceState(window.history.state, "", newUrl);
 }
 
 /**
