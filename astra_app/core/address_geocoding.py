@@ -15,25 +15,31 @@ _PHOTON_ADDRESS_CACHE_TTL_SECONDS = 24 * 60 * 60
 _PHOTON_MAX_ATTEMPTS = 3
 
 
+def _strip_text(value: object) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
 def _photon_address_parts_from_feature(feature: dict[str, Any]) -> dict[str, str] | None:
     properties = feature.get("properties")
     if not isinstance(properties, dict):
         return None
 
-    street_name = _normalize_str(properties.get("street") or properties.get("name"))
-    house_number = _normalize_str(properties.get("housenumber"))
+    street_name = _strip_text(properties.get("street") or properties.get("name"))
+    house_number = _strip_text(properties.get("housenumber"))
     street = f"{street_name} {house_number}".strip()
 
-    city = _normalize_str(
+    city = _strip_text(
         properties.get("city")
         or properties.get("town")
         or properties.get("village")
         or properties.get("hamlet")
         or properties.get("locality")
     )
-    state = _normalize_str(properties.get("state"))
-    postal_code = _normalize_str(properties.get("postcode"))
-    country_code = _normalize_str(properties.get("countrycode")).upper()
+    state = _strip_text(properties.get("state"))
+    postal_code = _strip_text(properties.get("postcode"))
+    country_code = _strip_text(properties.get("countrycode")).upper()
 
     result = {
         "street": street,

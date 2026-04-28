@@ -172,12 +172,26 @@ class ElectionStartedAuditLogTemplateTests(TestCase):
         viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "memberof_group": []})
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             resp = self.client.get(reverse("election-audit-log", args=[election.id]))
+            api_resp = self.client.get(
+                reverse("api-election-audit-log", args=[election.id]),
+                HTTP_ACCEPT="application/json",
+            )
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "alice")
-        self.assertContains(resp, "charlie")
-        self.assertContains(resp, str(c1.tiebreak_uuid))
-        self.assertContains(resp, str(c2.tiebreak_uuid))
+        self.assertContains(resp, 'data-election-audit-log-root')
+        self.assertContains(resp, reverse("api-election-audit-log", args=[election.id]))
+        self.assertEqual(api_resp.status_code, 200)
+        event_payload = api_resp.json()["audit_log"]["items"][0]["payload"]
+        self.assertEqual(
+            event_payload,
+            {
+                "genesis_chain_hash": genesis_hash,
+                "candidates": [
+                    {"id": c1.id, "freeipa_username": "alice", "tiebreak_uuid": str(c1.tiebreak_uuid)},
+                    {"id": c2.id, "freeipa_username": "charlie", "tiebreak_uuid": str(c2.tiebreak_uuid)},
+                ],
+            },
+        )
 
 
 def _make_tallied_election() -> Election:

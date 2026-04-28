@@ -2320,6 +2320,7 @@ class ElectionPublicPagesTests(TestCase):
         Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
 
         vote_url = reverse("election-vote", args=[election.id])
+        vote_api_url = reverse("api-election-vote", args=[election.id])
 
         def _get_user(username: str):
             if username == "viewer":
@@ -2402,8 +2403,9 @@ class ElectionPublicPagesTests(TestCase):
         Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
 
         vote_url = reverse("election-vote", args=[election.id])
+        vote_api_url = reverse("api-election-vote", args=[election.id])
 
-        def _get_user(username: str):
+        def _get_user(username: str, **_: object):
             if username == "viewer":
                 return viewer
             if username == "alice":
@@ -2414,51 +2416,15 @@ class ElectionPublicPagesTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(vote_url)
+            api_resp = self.client.get(vote_api_url)
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "You do not appear to be eligible")
-        self.assertContains(resp, "Submit vote")
-        self.assertContains(resp, "disabled")
+        self.assertContains(resp, "data-election-vote-root")
+        self.assertContains(resp, vote_api_url)
 
-    def test_vote_page_has_receipt_box_and_submit_button_ids(self) -> None:
-        self._login_as_freeipa_user("viewer")
-
-        viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "displayname": ["Viewer User"], "memberof_group": []})
-        alice = FreeIPAUser("alice", {"uid": ["alice"], "displayname": ["Alice User"], "memberof_group": []})
-        nominator = FreeIPAUser(
-            "nominator",
-            {"uid": ["nominator"], "displayname": ["Nominator User"], "memberof_group": []},
-        )
-
-        now = timezone.now()
-        election = Election.objects.create(
-            name="Vote page ui contract election",
-            description="",
-            start_datetime=now - datetime.timedelta(days=1),
-            end_datetime=now + datetime.timedelta(days=1),
-            number_of_seats=1,
-            status=Election.Status.open,
-        )
-        Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
-
-        vote_url = reverse("election-vote", args=[election.id])
-
-        def _get_user(username: str):
-            if username == "viewer":
-                return viewer
-            if username == "alice":
-                return alice
-            if username == "nominator":
-                return nominator
-            return None
-
-        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
-            resp = self.client.get(vote_url)
-
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'id="election-receipt-box"')
-        self.assertContains(resp, 'class="d-none" id="election-receipt-box"')
-        self.assertContains(resp, 'id="election-submit-button"')
+        self.assertEqual(api_resp.status_code, 200)
+        payload = api_resp.json()["election"]
+        self.assertFalse(payload["can_submit_vote"])
 
     def test_vote_page_randomizes_candidate_order(self) -> None:
         self._login_as_freeipa_user("viewer")
@@ -2484,6 +2450,7 @@ class ElectionPublicPagesTests(TestCase):
         c2 = Candidate.objects.create(election=election, freeipa_username="bob", nominated_by="nominator")
 
         vote_url = reverse("election-vote", args=[election.id])
+        vote_api_url = reverse("api-election-vote", args=[election.id])
 
         def _get_user(username: str):
             if username == "viewer":
@@ -2501,8 +2468,10 @@ class ElectionPublicPagesTests(TestCase):
             patch("random.shuffle") as shuffle_mock,
         ):
             resp = self.client.get(vote_url)
+            api_resp = self.client.get(vote_api_url)
 
         self.assertEqual(resp.status_code, 200)
+        self.assertEqual(api_resp.status_code, 200)
         shuffle_mock.assert_called_once()
 
         arg0 = shuffle_mock.call_args[0][0]
@@ -2530,8 +2499,9 @@ class ElectionPublicPagesTests(TestCase):
         Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
 
         detail_url = reverse("election-detail", args=[election.id])
+        detail_api_url = reverse("api-election-detail-info", args=[election.id])
 
-        def _get_user(username: str):
+        def _get_user(username: str, **_: object):
             if username == "viewer":
                 return viewer
             if username == "alice":
@@ -2542,9 +2512,14 @@ class ElectionPublicPagesTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(detail_url)
+            api_resp = self.client.get(detail_api_url)
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "not eligible")
+        self.assertContains(resp, "data-election-detail-action-root")
         self.assertContains(resp, "/membership/request/")
+
+        self.assertEqual(api_resp.status_code, 200)
+        payload = api_resp.json()["election"]
+        self.assertFalse(payload["can_vote"])
 
 

@@ -59,7 +59,7 @@ class ProfileBlacklistedEmailAlertTests(TestCase):
         action = required_actions["email-blacklisted-alert"]
         self.assertIn("your address may have bounced or been marked as spam", action["label"])
         self.assertEqual(action["urlLabel"], "Update your email address")
-        self.assertEqual(action["url"], f'{reverse("settings")}?tab=emails')
+        self.assertNotIn("url", action)
 
         # Other user view: should not see the alert.
         self._login_as_freeipa("viewer")

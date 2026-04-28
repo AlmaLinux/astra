@@ -775,6 +775,7 @@ def auto_ignore_pending_requests_for_deleted_users() -> int:
                 "failed_to_auto_ignore_pending_request_for_deleted_user request_id=%s username=%s",
                 request.pk,
                 request.requested_username,
+                extra=current_exception_log_fields(),
             )
 
     return ignored_count

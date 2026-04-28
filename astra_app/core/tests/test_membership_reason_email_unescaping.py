@@ -43,7 +43,8 @@ class MembershipReasonEmailUnescapingTests(TestCase):
         session["_freeipa_username"] = username
         session.save()
 
-    def _get_freeipa_user(self, username: str) -> FreeIPAUser | None:
+    def _get_freeipa_user(self, username: str, *, respect_privacy: bool = True) -> FreeIPAUser | None:
+        del respect_privacy
         return self._freeipa_users.get(str(username))
 
     def _add_freeipa_user(self, *, username: str, email: str, groups: list[str]) -> None:

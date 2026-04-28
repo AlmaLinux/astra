@@ -1437,6 +1437,8 @@ def _build_settings_request_context(
         "otp_tokens": tokens,
         "otp_uri": otp_uri,
         "otp_qr_png_b64": otp_qr_png_b64,
+        "is_otp_add": is_add,
+        "is_otp_confirm": is_confirm,
         "agreements": agreements,
         "agreement": agreement,
         "agreement_signed": agreement_signed,
@@ -1945,7 +1947,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
         return redirect(settings_url(tab="keys"))
 
     if requested_tab == "security":
-        if is_add or is_confirm:
+        if bool(context["is_otp_add"]) or bool(context["is_otp_confirm"]):
             context["force_tab"] = "security"
             return _render_settings_shell(request, context=context)
 

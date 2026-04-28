@@ -201,12 +201,19 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
             resp = self.client.get(reverse("api-user-profile", kwargs={"username": "alex"}))
 
         self.assertEqual(resp.status_code, 200)
-        required_urls = {action["url"] for action in resp.json()["accountSetup"]["requiredActions"]}
-        self.assertIn(
-            "/settings/?tab=agreements&agreement=AlmaLinux+Community+Code+of+Conduct&return=profile",
-            required_urls,
-        )
-        self.assertIn("/settings/?tab=profile&highlight=country_code", required_urls)
+        required_actions = {action["id"]: action for action in resp.json()["accountSetup"]["requiredActions"]}
+
+        coc_action = required_actions["coc-not-signed-alert"]
+        self.assertEqual(coc_action["label"], "Sign the AlmaLinux Community Code of Conduct")
+        self.assertEqual(coc_action["urlLabel"], "Review & sign")
+        self.assertEqual(coc_action["agreementCn"], "AlmaLinux Community Code of Conduct")
+        self.assertNotIn("url", coc_action)
+
+        country_action = required_actions["country-code-missing-alert"]
+        self.assertEqual(country_action["label"], "Add a valid ISO 3166-1 alpha-2 country code")
+        self.assertEqual(country_action["urlLabel"], "Set country code")
+        self.assertNotIn("agreementCn", country_action)
+        self.assertNotIn("url", country_action)
 
     def test_committee_viewer_sees_country_row_first_with_human_readable_name(self) -> None:
         alex_data = {
@@ -233,7 +240,7 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, respect_privacy: bool = True) -> FreeIPAUser | None:
             return {"alex": alex, "reviewer": reviewer}.get(username)
 
         self._login_as_freeipa_user("reviewer")
@@ -312,7 +319,7 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, respect_privacy: bool = True) -> FreeIPAUser | None:
             return {"alex": alex, "bob": bob}.get(username)
 
         self._login_as_freeipa_user("bob")

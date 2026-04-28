@@ -2,6 +2,7 @@
 from unittest.mock import patch
 
 from django.test import TestCase
+from django.urls import reverse
 
 from core.freeipa.group import FreeIPAGroup
 
@@ -36,17 +37,18 @@ class GroupDetailRendersChatChannelsTests(TestCase):
 
         with patch("core.freeipa.group.FreeIPAGroup.get", return_value=group):
             resp = self.client.get("/group/fas1/")
+            info_resp = self.client.get(reverse("api-group-detail-info", args=["fas1"]))
 
         self.assertEqual(resp.status_code, 200)
-
-        self.assertContains(resp, 'href="ircs://irc.libera.chat/#dev"')
-        self.assertContains(resp, ">#dev</a>")
-
-        self.assertContains(resp, 'href="https://matrix.to/#/#almalinux:matrix.org')
-        self.assertContains(resp, ">#almalinux</a>")
-
-        self.assertContains(resp, 'href="https://chat.almalinux.org/almalinux/channels/general"')
-        self.assertContains(resp, ">~general</a>")
-
-        self.assertContains(resp, 'href="https://chat.almalinux.org/almalinux/channels/atomicsig"')
-        self.assertContains(resp, ">~atomicsig</a>")
+        self.assertContains(resp, "data-group-detail-root")
+        self.assertContains(resp, reverse("api-group-detail-info", args=["fas1"]))
+        self.assertEqual(info_resp.status_code, 200)
+        self.assertEqual(
+            info_resp.json()["group"]["fas_irc_channels"],
+            [
+                "irc://#dev",
+                "matrix://matrix.org/#almalinux",
+                "mattermost://chat.almalinux.org/almalinux/channels/general",
+                "mattermost://channels/atomicsig",
+            ],
+        )

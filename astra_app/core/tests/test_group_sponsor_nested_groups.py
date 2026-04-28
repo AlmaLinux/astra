@@ -2,6 +2,7 @@
 from unittest.mock import patch
 
 from django.test import TestCase
+from django.urls import reverse
 
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import FreeIPAUser
@@ -73,20 +74,17 @@ class GroupSponsorNestedGroupsDisplayTests(TestCase):
             patch("core.templatetags.core_user_widget.FreeIPAUser.get", side_effect=_fake_user_get),
         ):
             resp = self.client.get("/group/parent/")
+            leaders_resp = self.client.get(reverse("api-group-detail-leaders", args=["parent"]))
 
         self.assertEqual(resp.status_code, 200)
-        html = resp.content.decode("utf-8")
-
-        idx_alpha = html.find('href="/group/alpha/"')
-        idx_child = html.find('href="/group/child/"')
-        idx_bob = html.find('href="/user/bob/"')
-
-        self.assertGreaterEqual(idx_alpha, 0)
-        self.assertGreaterEqual(idx_child, 0)
-        self.assertGreaterEqual(idx_bob, 0)
-
-        self.assertLess(idx_alpha, idx_child)
-        self.assertLess(idx_child, idx_bob)
+        self.assertContains(resp, "data-group-detail-root")
+        self.assertContains(resp, reverse("api-group-detail-leaders", args=["parent"]))
+        self.assertEqual(leaders_resp.status_code, 200)
+        items = leaders_resp.json()["leaders"]["items"]
+        self.assertEqual(items[0], {"kind": "group", "cn": "alpha"})
+        self.assertEqual(items[1], {"kind": "group", "cn": "child"})
+        self.assertEqual(items[2]["kind"], "user")
+        self.assertEqual(items[2]["username"], "bob")
 
     def test_group_detail_skips_non_fasgroup_sponsor_groups(self) -> None:
         self._login_as_freeipa("admin")
@@ -148,12 +146,14 @@ class GroupSponsorNestedGroupsDisplayTests(TestCase):
             patch("core.templatetags.core_user_widget.FreeIPAUser.get", side_effect=_fake_user_get),
         ):
             resp = self.client.get("/group/parent/")
+            leaders_resp = self.client.get(reverse("api-group-detail-leaders", args=["parent"]))
 
         self.assertEqual(resp.status_code, 200)
-        html = resp.content.decode("utf-8")
-
-        self.assertIn('href="/group/alpha/"', html)
-        self.assertNotIn('href="/group/legacy/"', html)
+        self.assertContains(resp, "data-group-detail-root")
+        self.assertEqual(leaders_resp.status_code, 200)
+        items = leaders_resp.json()["leaders"]["items"]
+        self.assertIn({"kind": "group", "cn": "alpha"}, items)
+        self.assertNotIn({"kind": "group", "cn": "legacy"}, items)
 
     def test_group_detail_hides_sponsors_section_when_empty(self) -> None:
         self._login_as_freeipa("admin")
@@ -173,6 +173,9 @@ class GroupSponsorNestedGroupsDisplayTests(TestCase):
 
         with patch("core.freeipa.group.FreeIPAGroup.get", return_value=group):
             resp = self.client.get("/group/parent/")
+            leaders_resp = self.client.get(reverse("api-group-detail-leaders", args=["parent"]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertNotContains(resp, "card-title\">Team Lead")
+        self.assertContains(resp, "data-group-detail-root")
+        self.assertEqual(leaders_resp.status_code, 200)
+        self.assertEqual(leaders_resp.json()["leaders"]["items"], [])

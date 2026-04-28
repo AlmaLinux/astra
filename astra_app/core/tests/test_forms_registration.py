@@ -8,7 +8,7 @@ from core.forms_security import PasswordConfirmationMixin, make_password_confirm
 
 
 class RegistrationFormValidationTests(SimpleTestCase):
-    def test_username_rejects_profanity(self):
+    def test_username_rejects_too_short_invalid_value_when_profanity_validation_disabled(self):
         form = RegistrationForm(
             data={
                 "username": "shit",
@@ -22,7 +22,7 @@ class RegistrationFormValidationTests(SimpleTestCase):
         self.assertFalse(form.is_valid())
         self.assertIn("username", form.errors)
 
-    def test_username_profanity_shows_specific_message_for_non_ascii(self):
+    def test_username_non_ascii_uses_username_validation_when_profanity_validation_disabled(self):
         form = RegistrationForm(
             data={
                 "username": "мразь",
@@ -35,11 +35,9 @@ class RegistrationFormValidationTests(SimpleTestCase):
 
         self.assertFalse(form.is_valid())
         self.assertIn("username", form.errors)
-        self.assertTrue(
-            any("disallowed language" in message.lower() for message in form.errors["username"])
-        )
+        self.assertFalse(any("disallowed language" in message.lower() for message in form.errors["username"]))
 
-    def test_username_rejects_profanity_substring(self):
+    def test_username_profanity_like_value_is_allowed_when_validation_disabled(self):
         form = RegistrationForm(
             data={
                 "username": "fuckputin",
@@ -50,10 +48,10 @@ class RegistrationFormValidationTests(SimpleTestCase):
             }
         )
 
-        self.assertFalse(form.is_valid())
-        self.assertIn("username", form.errors)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["username"], "fuckputin")
 
-    def test_first_name_rejects_profanity(self):
+    def test_first_name_profanity_like_value_is_allowed_when_validation_disabled(self):
         form = RegistrationForm(
             data={
                 "username": "alice",
@@ -64,10 +62,10 @@ class RegistrationFormValidationTests(SimpleTestCase):
             }
         )
 
-        self.assertFalse(form.is_valid())
-        self.assertIn("first_name", form.errors)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["first_name"], "shit")
 
-    def test_last_name_rejects_profanity(self):
+    def test_last_name_profanity_like_value_is_allowed_when_validation_disabled(self):
         form = RegistrationForm(
             data={
                 "username": "alice",
@@ -78,10 +76,10 @@ class RegistrationFormValidationTests(SimpleTestCase):
             }
         )
 
-        self.assertFalse(form.is_valid())
-        self.assertIn("last_name", form.errors)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["last_name"], "shit")
 
-    def test_email_rejects_profanity(self):
+    def test_email_profanity_like_value_is_allowed_when_validation_disabled(self):
         form = RegistrationForm(
             data={
                 "username": "alice",
@@ -92,11 +90,11 @@ class RegistrationFormValidationTests(SimpleTestCase):
             }
         )
 
-        self.assertFalse(form.is_valid())
-        self.assertIn("email", form.errors)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["email"], "shit@example.com")
 
-    def test_username_rejects_hate_speech(self):
-        with patch("core.profanity._detects_hate_speech", autospec=True, return_value=True):
+    def test_username_hate_speech_detector_is_skipped_when_validation_disabled(self):
+        with patch("core.profanity._detects_hate_speech", autospec=True, return_value=True) as detect_hate_speech:
             form = RegistrationForm(
                 data={
                     "username": "alice",
@@ -107,8 +105,9 @@ class RegistrationFormValidationTests(SimpleTestCase):
                 }
             )
 
-            self.assertFalse(form.is_valid())
-            self.assertIn("username", form.errors)
+            self.assertTrue(form.is_valid(), form.errors)
+
+        detect_hate_speech.assert_not_called()
 
 
 class PasswordSetFormConsolidationTests(SimpleTestCase):

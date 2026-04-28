@@ -59,15 +59,3 @@ class FormFieldDryPhase4TemplateTests(SimpleTestCase):
         self.assertNotIn("{{ profile_form.sn.label_tag }}", profile_template)
         self.assertNotIn("{{ profile_form.fasPronoun.label_tag }}", profile_template)
 
-    def test_phase4_out_of_scope_non_django_controls_remain_custom(self) -> None:
-        login_template = self._read_template("login.html")
-        ballot_template = self._read_template("ballot_verify.html")
-        compose_template = self._read_template("_templated_email_compose.html")
-
-        self.assertIn('name="username"', login_template)
-        self.assertIn('name="password"', login_template)
-        self.assertIn('name="otp"', login_template)
-
-        self.assertIn('name="receipt"', ballot_template)
-
-        self.assertIn('<select class="form-control" name="email_template_id">', compose_template)

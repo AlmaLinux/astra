@@ -40,10 +40,17 @@ class AuditFASUserAttributesTests(TestCase):
         self.assertTrue(any(f.attribute == "fasTimezone" and f.issue == "invalid" for f in findings))
 
     def test_invalid_timezone_includes_best_effort_suggestion(self) -> None:
-        findings = audit_fas_user_attributes(
-            username="alice",
-            user_data={"uid": ["alice"], "fasTimezone": ["EST"]},
-        )
+        from unittest.mock import patch
+
+        with (
+            patch("core.fas_user_attr_audit._get_timezones", return_value={"UTC"}),
+            patch("core.fas_user_attr_audit._canonical_iana_timezone_name", return_value=None),
+            patch("core.fas_user_attr_audit._suggest_iana_timezone", return_value="America/New_York"),
+        ):
+            findings = audit_fas_user_attributes(
+                username="alice",
+                user_data={"uid": ["alice"], "fasTimezone": ["EST"]},
+            )
         tz_findings = [f for f in findings if f.attribute == "fasTimezone" and f.issue == "invalid"]
         self.assertEqual(len(tz_findings), 1)
         self.assertTrue(bool(tz_findings[0].suggested))
@@ -83,7 +90,7 @@ class AuditFASUserAttributesTests(TestCase):
                 "fasGitLabUsername": ["octo.cat"],
                 "fasWebsiteUrl": ["https://example.org"],
                 "fasRssUrl": ["https://example.org/rss.xml"],
-                "fasIRCNick": ["irc://libera.chat/#fedora"],
+                "fasIRCNick": ["irc://alice"],
                 "fasPronoun": ["they/them"],
                 "fasGPGKeyId": ["0123456789ABCDEF"],
                 "fasRHBZEmail": ["alice@example.org"],

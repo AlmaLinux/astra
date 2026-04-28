@@ -110,10 +110,20 @@ class SendMailTests(TestCase):
         self.assertNotContains(resp, 'id="send-mail-form"')
 
     def test_send_mail_detail_api_returns_data_only_payload(self) -> None:
+        from post_office.models import EmailTemplate
+
         self._login_as_freeipa_user("reviewer")
         reviewer = FreeIPAUser(
             "reviewer",
             {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]},
+        )
+        EmailTemplate.objects.update_or_create(
+            name="account-invite",
+            defaults={
+                "subject": "Account invite",
+                "content": "Hello {{ email }}",
+                "html_content": "<p>Hello {{ email }}</p>",
+            },
         )
 
         with (

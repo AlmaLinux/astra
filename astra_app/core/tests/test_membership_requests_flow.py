@@ -374,7 +374,7 @@ class MembershipRequestsFlowTests(TestCase):
         self.assertContains(resp, reverse("membership-request-self", args=[existing.pk]))
 
     def test_membership_request_requires_signed_coc(self) -> None:
-        from core.freeipa.agreement import FreeIPAFASAgreement
+        from core.agreements import AgreementForUser
         from core.models import MembershipRequest, MembershipType
 
         MembershipType.objects.update_or_create(
@@ -402,17 +402,17 @@ class MembershipRequestsFlowTests(TestCase):
         )
         self._login_as_freeipa_user("alice")
 
-        coc = FreeIPAFASAgreement(
-            settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN,
-            {
-                "cn": [settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN],
-                "ipaenabledflag": ["TRUE"],
-                "memberuser_user": [],
-            },
+        coc = AgreementForUser(
+            cn=settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN,
+            description="Code of Conduct",
+            signed=False,
+            applicable=True,
+            enabled=True,
+            groups=(),
         )
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
-            with patch("core.views_utils.FreeIPAFASAgreement.get", autospec=True, return_value=coc):
+            with patch("core.views_utils.get_agreement_for_user", autospec=True, return_value=coc):
                 resp = self.client.post(
                     reverse("membership-request"),
                     data={
@@ -897,7 +897,7 @@ class MembershipRequestsFlowTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "alice":
@@ -975,7 +975,7 @@ class MembershipRequestsFlowTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "alice":
@@ -1046,7 +1046,7 @@ class MembershipRequestsFlowTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "alice":
@@ -1128,7 +1128,7 @@ class MembershipRequestsFlowTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "alice":
@@ -1233,7 +1233,7 @@ class MembershipRequestsFlowTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "alice":
@@ -1306,7 +1306,7 @@ class MembershipRequestsFlowTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "alice":
@@ -1375,7 +1375,7 @@ class MembershipRequestsFlowTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "alice":
@@ -1475,7 +1475,7 @@ class MembershipRequestsFlowTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "bob":
@@ -1566,7 +1566,7 @@ class MembershipRequestsFlowTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "bob":
@@ -1649,7 +1649,7 @@ class MembershipRequestsFlowTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "bob":
@@ -1739,7 +1739,7 @@ class MembershipRequestsFlowTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "bob":
@@ -1834,7 +1834,7 @@ class MembershipRequestsFlowTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "bob":
@@ -2025,7 +2025,7 @@ class MembershipRequestsFlowTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "bob":
@@ -2194,7 +2194,7 @@ class MembershipRequestsFlowTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "alice":
@@ -2278,7 +2278,7 @@ class MembershipRequestsFlowTests(TestCase):
 
         reason = "Missing paperwork"
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "bob":
@@ -2355,7 +2355,7 @@ class MembershipRequestsFlowTests(TestCase):
         )
         self._login_as_freeipa_user("reviewer")
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "bob":
@@ -2433,7 +2433,7 @@ class MembershipRequestsFlowTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "bob":
@@ -2497,7 +2497,7 @@ class MembershipRequestsFlowTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "alice":
@@ -2589,7 +2589,7 @@ class MembershipRequestsFlowTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "bob":
@@ -2715,7 +2715,7 @@ class MembershipRequestsFlowTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "bob":
@@ -2788,7 +2788,7 @@ class MembershipRequestsFlowTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "bob":
@@ -2922,7 +2922,7 @@ class MembershipRequestsFlowTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "alice":
@@ -3092,7 +3092,7 @@ class MembershipRequestsFlowTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "alice":
@@ -3274,7 +3274,7 @@ class MembershipRequestsFlowTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "alice":

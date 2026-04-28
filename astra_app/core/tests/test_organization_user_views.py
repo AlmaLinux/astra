@@ -18,6 +18,7 @@ from django.db import IntegrityError, transaction
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
+from post_office.models import EmailTemplate
 
 from core import views_membership
 from core.freeipa.user import FreeIPAUser
@@ -30,7 +31,8 @@ from core.permissions import (
     ASTRA_DELETE_MEMBERSHIP,
     ASTRA_VIEW_MEMBERSHIP,
 )
-from core.tests.utils_test_data import ensure_core_categories, ensure_email_templates
+from core.templated_email import configured_email_template_names
+from core.tests.utils_test_data import ensure_core_categories
 
 
 class OrganizationUserViewsTests(TestCase):
@@ -45,7 +47,17 @@ class OrganizationUserViewsTests(TestCase):
         self.addCleanup(self._country_code_patcher.stop)
 
         ensure_core_categories()
-        ensure_email_templates()
+        for name in sorted(configured_email_template_names()):
+            EmailTemplate.objects.update_or_create(
+                name=name,
+                language="",
+                default_template=None,
+                defaults={
+                    "subject": f"[{name}] Subject",
+                    "content": f"[{name}] Body",
+                    "html_content": f"<p>[{name}] Body</p>",
+                },
+            )
 
         MembershipTypeCategory.objects.update_or_create(
             pk="community",
@@ -281,25 +293,17 @@ class OrganizationUserViewsTests(TestCase):
         self.assertFalse(Organization.objects.filter(name="Second Org").exists())
 
     def test_organization_create_requires_signed_coc(self) -> None:
-        from core.freeipa.agreement import FreeIPAFASAgreement
         from core.models import Organization
 
         self._login_as_freeipa_user("alice")
 
-        coc = FreeIPAFASAgreement(
-            settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN,
-            {
-                "cn": [settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN],
-                "ipaenabledflag": ["TRUE"],
-                "memberuser_user": [],
-            },
-        )
-
         payload = self._valid_org_payload(name="Blocked Org")
         alice = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
-        with patch("core.freeipa.user.FreeIPAUser.get", autospec=True, return_value=alice):
-            with patch("core.views_utils.FreeIPAFASAgreement.get", autospec=True, return_value=coc):
-                resp = self.client.post(reverse("organization-create"), data=payload, follow=False)
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", autospec=True, return_value=alice),
+            patch("core.views_utils.has_signed_coc", return_value=False),
+        ):
+            resp = self.client.post(reverse("organization-create"), data=payload, follow=False)
 
         self.assertEqual(resp.status_code, 302)
         expected = (
@@ -368,7 +372,7 @@ class OrganizationUserViewsTests(TestCase):
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]})
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
 
-        def fake_get(username: str) -> FreeIPAUser | None:
+        def fake_get(username: str, *, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "bob":
@@ -499,7 +503,7 @@ class OrganizationUserViewsTests(TestCase):
         carol = FreeIPAUser("carol", {"uid": ["carol"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("reviewer")
 
-        def fake_get(username: str) -> FreeIPAUser | None:
+        def fake_get(username: str, *, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "bob":
@@ -577,7 +581,7 @@ class OrganizationUserViewsTests(TestCase):
         carol = FreeIPAUser("carol", {"uid": ["carol"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("reviewer")
 
-        def fake_get(username: str) -> FreeIPAUser | None:
+        def fake_get(username: str, *, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "bob":
@@ -656,7 +660,7 @@ class OrganizationUserViewsTests(TestCase):
         carol = FreeIPAUser("carol", {"uid": ["carol"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("reviewer")
 
-        def fake_get(username: str) -> FreeIPAUser | None:
+        def fake_get(username: str, *, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "bob":
@@ -716,17 +720,26 @@ class OrganizationUserViewsTests(TestCase):
         self._login_as_freeipa_user("bob")
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
-            resp = self.client.get(reverse("organizations"))
-            self.assertEqual(resp.status_code, 200)
-            self.assertContains(resp, "Create an organization profile only")
+            organizations_resp = self.client.get(reverse("organizations"))
+            organizations_api_resp = self.client.get(reverse("api-organizations"), HTTP_ACCEPT="application/json")
+            detail_resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+            detail_api_resp = self.client.get(reverse("api-organization-detail-page", args=[org.pk]))
 
-            resp = self.client.get(reverse("organization-detail", args=[org.pk]))
-            self.assertEqual(resp.status_code, 200)
-            self.assertContains(resp, "AlmaLinux")
-            self.assertContains(resp, "Annual dues: $2,500 USD")
+        self.assertEqual(organizations_resp.status_code, 200)
+        self.assertContains(organizations_resp, "data-organizations-root")
+        self.assertEqual(organizations_api_resp.status_code, 200)
+        self.assertEqual(organizations_api_resp.json()["my_organization"]["id"], org.pk)
 
-            # Navbar should include Organizations link for authenticated users.
-            self.assertContains(resp, reverse("organizations"))
+        self.assertEqual(detail_resp.status_code, 200)
+        self.assertContains(detail_resp, "AlmaLinux")
+        self.assertContains(detail_resp, reverse("organizations"))
+        self.assertEqual(detail_api_resp.status_code, 200)
+        membership = detail_api_resp.json()["organization"]["memberships"][0]
+        self.assertEqual(membership["membership_type"]["code"], "silver")
+        self.assertEqual(
+            membership["membership_type"]["description"],
+            "Silver Sponsor Member (Annual dues: $2,500 USD)",
+        )
 
     @override_settings(TIME_ZONE="Europe/Berlin")
     def test_org_detail_sponsorship_expiry_displays_utc_consistently(self) -> None:
@@ -763,13 +776,15 @@ class OrganizationUserViewsTests(TestCase):
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             with patch("django.utils.timezone.now", autospec=True, return_value=frozen_now):
                 resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+                api_resp = self.client.get(reverse("api-organization-detail", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Expires Jan 21, 2027")
-        self.assertNotContains(resp, "(UTC)")
-        self.assertNotContains(resp, "Expires Jan 22, 2027")
+        self.assertContains(resp, f'data-organization-detail-api-url="{reverse("api-organization-detail-page", args=[org.pk])}"')
+        membership = api_resp.json()["organization"]["memberships"][0]
+        self.assertEqual(membership["expires_label"], "Jan 21, 2027")
+        self.assertEqual(membership["expires_on"], "2027-01-21")
 
-    def test_org_detail_sponsorship_card_links_to_request_for_representative_and_committee(self) -> None:
+    def test_org_detail_sponsorship_card_bootstraps_request_template_and_request_ids_for_representative_and_committee(self) -> None:
         from core.models import MembershipRequest, MembershipType, Organization
         from core.permissions import ASTRA_VIEW_MEMBERSHIP
 
@@ -803,8 +818,14 @@ class OrganizationUserViewsTests(TestCase):
         self._login_as_freeipa_user("bob")
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp_rep = self.client.get(reverse("organization-detail", args=[org.pk]))
+            api_rep = self.client.get(reverse("api-organization-detail-page", args=[org.pk]))
         self.assertEqual(resp_rep.status_code, 200)
-        self.assertContains(resp_rep, reverse("membership-request-self", args=[req.pk]))
+        self.assertContains(
+            resp_rep,
+            'data-organization-detail-membership-request-detail-template="/membership/request/__request_id__/"',
+        )
+        self.assertEqual(api_rep.status_code, 200)
+        self.assertEqual(api_rep.json()["organization"]["memberships"][0]["request_id"], req.pk)
 
         FreeIPAPermissionGrant.objects.create(
             permission=ASTRA_VIEW_MEMBERSHIP,
@@ -819,8 +840,14 @@ class OrganizationUserViewsTests(TestCase):
         self._login_as_freeipa_user("reviewer")
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp_committee = self.client.get(reverse("organization-detail", args=[org.pk]))
+            api_committee = self.client.get(reverse("api-organization-detail-page", args=[org.pk]))
         self.assertEqual(resp_committee.status_code, 200)
-        self.assertContains(resp_committee, reverse("membership-request-detail", args=[req.pk]))
+        self.assertContains(
+            resp_committee,
+            'data-organization-detail-membership-request-detail-template="/membership/request/__request_id__/"',
+        )
+        self.assertEqual(api_committee.status_code, 200)
+        self.assertEqual(api_committee.json()["organization"]["memberships"][0]["request_id"], req.pk)
 
     def test_membership_viewer_can_view_org_but_cannot_see_edit_button(self) -> None:
         from core.models import MembershipType, Organization
@@ -886,7 +913,7 @@ class OrganizationUserViewsTests(TestCase):
         bob = FreeIPAUser("bob", {"uid": ["bob"], "cn": ["Bob Example"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("reviewer")
 
-        def fake_get(username: str) -> FreeIPAUser | None:
+        def fake_get(username: str, *, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "bob":
@@ -894,11 +921,25 @@ class OrganizationUserViewsTests(TestCase):
             return None
 
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=fake_get):
-            resp = self.client.get(reverse("organization-detail", args=[org.pk]))
-            self.assertEqual(resp.status_code, 200)
-            self.assertContains(resp, "Representative")
-            self.assertContains(resp, "Bob Example")
-            self.assertContains(resp, reverse("user-profile", args=["bob"]))
+            page_response = self.client.get(reverse("organization-detail", args=[org.pk]))
+            api_response = self.client.get(
+                reverse("api-organization-detail-page", args=[org.pk]),
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(page_response.status_code, 200)
+        self.assertContains(page_response, "data-organization-detail-root")
+        self.assertContains(page_response, reverse("api-organization-detail-page", args=[org.pk]))
+        self.assertNotContains(page_response, "Representative")
+
+        self.assertEqual(api_response.status_code, 200)
+        self.assertEqual(
+            api_response.json()["organization"]["representative"],
+            {
+                "username": "bob",
+                "full_name": "Bob Example",
+            },
+        )
 
     def test_unclaimed_organization_shows_ribbon_in_grid_and_detail(self) -> None:
         from core.models import Organization
@@ -919,23 +960,24 @@ class OrganizationUserViewsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             organizations_response = self.client.get(reverse("organizations"))
+            organizations_api_response = self.client.get(reverse("api-organizations"), HTTP_ACCEPT="application/json")
             self.assertEqual(organizations_response.status_code, 200)
-            self.assertContains(organizations_response, 'class="ribbon-wrapper organization-status-ribbon-widget"')
-            self.assertNotContains(organizations_response, "ribbon-wrapper ribbon-lg")
-            self.assertContains(organizations_response, 'class="ribbon bg-warning"')
-            self.assertNotContains(
-                organizations_response,
-                "card-widget widget-user position-relative ribbon-wrapper ribbon-lg",
-            )
+            self.assertContains(organizations_response, "data-organizations-root")
+            self.assertContains(organizations_response, 'data-organizations-api-url="/api/v1/organizations"')
+            self.assertNotContains(organizations_response, "Unclaimed Org")
+
+            self.assertEqual(organizations_api_response.status_code, 200)
+            self.assertIsNone(organizations_api_response.json()["my_organization"])
 
             detail_response = self.client.get(reverse("organization-detail", args=[organization.pk]))
+            detail_api_response = self.client.get(reverse("api-organization-detail-page", args=[organization.pk]))
             self.assertEqual(detail_response.status_code, 200)
-            self.assertContains(detail_response, "ribbon-wrapper ribbon-lg")
-            self.assertContains(detail_response, 'class="ribbon bg-warning"')
-            self.assertNotContains(
+            self.assertContains(
                 detail_response,
-                'class="card organization-hero ribbon-wrapper ribbon-lg"',
+                f'data-organization-detail-api-url="{reverse("api-organization-detail-page", args=[organization.pk])}"',
             )
+            self.assertEqual(detail_api_response.status_code, 200)
+            self.assertEqual(detail_api_response.json()["organization"]["status"], Organization.Status.unclaimed)
 
     def test_unclaimed_org_detail_shows_send_claim_invitation_button_for_send_mail_permission(self) -> None:
         from core.models import Organization
@@ -1212,21 +1254,23 @@ class OrganizationUserViewsTests(TestCase):
         self._login_as_freeipa_user("bob")
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+            api_resp = self.client.get(reverse("api-organization-detail-page", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Edit details")
         self.assertContains(resp, reverse("organization-edit", args=[org.pk]))
         self.assertNotContains(resp, "Request membership")
-        self.assertNotContains(resp, reverse("organization-membership-request", args=[org.pk]))
+        self.assertContains(resp, f'data-organization-detail-api-url="{reverse("api-organization-detail-page", args=[org.pk])}"')
+        self.assertContains(
+            resp,
+            f'data-organization-detail-membership-request-url="{reverse("organization-membership-request", args=[org.pk])}"',
+        )
 
-        self.assertNotContains(resp, "Active sponsor")
-        self.assertContains(resp, 'alx-status-badge--active">Gold')
-        self.assertContains(resp, "membership-gold")
-        self.assertNotContains(resp, "badge-warning")
-
-        body = resp.content.decode("utf-8")
-        self.assertLess(body.find('id="org-contacts-tabs"'), body.find('class="col-md-7"'))
-        self.assertLess(body.find('class="col-md-5"'), body.find("Brand assets"))
+        self.assertEqual(api_resp.status_code, 200)
+        membership = api_resp.json()["organization"]["memberships"][0]
+        self.assertEqual(membership["membership_type"]["code"], "gold")
+        self.assertFalse(membership["can_request_tier_change"])
+        self.assertEqual(api_resp.json()["organization"]["pending_memberships"], [])
 
     def test_org_detail_shows_dual_category_memberships(self) -> None:
         """An org with both sponsorship-category and mirror-category memberships
@@ -1276,16 +1320,17 @@ class OrganizationUserViewsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+            api_resp = self.client.get(reverse("api-organization-detail-page", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, f'data-organization-detail-api-url="{reverse("api-organization-detail-page", args=[org.pk])}"')
 
-        # Both membership badges render
-        self.assertContains(resp, 'alx-status-badge--active">Gold')
-        self.assertContains(resp, 'alx-status-badge--active">Mirror')
-
-        # Both membership names appear in the sponsorship level card
-        self.assertContains(resp, "Gold Sponsor Member")
-        self.assertContains(resp, "Mirror Member")
+        self.assertEqual(api_resp.status_code, 200)
+        memberships = api_resp.json()["organization"]["memberships"]
+        self.assertEqual(
+            [membership["membership_type"]["code"] for membership in memberships],
+            ["gold", "mirror"],
+        )
 
         # A same-category duplicate is rejected by membership invariant checks.
         with self.assertRaises(IntegrityError):
@@ -1359,15 +1404,17 @@ class OrganizationUserViewsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+            api_resp = self.client.get(reverse("api-organization-detail-page", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Change tier")
         tier_change_url = reverse("organization-membership-request", args=[org.pk]) + "?membership_type=gold"
-        self.assertContains(resp, tier_change_url)
-        self.assertNotContains(
+        self.assertContains(
             resp,
-            reverse("organization-membership-request", args=[org.pk]) + "?membership_type=ruby",
+            f'data-organization-detail-membership-request-url="{reverse("organization-membership-request", args=[org.pk])}"',
         )
+        membership = api_resp.json()["organization"]["memberships"][0]
+        self.assertTrue(membership["can_request_tier_change"])
+        self.assertEqual(membership["tier_change_membership_type_code"], "gold")
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
@@ -1413,13 +1460,12 @@ class OrganizationUserViewsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+            api_resp = self.client.get(reverse("api-organization-detail-page", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Change tier")
-        self.assertContains(
-            resp,
-            reverse("organization-membership-request", args=[org.pk]) + "?membership_type=silver",
-        )
+        membership = api_resp.json()["organization"]["memberships"][0]
+        self.assertTrue(membership["can_request_tier_change"])
+        self.assertEqual(membership["tier_change_membership_type_code"], "silver")
 
     def test_org_detail_change_tier_prefers_higher_ranked_tier_for_gold(self) -> None:
         from core.models import MembershipType, Organization
@@ -1465,17 +1511,12 @@ class OrganizationUserViewsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+            api_resp = self.client.get(reverse("api-organization-detail-page", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Change tier")
-        self.assertContains(
-            resp,
-            reverse("organization-membership-request", args=[org.pk]) + "?membership_type=platinum",
-        )
-        self.assertNotContains(
-            resp,
-            reverse("organization-membership-request", args=[org.pk]) + "?membership_type=silver",
-        )
+        membership = api_resp.json()["organization"]["memberships"][0]
+        self.assertTrue(membership["can_request_tier_change"])
+        self.assertEqual(membership["tier_change_membership_type_code"], "platinum")
 
     def test_org_detail_change_tier_for_ruby_suggests_silver(self) -> None:
         from core.models import MembershipType, Organization
@@ -1521,13 +1562,12 @@ class OrganizationUserViewsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+            api_resp = self.client.get(reverse("api-organization-detail-page", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Change tier")
-        self.assertContains(
-            resp,
-            reverse("organization-membership-request", args=[org.pk]) + "?membership_type=silver",
-        )
+        membership = api_resp.json()["organization"]["memberships"][0]
+        self.assertTrue(membership["can_request_tier_change"])
+        self.assertEqual(membership["tier_change_membership_type_code"], "silver")
 
     def test_org_detail_hides_request_membership_button_when_no_more_categories_available(self) -> None:
         from core.models import MembershipType, Organization
@@ -1567,10 +1607,13 @@ class OrganizationUserViewsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+            api_resp = self.client.get(reverse("api-organization-detail-page", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
         self.assertNotContains(resp, "Request membership")
-        self.assertNotContains(resp, reverse("organization-membership-request", args=[org.pk]))
+        memberships = api_resp.json()["organization"]["memberships"]
+        self.assertEqual({membership["membership_type"]["code"] for membership in memberships}, {"silver", "mirror"})
+        self.assertTrue(all(not membership["can_request_tier_change"] for membership in memberships))
 
     def test_org_detail_shows_request_membership_button_for_committee_user(self) -> None:
         from core.models import FreeIPAPermissionGrant, MembershipType, Organization
@@ -1600,10 +1643,19 @@ class OrganizationUserViewsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.views_membership.user.block_action_without_coc", return_value=None),
+        ):
+            request_resp = self.client.get(reverse("organization-membership-request", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Request membership")
-        self.assertContains(resp, reverse("organization-membership-request", args=[org.pk]))
+        self.assertContains(
+            resp,
+            f'data-organization-detail-membership-request-url="{reverse("organization-membership-request", args=[org.pk])}"',
+        )
+        self.assertEqual(request_resp.status_code, 200)
+        self.assertContains(request_resp, 'data-membership-request-form-root=""')
 
     @override_settings(
         STORAGES={
@@ -1684,12 +1736,14 @@ class OrganizationUserViewsTests(TestCase):
             self.assertContains(resp, expected_logo_path)
 
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+            detail_api_resp = self.client.get(reverse("api-organization-detail-page", args=[org.pk]))
             self.assertEqual(resp.status_code, 200)
-            self.assertContains(resp, expected_logo_path)
+            self.assertEqual(detail_api_resp.status_code, 200)
+            self.assertTrue(detail_api_resp.json()["organization"]["logo_url"].endswith(expected_logo_path))
 
             resp = self.client.get(reverse("organizations"))
             self.assertEqual(resp.status_code, 200)
-            self.assertContains(resp, expected_logo_path)
+            self.assertContains(resp, "data-organizations-root")
         self.assertTrue(org.logo.name.endswith(expected_logo_path))
 
         org.logo.open("rb")
@@ -1802,9 +1856,16 @@ class OrganizationUserViewsTests(TestCase):
         self._login_as_freeipa_user("bob")
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
-            self.assertEqual(resp.status_code, 200)
-            self.assertContains(resp, "Under review")
-            self.assertContains(resp, "Annual dues: $20,000 USD")
+            api_resp = self.client.get(reverse("api-organization-detail-page", args=[org.pk]))
+        self.assertEqual(resp.status_code, 200)
+        pending_membership = api_resp.json()["organization"]["pending_memberships"][0]
+        self.assertEqual(pending_membership["request_id"], req.pk)
+        self.assertEqual(pending_membership["status"], MembershipRequest.Status.pending)
+        self.assertEqual(pending_membership["membership_type"]["code"], "gold")
+        self.assertEqual(
+            pending_membership["membership_type"]["description"],
+            "Gold Sponsor Member (Annual dues: $20,000 USD)",
+        )
 
     def test_org_membership_request_prefills_current_membership_type(self) -> None:
         """When a representative visits the org request page, the current type should be pre-selected."""
@@ -1926,7 +1987,7 @@ class OrganizationUserViewsTests(TestCase):
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]})
         representative = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["DE"]})
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, *, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "bob":
@@ -2474,7 +2535,6 @@ class OrganizationUserViewsTests(TestCase):
         self.assertEqual(MembershipRequest.objects.filter(requested_organization=org).count(), 1)
 
     def test_org_membership_request_requires_signed_coc(self) -> None:
-        from core.freeipa.agreement import FreeIPAFASAgreement
         from core.models import MembershipRequest, MembershipType, Organization
 
         MembershipType.objects.update_or_create(
@@ -2503,26 +2563,19 @@ class OrganizationUserViewsTests(TestCase):
 
         self._login_as_freeipa_user("bob")
 
-        coc = FreeIPAFASAgreement(
-            settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN,
-            {
-                "cn": [settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN],
-                "ipaenabledflag": ["TRUE"],
-                "memberuser_user": [],
-            },
-        )
-
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
-        with patch("core.freeipa.user.FreeIPAUser.get", autospec=True, return_value=bob):
-            with patch("core.views_utils.FreeIPAFASAgreement.get", autospec=True, return_value=coc):
-                resp = self.client.post(
-                    reverse("organization-membership-request", args=[org.pk]),
-                    data={
-                        "membership_type": "silver",
-                        "q_sponsorship_details": "Please renew.",
-                    },
-                    follow=False,
-                )
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", autospec=True, return_value=bob),
+            patch("core.views_utils.has_signed_coc", return_value=False),
+        ):
+            resp = self.client.post(
+                reverse("organization-membership-request", args=[org.pk]),
+                data={
+                    "membership_type": "silver",
+                    "q_sponsorship_details": "Please renew.",
+                },
+                follow=False,
+            )
 
         self.assertEqual(resp.status_code, 302)
         expected = (
@@ -2640,7 +2693,7 @@ class OrganizationUserViewsTests(TestCase):
 
         past_date = timezone.now().astimezone(datetime.UTC).date() - datetime.timedelta(days=1)
 
-        def fake_get(username: str) -> FreeIPAUser | None:
+        def fake_get(username: str, *, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "bob":
                 return rep
             return reviewer
@@ -2854,7 +2907,7 @@ class OrganizationUserViewsTests(TestCase):
         self.assertEqual(sponsorship.membership_type_id, "silver")
         self.assertIsNone(sponsorship.expires_at)
 
-    def test_organization_detail_shows_committee_notes_with_request_link(self) -> None:
+    def test_organization_detail_bootstraps_committee_notes_without_api_notes_payload(self) -> None:
         from core.models import MembershipRequest, MembershipType, Note, Organization
         from core.permissions import ASTRA_VIEW_MEMBERSHIP
 
@@ -2889,26 +2942,34 @@ class OrganizationUserViewsTests(TestCase):
         self._login_as_freeipa_user("reviewer")
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
-            resp = self.client.get(reverse("api-organization-detail", args=[org.pk]))
+            page_resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+            detail_resp = self.client.get(reverse("api-organization-detail-page", args=[org.pk]))
+            legacy_resp = self.client.get(reverse("api-organization-detail", args=[org.pk]))
 
-        self.assertEqual(resp.status_code, 200)
-        payload = resp.json()
-        notes = payload["organization"]["notes"]
-        self.assertEqual(
-            notes["summaryUrl"],
-            reverse("api-membership-notes-aggregate-summary") + f"?target_type=org&target={org.pk}",
+        self.assertEqual(page_resp.status_code, 200)
+        self.assertContains(
+            page_resp,
+            f'data-organization-detail-membership-notes-summary-url="{reverse("api-membership-notes-aggregate-summary")}?target_type=org&amp;target={org.pk}"',
         )
-        self.assertEqual(
-            notes["detailUrl"],
-            reverse("api-membership-notes-aggregate") + f"?target_type=org&target={org.pk}",
+        self.assertContains(
+            page_resp,
+            f'data-organization-detail-membership-notes-detail-url="{reverse("api-membership-notes-aggregate")}?target_type=org&amp;target={org.pk}"',
         )
-        self.assertEqual(notes["addUrl"], reverse("api-membership-notes-aggregate-add"))
-        self.assertTrue(notes["canView"])
-        self.assertFalse(notes["canWrite"])
-        self.assertNotIn("Org note", str(payload))
-        self.assertNotIn(f"(req. #{req.pk})", str(payload))
+        self.assertContains(
+            page_resp,
+            f'data-organization-detail-membership-notes-add-url="{reverse("api-membership-notes-aggregate-add")}"',
+        )
+        self.assertContains(page_resp, 'data-organization-detail-membership-notes-can-view="true"')
+        self.assertContains(page_resp, 'data-organization-detail-membership-notes-can-write="false"')
+        self.assertNotContains(page_resp, "Org note")
+        self.assertNotContains(page_resp, f"(req. #{req.pk})")
 
-    def test_organization_detail_scopes_request_links_per_membership_type(self) -> None:
+        self.assertEqual(detail_resp.status_code, 200)
+        self.assertNotIn("notes", detail_resp.json()["organization"])
+        self.assertEqual(legacy_resp.status_code, 200)
+        self.assertNotIn("notes", legacy_resp.json()["organization"])
+
+    def test_organization_detail_page_api_scopes_request_ids_per_membership_type(self) -> None:
         from core.models import Membership, MembershipLog, MembershipRequest, MembershipType, Organization
 
         MembershipType.objects.update_or_create(
@@ -2978,10 +3039,19 @@ class OrganizationUserViewsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+            api_resp = self.client.get(reverse("api-organization-detail-page", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, reverse("membership-request-self", args=[req_gold.pk]))
-        self.assertContains(resp, reverse("membership-request-self", args=[req_mirror.pk]))
+        self.assertContains(
+            resp,
+            'data-organization-detail-membership-request-detail-template="/membership/request/__request_id__/"',
+        )
+        self.assertEqual(api_resp.status_code, 200)
+        request_ids = {
+            entry["membership_type"]["code"]: entry["request_id"]
+            for entry in api_resp.json()["organization"]["memberships"]
+        }
+        self.assertEqual(request_ids, {"gold": req_gold.pk, "mirror": req_mirror.pk})
 
     def test_organization_detail_allows_renewal_when_other_type_pending(self) -> None:
         from core.models import Membership, MembershipRequest, MembershipType, Organization
@@ -3033,13 +3103,23 @@ class OrganizationUserViewsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
+            extend_resp = self.client.post(
+                reverse("organization-sponsorship-extend", args=[org.pk]),
+                data={"membership_type": "gold"},
+                follow=False,
+            )
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(
             resp,
+            f'data-organization-detail-membership-request-url="{reverse("organization-membership-request", args=[org.pk])}"',
+        )
+        self.assertEqual(extend_resp.status_code, 302)
+        self.assertEqual(
+            extend_resp["Location"],
             reverse("organization-membership-request", args=[org.pk]) + "?membership_type=gold",
         )
-        self.assertContains(resp, "Request renewal")
 
     def test_organization_detail_pending_request_context_uses_standardized_entry_shape(self) -> None:
         from core.models import Membership, MembershipRequest, MembershipType, Organization
@@ -3074,14 +3154,15 @@ class OrganizationUserViewsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+            api_resp = self.client.get(reverse("api-organization-detail-page", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
-        sponsorship_entries = resp.context["sponsorship_entries"]
-        self.assertEqual(len(sponsorship_entries), 1)
-        pending_context = sponsorship_entries[0]["pending_request"]
-        self.assertIsInstance(pending_context, dict)
-        self.assertEqual(pending_context["request_id"], pending.pk)
-        self.assertEqual(pending_context["status"], MembershipRequest.Status.pending)
+        pending_memberships = api_resp.json()["organization"]["pending_memberships"]
+        self.assertEqual(len(pending_memberships), 1)
+        pending_entry = pending_memberships[0]
+        self.assertEqual(pending_entry["request_id"], pending.pk)
+        self.assertEqual(pending_entry["status"], MembershipRequest.Status.pending)
+        self.assertEqual(pending_entry["membership_type"]["code"], "gold")
 
     def test_organization_detail_hides_expired_memberships(self) -> None:
         from core.models import Membership, MembershipType, Organization
@@ -3135,12 +3216,14 @@ class OrganizationUserViewsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+            api_resp = self.client.get(reverse("api-organization-detail-page", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Gold Sponsor Member")
-        self.assertNotContains(resp, "Mirror Member")
+        memberships = api_resp.json()["organization"]["memberships"]
+        self.assertEqual(len(memberships), 1)
+        self.assertEqual(memberships[0]["membership_type"]["code"], "gold")
 
-    def test_organization_aggregate_notes_read_only_hides_compose_and_denies_post(self) -> None:
+    def test_organization_detail_bootstraps_read_only_notes_and_aggregate_post_stays_forbidden(self) -> None:
         from core.models import MembershipRequest, MembershipType, Note, Organization
 
         MembershipType.objects.update_or_create(
@@ -3195,23 +3278,30 @@ class OrganizationUserViewsTests(TestCase):
         self._login_as_freeipa_user("reviewer")
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
-            resp = self.client.get(reverse("api-organization-detail", args=[org.pk]))
+            page_resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+            detail_resp = self.client.get(reverse("api-organization-detail-page", args=[org.pk]))
+            legacy_resp = self.client.get(reverse("api-organization-detail", args=[org.pk]))
 
-        self.assertEqual(resp.status_code, 200)
-        payload = resp.json()
-        notes = payload["organization"]["notes"]
-        self.assertEqual(
-            notes["summaryUrl"],
-            reverse("api-membership-notes-aggregate-summary") + f"?target_type=org&target={org.pk}",
+        self.assertEqual(page_resp.status_code, 200)
+        self.assertContains(
+            page_resp,
+            f'data-organization-detail-membership-notes-summary-url="{reverse("api-membership-notes-aggregate-summary")}?target_type=org&amp;target={org.pk}"',
         )
-        self.assertEqual(
-            notes["detailUrl"],
-            reverse("api-membership-notes-aggregate") + f"?target_type=org&target={org.pk}",
+        self.assertContains(
+            page_resp,
+            f'data-organization-detail-membership-notes-detail-url="{reverse("api-membership-notes-aggregate")}?target_type=org&amp;target={org.pk}"',
         )
-        self.assertEqual(notes["addUrl"], reverse("api-membership-notes-aggregate-add"))
-        self.assertTrue(notes["canView"])
-        self.assertFalse(notes["canWrite"])
-        self.assertNotIn("Older org note", str(payload))
+        self.assertContains(
+            page_resp,
+            f'data-organization-detail-membership-notes-add-url="{reverse("api-membership-notes-aggregate-add")}"',
+        )
+        self.assertContains(page_resp, 'data-organization-detail-membership-notes-can-view="true"')
+        self.assertContains(page_resp, 'data-organization-detail-membership-notes-can-write="false"')
+        self.assertNotContains(page_resp, "Older org note")
+        self.assertEqual(detail_resp.status_code, 200)
+        self.assertNotIn("notes", detail_resp.json()["organization"])
+        self.assertEqual(legacy_resp.status_code, 200)
+        self.assertNotIn("notes", legacy_resp.json()["organization"])
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
@@ -3282,9 +3372,11 @@ class OrganizationUserViewsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+            detail_resp = self.client.get(reverse("api-organization-detail-page", args=[org.pk]))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Expires")
-        self.assertContains(resp, "Request renewal")
+        membership = detail_resp.json()["organization"]["memberships"][0]
+        self.assertEqual(membership["membership_type"]["code"], "gold")
+        self.assertEqual(membership["expires_at"], expires_at.isoformat())
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
@@ -3713,62 +3805,33 @@ class OrganizationUserViewsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("organization-detail", args=[org.pk]))
+            detail_resp = self.client.get(reverse("api-organization-detail-page", args=[org.pk]))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Edit expiration")
-        self.assertContains(resp, 'data-target="#sponsorship-expiry-modal-gold"')
-        self.assertContains(resp, 'id="sponsorship-expiry-modal-gold"')
         self.assertContains(
             resp,
-            f'action="{reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"])}"',
+            f'data-organization-detail-api-url="{reverse("api-organization-detail-page", args=[org.pk])}"',
         )
-        self.assertNotContains(resp, 'data-target="#sponsorship-terminate-modal-gold"')
-        self.assertNotContains(resp, 'id="sponsorship-terminate-modal-gold"')
         self.assertContains(
             resp,
-            f'action="{reverse("organization-sponsorship-terminate", args=[org.pk, "gold"])}"',
+            f'data-organization-detail-sponsorship-set-expiry-url-template="{reverse("organization-sponsorship-set-expiry", args=[org.pk, "__membership_type_code__"])}"',
         )
+        self.assertContains(
+            resp,
+            f'data-organization-detail-sponsorship-terminate-url-template="{reverse("organization-sponsorship-terminate", args=[org.pk, "__membership_type_code__"])}"',
+        )
+        self.assertContains(resp, 'data-organization-detail-expiry-min-date="')
+        self.assertNotContains(resp, "Edit expiration")
+        self.assertNotContains(resp, f"Manage membership: Gold Sponsor Member for {org.name}")
+        self.assertNotContains(resp, "Danger zone")
+        self.assertNotContains(resp, "Save expiration")
+        self.assertNotContains(resp, f'action="{reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"])}"')
+        self.assertNotContains(resp, f'action="{reverse("organization-sponsorship-terminate", args=[org.pk, "gold"])}"')
 
-        self.assertContains(resp, f"Manage membership: Gold Sponsor Member for {org.name}")
-        self.assertNotContains(resp, "Target:")
-        self.assertContains(resp, "Expiration date")
-        self.assertContains(resp, "Expiration is an end-of-day date in UTC.")
-        self.assertContains(resp, 'name="expires_on"')
-        self.assertContains(resp, 'min="')
-        self.assertContains(resp, "Save expiration")
-        self.assertContains(resp, "Danger zone")
-        self.assertContains(resp, "Ends this membership early.")
-        self.assertContains(resp, "Terminate membership&hellip;", html=True)
-        self.assertContains(resp, 'data-target="#sponsorship-expiry-modal-gold-terminate-collapse"')
-        self.assertContains(resp, 'id="sponsorship-expiry-modal-gold-terminate-collapse"')
-        self.assertContains(resp, "This will end the membership early and cannot be undone.")
-        self.assertContains(resp, "Type the name to confirm")
-        self.assertContains(resp, f'placeholder="{org.name}"')
-        self.assertContains(resp, f'data-terminate-target="{org.name}"')
-        self.assertContains(resp, "Does not match. Type the name to enable termination (case-insensitive).")
-        self.assertContains(resp, 'data-terminate-action="cancel"')
-        self.assertContains(resp, "Cancel termination")
-        self.assertContains(resp, 'id="sponsorship-expiry-modal-gold-terminate-submit"')
-        self.assertContains(resp, "disabled")
-        self.assertContains(resp, "aria-disabled=\"true\"")
-        self.assertContains(resp, "attr('data-terminate-target')")
-        self.assertContains(resp, "var modalId = 'sponsorship\\u002Dexpiry\\u002Dmodal\\u002Dgold';")
-        self.assertContains(resp, "var inputId = modalId + '-terminate-confirm-input';")
-        self.assertContains(resp, "var submitId = modalId + '-terminate-submit';")
-        self.assertContains(resp, "jq(document).on('input', '#' + inputId, function() {")
-        self.assertContains(resp, "var $input = jq(this);")
-        self.assertContains(resp, "jq(document).on('click', '[data-terminate-action=\"cancel\"]', function() {")
-        self.assertContains(resp, "jq(collapseSel).on('shown.bs.collapse', function() {")
-        self.assertContains(resp, "jq(collapseSel).on('hidden.bs.collapse', function() {")
-        self.assertContains(resp, "jq(modalSel).on('hidden.bs.modal', function() {")
-        self.assertContains(resp, "$submit.prop('disabled', !matches).attr('aria-disabled', !matches ? 'true' : 'false');")
-        self.assertNotContains(resp, "$input.off('input.terminate');")
-        self.assertNotContains(resp, "$input.on('input.terminate', updateConfirmState);")
-        self.assertNotContains(resp, "jq(collapseSel).on('click', '[data-terminate-action=\"cancel\"]', function () {")
-        self.assertNotContains(resp, "jq(modalSel).on('shown.bs.modal hidden.bs.modal', function () {")
-        self.assertNotContains(resp, "function setDisabled(btn, disabled) {")
-        self.assertNotContains(resp, "data-expiry-modal-state")
-        self.assertNotContains(resp, 'data-expiry-action="go-confirm-terminate"')
-        self.assertNotContains(resp, 'data-expiry-action="back-to-edit"')
+        self.assertEqual(detail_resp.status_code, 200)
+        membership = detail_resp.json()["organization"]["memberships"][0]
+        self.assertEqual(membership["membership_type"]["code"], "gold")
+        self.assertTrue(membership["can_manage_expiration"])
+        self.assertEqual(membership["expires_at"], expires_at.isoformat())
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.get(reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"]))
@@ -4403,8 +4466,13 @@ class OrganizationUserViewsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             resp = self.client.get(reverse("organizations"))
+            api_resp = self.client.get(reverse("api-organizations"), HTTP_ACCEPT="application/json")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, reverse("organization-detail", args=[created.pk]))
+        self.assertContains(resp, "data-organizations-root")
+        self.assertEqual(api_resp.status_code, 200)
+        self.assertEqual(api_resp.json()["my_organization"]["id"], created.pk)
+        self.assertEqual(api_resp.json()["my_organization"]["name"], "AlmaLinux")
+        self.assertTrue(api_resp.json()["my_organization"]["link_to_detail"])
 
     def test_organization_create_redirects_creator_to_membership_request(self) -> None:
         from core.models import MembershipType, Organization
@@ -4517,7 +4585,7 @@ class OrganizationUserViewsTests(TestCase):
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("reviewer")
 
-        def fake_get(username: str):
+        def fake_get(username: str, *, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "bob":

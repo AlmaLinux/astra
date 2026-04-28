@@ -1,4 +1,5 @@
 
+import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -444,22 +445,27 @@ class MembershipCountryRequirementsTests(TestCase):
             _user_data={"fasstatusnote": ["RU"]},
         )
 
-        captured: dict[str, object] = {}
-
-        def fake_render(_request, template, context):
-            captured["template"] = template
-            captured["context"] = context
-            return HttpResponse("ok")
-
         with patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_target) as get_mock:
-            with patch("core.views_membership.committee.render", autospec=True, side_effect=fake_render):
-                response = views_membership.membership_request_detail(request, pk=mr.pk)
+            response = views_membership.membership_request_detail(request, pk=mr.pk)
+
+            api_request = self.factory.get(f"/api/v1/membership/requests/{mr.pk}/detail")
+            self._add_session_and_messages(api_request)
+            api_request.user = self._committee_user()
+            api_response = views_membership.membership_request_detail_api(api_request, pk=mr.pk)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(captured.get("template"), "core/membership_request_detail.html")
-        ctx = captured.get("context") or {}
-        self.assertEqual(ctx.get("embargoed_country_code"), "RU")
-        self.assertEqual(ctx.get("embargoed_country_label"), f"{country_name_from_code('RU')} (RU)")
+        self.assertIn('data-membership-request-detail-root=""', response.content.decode())
+        self.assertIn(reverse("api-membership-request-detail", args=[mr.pk]), response.content.decode())
+        self.assertEqual(api_response.status_code, 200)
+        payload = json.loads(api_response.content)
+        self.assertEqual(
+            payload["committee"]["compliance_warning"],
+            {
+                "country_code": "RU",
+                "country_label": f"{country_name_from_code('RU')} (RU)",
+                "message": f"This user's declared country, {country_name_from_code('RU')} (RU), is on the list of embargoed countries.",
+            },
+        )
         get_mock.assert_any_call("alice", respect_privacy=False)
 
     @override_settings(MEMBERSHIP_EMBARGOED_COUNTRY_CODES=["RU", "IR"])
@@ -489,22 +495,27 @@ class MembershipCountryRequirementsTests(TestCase):
             _user_data={"fasstatusnote": ["RU"]},
         )
 
-        captured: dict[str, object] = {}
-
-        def fake_render(_request, template, context):
-            captured["template"] = template
-            captured["context"] = context
-            return HttpResponse("ok")
-
         with patch("core.views_membership.FreeIPAUser.get", autospec=True, return_value=fake_rep) as get_mock:
-            with patch("core.views_membership.committee.render", autospec=True, side_effect=fake_render):
-                response = views_membership.membership_request_detail(request, pk=mr.pk)
+            response = views_membership.membership_request_detail(request, pk=mr.pk)
+
+            api_request = self.factory.get(f"/api/v1/membership/requests/{mr.pk}/detail")
+            self._add_session_and_messages(api_request)
+            api_request.user = self._committee_user()
+            api_response = views_membership.membership_request_detail_api(api_request, pk=mr.pk)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(captured.get("template"), "core/membership_request_detail.html")
-        ctx = captured.get("context") or {}
-        self.assertEqual(ctx.get("embargoed_country_code"), "RU")
-        self.assertEqual(ctx.get("embargoed_country_label"), f"{country_name_from_code('RU')} (RU)")
+        self.assertIn('data-membership-request-detail-root=""', response.content.decode())
+        self.assertIn(reverse("api-membership-request-detail", args=[mr.pk]), response.content.decode())
+        self.assertEqual(api_response.status_code, 200)
+        payload = json.loads(api_response.content)
+        self.assertEqual(
+            payload["committee"]["compliance_warning"],
+            {
+                "country_code": "RU",
+                "country_label": f"{country_name_from_code('RU')} (RU)",
+                "message": f"This user's declared country, {country_name_from_code('RU')} (RU), is on the list of embargoed countries.",
+            },
+        )
         get_mock.assert_any_call("bob", respect_privacy=False)
 
     def test_country_change_with_pending_request_creates_system_note(self) -> None:

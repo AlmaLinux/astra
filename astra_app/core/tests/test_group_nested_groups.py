@@ -2,6 +2,7 @@
 from unittest.mock import patch
 
 from django.test import TestCase
+from django.urls import reverse
 
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import FreeIPAUser
@@ -82,28 +83,15 @@ class GroupNestedGroupsDisplayTests(TestCase):
             patch("core.templatetags.core_user_widget.FreeIPAUser.get", side_effect=_fake_user_get),
         ):
             resp = self.client.get("/group/parent/")
+            info_resp = self.client.get(reverse("api-group-detail-info", args=["parent"]))
 
         self.assertEqual(resp.status_code, 200)
-        html = resp.content.decode("utf-8")
-
-        # Nested groups should be rendered using the group widget.
-        self.assertIn("widget-group", html)
-
-        idx_alpha = html.find('href="/group/alpha/"')
-        idx_child = html.find('href="/group/child/"')
-        idx_bob = html.find('href="/user/bob/"')
-
-        self.assertGreaterEqual(idx_alpha, 0)
-        self.assertGreaterEqual(idx_child, 0)
-        self.assertGreaterEqual(idx_bob, 0)
-
-        # Groups first, then users. Groups sorted alpha -> child.
-        self.assertLess(idx_alpha, idx_child)
-        self.assertLess(idx_child, idx_bob)
-
-        # Child includes nested group 'grand' (carol), so the nested-aware count is 3 unique users.
-        self.assertIn("child", html)
-        self.assertIn(">3<", html)
+        self.assertContains(resp, "data-group-detail-root")
+        self.assertContains(resp, reverse("api-group-detail-info", args=["parent"]))
+        self.assertContains(resp, reverse("api-group-detail-members", args=["parent"]))
+        self.assertContains(resp, reverse("api-group-detail-leaders", args=["parent"]))
+        self.assertEqual(info_resp.status_code, 200)
+        self.assertEqual(info_resp.json()["group"]["member_count"], 4)
 
     def test_group_detail_skips_non_fasgroup_member_groups_and_members(self) -> None:
         self._login_as_freeipa("admin")
@@ -163,10 +151,10 @@ class GroupNestedGroupsDisplayTests(TestCase):
             patch("core.templatetags.core_user_widget.FreeIPAUser.get", side_effect=_fake_user_get),
         ):
             resp = self.client.get("/group/parent/")
+            info_resp = self.client.get(reverse("api-group-detail-info", args=["parent"]))
 
         self.assertEqual(resp.status_code, 200)
-        html = resp.content.decode("utf-8")
-
-        self.assertNotIn('href="/group/legacy/"', html)
-        self.assertIn('href="/group/child/"', html)
-        self.assertIn("(2 members)", html)
+        self.assertContains(resp, "data-group-detail-root")
+        self.assertContains(resp, reverse("api-group-detail-info", args=["parent"]))
+        self.assertEqual(info_resp.status_code, 200)
+        self.assertEqual(info_resp.json()["group"]["member_count"], 2)

@@ -64,10 +64,9 @@ class ProfileAccountSetupAlertTests(TestCase):
         self.assertFalse(account_setup["requiredIsRfi"])
         self.assertEqual(account_setup["requiredActions"][0]["id"], "coc-not-signed-alert")
         self.assertEqual(account_setup["requiredActions"][0]["label"], f"Sign the {coc_cn}")
-        self.assertEqual(
-            account_setup["requiredActions"][0]["url"],
-            f'{reverse("settings")}?tab=agreements&agreement=AlmaLinux+Community+Code+of+Conduct&return=profile',
-        )
+        self.assertEqual(account_setup["requiredActions"][0]["urlLabel"], "Review & sign")
+        self.assertEqual(account_setup["requiredActions"][0]["agreementCn"], coc_cn)
+        self.assertNotIn("url", account_setup["requiredActions"][0])
 
     def test_shows_recommended_membership_request_when_no_individual_membership(self) -> None:
         bob = FreeIPAUser(
@@ -106,7 +105,9 @@ class ProfileAccountSetupAlertTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         recommended = resp.json()["accountSetup"]["recommendedActions"]
         self.assertEqual(recommended[0]["id"], "membership-request-recommended-alert")
-        self.assertEqual(recommended[0]["url"], reverse("membership-request"))
+        self.assertEqual(recommended[0]["label"], "Request an individual membership")
+        self.assertEqual(recommended[0]["urlLabel"], "Request a membership")
+        self.assertNotIn("url", recommended[0])
 
     def test_does_not_recommend_membership_when_request_already_pending(self) -> None:
         bob = FreeIPAUser(

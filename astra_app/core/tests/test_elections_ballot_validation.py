@@ -1,6 +1,7 @@
 
 import datetime
 import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.conf import settings
@@ -227,14 +228,7 @@ class ElectionBallotValidationTests(TestCase):
             weight=1,
         )
 
-        coc = FreeIPAFASAgreement(
-            settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN,
-            {
-                "cn": [settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN],
-                "ipaenabledflag": ["TRUE"],
-                "memberuser_user": [],
-            },
-        )
+        coc = SimpleNamespace(signed=False)
 
         self._login_as_freeipa_user("voter1")
         voter = FreeIPAUser(
@@ -247,7 +241,7 @@ class ElectionBallotValidationTests(TestCase):
             },
         )
         with patch("core.freeipa.user.FreeIPAUser.get", autospec=True, return_value=voter):
-            with patch("core.views_utils.FreeIPAFASAgreement.get", autospec=True, return_value=coc):
+            with patch("core.views_utils.get_agreement_for_user", autospec=True, return_value=coc):
                 resp = self.client.post(
                     reverse("election-vote-submit", args=[election.id]),
                     data=json.dumps({"credential_public_id": "cred-1", "ranking": [c1.id]}),

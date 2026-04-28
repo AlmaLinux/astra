@@ -1,4 +1,6 @@
 import datetime
+import json
+import re
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -78,6 +80,16 @@ class SelfServiceMembershipPrivacyTests(TestCase):
             },
         )
 
+    def _settings_initial_payload(self, response) -> dict[str, object]:
+        html = response.content.decode("utf-8")
+        match = re.search(
+            r'<script id="settings-initial-payload" type="application/json">(?P<payload>.*?)</script>',
+            html,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(match)
+        return json.loads(match.group("payload"))
+
     def _create_membership_type(self, *, code: str, name: str, group_cn: str, category_id: str = "individual") -> None:
         MembershipType.objects.update_or_create(
             code=code,
@@ -125,11 +137,13 @@ class SelfServiceMembershipPrivacyTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         html = response.content.decode("utf-8")
-        self.assertIn('data-settings-tab="membership"', html)
-        self.assertIn('data-settings-tab-pane="membership"', html)
-        self.assertIn('data-settings-tab="privacy"', html)
-        self.assertIn('data-settings-tab-pane="privacy"', html)
-        self.assertIn("Delete my account", html)
+        payload = self._settings_initial_payload(response)
+        self.assertIn('data-settings-root=""', html)
+        self.assertEqual(payload["active_tab"], "privacy")
+        self.assertIn("membership", payload["tabs"])
+        self.assertIn("privacy", payload["tabs"])
+        self.assertIn("account_deletion_form", payload["privacy"])
+        self.assertIn("active_memberships", payload["membership"])
 
     def test_profile_tab_no_longer_renders_private_profile_toggle(self) -> None:
         request = self.factory.get("/settings/?tab=profile")
@@ -557,10 +571,10 @@ class SelfServiceMembershipPrivacyTests(TestCase):
             response = views_settings.settings_root(request)
 
         self.assertEqual(response.status_code, 200)
-        html = response.content.decode("utf-8")
-        self.assertIn("current deletion request status", html.lower())
-        self.assertNotIn("Submit deletion request", html)
-        self.assertNotIn('action="/settings/privacy/delete-request/"', html)
+        payload = self._settings_initial_payload(response)
+        self.assertEqual(payload["active_tab"], "privacy")
+        self.assertIsNotNone(payload["privacy"]["active_deletion_request"])
+        self.assertEqual(payload["privacy"]["active_deletion_request"]["status"], "pending_review")
 
     def test_privacy_toggle_save_does_not_require_country_code(self) -> None:
         request = self.factory.post(
@@ -614,11 +628,13 @@ class SelfServiceMembershipPrivacyTests(TestCase):
             response = views_settings.settings_root(request)
 
         self.assertEqual(response.status_code, 200)
-        html = response.content.decode("utf-8")
-        self.assertNotIn("confirm_membership_name", html)
-        self.assertNotIn("confirm_account_name", html)
-        self.assertIn("Enter your current password to leave this membership.", html)
-        self.assertIn("Enter your current password to submit this request.", html)
+        payload = self._settings_initial_payload(response)
+        account_deletion_fields = payload["privacy"]["account_deletion_form"]["fields"]
+        self.assertNotIn("confirm_account_name", {field["name"] for field in account_deletion_fields})
+        membership_fields = payload["membership"]["active_memberships"][0]["termination_form"]["fields"]
+        self.assertNotIn("confirm_membership_name", {field["name"] for field in membership_fields})
+        self.assertIn("current_password", {field["name"] for field in account_deletion_fields})
+        self.assertIn("current_password", {field["name"] for field in membership_fields})
 
     def test_selfservice_lifecycle_cleanup_clears_due_reason_text(self) -> None:
         from core.models import AccountDeletionRequest, MembershipTerminationFeedback  # noqa: PLC0415

@@ -1236,6 +1236,30 @@ def users_api(request: HttpRequest) -> JsonResponse:
     if not can_view_user_directory(request.user):
         raise Http404
 
+    def _user_directory_display_username(user: object) -> str:
+        if hasattr(user, "username"):
+            try:
+                username_value = str(user.username or "").strip()
+            except Exception:
+                username_value = ""
+            if username_value:
+                return username_value
+
+        if hasattr(user, "get_username"):
+            try:
+                username_func = user.get_username
+            except Exception:
+                username_func = None
+            if callable(username_func):
+                try:
+                    username_value = str(username_func() or "").strip()
+                except Exception:
+                    username_value = ""
+                if username_value:
+                    return username_value
+
+        return ""
+
     q, page_number, _base_query, _page_url_prefix = parse_grid_query(request)
     users_list = snapshot_freeipa_users()
 
@@ -1255,10 +1279,13 @@ def users_api(request: HttpRequest) -> JsonResponse:
 
     items: list[dict[str, str]] = []
     for user in users_page_list:
-        username = try_get_username_from_user(user)
+        username = _user_directory_display_username(user)
         if not username:
             continue
-        user_avatar_url = avatar_url_by_username.get(username, "")
+        user_avatar_url = avatar_url_by_username.get(username, "") or avatar_url_by_username.get(
+            normalize_freeipa_username(username),
+            "",
+        )
         items.append(
             {
                 "username": username,

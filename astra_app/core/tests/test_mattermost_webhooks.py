@@ -620,6 +620,15 @@ class MattermostWebhookPostTests(SimpleTestCase):
 
 
 class MattermostWebhookDispatchTests(TestCase):
+    def _dispatch_thread_patch(self):
+        def _make_thread(*thread_ctor_args: object, target=None, args=(), kwargs=None, **_thread_kwargs: object):
+            del thread_ctor_args
+            call_kwargs = dict(kwargs or {})
+            call_args = tuple(args or ())
+            return SimpleNamespace(start=lambda: target(*call_args, **call_kwargs) if target is not None else None)
+
+        return patch("core.mattermost_webhooks.threading.Thread", side_effect=_make_thread)
+
     def test_dispatch_skips_membership_request_event_when_membership_request_missing(self) -> None:
         MattermostWebhookEndpoint.objects.create(
             label="Membership",
@@ -738,7 +747,10 @@ class MattermostWebhookDispatchTests(TestCase):
             accepted_username="alice",
         )
 
-        with patch("core.mattermost_webhooks._post_to_endpoint") as post_mock:
+        with (
+            patch("core.mattermost_webhooks._post_to_endpoint") as post_mock,
+            self._dispatch_thread_patch(),
+        ):
             CANONICAL_SIGNALS["account_invitation_accepted"].send(
                 sender=AccountInvitation,
                 account_invitation=invitation,
@@ -759,7 +771,10 @@ class MattermostWebhookDispatchTests(TestCase):
         )
         organization = Organization.objects.create(name="Claimed Org")
 
-        with patch("core.mattermost_webhooks._post_to_endpoint") as post_mock:
+        with (
+            patch("core.mattermost_webhooks._post_to_endpoint") as post_mock,
+            self._dispatch_thread_patch(),
+        ):
             CANONICAL_SIGNALS["organization_claimed"].send(
                 sender=Organization,
                 organization=organization,
@@ -780,7 +795,10 @@ class MattermostWebhookDispatchTests(TestCase):
         )
         membership_type = SimpleNamespace(code="individual", name="Individual")
 
-        with patch("core.mattermost_webhooks._post_to_endpoint") as post_mock:
+        with (
+            patch("core.mattermost_webhooks._post_to_endpoint") as post_mock,
+            self._dispatch_thread_patch(),
+        ):
             CANONICAL_SIGNALS["membership_self_terminated"].send(
                 sender=MembershipLog,
                 actor="alice",
@@ -808,7 +826,10 @@ class MattermostWebhookDispatchTests(TestCase):
             blocker_codes=[],
         )
 
-        with patch("core.mattermost_webhooks._post_to_endpoint") as post_mock:
+        with (
+            patch("core.mattermost_webhooks._post_to_endpoint") as post_mock,
+            self._dispatch_thread_patch(),
+        ):
             CANONICAL_SIGNALS["account_deletion_completed"].send(
                 sender=type(deletion_request),
                 account_deletion_request=deletion_request,

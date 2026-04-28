@@ -130,7 +130,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         membership = resp.json()["membership"]
         self.assertTrue(membership["showCard"])
         self.assertTrue(membership["canRequestAny"])
-        self.assertEqual(membership["requestUrl"], reverse("membership-request"))
+        self.assertNotIn("requestUrl", membership)
         self.assertEqual(membership["entries"], [])
         self.assertEqual(membership["pendingEntries"], [])
 
@@ -163,8 +163,8 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertEqual(entry["badge"]["label"], "Under review")
         self.assertEqual(entry["membershipType"]["name"], "Individual")
         self.assertEqual(entry["requestId"], req.pk)
-        self.assertEqual(entry["requestUrl"], reverse("membership-request-self", args=[req.pk]))
-        self.assertEqual(entry["badge"]["url"], reverse("membership-request-self", args=[req.pk]))
+        self.assertNotIn("requestUrl", entry)
+        self.assertNotIn("url", entry["badge"])
 
     def test_committee_viewer_sees_in_review_badge_linked_to_request(self) -> None:
         from core.models import MembershipRequest, MembershipType
@@ -205,8 +205,8 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertEqual(entry["badge"]["label"], "Under review")
         self.assertEqual(entry["membershipType"]["name"], "Individual")
         self.assertEqual(entry["requestId"], req.pk)
-        self.assertEqual(entry["requestUrl"], reverse("membership-request-detail", args=[req.pk]))
-        self.assertEqual(entry["badge"]["url"], reverse("membership-request-detail", args=[req.pk]))
+        self.assertNotIn("requestUrl", entry)
+        self.assertNotIn("url", entry["badge"])
 
     def test_committee_viewer_sees_active_badge_linked_to_request(self) -> None:
         from core.models import MembershipLog, MembershipRequest, MembershipType
@@ -263,7 +263,8 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         [entry] = resp.json()["membership"]["entries"]
         self.assertIn("alx-status-badge--active", entry["badge"]["className"])
         self.assertEqual(entry["membershipType"]["name"], "Individual")
-        self.assertEqual(entry["badge"]["url"], reverse("membership-request-detail", args=[req.pk]))
+        self.assertEqual(entry["requestId"], req.pk)
+        self.assertNotIn("url", entry["badge"])
 
     def test_membership_badge_renders_active_without_expiry_label(self) -> None:
         expires_at = timezone.now() + datetime.timedelta(days=30)
@@ -459,8 +460,17 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             resp_request = self.client.get(
                 reverse("membership-request") + "?membership_type=individual"
             )
+            api_resp_request = self.client.get(
+                reverse("api-membership-request-form-detail") + "?membership_type=individual"
+            )
         self.assertEqual(resp_request.status_code, 200)
-        self.assertContains(resp_request, 'value="individual" selected')
+        self.assertContains(resp_request, 'data-membership-request-form-root=""')
+        self.assertContains(
+            resp_request,
+            f'data-membership-request-form-api-url="{reverse("api-membership-request-form-detail")}"',
+        )
+        self.assertEqual(api_resp_request.status_code, 200)
+        self.assertEqual(api_resp_request.json()["form"]["fields"][0]["value"], "individual")
 
     def test_profile_shows_change_tier_button_for_multi_type_category(self) -> None:
         from core.models import MembershipLog, MembershipType
@@ -549,10 +559,17 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             resp = self.client.get(
                 reverse("membership-request") + "?membership_type=mirror"
             )
+            api_resp = self.client.get(
+                reverse("api-membership-request-form-detail") + "?membership_type=mirror"
+            )
         self.assertEqual(resp.status_code, 200)
-        # Mirror should be selected, individual should NOT be selected.
-        self.assertContains(resp, 'value="mirror" selected')
-        self.assertNotContains(resp, 'value="individual" selected')
+        self.assertContains(resp, 'data-membership-request-form-root=""')
+        self.assertContains(
+            resp,
+            f'data-membership-request-form-api-url="{reverse("api-membership-request-form-detail")}"',
+        )
+        self.assertEqual(api_resp.status_code, 200)
+        self.assertEqual(api_resp.json()["form"]["fields"][0]["value"], "mirror")
 
     def test_terminated_membership_does_not_count_as_active(self) -> None:
         import datetime
@@ -908,10 +925,32 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self._login_as_freeipa_user("reviewer")
 
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
-            resp = self.client.get(reverse("membership-request-detail", args=[req.pk]))
+            page_response = self.client.get(reverse("membership-request-detail", args=[req.pk]))
+            api_response = self.client.get(reverse("api-membership-request-detail", args=[req.pk]))
 
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, req.requested_username)
+        self.assertEqual(page_response.status_code, 200)
+        self.assertContains(page_response, 'data-membership-request-detail-root=""')
+        self.assertContains(
+            page_response,
+            f'data-membership-request-detail-api-url="{reverse("api-membership-request-detail", args=[req.pk])}"',
+        )
+        self.assertNotContains(page_response, "Request responses")
+
+        self.assertEqual(api_response.status_code, 200)
+        payload = api_response.json()
+        self.assertEqual(payload["viewer"]["mode"], "committee")
+        self.assertFalse(payload["request"]["requested_by"]["show"])
+        self.assertEqual(
+            payload["request"]["requested_for"],
+            {
+                "show": True,
+                "kind": "user",
+                "label": req.requested_username,
+                "username": req.requested_username,
+                "organization_id": None,
+                "deleted": True,
+            },
+        )
 
     def test_profile_shows_status_note_to_membership_viewer(self) -> None:
         from core.models import MembershipRequest, MembershipType, Note
@@ -1261,10 +1300,20 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             resp_get = self.client.get(reverse("membership-request"))
+            api_resp_get = self.client.get(reverse("api-membership-request-form-detail"))
 
         self.assertEqual(resp_get.status_code, 200)
-        self.assertContains(resp_get, 'value="individual"')
-        self.assertContains(resp_get, 'value="mirror"')
+        self.assertContains(resp_get, 'data-membership-request-form-root=""')
+        self.assertContains(
+            resp_get,
+            f'data-membership-request-form-api-url="{reverse("api-membership-request-form-detail")}"',
+        )
+        option_values = [
+            option["value"]
+            for group in api_resp_get.json()["form"]["fields"][0]["option_groups"]
+            for option in group["options"]
+        ]
+        self.assertEqual(option_values, ["individual", "mirror"])
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             resp_post_invalid = self.client.post(
@@ -1442,10 +1491,17 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             resp = self.client.get(reverse("membership-request"))
+            api_resp = self.client.get(reverse("api-membership-request-form-detail"))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertNotContains(resp, 'value="individual"')
-        self.assertContains(resp, 'value="community"')
+        self.assertContains(resp, 'data-membership-request-form-root=""')
+        option_values = [
+            option["value"]
+            for group in api_resp.json()["form"]["fields"][0]["option_groups"]
+            for option in group["options"]
+        ]
+        self.assertNotIn("individual", option_values)
+        self.assertIn("community", option_values)
 
     def test_membership_request_allows_renewal_when_expiring_soon(self) -> None:
         from core.models import MembershipLog, MembershipType, MembershipTypeCategory
@@ -1481,9 +1537,16 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             resp = self.client.get(reverse("membership-request"))
+            api_resp = self.client.get(reverse("api-membership-request-form-detail"))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'value="individual"')
+        self.assertContains(resp, 'data-membership-request-form-root=""')
+        option_values = [
+            option["value"]
+            for group in api_resp.json()["form"]["fields"][0]["option_groups"]
+            for option in group["options"]
+        ]
+        self.assertIn("individual", option_values)
 
     def test_membership_request_renders_sponsorship_question(self) -> None:
         from core.models import MembershipType, MembershipTypeCategory
@@ -1510,11 +1573,17 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             resp = self.client.get(reverse("membership-request"))
+            api_resp = self.client.get(reverse("api-membership-request-form-detail"))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Sponsorship")
-        self.assertContains(resp, "sponsorship goals and planned community participation")
-        self.assertContains(resp, 'id="id_q_sponsorship_details"')
+        self.assertContains(resp, 'data-membership-request-form-root=""')
+        payload = api_resp.json()
+        sponsorship_field = next(field for field in payload["form"]["fields"] if field["name"] == "q_sponsorship_details")
+        self.assertEqual(
+            sponsorship_field["label"],
+            "Please describe your organization's sponsorship goals and planned community participation.",
+        )
+        self.assertEqual(sponsorship_field["id"], "id_q_sponsorship_details")
 
     def test_membership_request_mirror_url_fields_are_validated(self) -> None:
         from core.models import MembershipRequest, MembershipType
@@ -1592,11 +1661,22 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self._login_as_freeipa_user("reviewer")
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
-            resp = self.client.get(reverse("membership-request-detail", args=[req.pk]))
+            resp = self.client.get(reverse("api-membership-request-detail", args=[req.pk]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'href="https://mirror.example.org"')
-        self.assertContains(resp, 'href="https://github.com/AlmaLinux/mirrors/pull/1"')
+        responses = resp.json()["request"]["responses"]
+        self.assertEqual(
+            responses[0]["segments"],
+            [{"kind": "link", "text": "mirror.example.org", "url": "https://mirror.example.org"}],
+        )
+        self.assertEqual(
+            responses[1]["segments"],
+            [{
+                "kind": "link",
+                "text": "https://github.com/AlmaLinux/mirrors/pull/1",
+                "url": "https://github.com/AlmaLinux/mirrors/pull/1",
+            }],
+        )
 
     def test_membership_audit_log_is_paginated_50_per_page(self) -> None:
         import datetime
@@ -1756,7 +1836,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertEqual(payload["recordsFiltered"], 1)
         request_payload = payload["data"][0]["request"]
         self.assertEqual(request_payload["request_id"], req.pk)
-        self.assertEqual(request_payload["url"], reverse("membership-request-detail", args=[req.pk]))
+        self.assertNotIn("url", request_payload)
         self.assertEqual(request_payload["responses"][0]["question"], "Contributions")
         self.assertIn("Patch submissions", request_payload["responses"][0]["answer_html"])
 
@@ -1805,7 +1885,9 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
                         resp = self.client.get(reverse("api-user-profile", args=["alice"]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()["membership"]["historyUrl"], f"{reverse('membership-audit-log')}?username=alice")
+        membership = resp.json()["membership"]
+        self.assertTrue(membership["canViewHistory"])
+        self.assertNotIn("historyUrl", membership)
 
     def test_profile_hides_renewal_button_when_pending_request_exists_for_same_type(self) -> None:
         """When an expiring-soon membership already has a pending renewal request,
@@ -2059,10 +2141,19 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             resp = self.client.get(reverse("membership-request"))
+            api_resp = self.client.get(reverse("api-membership-request-form-detail"))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Thank you")
-        self.assertNotContains(resp, "Submit request")
+        self.assertContains(resp, 'data-membership-request-form-root=""')
+        payload = api_resp.json()
+        self.assertTrue(payload["no_types_available"])
+        self.assertEqual(payload["prefill_type_unavailable_name"], None)
+        option_values = [
+            option["value"]
+            for group in payload["form"]["fields"][0]["option_groups"]
+            for option in group["options"]
+        ]
+        self.assertEqual(option_values, [])
 
     def test_membership_request_type_param_preselects_form(self) -> None:
         """?type=individual should pre-select the individual option in the form."""
@@ -2094,10 +2185,18 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             resp = self.client.get(reverse("membership-request") + "?membership_type=individual")
+            api_resp = self.client.get(
+                reverse("api-membership-request-form-detail") + "?membership_type=individual"
+            )
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'value="individual" selected')
-        self.assertNotContains(resp, 'value="mirror" selected')
+        self.assertContains(resp, 'data-membership-request-form-root=""')
+        self.assertContains(
+            resp,
+            f'data-membership-request-form-api-url="{reverse("api-membership-request-form-detail")}"',
+        )
+        self.assertEqual(api_resp.status_code, 200)
+        self.assertEqual(api_resp.json()["form"]["fields"][0]["value"], "individual")
 
     def test_membership_request_type_param_shows_message_when_unavailable(self) -> None:
         """When ?type=individual but user already holds an active individual
@@ -2142,11 +2241,22 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
             resp = self.client.get(reverse("membership-request") + "?membership_type=individual")
+            api_resp = self.client.get(
+                reverse("api-membership-request-form-detail") + "?membership_type=individual"
+            )
 
         self.assertEqual(resp.status_code, 200)
-        # Should show a message about the unavailable type.
-        self.assertContains(resp, "Individual")
-        self.assertContains(resp, "already")
-        # Should still show the form with mirror available.
-        self.assertContains(resp, "Submit request")
-        self.assertContains(resp, 'value="mirror"')
+        self.assertContains(resp, 'data-membership-request-form-root=""')
+        self.assertContains(
+            resp,
+            f'data-membership-request-form-api-url="{reverse("api-membership-request-form-detail")}"',
+        )
+        self.assertEqual(api_resp.status_code, 200)
+        payload = api_resp.json()
+        option_values = [
+            option["value"]
+            for group in payload["form"]["fields"][0]["option_groups"]
+            for option in group["options"]
+        ]
+        self.assertEqual(payload["prefill_type_unavailable_name"], "Individual")
+        self.assertEqual(option_values, ["mirror"])

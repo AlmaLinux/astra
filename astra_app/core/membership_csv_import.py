@@ -77,6 +77,12 @@ def _membership_type_matches(value: str, membership_type: MembershipType) -> boo
 
     return candidate == membership_type.name.strip().lower()
 
+
+def _strip_csv_text(value: object) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
 class MembershipCSVImportForm(ImportForm):
     membership_type = forms.ModelChoiceField(
         queryset=_USER_IMPORT_MEMBERSHIP_TYPES,
@@ -694,7 +700,7 @@ class MembershipCSVImportResource(resources.ModelResource):
         if not header:
             return ""
         try:
-            return _normalize_str(row.get(header, ""))
+            return _strip_csv_text(row.get(header, ""))
         except AttributeError:
             return ""
 
@@ -962,7 +968,7 @@ class MembershipCSVImportResource(resources.ModelResource):
                 continue
             used_norms.add(norm_csv_header(header))
             try:
-                value = _normalize_str(row.get(header, ""))
+                value = _strip_csv_text(row.get(header, ""))
             except AttributeError:
                 value = ""
             if value or spec.required:
@@ -993,7 +999,7 @@ class MembershipCSVImportResource(resources.ModelResource):
             if not header or norm_csv_header(header) in reserved_norms:
                 continue
             try:
-                value = _normalize_str(row.get(header, ""))
+                value = _strip_csv_text(row.get(header, ""))
             except AttributeError:
                 value = ""
             if value:
@@ -1010,7 +1016,7 @@ class MembershipCSVImportResource(resources.ModelResource):
             if not header:
                 continue
             try:
-                item[header] = _normalize_str(row.get(header, ""))
+                item[header] = _strip_csv_text(row.get(header, ""))
             except AttributeError:
                 item[header] = ""
         item["reason"] = reason
@@ -1189,11 +1195,19 @@ class MembershipCSVImportResource(resources.ModelResource):
             username,
             instance.membership_type_id,
         )
+        import_note_content = f"[Import] {row_decision.row_note}" if row_decision.row_note else ""
 
         existing_log_ids: set[int] = set()
         if self._import_batch_id is not None:
             existing_log_ids = set(
                 MembershipLog.objects.filter(membership_request=instance).values_list("pk", flat=True)
+            )
+
+        def _record_import_note() -> None:
+            add_note(
+                membership_request=instance,
+                username=self._actor_username,
+                content=import_note_content,
             )
 
         # `import_instance()` should have precomputed merged responses before
@@ -1203,12 +1217,8 @@ class MembershipCSVImportResource(resources.ModelResource):
             instance.responses = row_decision.responses
 
         if instance._csv_on_hold_request:
-            if row_decision.row_note:
-                add_note(
-                    membership_request=instance,
-                    username=self._actor_username,
-                    content=f"[Import] {row_decision.row_note}",
-                )
+            if import_note_content:
+                _record_import_note()
             logger.info(
                 "Membership CSV import: apply ignored (on-hold) row=%s email=%r username=%r membership_type=%s",
                 row_number,
@@ -1243,6 +1253,11 @@ class MembershipCSVImportResource(resources.ModelResource):
                 actor_username=self._actor_username,
                 send_approved_email=send_approved_email,
                 decided_at=decided_at,
+                on_group_add_success=(
+                    _record_import_note
+                    if import_note_content and instance.target_kind == MembershipRequest.TargetKind.user
+                    else None
+                ),
             )
 
             # requested_at is auto_now_add, so Django overwrites it on create.
@@ -1271,12 +1286,8 @@ class MembershipCSVImportResource(resources.ModelResource):
             # Only record the import note after a fully successful apply. This
             # avoids leaving misleading "[Import]" notes behind when approval
             # fails (e.g. FreeIPA group add failure).
-            if row_decision.row_note:
-                add_note(
-                    membership_request=instance,
-                    username=self._actor_username,
-                    content=f"[Import] {row_decision.row_note}",
-                )
+            if import_note_content and instance.target_kind != MembershipRequest.TargetKind.user:
+                _record_import_note()
         except Exception:
             logger.exception(
                 "Membership CSV import: apply failed row=%s email=%r username=%r membership_type=%s",

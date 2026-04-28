@@ -109,15 +109,21 @@ class Phase9ServerRenderedContractsTests(TestCase):
         self.assertNotIn('id="shared-approve-modal"', requests_html)
         self.assertNotIn('src="/static/core/js/membership_request_shared_modals.js"', requests_html)
 
-        self.assertIn('data-bulk-table-form', invitations_html)
-        self.assertIn('data-bulk-select-all-id="select-all-invitations-pending"', invitations_html)
-        self.assertIn('data-bulk-apply-id="bulk-apply-pending"', invitations_html)
-        self.assertIn('data-bulk-checkbox-selector=".invitation-checkbox--pending"', invitations_html)
-        self.assertIn('id="select-all-invitations-pending"', invitations_html)
-        self.assertIn('id="bulk-apply-pending"', invitations_html)
-        self.assertIn('select name="bulk_action"', invitations_html)
-        self.assertIn('class="invitation-checkbox invitation-checkbox--pending"', invitations_html)
-        self.assertIn('form="bulk-invitations-pending-form"', invitations_html)
+        self.assertIn('data-account-invitations-root', invitations_html)
+        self.assertIn(
+            f'data-account-invitations-pending-api-url="{reverse("api-account-invitations-pending-detail")}"',
+            invitations_html,
+        )
+        self.assertIn(
+            f'data-account-invitations-accepted-api-url="{reverse("api-account-invitations-accepted-detail")}"',
+            invitations_html,
+        )
+        self.assertIn(
+            f'data-account-invitations-bulk-api-url="{reverse("api-account-invitations-bulk")}"',
+            invitations_html,
+        )
+        self.assertIn('data-account-invitations-sentinel-token="123456789"', invitations_html)
+        self.assertNotIn('data-bulk-table-form', invitations_html)
 
     def test_membership_requests_page_uses_vue_owned_modals(self) -> None:
         self._login_as_freeipa_user("reviewer")
@@ -179,8 +185,12 @@ class Phase9ServerRenderedContractsTests(TestCase):
         self.assertEqual(election_edit_resp.status_code, 200)
         self.assertEqual(template_edit_resp.status_code, 200)
 
+        send_mail_html = send_mail_resp.content.decode("utf-8")
+        self.assertIn('data-send-mail-root=""', send_mail_html)
+        self.assertIn('id="send-mail-initial-payload"', send_mail_html)
+        self.assertNotIn("data-templated-email-compose", send_mail_html)
+
         for html in (
-            send_mail_resp.content.decode("utf-8"),
             election_edit_resp.content.decode("utf-8"),
         ):
             self.assertIn("data-templated-email-compose", html)

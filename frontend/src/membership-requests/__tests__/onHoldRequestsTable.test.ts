@@ -71,6 +71,10 @@ describe("OnHoldRequestsTable", () => {
     window.history.replaceState({}, "", "/");
   });
 
+  function rowCells(wrapper: ReturnType<typeof mount>) {
+    return wrapper.get("tbody tr").findAll("td");
+  }
+
   it("renders legacy linking, notes spacing, apply title, and anchor pagination", () => {
     const wrapper = mount(OnHoldRequestsTable, {
       props: {
@@ -92,12 +96,12 @@ describe("OnHoldRequestsTable", () => {
       },
     });
 
-    const bodyCells = wrapper.findAll("tbody tr").at(0)?.findAll("td") ?? [];
+    const bodyCells = rowCells(wrapper);
     const requestCell = bodyCells[1];
     const requestedForCell = bodyCells[2];
 
     expect(wrapper.text()).toContain("Request #88");
-    expect(requestCell?.classes()).toEqual(expect.arrayContaining(["text-muted", "text-nowrap"]));
+    expect(requestCell?.classes()).toEqual(expect.arrayContaining(["align-top", "text-muted", "text-nowrap"]));
     expect(requestCell?.attributes("style")).toContain("width: 1%;");
     expect(requestCell?.html()).toContain("<br>");
     expect(requestCell?.text()).toContain("2026-04-20 08:30");
@@ -155,7 +159,7 @@ describe("OnHoldRequestsTable", () => {
       },
     });
 
-    const requestedForCell = wrapper.findAll("tbody tr").at(0)?.findAll("td").at(2);
+    const requestedForCell = rowCells(wrapper)[2];
     expect(requestedForCell?.find('a[href="/organization/44/"]').exists()).toBe(false);
     expect(requestedForCell?.text()).toContain("Deleted Org");
     expect(requestedForCell?.text()).toContain("(deleted)");
@@ -180,7 +184,8 @@ describe("OnHoldRequestsTable", () => {
       },
     });
 
-    expect(loadingWrapper.find("tbody td[colspan='6']").text()).toContain("Loading on-hold requests...");
+    expect(loadingWrapper.get("tbody td").attributes("colspan")).toBe("6");
+    expect(loadingWrapper.get("tbody td").text()).toContain("Loading on-hold requests...");
     expect(loadingWrapper.find(".alert").exists()).toBe(false);
 
     const errorWrapper = mount(OnHoldRequestsTable, {
@@ -201,7 +206,7 @@ describe("OnHoldRequestsTable", () => {
       },
     });
 
-    expect(errorWrapper.find("tbody td[colspan='6']").text()).toContain("Failed to load membership requests.");
+    expect(errorWrapper.get("tbody td").text()).toContain("Failed to load membership requests.");
     expect(errorWrapper.find(".alert").exists()).toBe(false);
   });
 });

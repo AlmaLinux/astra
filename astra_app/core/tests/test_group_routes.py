@@ -2,6 +2,7 @@
 from unittest.mock import patch
 
 from django.test import TestCase, override_settings
+from django.urls import reverse
 
 from core.freeipa.group import FreeIPAGroup
 
@@ -122,6 +123,31 @@ class GroupDetailRouteTests(TestCase):
             resp = self.client.get("/group/ipa_only/")
 
         self.assertEqual(resp.status_code, 404)
+
+    def test_group_detail_route_accepts_mixed_case_group_path(self) -> None:
+        self._login_as_freeipa("admin")
+
+        group = FreeIPAGroup(
+            "fas1",
+            {
+                "cn": ["fas1"],
+                "description": ["FAS Group 1"],
+                "member_user": ["alice", "bob"],
+                "member_group": [],
+                "membermanager_user": [],
+                "membermanager_group": [],
+                "objectclass": ["fasgroup"],
+            },
+        )
+
+        with patch(
+            "core.freeipa.group.FreeIPAGroup.get",
+            side_effect=lambda cn: group if cn == "fas1" else None,
+        ):
+            resp = self.client.get(reverse("group-detail", args=["FAS1"]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'data-group-detail-info-api-url="/api/v1/groups/fas1/info"')
 
     @override_settings(
         DJANGO_VITE={

@@ -76,7 +76,7 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
             api_resp = self.client.get(reverse("api-election-detail-info", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, reverse("api-election-detail-info", args=[election.id]))
+        self.assertContains(resp, reverse("api-election-detail-page", args=[election.id]))
 
         self.assertEqual(api_resp.status_code, 200)
         self.assertEqual(api_resp.json()["election"]["viewer_email"], "viewer@example.com")

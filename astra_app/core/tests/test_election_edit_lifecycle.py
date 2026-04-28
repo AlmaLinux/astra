@@ -90,7 +90,7 @@ class ElectionEditLifecycleTests(TestCase):
             {"uid": ["voter1"], "memberof_group": [], "mail": ["voter1@example.com"]},
         )
 
-        def get_user(username: str):
+        def get_user(username: str, **_: object):
             if username == "admin":
                 return admin_user
             if username == "voter1":
@@ -103,7 +103,10 @@ class ElectionEditLifecycleTests(TestCase):
         with (
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=get_user),
             patch("core.views_elections.edit.timezone.now", return_value=started_at),
-            patch("post_office.mail.send", autospec=True) as post_office_send_mock,
+            patch(
+                "core.views_elections.edit.elections_services.send_voting_credential_email",
+                autospec=True,
+            ) as send_credential_email_mock,
         ):
             resp = self.client.post(
                 reverse("election-edit", args=[election.id]),
@@ -131,8 +134,11 @@ class ElectionEditLifecycleTests(TestCase):
         self.assertEqual(election.start_datetime.tzinfo, timezone.UTC)
         self.assertTrue(VotingCredential.objects.filter(election=election, freeipa_username="voter1").exists())
 
-        # Snapshot templates should be rendered into explicit subject/body sends.
-        self.assertEqual(post_office_send_mock.call_count, 1)
+        # Snapshot templates should flow through the composed credential email path.
+        send_credential_email_mock.assert_called_once()
+        self.assertEqual(send_credential_email_mock.call_args.kwargs["subject_template"], election.voting_email_subject)
+        self.assertEqual(send_credential_email_mock.call_args.kwargs["html_template"], election.voting_email_html)
+        self.assertEqual(send_credential_email_mock.call_args.kwargs["text_template"], election.voting_email_text)
 
     @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=1)
     def test_start_election_is_atomic_on_credential_failure(self) -> None:

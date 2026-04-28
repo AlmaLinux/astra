@@ -349,11 +349,16 @@ class ElectionVoteWeightsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             resp = self.client.get(reverse("election-vote", args=[election.id]))
+            api_resp = self.client.get(
+                reverse("api-election-vote", args=[election.id]),
+                HTTP_ACCEPT="application/json",
+            )
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "You have")
-        self.assertContains(resp, f"<strong>{expected}</strong>")
-        self.assertContains(resp, "votes for this election")
+        self.assertContains(resp, "data-election-vote-root")
+        self.assertContains(resp, reverse("api-election-vote", args=[election.id]))
+        self.assertEqual(api_resp.status_code, 200)
+        self.assertEqual(api_resp.json()["election"]["voter_votes"], expected)
 
     def test_vote_weight_breakdown_returns_per_membership_lines(self) -> None:
         """vote_weight_breakdown_for_username returns one line per contributing membership."""
@@ -543,9 +548,14 @@ class ElectionVoteWeightsTests(TestCase):
         voter1_ipa = FreeIPAUser("voter1", {"uid": ["voter1"], "memberof_group": []})
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=voter1_ipa):
             resp = self.client.get(reverse("election-vote", args=[election.id]))
+            api_resp = self.client.get(
+                reverse("api-election-vote", args=[election.id]),
+                HTTP_ACCEPT="application/json",
+            )
 
         self.assertEqual(resp.status_code, 200)
-        # Info icon should be present
-        self.assertContains(resp, "fa-info-circle")
-        # Tooltip should reference individual membership names or "ACME"
-        self.assertContains(resp, "ACME")
+        self.assertContains(resp, "data-election-vote-root")
+        self.assertContains(resp, reverse("api-election-vote", args=[election.id]))
+        self.assertEqual(api_resp.status_code, 200)
+        breakdown = api_resp.json()["vote_weight_breakdown"]
+        self.assertTrue(any(line["org_name"] == "ACME" for line in breakdown))

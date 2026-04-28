@@ -1,5 +1,6 @@
-from django.test import TestCase
-from post_office.models import EmailTemplate
+from django.db import connection
+from django.db.migrations.executor import MigrationExecutor
+from django.test import TransactionTestCase
 
 EXPECTED_DESCRIPTION = "Approval for a membership renewal"
 EXPECTED_SUBJECT = "Membership Renewal Approved!"
@@ -25,9 +26,33 @@ EXPECTED_HTML_CONTENT = (
 )
 
 
-class MembershipRenewalApprovedEmailTemplateSeedTests(TestCase):
+class MembershipRenewalApprovedEmailTemplateSeedTests(TransactionTestCase):
+    migrate_from = [("core", "0094_update_membership_committee_pending_requests_email_template")]
+    migrate_to = [("core", "0095_create_membership_renewal_approved_email_template")]
+
+    def setUp(self) -> None:
+        super().setUp()
+        executor = MigrationExecutor(connection)
+        executor.migrate(self.migrate_from)
+
+        old_apps = executor.loader.project_state(self.migrate_from).apps
+        old_email_template = old_apps.get_model("post_office", "EmailTemplate")
+        old_email_template.objects.filter(name="membership-renewal-approved").delete()
+        old_email_template.objects.create(
+            name="membership-renewal-approved",
+            description="",
+            subject="stale subject",
+            content="stale content",
+            html_content="stale html",
+        )
+
+        executor = MigrationExecutor(connection)
+        executor.migrate(self.migrate_to)
+        self.apps = executor.loader.project_state(self.migrate_to).apps
+
     def test_membership_renewal_approved_template_is_seeded(self) -> None:
-        template = EmailTemplate.objects.filter(name="membership-renewal-approved").first()
+        email_template = self.apps.get_model("post_office", "EmailTemplate")
+        template = email_template.objects.filter(name="membership-renewal-approved").first()
 
         self.assertIsNotNone(template)
         assert template is not None

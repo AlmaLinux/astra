@@ -1,3 +1,5 @@
+import json
+import re
 from unittest.mock import patch
 
 from django.test import TestCase, override_settings
@@ -9,6 +11,15 @@ from core.tests.utils_test_data import ensure_core_categories
 
 
 class Plan091Bootstrap44ValidationSmokeQaTests(TestCase):
+    def _payload_from_html(self, html: str, script_attr: str) -> dict[str, object]:
+        match = re.search(
+            rf'<script type="application/json" {script_attr}>(.*?)</script>',
+            html,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(match)
+        return json.loads(str(match.group(1)))
+
     def setUp(self) -> None:
         super().setUp()
         ensure_core_categories()
@@ -29,14 +40,19 @@ class Plan091Bootstrap44ValidationSmokeQaTests(TestCase):
         self.assertEqual(resp.status_code, 200)
 
         html = resp.content.decode("utf-8")
-        self.assertIn("<form", html)
-        self.assertIn("novalidate", html)
-        self.assertIn("needs-validation", html)
-        self.assertIn('data-required-indicator-for="id_username"', html)
-        self.assertRegex(html, r"name=\"username\"[^>]*required")
-        self.assertRegex(html, r"name=\"first_name\"[^>]*required")
-        self.assertRegex(html, r"name=\"last_name\"[^>]*required")
-        self.assertRegex(html, r"name=\"email\"[^>]*required")
+        self.assertIn('data-register-root=""', html)
+        self.assertIn(f'data-register-api-url="{reverse("api-register-detail")}"', html)
+        self.assertIn(f'data-register-submit-url="{reverse("register")}"', html)
+        self.assertIn("data-registration-initial-payload", html)
+
+        payload = self._payload_from_html(html, "data-registration-initial-payload")
+        self.assertTrue(payload["registration_open"])
+        self.assertFalse(payload["form"]["is_bound"])
+        fields = {field["name"]: field for field in payload["form"]["fields"]}
+        self.assertTrue(fields["username"]["required"])
+        self.assertTrue(fields["first_name"]["required"])
+        self.assertTrue(fields["last_name"]["required"])
+        self.assertTrue(fields["email"]["required"])
 
         resp2 = self.client.post(
             reverse("register"),
@@ -52,10 +68,16 @@ class Plan091Bootstrap44ValidationSmokeQaTests(TestCase):
         self.assertEqual(resp2.status_code, 200)
 
         html2 = resp2.content.decode("utf-8")
-        self.assertIn("invalid-feedback", html2)
-        self.assertIn("is-invalid", html2)
-        self.assertIn("This field is required", html2)
-        self.assertIn("You must be over 16 years old", html2)
+        self.assertIn('data-register-root=""', html2)
+
+        payload2 = self._payload_from_html(html2, "data-registration-initial-payload")
+        self.assertTrue(payload2["form"]["is_bound"])
+        fields2 = {field["name"]: field for field in payload2["form"]["fields"]}
+        self.assertIn("This field is required.", fields2["username"]["errors"])
+        self.assertIn("This field is required.", fields2["first_name"]["errors"])
+        self.assertIn("This field is required.", fields2["last_name"]["errors"])
+        self.assertIn("This field is required.", fields2["email"]["errors"])
+        self.assertIn("You must be over 16 years old to create an account", fields2["over_16"]["errors"])
 
     def _login_as_freeipa(self, username: str) -> None:
         session = self.client.session
@@ -78,12 +100,11 @@ class Plan091Bootstrap44ValidationSmokeQaTests(TestCase):
         ):
             resp = self.client.get(reverse("membership-request"))
             self.assertEqual(resp.status_code, 200)
-            self.assertContains(resp, 'id="membership-request-form"')
-            self.assertContains(resp, 'data-validation-hook="membership-mirror"')
-            self.assertContains(resp, "needs-validation")
-            self.assertContains(resp, "novalidate")
+            self.assertContains(resp, 'data-membership-request-form-root=""')
+            self.assertContains(resp, f'data-membership-request-form-api-url="{reverse("api-membership-request-form-detail")}"')
+            self.assertContains(resp, f'data-membership-request-form-submit-url="{reverse("membership-request")}"')
+            self.assertNotContains(resp, 'id="membership-request-form"')
             self.assertContains(resp, "core/js/form_validation_bootstrap44.js")
-            self.assertContains(resp, "astra:validate-form")
 
             resp2 = self.client.post(
                 reverse("membership-request"),
@@ -96,6 +117,12 @@ class Plan091Bootstrap44ValidationSmokeQaTests(TestCase):
             )
 
         self.assertEqual(resp2.status_code, 200)
-        self.assertContains(resp2, "invalid-feedback")
-        self.assertContains(resp2, "was-validated")
-        self.assertIn("Enter a valid URL", resp2.content.decode("utf-8"))
+        html2 = resp2.content.decode("utf-8")
+        self.assertIn('data-membership-request-form-root=""', html2)
+
+        payload2 = self._payload_from_html(html2, "data-membership-request-form-initial-payload")
+        self.assertTrue(payload2["form"]["is_bound"])
+        fields2 = {field["name"]: field for field in payload2["form"]["fields"]}
+        self.assertEqual(mirror_code, fields2["membership_type"]["value"])
+        self.assertIn("Enter a valid URL.", fields2["q_domain"]["errors"])
+        self.assertIn("Enter a valid URL.", fields2["q_pull_request"]["errors"])

@@ -1,7 +1,9 @@
 
+import json
 from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
+from django.urls import reverse
 
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import FreeIPAUser
@@ -35,11 +37,14 @@ class GroupDetailPromoteMemberToSponsorTests(TestCase):
             patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
         ):
             resp = self.client.get("/group/testgroup/")
+            members_resp = self.client.get(reverse("api-group-detail-members", args=["testgroup"]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'data-target="#promote-member-modal"')
-        self.assertContains(resp, 'data-username="member1"')
-        self.assertContains(resp, "fa-person-arrow-up-from-line")
+        self.assertContains(resp, "data-group-detail-root")
+        self.assertContains(resp, reverse("api-group-detail-members", args=["testgroup"]))
+        self.assertEqual(members_resp.status_code, 200)
+        member_items = members_resp.json()["members"]["items"]
+        self.assertTrue(any(item.get("username") == "member1" and not item.get("is_leader") for item in member_items))
 
     def test_group_detail_shows_demote_button_for_other_sponsor(self) -> None:
         self._login_as_freeipa("sponsor1")
@@ -63,11 +68,14 @@ class GroupDetailPromoteMemberToSponsorTests(TestCase):
             patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
         ):
             resp = self.client.get("/group/testgroup/")
+            leaders_resp = self.client.get(reverse("api-group-detail-leaders", args=["testgroup"]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'data-target="#demote-sponsor-modal"')
-        self.assertContains(resp, 'data-username="sponsor2"')
-        self.assertContains(resp, "fa-person-arrow-down-to-line")
+        self.assertContains(resp, "data-group-detail-root")
+        self.assertContains(resp, reverse("api-group-detail-leaders", args=["testgroup"]))
+        self.assertEqual(leaders_resp.status_code, 200)
+        leader_items = leaders_resp.json()["leaders"]["items"]
+        self.assertTrue(any(item.get("kind") == "user" and item.get("username") == "sponsor2" for item in leader_items))
 
     def test_sponsor_can_promote_member_to_sponsor(self) -> None:
         self._login_as_freeipa("sponsor1")
@@ -92,12 +100,14 @@ class GroupDetailPromoteMemberToSponsorTests(TestCase):
             patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
         ):
             resp = self.client.post(
-                "/group/testgroup/",
-                data={"action": "promote_member", "username": "member1"},
-                follow=False,
+                reverse("api-group-action", args=["testgroup"]),
+                data=json.dumps({"action": "promote_member", "username": "member1"}),
+                content_type="application/json",
+                HTTP_ACCEPT="application/json",
             )
 
-        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["ok"])
         group.add_sponsor.assert_called_once_with("member1")
 
     def test_sponsor_can_demote_other_sponsor(self) -> None:
@@ -123,10 +133,12 @@ class GroupDetailPromoteMemberToSponsorTests(TestCase):
             patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
         ):
             resp = self.client.post(
-                "/group/testgroup/",
-                data={"action": "demote_sponsor", "username": "sponsor2"},
-                follow=False,
+                reverse("api-group-action", args=["testgroup"]),
+                data=json.dumps({"action": "demote_sponsor", "username": "sponsor2"}),
+                content_type="application/json",
+                HTTP_ACCEPT="application/json",
             )
 
-        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["ok"])
         group.remove_sponsor.assert_called_once_with("sponsor2")

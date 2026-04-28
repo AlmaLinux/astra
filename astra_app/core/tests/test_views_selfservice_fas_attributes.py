@@ -66,22 +66,26 @@ class FASAttributesTests(TestCase):
         self._add_session_and_messages(req)
         req.user = self._auth_user(fu.username)
 
-        captured = {}
-
-        def fake_render(request, template, context):
-            captured["template"] = template
-            captured["context"] = context
-            return HttpResponse("ok")
-
         with patch("core.views_users._get_full_user", autospec=True, return_value=fu):
             with patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]):
                 with patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False):
-                    with patch("core.views_users.render", autospec=True, side_effect=fake_render):
-                        resp = user_profile(req, fu.username)
+                    with patch(
+                        "core.views_users.resolve_avatar_urls_for_users",
+                        autospec=True,
+                        return_value=({}, 0, 0),
+                    ):
+                        resp = user_profile_api(req, fu.username)
 
         self.assertEqual(resp.status_code, 200)
-        self.assertIn("context", captured)
-        return captured["context"]
+        payload = json.loads(resp.content)
+        summary = payload["summary"]
+        return {
+            "pronouns": summary.get("pronouns", ""),
+            "fu": SimpleNamespace(
+                full_name=summary.get("fullName", ""),
+                email=summary.get("email", ""),
+            ),
+        }
 
     @staticmethod
     def _apply_user_mod_to_dummy(fu: _DummyFreeIPAUser, call_kwargs: dict):

@@ -148,8 +148,8 @@ describe("MembershipRequestsPage", () => {
     expect(wrapper.text()).toContain("Reject");
     expect(wrapper.find('a[href="/organization/42/"]').exists()).toBe(true);
     expect(wrapper.find('a[href="/user/bob/"]').exists()).toBe(true);
-    expect(wrapper.find('input.request-checkbox--pending').exists()).toBe(true);
-    expect(wrapper.find('input.request-checkbox--on-hold').exists()).toBe(true);
+    expect(wrapper.find('input[type="checkbox"][aria-label="Select all requests"].request-checkbox--pending').exists()).toBe(true);
+    expect(wrapper.find('input[type="checkbox"][aria-label="Select all requests"].request-checkbox--on-hold').exists()).toBe(true);
   });
 
   it("renders inline table errors instead of failing the route when queue loads fail", async () => {

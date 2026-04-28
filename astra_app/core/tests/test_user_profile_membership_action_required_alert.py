@@ -154,7 +154,7 @@ class UserProfileMembershipActionRequiredAlertTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, respect_privacy: bool = True) -> FreeIPAUser | None:
             return {"alice": alice, "bob": bob}.get(username)
 
         self._login_as_freeipa_user("bob")

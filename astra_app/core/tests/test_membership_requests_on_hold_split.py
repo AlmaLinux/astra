@@ -106,7 +106,7 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
         self.assertContains(resp, reverse("api-membership-request-notes-add", args=[123456789]))
         self.assertNotContains(resp, "Request #1")
 
-    def test_reject_modal_includes_reason_presets(self) -> None:
+    def test_reject_modal_is_vue_owned_and_bootstraps_reject_action(self) -> None:
         MembershipType.objects.update_or_create(
             code="individual",
             defaults={
@@ -136,25 +136,30 @@ class MembershipRequestsOnHoldSplitTests(TestCase):
             resp = self.client.get(reverse("membership-requests"))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(
+        self.assertContains(resp, reverse("api-membership-request-reject", args=[123456789]))
+        self.assertContains(resp, 'data-membership-requests-root')
+        self.assertContains(resp, 'data-membership-request-reject-template')
+        self.assertNotContains(
             resp,
             "This decision is due to legal requirements that currently prevent the AlmaLinux OS Foundation from "
             "approving applications from certain countries.",
         )
-        self.assertContains(
+        self.assertNotContains(
             resp,
             "We were unable to complete the approval process because we did not receive the additional information "
             "requested during our review.",
         )
 
     def test_pending_endpoint_hides_requested_by_when_same_as_target_user(self) -> None:
-        membership_type = MembershipType.objects.create(
+        membership_type, _ = MembershipType.objects.update_or_create(
             code="individual",
-            name="Individual",
-            group_cn="almalinux-individual",
-            category_id="individual",
-            sort_order=0,
-            enabled=True,
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
         )
         same_request = MembershipRequest.objects.create(
             requested_username="alice",

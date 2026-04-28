@@ -2,6 +2,7 @@
 from unittest.mock import patch
 
 from django.test import TestCase
+from django.urls import reverse
 
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import FreeIPAUser
@@ -50,7 +51,6 @@ class GroupDetailModalConfirmTests(TestCase):
         self.assertNotContains(resp, "return confirm(")
         self.assertNotContains(resp, "onsubmit=\"return confirm")
 
-        # The page should render Bootstrap confirm modals for these actions.
-        self.assertContains(resp, 'id="leave-group-modal"')
-        self.assertContains(resp, 'id="stop-sponsoring-modal"')
-        self.assertContains(resp, 'id="remove-member-modal"')
+        # Group-detail actions are now frontend-owned; Django only serves the shell.
+        self.assertContains(resp, "data-group-detail-root")
+        self.assertContains(resp, reverse("api-group-action", args=["parent"]))

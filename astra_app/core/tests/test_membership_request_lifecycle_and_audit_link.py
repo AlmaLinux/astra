@@ -104,7 +104,7 @@ class MembershipRequestLifecycleAndAuditLinkTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, *, respect_privacy: bool = True) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "alice":

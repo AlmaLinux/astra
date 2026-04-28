@@ -8,7 +8,7 @@ from django.test import TestCase, override_settings
 
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import FreeIPAUser
-from core.models import FreeIPAPermissionGrant, Membership, MembershipType
+from core.models import FreeIPAPermissionGrant, Membership, MembershipType, MembershipTypeCategory
 from core.permissions import ASTRA_ADD_MEMBERSHIP
 
 
@@ -32,6 +32,15 @@ class MembershipEmbargoedMembersNotificationCommandTests(TestCase):
         )
 
     def _create_membership_type(self) -> MembershipType:
+        MembershipTypeCategory.objects.update_or_create(
+            pk="individual",
+            defaults={
+                "name": "Individual",
+                "is_individual": True,
+                "is_organization": False,
+                "sort_order": 0,
+            },
+        )
         membership_type, _created = MembershipType.objects.update_or_create(
             code="individual",
             defaults={
@@ -43,6 +52,15 @@ class MembershipEmbargoedMembersNotificationCommandTests(TestCase):
             },
         )
         return membership_type
+
+    def test_create_membership_type_recreates_missing_category(self) -> None:
+        MembershipType.objects.filter(code="individual").delete()
+        MembershipTypeCategory.objects.filter(pk="individual").delete()
+
+        membership_type = self._create_membership_type()
+
+        self.assertEqual(membership_type.category_id, "individual")
+        self.assertTrue(MembershipTypeCategory.objects.filter(pk="individual").exists())
 
     def _country_attr_data(self, code: str) -> dict[str, list[str]]:
         country_attr = settings.SELF_SERVICE_ADDRESS_COUNTRY_ATTR
@@ -82,7 +100,8 @@ class MembershipEmbargoedMembersNotificationCommandTests(TestCase):
             {"uid": ["bob"], "mail": ["bob@example.com"], "memberof_group": []},
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, *, respect_privacy: bool = True) -> FreeIPAUser | None:
+            del respect_privacy
             return {"member1": member1, "alice": alice, "bob": bob}.get(username)
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
@@ -157,7 +176,8 @@ class MembershipEmbargoedMembersNotificationCommandTests(TestCase):
             {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []},
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, *, respect_privacy: bool = True) -> FreeIPAUser | None:
+            del respect_privacy
             return {"member1": member1, "member2": member2, "alice": alice}.get(username)
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
@@ -208,7 +228,8 @@ class MembershipEmbargoedMembersNotificationCommandTests(TestCase):
             {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []},
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, *, respect_privacy: bool = True) -> FreeIPAUser | None:
+            del respect_privacy
             return {"member1": member1, "alice": alice}.get(username)
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
@@ -255,7 +276,8 @@ class MembershipEmbargoedMembersNotificationCommandTests(TestCase):
             {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []},
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, *, respect_privacy: bool = True) -> FreeIPAUser | None:
+            del respect_privacy
             return {"member1": member1, "alice": alice}.get(username)
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
@@ -302,7 +324,8 @@ class MembershipEmbargoedMembersNotificationCommandTests(TestCase):
             {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []},
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, *, respect_privacy: bool = True) -> FreeIPAUser | None:
+            del respect_privacy
             return {"member1": member1, "alice": alice}.get(username)
 
         from post_office.models import Email
@@ -348,7 +371,8 @@ class MembershipEmbargoedMembersNotificationCommandTests(TestCase):
             {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []},
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, *, respect_privacy: bool = True) -> FreeIPAUser | None:
+            del respect_privacy
             return {"member1": member1, "alice": alice}.get(username)
 
         from post_office.models import Email

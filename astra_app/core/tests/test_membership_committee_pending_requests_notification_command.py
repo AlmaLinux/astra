@@ -61,7 +61,8 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
             {"uid": ["bob"], "mail": ["bob@example.com"], "memberof_group": []},
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, *, respect_privacy: bool = True) -> FreeIPAUser | None:
+            del respect_privacy
             return {"req1": req1, "alice": alice, "bob": bob}.get(username)
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
@@ -139,7 +140,10 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
 
         with patch("django.utils.timezone.now", return_value=frozen_now):
             with patch("core.freeipa.group.FreeIPAGroup.get", return_value=committee_group):
-                with patch("core.freeipa.user.FreeIPAUser.get", side_effect=lambda username: alice if username == "alice" else None):
+                with patch(
+                    "core.freeipa.user.FreeIPAUser.get",
+                    side_effect=lambda username, *, respect_privacy=True: alice if username == "alice" else None,
+                ):
                     with patch("core.freeipa.user.FreeIPAUser.all", return_value=[alice]):
                         with self.assertLogs(
                             "core.management.commands.membership_pending_requests",

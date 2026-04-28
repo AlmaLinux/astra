@@ -35,8 +35,8 @@ describe("TableBase", () => {
       },
     });
 
-    const firstCheckbox = wrapper.findAll("tbody input[type='checkbox']").at(0);
-    await firstCheckbox?.setValue(true);
+    const rowCheckbox = wrapper.get('tbody input[type="checkbox"][name="selected"][value="11"]');
+    await rowCheckbox.setChecked(true);
     await wrapper.find("select[name='bulk_action']").setValue("approve");
     await wrapper.find("form").trigger("submit");
 
@@ -67,12 +67,13 @@ describe("TableBase", () => {
         "row-cells": "<td></td>",
       },
     });
-    expect(loadingWrapper.find("tbody td[colspan='2']").text()).toContain("Loading...");
+    expect(loadingWrapper.get("tbody td").attributes("colspan")).toBe("2");
+    expect(loadingWrapper.get("tbody td").text()).toContain("Loading...");
 
     await loadingWrapper.setProps({ isLoading: false, error: "boom" });
-    expect(loadingWrapper.find("tbody td[colspan='2']").text()).toContain("boom");
+    expect(loadingWrapper.get("tbody td").text()).toContain("boom");
 
     await loadingWrapper.setProps({ error: "" });
-    expect(loadingWrapper.find("tbody td[colspan='2']").text()).toContain("No items.");
+    expect(loadingWrapper.get("tbody td").text()).toContain("No items.");
   });
 });

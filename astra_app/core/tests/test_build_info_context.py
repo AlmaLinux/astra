@@ -3,7 +3,7 @@ import os
 from unittest import TestCase
 from unittest.mock import patch
 
-from astra_app.core.build_info import get_build_sha
+from core.build_info import get_build_sha
 
 
 class BuildInfoTests(TestCase):

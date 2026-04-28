@@ -1,5 +1,6 @@
 
 import datetime
+from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import quote_plus
 
@@ -43,8 +44,6 @@ class ElectionsVoteAccessTests(TestCase):
         session.save()
 
     def test_vote_page_requires_signed_coc(self) -> None:
-        from core.freeipa.agreement import FreeIPAFASAgreement
-
         now = timezone.now()
         election = Election.objects.create(
             name="Board election",
@@ -55,19 +54,12 @@ class ElectionsVoteAccessTests(TestCase):
             status=Election.Status.open,
         )
 
-        coc = FreeIPAFASAgreement(
-            settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN,
-            {
-                "cn": [settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN],
-                "ipaenabledflag": ["TRUE"],
-                "memberuser_user": [],
-            },
-        )
+        coc = SimpleNamespace(signed=False)
 
         self._login_as_freeipa_user("voter1")
         voter = FreeIPAUser("voter1", {"uid": ["voter1"], "memberof_group": []})
         with patch("core.freeipa.user.FreeIPAUser.get", autospec=True, return_value=voter):
-            with patch("core.views_utils.FreeIPAFASAgreement.get", autospec=True, return_value=coc):
+            with patch("core.views_utils.get_agreement_for_user", autospec=True, return_value=coc):
                 resp = self.client.get(reverse("election-vote", args=[election.id]), follow=False)
 
         self.assertEqual(resp.status_code, 302)
@@ -195,7 +187,7 @@ class ElectionsDetailShellTests(TestCase):
         eligible_voters_context.assert_not_called()
         vote_access_context.assert_not_called()
         self.assertContains(resp, 'data-election-detail-root')
-        self.assertContains(resp, reverse("api-election-detail-info", args=[election.id]))
+        self.assertContains(resp, reverse("api-election-detail-page", args=[election.id]))
         self.assertContains(resp, reverse("api-election-detail-candidates", args=[election.id]))
         self.assertNotContains(resp, "data-election-detail-info-json-id")
         self.assertNotContains(resp, "election-detail-initial-info")

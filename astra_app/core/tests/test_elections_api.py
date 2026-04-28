@@ -27,11 +27,16 @@ from core.models import (
 )
 from core.permissions import ASTRA_ADD_ELECTION
 from core.tests.ballot_chain import compute_chain_hash
+from core.tests.utils_test_data import ensure_core_categories
 from core.tokens import election_genesis_chain_hash
 from core.views_elections.vote import _parse_vote_payload
 
 
 class ElectionsApiTests(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        ensure_core_categories()
+
     def _login_as_freeipa_user(self, username: str) -> None:
         session = self.client.session
         session["_freeipa_username"] = username

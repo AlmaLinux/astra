@@ -74,6 +74,10 @@ describe("PendingRequestsTable", () => {
     window.history.replaceState({}, "", "/");
   });
 
+  function rowCells(wrapper: ReturnType<typeof mount>) {
+    return wrapper.get("tbody tr").findAll("td");
+  }
+
   it("renders legacy request metadata, response placement, requester linking, and anchor pagination", () => {
     window.history.replaceState({}, "", "/membership/requests/?filter=renewals&on_hold_page=3");
 
@@ -99,12 +103,12 @@ describe("PendingRequestsTable", () => {
       },
     });
 
-    const bodyCells = wrapper.findAll("tbody tr").at(0)?.findAll("td") ?? [];
+    const bodyCells = rowCells(wrapper);
     const requestCell = bodyCells[1];
     const requestedForCell = bodyCells[2];
     const typeCell = bodyCells[3];
 
-    expect(requestCell?.classes()).toEqual(expect.arrayContaining(["text-muted", "text-nowrap"]));
+    expect(requestCell?.classes()).toEqual(expect.arrayContaining(["align-top", "text-muted", "text-nowrap"]));
     expect(requestCell?.attributes("style")).toContain("width: 1%;");
     expect(requestCell?.html()).toContain("<br>");
     expect(requestCell?.text()).toContain("2026-04-21 12:00");
@@ -208,7 +212,7 @@ describe("PendingRequestsTable", () => {
       },
     });
 
-    const requestedForCell = wrapper.findAll("tbody tr").at(0)?.findAll("td").at(2);
+    const requestedForCell = rowCells(wrapper)[2];
     expect(requestedForCell?.find('a[href="/organization/77/"]').exists()).toBe(false);
     expect(requestedForCell?.text()).toContain("Former Org");
     expect(requestedForCell?.text()).toContain("(deleted)");
@@ -235,7 +239,8 @@ describe("PendingRequestsTable", () => {
       },
     });
 
-    expect(loadingWrapper.find("tbody td[colspan='5']").text()).toContain("Loading pending requests...");
+    expect(loadingWrapper.get("tbody td").attributes("colspan")).toBe("5");
+    expect(loadingWrapper.get("tbody td").text()).toContain("Loading pending requests...");
     expect(loadingWrapper.find(".alert").exists()).toBe(false);
 
     const errorWrapper = mount(PendingRequestsTable, {
@@ -258,7 +263,7 @@ describe("PendingRequestsTable", () => {
       },
     });
 
-    expect(errorWrapper.find("tbody td[colspan='5']").text()).toContain("Failed to load membership requests.");
+    expect(errorWrapper.get("tbody td").text()).toContain("Failed to load membership requests.");
     expect(errorWrapper.find(".alert").exists()).toBe(false);
   });
 });

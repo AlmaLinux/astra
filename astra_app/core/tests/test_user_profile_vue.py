@@ -254,5 +254,34 @@ class UserProfileVueTests(TestCase):
         self._login_as_freeipa(username)
 
         response = self.client.post(reverse("api-user-profile-detail", args=[username]))
-
         self.assertEqual(response.status_code, 405)
+
+    def test_user_profile_detail_api_treats_mixed_case_path_as_self_when_resolved_user_matches(self) -> None:
+        self._login_as_freeipa("alex")
+
+        profile_user = FreeIPAUser(
+            "alex",
+            {
+                "uid": ["alex"],
+                "givenname": ["Alex"],
+                "sn": ["Example"],
+                "mail": ["alex@example.test"],
+                "timezone": ["UTC"],
+            },
+        )
+
+        with (
+            patch("core.views_users._get_full_user", return_value=profile_user),
+            patch("core.views_users._is_membership_committee_viewer", return_value=False),
+            patch("core.views_users.FreeIPAGroup.all", return_value=[]),
+            patch("core.views_users.has_enabled_agreements", return_value=False),
+            patch("core.views_users.resolve_avatar_urls_for_users", return_value=({"alex": "https://avatars.example/alex.png"}, 1, 0)),
+        ):
+            response = self.client.get(reverse("api-user-profile-detail", args=["ALEX"]))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["summary"]["isSelf"])
+        self.assertTrue(payload["groups"]["isSelf"])
+        self.assertEqual(payload["summary"]["username"], "alex")
+        self.assertEqual(payload["membership"]["username"], "alex")

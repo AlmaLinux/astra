@@ -104,6 +104,33 @@ class GroupsApiTests(TestCase):
         self.assertEqual(payload["group"]["unsigned_usernames"], [])
         self.assertNotIn("edit_url", payload["group"])
 
+    def test_group_info_api_accepts_mixed_case_group_path(self) -> None:
+        self._login_as_freeipa_user("alice")
+        viewer = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
+
+        group = self._make_group(
+            "infra-team",
+            description="Infra Team",
+            members=["alice", "bob"],
+            sponsors=["alice"],
+        )
+        group.member_count_recursive = MagicMock(return_value=2)
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
+            with patch(
+                "core.views_groups.FreeIPAGroup.get",
+                side_effect=lambda cn: group if cn == "infra-team" else None,
+            ):
+                with patch("core.views_groups.required_agreements_for_group", return_value=[]):
+                    response = self.client.get(
+                        reverse("api-group-detail-info", args=["INFRA-TEAM"]),
+                        HTTP_ACCEPT="application/json",
+                    )
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        self.assertEqual(payload["group"]["cn"], "infra-team")
+
     def test_group_info_api_omits_agreement_page_urls_from_required_agreements(self) -> None:
         self._login_as_freeipa_user("alice")
         viewer = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})

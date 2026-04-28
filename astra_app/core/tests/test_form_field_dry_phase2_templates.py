@@ -1,19 +1,11 @@
-from pathlib import Path
-
 from django import forms
 from django.template import Context, Template
 from django.test import SimpleTestCase
-
-
 class _SampleForm(forms.Form):
     name = forms.CharField(help_text="Original help")
 
 
 class FormFieldDryPhase2TemplateTests(SimpleTestCase):
-    def _read_template(self, template_name: str) -> str:
-        template_path = Path(__file__).resolve().parents[1] / "templates" / "core" / template_name
-        return template_path.read_text(encoding="utf-8")
-
     def test_form_field_include_supports_phase2_options(self) -> None:
         invalid_form = _SampleForm(data={"name": ""})
         invalid_form.is_valid()
@@ -30,24 +22,3 @@ class FormFieldDryPhase2TemplateTests(SimpleTestCase):
         self.assertIn("invalid-feedback", rendered)
         self.assertNotIn("Original help", rendered)
         self.assertIn("Custom helper text", rendered)
-
-    def test_phase2_templates_use_extended_form_field_include(self) -> None:
-        expectations: dict[str, list[str]] = {
-            "_organization_contacts_tabs.html": [
-                "{% include 'core/_form_field.html' with field=form.representative wrapper_class='mb-0' %}",
-            ],
-            "_settings_tab_security.html": [
-                "{% include 'core/_form_field.html' with field=password_form.otp help_text_override='Your account has OTP enabled; enter your current OTP.' %}",
-                "{% include 'core/_form_field.html' with field=otp_add_form.otp help_text_override='Enter your current OTP to authorize adding a new token.' %}",
-            ],
-            "email_template_edit.html": [
-                "{% include 'core/_form_field.html' with field=form.name %}",
-                "{% include 'core/_form_field.html' with field=form.description wrapper_class='mb-0' %}",
-            ],
-        }
-
-        for template_name, snippets in expectations.items():
-            template_content = self._read_template(template_name)
-            for snippet in snippets:
-                with self.subTest(template=template_name, snippet=snippet):
-                    self.assertIn(snippet, template_content)

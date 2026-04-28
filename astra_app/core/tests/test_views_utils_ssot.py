@@ -9,14 +9,19 @@ from django.test import RequestFactory, SimpleTestCase
 from django.urls import reverse
 from django.utils.functional import SimpleLazyObject
 
+from core.agreements import AgreementForUser
 from core.views_utils import (
     agreement_settings_url,
     block_action_without_coc,
     build_page_url_prefix,
     build_url_for_page,
     get_username,
+    has_signed_coc,
+    normalize_freeipa_group_name,
+    normalize_freeipa_username,
     settings_context,
     settings_url,
+    try_get_username_from_user,
 )
 
 
@@ -92,6 +97,32 @@ class ViewsUtilsSSOTTests(SimpleTestCase):
         self.assertEqual(query.get("tab"), ["agreements"])
         self.assertEqual(query.get("agreement"), ["coc"])
         self.assertEqual(query.get("return"), ["/organizations/claim/"])
+
+    def test_has_signed_coc_uses_shared_agreement_state(self):
+        listed_coc = AgreementForUser(
+            cn="coc",
+            description="Code of Conduct",
+            signed=True,
+            applicable=True,
+            enabled=True,
+            groups=(),
+        )
+
+        with (
+            patch("core.views_utils.settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN", "coc"),
+            patch("core.agreements.list_agreements_for_user", return_value=[listed_coc]),
+            patch(
+                "core.freeipa.agreement.FreeIPAFASAgreement.get",
+                side_effect=AssertionError("stale direct-detail lookup should not be used"),
+            ),
+        ):
+            self.assertTrue(has_signed_coc("alice"))
+
+    def test_username_helpers_normalize_case(self):
+        self.assertEqual(normalize_freeipa_username(" ALEX "), "alex")
+        self.assertEqual(normalize_freeipa_group_name(" Infra-Team "), "infra-team")
+        self.assertEqual(try_get_username_from_user(SimpleNamespace(username="ALEX")), "alex")
+        self.assertEqual(try_get_username_from_user(SimpleNamespace(get_username=lambda: "Bob")), "bob")
 
     def test_get_username_can_skip_user_fallback_without_forcing_lazy_user(self):
         request = RequestFactory().get("/")

@@ -20,7 +20,7 @@ interface BulkSubmitPayload {
   scope?: string;
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   rows: unknown[];
   count: number;
   currentPage: number;
@@ -46,7 +46,9 @@ const props = defineProps<{
   bulkSubmitting?: boolean;
   headerError?: string;
   showSelection?: boolean;
-}>();
+}>(), {
+  showSelection: true,
+});
 
 const emit = defineEmits<{
   (event: "page-change", value: number): void;
@@ -58,7 +60,7 @@ const selectedAction = ref("");
 const localBulkError = ref("");
 const slots = useSlots();
 
-const showSelection = computed(() => props.showSelection !== false);
+const showSelection = computed(() => props.showSelection);
 const colspan = computed(() => props.columns.length + (showSelection.value ? 1 : 0));
 const hasBulkActions = computed(() => (props.bulkActions?.length || 0) > 0);
 const bulkActionPlaceholder = computed(() => props.bulkActionPlaceholder || "Bulk action…");

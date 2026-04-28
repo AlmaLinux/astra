@@ -19,7 +19,7 @@ This script runs with Python stdlib only (no pip install required).
 # Download public-audit.json from the election page and keep it next to this script.
 audit_file: str = "public-audit.json"
 # Set True to also query each Rekor entry URL via HTTPS.
-verify_rekor_online: bool = True
+verify_rekor_online: bool = False
 # ===== END OF USER INPUT =====
 
 import base64  # noqa: E402

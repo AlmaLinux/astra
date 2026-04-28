@@ -43,7 +43,7 @@ class ProfileFormValidationTests(SimpleTestCase):
         self.assertFalse(form.is_valid())
         self.assertIn("country_code", form.errors)
 
-    def test_givenname_rejects_profanity(self):
+    def test_givenname_profanity_like_value_is_allowed_when_validation_disabled(self):
         form = ProfileForm(
             data={
                 "givenname": "shit",
@@ -51,10 +51,10 @@ class ProfileFormValidationTests(SimpleTestCase):
                 "country_code": "US",
             }
         )
-        self.assertFalse(form.is_valid())
-        self.assertIn("givenname", form.errors)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["givenname"], "shit")
 
-    def test_sn_rejects_profanity(self):
+    def test_sn_profanity_like_value_is_allowed_when_validation_disabled(self):
         form = ProfileForm(
             data={
                 "givenname": "Alice",
@@ -62,8 +62,8 @@ class ProfileFormValidationTests(SimpleTestCase):
                 "country_code": "US",
             }
         )
-        self.assertFalse(form.is_valid())
-        self.assertIn("sn", form.errors)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["sn"], "shit")
 
     def test_github_username_strips_at_and_validates(self):
         form = ProfileForm(

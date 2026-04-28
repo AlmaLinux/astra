@@ -38,6 +38,25 @@ class FreeIPABackendBehaviorTests(TestCase):
         self.assertIsNotNone(user)
         self.assertEqual(request.session.get("_freeipa_username"), "alice")
 
+    def test_authenticate_normalizes_freeipa_username_in_session(self):
+        factory = RequestFactory()
+        request = factory.post("/login/")
+        self._add_session(request)
+
+        backend = FreeIPAAuthBackend()
+
+        with patch("core.freeipa.client.ClientMeta", autospec=True) as mocked_client_cls:
+            mocked_client = mocked_client_cls.return_value
+            mocked_client.login.return_value = None
+
+            with patch("core.freeipa.user.FreeIPAUser._fetch_full_user", autospec=True) as mocked_fetch:
+                mocked_fetch.return_value = {"uid": ["linuxmonger"], "givenname": ["Linux"], "sn": ["Monger"]}
+
+                user = backend.authenticate(request, username="Linuxmonger", password="pw")
+
+        self.assertIsNotNone(user)
+        self.assertEqual(request.session.get("_freeipa_username"), "linuxmonger")
+
     def test_authenticate_no_longer_writes_session_uid_cache_mapping(self):
         factory = RequestFactory()
         request = factory.post("/login/")

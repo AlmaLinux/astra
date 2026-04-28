@@ -1,6 +1,5 @@
 import datetime
 import socket
-from io import StringIO
 from typing import override
 from unittest.mock import patch
 from urllib.parse import urlsplit
@@ -171,6 +170,11 @@ class MirrorMembershipValidationTests(TestCase):
     def _alma_timestamp_text(self, *, age: datetime.timedelta) -> bytes:
         timestamp = timezone.now().astimezone(datetime.UTC) - age
         return timestamp.strftime("%a %b %d %H:%M:%S UTC %Y\n").encode()
+
+    def _call_membership_mirror_validation_command(self, *args: object, **options: object) -> str:
+        with self.assertLogs("core.management.commands.membership_mirror_validation", level="INFO") as captured_logs:
+            call_command("membership_mirror_validation", *args, **options)
+        return "\n".join(captured_logs.output)
 
     def _bound_http_get(self, url: str) -> _FakeResponse:
         if url == "https://mirror.example.org":
@@ -1535,21 +1539,20 @@ class MirrorMembershipValidationTests(TestCase):
             )
 
         validation = MirrorMembershipValidation.objects.get(membership_request=membership_request)
-        stdout = StringIO()
 
         with patch(
             "core.mirror_membership_validation.requests.get",
             side_effect=self._requests_get,
             autospec=True,
         ):
-            call_command("membership_mirror_validation", "--dry-run", stdout=stdout)
+            command_output = self._call_membership_mirror_validation_command("--dry-run")
 
         validation.refresh_from_db()
         self.assertEqual(validation.status, MirrorMembershipValidation.Status.pending)
         self.assertEqual(validation.attempt_count, 0)
         self.assertFalse(Note.objects.filter(membership_request=membership_request, username=CUSTOS).exists())
-        self.assertIn("dry-run", stdout.getvalue().lower())
-        self.assertIn(str(membership_request.pk), stdout.getvalue())
+        self.assertIn("dry-run", command_output.lower())
+        self.assertIn(str(membership_request.pk), command_output)
 
     def test_command_force_processes_retryable_row_before_next_run(self) -> None:
         membership_request = self._create_user_request()
@@ -1610,7 +1613,6 @@ class MirrorMembershipValidationTests(TestCase):
         validation.claim_expires_at = timezone.now() - datetime.timedelta(minutes=5)
         validation.save(update_fields=["status", "claimed_at", "claim_expires_at"])
 
-        stdout = StringIO()
         with (
             patch("core.mirror_membership_validation._bound_http_get", side_effect=self._bound_http_get, autospec=True),
             patch(
@@ -1619,11 +1621,11 @@ class MirrorMembershipValidationTests(TestCase):
                 autospec=True,
             ),
         ):
-            call_command("membership_mirror_validation", stdout=stdout)
+            command_output = self._call_membership_mirror_validation_command()
 
         validation.refresh_from_db()
         self.assertEqual(validation.status, MirrorMembershipValidation.Status.completed)
-        self.assertIn("reclaimed", stdout.getvalue().lower())
+        self.assertIn("reclaimed", command_output.lower())
 
     def test_command_retries_then_terminally_notes_after_retry_exhaustion(self) -> None:
         membership_request = self._create_user_request()
@@ -1660,7 +1662,6 @@ class MirrorMembershipValidationTests(TestCase):
                 send_submitted_email=False,
             )
 
-        stdout = StringIO()
         with (
             patch("core.mirror_membership_validation._bound_http_get", side_effect=self._bound_http_get, autospec=True),
             patch(
@@ -1669,13 +1670,12 @@ class MirrorMembershipValidationTests(TestCase):
                 autospec=True,
             ),
         ):
-            call_command("membership_mirror_validation", stdout=stdout)
+            command_output = self._call_membership_mirror_validation_command()
 
-        self.assertIn(f"processed request {membership_request.pk} status=completed", stdout.getvalue())
+        self.assertIn(f"mirror_validation.processed_stdout: {membership_request.pk}", command_output)
 
     def test_command_request_id_processes_request_without_existing_validation_row(self) -> None:
         membership_request = self._create_user_request()
-        stdout = StringIO()
 
         self.assertFalse(MirrorMembershipValidation.objects.filter(membership_request=membership_request).exists())
 
@@ -1687,24 +1687,22 @@ class MirrorMembershipValidationTests(TestCase):
                 autospec=True,
             ),
         ):
-            call_command(
-                "membership_mirror_validation",
+            command_output = self._call_membership_mirror_validation_command(
                 "--request-id",
                 str(membership_request.pk),
-                stdout=stdout,
             )
 
         validation = MirrorMembershipValidation.objects.get(membership_request=membership_request)
         self.assertEqual(validation.status, MirrorMembershipValidation.Status.completed)
         self.assertEqual(validation.attempt_count, 1)
-        self.assertIn(f"processing request ID {membership_request.pk} via --request-id", stdout.getvalue())
+        self.assertIn(f"mirror_validation.processing_direct: {membership_request.pk}", command_output)
         self.assertIn(
             "debug: domain target=https://mirror.example.org result=reachable",
-            stdout.getvalue(),
+            command_output,
         )
         self.assertIn(
             "debug: GitHub target=https://github.com/AlmaLinux/mirrors/pull/123 diff=https://github.com/AlmaLinux/mirrors/pull/123.diff result=valid",
-            stdout.getvalue(),
+            command_output,
         )
 
     def test_command_request_id_reruns_completed_validation_with_sanitized_debug_output(self) -> None:
@@ -1743,7 +1741,6 @@ class MirrorMembershipValidationTests(TestCase):
                 return _FakeResponse(status_code=404)
             raise AssertionError(f"unexpected bound URL: {url}")
 
-        stdout = StringIO()
         with (
             patch("core.mirror_membership_validation._bound_http_get", side_effect=bound_http_get, autospec=True),
             patch(
@@ -1752,15 +1749,12 @@ class MirrorMembershipValidationTests(TestCase):
                 autospec=True,
             ),
         ):
-            call_command(
-                "membership_mirror_validation",
+            command_output = self._call_membership_mirror_validation_command(
                 "--request-id",
                 str(membership_request.pk),
-                stdout=stdout,
             )
 
         validation.refresh_from_db()
-        command_output = stdout.getvalue()
         self.assertEqual(validation.status, MirrorMembershipValidation.Status.completed)
         self.assertEqual(validation.attempt_count, 3)
         self.assertIn(
@@ -1796,23 +1790,19 @@ class MirrorMembershipValidationTests(TestCase):
         membership_request.status = MembershipRequest.Status.approved
         membership_request.save(update_fields=["status"])
 
-        stdout = StringIO()
         with (
             patch("core.mirror_membership_validation._bound_http_get", autospec=True) as bound_get_mock,
             patch("core.mirror_membership_validation.requests.get", autospec=True) as get_mock,
         ):
-            call_command(
-                "membership_mirror_validation",
+            output = self._call_membership_mirror_validation_command(
                 "--request-id",
                 str(membership_request.pk),
-                stdout=stdout,
             )
 
-        output = stdout.getvalue()
         self.assertFalse(MirrorMembershipValidation.objects.filter(pk=validation.pk).exists())
         self.assertFalse(Note.objects.filter(membership_request=membership_request, username=CUSTOS).exists())
         self.assertIn(
-            f"deleted closed-request validation for request ID {membership_request.pk} via --request-id",
+            f"mirror_validation.deleted_closed_request_direct_stdout: {membership_request.pk}",
             output,
         )
         self.assertNotIn("debug:", output)
@@ -1822,23 +1812,19 @@ class MirrorMembershipValidationTests(TestCase):
     def test_command_request_id_closed_request_without_row_does_not_recreate_validation(self) -> None:
         membership_request = self._create_user_request(status=MembershipRequest.Status.approved)
 
-        stdout = StringIO()
         with (
             patch("core.mirror_membership_validation._bound_http_get", autospec=True) as bound_get_mock,
             patch("core.mirror_membership_validation.requests.get", autospec=True) as get_mock,
         ):
-            call_command(
-                "membership_mirror_validation",
+            output = self._call_membership_mirror_validation_command(
                 "--request-id",
                 str(membership_request.pk),
-                stdout=stdout,
             )
 
-        output = stdout.getvalue()
         self.assertFalse(MirrorMembershipValidation.objects.filter(membership_request=membership_request).exists())
         self.assertFalse(Note.objects.filter(membership_request=membership_request, username=CUSTOS).exists())
         self.assertIn(
-            f"request ID {membership_request.pk} is closed; no validation row to delete via --request-id",
+                f"mirror_validation.no_closed_request_row_direct: {membership_request.pk}",
             output,
         )
         self.assertNotIn("debug:", output)
@@ -1861,21 +1847,17 @@ class MirrorMembershipValidationTests(TestCase):
         validation.result = {"domain": {"status": "reachable", "url": "https://mirror.example.org"}}
         validation.save(update_fields=["status", "attempt_count", "next_run_at", "result"])
 
-        stdout = StringIO()
         with (
             patch("core.mirror_membership_validation._bound_http_get", autospec=True) as bound_get_mock,
             patch("core.mirror_membership_validation.requests.get", autospec=True) as get_mock,
         ):
-            call_command(
-                "membership_mirror_validation",
+            output = self._call_membership_mirror_validation_command(
                 "--request-id",
                 str(membership_request.pk),
                 "--dry-run",
-                stdout=stdout,
             )
 
         validation.refresh_from_db()
-        output = stdout.getvalue()
         self.assertEqual(validation.status, MirrorMembershipValidation.Status.completed)
         self.assertEqual(validation.attempt_count, 2)
         self.assertFalse(Note.objects.filter(membership_request=membership_request, username=CUSTOS).exists())
@@ -1910,20 +1892,15 @@ class MirrorMembershipValidationTests(TestCase):
                 pull_request="https://user:secret@github.com/AlmaLinux/infra/pull/123/private?token=secret",
             ),
         )
-        stdout = StringIO()
-
         with (
             patch("core.mirror_membership_validation._bound_http_get", autospec=True) as bound_get_mock,
             patch("core.mirror_membership_validation.requests.get", autospec=True) as get_mock,
         ):
-            call_command(
-                "membership_mirror_validation",
+            output = self._call_membership_mirror_validation_command(
                 "--request-id",
                 str(membership_request.pk),
-                stdout=stdout,
             )
 
-        output = stdout.getvalue()
         validation = MirrorMembershipValidation.objects.get(membership_request=membership_request)
         self.assertEqual(validation.status, MirrorMembershipValidation.Status.failed_terminal)
         self.assertIn(
@@ -1955,8 +1932,6 @@ class MirrorMembershipValidationTests(TestCase):
                 domain="https://user:secret@mirror.example.org/private/token123/?token=secret",
             ),
         )
-        stdout = StringIO()
-
         with (
             patch(
                 "core.mirror_membership_validation._bound_http_get",
@@ -1969,14 +1944,11 @@ class MirrorMembershipValidationTests(TestCase):
                 autospec=True,
             ),
         ):
-            call_command(
-                "membership_mirror_validation",
+            output = self._call_membership_mirror_validation_command(
                 "--request-id",
                 str(membership_request.pk),
-                stdout=stdout,
             )
 
-        output = stdout.getvalue()
         self.assertIn(
             "debug: domain target=https://mirror.example.org result=unsafe_target detail=private_address",
             output,
@@ -2000,8 +1972,6 @@ class MirrorMembershipValidationTests(TestCase):
                 domain="https://user:secret@mirror.example.org/private/token123/?token=secret",
             ),
         )
-        stdout = StringIO()
-
         with (
             patch(
                 "core.mirror_membership_validation._bound_http_get",
@@ -2014,14 +1984,11 @@ class MirrorMembershipValidationTests(TestCase):
                 autospec=True,
             ),
         ):
-            call_command(
-                "membership_mirror_validation",
+            output = self._call_membership_mirror_validation_command(
                 "--request-id",
                 str(membership_request.pk),
-                stdout=stdout,
             )
 
-        output = stdout.getvalue()
         self.assertIn(
             "debug: domain target=https://mirror.example.org result=inaccessible detail=dns_lookup_failed",
             output,
@@ -2045,8 +2012,6 @@ class MirrorMembershipValidationTests(TestCase):
                 domain="https://user:secret@mirror.example.org/private/token123/?token=secret",
             ),
         )
-        stdout = StringIO()
-
         with (
             patch(
                 "core.mirror_membership_validation._bound_http_get",
@@ -2059,14 +2024,11 @@ class MirrorMembershipValidationTests(TestCase):
                 autospec=True,
             ),
         ):
-            call_command(
-                "membership_mirror_validation",
+            output = self._call_membership_mirror_validation_command(
                 "--request-id",
                 str(membership_request.pk),
-                stdout=stdout,
             )
 
-        output = stdout.getvalue()
         self.assertIn(
             "debug: domain target=https://mirror.example.org result=retryable_failure detail=timeout",
             output,

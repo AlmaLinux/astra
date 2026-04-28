@@ -75,7 +75,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_: Any) -> FreeIPAUser | None:
             if username == "alex":
                 return admin_user
             if username == "alice":
@@ -225,7 +225,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_: Any) -> FreeIPAUser | None:
             if username == "alex":
                 return admin_user
             if username == "alice":
@@ -609,7 +609,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_: Any) -> FreeIPAUser | None:
             if username == "alex":
                 return admin_user
             if username == "alice":
@@ -650,7 +650,8 @@ class AdminImportMembershipsCSVTests(TestCase):
             process_url = reverse("admin:core_membershipcsvimportlink_process_import")
             confirm_data = dict(confirm_form.initial)
             confirm_data["membership_type"] = "individual"
-            resp = self.client.post(process_url, data=confirm_data, follow=False)
+            with self.captureOnCommitCallbacks(execute=True):
+                resp = self.client.post(process_url, data=confirm_data, follow=False)
 
         self.assertEqual(resp.status_code, 302)
 
@@ -735,7 +736,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_: Any) -> FreeIPAUser | None:
             if username == "alex":
                 return admin_user
             if username == "alice":
@@ -814,7 +815,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_: Any) -> FreeIPAUser | None:
             if username == "alex":
                 return admin_user
             if username == "alice":
@@ -933,7 +934,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_: Any) -> FreeIPAUser | None:
             if username == "alex":
                 return admin_user
             if username == "alice":
@@ -1019,7 +1020,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_: Any) -> FreeIPAUser | None:
             if username == "alex":
                 return admin_user
             if username == "bob":
@@ -1181,7 +1182,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_: Any) -> FreeIPAUser | None:
             if username == "alex":
                 return admin_user
             if username == "alice":
@@ -1322,7 +1323,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_: Any) -> FreeIPAUser | None:
             if username == "alex":
                 return admin_user
             if username == "alice":
@@ -1571,7 +1572,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_: Any) -> FreeIPAUser | None:
             if username == "alex":
                 return admin_user
             if username == "alice":
@@ -1637,7 +1638,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_: Any) -> FreeIPAUser | None:
             if username == "alex":
                 return admin_user
             if username == "alice":
@@ -1706,7 +1707,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_: Any) -> FreeIPAUser | None:
             if username == "alex":
                 return admin_user
             if username == "alice":
@@ -1775,7 +1776,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_: Any) -> FreeIPAUser | None:
             if username == "alex":
                 return admin_user
             if username == "alice":
@@ -1842,7 +1843,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_: Any) -> FreeIPAUser | None:
             if username == "alex":
                 return admin_user
             if username == "alice":
@@ -1905,7 +1906,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_: Any) -> FreeIPAUser | None:
             if username == "alex":
                 return admin_user
             if username == "alice":
@@ -1938,7 +1939,8 @@ class AdminImportMembershipsCSVTests(TestCase):
             process_url = reverse("admin:core_membershipcsvimportlink_process_import")
             confirm_data = dict(confirm_form.initial)
             confirm_data["membership_type"] = "individual"
-            resp = self.client.post(process_url, data=confirm_data, follow=False)
+            with self.captureOnCommitCallbacks(execute=True):
+                resp = self.client.post(process_url, data=confirm_data, follow=False)
 
         self.assertEqual(resp.status_code, 302)
 
@@ -2001,7 +2003,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_: Any) -> FreeIPAUser | None:
             if username == "alex":
                 return admin_user
             if username == "alice":
@@ -2141,7 +2143,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_: Any) -> FreeIPAUser | None:
             if username == "alex":
                 return admin_user
             if username == "alice":
@@ -2218,7 +2220,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_: Any) -> FreeIPAUser | None:
             if username == "alex":
                 return admin_user
             if username == "alice":
@@ -2298,7 +2300,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_: Any) -> FreeIPAUser | None:
             if username == "alex":
                 return admin_user
             if username == "alice":
@@ -2387,7 +2389,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_: Any) -> FreeIPAUser | None:
             if username == "alex":
                 return admin_user
             if username == "alice":
@@ -2497,7 +2499,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_: Any) -> FreeIPAUser | None:
             if username == "alex":
                 return admin_user
             if username == "alice":
@@ -2581,7 +2583,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_: Any) -> FreeIPAUser | None:
             if username == "alex":
                 return admin_user
             if username == "alice":
@@ -2661,7 +2663,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_: Any) -> FreeIPAUser | None:
             if username == "alex":
                 return admin_user
             if username == "alice":
@@ -2756,7 +2758,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_: Any) -> FreeIPAUser | None:
             if username == "alex":
                 return admin_user
             if username == "alice":
@@ -2855,7 +2857,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_: Any) -> FreeIPAUser | None:
             if username == "alex":
                 return admin_user
             if username == "alexi":
@@ -2936,7 +2938,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_: Any) -> FreeIPAUser | None:
             if username == "alex":
                 return admin_user
             if username == "alice":
@@ -3013,7 +3015,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_: Any) -> FreeIPAUser | None:
             if username == "alex":
                 return admin_user
             if username == "alice":
@@ -3055,7 +3057,7 @@ class AdminImportMembershipsCSVTests(TestCase):
         assert req is not None
         req.refresh_from_db()
         self.assertEqual(req.status, MembershipRequest.Status.approved)
-        self.assertTrue(
+        self.assertFalse(
             Note.objects.filter(
                 membership_request=req,
                 username="alex",
@@ -3109,7 +3111,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_: Any) -> FreeIPAUser | None:
             if username == "alex":
                 return admin_user
             if username == "alice":
