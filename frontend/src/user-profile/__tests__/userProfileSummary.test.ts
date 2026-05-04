@@ -31,10 +31,17 @@ const bootstrap = {
   isSelf: true,
 } as unknown as UserProfileSummaryBootstrap;
 
+const chatConfig = {
+  irc: { defaultServer: "irc.libera.chat" },
+  matrix: { defaultServer: "matrix.org" },
+  mattermost: { defaultServer: "chat.almalinux.org", defaultTeam: "almalinux" },
+  matrixToArgs: "web-instance[element.io]=app.element.io",
+};
+
 describe("UserProfileSummary", () => {
   it("renders the profile identity and attributes", () => {
     const wrapper = mount(UserProfileSummary, {
-      props: { bootstrap, currentTimeLabel: "Thursday 12:00:00", settingsProfileUrl: "/settings/?tab=profile" },
+      props: { bootstrap, chatConfig, currentTimeLabel: "Thursday 12:00:00", settingsProfileUrl: "/settings/?tab=profile" },
     });
 
     expect(wrapper.text()).toContain("Alice User");
@@ -50,10 +57,29 @@ describe("UserProfileSummary", () => {
 
   it("falls back to the placeholder icon when no avatar URL exists", () => {
     const wrapper = mount(UserProfileSummary, {
-      props: { bootstrap, currentTimeLabel: "Thursday 12:00:00", settingsProfileUrl: "/settings/?tab=profile" },
+      props: { bootstrap, chatConfig, currentTimeLabel: "Thursday 12:00:00", settingsProfileUrl: "/settings/?tab=profile" },
     });
 
     expect(wrapper.find(".fa-user").exists()).toBe(true);
+  });
+
+  it("renders linked chat identities when values are parseable and plain text otherwise", () => {
+    const wrapper = mount(UserProfileSummary, {
+      props: {
+        bootstrap: {
+          ...bootstrap,
+          ircNicks: ["alice", "mattermost://alice", "bad value with spaces"],
+        },
+        chatConfig,
+        currentTimeLabel: "Thursday 12:00:00",
+        settingsProfileUrl: "/settings/?tab=profile",
+      },
+    });
+
+    expect(wrapper.find('a[href="irc://irc.libera.chat/alice,isnick"]').text()).toBe("alice");
+    expect(wrapper.find('a[href="https://chat.almalinux.org/almalinux/messages/@alice"]').text()).toBe("@alice");
+    expect(wrapper.text()).toContain("bad value with spaces");
+    expect(wrapper.find('a[href="bad value with spaces"]').exists()).toBe(false);
   });
 
   it("normalizes scheme-less links and leaves unsafe raw URLs as plain text", () => {
@@ -70,6 +96,7 @@ describe("UserProfileSummary", () => {
           websiteUrls: ["plain.example.test/path", "javascript:alert(1)"],
           rssUrls: ["feeds.example.com/rss", "ftp://example.com/feed.xml"],
         },
+        chatConfig,
         currentTimeLabel: "Thursday 12:00:00",
         settingsProfileUrl: "/settings/?tab=profile",
       },
@@ -93,6 +120,7 @@ describe("UserProfileSummary", () => {
           ...bootstrap,
           countryCode: "",
         },
+        chatConfig,
         currentTimeLabel: "Thursday 12:00:00",
         settingsProfileUrl: "/settings/?tab=profile",
       },
@@ -108,6 +136,7 @@ describe("UserProfileSummary", () => {
           ...bootstrap,
           pronouns: "",
         },
+        chatConfig,
         currentTimeLabel: "Thursday 12:00:00",
         settingsProfileUrl: "/settings/?tab=profile",
       },

@@ -12,6 +12,12 @@ function flushPromises(): Promise<void> {
 
 const bootstrap: UserProfileBootstrap = {
   apiUrl: "/api/v1/users/alice/profile/detail",
+  chatConfig: {
+    irc: { defaultServer: "irc.libera.chat" },
+    matrix: { defaultServer: "matrix.org" },
+    mattermost: { defaultServer: "chat.almalinux.org", defaultTeam: "almalinux" },
+    matrixToArgs: "web-instance[element.io]=app.element.io",
+  },
   settingsProfileUrl: "/settings/?tab=profile",
   settingsCountryCodeUrl: "/settings/?tab=profile&highlight=country_code",
   settingsEmailsUrl: "/settings/?tab=emails",

@@ -198,7 +198,12 @@ onBeforeUnmount(() => {
 
       <div class="row">
         <div class="col-md-4">
-          <UserProfileSummary :bootstrap="summary" :current-time-label="currentTimeLabel" :settings-profile-url="bootstrap.settingsProfileUrl" />
+          <UserProfileSummary
+            :bootstrap="summary"
+            :chat-config="bootstrap.chatConfig"
+            :current-time-label="currentTimeLabel"
+            :settings-profile-url="bootstrap.settingsProfileUrl"
+          />
         </div>
         <div class="col-md-8">
           <UserProfileMembershipPanel

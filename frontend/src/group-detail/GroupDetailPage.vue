@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 
+import { buildChatLink } from "../shared/chatLinks";
 import WidgetGrid from "../shared/components/WidgetGrid.vue";
 import WidgetUser from "../shared/components/WidgetUser.vue";
 import {
@@ -46,6 +47,10 @@ const membersCount = computed(() => membersPayload.value?.pagination.count || gr
 const membersPagination = computed(() => membersPayload.value?.pagination || null);
 const leaderItems = computed<GroupLeaderItem[]>(() => leadersPayload.value?.items || []);
 const leadersPagination = computed(() => leadersPayload.value?.pagination || null);
+const groupChatLinks = computed(() => (groupInfo.value?.fas_irc_channels || []).map((value) => ({
+  raw: value,
+  link: buildChatLink(value, { kind: "channel", config: props.bootstrap.chatConfig }),
+})));
 
 function asMember(row: unknown): GroupMemberItem {
   return row as GroupMemberItem;
@@ -567,7 +572,10 @@ onMounted(async () => {
               <li v-if="groupInfo.fas_irc_channels.length" class="list-group-item d-flex justify-content-between">
                 <strong class="profile-attr-label" title="Chat channels"><i class="fas fa-comments"></i> Chat</strong>
                 <div class="profile-attr-value text-end">
-                  <div v-for="channel in groupInfo.fas_irc_channels" :key="channel" class="mb-0 text-monospace">{{ channel }}</div>
+                  <div v-for="item in groupChatLinks" :key="item.raw" class="mb-0 text-monospace profile-chat-item">
+                    <a v-if="item.link" :href="item.link.href" :target="item.link.external ? '_blank' : undefined" :title="item.link.title" rel="noopener noreferrer">{{ item.link.display }}</a>
+                    <template v-else>{{ item.raw }}</template>
+                  </div>
                 </div>
               </li>
 

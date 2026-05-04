@@ -44,6 +44,7 @@ from core.templatetags.core_user_grid import build_user_grid_page
 from core.views_utils import (
     _normalize_str,
     agreement_settings_url,
+    chat_link_bootstrap_context,
     get_username,
     normalize_freeipa_username,
     settings_url,
@@ -1192,6 +1193,7 @@ def user_profile(request: HttpRequest, username: str) -> HttpResponse:
             "membership_notes_add_url": reverse("api-membership-notes-aggregate-add"),
             "membership_notes_can_view": membership_can_view,
             "membership_notes_can_write": membership_can_write,
+            **chat_link_bootstrap_context(),
         },
     )
 

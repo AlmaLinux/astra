@@ -1,3 +1,5 @@
+import type { ChatLinkConfig } from "../shared/chatLinks";
+
 export interface GroupMemberItem {
   username: string;
   full_name: string;
@@ -92,6 +94,7 @@ export interface GroupDetailBootstrap {
   leadersApiUrl: string;
   membersApiUrl: string;
   actionUrl: string;
+  chatConfig: ChatLinkConfig;
   currentUsername: string;
   detailUrlTemplate: string;
   editUrlTemplate: string;
@@ -111,6 +114,11 @@ export function readGroupDetailBootstrap(root: HTMLElement): GroupDetailBootstra
   const leadersApiUrl = String(root.dataset.groupDetailLeadersApiUrl || "").trim();
   const membersApiUrl = String(root.dataset.groupDetailMembersApiUrl || "").trim();
   const actionUrl = String(root.dataset.groupDetailActionUrl || "").trim();
+  const chatIrcDefaultServer = String(root.dataset.groupDetailChatIrcDefaultServer || "").trim();
+  const chatMatrixDefaultServer = String(root.dataset.groupDetailChatMatrixDefaultServer || "").trim();
+  const chatMattermostDefaultServer = String(root.dataset.groupDetailChatMattermostDefaultServer || "").trim();
+  const chatMattermostDefaultTeam = String(root.dataset.groupDetailChatMattermostDefaultTeam || "").trim();
+  const chatMatrixToArgs = String(root.dataset.groupDetailChatMatrixToArgs || "").trim();
   const currentUsername = String(root.dataset.groupDetailCurrentUsername || "").trim();
   const detailUrlTemplate = String(root.dataset.groupDetailUrlTemplate || "").trim();
   const editUrlTemplate = String(root.dataset.groupDetailEditUrlTemplate || "").trim();
@@ -121,6 +129,10 @@ export function readGroupDetailBootstrap(root: HTMLElement): GroupDetailBootstra
     || !leadersApiUrl
     || !membersApiUrl
     || !actionUrl
+    || !chatIrcDefaultServer
+    || !chatMatrixDefaultServer
+    || !chatMattermostDefaultServer
+    || !chatMattermostDefaultTeam
     || !detailUrlTemplate
     || !editUrlTemplate
     || !agreementDetailUrlTemplate
@@ -133,6 +145,12 @@ export function readGroupDetailBootstrap(root: HTMLElement): GroupDetailBootstra
     leadersApiUrl,
     membersApiUrl,
     actionUrl,
+    chatConfig: {
+      irc: { defaultServer: chatIrcDefaultServer },
+      matrix: { defaultServer: chatMatrixDefaultServer },
+      mattermost: { defaultServer: chatMattermostDefaultServer, defaultTeam: chatMattermostDefaultTeam },
+      matrixToArgs: chatMatrixToArgs,
+    },
     currentUsername,
     detailUrlTemplate,
     editUrlTemplate,

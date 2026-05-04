@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
+import { buildChatLink, type ChatLinkConfig } from "../shared/chatLinks";
 import type { UserProfileSummaryBootstrap } from "./types";
 
 const props = defineProps<{
   bootstrap: UserProfileSummaryBootstrap;
+  chatConfig: ChatLinkConfig;
   currentTimeLabel: string;
   settingsProfileUrl: string;
 }>();
@@ -176,6 +178,11 @@ const rssLinks = computed(() => props.bootstrap.rssUrls.map((url) => ({
   text: String(url || "").trim(),
 })).filter((item) => item.text));
 
+const chatLinks = computed(() => props.bootstrap.ircNicks.map((value) => ({
+  raw: value,
+  link: buildChatLink(value, { kind: "nickname", config: props.chatConfig }),
+})).filter((item) => item.raw.trim()));
+
 function externalLinkTarget(href: string | null): string | undefined {
   return href ? "_blank" : undefined;
 }
@@ -249,7 +256,10 @@ function externalLinkTarget(href: string | null): string | undefined {
         <li v-if="bootstrap.ircNicks.length" class="list-group-item d-flex justify-content-between">
           <strong class="profile-attr-label" title="Chat"><i class="fas fa-comments" /> Chat</strong>
           <div class="profile-attr-value text-end">
-            <div v-for="nick in bootstrap.ircNicks" :key="nick" class="mb-0 text-monospace profile-chat-item">{{ nick }}</div>
+            <div v-for="item in chatLinks" :key="item.raw" class="mb-0 text-monospace profile-chat-item">
+              <a v-if="item.link" :href="item.link.href" :target="externalLinkTarget(item.link.external ? item.link.href : null)" :title="item.link.title" rel="noopener noreferrer">{{ item.link.display }}</a>
+              <template v-else>{{ item.raw }}</template>
+            </div>
           </div>
         </li>
 

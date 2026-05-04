@@ -1,0 +1,106 @@
+{
+  "config": {
+    "irc": {
+      "defaultServer": "irc.libera.chat"
+    },
+    "matrix": {
+      "defaultServer": "matrix.org"
+    },
+    "mattermost": {
+      "defaultServer": "chat.almalinux.org",
+      "defaultTeam": "almalinux"
+    },
+    "matrixToArgs": "web-instance[element.io]=app.element.io"
+  },
+  "cases": [
+    {
+      "id": "irc-nickname-default",
+      "kind": "nickname",
+      "raw": "alice",
+      "expected": {
+        "href": "irc://irc.libera.chat/alice,isnick",
+        "title": "IRC on irc.libera.chat",
+        "display": "alice",
+        "external": false
+      }
+    },
+    {
+      "id": "irc-channel-default",
+      "kind": "channel",
+      "raw": "irc://#infra",
+      "expected": {
+        "href": "ircs://irc.libera.chat/#infra",
+        "title": "IRC channel on irc.libera.chat",
+        "display": "#infra",
+        "external": false
+      }
+    },
+    {
+      "id": "matrix-nickname-custom-server",
+      "kind": "nickname",
+      "raw": "matrix://chat.example.org/alice",
+      "expected": {
+        "href": "https://matrix.to/#/@alice:chat.example.org?web-instance[element.io]=app.element.io",
+        "title": "Matrix on chat.example.org",
+        "display": "@alice:chat.example.org",
+        "external": true
+      }
+    },
+    {
+      "id": "matrix-channel-default-server",
+      "kind": "channel",
+      "raw": "matrix://matrix.org/#almalinux",
+      "expected": {
+        "href": "https://matrix.to/#/#almalinux:matrix.org?web-instance[element.io]=app.element.io",
+        "title": "Matrix room alias on matrix.org",
+        "display": "#almalinux",
+        "external": true
+      }
+    },
+    {
+      "id": "mattermost-nickname-defaults",
+      "kind": "nickname",
+      "raw": "mattermost://alice",
+      "expected": {
+        "href": "https://chat.almalinux.org/almalinux/messages/@alice",
+        "title": "Mattermost on chat.almalinux.org (almalinux)",
+        "display": "@alice",
+        "external": true
+      }
+    },
+    {
+      "id": "mattermost-channel-defaults",
+      "kind": "channel",
+      "raw": "mattermost://channels/atomicsig",
+      "expected": {
+        "href": "https://chat.almalinux.org/almalinux/channels/atomicsig",
+        "title": "Mattermost channel on chat.almalinux.org (almalinux)",
+        "display": "~atomicsig",
+        "external": true
+      }
+    },
+    {
+      "id": "mattermost-nickname-custom-server-team",
+      "kind": "nickname",
+      "raw": "mattermost://chat.example.org/teamx/messages/@carol",
+      "expected": {
+        "href": "https://chat.example.org/teamx/messages/@carol",
+        "title": "Mattermost on chat.example.org (teamx)",
+        "display": "@carol:chat.example.org:teamx",
+        "external": true
+      }
+    },
+    {
+      "id": "invalid-nickname",
+      "kind": "nickname",
+      "raw": "bad value with spaces",
+      "expected": null
+    },
+    {
+      "id": "invalid-channel",
+      "kind": "channel",
+      "raw": "not a channel",
+      "expected": null
+    }
+  ]
+}

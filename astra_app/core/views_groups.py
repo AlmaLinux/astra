@@ -25,6 +25,7 @@ from core.views_utils import (
     _normalize_str,
     agreement_settings_url,
     build_page_url_prefix,
+    chat_link_bootstrap_context,
     get_username,
     normalize_freeipa_group_name,
     paginate_and_build_context,
@@ -304,6 +305,7 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
                 "placeholder-agreement", "__agreement_cn__"
             ),
             "agreements_list_url": agreement_settings_url(None),
+            **chat_link_bootstrap_context(),
         },
     )
 

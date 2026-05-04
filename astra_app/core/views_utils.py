@@ -243,6 +243,16 @@ def agreement_settings_url(agreement_cn: str | None, *, return_to: str | None = 
     return settings_url(tab="agreements", agreement=agreement_cn_value, return_to=return_to)
 
 
+def chat_link_bootstrap_context() -> dict[str, str]:
+    return {
+        "chat_irc_default_server": settings.CHAT_NETWORKS["irc"]["default_server"],
+        "chat_matrix_default_server": settings.CHAT_NETWORKS["matrix"]["default_server"],
+        "chat_mattermost_default_server": settings.CHAT_NETWORKS["mattermost"]["default_server"],
+        "chat_mattermost_default_team": settings.CHAT_NETWORKS["mattermost"]["default_team"],
+        "chat_matrix_to_args": settings.CHAT_MATRIX_TO_ARGS,
+    }
+
+
 def block_action_without_country_code(
     request: HttpRequest,
     *,

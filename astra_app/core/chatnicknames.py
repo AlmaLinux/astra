@@ -201,6 +201,9 @@ def build_chat_nickname_link(value: str, *, scheme_override: str | None = None) 
                 display = f"{display}@{server}"
             return ChatNicknameLink(href=href, title=title, display=display)
 
+        if not _IRC_NICK_RE.match(nick):
+            return None
+
         href = f"irc://{server}/{nick},isnick"
         title = f"IRC on {server}"
         display = nick
@@ -209,28 +212,38 @@ def build_chat_nickname_link(value: str, *, scheme_override: str | None = None) 
         return ChatNicknameLink(href=href, title=title, display=display)
 
     if scheme == ChatScheme.matrix:
+        localpart = nick.lstrip("@")
+        if not _MATRIX_LOCALPART_RE.match(localpart):
+            return None
+
         args = settings.CHAT_MATRIX_TO_ARGS
         args = args if isinstance(args, str) and args else ""
 
-        href = f"https://matrix.to/#/@{nick}:{server}"
+        href = f"https://matrix.to/#/@{localpart}:{server}"
         if args:
             href = f"{href}?{args}"
 
         title = f"Matrix on {server}"
 
-        display = f"@{nick}"
+        display = f"@{localpart}"
         if not default_server or server != default_server:
             display = f"{display}:{server}"
 
         return ChatNicknameLink(href=href, title=title, display=display, external=True)
 
     if scheme == ChatScheme.mattermost:
+        if not _SERVER_RE.match(server) or not _MATTERMOST_USERNAME_RE.match(nick):
+            return None
+
         if not team:
             # For default server we can fall back to the configured default team.
             if default_server and server == default_server and default_team:
                 team = default_team
             else:
                 return None
+
+        if not _MATTERMOST_TEAM_RE.match(team):
+            return None
 
         href = f"https://{server}/{team}/messages/@{nick}"
         title = f"Mattermost on {server} ({team})"
@@ -239,7 +252,7 @@ def build_chat_nickname_link(value: str, *, scheme_override: str | None = None) 
         if (default_server and server != default_server) or (default_team and team != default_team) or (not default_server) or (not default_team):
             display = f"@{nick}:{server}:{team}"
 
-        return ChatNicknameLink(href=href, title=title, display=display)
+        return ChatNicknameLink(href=href, title=title, display=display, external=True)
 
     return None
 
@@ -405,6 +418,9 @@ def build_chat_channel_link(value: str, *, scheme_override: str | None = None) -
         if not channel or not server:
             return None
 
+        if not _SERVER_RE.match(server) or not _MATTERMOST_CHANNEL_RE.match(channel):
+            return None
+
         default_server = _get_default_server(ChatScheme.mattermost) or ""
         default_team = _get_default_team() or ""
 
@@ -414,6 +430,9 @@ def build_chat_channel_link(value: str, *, scheme_override: str | None = None) -
             else:
                 return None
 
+        if not _MATTERMOST_TEAM_RE.match(team):
+            return None
+
         href = f"https://{server}/{team}/channels/{channel}"
         title = f"Mattermost channel on {server} ({team})"
 
@@ -421,7 +440,7 @@ def build_chat_channel_link(value: str, *, scheme_override: str | None = None) -
         if (default_server and server != default_server) or (default_team and team != default_team) or (not default_server) or (not default_team):
             display = f"~{channel}:{server}:{team}"
 
-        return ChatChannelLink(href=href, title=title, display=display)
+        return ChatChannelLink(href=href, title=title, display=display, external=True)
 
     if not channel or not server:
         return None

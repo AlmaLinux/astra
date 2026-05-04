@@ -21,7 +21,7 @@ function deferredResponse(): {
   return { promise, resolve };
 }
 
-const bootstrap: GroupDetailBootstrap = {
+const bootstrap = {
   infoApiUrl: "/api/v1/groups/infra/info",
   leadersApiUrl: "/api/v1/groups/infra/leaders",
   membersApiUrl: "/api/v1/groups/infra/members",
@@ -31,7 +31,13 @@ const bootstrap: GroupDetailBootstrap = {
   editUrlTemplate: "/group/__group_name__/edit/",
   agreementDetailUrlTemplate: "/settings/?tab=agreements&agreement=__agreement_cn__",
   agreementsListUrl: "/settings/?tab=agreements",
-};
+  chatConfig: {
+    irc: { defaultServer: "irc.libera.chat" },
+    matrix: { defaultServer: "matrix.org" },
+    mattermost: { defaultServer: "chat.almalinux.org", defaultTeam: "almalinux" },
+    matrixToArgs: "web-instance[element.io]=app.element.io",
+  },
+} as unknown as GroupDetailBootstrap;
 
 describe("GroupDetailPage", () => {
   afterEach(() => {
@@ -132,6 +138,49 @@ describe("GroupDetailPage", () => {
     expect(wrapper.find('img[src="/avatars/alice.png"]').exists()).toBe(true);
     expect(wrapper.find('.card-tools a[href="/group/infra/edit/"]').exists()).toBe(true);
     expect(wrapper.find('a[href="/group/infra/edit/"]').exists()).toBe(true);
+  });
+
+  it("renders linked chat channels when values are parseable and plain text otherwise", async () => {
+    const fetchMock = vi.fn(async (input) => {
+      const url = String(input);
+      if (url.includes("/info")) {
+        return new Response(
+          JSON.stringify({
+            group: {
+              cn: "infra",
+              description: "Infrastructure",
+              fas_url: "",
+              fas_mailing_list: "",
+              fas_discussion_url: "",
+              fas_irc_channels: ["irc://#infra", "mattermost://channels/atomicsig", "not a channel"],
+              member_count: 2,
+              is_member: true,
+              is_sponsor: true,
+              sponsor_groups: [],
+              required_agreements: [],
+              unsigned_usernames: [],
+            },
+          }),
+        );
+      }
+      if (url.includes("/leaders")) {
+        return new Response(JSON.stringify({ leaders: { items: [], pagination: { count: 0, page: 1, num_pages: 1, page_numbers: [1], show_first: false, show_last: false, has_previous: false, has_next: false, previous_page_number: null, next_page_number: null, start_index: 0, end_index: 0 } } }));
+      }
+      return new Response(JSON.stringify({ members: { q: "", items: [], pagination: { count: 0, page: 1, num_pages: 1, page_numbers: [1], show_first: false, show_last: false, has_previous: false, has_next: false, previous_page_number: null, next_page_number: null, start_index: 0, end_index: 0 } } }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const wrapper = mount(GroupDetailPage, {
+      props: { bootstrap },
+    });
+
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.find('a[href="ircs://irc.libera.chat/#infra"]').text()).toBe("#infra");
+    expect(wrapper.find('a[href="https://chat.almalinux.org/almalinux/channels/atomicsig"]').text()).toBe("~atomicsig");
+    expect(wrapper.findAll(".profile-chat-item").some((item) => item.text().includes("not a channel"))).toBe(true);
+    expect(wrapper.find('a[href="not a channel"]').exists()).toBe(false);
   });
 
   it("renders the info card and loading states before leaders and members finish loading", async () => {

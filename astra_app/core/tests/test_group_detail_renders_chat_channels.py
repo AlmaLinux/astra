@@ -42,6 +42,11 @@ class GroupDetailRendersChatChannelsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "data-group-detail-root")
         self.assertContains(resp, reverse("api-group-detail-info", args=["fas1"]))
+        self.assertContains(resp, 'data-group-detail-chat-irc-default-server="irc.libera.chat"')
+        self.assertContains(resp, 'data-group-detail-chat-matrix-default-server="matrix.org"')
+        self.assertContains(resp, 'data-group-detail-chat-mattermost-default-server="chat.almalinux.org"')
+        self.assertContains(resp, 'data-group-detail-chat-mattermost-default-team="almalinux"')
+        self.assertContains(resp, 'data-group-detail-chat-matrix-to-args="web-instance[element.io]=app.element.io"')
         self.assertEqual(info_resp.status_code, 200)
         self.assertEqual(
             info_resp.json()["group"]["fas_irc_channels"],

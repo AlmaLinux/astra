@@ -15,6 +15,11 @@
   <div
     data-user-profile-root
     data-user-profile-api-url="{% url 'api-user-profile-detail' profile_username %}"
+    data-user-profile-chat-irc-default-server="{{ chat_irc_default_server }}"
+    data-user-profile-chat-matrix-default-server="{{ chat_matrix_default_server }}"
+    data-user-profile-chat-mattermost-default-server="{{ chat_mattermost_default_server }}"
+    data-user-profile-chat-mattermost-default-team="{{ chat_mattermost_default_team }}"
+    data-user-profile-chat-matrix-to-args="{{ chat_matrix_to_args }}"
     data-user-profile-settings-profile-url="{{ settings_profile_url }}"
     data-user-profile-settings-country-code-url="{{ settings_country_code_url }}"
     data-user-profile-settings-emails-url="{{ settings_emails_url }}"

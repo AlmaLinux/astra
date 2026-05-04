@@ -1,3 +1,5 @@
+import type { ChatLinkConfig } from "../shared/chatLinks";
+
 export interface UserProfileSocialProfile {
   platform: string;
   urls: string[];
@@ -122,6 +124,7 @@ export interface UserProfileResponse {
 
 export interface UserProfileBootstrap {
   apiUrl: string;
+  chatConfig: ChatLinkConfig;
   settingsProfileUrl: string;
   settingsCountryCodeUrl: string;
   settingsEmailsUrl: string;
@@ -140,6 +143,11 @@ function readBoolean(value: string): boolean {
 
 export function readUserProfileBootstrap(root: HTMLElement): UserProfileBootstrap | null {
   const apiUrl = String(root.dataset.userProfileApiUrl || "").trim();
+  const chatIrcDefaultServer = String(root.dataset.userProfileChatIrcDefaultServer || "").trim();
+  const chatMatrixDefaultServer = String(root.dataset.userProfileChatMatrixDefaultServer || "").trim();
+  const chatMattermostDefaultServer = String(root.dataset.userProfileChatMattermostDefaultServer || "").trim();
+  const chatMattermostDefaultTeam = String(root.dataset.userProfileChatMattermostDefaultTeam || "").trim();
+  const chatMatrixToArgs = String(root.dataset.userProfileChatMatrixToArgs || "").trim();
   const settingsProfileUrl = String(root.dataset.userProfileSettingsProfileUrl || "").trim();
   const settingsCountryCodeUrl = String(root.dataset.userProfileSettingsCountryCodeUrl || "").trim();
   const settingsEmailsUrl = String(root.dataset.userProfileSettingsEmailsUrl || "").trim();
@@ -159,6 +167,10 @@ export function readUserProfileBootstrap(root: HTMLElement): UserProfileBootstra
   const agreementsUrlTemplate = String(root.dataset.userProfileAgreementsUrlTemplate || "").trim();
   if (
     !apiUrl
+    || !chatIrcDefaultServer
+    || !chatMatrixDefaultServer
+    || !chatMattermostDefaultServer
+    || !chatMattermostDefaultTeam
     || !settingsProfileUrl
     || !settingsCountryCodeUrl
     || !settingsEmailsUrl
@@ -179,6 +191,12 @@ export function readUserProfileBootstrap(root: HTMLElement): UserProfileBootstra
   }
   return {
     apiUrl,
+    chatConfig: {
+      irc: { defaultServer: chatIrcDefaultServer },
+      matrix: { defaultServer: chatMatrixDefaultServer },
+      mattermost: { defaultServer: chatMattermostDefaultServer, defaultTeam: chatMattermostDefaultTeam },
+      matrixToArgs: chatMatrixToArgs,
+    },
     settingsProfileUrl,
     settingsCountryCodeUrl,
     settingsEmailsUrl,
