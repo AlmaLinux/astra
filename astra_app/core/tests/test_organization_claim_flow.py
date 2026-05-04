@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.messages import get_messages
@@ -7,6 +8,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from core.freeipa.user import FreeIPAUser
+from core.membership import FreeIPARepresentativeSyncJournal
 from core.models import AccountInvitation, Membership, MembershipType, Organization
 from core.organization_claim import make_organization_claim_token
 from core.tests.utils_test_data import ensure_core_categories
@@ -170,6 +172,72 @@ class OrganizationClaimFlowTests(TestCase):
         remove_mock.assert_called_once()
         _, remove_kwargs = remove_mock.call_args
         self.assertEqual(remove_kwargs["group_name"], "almalinux-gold")
+
+    def test_duplicate_representative_claim_handles_clean_error_after_transaction_safe_rollback(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 1,
+                "enabled": True,
+                "group_cn": "almalinux-gold",
+            },
+        )
+
+        Organization.objects.create(
+            name="Existing Rep Org",
+            representative="alice",
+            status=Organization.Status.active,
+        )
+        organization = Organization.objects.create(
+            name="Duplicate Claim Org",
+            business_contact_email="contact@duplicate.example",
+        )
+        Membership.objects.create(
+            target_organization=organization,
+            membership_type_id="gold",
+        )
+        token = make_organization_claim_token(organization)
+        journal = FreeIPARepresentativeSyncJournal(
+            targeted_group_cns=("almalinux-gold",),
+            skipped_group_cns=(),
+            old_removed_group_cns=("almalinux-gold",),
+            new_added_group_cns=("almalinux-gold",),
+        )
+        rollback_probe_counts: list[int] = []
+
+        def rollback_probe(*, old_representative: str, new_representative: str, journal: FreeIPARepresentativeSyncJournal) -> None:
+            self.assertEqual(old_representative, "")
+            self.assertEqual(new_representative, "alice")
+            self.assertEqual(journal.targeted_group_cns, ("almalinux-gold",))
+            rollback_probe_counts.append(Organization.objects.count())
+
+        self._login_as_freeipa_user("alice")
+        claimant = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
+
+        with (
+            patch("core.views_organizations.block_action_without_coc", return_value=None),
+            patch("core.views_organizations.block_action_without_country_code", return_value=None),
+            patch("core.views_organizations.FreeIPAUser.get", return_value=claimant),
+            patch(
+                "core.organization_representative_transition.sync_organization_representative_groups",
+                return_value=SimpleNamespace(journal=journal),
+            ),
+            patch(
+                "core.organization_representative_transition.rollback_organization_representative_groups",
+                side_effect=rollback_probe,
+            ) as rollback_mock,
+        ):
+            response = self.client.post(reverse("organization-claim", args=[token]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "You already represent an organization and cannot claim another.")
+        rollback_mock.assert_called_once()
+        self.assertEqual(len(rollback_probe_counts), 1)
+        organization.refresh_from_db()
+        self.assertEqual(organization.representative, "")
+        self.assertEqual(organization.status, Organization.Status.unclaimed)
 
     def test_claiming_already_claimed_org_shows_already_claimed_message(self) -> None:
         organization = Organization.objects.create(

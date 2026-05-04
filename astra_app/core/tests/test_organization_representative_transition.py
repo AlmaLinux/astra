@@ -173,6 +173,60 @@ class OrganizationRepresentativeTransitionTests(TestCase):
         organization.refresh_from_db()
         self.assertEqual(organization.representative, "bob")
 
+    def test_persistence_failure_reraises_integrity_error_after_transaction_safe_rollback(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "category_id": "sponsorship",
+                "sort_order": 1,
+                "enabled": True,
+                "group_cn": "almalinux-gold",
+            },
+        )
+        Organization.objects.create(name="Existing Rep Org", representative="alice")
+        organization = Organization.objects.create(name="Rollback Probe Org", representative="bob")
+        Membership.objects.create(target_organization=organization, membership_type_id="gold")
+        journal = FreeIPARepresentativeSyncJournal(
+            targeted_group_cns=("almalinux-gold",),
+            skipped_group_cns=(),
+            old_removed_group_cns=("almalinux-gold",),
+            new_added_group_cns=("almalinux-gold",),
+        )
+        rollback_probe_counts: list[int] = []
+
+        def persist_changes(locked_organization: Organization) -> None:
+            locked_organization.save(update_fields=["representative"])
+
+        def rollback_probe(*, old_representative: str, new_representative: str, journal: FreeIPARepresentativeSyncJournal) -> None:
+            self.assertEqual(old_representative, "bob")
+            self.assertEqual(new_representative, "alice")
+            self.assertEqual(journal.targeted_group_cns, ("almalinux-gold",))
+            rollback_probe_counts.append(Organization.objects.count())
+
+        with (
+            patch(
+                "core.organization_representative_transition.sync_organization_representative_groups",
+                return_value=SimpleNamespace(journal=journal),
+            ),
+            patch(
+                "core.organization_representative_transition.rollback_organization_representative_groups",
+                side_effect=rollback_probe,
+            ) as rollback_mock,
+        ):
+            with self.assertRaises(IntegrityError):
+                apply_organization_representative_transition(
+                    organization_id=organization.pk,
+                    new_representative="alice",
+                    caller_label="test",
+                    persist_changes=persist_changes,
+                )
+
+        rollback_mock.assert_called_once()
+        self.assertEqual(len(rollback_probe_counts), 1)
+        organization.refresh_from_db()
+        self.assertEqual(organization.representative, "bob")
+
     def test_no_active_groups_skips_freeipa_sync(self) -> None:
         organization = Organization.objects.create(name="No Groups Org", representative="bob")
         callback_calls: list[int] = []
