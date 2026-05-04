@@ -9,7 +9,7 @@ declare global {
     ChatNicknamesEditor?: {
       initAll?: (scope?: ParentNode) => void;
     };
-    jQuery?: ((selector: string) => { modal: (command: string) => void }) & { fn?: unknown };
+    jQuery?: ((selector: string) => { modal?: (command: string) => void }) & { fn?: unknown };
   }
 }
 
@@ -332,10 +332,16 @@ function initEnhancements(): void {
     }
 
     if (payload.value?.security.otpConfirm.otpUri && window.jQuery) {
-      window.jQuery("#otp-modal").modal("show");
+      const otpModal = window.jQuery("#otp-modal");
+      if (typeof otpModal.modal === "function") {
+        otpModal.modal("show");
+      }
     }
     if (payload.value?.security.otpAdd.form.nonFieldErrors.length && window.jQuery) {
-      window.jQuery("#add-token-modal").modal("show");
+      const addTokenModal = window.jQuery("#add-token-modal");
+      if (typeof addTokenModal.modal === "function") {
+        addTokenModal.modal("show");
+      }
     }
   });
 }

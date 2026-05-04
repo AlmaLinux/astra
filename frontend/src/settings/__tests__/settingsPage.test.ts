@@ -1,4 +1,5 @@
 import { mount } from "@vue/test-utils";
+import { nextTick } from "vue";
 import { describe, expect, it } from "vitest";
 
 import SettingsPage from "../SettingsPage.vue";
@@ -282,5 +283,54 @@ describe("SettingsPage", () => {
 
     expect(checkbox.element.checked).toBe(true);
     expect(new FormData(form as HTMLFormElement).has("acknowledge_retained_data")).toBe(true);
+  });
+
+  it("does not crash when modal enhancement is unavailable during agreements-tab render", async () => {
+    const errors: unknown[] = [];
+    window.jQuery = (() => ({})) as typeof window.jQuery;
+
+    mount(SettingsPage, {
+      props: {
+        bootstrap: {
+          ...bootstrap,
+          initialPayload: {
+            ...bootstrap.initialPayload,
+            activeTab: "agreements",
+            tabs: ["profile", "emails", "keys", "security", "privacy", "membership", "agreements"],
+            agreements: {
+              agreements: [
+                {
+                  cn: "cla",
+                  description: "Contributor License Agreement",
+                  signed: false,
+                  signedAt: null,
+                  groups: ["packagers"],
+                },
+              ],
+            },
+            security: {
+              usingOtp: false,
+              password: { form: { isBound: false, nonFieldErrors: [], fields: [] } },
+              otpAdd: { form: { isBound: true, nonFieldErrors: ["OTP add failed."], fields: [] } },
+              otpConfirm: { form: { isBound: false, nonFieldErrors: [], fields: [] }, otpUri: null, otpQrPngB64: null },
+              otpTokens: [],
+            },
+          },
+        },
+      },
+      attachTo: document.body,
+      global: {
+        config: {
+          errorHandler: (error) => {
+            errors.push(error);
+          },
+        },
+      },
+    });
+
+    await nextTick();
+    await nextTick();
+
+    expect(errors).toEqual([]);
   });
 });
