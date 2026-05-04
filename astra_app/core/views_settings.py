@@ -1944,10 +1944,6 @@ def settings_root(request: HttpRequest) -> HttpResponse:
         return redirect(ordinary_tab_save["success_url"])
 
     if requested_tab == "security":
-        if bool(context["is_otp_add"]) or bool(context["is_otp_confirm"]):
-            context["force_tab"] = "security"
-            return _render_settings_shell(request, context=context)
-
         context["force_tab"] = "security"
         return _render_settings_shell(request, context=context)
 

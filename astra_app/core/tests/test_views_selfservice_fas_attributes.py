@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from django.conf import settings
+from django.contrib.messages import get_messages
 from django.contrib.messages.storage.fallback import FallbackStorage
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.core.cache import cache
@@ -184,6 +185,56 @@ class FASAttributesTests(TestCase):
         self.assertEqual(got_add, add)
         self.assertEqual(got_set, set_)
         self.assertEqual(got_del, del_)
+
+    @patch("core.forms_selfservice.get_timezone_options", autospec=True, return_value=["UTC"])
+    @patch("core.forms_selfservice.get_locale_options", autospec=True, return_value=["en-US"])
+    def test_profile_post_apply_error_renders_settings_shell(self, _mock_locales, _mock_tzs):
+        fu = _DummyFreeIPAUser(
+            first_name="Alice",
+            last_name="User",
+            email="alice@example.com",
+            _user_data={
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "cn": ["Alice User"],
+            },
+        )
+        self._seed_valid_country_code(fu)
+
+        req = self.factory.post(
+            "/settings/",
+            data={
+                "tab": "profile",
+                "givenname": "Alice",
+                "sn": "User",
+                "country_code": "US",
+                "fasPronoun": "she/her",
+                "fasLocale": "en-US",
+                "fasTimezone": "UTC",
+                "fasWebsiteUrl": "",
+                "fasRssUrl": "",
+                "fasIRCNick": "",
+                "fasGitHubUsername": "",
+                "fasGitLabUsername": "",
+            },
+        )
+        self._add_session_and_messages(req)
+        req.user = self._auth_user()
+
+        with patch("core.views_settings._get_full_user", autospec=True, return_value=fu):
+            with patch("core.ipa_user_attrs.FreeIPAUser.get", autospec=True, return_value=fu):
+                with patch("core.ipa_user_attrs.FreeIPAUser.get_client", autospec=True):
+                    with patch(
+                        "core.views_settings._apply_and_report_profile_update",
+                        autospec=True,
+                        side_effect=Exception("boom"),
+                    ):
+                        response = settings_root(req)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-settings-root=""')
+        messages = [message.message for message in get_messages(req)]
+        self.assertIn("Failed to update profile due to an internal error.", messages)
 
     @patch("core.forms_selfservice.get_timezone_options", autospec=True, return_value=["UTC"])
     @patch("core.forms_selfservice.get_locale_options", autospec=True, return_value=["en-US"])
