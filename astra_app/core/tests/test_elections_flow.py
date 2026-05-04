@@ -2320,7 +2320,6 @@ class ElectionPublicPagesTests(TestCase):
         Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
 
         vote_url = reverse("election-vote", args=[election.id])
-        vote_api_url = reverse("api-election-vote", args=[election.id])
 
         def _get_user(username: str):
             if username == "viewer":
@@ -2499,7 +2498,7 @@ class ElectionPublicPagesTests(TestCase):
         Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
 
         detail_url = reverse("election-detail", args=[election.id])
-        detail_api_url = reverse("api-election-detail-info", args=[election.id])
+        detail_api_url = reverse("api-election-detail-page", args=[election.id])
 
         def _get_user(username: str, **_: object):
             if username == "viewer":

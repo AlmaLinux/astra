@@ -4,7 +4,9 @@ import json
 from unittest.mock import patch
 
 from django.conf import settings
-from django.test import TestCase
+from django.contrib.messages import constants as message_constants
+from django.contrib.messages import get_messages
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from post_office.models import EmailTemplate
@@ -73,7 +75,7 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
-            api_resp = self.client.get(reverse("api-election-detail-info", args=[election.id]))
+            api_resp = self.client.get(reverse("api-election-detail-page", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, reverse("api-election-detail-page", args=[election.id]))
@@ -306,6 +308,7 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             resp1 = self.client.post(url, data={"skip_tally": "1"})
         self.assertEqual(resp1.status_code, 400)
+        self.assertEqual(resp1.content.decode("utf-8"), "Confirmation required.")
         election.refresh_from_db()
         self.assertEqual(election.status, Election.Status.open)
 
@@ -343,6 +346,7 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             resp1 = self.client.post(url, data={"end_datetime": new_end_local})
         self.assertEqual(resp1.status_code, 400)
+        self.assertEqual(resp1.content.decode("utf-8"), "Confirmation required.")
         election.refresh_from_db()
         self.assertEqual(election.end_datetime, original_end)
 
@@ -351,6 +355,96 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
         self.assertEqual(resp2.status_code, 302)
         election.refresh_from_db()
         self.assertGreater(election.end_datetime, original_end)
+
+    @override_settings(
+        ELECTION_RATE_LIMIT_CREDENTIAL_RESEND_LIMIT=1,
+        ELECTION_RATE_LIMIT_CREDENTIAL_RESEND_WINDOW_SECONDS=60,
+    )
+    def test_resend_credentials_html_rate_limit_returns_plain_text_429(self) -> None:
+        self._login_as_freeipa_user("viewer")
+
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_ADD_ELECTION,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="viewer",
+        )
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Rate limited resend election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+        Candidate.objects.create(
+            election=election,
+            freeipa_username="alice",
+            nominated_by="nominator",
+        )
+        VotingCredential.objects.create(
+            election=election,
+            public_id="cred-alice",
+            freeipa_username="alice",
+            weight=1,
+        )
+
+        def _get_user(username: str, respect_privacy: bool = True):
+            return FreeIPAUser(username, {"uid": [username], "mail": [f"{username}@example.com"], "memberof_group": []})
+
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
+            first = self.client.post(reverse("election-send-mail-credentials", args=[election.id]), data={"username": "alice"})
+            second = self.client.post(reverse("election-send-mail-credentials", args=[election.id]), data={"username": "alice"})
+
+        self.assertEqual(first.status_code, 302)
+        self.assertEqual(second.status_code, 429)
+        self.assertEqual(second.content.decode("utf-8"), "Too many resend attempts. Please try again later.")
+
+    def test_resend_credentials_html_redirects_with_error_message_on_non_rate_limit_failure(self) -> None:
+        self._login_as_freeipa_user("viewer")
+
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_ADD_ELECTION,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="viewer",
+        )
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Resend credentials error redirect election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+        Candidate.objects.create(
+            election=election,
+            freeipa_username="alice",
+            nominated_by="nominator",
+        )
+
+        viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "mail": ["viewer@example.com"], "memberof_group": []})
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
+            response = self.client.post(
+                reverse("election-send-mail-credentials", args=[election.id]),
+                data={"username": "alice"},
+                follow=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.request["PATH_INFO"], reverse("election-detail", args=[election.id]))
+        flashed = list(get_messages(response.wsgi_request))
+        self.assertEqual(
+            [(message.level, message.message) for message in flashed],
+            [
+                (
+                    message_constants.ERROR,
+                    "No voting credentials exist for this election. Credentials are issued only at election start (draft -> open).",
+                )
+            ],
+        )
 
     def test_does_not_show_resend_buttons_when_not_open(self) -> None:
         self._login_as_freeipa_user("viewer")

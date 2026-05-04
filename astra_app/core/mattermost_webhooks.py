@@ -438,7 +438,28 @@ def _event_link(event_key: str, kwargs: dict[str, object]) -> str:
         return build_public_absolute_url(f"{reverse('settings')}?tab=membership", on_missing="relative")
 
     if event_key in _ACCOUNT_DELETION_EVENTS:
-        return build_public_absolute_url(f"{reverse('settings')}?tab=privacy", on_missing="relative")
+        account_deletion_request = kwargs.get("account_deletion_request")
+        if account_deletion_request is not None:
+            try:
+                return build_public_absolute_url(
+                    reverse("admin:core_accountdeletionrequest_change", args=[account_deletion_request.pk]),
+                    on_missing="relative",
+                )
+            except Exception:
+                pass
+        account_deletion_request_id = kwargs.get("account_deletion_request_id")
+        if account_deletion_request_id is not None and str(account_deletion_request_id).strip():
+            try:
+                return build_public_absolute_url(
+                    reverse("admin:core_accountdeletionrequest_change", args=[account_deletion_request_id]),
+                    on_missing="relative",
+                )
+            except Exception:
+                pass
+        return build_public_absolute_url(
+            reverse("admin:core_accountdeletionrequest_changelist"),
+            on_missing="relative",
+        )
 
     if event_key in _MEMBERSHIP_REQUEST_DETAIL_EVENTS:
         membership_request = kwargs.get("membership_request")

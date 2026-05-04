@@ -19,6 +19,22 @@ _DATETIME_LOCAL_INPUT_FORMATS: list[str] = [
 ]
 
 
+def parse_datetime_local_value(raw_value: str | datetime.datetime) -> datetime.datetime | None:
+    if isinstance(raw_value, datetime.datetime):
+        parsed = raw_value
+    else:
+        raw = str(raw_value or "").strip()
+        if not raw:
+            return None
+        try:
+            parsed = datetime.datetime.fromisoformat(raw)
+        except ValueError:
+            return None
+    if timezone.is_naive(parsed):
+        return timezone.make_aware(parsed)
+    return parsed
+
+
 def is_self_nomination(*, candidate_username: str, nominator_username: str) -> bool:
     candidate = str(candidate_username or "").strip().lower()
     nominator = str(nominator_username or "").strip().lower()
@@ -91,10 +107,10 @@ class ElectionDetailsForm(StyledModelForm):
         start_dt = cleaned.get("start_datetime")
         end_dt = cleaned.get("end_datetime")
 
-        if isinstance(start_dt, datetime.datetime) and timezone.is_naive(start_dt):
-            cleaned["start_datetime"] = timezone.make_aware(start_dt)
-        if isinstance(end_dt, datetime.datetime) and timezone.is_naive(end_dt):
-            cleaned["end_datetime"] = timezone.make_aware(end_dt)
+        if isinstance(start_dt, datetime.datetime):
+            cleaned["start_datetime"] = parse_datetime_local_value(start_dt)
+        if isinstance(end_dt, datetime.datetime):
+            cleaned["end_datetime"] = parse_datetime_local_value(end_dt)
 
         start_dt = cleaned.get("start_datetime")
         end_dt = cleaned.get("end_datetime")
@@ -161,9 +177,7 @@ class ElectionEndDateForm(StyledModelForm):
 
     def clean_end_datetime(self) -> datetime.datetime:
         end_dt = self.cleaned_data["end_datetime"]
-        if timezone.is_naive(end_dt):
-            return timezone.make_aware(end_dt)
-        return end_dt
+        return parse_datetime_local_value(end_dt) or end_dt
 
 
 class ElectionVotingEmailForm(StyledForm):

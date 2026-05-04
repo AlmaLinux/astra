@@ -10,6 +10,38 @@ class UnifiedSettingsTests(TestCase):
     def _auth_user(self, username: str = "alice"):
         return SimpleNamespace(is_authenticated=True, get_username=lambda: username, email=f"{username}@example.org")
 
+    def test_settings_tab_registry_does_not_expose_legacy_pane_template_metadata(self):
+        from core.settings_tabs import SETTINGS_TAB_REGISTRY
+
+        self.assertTrue(SETTINGS_TAB_REGISTRY)
+        for tab in SETTINGS_TAB_REGISTRY:
+            with self.subTest(tab=tab.tab_id):
+                self.assertFalse(hasattr(tab, "pane_template"))
+
+    def test_get_settings_tab_form_returns_expected_form_for_each_tab(self):
+        from core.views_settings import _get_settings_tab_form
+
+        profile_form = object()
+        privacy_form = object()
+        emails_form = object()
+        keys_form = object()
+        password_form = object()
+        context = {
+            "profile_form": profile_form,
+            "privacy_form": privacy_form,
+            "emails_form": emails_form,
+            "keys_form": keys_form,
+            "password_form": password_form,
+        }
+
+        self.assertIs(_get_settings_tab_form(context=context, tab_id="profile"), profile_form)
+        self.assertIs(_get_settings_tab_form(context=context, tab_id="privacy"), privacy_form)
+        self.assertIs(_get_settings_tab_form(context=context, tab_id="emails"), emails_form)
+        self.assertIs(_get_settings_tab_form(context=context, tab_id="keys"), keys_form)
+        self.assertIs(_get_settings_tab_form(context=context, tab_id="security"), password_form)
+        self.assertIsNone(_get_settings_tab_form(context=context, tab_id="membership"))
+        self.assertIsNone(_get_settings_tab_form(context=context, tab_id="agreements"))
+
     def test_settings_root_context_exposes_registry_driven_tabs(self):
         from core.settings_tabs import SETTINGS_TAB_REGISTRY
         from core.views_settings import settings_root

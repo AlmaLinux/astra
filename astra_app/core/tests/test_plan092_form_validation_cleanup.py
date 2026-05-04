@@ -1,3 +1,5 @@
+import json
+import re
 from unittest.mock import patch
 
 from django import forms
@@ -61,6 +63,17 @@ class Plan092FormValidationCleanupTests(SimpleTestCase):
 
 
 class Plan092SendMailValidationIntegrationTests(TestCase):
+    def _send_mail_initial_payload(self, response) -> dict[str, object]:
+        html = response.content.decode("utf-8")
+        match = re.search(
+            r'<script id="send-mail-initial-payload" type="application/json">(.*?)</script>',
+            html,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(match)
+        assert match is not None
+        return json.loads(match.group(1))
+
     def _login_as_freeipa_user(self, username: str) -> None:
         session = self.client.session
         session["_freeipa_username"] = username
@@ -96,6 +109,11 @@ class Plan092SendMailValidationIntegrationTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         html = response.content.decode("utf-8")
-        self.assertIn("invalid-feedback", html)
+        self.assertIn('data-send-mail-root=""', html)
+        self.assertNotIn("invalid-feedback", html)
         self.assertNotIn("invalid-feedback d-block", html)
-        self.assertIn("is-invalid", html)
+        payload = self._send_mail_initial_payload(response)
+        self.assertEqual(payload["selected_recipient_mode"], "manual")
+        reply_to_field = next(field for field in payload["form"]["fields"] if field["name"] == "reply_to")
+        self.assertIn("is-invalid", reply_to_field["attrs"]["class"])
+        self.assertEqual(reply_to_field["errors"], ["Invalid Reply-To address list: ['Enter a valid email address.']"])

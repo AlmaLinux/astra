@@ -2,6 +2,7 @@
 import json
 from types import SimpleNamespace
 from unittest.mock import patch
+from urllib.parse import quote
 
 from django.contrib.messages import get_messages
 from django.contrib.messages.storage.fallback import FallbackStorage
@@ -211,9 +212,24 @@ class EmailChangeValidationFlowTests(TestCase):
         self.assertEqual(resp_get.status_code, 200)
         html = resp_get.content.decode("utf-8")
         self.assertIn('data-settings-email-validation-root=""', html)
-        self.assertIn(reverse("api-settings-email-validate-detail"), html)
+        self.assertIn(
+            (
+                'data-settings-email-validation-api-url="'
+                f'{reverse("api-settings-email-validate-detail")}?token={quote(token)}'
+                '"'
+            ),
+            html,
+        )
+        self.assertIn(
+            'data-settings-email-validation-submit-url="/settings/emails/validate/?token='
+            f'{token}"',
+            html,
+        )
         self.assertIn('data-settings-email-validation-cancel-url="/settings/?tab=emails"', html)
-        self.assertIn('type="application/json"', html)
+        self.assertIn('data-settings-email-validation-username="alice"', html)
+        self.assertIn('id="settings-email-validation-initial-payload"', html)
+        self.assertIn('id="settings-email-validation-route-config"', html)
+        self.assertIn('id="settings-email-validation-tabs"', html)
 
         request_post = self.factory.post(f"/settings/emails/validate/?token={token}")
         self._add_session_and_messages(request_post)

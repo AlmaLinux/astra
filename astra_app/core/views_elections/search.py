@@ -1,7 +1,5 @@
 """Election user-search and email preview endpoints."""
 
-import datetime
-
 from django.http import Http404, HttpRequest, JsonResponse
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
@@ -10,6 +8,7 @@ from core import elections_eligibility
 from core.election_nominators import organization_nominator_identifier, organization_nominator_label
 from core.elections_eligibility import ElectionEligibilityError
 from core.email_context import election_committee_email_context
+from core.forms_elections import parse_datetime_local_value
 from core.freeipa.user import FreeIPAUser
 from core.models import Election, Organization
 from core.permissions import ASTRA_ADD_ELECTION, json_permission_required
@@ -18,18 +17,12 @@ from core.user_labels import user_label
 from core.views_elections._helpers import _election_email_preview_context, _get_active_election
 
 
-def _parse_search_start_datetime(request: HttpRequest) -> datetime.datetime | None:
+def _parse_search_start_datetime(request: HttpRequest):
     """Parse start_datetime from GET params, defaulting to now. Returns None for invalid dates."""
     raw = str(request.GET.get("start_datetime") or "").strip()
     if not raw:
         return timezone.now()
-    try:
-        dt = datetime.datetime.fromisoformat(raw)
-    except ValueError:
-        return None
-    if timezone.is_naive(dt):
-        dt = timezone.make_aware(dt)
-    return dt
+    return parse_datetime_local_value(raw)
 
 
 def _build_user_search_results(
@@ -122,21 +115,9 @@ def _resolve_election_for_search(
 @require_POST
 @json_permission_required(ASTRA_ADD_ELECTION)
 def election_email_render_preview(request, election_id: int) -> JsonResponse:
-    def _parse_datetime_local(value: str) -> datetime.datetime | None:
-        raw = str(value or "").strip()
-        if not raw:
-            return None
-        try:
-            dt = datetime.datetime.fromisoformat(raw)
-        except ValueError:
-            return None
-        if timezone.is_naive(dt):
-            dt = timezone.make_aware(dt)
-        return dt
-
     if election_id == 0:
-        start_dt = _parse_datetime_local(str(request.POST.get("start_datetime") or "")) or timezone.now()
-        end_dt = _parse_datetime_local(str(request.POST.get("end_datetime") or "")) or start_dt
+        start_dt = parse_datetime_local_value(str(request.POST.get("start_datetime") or "")) or timezone.now()
+        end_dt = parse_datetime_local_value(str(request.POST.get("end_datetime") or "")) or start_dt
         number_of_seats_raw = str(request.POST.get("number_of_seats") or "").strip()
         try:
             number_of_seats = int(number_of_seats_raw)
@@ -168,10 +149,10 @@ def election_email_render_preview(request, election_id: int) -> JsonResponse:
         if url_raw:
             election.url = url_raw
 
-        start_dt = _parse_datetime_local(str(request.POST.get("start_datetime") or ""))
+        start_dt = parse_datetime_local_value(str(request.POST.get("start_datetime") or ""))
         if start_dt is not None:
             election.start_datetime = start_dt
-        end_dt = _parse_datetime_local(str(request.POST.get("end_datetime") or ""))
+        end_dt = parse_datetime_local_value(str(request.POST.get("end_datetime") or ""))
         if end_dt is not None:
             election.end_datetime = end_dt
 

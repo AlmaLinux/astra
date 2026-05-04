@@ -23,7 +23,7 @@ class ProfileFasGroupsOnlyTests(TestCase):
         setattr(request, "_messages", FallbackStorage(request))
         return request
 
-    def test_profile_shows_only_fas_groups_and_links_to_group_page(self) -> None:
+    def test_user_profile_detail_shows_only_fas_groups(self) -> None:
         factory = RequestFactory()
         request = factory.get("/")
         self._add_session_and_messages(request)
@@ -63,14 +63,23 @@ class ProfileFasGroupsOnlyTests(TestCase):
             patch("core.views_users._get_full_user", autospec=True, return_value=fake_user),
             patch("core.freeipa.group.FreeIPAGroup.all", return_value=groups),
             patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
-            patch("core.views_users.resolve_avatar_urls_for_users", autospec=True, return_value=({}, 0, 0)),
+            patch(
+                "core.views_users.membership_review_permissions",
+                autospec=True,
+                return_value={
+                    "membership_can_view": False,
+                    "membership_can_add": False,
+                    "membership_can_change": False,
+                    "membership_can_delete": False,
+                },
+            ),
         ):
-            response = views_users.user_profile_api(request, "alice")
+            response = views_users.user_profile_detail_api(request, "alice")
 
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.content)
 
         self.assertEqual(
             payload["groups"]["groups"],
-            [{"cn": "fas1", "role": "Member"}, {"cn": "fas2", "role": "Member"}],
+            [{"cn": "fas1", "role": "member"}, {"cn": "fas2", "role": "member"}],
         )

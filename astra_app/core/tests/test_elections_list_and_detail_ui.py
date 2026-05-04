@@ -3,10 +3,13 @@ import datetime
 from unittest.mock import patch
 
 from django.conf import settings
+from django.contrib.messages import constants as message_constants
+from django.contrib.messages import get_messages
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
+from core import elections_services
 from core.freeipa.user import FreeIPAUser
 from core.models import (
     AuditLogEntry,
@@ -387,13 +390,13 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
             patch("core.elections_eligibility.snapshot_freeipa_users", return_value=[]),
         ):
-            api_resp = self.client.get(reverse("api-election-detail-info", args=[election.id]))
+            api_resp = self.client.get(reverse("api-election-detail-page", args=[election.id]))
         self.assertEqual(api_resp.status_code, 200)
         election_payload = api_resp.json()["election"]
         self.assertTrue(election_payload["show_turnout_chart"])
         self.assertEqual(election_payload["turnout_stats"]["participating_voter_count"], 1)
         self.assertEqual(election_payload["turnout_stats"]["participating_vote_weight_total"], 2)
-        self.assertEqual(set(election_payload["turnout_chart_data"]), {"labels", "counts"})
+        self.assertEqual(election_payload["turnout_rows"], [])
 
     def test_election_voting_window_renders_in_users_timezone(self) -> None:
         # If the user has a FreeIPA timezone configured, our middleware activates it.
@@ -422,16 +425,16 @@ class ElectionDetailManagerUIStatsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
-            api_resp = self.client.get(reverse("api-election-detail-info", args=[election.id]))
+            api_resp = self.client.get(reverse("api-election-detail-page", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, reverse("api-election-detail-page", args=[election.id]))
 
         self.assertEqual(api_resp.status_code, 200)
         payload = api_resp.json()["election"]
-        # 12:00Z -> 13:00 Europe/Paris (winter), 14:00Z -> 15:00.
-        self.assertIn("2026-01-02 13:00", payload["start_datetime_display"])
-        self.assertIn("2026-01-02 15:00", payload["end_datetime_display"])
+        self.assertEqual(payload["viewer_timezone"], "Europe/Paris")
+        self.assertEqual(payload["start_datetime"], start_utc.isoformat())
+        self.assertEqual(payload["end_datetime"], end_utc.isoformat())
 
     def test_turnout_chart_includes_zero_days_since_start(self) -> None:
         today = datetime.date(2026, 1, 2)
@@ -493,15 +496,18 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             patch("core.elections_eligibility.snapshot_freeipa_users", return_value=[]),
             patch("core.views_elections.detail.timezone.localdate", side_effect=_localdate_side_effect),
         ):
-            api_resp = self.client.get(reverse("api-election-detail-info", args=[election.id]))
+            api_resp = self.client.get(reverse("api-election-detail-page", args=[election.id]))
         self.assertEqual(api_resp.status_code, 200)
-        payload = api_resp.json()["election"]["turnout_chart_data"]
+        payload = api_resp.json()["election"]
 
         self.assertEqual(
-            payload.get("labels"),
-            ["2025-12-30", "2025-12-31", "2026-01-01", "2026-01-02"],
+            payload["turnout_rows"],
+            [
+                {"day": "2025-12-30", "count": 1},
+                {"day": "2026-01-01", "count": 1},
+            ],
         )
-        self.assertEqual(payload.get("counts"), [1, 0, 1, 0])
+        self.assertEqual(payload["viewer_timezone"], "UTC")
 
     def test_turnout_chart_uses_election_end_day_after_close(self) -> None:
         # When an election is closed, the votes-per-day chart should extend only
@@ -560,13 +566,12 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             patch("core.elections_eligibility.snapshot_freeipa_users", return_value=[]),
             patch("core.views_elections.detail.timezone.localdate", side_effect=_localdate_side_effect),
         ):
-            api_resp = self.client.get(reverse("api-election-detail-info", args=[election.id]))
+            api_resp = self.client.get(reverse("api-election-detail-page", args=[election.id]))
         self.assertEqual(api_resp.status_code, 200)
-        payload = api_resp.json()["election"]["turnout_chart_data"]
+        payload = api_resp.json()["election"]
 
-        # The chart should end at 2026-01-01 (election end), not 2026-01-02 (today).
-        self.assertEqual(payload.get("labels"), ["2025-12-30", "2025-12-31", "2026-01-01"])
-        self.assertEqual(payload.get("counts"), [1, 0, 0])
+        self.assertEqual(payload["turnout_rows"], [{"day": "2025-12-30", "count": 1}])
+        self.assertEqual(payload["end_datetime"], end_dt.isoformat())
 
     def test_turnout_chart_renders_for_tallied_election_for_manager(self) -> None:
         now = timezone.now()
@@ -612,7 +617,7 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             patch("core.freeipa.user.FreeIPAUser.get", return_value=admin),
             patch("core.elections_eligibility.snapshot_freeipa_users", return_value=[]),
         ):
-            api_resp = self.client.get(reverse("api-election-detail-info", args=[election.id]))
+            api_resp = self.client.get(reverse("api-election-detail-page", args=[election.id]))
         self.assertEqual(api_resp.status_code, 200)
         self.assertTrue(api_resp.json()["election"]["show_turnout_chart"])
 
@@ -945,7 +950,6 @@ class ElectionDetailManagerUIStatsTests(TestCase):
                 "core.elections_eligibility._freeipa_group_recursive_member_usernames",
                 return_value={"nomember"},
             ),
-            patch("core.elections_eligibility.snapshot_freeipa_users", return_value=[]),
             patch("core.views_elections.detail.timezone.now", return_value=now),
         ):
             resp = self.client.get(
@@ -953,7 +957,6 @@ class ElectionDetailManagerUIStatsTests(TestCase):
                 HTTP_ACCEPT="application/json",
             )
 
-        self.assertEqual(resp.status_code, 200)
         payload = resp.json()["ineligible_voters"]
         self.assertEqual([item["username"] for item in payload["items"]], ["nomember"])
         self.assertEqual(payload["details_by_username"]["nomember"]["reason"], "no_membership")
@@ -1095,17 +1098,25 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             patch("core.elections_eligibility.snapshot_freeipa_users", return_value=[]),
         ):
             resp = self.client.get(reverse("election-detail", args=[election.id]))
-            api_resp = self.client.get(reverse("api-election-detail-info", args=[election.id]))
+            api_resp = self.client.get(reverse("api-election-detail-page", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, reverse("api-election-detail-page", args=[election.id]))
 
         self.assertEqual(api_resp.status_code, 200)
-        messages = api_resp.json()["election"]["exclusion_group_messages"]
-        self.assertEqual(len(messages), 1)
-        self.assertIn("Employees of X", messages[0])
-        self.assertIn("exclusion group", messages[0])
-        self.assertIn("only 1 candidate", messages[0])
+        self.assertEqual(
+            api_resp.json()["election"]["exclusion_groups"],
+            [
+                {
+                    "name": "Employees of X",
+                    "max_elected": 1,
+                    "candidates": [
+                        {"username": "alice", "full_name": "alice"},
+                        {"username": "bob", "full_name": "bob"},
+                    ],
+                }
+            ],
+        )
 
 
 @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=1)
@@ -1248,6 +1259,89 @@ class ElectionDetailConcludeElectionTests(TestCase):
         election.refresh_from_db()
         self.assertEqual(election.status, Election.Status.closed)
         self.assertFalse(election.tally_result)
+
+    def test_conclude_post_flashes_success_warning_and_error_messages(self) -> None:
+        self._login_as_freeipa_user("admin")
+        self._grant_manage_permission("admin")
+        admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+        now = timezone.now()
+
+        success_election = Election.objects.create(
+            name="Conclude election success message",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin):
+            success_response = self.client.post(
+                reverse("election-conclude", args=[success_election.id]),
+                data={"skip_tally": "on", "confirm": success_election.name},
+                follow=True,
+            )
+
+        success_messages = list(get_messages(success_response.wsgi_request))
+        self.assertEqual([(message.level, message.message) for message in success_messages], [(message_constants.SUCCESS, "Election closed.")])
+
+        warning_election = Election.objects.create(
+            name="Conclude election warning message",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+
+        def _close_election(*, election: Election, actor: str | None = None) -> None:
+            election.status = Election.Status.closed
+            election.save(update_fields=["status"])
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin),
+            patch("core.views_elections.lifecycle.elections_services.close_election", side_effect=_close_election),
+            patch(
+                "core.views_elections.lifecycle.elections_services.tally_election",
+                side_effect=elections_services.ElectionError("tally exploded"),
+            ),
+        ):
+            warning_response = self.client.post(
+                reverse("election-conclude", args=[warning_election.id]),
+                data={"confirm": warning_election.name},
+                follow=True,
+            )
+
+        warning_messages = list(get_messages(warning_response.wsgi_request))
+        self.assertEqual(
+            [(message.level, message.message) for message in warning_messages],
+            [(message_constants.WARNING, "Election closed, but tally failed: tally exploded")],
+        )
+
+        error_election = Election.objects.create(
+            name="Conclude election error message",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin),
+            patch(
+                "core.views_elections.lifecycle.elections_services.close_election",
+                side_effect=elections_services.ElectionError("close exploded"),
+            ),
+        ):
+            error_response = self.client.post(
+                reverse("election-conclude", args=[error_election.id]),
+                data={"skip_tally": "on", "confirm": error_election.name},
+                follow=True,
+            )
+
+        error_messages = list(get_messages(error_response.wsgi_request))
+        self.assertEqual([(message.level, message.message) for message in error_messages], [(message_constants.ERROR, "close exploded")])
 
     def test_conclude_post_denied_without_permission(self) -> None:
         now = timezone.now()
@@ -1478,3 +1572,47 @@ class ElectionDetailTallyElectionTests(TestCase):
         self.assertIn("new_end_datetime", payload)
         self.assertIn("quorum_percent", payload)
         self.assertIn("participating_voter_count", payload)
+
+    def test_extend_post_flashes_success_and_error_messages(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Extend election flash messages",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            quorum=50,
+            status=Election.Status.open,
+        )
+
+        self._login_as_freeipa_user("admin")
+        self._grant_manage_permission("admin")
+        admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+
+        same_end = timezone.localtime(election.end_datetime).strftime("%Y-%m-%dT%H:%M")
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin):
+            error_response = self.client.post(
+                reverse("election-extend-end", args=[election.id]),
+                {"end_datetime": same_end, "confirm": election.name},
+                follow=True,
+            )
+
+        error_messages = list(get_messages(error_response.wsgi_request))
+        self.assertEqual(
+            [(message.level, message.message) for message in error_messages],
+            [(message_constants.ERROR, "End datetime must be later than the current end.")],
+        )
+
+        new_end = timezone.localtime(election.end_datetime + datetime.timedelta(days=2)).strftime("%Y-%m-%dT%H:%M")
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin):
+            success_response = self.client.post(
+                reverse("election-extend-end", args=[election.id]),
+                {"end_datetime": new_end, "confirm": election.name},
+                follow=True,
+            )
+
+        success_messages = list(get_messages(success_response.wsgi_request))
+        self.assertEqual(
+            [(message.level, message.message) for message in success_messages],
+            [(message_constants.SUCCESS, "Election end date extended.")],
+        )

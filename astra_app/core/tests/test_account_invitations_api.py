@@ -1,4 +1,5 @@
 import datetime
+import importlib
 import json
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -558,7 +559,7 @@ class AccountInvitationsApiTests(TestCase):
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
             patch("core.account_invitations.find_account_invitation_matches", return_value=[]),
-            patch("core.views_account_invitations.queue_templated_email", return_value=queued_email),
+            patch("core.account_invitations.queue_templated_email", return_value=queued_email),
         ):
             response = self.client.post(
                 f"/api/v1/membership/invitations/{invitation.pk}/resend",
@@ -569,6 +570,162 @@ class AccountInvitationsApiTests(TestCase):
         payload = response.json()
         self.assertTrue(payload.get("ok"))
         self.assertIn("message", payload)
+
+    def test_resend_endpoint_rate_limit_rejection_preserves_429_json_contract(self) -> None:
+        self._login_as_freeipa_user("committee")
+        invitation = AccountInvitation.objects.create(
+            email="pending@example.com",
+            full_name="Pending User",
+            invited_by_username="committee",
+            email_template_name="account-invite",
+        )
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
+            patch("core.views_invitations_api.find_account_invitation_matches", return_value=[]),
+            patch("core.views_invitations_api.allow_request", return_value=False),
+        ):
+            response = self.client.post(
+                f"/api/v1/membership/invitations/{invitation.pk}/resend",
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(
+            response.json(),
+            {"ok": False, "error": "Too many resend attempts. Try again shortly."},
+        )
+
+    def test_resend_endpoint_non_queued_send_failure_preserves_500_json_contract(self) -> None:
+        self._login_as_freeipa_user("committee")
+        invitation = AccountInvitation.objects.create(
+            email="pending@example.com",
+            full_name="Pending User",
+            invited_by_username="committee",
+            email_template_name="account-invite",
+        )
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
+            patch("core.views_invitations_api.find_account_invitation_matches", return_value=[]),
+            patch("core.views_invitations_api.allow_request", return_value=True),
+            patch("core.views_invitations_api._send_account_invitation_email", return_value="failed"),
+        ):
+            response = self.client.post(
+                f"/api/v1/membership/invitations/{invitation.pk}/resend",
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(
+            response.json(),
+            {"ok": False, "error": "Failed to resend invitation"},
+        )
+
+    def test_resend_endpoint_uses_invitation_email_template_name_directly(self) -> None:
+        self._login_as_freeipa_user("committee")
+        invitation = AccountInvitation.objects.create(
+            email="pending@example.com",
+            full_name="Pending User",
+            invited_by_username="committee",
+            email_template_name="account-invite-alt",
+        )
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
+            patch("core.views_invitations_api.find_account_invitation_matches", return_value=[]),
+            patch("core.views_invitations_api.allow_request", return_value=True),
+            patch("core.views_invitations_api._send_account_invitation_email", return_value="queued") as send_mock,
+        ):
+            response = self.client.post(
+                f"/api/v1/membership/invitations/{invitation.pk}/resend",
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"ok": True, "message": f"Invitation resent to {invitation.email}"})
+        send_mock.assert_called_once_with(
+            invitation=invitation,
+            actor_username="committee",
+            template_name="account-invite-alt",
+            now=send_mock.call_args.kwargs["now"],
+        )
+
+    def test_resend_endpoint_does_not_auto_accept_org_linked_invitation_from_email_match(self) -> None:
+        """Org-linked invitation resend must preserve the canonical non-auto-accept rule."""
+        self._login_as_freeipa_user("committee")
+        organization = Organization.objects.create(
+            name="Pending Claim Org",
+            business_contact_email="contact@example.com",
+        )
+        invitation = AccountInvitation.objects.create(
+            email="pending-claim@example.com",
+            full_name="Pending Claim User",
+            invited_by_username="committee",
+            email_template_name=settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME,
+            organization=organization,
+        )
+        queued_email = SimpleNamespace(id=456)
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
+            patch("core.views_invitations_api.find_account_invitation_matches", return_value=["pendingclaim"]),
+            patch("core.views_invitations_api.queue_templated_email", return_value=queued_email, create=True) as api_queue_mock,
+            patch("core.account_invitations.queue_templated_email", return_value=queued_email) as shared_queue_mock,
+        ):
+            response = self.client.post(
+                f"/api/v1/membership/invitations/{invitation.pk}/resend",
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"ok": True, "message": f"Invitation resent to {invitation.email}"})
+        invitation.refresh_from_db()
+        self.assertIsNone(invitation.accepted_at)
+        self.assertEqual(invitation.freeipa_matched_usernames, ["pendingclaim"])
+        self.assertEqual(invitation.send_count, 1)
+        self.assertEqual(api_queue_mock.call_count + shared_queue_mock.call_count, 1)
+
+    def test_resend_endpoint_email_match_emits_signal_only_for_first_transition(self) -> None:
+        """API resend must use the canonical acceptance transition path exactly once."""
+        self._login_as_freeipa_user("committee")
+        invitation = AccountInvitation.objects.create(
+            email="pending@example.com",
+            full_name="Pending User",
+            invited_by_username="committee",
+            email_template_name="account-invite",
+        )
+        signal_module = importlib.import_module("core.signals")
+        queued_email = SimpleNamespace(id=654)
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
+            patch("core.views_invitations_api.find_account_invitation_matches", return_value=["pendinguser"]),
+            patch("core.views_invitations_api.queue_templated_email", return_value=queued_email, create=True) as api_queue_mock,
+            patch("core.account_invitations.queue_templated_email", return_value=queued_email) as shared_queue_mock,
+            patch.object(signal_module.account_invitation_accepted, "send", autospec=True) as send_mock,
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            first_response = self.client.post(
+                f"/api/v1/membership/invitations/{invitation.pk}/resend",
+                HTTP_ACCEPT="application/json",
+            )
+            second_response = self.client.post(
+                f"/api/v1/membership/invitations/{invitation.pk}/resend",
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
+        invitation.refresh_from_db()
+        self.assertIsNotNone(invitation.accepted_at)
+        self.assertEqual(invitation.freeipa_matched_usernames, ["pendinguser"])
+        api_queue_mock.assert_not_called()
+        shared_queue_mock.assert_not_called()
+        send_mock.assert_called_once()
+        kwargs = send_mock.call_args.kwargs
+        self.assertEqual(kwargs.get("actor"), "committee")
+        self.assertEqual(kwargs.get("account_invitation").pk, invitation.pk)
 
     def test_resend_endpoint_returns_error_for_missing_invitation(self) -> None:
         """Resend must return {ok: false, error: ...} for missing invitation."""
@@ -655,6 +812,43 @@ class AccountInvitationsApiTests(TestCase):
         payload = response.json()
         self.assertTrue(payload.get("ok"))
         self.assertIn("message", payload)
+
+    def test_bulk_resend_preserves_current_no_acceptance_precheck_behavior(self) -> None:
+        """Bulk resend must not introduce an email-match acceptance precheck in this slice."""
+        self._login_as_freeipa_user("committee")
+        invitation = AccountInvitation.objects.create(
+            email="pending@example.com",
+            full_name="Pending User",
+            invited_by_username="committee",
+            email_template_name="account-invite",
+        )
+        queued_email = SimpleNamespace(id=789)
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
+            patch(
+                "core.views_invitations_api.find_account_invitation_matches",
+                side_effect=AssertionError("bulk resend should not run acceptance precheck"),
+            ),
+            patch("core.views_invitations_api.queue_templated_email", return_value=queued_email, create=True) as api_queue_mock,
+            patch("core.account_invitations.queue_templated_email", return_value=queued_email) as shared_queue_mock,
+        ):
+            response = self.client.post(
+                "/api/v1/membership/invitations/bulk",
+                data={
+                    "bulk_action": "resend",
+                    "bulk_scope": "pending",
+                    "selected": [str(invitation.pk)],
+                },
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"ok": True, "message": "Resent 1 invitation(s)"})
+        invitation.refresh_from_db()
+        self.assertIsNone(invitation.accepted_at)
+        self.assertEqual(invitation.send_count, 1)
+        self.assertEqual(api_queue_mock.call_count + shared_queue_mock.call_count, 1)
 
     def test_bulk_endpoint_accepts_json_payload(self) -> None:
         """Bulk endpoint must accept JSON body payload used by Vue fetch."""

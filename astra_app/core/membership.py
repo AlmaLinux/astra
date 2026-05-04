@@ -7,7 +7,7 @@ from enum import StrEnum
 
 from django.conf import settings
 from django.core.cache import cache
-from django.db.models import Case, IntegerField, Value, When
+from django.db.models import Case, IntegerField, QuerySet, Value, When
 from django.utils import timezone
 
 from core.freeipa.user import FreeIPAUser
@@ -99,6 +99,45 @@ def membership_target_filter(
         return {"target_username": normalized_username}
 
     return {"target_organization": organization}
+
+
+def membership_request_queryset() -> QuerySet[MembershipRequest]:
+    return MembershipRequest.objects.select_related("membership_type", "requested_organization")
+
+
+def latest_membership_request_for_target(
+    *,
+    username: str | None = None,
+    organization: Organization | None = None,
+    organization_id: int | None = None,
+    membership_category_id: str | None = None,
+    statuses: Iterable[str] | None = None,
+) -> MembershipRequest | None:
+    has_username = username is not None
+    has_organization = organization is not None
+    has_organization_id = organization_id is not None
+    if sum([has_username, has_organization, has_organization_id]) != 1:
+        raise ValueError("Provide exactly one of username, organization, or organization_id.")
+
+    queryset = membership_request_queryset()
+    if has_username:
+        normalized_username = str(username or "").strip()
+        if not normalized_username:
+            return None
+        queryset = queryset.filter(requested_username=normalized_username)
+    elif has_organization:
+        queryset = queryset.filter(requested_organization=organization)
+    else:
+        queryset = queryset.filter(requested_organization_id=organization_id)
+
+    normalized_membership_category_id = str(membership_category_id or "").strip()
+    if normalized_membership_category_id:
+        queryset = queryset.filter(membership_type__category_id=normalized_membership_category_id)
+
+    if statuses is not None:
+        queryset = queryset.filter(status__in=tuple(statuses))
+
+    return queryset.order_by("-requested_at", "-pk").first()
 
 
 def _normalized_group_cns(group_cns: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
@@ -952,11 +991,3 @@ def requestable_membership_types_for_target(
         .exclude(category_id__in=resolved_eligibility.pending_membership_category_ids)
         .exclude(group_cn="")
     )
-
-
-def get_valid_membership_type_codes_for_username(username: str) -> set[str]:
-    return get_valid_membership_type_codes(username=username)
-
-
-def get_extendable_membership_type_codes_for_username(username: str) -> set[str]:
-    return get_extendable_membership_type_codes(username=username)

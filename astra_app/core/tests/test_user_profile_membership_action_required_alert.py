@@ -14,7 +14,7 @@ class UserProfileMembershipActionRequiredAlertTests(TestCase):
         session["_freeipa_username"] = username
         session.save()
 
-    def test_self_profile_shows_action_required_alert_for_on_hold_request(self) -> None:
+    def test_user_profile_detail_self_profile_shows_action_required_alert_for_on_hold_request(self) -> None:
         MembershipType.objects.update_or_create(
             code="individual",
             defaults={
@@ -48,22 +48,27 @@ class UserProfileMembershipActionRequiredAlertTests(TestCase):
             patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
             patch("core.views_users.has_enabled_agreements", return_value=False),
+            patch(
+                "core.views_users.membership_review_permissions",
+                return_value={
+                    "membership_can_view": False,
+                    "membership_can_add": False,
+                    "membership_can_change": False,
+                    "membership_can_delete": False,
+                },
+            ),
         ):
-            resp = self.client.get(reverse("api-user-profile", kwargs={"username": "alice"}))
+            resp = self.client.get(reverse("api-user-profile-detail", kwargs={"username": "alice"}))
 
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
         self.assertTrue(payload["accountSetup"]["requiredIsRfi"])
         required_actions = {action["id"]: action for action in payload["accountSetup"]["requiredActions"]}
         action = required_actions["membership-action-required-alert"]
-        self.assertEqual(action["label"], "Help us review your membership request")
-        self.assertEqual(action["urlLabel"], "Add details")
-        self.assertNotIn("url", action)
-        self.assertEqual(payload["membership"]["pendingEntries"][0]["badge"]["label"], "Action required")
-        self.assertNotIn("requestUrl", payload["membership"]["pendingEntries"][0])
-        self.assertNotIn("url", payload["membership"]["pendingEntries"][0]["badge"])
+        self.assertEqual(action["requestId"], payload["membership"]["pendingEntries"][0]["requestId"])
+        self.assertEqual(payload["membership"]["pendingEntries"][0]["status"], MembershipRequest.Status.on_hold)
 
-    def test_self_profile_shows_action_required_alert_for_on_hold_org_request(self) -> None:
+    def test_user_profile_detail_self_profile_shows_action_required_alert_for_on_hold_org_request(self) -> None:
         MembershipType.objects.update_or_create(
             code="org",
             defaults={
@@ -99,23 +104,28 @@ class UserProfileMembershipActionRequiredAlertTests(TestCase):
             patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
             patch("core.views_users.has_enabled_agreements", return_value=False),
+            patch(
+                "core.views_users.membership_review_permissions",
+                return_value={
+                    "membership_can_view": False,
+                    "membership_can_add": False,
+                    "membership_can_change": False,
+                    "membership_can_delete": False,
+                },
+            ),
         ):
-            resp = self.client.get(reverse("api-user-profile", kwargs={"username": "alice"}))
+            resp = self.client.get(reverse("api-user-profile-detail", kwargs={"username": "alice"}))
 
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
         self.assertTrue(payload["accountSetup"]["requiredIsRfi"])
         required_actions = {action["id"]: action for action in payload["accountSetup"]["requiredActions"]}
         action = required_actions["sponsorship-action-required-alert"]
-        self.assertEqual(action["label"], "Help us review your sponsorship request")
-        self.assertEqual(action["urlLabel"], "Add details")
-        self.assertNotIn("url", action)
+        self.assertEqual(action["requestId"], payload["membership"]["pendingEntries"][0]["requestId"])
         self.assertEqual(payload["membership"]["pendingEntries"][0]["organizationName"], "Example Org")
-        self.assertEqual(payload["membership"]["pendingEntries"][0]["badge"]["label"], "Action required")
-        self.assertNotIn("requestUrl", payload["membership"]["pendingEntries"][0])
-        self.assertNotIn("url", payload["membership"]["pendingEntries"][0]["badge"])
+        self.assertEqual(payload["membership"]["pendingEntries"][0]["status"], MembershipRequest.Status.on_hold)
 
-    def test_other_profile_keeps_on_hold_badge_label(self) -> None:
+    def test_user_profile_detail_other_profile_hides_on_hold_pending_entries(self) -> None:
         MembershipType.objects.update_or_create(
             code="individual",
             defaults={
@@ -162,8 +172,17 @@ class UserProfileMembershipActionRequiredAlertTests(TestCase):
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
             patch("core.views_users.has_enabled_agreements", return_value=False),
+            patch(
+                "core.views_users.membership_review_permissions",
+                return_value={
+                    "membership_can_view": False,
+                    "membership_can_add": False,
+                    "membership_can_change": False,
+                    "membership_can_delete": False,
+                },
+            ),
         ):
-            resp = self.client.get(reverse("api-user-profile", kwargs={"username": "alice"}))
+            resp = self.client.get(reverse("api-user-profile-detail", kwargs={"username": "alice"}))
 
         self.assertEqual(resp.status_code, 200)
         # Pending membership requests are only visible to the user themself or

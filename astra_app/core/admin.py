@@ -2174,6 +2174,7 @@ class AccountDeletionRequestAdmin(admin.ModelAdmin):
         "updated_at",
     )
     approve_confirmation_template = "admin/core/accountdeletionrequest/approve_requests_confirmation.html"
+    change_form_template = "admin/core/accountdeletionrequest/change_form.html"
 
     @admin.display(description="Manual review")
     def manual_review_flag(self, obj: AccountDeletionRequest) -> str:
@@ -2191,6 +2192,77 @@ class AccountDeletionRequestAdmin(admin.ModelAdmin):
     @override
     def has_delete_permission(self, request: HttpRequest, obj: object | None = None) -> bool:
         return False
+
+    def _change_view_url(self, obj: AccountDeletionRequest) -> str:
+        return reverse(
+            f"admin:{self.model._meta.app_label}_{self.model._meta.model_name}_change",
+            args=[obj.pk],
+        )
+
+    def _dispatch_single_request_action(
+        self,
+        request: HttpRequest,
+        object_id: str,
+        *,
+        action_name: str,
+        action: Callable[[HttpRequest, object], HttpResponse | None],
+    ) -> HttpResponse:
+        obj = self.get_object(request, object_id)
+        if obj is None:
+            raise Http404
+        if not self.has_change_permission(request, obj=obj):
+            raise PermissionDenied
+        if request.method != "POST" or not request.POST.get("post"):
+            return HttpResponseRedirect(self._change_view_url(obj))
+
+        mutable_post = request.POST.copy()
+        mutable_post["action"] = action_name
+        mutable_post["post"] = "yes"
+        mutable_post.setlist(helpers.ACTION_CHECKBOX_NAME, [str(obj.pk)])
+        request.POST = mutable_post
+
+        response = action(request, self.model.objects.filter(pk=obj.pk))
+        return response or HttpResponseRedirect(self._change_view_url(obj))
+
+    @override
+    def changeform_view(
+        self,
+        request: HttpRequest,
+        object_id: str | None = None,
+        form_url: str = "",
+        extra_context: dict[str, object] | None = None,
+    ) -> HttpResponse:
+        extra = extra_context or {}
+        obj = self.get_object(request, object_id) if object_id is not None else None
+        if obj is not None:
+            extra["show_account_deletion_approve_button"] = obj.status in self.APPROVE_SOURCE_STATUSES
+            extra["show_account_deletion_reject_button"] = obj.status in self.CLOSE_SOURCE_STATUSES
+            extra["account_deletion_approve_url"] = reverse(
+                f"admin:{self.model._meta.app_label}_{self.model._meta.model_name}_approve",
+                args=[obj.pk],
+            )
+            extra["account_deletion_reject_url"] = reverse(
+                f"admin:{self.model._meta.app_label}_{self.model._meta.model_name}_reject",
+                args=[obj.pk],
+            )
+        return super().changeform_view(request, object_id=object_id, form_url=form_url, extra_context=extra)
+
+    @override
+    def get_urls(self):
+        urls = super().get_urls()
+        custom = [
+            path(
+                "<path:object_id>/approve/",
+                self.admin_site.admin_view(self.approve_request_view),
+                name="core_accountdeletionrequest_approve",
+            ),
+            path(
+                "<path:object_id>/reject/",
+                self.admin_site.admin_view(self.reject_request_view),
+                name="core_accountdeletionrequest_reject",
+            ),
+        ]
+        return custom + urls
 
     def _transition_requests(
         self,
@@ -2402,6 +2474,14 @@ class AccountDeletionRequestAdmin(admin.ModelAdmin):
                 level=messages.WARNING,
             )
 
+    def approve_request_view(self, request: HttpRequest, object_id: str) -> HttpResponse:
+        return self._dispatch_single_request_action(
+            request,
+            object_id,
+            action_name="approve_requests",
+            action=self.approve_requests,
+        )
+
     @admin.action(description="Mark as pending privilege check")
     def mark_requests_pending_privilege_check(self, request: HttpRequest, queryset) -> None:
         self._transition_requests(
@@ -2422,6 +2502,14 @@ class AccountDeletionRequestAdmin(admin.ModelAdmin):
             allowed_source_statuses=self.CLOSE_SOURCE_STATUSES,
             success_label=AccountDeletionRequest.Status.rejected.label,
             signal_event_key=ACCOUNT_DELETION_STATUS_EVENT_KEYS[AccountDeletionRequest.Status.rejected],
+        )
+
+    def reject_request_view(self, request: HttpRequest, object_id: str) -> HttpResponse:
+        return self._dispatch_single_request_action(
+            request,
+            object_id,
+            action_name="reject_requests",
+            action=self.reject_requests,
         )
 
     @admin.action(description="Cancel request(s)")

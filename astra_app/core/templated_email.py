@@ -599,6 +599,31 @@ def render_template_string(value: str, context: Mapping[str, object]) -> str:
         raise ValueError(str(exc)) from exc
 
 
+def execute_email_template_save(
+    *,
+    template: EmailTemplate | None,
+    raw_name: str | None,
+    subject: str,
+    html_content: str,
+    text_content: str,
+) -> EmailTemplate:
+    if template is not None:
+        update_email_template(
+            template=template,
+            subject=subject,
+            html_content=html_content,
+            text_content=text_content,
+        )
+        return template
+
+    return create_email_template_unique(
+        raw_name=str(raw_name or ""),
+        subject=subject,
+        html_content=html_content,
+        text_content=text_content,
+    )
+
+
 def render_templated_email_preview(*, subject: str, html_content: str, text_content: str, context: Mapping[str, object]) -> dict[str, str]:
     subject = validate_email_subject(subject)
     sources = (subject, html_content, text_content)

@@ -1,4 +1,3 @@
-
 import datetime
 import importlib
 from types import SimpleNamespace
@@ -14,6 +13,7 @@ from django.utils import timezone
 from post_office.models import EmailTemplate
 
 from core.account_invitations import (
+    _build_invitation_email_context,
     _mark_invitation_accepted_from_email_match,
     build_freeipa_email_lookup,
     find_account_invitation_matches,
@@ -22,7 +22,6 @@ from core.account_invitations import (
 from core.freeipa.user import FreeIPAUser
 from core.models import AccountInvitation, AccountInvitationSend, FreeIPAPermissionGrant, Organization
 from core.permissions import ASTRA_ADD_MEMBERSHIP
-from core.views_account_invitations import _build_invitation_email_context
 
 
 class AccountInvitationFreeIPAServiceTests(TestCase):
@@ -446,7 +445,7 @@ class AccountInvitationViewsTests(TestCase):
             patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
             patch("core.views_account_invitations.build_freeipa_email_lookup", return_value={}),
             patch("core.views_account_invitations.find_account_invitation_matches", return_value=[]),
-            patch("core.views_account_invitations.queue_templated_email", return_value=queued_email) as queue_mock,
+            patch("core.account_invitations.queue_templated_email", return_value=queued_email) as queue_mock,
         ):
             preview_resp = self.client.post(
                 reverse("account-invitations-upload"),
@@ -520,7 +519,7 @@ class AccountInvitationViewsTests(TestCase):
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
             patch("core.views_account_invitations.find_account_invitation_matches", return_value=[]),
-            patch("core.views_account_invitations.queue_templated_email", return_value=SimpleNamespace(id=101)) as queue_mock,
+            patch("core.account_invitations.queue_templated_email", return_value=SimpleNamespace(id=101)) as queue_mock,
         ):
             preview_resp = self.client.post(
                 reverse("account-invitations-upload"),
@@ -566,7 +565,7 @@ class AccountInvitationViewsTests(TestCase):
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
             patch("core.views_account_invitations.find_account_invitation_matches", return_value=[]),
-            patch("core.views_account_invitations.queue_templated_email", return_value=queued_email) as queue_mock,
+            patch("core.account_invitations.queue_templated_email", return_value=queued_email) as queue_mock,
         ):
             preview_resp = self.client.post(
                 reverse("account-invitations-upload"),
@@ -619,7 +618,7 @@ class AccountInvitationViewsTests(TestCase):
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
             patch("core.views_account_invitations.find_account_invitation_matches", return_value=[]),
-            patch("core.views_account_invitations.queue_templated_email", return_value=queued_email) as queue_mock,
+            patch("core.account_invitations.queue_templated_email", return_value=queued_email) as queue_mock,
         ):
             resend_resp = self.client.post(reverse("account-invitation-resend", args=[invitation.pk]))
 
@@ -655,7 +654,7 @@ class AccountInvitationViewsTests(TestCase):
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
             patch("core.views_account_invitations.find_account_invitation_matches", return_value=[]),
-            patch("core.views_account_invitations.queue_templated_email", return_value=queued_email) as queue_mock,
+            patch("core.account_invitations.queue_templated_email", return_value=queued_email) as queue_mock,
         ):
             resend_resp = self.client.post(reverse("account-invitation-resend", args=[invitation.pk]))
 
@@ -722,7 +721,7 @@ class AccountInvitationViewsTests(TestCase):
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
             patch("core.views_account_invitations.find_account_invitation_matches", return_value=[]),
-            patch("core.views_account_invitations.queue_templated_email") as queue_mock,
+            patch("core.account_invitations.queue_templated_email") as queue_mock,
         ):
             preview_resp = self.client.post(
                 reverse("account-invitations-upload"),
@@ -763,7 +762,7 @@ class AccountInvitationViewsTests(TestCase):
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
             patch("core.views_account_invitations.find_account_invitation_matches", return_value=[]),
-            patch("core.views_account_invitations.queue_templated_email") as queue_mock,
+            patch("core.account_invitations.queue_templated_email") as queue_mock,
         ):
             preview_resp = self.client.post(
                 reverse("account-invitations-upload"),
@@ -798,7 +797,7 @@ class AccountInvitationViewsTests(TestCase):
             patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
             patch("core.views_account_invitations.find_account_invitation_matches", return_value=[]),
             patch(
-                "core.views_account_invitations._build_invitation_email_context",
+                "core.account_invitations._build_invitation_email_context",
                 side_effect=ValueError("unexpected value error"),
             ),
         ):
@@ -967,7 +966,7 @@ class AccountInvitationViewsTests(TestCase):
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
             patch("core.views_account_invitations.find_account_invitation_matches", return_value=[]),
-            patch("core.views_account_invitations.queue_templated_email", return_value=queued_email) as queue_mock,
+            patch("core.account_invitations.queue_templated_email", return_value=queued_email) as queue_mock,
         ):
             resend_resp = self.client.post(reverse("account-invitation-resend", args=[invitation.pk]))
             self.assertEqual(resend_resp.status_code, 302)
@@ -996,7 +995,7 @@ class AccountInvitationViewsTests(TestCase):
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
             patch("core.views_account_invitations.find_account_invitation_matches", return_value=["bob"]),
-            patch("core.views_account_invitations.queue_templated_email") as queue_mock,
+            patch("core.account_invitations.queue_templated_email") as queue_mock,
             patch.object(signal_module.account_invitation_accepted, "send", autospec=True) as send_mock,
             self.captureOnCommitCallbacks(execute=True),
         ):
@@ -1033,7 +1032,7 @@ class AccountInvitationViewsTests(TestCase):
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
             patch("core.views_account_invitations.find_account_invitation_matches", return_value=[]),
-            patch("core.views_account_invitations.queue_templated_email", return_value=queued_email),
+            patch("core.account_invitations.queue_templated_email", return_value=queued_email),
         ):
             resp = self.client.post(
                 reverse("account-invitations-bulk"),

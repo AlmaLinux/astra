@@ -30,13 +30,12 @@ from core.models import MembershipRequest, Organization
 from core.permissions import ASTRA_ADD_SEND_MAIL, json_permission_required
 from core.rate_limit import allow_request
 from core.templated_email import (
-    create_email_template_unique,
+    execute_email_template_save,
     preview_drop_inline_image_tags,
     preview_rewrite_inline_image_tags_to_urls,
     queue_composed_email,
     render_templated_email_preview,
     render_templated_email_preview_response,
-    update_email_template,
 )
 from core.views_account_invitations import send_organization_claim_invitation
 from core.views_utils import get_username
@@ -58,11 +57,12 @@ class RecipientPreview:
 
 @dataclass(frozen=True)
 class SendMailGetState:
-    form: "SendMailForm"
+    form: SendMailForm
     preview: RecipientPreview | None
     rendered_preview: dict[str, str]
     templates: list[EmailTemplate]
     created_template_id: int | None
+    selected_template_id: int | None
     selected_recipient_mode: str
     action_notice: str
     action_status: str
@@ -747,7 +747,7 @@ def _serialize_send_mail_field(*, bound_field: forms.BoundField) -> dict[str, ob
     return payload
 
 
-def _serialize_send_mail_form(*, form: "SendMailForm") -> dict[str, object]:
+def _serialize_send_mail_form(*, form: SendMailForm) -> dict[str, object]:
     return {
         "is_bound": form.is_bound,
         "non_field_errors": [str(error) for error in form.non_field_errors()],
@@ -755,7 +755,7 @@ def _serialize_send_mail_form(*, form: "SendMailForm") -> dict[str, object]:
     }
 
 
-def _selected_template_id_from_form(*, form: "SendMailForm") -> int | None:
+def _selected_template_id_from_form(*, form: SendMailForm) -> int | None:
     raw_value = form["email_template_id"].value()
     if raw_value in (None, ""):
         return None
@@ -795,7 +795,7 @@ def _serialize_send_mail_get_payload(*, state: SendMailGetState) -> dict[str, ob
         "form": _serialize_send_mail_form(form=state.form),
         "recipient_preview": _serialize_recipient_preview(preview=state.preview),
         "compose": {
-            "selected_template_id": _selected_template_id_from_form(form=state.form),
+            "selected_template_id": state.selected_template_id,
             "preview": state.rendered_preview,
         },
     }
@@ -946,6 +946,7 @@ def _prepare_send_mail_get_state(request: HttpRequest) -> SendMailGetState:
         rendered_preview=rendered_preview,
         templates=templates,
         created_template_id=None,
+        selected_template_id=_selected_template_id_from_form(form=form),
         selected_recipient_mode=selected_recipient_mode,
         action_notice=action_notice,
         action_status=action_status,
@@ -979,6 +980,7 @@ def send_mail(request: HttpRequest) -> HttpResponse:
     user_choices = _user_select_choices()
 
     created_template_id: int | None = None
+    selected_template_id: int | None = None
 
     preview: RecipientPreview | None = None
     recipients: list[dict[str, str]] = []
@@ -986,7 +988,6 @@ def send_mail(request: HttpRequest) -> HttpResponse:
 
     initial: dict[str, object] = {}
     selected_recipient_mode = ""
-    deep_link_autoload_recipients = False
     system_context = system_email_context()
     extra_context = _extra_context_from_query(request.GET)
     extra_context = {**extra_context, **system_context}
@@ -994,7 +995,9 @@ def send_mail(request: HttpRequest) -> HttpResponse:
     action_notice = _build_send_mail_action_notice(action_status=action_status)
 
     if request.method == "POST":
+        selected_recipient_mode = str(request.POST.get("recipient_mode") or "").strip().lower()
         form = SendMailForm(request.POST, request.FILES, group_choices=group_choices, user_choices=user_choices)
+        selected_template_id = _selected_template_id_from_form(form=form)
         if form.is_valid():
             group_cn = str(form.cleaned_data.get("group_cn") or "").strip()
             csv_file = form.cleaned_data.get("csv_file")
@@ -1080,13 +1083,15 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                 action = ""
 
             if action == "save" and selected_template is not None:
-                update_email_template(
+                selected_template = execute_email_template_save(
                     template=selected_template,
+                    raw_name=None,
                     subject=subject,
                     html_content=html_content,
                     text_content=text_content,
                 )
                 messages.success(request, f"Saved template: {selected_template.name}.")
+                selected_template_id = selected_template.pk
             elif action == "save" and selected_template is None:
                 messages.error(request, "Select a template to save, or use Save as.")
 
@@ -1095,7 +1100,8 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                 if not raw_name:
                     messages.error(request, "Provide a template name for Save as.")
                 else:
-                    selected_template = create_email_template_unique(
+                    selected_template = execute_email_template_save(
+                        template=None,
                         raw_name=raw_name,
                         subject=subject,
                         html_content=html_content,
@@ -1103,6 +1109,7 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                     )
                     messages.success(request, f"Created template: {selected_template.name}.")
                     created_template_id = selected_template.pk
+                    selected_template_id = selected_template.pk
 
             if action == "send":
                 if preview is None or not recipients:
@@ -1257,6 +1264,57 @@ def send_mail(request: HttpRequest) -> HttpResponse:
             initial.update(request.POST.dict())
             if "user_usernames" in request.POST:
                 initial["user_usernames"] = request.POST.getlist("user_usernames")
+
+            posted_extra_context: dict[str, str] = {}
+            raw_extra_context = str(request.POST.get("extra_context_json") or "").strip()
+            if raw_extra_context:
+                try:
+                    parsed_extra_context = json.loads(raw_extra_context)
+                except Exception:
+                    parsed_extra_context = None
+                if isinstance(parsed_extra_context, dict):
+                    for key, value in parsed_extra_context.items():
+                        normalized_key = _normalize_identifier(str(key))
+                        normalized_value = str(value or "").strip()
+                        if normalized_value:
+                            posted_extra_context[normalized_key] = normalized_value
+            posted_extra_context = {**posted_extra_context, **system_context}
+
+            try:
+                if selected_recipient_mode == SendMailForm.RECIPIENT_MODE_GROUP:
+                    group_cn = str(request.POST.get("group_cn") or "").strip()
+                    if group_cn:
+                        preview, recipients = _preview_for_group(group_cn)
+                elif selected_recipient_mode == SendMailForm.RECIPIENT_MODE_CSV:
+                    csv_file = request.FILES.get("csv_file")
+                    if csv_file is not None:
+                        preview, recipients, _header_to_var = _parse_csv_upload(csv_file)
+                    else:
+                        raw_payload = request.session.get(_CSV_SESSION_KEY)
+                        if raw_payload:
+                            payload = json.loads(str(raw_payload))
+                            if isinstance(payload, dict):
+                                preview, recipients = _preview_from_csv_session_payload(payload)
+                elif selected_recipient_mode == SendMailForm.RECIPIENT_MODE_MANUAL:
+                    manual_to = _parse_email_list(str(request.POST.get("manual_to") or ""))
+                    if manual_to:
+                        preview, recipients = _preview_for_manual(manual_to)
+                elif selected_recipient_mode == SendMailForm.RECIPIENT_MODE_USERS:
+                    usernames = [str(username) for username in request.POST.getlist("user_usernames") if str(username).strip()]
+                    if usernames:
+                        preview, recipients = _preview_for_users(usernames)
+            except (ValidationError, ValueError):
+                preview = None
+                recipients = []
+
+            preview, recipients = _apply_extra_context(
+                preview=preview,
+                recipients=recipients,
+                extra_context=posted_extra_context,
+            )
+            if preview and preview.first_context:
+                request.session[_PREVIEW_CONTEXT_SESSION_KEY] = json.dumps(preview.first_context)
+
             form.initial.update(initial)
     # Compute templates at the end so any newly-created template is visible
     # immediately after Save as.
@@ -1265,43 +1323,48 @@ def send_mail(request: HttpRequest) -> HttpResponse:
     first_context = preview.first_context if preview else {}
 
     rendered_preview = {"subject": "", "html": "", "text": ""}
-    if first_context and form.is_bound and form.is_valid():
+    subject_value = str(form["subject"].value() or "")
+    html_content_value = str(form["html_content"].value() or "")
+    text_content_value = str(form["text_content"].value() or "")
+    if first_context and form.is_bound:
         rendered_preview = _render_send_mail_preview(
-            subject=str(form.cleaned_data.get("subject") or ""),
-            html_content=str(form.cleaned_data.get("html_content") or ""),
-            text_content=str(form.cleaned_data.get("text_content") or ""),
+            subject=subject_value,
+            html_content=html_content_value,
+            text_content=text_content_value,
             context=first_context,
         )
         if not any(str(rendered_preview.get(key) or "").strip() for key in ("subject", "html", "text")):
             try:
                 render_templated_email_preview(
-                    subject=str(form.cleaned_data.get("subject") or ""),
-                    html_content=preview_rewrite_inline_image_tags_to_urls(
-                        str(form.cleaned_data.get("html_content") or "")
-                    ),
-                    text_content=preview_drop_inline_image_tags(str(form.cleaned_data.get("text_content") or "")),
+                    subject=subject_value,
+                    html_content=preview_rewrite_inline_image_tags_to_urls(html_content_value),
+                    text_content=preview_drop_inline_image_tags(text_content_value),
                     context=first_context,
                 )
             except ValueError as error:
                 messages.error(request, f"Template error: {error}")
 
+    state = SendMailGetState(
+        form=form,
+        preview=preview,
+        rendered_preview=rendered_preview,
+        templates=templates,
+        created_template_id=created_template_id,
+        selected_template_id=selected_template_id,
+        selected_recipient_mode=selected_recipient_mode,
+        action_notice=action_notice,
+        action_status=action_status,
+        has_saved_csv_recipients=bool(request.session.get(_CSV_SESSION_KEY)),
+    )
+
     return render(
         request,
-        "core/send_mail.html",
+        "core/send_mail_shell.html",
         {
-            "form": form,
-            "templates": templates,
-            "preview": preview,
-            "rendered_preview": rendered_preview,
-            "csv_session_key": _CSV_SESSION_KEY,
-            "has_saved_csv_recipients": bool(request.session.get(_CSV_SESSION_KEY)),
-            "created_template_id": created_template_id,
-            "selected_recipient_mode": selected_recipient_mode,
-            "action_notice": action_notice,
-            "action_status": action_status,
-            "compose_skip_initial_preview_refresh": any(
-                str(rendered_preview.get(key) or "").strip() for key in ("subject", "html", "text")
-            ),
+            "send_mail_api_url": reverse_lazy("api-send-mail-detail"),
+            "send_mail_submit_url": reverse_lazy("send-mail"),
+            "send_mail_preview_url": reverse_lazy("send-mail-render-preview"),
+            "send_mail_initial_payload": _serialize_send_mail_get_payload(state=state),
         },
     )
 

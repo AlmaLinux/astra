@@ -8,11 +8,10 @@ from django.conf import settings
 from django.contrib.messages.storage.fallback import FallbackStorage
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.core.cache import cache
-from django.http import HttpResponse
 from django.test import RequestFactory, TestCase, override_settings
 
 from core.views_settings import settings_root
-from core.views_users import user_profile_api
+from core.views_users import user_profile_detail_api
 
 
 @dataclass
@@ -74,7 +73,17 @@ class FASAttributesTests(TestCase):
                         autospec=True,
                         return_value=({}, 0, 0),
                     ):
-                        resp = user_profile_api(req, fu.username)
+                        with patch(
+                            "core.views_users.membership_review_permissions",
+                            autospec=True,
+                            return_value={
+                                "membership_can_view": False,
+                                "membership_can_add": False,
+                                "membership_can_change": False,
+                                "membership_can_delete": False,
+                            },
+                        ):
+                            resp = user_profile_detail_api(req, fu.username)
 
         self.assertEqual(resp.status_code, 200)
         payload = json.loads(resp.content)
@@ -445,7 +454,7 @@ class FASAttributesTests(TestCase):
         self.assertEqual(Note.objects.filter(membership_request=membership_request).count(), 0)
 
     @override_settings(SELF_SERVICE_ADDRESS_COUNTRY_ATTR="fasstatusnote")
-    def test_user_profile_self_shows_danger_when_missing_country_code(self):
+    def test_user_profile_detail_self_shows_danger_when_missing_country_code(self):
         fu = _DummyFreeIPAUser(
             username="alice",
             first_name="Alice",
@@ -467,9 +476,18 @@ class FASAttributesTests(TestCase):
             patch("core.views_users._get_full_user", autospec=True, return_value=fu),
             patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]),
             patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
-            patch("core.views_users.resolve_avatar_urls_for_users", autospec=True, return_value=({}, 0, 0)),
+            patch(
+                "core.views_users.membership_review_permissions",
+                autospec=True,
+                return_value={
+                    "membership_can_view": False,
+                    "membership_can_add": False,
+                    "membership_can_change": False,
+                    "membership_can_delete": False,
+                },
+            ),
         ):
-            resp = user_profile_api(req, "alice")
+            resp = user_profile_detail_api(req, "alice")
 
         self.assertEqual(resp.status_code, 200)
         payload = json.loads(resp.content)

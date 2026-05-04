@@ -776,13 +776,13 @@ class OrganizationUserViewsTests(TestCase):
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=bob):
             with patch("django.utils.timezone.now", autospec=True, return_value=frozen_now):
                 resp = self.client.get(reverse("organization-detail", args=[org.pk]))
-                api_resp = self.client.get(reverse("api-organization-detail", args=[org.pk]))
+                api_resp = self.client.get(reverse("api-organization-detail-page", args=[org.pk]))
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, f'data-organization-detail-api-url="{reverse("api-organization-detail-page", args=[org.pk])}"')
         membership = api_resp.json()["organization"]["memberships"][0]
-        self.assertEqual(membership["expires_label"], "Jan 21, 2027")
-        self.assertEqual(membership["expires_on"], "2027-01-21")
+        self.assertEqual(membership["expires_at"], "2027-01-21T23:59:59+00:00")
+        self.assertNotIn("expires_label", membership)
 
     def test_org_detail_sponsorship_card_bootstraps_request_template_and_request_ids_for_representative_and_committee(self) -> None:
         from core.models import MembershipRequest, MembershipType, Organization
@@ -2944,7 +2944,6 @@ class OrganizationUserViewsTests(TestCase):
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             page_resp = self.client.get(reverse("organization-detail", args=[org.pk]))
             detail_resp = self.client.get(reverse("api-organization-detail-page", args=[org.pk]))
-            legacy_resp = self.client.get(reverse("api-organization-detail", args=[org.pk]))
 
         self.assertEqual(page_resp.status_code, 200)
         self.assertContains(
@@ -2966,8 +2965,6 @@ class OrganizationUserViewsTests(TestCase):
 
         self.assertEqual(detail_resp.status_code, 200)
         self.assertNotIn("notes", detail_resp.json()["organization"])
-        self.assertEqual(legacy_resp.status_code, 200)
-        self.assertNotIn("notes", legacy_resp.json()["organization"])
 
     def test_organization_detail_page_api_scopes_request_ids_per_membership_type(self) -> None:
         from core.models import Membership, MembershipLog, MembershipRequest, MembershipType, Organization
@@ -3280,7 +3277,6 @@ class OrganizationUserViewsTests(TestCase):
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             page_resp = self.client.get(reverse("organization-detail", args=[org.pk]))
             detail_resp = self.client.get(reverse("api-organization-detail-page", args=[org.pk]))
-            legacy_resp = self.client.get(reverse("api-organization-detail", args=[org.pk]))
 
         self.assertEqual(page_resp.status_code, 200)
         self.assertContains(
@@ -3300,8 +3296,6 @@ class OrganizationUserViewsTests(TestCase):
         self.assertNotContains(page_resp, "Older org note")
         self.assertEqual(detail_resp.status_code, 200)
         self.assertNotIn("notes", detail_resp.json()["organization"])
-        self.assertEqual(legacy_resp.status_code, 200)
-        self.assertNotIn("notes", legacy_resp.json()["organization"])
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(

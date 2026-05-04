@@ -471,8 +471,49 @@ class MattermostWebhookTemplateAndPayloadTests(SimpleTestCase):
             "request=42 user=alice status=completed manual=False",
         )
         self.assertEqual(payload["attachments"][0]["title"], "Deletion request 42")
-        self.assertTrue(payload["attachments"][0]["title_link"].endswith(reverse("settings") + "?tab=privacy"))
+        self.assertTrue(
+            payload["attachments"][0]["title_link"].endswith(
+                reverse("admin:core_accountdeletionrequest_change", args=[42])
+            )
+        )
         self.assertNotIn("This must never appear in Mattermost.", str(payload))
+
+    def test_build_payload_account_deletion_uses_request_id_for_admin_change_link_without_object(self) -> None:
+        payload = _default_payload(
+            "account_deletion_completed",
+            {
+                "account_deletion_request_id": 42,
+                "account_deletion_username": "alice",
+                "account_deletion_status": "completed",
+                "account_deletion_manual_review_required": False,
+                "account_deletion_blocker_codes_csv": "",
+                "actor": "admin",
+            },
+        )
+
+        self.assertTrue(
+            payload["attachments"][0]["title_link"].endswith(
+                reverse("admin:core_accountdeletionrequest_change", args=[42])
+            )
+        )
+
+    def test_build_payload_account_deletion_without_request_uses_admin_changelist_link(self) -> None:
+        payload = _default_payload(
+            "account_deletion_completed",
+            {
+                "account_deletion_username": "alice",
+                "account_deletion_status": "completed",
+                "account_deletion_manual_review_required": False,
+                "account_deletion_blocker_codes_csv": "",
+                "actor": "admin",
+            },
+        )
+
+        self.assertTrue(
+            payload["attachments"][0]["title_link"].endswith(
+                reverse("admin:core_accountdeletionrequest_changelist")
+            )
+        )
 
 
 @override_settings(MATTERMOST_WEBHOOK_TIMEOUT_SECONDS=3)
@@ -840,6 +881,11 @@ class MattermostWebhookDispatchTests(TestCase):
         self.assertEqual(post_mock.call_args.args[0].pk, endpoint.pk)
         payload = post_mock.call_args.args[1]
         self.assertEqual(payload["text"], "Account deletion completed")
+        self.assertTrue(
+            payload["attachments"][0]["title_link"].endswith(
+                reverse("admin:core_accountdeletionrequest_change", args=[42])
+            )
+        )
 
 
 class MattermostWebhookAdminTests(TestCase):

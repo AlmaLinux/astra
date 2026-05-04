@@ -13,7 +13,7 @@ class ProfileBlacklistedEmailAlertTests(TestCase):
         session["_freeipa_username"] = username
         session.save()
 
-    def test_blacklisted_email_alert_shown_only_to_self(self) -> None:
+    def test_user_profile_detail_blacklisted_email_alert_shown_only_to_self(self) -> None:
         from django_ses.models import BlacklistedEmail
 
         blacklisted = "bob@example.org"
@@ -51,15 +51,21 @@ class ProfileBlacklistedEmailAlertTests(TestCase):
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=fake_get),
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
             patch("core.views_users.has_enabled_agreements", return_value=False),
+            patch(
+                "core.views_users.membership_review_permissions",
+                return_value={
+                    "membership_can_view": False,
+                    "membership_can_add": False,
+                    "membership_can_change": False,
+                    "membership_can_delete": False,
+                },
+            ),
         ):
-            resp = self.client.get(reverse("api-user-profile", kwargs={"username": "bob"}))
+            resp = self.client.get(reverse("api-user-profile-detail", kwargs={"username": "bob"}))
 
         self.assertEqual(resp.status_code, 200)
         required_actions = {action["id"]: action for action in resp.json()["accountSetup"]["requiredActions"]}
-        action = required_actions["email-blacklisted-alert"]
-        self.assertIn("your address may have bounced or been marked as spam", action["label"])
-        self.assertEqual(action["urlLabel"], "Update your email address")
-        self.assertNotIn("url", action)
+        self.assertEqual(required_actions["email-blacklisted-alert"], {"id": "email-blacklisted-alert"})
 
         # Other user view: should not see the alert.
         self._login_as_freeipa("viewer")
@@ -67,8 +73,17 @@ class ProfileBlacklistedEmailAlertTests(TestCase):
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=fake_get),
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
             patch("core.views_users.has_enabled_agreements", return_value=False),
+            patch(
+                "core.views_users.membership_review_permissions",
+                return_value={
+                    "membership_can_view": False,
+                    "membership_can_add": False,
+                    "membership_can_change": False,
+                    "membership_can_delete": False,
+                },
+            ),
         ):
-            resp = self.client.get(reverse("api-user-profile", kwargs={"username": "bob"}))
+            resp = self.client.get(reverse("api-user-profile-detail", kwargs={"username": "bob"}))
 
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["accountSetup"]["requiredActions"], [])

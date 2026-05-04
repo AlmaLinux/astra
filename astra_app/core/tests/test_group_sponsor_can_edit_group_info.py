@@ -78,6 +78,37 @@ class GroupSponsorCanEditGroupInfoTests(TestCase):
         self.assertEqual(payload["group"]["description"], "FAS Group 1")
         self.assertEqual(payload["group"]["fas_irc_channels"], ["#fas1"])
 
+    def test_sponsor_group_member_can_get_edit_api_prefilled(self) -> None:
+        self._login_as_freeipa("bob")
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": ["sponsor-subgroup"]})
+        group = FreeIPAGroup(
+            "fas1",
+            {
+                "cn": ["fas1"],
+                "description": ["FAS Group 1"],
+                "member_user": ["bob", "alice"],
+                "member_group": [],
+                "membermanager_user": ["alice"],
+                "membermanager_group": ["sponsor-subgroup"],
+                "fasurl": ["https://example.org/group/fas1"],
+                "fasmailinglist": ["fas1@example.org"],
+                "fasircchannel": ["#fas1"],
+                "fasdiscussionurl": ["https://discussion.example.org/c/fas1"],
+                "objectclass": ["fasgroup"],
+            },
+        )
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
+        ):
+            resp = self.client.get(reverse("api-group-edit", args=["fas1"]), HTTP_ACCEPT="application/json")
+
+        self.assertEqual(resp.status_code, 200)
+        payload = json.loads(resp.content)
+        self.assertEqual(payload["group"]["cn"], "fas1")
+        self.assertEqual(payload["group"]["description"], "FAS Group 1")
+
     def test_sponsor_can_put_updates_via_api(self) -> None:
         self._login_as_freeipa("bob")
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})

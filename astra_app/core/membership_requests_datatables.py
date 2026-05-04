@@ -7,7 +7,7 @@ from django.utils.timezone import localtime
 
 from core.avatar_providers import resolve_avatar_urls_for_users
 from core.freeipa.user import FreeIPAUser
-from core.membership import visible_committee_membership_requests
+from core.membership import membership_request_queryset, visible_committee_membership_requests
 from core.membership_constants import MembershipCategoryCode
 from core.membership_notes import CUSTOS, last_votes
 from core.models import Membership, MembershipLog, MembershipRequest, Note
@@ -42,7 +42,7 @@ def resolve_requested_by(
 
 
 def _membership_request_base_queryset() -> QuerySet[MembershipRequest]:
-    return MembershipRequest.objects.select_related("membership_type", "requested_organization").prefetch_related(
+    return membership_request_queryset().prefetch_related(
         Prefetch(
             "logs",
             queryset=MembershipLog.objects.filter(action=MembershipLog.Action.requested)

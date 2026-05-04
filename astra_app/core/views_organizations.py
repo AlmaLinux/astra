@@ -22,7 +22,7 @@ from django.views.decorators.http import require_GET
 from core import signals as astra_signals
 from core.account_invitation_reconcile import schedule_account_invitation_accepted_signal
 from core.api_pagination import serialize_pagination
-from core.forms_organizations import OrganizationEditForm
+from core.forms_organizations import ORGANIZATION_CONTACT_GROUP_DESCRIPTORS, OrganizationEditForm
 from core.freeipa.user import FreeIPAUser
 from core.freeipa_directory import search_freeipa_users
 from core.logging_extras import current_exception_log_fields
@@ -88,6 +88,124 @@ from core.views_utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _build_organization_form_contact_groups(form: OrganizationEditForm) -> list[dict[str, object]]:
+    return [
+        {
+            **ORGANIZATION_CONTACT_GROUP_DESCRIPTORS[0],
+            "name_field": form["business_contact_name"],
+            "email_field": form["business_contact_email"],
+            "phone_field": form["business_contact_phone"],
+            "has_errors": bool(
+                form["business_contact_name"].errors
+                or form["business_contact_email"].errors
+                or form["business_contact_phone"].errors
+            ),
+        },
+        {
+            **ORGANIZATION_CONTACT_GROUP_DESCRIPTORS[1],
+            "name_field": form["pr_marketing_contact_name"],
+            "email_field": form["pr_marketing_contact_email"],
+            "phone_field": form["pr_marketing_contact_phone"],
+            "has_errors": bool(
+                form["pr_marketing_contact_name"].errors
+                or form["pr_marketing_contact_email"].errors
+                or form["pr_marketing_contact_phone"].errors
+            ),
+        },
+        {
+            **ORGANIZATION_CONTACT_GROUP_DESCRIPTORS[2],
+            "name_field": form["technical_contact_name"],
+            "email_field": form["technical_contact_email"],
+            "phone_field": form["technical_contact_phone"],
+            "has_errors": bool(
+                form["technical_contact_name"].errors
+                or form["technical_contact_email"].errors
+                or form["technical_contact_phone"].errors
+            ),
+        },
+    ]
+
+
+def _build_organization_contact_display_groups(organization: Organization) -> list[dict[str, str]]:
+    return [
+        {
+            **ORGANIZATION_CONTACT_GROUP_DESCRIPTORS[0],
+            "name": organization.business_contact_name,
+            "email": organization.business_contact_email,
+            "phone": organization.business_contact_phone,
+        },
+        {
+            **ORGANIZATION_CONTACT_GROUP_DESCRIPTORS[1],
+            "name": organization.pr_marketing_contact_name,
+            "email": organization.pr_marketing_contact_email,
+            "phone": organization.pr_marketing_contact_phone,
+        },
+        {
+            **ORGANIZATION_CONTACT_GROUP_DESCRIPTORS[2],
+            "name": organization.technical_contact_name,
+            "email": organization.technical_contact_email,
+            "phone": organization.technical_contact_phone,
+        },
+    ]
+
+
+def _resolve_organization_form_active_contact(
+    form: OrganizationEditForm,
+    *,
+    contact_groups: list[dict[str, object]],
+) -> str:
+    if "representative" in form.fields and form["representative"].errors:
+        return "representative"
+
+    for group in contact_groups:
+        if bool(group["has_errors"]):
+            return str(group["key"])
+
+    if "representative" in form.fields:
+        return "representative"
+    return "business"
+
+
+def _build_organization_representative_search_url(*, organization: Organization | None = None) -> str:
+    search_url = reverse("organization-representatives-search")
+    if organization is None:
+        return search_url
+    return f"{search_url}?organization_id={organization.pk}"
+
+
+def _build_claim_invitation_context(
+    request: HttpRequest,
+    *,
+    organization: Organization,
+) -> dict[str, str | bool]:
+    claim_url = ""
+    can_send_claim_invitation = False
+    send_claim_invitation_url = ""
+    if organization.status == Organization.Status.unclaimed:
+        claim_url = build_organization_claim_url(organization=organization, request=request)
+        recipient_email = str(organization.primary_contact_email() or "").strip()
+        if request.user.has_perm(ASTRA_ADD_SEND_MAIL) and recipient_email:
+            can_send_claim_invitation = True
+            send_claim_invitation_url = send_mail_url(
+                to_type="manual",
+                to=recipient_email,
+                template_name=settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME,
+                extra_context={
+                    "invitation_action": "org_claim",
+                    "invitation_org_id": str(organization.pk),
+                    "organization_name": organization.name,
+                    "claim_url": claim_url,
+                },
+                reply_to=settings.MEMBERSHIP_COMMITTEE_EMAIL,
+            )
+
+    return {
+        "claim_url": claim_url,
+        "can_send_claim_invitation": can_send_claim_invitation,
+        "send_claim_invitation_url": send_claim_invitation_url,
+    }
 
 
 def _render_organization_claim_page(
@@ -263,46 +381,8 @@ def _render_org_form(
     organization: Organization | None,
     is_create: bool,
 ) -> HttpResponse:
-    # Build contact-group descriptors so the template can loop instead of
-    # repeating the same markup three times.
-    contact_groups = [
-        {
-            "key": "business",
-            "label": "Business",
-            "description": "We will send legal and billing notices to this email address, unless you tell us otherwise.",
-            "name_field": form["business_contact_name"],
-            "email_field": form["business_contact_email"],
-            "phone_field": form["business_contact_phone"],
-        },
-        {
-            "key": "marketing",
-            "label": "PR and marketing",
-            "description": "We will contact this person about press releases and sponsor marketing benefits.",
-            "name_field": form["pr_marketing_contact_name"],
-            "email_field": form["pr_marketing_contact_email"],
-            "phone_field": form["pr_marketing_contact_phone"],
-        },
-        {
-            "key": "technical",
-            "label": "Technical",
-            "description": "We will send technical notices to this email address, unless you tell us otherwise.",
-            "name_field": form["technical_contact_name"],
-            "email_field": form["technical_contact_email"],
-            "phone_field": form["technical_contact_phone"],
-        },
-    ]
-
-    # When re-rendering after a failed POST, jump to the first tab that has
-    # errors so the user sees the invalid fields immediately.
-    selected_contact: str | None = None
-    if form.errors:
-        if "representative" in form.fields and form["representative"].errors:
-            selected_contact = "representative"
-        else:
-            for _group in contact_groups:
-                if _group["name_field"].errors or _group["email_field"].errors or _group["phone_field"].errors:
-                    selected_contact = _group["key"]
-                    break
+    contact_groups = _build_organization_form_contact_groups(form)
+    active_contact = _resolve_organization_form_active_contact(form, contact_groups=contact_groups)
 
     return render(
         request,
@@ -314,7 +394,7 @@ def _render_org_form(
             "organization": organization,
             "show_representatives": "representative" in form.fields,
             "contact_groups": contact_groups,
-            "selected_contact": selected_contact,
+            "active_contact": active_contact,
         },
     )
 
@@ -788,51 +868,8 @@ def _build_organization_detail_page_context(
     if can_request_membership:
         membership_can_request_any = requestability_context.membership_can_request_any
 
-    contact_display_groups = [
-        {
-            "key": "business",
-            "label": "Business",
-            "name": organization.business_contact_name,
-            "email": organization.business_contact_email,
-            "phone": organization.business_contact_phone,
-        },
-        {
-            "key": "marketing",
-            "label": "PR and marketing",
-            "name": organization.pr_marketing_contact_name,
-            "email": organization.pr_marketing_contact_email,
-            "phone": organization.pr_marketing_contact_phone,
-        },
-        {
-            "key": "technical",
-            "label": "Technical",
-            "name": organization.technical_contact_name,
-            "email": organization.technical_contact_email,
-            "phone": organization.technical_contact_phone,
-        },
-    ]
-
-    claim_url = ""
-    can_send_claim_invitation = False
-    send_claim_invitation_url = ""
-    if organization.status == Organization.Status.unclaimed:
-        claim_url = build_organization_claim_url(organization=organization, request=request)
-
-        recipient_email = str(organization.primary_contact_email() or "").strip()
-        if request.user.has_perm(ASTRA_ADD_SEND_MAIL) and recipient_email:
-            can_send_claim_invitation = True
-            send_claim_invitation_url = send_mail_url(
-                to_type="manual",
-                to=recipient_email,
-                template_name=settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME,
-                extra_context={
-                    "invitation_action": "org_claim",
-                    "invitation_org_id": str(organization.pk),
-                    "organization_name": organization.name,
-                    "claim_url": claim_url,
-                },
-                reply_to=settings.MEMBERSHIP_COMMITTEE_EMAIL,
-            )
+    contact_display_groups = _build_organization_contact_display_groups(organization)
+    claim_invitation_context = _build_claim_invitation_context(request, organization=organization)
 
     return {
         "organization": organization,
@@ -847,9 +884,7 @@ def _build_organization_detail_page_context(
         "can_edit_organization": can_edit_organization,
         "can_delete_organization": can_delete_organization,
         "contact_display_groups": contact_display_groups,
-        "claim_url": claim_url,
-        "can_send_claim_invitation": can_send_claim_invitation,
-        "send_claim_invitation_url": send_claim_invitation_url,
+        **claim_invitation_context,
     }
 
 
@@ -1062,26 +1097,6 @@ def _serialize_organization_detail_page_payload(
 
 
 @require_GET
-def organization_detail_api(request: HttpRequest, organization_id: int) -> JsonResponse:
-    organization = get_object_or_404(Organization, pk=organization_id)
-    _require_organization_access(request, organization)
-    context = _build_organization_detail_page_context(request, organization=organization)
-    review_permissions = membership_review_permissions(request.user)
-    can_manage = bool(review_permissions["membership_can_change"] and review_permissions["membership_can_delete"])
-    payload = _serialize_organization_detail_payload(context)
-    organization_payload = cast(dict[str, object], payload["organization"])
-    organization_payload["memberships"] = [
-        _serialize_organization_detail_membership_entry(
-            entry,
-            can_request_membership=bool(context["can_request_membership"]),
-            can_manage=can_manage,
-        )
-        for entry in cast(list[dict[str, object]], context["sponsorship_entries"])
-    ]
-    return JsonResponse(payload)
-
-
-@require_GET
 def organization_detail_page_api(request: HttpRequest, organization_id: int) -> JsonResponse:
     organization = get_object_or_404(Organization, pk=organization_id)
     _require_organization_access(request, organization)
@@ -1122,11 +1137,8 @@ def organization_create(request: HttpRequest) -> HttpResponse:
             request.POST,
             request.FILES,
             can_select_representatives=can_select_representatives,
+            representative_search_url=_build_organization_representative_search_url(),
         )
-        if can_select_representatives and "representative" in form.fields:
-            form.fields["representative"].widget.attrs["data-ajax-url"] = reverse(
-                "organization-representatives-search"
-            )
         if form.is_valid():
             organization = form.save(commit=False)
 
@@ -1182,11 +1194,8 @@ def organization_create(request: HttpRequest) -> HttpResponse:
     else:
         form = OrganizationEditForm(
             can_select_representatives=can_select_representatives,
+            representative_search_url=_build_organization_representative_search_url(),
         )
-        if can_select_representatives and "representative" in form.fields:
-            form.fields["representative"].widget.attrs["data-ajax-url"] = reverse(
-                "organization-representatives-search"
-            )
 
     return _render_org_form(request, form, organization=None, is_create=True)
 
@@ -1253,24 +1262,7 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
                 or review_permissions["membership_can_delete"]
             ),
         }
-    can_send_claim_invitation = False
-    send_claim_invitation_url = ""
-    if organization.status == Organization.Status.unclaimed:
-        recipient_email = str(organization.primary_contact_email() or "").strip()
-        if request.user.has_perm(ASTRA_ADD_SEND_MAIL) and recipient_email:
-            can_send_claim_invitation = True
-            send_claim_invitation_url = send_mail_url(
-                to_type="manual",
-                to=recipient_email,
-                template_name=settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME,
-                extra_context={
-                    "invitation_action": "org_claim",
-                    "invitation_org_id": str(organization.pk),
-                    "organization_name": organization.name,
-                    "claim_url": build_organization_claim_url(organization=organization, request=request),
-                },
-                reply_to=settings.MEMBERSHIP_COMMITTEE_EMAIL,
-            )
+    claim_invitation_context = _build_claim_invitation_context(request, organization=organization)
 
     return render(
         request,
@@ -1280,8 +1272,8 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
             "can_edit_organization": _can_edit_organization(request, organization),
             "can_delete_organization": _can_delete_organization(request, organization),
             "is_representative": is_representative,
-            "can_send_claim_invitation": can_send_claim_invitation,
-            "send_claim_invitation_url": send_claim_invitation_url,
+            "can_send_claim_invitation": claim_invitation_context["can_send_claim_invitation"],
+            "send_claim_invitation_url": claim_invitation_context["send_claim_invitation_url"],
             "membership_request_detail_template": reverse(
                 "membership-request-detail",
                 args=[membership_request_id_sentinel],
@@ -1438,11 +1430,8 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
         instance=organization,
         can_select_representatives=can_select_representatives,
         initial=initial,
+        representative_search_url=_build_organization_representative_search_url(organization=organization),
     )
-    if can_select_representatives and "representative" in form.fields:
-        form.fields["representative"].widget.attrs["data-ajax-url"] = (
-            reverse("organization-representatives-search") + f"?organization_id={organization.pk}"
-        )
 
     if request.method == "POST" and form.is_valid():
         updated_org = form.save(commit=False)

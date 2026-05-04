@@ -85,4 +85,34 @@ describe("UserProfileSummary", () => {
     expect(wrapper.text()).toContain("ftp://example.com/feed.xml");
     expect(wrapper.find('a[href="ftp://example.com/feed.xml"]').exists()).toBe(false);
   });
+
+  it("renders Not provided for committee viewer when countryCode is empty", () => {
+    const wrapper = mount(UserProfileSummary, {
+      props: {
+        bootstrap: {
+          ...bootstrap,
+          countryCode: "",
+        },
+        currentTimeLabel: "Thursday 12:00:00",
+        settingsProfileUrl: "/settings/?tab=profile",
+      },
+    });
+
+    expect(wrapper.text()).toContain("Not provided");
+  });
+
+  it("hides the pronouns row when pronouns are empty", () => {
+    const wrapper = mount(UserProfileSummary, {
+      props: {
+        bootstrap: {
+          ...bootstrap,
+          pronouns: "",
+        },
+        currentTimeLabel: "Thursday 12:00:00",
+        settingsProfileUrl: "/settings/?tab=profile",
+      },
+    });
+
+    expect(wrapper.text()).not.toContain("Pronouns");
+  });
 });

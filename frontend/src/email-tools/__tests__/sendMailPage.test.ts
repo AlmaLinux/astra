@@ -148,4 +148,46 @@ describe("SendMailPage", () => {
     expect(initAll).toHaveBeenCalled();
     expect(initPage).toHaveBeenCalled();
   });
+
+  it("renders the compose controls and selects a newly created template from the payload", async () => {
+    const wrapper = mount(SendMailPage, {
+      props: {
+        bootstrap: {
+          ...bootstrap,
+          initialPayload: {
+            ...bootstrap.initialPayload,
+            createdTemplateId: 32,
+            templates: [
+              { id: 31, name: "Original Send Mail Template" },
+              { id: 32, name: "New Send Mail Template" },
+            ],
+            recipientPreview: {
+              variables: [{ name: "full_name", example: "Alice User" }],
+              recipientCount: 1,
+              firstContext: { full_name: "Alice User" },
+              skippedCount: 0,
+            },
+            compose: {
+              selectedTemplateId: 32,
+              preview: {
+                subject: "Hello Alice User",
+                html: "<p>Hello Alice User</p>",
+                text: "Hello Alice User",
+              },
+            },
+          },
+        },
+      },
+      attachTo: document.body,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(wrapper.text()).toContain("Available variables");
+    expect(wrapper.find('[data-compose-action="copy-html-to-text"]').exists()).toBe(true);
+    expect(wrapper.get("#send-mail-autoload-template-id").element).toHaveProperty("value", "32");
+    const selectedTemplate = wrapper.get('select[name="email_template_id"] option:checked');
+    expect(selectedTemplate.element).toHaveProperty("value", "32");
+    expect(selectedTemplate.text()).toBe("New Send Mail Template");
+  });
 });

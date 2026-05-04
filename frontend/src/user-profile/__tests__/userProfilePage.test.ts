@@ -193,4 +193,24 @@ describe("UserProfilePage", () => {
 
     expect(wrapper.find("#user-time").text()).toBe("Thursday 12:34:56");
   });
+
+  it("hides the live clock when timezoneName is empty", async () => {
+    stubProfileFetch(
+      makePayload({
+        summary: {
+          ...makePayload().summary,
+          timezoneName: "",
+        },
+      }),
+    );
+
+    const wrapper = mount(UserProfilePage, {
+      props: { bootstrap },
+    });
+
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.find("#user-time").exists()).toBe(false);
+  });
 });

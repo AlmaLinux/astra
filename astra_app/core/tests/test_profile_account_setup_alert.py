@@ -23,7 +23,7 @@ class ProfileAccountSetupAlertTests(TestCase):
         session["_freeipa_username"] = username
         session.save()
 
-    def test_shows_coc_required_action_when_not_signed(self) -> None:
+    def test_user_profile_detail_shows_coc_required_action_when_not_signed(self) -> None:
         coc_cn = "AlmaLinux Community Code of Conduct"
 
         bob = FreeIPAUser(
@@ -56,19 +56,26 @@ class ProfileAccountSetupAlertTests(TestCase):
                 return_value=SimpleNamespace(code="US", is_valid=True),
             ),
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
+            patch(
+                "core.views_users.membership_review_permissions",
+                return_value={
+                    "membership_can_view": False,
+                    "membership_can_add": False,
+                    "membership_can_change": False,
+                    "membership_can_delete": False,
+                },
+            ),
         ):
-            resp = self.client.get(reverse("api-user-profile", kwargs={"username": "bob"}))
+            resp = self.client.get(reverse("api-user-profile-detail", kwargs={"username": "bob"}))
 
         self.assertEqual(resp.status_code, 200)
         account_setup = resp.json()["accountSetup"]
         self.assertFalse(account_setup["requiredIsRfi"])
         self.assertEqual(account_setup["requiredActions"][0]["id"], "coc-not-signed-alert")
-        self.assertEqual(account_setup["requiredActions"][0]["label"], f"Sign the {coc_cn}")
-        self.assertEqual(account_setup["requiredActions"][0]["urlLabel"], "Review & sign")
         self.assertEqual(account_setup["requiredActions"][0]["agreementCn"], coc_cn)
-        self.assertNotIn("url", account_setup["requiredActions"][0])
+        self.assertEqual(set(account_setup["requiredActions"][0].keys()), {"id", "agreementCn"})
 
-    def test_shows_recommended_membership_request_when_no_individual_membership(self) -> None:
+    def test_user_profile_detail_shows_recommended_membership_request_when_no_individual_membership(self) -> None:
         bob = FreeIPAUser(
             "bob",
             {
@@ -99,17 +106,23 @@ class ProfileAccountSetupAlertTests(TestCase):
                 return_value=SimpleNamespace(code="US", is_valid=True),
             ),
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
+            patch(
+                "core.views_users.membership_review_permissions",
+                return_value={
+                    "membership_can_view": False,
+                    "membership_can_add": False,
+                    "membership_can_change": False,
+                    "membership_can_delete": False,
+                },
+            ),
         ):
-            resp = self.client.get(reverse("api-user-profile", kwargs={"username": "bob"}))
+            resp = self.client.get(reverse("api-user-profile-detail", kwargs={"username": "bob"}))
 
         self.assertEqual(resp.status_code, 200)
         recommended = resp.json()["accountSetup"]["recommendedActions"]
-        self.assertEqual(recommended[0]["id"], "membership-request-recommended-alert")
-        self.assertEqual(recommended[0]["label"], "Request an individual membership")
-        self.assertEqual(recommended[0]["urlLabel"], "Request a membership")
-        self.assertNotIn("url", recommended[0])
+        self.assertEqual(recommended, [{"id": "membership-request-recommended-alert"}])
 
-    def test_does_not_recommend_membership_when_request_already_pending(self) -> None:
+    def test_user_profile_detail_does_not_recommend_membership_when_request_already_pending(self) -> None:
         bob = FreeIPAUser(
             "bob",
             {
@@ -146,8 +159,17 @@ class ProfileAccountSetupAlertTests(TestCase):
                 return_value=SimpleNamespace(code="US", is_valid=True),
             ),
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
+            patch(
+                "core.views_users.membership_review_permissions",
+                return_value={
+                    "membership_can_view": False,
+                    "membership_can_add": False,
+                    "membership_can_change": False,
+                    "membership_can_delete": False,
+                },
+            ),
         ):
-            resp = self.client.get(reverse("api-user-profile", kwargs={"username": "bob"}))
+            resp = self.client.get(reverse("api-user-profile-detail", kwargs={"username": "bob"}))
 
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["accountSetup"]["recommendedActions"], [])

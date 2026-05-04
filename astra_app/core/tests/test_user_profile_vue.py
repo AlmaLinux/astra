@@ -1,7 +1,7 @@
 from unittest.mock import patch
 
 from django.test import TestCase, override_settings
-from django.urls import reverse
+from django.urls import NoReverseMatch, reverse
 
 from core.freeipa.user import FreeIPAUser
 
@@ -69,7 +69,7 @@ class UserProfileVueTests(TestCase):
         self.assertNotContains(response, "data-user-profile-groups-root")
         self.assertNotContains(response, "user-profile-groups-bootstrap")
 
-    def test_user_profile_api_returns_vue_profile_payload(self) -> None:
+    def test_user_profile_detail_api_preserves_top_level_sections_and_avatar(self) -> None:
         username = "alice"
         self._login_as_freeipa(username)
 
@@ -91,8 +91,17 @@ class UserProfileVueTests(TestCase):
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
             patch("core.views_users.has_enabled_agreements", return_value=False),
             patch("core.views_users.resolve_avatar_urls_for_users", return_value=({username: "https://avatars.example/alice.png"}, 1, 0)),
+            patch(
+                "core.views_users.membership_review_permissions",
+                return_value={
+                    "membership_can_view": False,
+                    "membership_can_add": False,
+                    "membership_can_change": False,
+                    "membership_can_delete": False,
+                },
+            ),
         ):
-            response = self.client.get(reverse("api-user-profile", args=[username]))
+            response = self.client.get(reverse("api-user-profile-detail", args=[username]))
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -100,12 +109,16 @@ class UserProfileVueTests(TestCase):
         self.assertEqual(payload["summary"]["fullName"], "Alice Example")
         self.assertEqual(payload["summary"]["email"], "alice@example.test")
         self.assertEqual(payload["summary"]["avatarUrl"], "https://avatars.example/alice.png")
-        self.assertNotIn("profileEditUrl", payload["summary"])
         self.assertEqual(payload["groups"]["username"], username)
+        self.assertEqual(payload["summary"]["socialProfiles"], [])
         self.assertIn("membership", payload)
-        self.assertNotIn("historyUrl", payload["membership"])
-        self.assertNotIn("requestUrl", payload["membership"])
+        self.assertEqual(payload["membership"]["entries"], [])
+        self.assertEqual(payload["membership"]["pendingEntries"], [])
         self.assertIn("accountSetup", payload)
+
+    def test_user_profile_api_route_is_retired(self) -> None:
+        with self.assertRaises(NoReverseMatch):
+            reverse("api-user-profile", args=["alice"])
 
     def test_user_profile_detail_api_returns_data_only_payload(self) -> None:
         username = "alice"

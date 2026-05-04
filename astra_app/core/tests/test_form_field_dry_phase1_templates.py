@@ -52,24 +52,25 @@ class FormFieldDryPhase1TemplateTests(SimpleTestCase):
                 with self.subTest(template=template_name, obsolete_snippet=obsolete_snippet):
                     self.assertNotIn(obsolete_snippet, template_content)
 
-    def test_server_rendered_settings_phase1_templates_keep_behavioral_contract(self) -> None:
-        expectations: dict[str, list[str]] = {
-            "_settings_tab_emails.html": [
-                "Email delivery problem",
-                "Please update your email address to a working one below.",
-                "field=emails_form.mail",
-                "field=emails_form.fasRHBZEmail",
-            ],
-            "_settings_tab_security.html": [
-                "field=password_form.otp",
-                "field=otp_add_form.otp",
-                "Your account has OTP enabled; enter your current OTP.",
-                "Enter your current OTP to authorize adding a new token.",
-            ],
-        }
+    def test_settings_shell_template_exposes_current_vue_runtime_contract(self) -> None:
+        template_content = self._read_template("settings_shell.html")
 
-        for template_name, snippets in expectations.items():
-            template_content = self._read_template(template_name)
-            for snippet in snippets:
-                with self.subTest(template=template_name, snippet=snippet):
-                    self.assertIn(snippet, template_content)
+        for snippet in (
+            'data-settings-root=""',
+            'data-settings-api-url="{{ settings_api_url }}"',
+            'data-settings-submit-url="{{ settings_submit_url }}"',
+            'data-settings-csrf-token="{{ settings_csrf_token }}"',
+            'settings_initial_payload|json_script:"settings-initial-payload"',
+            'settings_route_config|json_script:"settings-route-config"',
+            'Loading settings...',
+            "src/entrypoints/settings.ts",
+        ):
+            with self.subTest(snippet=snippet):
+                self.assertIn(snippet, template_content)
+
+        self.assertNotIn("_settings_tabs.html", template_content)
+        self.assertNotIn("_settings_tab_", template_content)
+        self.assertNotIn("field=profile_form", template_content)
+        self.assertNotIn("field=emails_form", template_content)
+        self.assertNotIn("field=keys_form", template_content)
+        self.assertNotIn("field=password_form", template_content)

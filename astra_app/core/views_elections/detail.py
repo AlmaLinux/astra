@@ -106,28 +106,6 @@ def _natural_join(items: list[str]) -> str:
     return ", ".join(items[:-1]) + f", and {items[-1]}"
 
 
-def _serialize_exclusion_group_messages(exclusion_groups: list[dict[str, object]]) -> list[str]:
-    messages: list[str] = []
-    for exclusion_group in exclusion_groups:
-        candidates = cast(list[dict[str, str]], exclusion_group["candidates"])
-        if not candidates:
-            continue
-        who = _natural_join(
-            [
-                f"{candidate['full_name']} ({candidate['username']})"
-                if candidate["full_name"] != candidate["username"]
-                else candidate["username"]
-                for candidate in candidates
-            ]
-        )
-        max_elected = int(exclusion_group["max_elected"])
-        candidate_word = "candidate" if max_elected == 1 else "candidates"
-        messages.append(
-            f"{who} belong to the {exclusion_group['name']} exclusion group: only {max_elected} {candidate_word} of the group can be elected."
-        )
-    return messages
-
-
 def _candidate_cards_context(election: Election) -> tuple[list[Candidate], list[dict[str, object]], dict[str, object]]:
     candidates = list(Candidate.objects.filter(election=election).order_by("freeipa_username", "id"))
 
@@ -189,51 +167,6 @@ def _serialize_election_list_item(election: Election, *, can_manage_elections: b
         "status": election.status,
         "start_datetime": election.start_datetime.isoformat(),
         "end_datetime": election.end_datetime.isoformat(),
-    }
-
-
-def _serialize_election_info_payload(
-    election: Election,
-    *,
-    request: HttpRequest,
-    can_vote: bool,
-    credential_issued_at: datetime.datetime | None,
-    summary_context: dict[str, object],
-) -> dict[str, object]:
-    start_datetime_local = timezone.localtime(election.start_datetime)
-    end_datetime_local = timezone.localtime(election.end_datetime)
-    exclusion_groups = cast(list[dict[str, object]], summary_context["exclusion_groups"])
-
-    return {
-        "id": election.id,
-        "name": election.name,
-        "description": election.description,
-        "url": election.url,
-        "status": election.status,
-        "start_datetime": election.start_datetime.isoformat(),
-        "end_datetime": election.end_datetime.isoformat(),
-        "start_datetime_display": start_datetime_local.strftime("%Y-%m-%d %H:%M %Z"),
-        "end_datetime_display": end_datetime_local.strftime("%Y-%m-%d %H:%M %Z"),
-        "number_of_seats": election.number_of_seats,
-        "quorum": election.quorum,
-        "eligible_group_cn": election.eligible_group_cn,
-        "can_vote": can_vote,
-        "viewer_email": str(request.user.email or "").strip() or None,
-        "credential_issued_at": credential_issued_at.isoformat() if credential_issued_at is not None else None,
-        "eligibility_min_membership_age_days": settings.ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS,
-        "show_turnout_chart": summary_context["show_turnout_chart"],
-        "turnout_stats": summary_context["turnout_stats"],
-        "turnout_chart_data": summary_context["turnout_chart_data"],
-        "exclusion_group_messages": _serialize_exclusion_group_messages(exclusion_groups),
-        "election_is_finished": summary_context["election_is_finished"],
-        "tally_winners": [
-            {
-                "username": winner["username"],
-                "full_name": winner["full_name"],
-            }
-            for winner in summary_context["tally_winners"]
-        ],
-        "empty_seats": summary_context["empty_seats"],
     }
 
 
@@ -329,7 +262,6 @@ def _election_detail_summary_context(
 
     turnout_stats: dict[str, object] = {}
     turnout_rows: list[dict[str, object]] = []
-    turnout_chart_data: dict[str, object] = {}
     show_turnout_stats = election.status in {Election.Status.open, Election.Status.closed, Election.Status.tallied} and (
         can_manage_elections or election.status == Election.Status.tallied
     )
@@ -384,46 +316,21 @@ def _election_detail_summary_context(
                 .order_by("day")
             )
 
-            counts_by_day: dict[datetime.date, int] = {}
             for row in rows:
                 day = row.get("day")
                 if not isinstance(day, datetime.date):
                     continue
-                count = int(row.get("count") or 0)
-                counts_by_day[day] = count
                 turnout_rows.append(
                     {
                         "day": day.isoformat(),
-                        "count": count,
+                        "count": int(row.get("count") or 0),
                     }
                 )
-
-            start_day = timezone.localdate(election.start_datetime)
-            if election.status == Election.Status.open:
-                end_day = timezone.localdate()
-            else:
-                end_day = timezone.localdate(election.end_datetime)
-            if end_day < start_day:
-                end_day = start_day
-
-            labels: list[str] = []
-            counts: list[int] = []
-            cursor = start_day
-            while cursor <= end_day:
-                labels.append(cursor.isoformat())
-                counts.append(counts_by_day.get(cursor, 0))
-                cursor += datetime.timedelta(days=1)
-
-            turnout_chart_data = {
-                "labels": labels,
-                "counts": counts,
-            }
 
     return {
         "show_turnout_chart": show_turnout_chart,
         "turnout_stats": turnout_stats,
         "turnout_rows": turnout_rows,
-        "turnout_chart_data": turnout_chart_data,
         "exclusion_groups": exclusion_groups_payload,
         "election_is_finished": election.status in {Election.Status.closed, Election.Status.tallied},
         "tally_winners": tally_winners,
@@ -485,33 +392,6 @@ def election_detail(request, election_id: int):
             "eligible_q": str(request.GET.get("eligible_q") or ""),
             "ineligible_q": str(request.GET.get("ineligible_q") or ""),
         },
-    )
-
-
-@require_GET
-def election_detail_info_api(request: HttpRequest, election_id: int) -> JsonResponse:
-    election = _get_active_election(election_id)
-    can_manage_elections = _can_manage_elections(request)
-    _enforce_election_detail_visibility(request, election, can_manage_elections=can_manage_elections)
-    vote_access = _vote_access_context(request=request, election=election)
-    candidates, _candidate_cards, users_by_username = _candidate_cards_context(election)
-    summary_context = _election_detail_summary_context(
-        election=election,
-        candidates=candidates,
-        users_by_username=users_by_username,
-        can_manage_elections=can_manage_elections,
-    )
-
-    return JsonResponse(
-        {
-            "election": _serialize_election_info_payload(
-                election,
-                request=request,
-                can_vote=bool(vote_access["can_vote"]),
-                credential_issued_at=vote_access["credential_issued_at"],
-                summary_context=summary_context,
-            )
-        }
     )
 
 

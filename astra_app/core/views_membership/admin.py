@@ -35,10 +35,7 @@ from core.views_membership_admin import (
     membership_audit_log_organization,
     membership_audit_log_user,
     membership_stats,
-    stats_membership_composition_charts_api,
-    stats_membership_retention_chart_api,
     stats_membership_summary_api,
-    stats_membership_trends_charts_api,
 )
 from core.views_utils import (
     _normalize_str,
@@ -571,9 +568,6 @@ __all__ = [
     "membership_set_expiry",
     "membership_sponsors_list",
     "membership_stats",
-    "stats_membership_composition_charts_api",
-    "stats_membership_retention_chart_api",
     "stats_membership_summary_api",
-    "stats_membership_trends_charts_api",
     "membership_terminate",
 ]

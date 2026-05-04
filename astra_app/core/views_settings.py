@@ -58,8 +58,8 @@ from core.freeipa.agreement import FreeIPAFASAgreement
 from core.freeipa.circuit_breaker import _freeipa_circuit_open
 from core.freeipa.client import _build_freeipa_client, _get_freeipa_client
 from core.freeipa.exceptions import FreeIPAOperationFailed
-from core.freeipa.utils import _is_benign_membership_message
 from core.freeipa.user import DegradedFreeIPAUser, FreeIPAUser
+from core.freeipa.utils import _is_benign_membership_message
 from core.ipa_user_attrs import (
     _add_change,
     _add_change_list_setattr,
@@ -297,6 +297,17 @@ def avatar_delete(request: HttpRequest) -> HttpResponse:
 type TokenDict = dict[str, Any]
 
 
+_SETTINGS_TAB_FORM_CONTEXT_KEYS: Final[dict[str, str | None]] = {
+    "profile": "profile_form",
+    "membership": None,
+    "privacy": "privacy_form",
+    "emails": "emails_form",
+    "keys": "keys_form",
+    "security": "password_form",
+    "agreements": None,
+}
+
+
 # ---------------------------------------------------------------------------
 # Per-tab change builders — shared between save-all and single-tab paths.
 # ---------------------------------------------------------------------------
@@ -329,6 +340,13 @@ def _form_invalid_values(form: object, *, max_value_length: int = 200) -> dict[s
             normalized = f"{normalized[: max_value_length - 3]}..."
         values[name] = normalized
     return values
+
+
+def _get_settings_tab_form(*, context: dict[str, object], tab_id: str) -> object | None:
+    form_key = _SETTINGS_TAB_FORM_CONTEXT_KEYS.get(str(tab_id))
+    if form_key is None:
+        return None
+    return context[form_key]
 
 
 def _log_invalid_form(*, form_label: str, username: str, form: object) -> None:
@@ -942,34 +960,6 @@ def _load_settings_email_validation_state(
     }
 
 
-def _render_settings_email_validation_shell(
-    request: HttpRequest,
-    *,
-    state: dict[str, str],
-    status: int = 200,
-) -> HttpResponse:
-    context = settings_context("emails")
-    shell_context = {
-        **context,
-        "settings_email_validation_api_url": (
-            f'{reverse("api-settings-email-validate-detail")}?token={quote(state["token_string"])}'
-        ),
-        "settings_email_validation_submit_url": request.get_full_path(),
-        "settings_email_validation_cancel_url": settings_url(tab="emails"),
-        "settings_email_validation_csrf_token": get_token(request),
-        "settings_email_validation_username": state["username"],
-        "settings_email_validation_initial_payload": _build_settings_email_validation_payload(
-            attr=state["attr"],
-            value=state["value"],
-        ),
-        "settings_email_validation_route_config": _build_settings_route_config(request, context=context),
-        "settings_email_validation_tabs": [tab.tab_id for tab in context["settings_tabs"]],
-    }
-    if status == 200:
-        return render(request, "core/settings_email_validation.html", shell_context)
-    return render(request, "core/settings_email_validation.html", shell_context, status=status)
-
-
 def _settings_form_widget_type(widget: forms.Widget) -> str:
     if isinstance(widget, forms.HiddenInput):
         return "hidden"
@@ -1460,15 +1450,7 @@ def _build_settings_request_context(
         "show_agreements_tab": show_agreements_tab,
     }
 
-    context["form"] = {
-        "profile": profile_form,
-        "membership": None,
-        "privacy": privacy_form,
-        "emails": emails_form,
-        "keys": keys_form,
-        "security": password_form,
-        "agreements": None,
-    }.get(str(context["active_tab"]))
+    context["form"] = _get_settings_tab_form(context=context, tab_id=str(context["active_tab"]))
 
     return context
 
@@ -1516,18 +1498,28 @@ def _build_settings_route_config(request: HttpRequest, *, context: dict[str, obj
     }
 
 
-def _render_settings_shell(request: HttpRequest, *, context: dict[str, object], status: int = 200) -> HttpResponse:
-    shell_context = {
-        **context,
+def _render_settings_shell(
+    request: HttpRequest,
+    *,
+    context: dict[str, object],
+    status: int = 200,
+    template_name: str = "core/settings_shell.html",
+    bootstrap: dict[str, object] | None = None,
+    transport_keys: tuple[str, str] = ("settings_csrf_token", "settings_route_config"),
+) -> HttpResponse:
+    csrf_token_key, route_config_key = transport_keys
+    bootstrap = bootstrap or {
         "settings_api_url": f'{reverse("api-settings-detail")}?tab={context["active_tab"]}',
         "settings_submit_url": reverse("settings"),
-        "settings_csrf_token": get_token(request),
         "settings_initial_payload": _build_settings_payload(context=context),
-        "settings_route_config": _build_settings_route_config(request, context=context),
     }
-    if status == 200:
-        return render(request, "core/settings_shell.html", shell_context)
-    return render(request, "core/settings_shell.html", shell_context, status=status)
+    shell_context = {
+        **context,
+        **bootstrap,
+        csrf_token_key: get_token(request),
+        route_config_key: _build_settings_route_config(request, context=context),
+    }
+    return render(request, template_name, shell_context, **({"status": status} if status != 200 else {}))
 
 
 def settings_root(request: HttpRequest) -> HttpResponse:
@@ -1598,7 +1590,6 @@ def settings_root(request: HttpRequest) -> HttpResponse:
     country_attr_lower = str(context["country_attr_lower"])
     profile_initial = context["profile_initial"]
     emails_initial = context["emails_initial"]
-    keys_initial = context["keys_initial"]
     profile_form = context["profile_form"]
     privacy_form = context["privacy_form"]
     emails_form = context["emails_form"]
@@ -1712,15 +1703,7 @@ def settings_root(request: HttpRequest) -> HttpResponse:
             # override the server-selected tab via client-side JS. Force the UI to
             # show the tab that contains the validation errors.
             context["force_tab"] = invalid_tab
-            context["form"] = {
-                "profile": profile_form,
-                "membership": None,
-                "privacy": privacy_form,
-                "emails": emails_form,
-                "keys": keys_form,
-                "security": password_form,
-                "agreements": None,
-            }.get(invalid_tab)
+            context["form"] = _get_settings_tab_form(context=context, tab_id=invalid_tab)
             return _render_settings_shell(request, context=context)
 
         # --- Build changes for each tab using shared helpers ---
@@ -1869,82 +1852,96 @@ def settings_root(request: HttpRequest) -> HttpResponse:
             return redirect(return_target)
         return redirect(settings_url(tab="profile", highlight=highlight, status="saved"))
 
-    if requested_tab == "privacy" and privacy_form.is_valid():
-        setattrs, delattrs = _build_privacy_changes(
-            privacy_form=privacy_form,
-            current_private=bool(profile_initial["fasIsPrivate"]),
-        )
-
-        if not setattrs and not delattrs:
-            messages.info(request, "No changes to save.")
-            return redirect(settings_url(tab="privacy"))
-
-        try:
-            _apply_and_report_privacy_update(
+    ordinary_tab_saves = {
+        "privacy": {
+            "form": privacy_form,
+            "build_changes": lambda: _build_privacy_changes(
+                privacy_form=privacy_form,
+                current_private=bool(profile_initial["fasIsPrivate"]),
+            ),
+            "has_changes": lambda changes: bool(changes[0] or changes[1]),
+            "apply": lambda changes: _apply_and_report_privacy_update(
                 request,
                 username,
-                setattrs=setattrs,
-                delattrs=delattrs,
+                setattrs=changes[0],
+                delattrs=changes[1],
                 privacy_form=privacy_form,
-            )
-        except Exception as e:
-            return _settings_update_error_response(
-                request, context, "privacy", e, tab_label="privacy settings", username=username,
-            )
-
-        return redirect(settings_url(tab="privacy", status="saved"))
-
-    if requested_tab == "emails" and emails_form.is_valid():
-        direct_updates, setattrs, delattrs, pending_validations = _build_emails_changes(
-            emails_form=emails_form, emails_initial=emails_initial,
-        )
-
-        if not pending_validations and not direct_updates and not setattrs and not delattrs:
-            messages.info(request, "No changes to save.")
-            return redirect(settings_url(tab="emails"))
-
-        blocked = _block_settings_change_without_country_code(request, user_data=data)
-        if blocked is not None:
-            return blocked
-
-        try:
-            _apply_and_report_emails_update(
-                request, username,
-                direct_updates=direct_updates, setattrs=setattrs, delattrs=delattrs,
-                pending_validations=pending_validations, fu=fu, emails_form=emails_form,
-            )
-        except Exception as e:
-            return _settings_update_error_response(
-                request, context, "emails", e, tab_label="email settings", username=username,
-            )
-
-        return redirect(settings_url(tab="emails"))
-
-    if requested_tab == "keys" and keys_form.is_valid():
-        addattrs, setattrs, delattrs = _build_keys_changes(
-            keys_form=keys_form, data=data,
-        )
-
-        if not addattrs and not setattrs and not delattrs:
-            messages.info(request, "No changes to save.")
-            return redirect(settings_url(tab="keys"))
-
-        blocked = _block_settings_change_without_country_code(request, user_data=data)
-        if blocked is not None:
-            return blocked
-
-        try:
-            _apply_and_report_keys_update(
-                request, username,
-                addattrs=addattrs, setattrs=setattrs, delattrs=delattrs,
+            ),
+            "block_user_data": None,
+            "error_label": "privacy settings",
+            "success_url": settings_url(tab="privacy", status="saved"),
+            "no_changes_url": settings_url(tab="privacy"),
+        },
+        "emails": {
+            "form": emails_form,
+            "build_changes": lambda: _build_emails_changes(
+                emails_form=emails_form,
+                emails_initial=emails_initial,
+            ),
+            "has_changes": lambda changes: bool(changes[0] or changes[1] or changes[2] or changes[3]),
+            "apply": lambda changes: _apply_and_report_emails_update(
+                request,
+                username,
+                direct_updates=changes[0],
+                setattrs=changes[1],
+                delattrs=changes[2],
+                pending_validations=changes[3],
+                fu=fu,
+                emails_form=emails_form,
+            ),
+            "block_user_data": data,
+            "error_label": "email settings",
+            "success_url": settings_url(tab="emails"),
+            "no_changes_url": settings_url(tab="emails"),
+        },
+        "keys": {
+            "form": keys_form,
+            "build_changes": lambda: _build_keys_changes(
                 keys_form=keys_form,
-            )
+                data=data,
+            ),
+            "has_changes": lambda changes: bool(changes[0] or changes[1] or changes[2]),
+            "apply": lambda changes: _apply_and_report_keys_update(
+                request,
+                username,
+                addattrs=changes[0],
+                setattrs=changes[1],
+                delattrs=changes[2],
+                keys_form=keys_form,
+            ),
+            "block_user_data": data,
+            "error_label": "keys",
+            "success_url": settings_url(tab="keys"),
+            "no_changes_url": settings_url(tab="keys"),
+        },
+    }
+    ordinary_tab_save = ordinary_tab_saves.get(requested_tab)
+    if ordinary_tab_save is not None and ordinary_tab_save["form"].is_valid():
+        changes = ordinary_tab_save["build_changes"]()
+
+        if not ordinary_tab_save["has_changes"](changes):
+            messages.info(request, "No changes to save.")
+            return redirect(ordinary_tab_save["no_changes_url"])
+
+        block_user_data = ordinary_tab_save["block_user_data"]
+        if block_user_data is not None:
+            blocked = _block_settings_change_without_country_code(request, user_data=block_user_data)
+            if blocked is not None:
+                return blocked
+
+        try:
+            ordinary_tab_save["apply"](changes)
         except Exception as e:
             return _settings_update_error_response(
-                request, context, "keys", e, tab_label="keys", username=username,
+                request,
+                context,
+                requested_tab,
+                e,
+                tab_label=ordinary_tab_save["error_label"],
+                username=username,
             )
 
-        return redirect(settings_url(tab="keys"))
+        return redirect(ordinary_tab_save["success_url"])
 
     if requested_tab == "security":
         if bool(context["is_otp_add"]) or bool(context["is_otp_confirm"]):
@@ -2363,7 +2360,25 @@ def settings_email_validate(request: HttpRequest) -> HttpResponse:
         messages.success(request, "Your email address has been validated.")
         return redirect(settings_url(tab="emails"))
 
-    return _render_settings_email_validation_shell(request, state=state)
+    context = settings_context("emails")
+    bootstrap = {
+        "settings_email_validation_api_url": f'{reverse("api-settings-email-validate-detail")}?token={quote(state["token_string"])}',
+        "settings_email_validation_submit_url": request.get_full_path(),
+        "settings_email_validation_cancel_url": settings_url(tab="emails"),
+        "settings_email_validation_username": state["username"],
+        "settings_email_validation_initial_payload": _build_settings_email_validation_payload(
+            attr=state["attr"],
+            value=state["value"],
+        ),
+        "settings_email_validation_tabs": [tab.tab_id for tab in context["settings_tabs"]],
+    }
+    return _render_settings_shell(
+        request,
+        context=context,
+        template_name="core/settings_email_validation.html",
+        bootstrap=bootstrap,
+        transport_keys=("settings_email_validation_csrf_token", "settings_email_validation_route_config"),
+    )
 
 
 @login_required

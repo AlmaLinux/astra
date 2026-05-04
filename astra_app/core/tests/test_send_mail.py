@@ -241,11 +241,16 @@ class SendMailTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Send Mail")
-        self.assertContains(resp, "Recipients")
-        self.assertContains(resp, "2")
-        self.assertContains(resp, "{{ full_name }}")
-        self.assertContains(resp, "Alice User")
+        self.assertContains(resp, 'data-send-mail-root=""')
+        self.assertNotContains(resp, 'id="send-mail-form"')
+
+        payload = self._send_mail_initial_payload(resp)
+        self.assertEqual(payload["selected_recipient_mode"], "group")
+        self.assertEqual(payload["recipient_preview"]["recipient_count"], 2)
+        self.assertIn(
+            {"name": "full_name", "example": "Alice User"},
+            payload["recipient_preview"]["variables"],
+        )
 
     def test_csv_recipients_show_header_variables(self) -> None:
         self._login_as_freeipa_user("reviewer")
@@ -266,10 +271,16 @@ class SendMailTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "{{ email }}")
-        self.assertContains(resp, "{{ display_name }}")
-        self.assertContains(resp, "{{ company }}")
-        self.assertContains(resp, "alice@example.com")
+        self.assertContains(resp, 'data-send-mail-root=""')
+        payload = self._send_mail_initial_payload(resp)
+        self.assertEqual(payload["selected_recipient_mode"], "csv")
+        self.assertEqual(payload["recipient_preview"]["recipient_count"], 1)
+        self.assertIn({"name": "email", "example": "alice@example.com"}, payload["recipient_preview"]["variables"])
+        self.assertIn(
+            {"name": "display_name", "example": "Alice User"},
+            payload["recipient_preview"]["variables"],
+        )
+        self.assertIn({"name": "company", "example": "Acme"}, payload["recipient_preview"]["variables"])
 
     def test_manual_recipients_show_variables_and_count(self) -> None:
         self._login_as_freeipa_user("reviewer")
@@ -289,10 +300,11 @@ class SendMailTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Recipient count")
-        self.assertContains(resp, "2")
-        self.assertContains(resp, "{{ email }}")
-        self.assertContains(resp, "jim@example.com")
+        self.assertContains(resp, 'data-send-mail-root=""')
+        payload = self._send_mail_initial_payload(resp)
+        self.assertEqual(payload["selected_recipient_mode"], "manual")
+        self.assertEqual(payload["recipient_preview"]["recipient_count"], 2)
+        self.assertIn({"name": "email", "example": "jim@example.com"}, payload["recipient_preview"]["variables"])
 
     def test_get_prefills_group_recipients_from_query_params(self) -> None:
         self._login_as_freeipa_user("reviewer")
@@ -775,6 +787,53 @@ class SendMailTests(TestCase):
         self.assertEqual(payload["compose"]["preview"]["text"], "Text body for jim@example.com")
         self.assertEqual(payload["compose"]["preview"]["html"], "<p>HTML body for jim@example.com</p>")
 
+    def test_invalid_post_preserves_selected_template_and_derivable_manual_preview(self) -> None:
+        from post_office.models import EmailTemplate
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser(
+            "reviewer",
+            {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]},
+        )
+
+        tpl = EmailTemplate.objects.create(
+            name="send-mail-invalid-post-template",
+            subject="Hello {{ email }}",
+            content="Text body for {{ email }}",
+            html_content="<p>HTML body for {{ email }}</p>",
+        )
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
+        ):
+            resp = self.client.post(
+                reverse("send-mail"),
+                data={
+                    "recipient_mode": "manual",
+                    "manual_to": "jim@example.com",
+                    "email_template_id": str(tpl.pk),
+                    "subject": "Hello {{ email }}",
+                    "text_content": "Text body for {{ email }}",
+                    "html_content": "<p>HTML body for {{ email }}</p>",
+                    "reply_to": "not-an-email",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'data-send-mail-root=""')
+        payload = self._send_mail_initial_payload(resp)
+        self.assertEqual(payload["selected_recipient_mode"], "manual")
+        self.assertEqual(payload["recipient_preview"]["recipient_count"], 1)
+        self.assertIn({"name": "email", "example": "jim@example.com"}, payload["recipient_preview"]["variables"])
+        self.assertEqual(payload["compose"]["selected_template_id"], tpl.pk)
+        self.assertEqual(payload["compose"]["preview"]["subject"], "Hello jim@example.com")
+        self.assertEqual(payload["compose"]["preview"]["text"], "Text body for jim@example.com")
+        self.assertEqual(payload["compose"]["preview"]["html"], "<p>HTML body for jim@example.com</p>")
+        template_field = next(field for field in payload["form"]["fields"] if field["name"] == "email_template_id")
+        self.assertEqual(template_field["value"], str(tpl.pk))
+
     def test_csv_mode_hides_org_claim_template_choice(self) -> None:
         from post_office.models import EmailTemplate
 
@@ -1013,8 +1072,14 @@ class SendMailTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Available variables")
-        self.assertContains(resp, 'data-compose-action="copy-html-to-text"')
+        self.assertContains(resp, 'data-send-mail-root=""')
+        payload = self._send_mail_initial_payload(resp)
+        self.assertEqual(payload["selected_recipient_mode"], "group")
+        self.assertEqual(payload["recipient_preview"]["recipient_count"], 1)
+        self.assertIn(
+            {"name": "full_name", "example": "Alice User"},
+            payload["recipient_preview"]["variables"],
+        )
 
     def test_save_as_template_appears_and_is_selected(self) -> None:
         from post_office.models import EmailTemplate
@@ -1078,10 +1143,82 @@ class SendMailTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         tpl = EmailTemplate.objects.get(name="New Send Mail Template")
-        self.assertContains(resp, "New Send Mail Template")
-        self.assertContains(resp, f'<option value="{tpl.pk}" selected>')
-        self.assertNotContains(resp, f'<option value="{original.pk}" selected>')
-        self.assertContains(resp, f'id="send-mail-autoload-template-id" value="{tpl.pk}"')
+        self.assertContains(resp, 'data-send-mail-root=""')
+        payload = self._send_mail_initial_payload(resp)
+        self.assertIn({"id": tpl.pk, "name": "New Send Mail Template"}, payload["templates"])
+        self.assertEqual(payload["created_template_id"], tpl.pk)
+        self.assertEqual(payload["compose"]["selected_template_id"], tpl.pk)
+        self.assertNotEqual(payload["compose"]["selected_template_id"], original.pk)
+
+    def test_save_existing_template_keeps_selection_and_updates_snapshot(self) -> None:
+        from post_office.models import EmailTemplate
+
+        self._login_as_freeipa_user("reviewer")
+
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
+
+        class _FakeGroup:
+            cn = "example-group"
+            description = ""
+
+            def member_usernames_recursive(self) -> set[str]:
+                return {"alice"}
+
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "displayname": ["Alice User"],
+                "mail": ["alice@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        def _get_user(username: str, **_kwargs):
+            if username == "reviewer":
+                return reviewer
+            if username == "alice":
+                return alice
+            return None
+
+        existing = EmailTemplate.objects.create(
+            name="Existing Send Mail Template",
+            subject="Original subject",
+            content="Original text",
+            html_content="<p>Original html</p>",
+        )
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=_FakeGroup()),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[_FakeGroup()]),
+        ):
+            resp = self.client.post(
+                reverse("send-mail"),
+                data={
+                    "recipient_mode": "group",
+                    "group_cn": "example-group",
+                    "email_template_id": str(existing.pk),
+                    "subject": "Updated {{ full_name }}",
+                    "text_content": "Updated text for {{ full_name }}",
+                    "html_content": "<p>Updated html for {{ full_name }}</p>",
+                    "action": "save",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        existing.refresh_from_db()
+        self.assertEqual(existing.subject, "Updated {{ full_name }}")
+        self.assertEqual(existing.content, "Updated text for {{ full_name }}")
+        self.assertEqual(existing.html_content, "<p>Updated html for {{ full_name }}</p>")
+
+        payload = self._send_mail_initial_payload(resp)
+        self.assertEqual(payload["created_template_id"], None)
+        self.assertEqual(payload["compose"]["selected_template_id"], existing.pk)
+        self.assertIn({"id": existing.pk, "name": "Existing Send Mail Template"}, payload["templates"])
 
     def test_send_emails_renders_per_recipient(self) -> None:
         from django.conf import settings
@@ -1472,7 +1609,7 @@ class SendMailTests(TestCase):
             patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
             patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
             patch("core.views_send_mail.queue_composed_email") as queue_composed_mock,
-            patch("core.views_account_invitations.queue_templated_email", return_value=SimpleNamespace(id=777)),
+            patch("core.account_invitations.queue_templated_email", return_value=SimpleNamespace(id=777)),
         ):
             response = self.client.post(
                 reverse("send-mail"),
@@ -1520,7 +1657,7 @@ class SendMailTests(TestCase):
             patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
             patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
             patch("core.views_send_mail.queue_composed_email") as queue_composed_mock,
-            patch("core.views_account_invitations.queue_templated_email", return_value=SimpleNamespace(id=777)) as queue_mock,
+            patch("core.account_invitations.queue_templated_email", return_value=SimpleNamespace(id=777)) as queue_mock,
         ):
             response = self.client.post(
                 reverse("send-mail"),
@@ -1559,7 +1696,7 @@ class SendMailTests(TestCase):
             patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
             patch("core.views_send_mail.allow_request", return_value=False),
             patch("core.views_send_mail.queue_composed_email") as queue_composed_mock,
-            patch("core.views_account_invitations.queue_templated_email") as queue_templated_mock,
+            patch("core.account_invitations.queue_templated_email") as queue_templated_mock,
         ):
             response = self.client.post(
                 reverse("send-mail"),
@@ -1598,7 +1735,7 @@ class SendMailTests(TestCase):
             patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
             patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
             patch("core.views_send_mail.queue_composed_email") as queue_composed_mock,
-            patch("core.views_account_invitations.queue_templated_email") as queue_templated_mock,
+            patch("core.account_invitations.queue_templated_email") as queue_templated_mock,
         ):
             response = self.client.post(
                 reverse("send-mail"),
@@ -1633,7 +1770,7 @@ class SendMailTests(TestCase):
             patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer),
             patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
             patch("core.views_send_mail.queue_composed_email") as queue_composed_mock,
-            patch("core.views_account_invitations.queue_templated_email") as queue_templated_mock,
+            patch("core.account_invitations.queue_templated_email") as queue_templated_mock,
         ):
             response = self.client.post(
                 reverse("send-mail"),
@@ -1672,7 +1809,7 @@ class SendMailTests(TestCase):
             patch("core.freeipa.group.FreeIPAGroup.all", return_value=[]),
             patch("core.freeipa.user.FreeIPAUser.all", return_value=[]),
             patch("core.views_send_mail.queue_composed_email") as queue_composed_mock,
-            patch("core.views_account_invitations.queue_templated_email") as queue_templated_mock,
+            patch("core.account_invitations.queue_templated_email") as queue_templated_mock,
         ):
             response = self.client.post(
                 reverse("send-mail"),

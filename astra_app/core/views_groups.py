@@ -56,26 +56,22 @@ def group_search(request: HttpRequest) -> HttpResponse:
     return JsonResponse({"results": results})
 
 
-def _sort_key(group: FreeIPAGroup) -> str:
-    return group.cn.lower()
-
-
-def _matches_query(group: FreeIPAGroup, query: str) -> bool:
-    if not query:
-        return True
-    query_lower = query.lower()
-    if query_lower in group.cn.lower():
-        return True
-    desc = (group.description or "").lower()
-    return query_lower in desc
-
-
 def _groups_page_context(request: HttpRequest) -> dict[str, object]:
     q = _normalize_str(request.GET.get("q"))
     page_number = _normalize_str(request.GET.get("page")) or None
+    q_lower = q.lower()
     groups_list = FreeIPAGroup.all()
-    groups_filtered = [g for g in groups_list if g.fas_group and _matches_query(g, q)]
-    groups_sorted = sorted(groups_filtered, key=_sort_key)
+    groups_filtered = [
+        group
+        for group in groups_list
+        if group.fas_group
+        and (
+            not q_lower
+            or q_lower in group.cn.lower()
+            or q_lower in (group.description or "").lower()
+        )
+    ]
+    groups_sorted = sorted(groups_filtered, key=lambda group: group.cn.lower())
 
     for group in groups_sorted:
         group.member_count = group.member_count_recursive()
@@ -276,14 +272,18 @@ def _json_error(message: str, *, status: int) -> JsonResponse:
     return JsonResponse({"ok": False, "error": message}, status=status)
 
 
+def _group_detail_url_template() -> str:
+    return reverse("group-detail", args=["placeholder-group"]).replace(
+        "placeholder-group", "__group_name__"
+    )
+
+
 def groups(request: HttpRequest) -> HttpResponse:
     return render(
         request,
         "core/groups.html",
         {
-            "group_detail_url_template": reverse("group-detail", args=["placeholder-group"]).replace(
-                "placeholder-group", "__group_name__"
-            ),
+            "group_detail_url_template": _group_detail_url_template(),
         },
     )
 
@@ -296,9 +296,7 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
         "core/group_detail.html",
         {
             "group": group,
-            "group_detail_url_template": reverse("group-detail", args=["placeholder-group"]).replace(
-                "placeholder-group", "__group_name__"
-            ),
+            "group_detail_url_template": _group_detail_url_template(),
             "group_edit_url_template": reverse("group-edit", args=["placeholder-group"]).replace(
                 "placeholder-group", "__group_name__"
             ),
@@ -320,8 +318,8 @@ def group_edit(request: HttpRequest, name: str) -> HttpResponse:
     if isinstance(request.user, FreeIPAUser):
         user_groups = set(request.user.groups_list)
 
-    sponsor_groups_lower = {g.lower() for g in sponsor_groups}
-    user_groups_lower = {g.lower() for g in user_groups}
+    sponsor_groups_lower = {group_name.lower() for group_name in sponsor_groups}
+    user_groups_lower = {group_name.lower() for group_name in user_groups}
     is_sponsor = (username in sponsors) or bool(sponsor_groups_lower & user_groups_lower)
     if not is_sponsor:
         raise PermissionDenied("Only sponsors can edit group info.")
@@ -478,6 +476,7 @@ def group_action_api(request: HttpRequest, name: str) -> JsonResponse:
             return _json_error("Only Team Leads can manage group members.", status=403)
         if not target:
             return _json_error("Please provide a username.", status=400)
+
         if action == "add_member" and target == username:
             return _json_error("You can't add yourself to a group.", status=400)
 

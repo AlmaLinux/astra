@@ -4,9 +4,8 @@ from unittest.mock import patch
 
 from django.conf import settings
 from django.core.cache import cache
-from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import RequestFactory, TestCase, override_settings
-from django.urls import reverse
+from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
 
 from core import elections_services
@@ -104,7 +103,11 @@ class ElectionsApiTests(TestCase):
         self.assertNotIn("edit_url", payload["items"][0])
         self.assertEqual(payload["pagination"]["page"], 1)
 
-    def test_election_detail_info_api_returns_data_only_for_draft_manager(self) -> None:
+    def test_election_detail_info_api_route_is_retired(self) -> None:
+        with self.assertRaises(NoReverseMatch):
+            reverse("api-election-detail-info", args=[123])
+
+    def test_election_detail_page_api_returns_data_only_for_draft_manager(self) -> None:
         self._login_as_freeipa_user("admin")
         FreeIPAPermissionGrant.objects.create(
             principal_type=FreeIPAPermissionGrant.PrincipalType.user,
@@ -129,7 +132,7 @@ class ElectionsApiTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin):
             response = self.client.get(
-                reverse("api-election-detail-info", args=[election.id]),
+                reverse("api-election-detail-page", args=[election.id]),
                 HTTP_ACCEPT="application/json",
             )
 
@@ -142,6 +145,7 @@ class ElectionsApiTests(TestCase):
         self.assertEqual(payload["election"]["number_of_seats"], 2)
         self.assertEqual(payload["election"]["quorum"], 25)
         self.assertFalse(payload["election"]["can_vote"])
+        self.assertEqual(payload["election"]["viewer_timezone"], "UTC")
         self.assertNotIn("can_manage_elections", payload["election"])
         self.assertNotIn("detail_url", payload["election"])
         self.assertNotIn("vote_url", payload["election"])
@@ -152,8 +156,11 @@ class ElectionsApiTests(TestCase):
         self.assertNotIn("public_audit_url", payload["election"])
         self.assertNotIn("extend_end_api_url", payload["election"])
         self.assertNotIn("conclude_api_url", payload["election"])
+        self.assertNotIn("start_datetime_display", payload["election"])
+        self.assertNotIn("end_datetime_display", payload["election"])
+        self.assertNotIn("exclusion_group_messages", payload["election"])
 
-    def test_election_detail_info_api_omits_open_manager_lifecycle_api_urls(self) -> None:
+    def test_election_detail_page_api_omits_lifecycle_and_public_artifact_urls(self) -> None:
         self._login_as_freeipa_user("admin")
         FreeIPAPermissionGrant.objects.create(
             principal_type=FreeIPAPermissionGrant.PrincipalType.user,
@@ -174,7 +181,7 @@ class ElectionsApiTests(TestCase):
         admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin):
             response = self.client.get(
-                reverse("api-election-detail-info", args=[election.id]),
+                reverse("api-election-detail-page", args=[election.id]),
                 HTTP_ACCEPT="application/json",
             )
 
@@ -182,8 +189,10 @@ class ElectionsApiTests(TestCase):
         payload = json.loads(response.content)
         self.assertNotIn("extend_end_api_url", payload["election"])
         self.assertNotIn("conclude_api_url", payload["election"])
+        self.assertNotIn("public_ballots_url", payload["election"])
+        self.assertNotIn("public_audit_url", payload["election"])
 
-    def test_election_detail_info_api_includes_action_card_state_for_open_voter(self) -> None:
+    def test_election_detail_page_api_includes_action_card_state_for_open_voter(self) -> None:
         self._login_as_freeipa_user("viewer")
 
         now = timezone.now()
@@ -231,7 +240,7 @@ class ElectionsApiTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
             response = self.client.get(
-                reverse("api-election-detail-info", args=[election.id]),
+                reverse("api-election-detail-page", args=[election.id]),
                 HTTP_ACCEPT="application/json",
             )
 
@@ -246,43 +255,7 @@ class ElectionsApiTests(TestCase):
         )
         self.assertTrue(payload["election"]["credential_issued_at"])
 
-    def test_election_detail_info_api_omits_public_artifact_urls(self) -> None:
-        self._login_as_freeipa_user("viewer")
-
-        now = timezone.now()
-        election = Election.objects.create(
-            name="Finished election",
-            description="",
-            start_datetime=now - datetime.timedelta(days=2),
-            end_datetime=now - datetime.timedelta(days=1),
-            number_of_seats=1,
-            status=Election.Status.closed,
-        )
-        election.public_ballots_file.save(
-            "ballots.json",
-            SimpleUploadedFile("ballots.json", b"{}", content_type="application/json"),
-            save=False,
-        )
-        election.public_audit_file.save(
-            "audit.json",
-            SimpleUploadedFile("audit.json", b"{}", content_type="application/json"),
-            save=False,
-        )
-        election.save(update_fields=["public_ballots_file", "public_audit_file"])
-
-        viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "memberof_group": []})
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
-            response = self.client.get(
-                reverse("api-election-detail-info", args=[election.id]),
-                HTTP_ACCEPT="application/json",
-            )
-
-        self.assertEqual(response.status_code, 200)
-        payload = json.loads(response.content)
-        self.assertNotIn("public_ballots_url", payload["election"])
-        self.assertNotIn("public_audit_url", payload["election"])
-
-    def test_election_detail_info_api_includes_exclusion_and_tally_summary(self) -> None:
+    def test_election_detail_page_api_includes_finished_summary_fields(self) -> None:
         self._login_as_freeipa_user("admin")
         FreeIPAPermissionGrant.objects.create(
             principal_type=FreeIPAPermissionGrant.PrincipalType.user,
@@ -347,7 +320,7 @@ class ElectionsApiTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             response = self.client.get(
-                reverse("api-election-detail-info", args=[election.id]),
+                reverse("api-election-detail-page", args=[election.id]),
                 HTTP_ACCEPT="application/json",
             )
 
@@ -357,12 +330,22 @@ class ElectionsApiTests(TestCase):
         self.assertEqual(payload["election"]["empty_seats"], 1)
         self.assertEqual(payload["election"]["tally_winners"][0]["username"], "alice")
         self.assertEqual(payload["election"]["tally_winners"][0]["full_name"], "Alice User")
-        self.assertEqual(len(payload["election"]["exclusion_group_messages"]), 1)
-        self.assertIn("Employees of X", payload["election"]["exclusion_group_messages"][0])
-        self.assertIn("only 1", payload["election"]["exclusion_group_messages"][0])
+        self.assertEqual(
+            payload["election"]["exclusion_groups"],
+            [
+                {
+                    "name": "Employees of X",
+                    "max_elected": 1,
+                    "candidates": [
+                        {"username": "alice", "full_name": "Alice User"},
+                        {"username": "bob", "full_name": "Bob User"},
+                    ],
+                }
+            ],
+        )
         self.assertTrue(payload["election"]["show_turnout_chart"])
         self.assertIn("participating_voter_count", payload["election"]["turnout_stats"])
-        self.assertEqual(set(payload["election"]["turnout_chart_data"]), {"labels", "counts"})
+        self.assertEqual(payload["election"]["turnout_rows"], [])
 
     def test_election_detail_candidates_api_returns_paginated_candidate_cards(self) -> None:
         self._login_as_freeipa_user("viewer")
@@ -1045,6 +1028,36 @@ class ElectionsApiTests(TestCase):
         election.refresh_from_db()
         self.assertEqual(timezone.localtime(election.end_datetime).strftime("%Y-%m-%dT%H:%M"), new_end)
 
+    def test_election_extend_end_api_requires_confirmation_returns_json_error_shape(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="API extend confirmation election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+
+        admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+        new_end = timezone.localtime(election.end_datetime + datetime.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin):
+            response = self.client.post(
+                reverse("api-election-extend-end", args=[election.id]),
+                data=json.dumps({"end_datetime": new_end}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"ok": False, "errors": ["Confirmation required."]})
+
     def test_election_conclude_api_closes_open_election_for_manager(self) -> None:
         self._login_as_freeipa_user("admin")
         FreeIPAPermissionGrant.objects.create(
@@ -1077,6 +1090,35 @@ class ElectionsApiTests(TestCase):
         self.assertEqual(payload["election"]["status"], Election.Status.closed)
         election.refresh_from_db()
         self.assertEqual(election.status, Election.Status.closed)
+
+    def test_election_conclude_api_requires_confirmation_returns_json_error_shape(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="API conclude confirmation election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+
+        admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin):
+            response = self.client.post(
+                reverse("api-election-conclude", args=[election.id]),
+                data=json.dumps({"skip_tally": True}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"ok": False, "errors": ["Confirmation required."]})
 
     def test_election_conclude_api_returns_closed_status_when_tally_fails_after_close(self) -> None:
         self._login_as_freeipa_user("admin")

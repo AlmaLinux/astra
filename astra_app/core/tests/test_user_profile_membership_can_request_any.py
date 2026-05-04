@@ -26,7 +26,7 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
         session["_freeipa_username"] = username
         session.save()
 
-    def test_membership_can_request_any_false_when_all_eligible_types_have_open_requests(self) -> None:
+    def test_user_profile_detail_membership_can_request_any_false_when_all_eligible_types_have_open_requests(self) -> None:
         # Ensure the test is deterministic: only two membership types are requestable.
         MembershipType.objects.update(enabled=False)
 
@@ -78,13 +78,22 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
             patch("core.views_users.has_enabled_agreements", return_value=False),
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
             patch("core.freeipa.user.FreeIPAUser.get", return_value=alex),
+            patch(
+                "core.views_users.membership_review_permissions",
+                return_value={
+                    "membership_can_view": False,
+                    "membership_can_add": False,
+                    "membership_can_change": False,
+                    "membership_can_delete": False,
+                },
+            ),
         ):
-            resp = self.client.get(reverse("api-user-profile", kwargs={"username": "alex"}))
+            resp = self.client.get(reverse("api-user-profile-detail", kwargs={"username": "alex"}))
 
         self.assertEqual(resp.status_code, 200)
         self.assertFalse(resp.json()["membership"]["canRequestAny"])
 
-    def test_user_profile_does_not_recommend_request_after_rejection(self) -> None:
+    def test_user_profile_detail_does_not_recommend_request_after_rejection(self) -> None:
         # Ensure the test is deterministic: only one membership type is requestable.
         MembershipType.objects.update(enabled=False)
 
@@ -123,8 +132,17 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
             patch("core.views_users.has_enabled_agreements", return_value=False),
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
             patch("core.freeipa.user.FreeIPAUser.get", return_value=alex),
+            patch(
+                "core.views_users.membership_review_permissions",
+                return_value={
+                    "membership_can_view": False,
+                    "membership_can_add": False,
+                    "membership_can_change": False,
+                    "membership_can_delete": False,
+                },
+            ),
         ):
-            resp = self.client.get(reverse("api-user-profile", kwargs={"username": "alex"}))
+            resp = self.client.get(reverse("api-user-profile-detail", kwargs={"username": "alex"}))
 
         self.assertEqual(resp.status_code, 200)
         recommended = resp.json()["accountSetup"]["recommendedActions"]
@@ -133,7 +151,7 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
             "Did not expect a membership request recommendation after a rejected request.",
         )
 
-    def test_membership_can_request_any_uses_effective_category_when_denorm_drifts(self) -> None:
+    def test_user_profile_detail_membership_can_request_any_uses_effective_category_when_denorm_drifts(self) -> None:
         MembershipType.objects.update(enabled=False)
 
         MembershipType.objects.update_or_create(
@@ -169,13 +187,22 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
             patch("core.views_users.has_enabled_agreements", return_value=False),
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
             patch("core.freeipa.user.FreeIPAUser.get", return_value=alex),
+            patch(
+                "core.views_users.membership_review_permissions",
+                return_value={
+                    "membership_can_view": False,
+                    "membership_can_add": False,
+                    "membership_can_change": False,
+                    "membership_can_delete": False,
+                },
+            ),
         ):
-            resp = self.client.get(reverse("api-user-profile", kwargs={"username": "alex"}))
+            resp = self.client.get(reverse("api-user-profile-detail", kwargs={"username": "alex"}))
 
         self.assertEqual(resp.status_code, 200)
         self.assertFalse(resp.json()["membership"]["canRequestAny"])
 
-    def test_user_profile_required_actions_use_context_aware_settings_links(self) -> None:
+    def test_user_profile_detail_required_actions_preserve_ids_and_agreement_metadata(self) -> None:
         MembershipType.objects.update(enabled=False)
 
         alex = FreeIPAUser(
@@ -197,25 +224,30 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
             patch("core.views_users.list_agreements_for_user", return_value=[agreement]),
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
             patch("core.freeipa.user.FreeIPAUser.get", return_value=alex),
+            patch(
+                "core.views_users.membership_review_permissions",
+                return_value={
+                    "membership_can_view": False,
+                    "membership_can_add": False,
+                    "membership_can_change": False,
+                    "membership_can_delete": False,
+                },
+            ),
         ):
-            resp = self.client.get(reverse("api-user-profile", kwargs={"username": "alex"}))
+            resp = self.client.get(reverse("api-user-profile-detail", kwargs={"username": "alex"}))
 
         self.assertEqual(resp.status_code, 200)
         required_actions = {action["id"]: action for action in resp.json()["accountSetup"]["requiredActions"]}
 
         coc_action = required_actions["coc-not-signed-alert"]
-        self.assertEqual(coc_action["label"], "Sign the AlmaLinux Community Code of Conduct")
-        self.assertEqual(coc_action["urlLabel"], "Review & sign")
         self.assertEqual(coc_action["agreementCn"], "AlmaLinux Community Code of Conduct")
-        self.assertNotIn("url", coc_action)
+        self.assertEqual(set(coc_action.keys()), {"id", "agreementCn"})
 
         country_action = required_actions["country-code-missing-alert"]
-        self.assertEqual(country_action["label"], "Add a valid ISO 3166-1 alpha-2 country code")
-        self.assertEqual(country_action["urlLabel"], "Set country code")
         self.assertNotIn("agreementCn", country_action)
-        self.assertNotIn("url", country_action)
+        self.assertEqual(country_action, {"id": "country-code-missing-alert"})
 
-    def test_committee_viewer_sees_country_row_first_with_human_readable_name(self) -> None:
+    def test_user_profile_detail_committee_viewer_gets_country_code(self) -> None:
         alex_data = {
             "uid": ["alex"],
             "mail": ["alex@example.com"],
@@ -248,15 +280,24 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
             patch("core.views_users.has_enabled_agreements", return_value=False),
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch(
+                "core.views_users.membership_review_permissions",
+                return_value={
+                    "membership_can_view": True,
+                    "membership_can_add": False,
+                    "membership_can_change": False,
+                    "membership_can_delete": False,
+                },
+            ),
         ):
-            resp = self.client.get(reverse("api-user-profile", kwargs={"username": "alex"}))
+            resp = self.client.get(reverse("api-user-profile-detail", kwargs={"username": "alex"}))
 
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
         self.assertTrue(payload["summary"]["viewerIsMembershipCommittee"])
-        self.assertEqual(payload["summary"]["profileCountry"], "United States")
+        self.assertEqual(payload["summary"]["countryCode"], "US")
 
-    def test_committee_viewer_sees_not_provided_when_country_missing(self) -> None:
+    def test_user_profile_detail_committee_viewer_gets_empty_country_code_when_missing(self) -> None:
         alex = FreeIPAUser(
             "alex",
             {
@@ -286,15 +327,24 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
             patch("core.views_users.has_enabled_agreements", return_value=False),
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch(
+                "core.views_users.membership_review_permissions",
+                return_value={
+                    "membership_can_view": True,
+                    "membership_can_add": False,
+                    "membership_can_change": False,
+                    "membership_can_delete": False,
+                },
+            ),
         ):
-            resp = self.client.get(reverse("api-user-profile", kwargs={"username": "alex"}))
+            resp = self.client.get(reverse("api-user-profile-detail", kwargs={"username": "alex"}))
 
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
         self.assertTrue(payload["summary"]["viewerIsMembershipCommittee"])
-        self.assertEqual(payload["summary"]["profileCountry"], "Not provided")
+        self.assertEqual(payload["summary"]["countryCode"], "")
 
-    def test_non_committee_viewer_does_not_see_country_row(self) -> None:
+    def test_user_profile_detail_non_committee_viewer_does_not_get_country_code(self) -> None:
         alex_data = {
             "uid": ["alex"],
             "mail": ["alex@example.com"],
@@ -327,11 +377,20 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
             patch("core.views_users.has_enabled_agreements", return_value=False),
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch(
+                "core.views_users.membership_review_permissions",
+                return_value={
+                    "membership_can_view": False,
+                    "membership_can_add": False,
+                    "membership_can_change": False,
+                    "membership_can_delete": False,
+                },
+            ),
         ):
-            resp = self.client.get(reverse("api-user-profile", kwargs={"username": "alex"}))
+            resp = self.client.get(reverse("api-user-profile-detail", kwargs={"username": "alex"}))
 
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
         self.assertFalse(payload["summary"]["viewerIsMembershipCommittee"])
         self.assertEqual(payload["summary"]["pronouns"], "they/them")
-        self.assertEqual(payload["summary"]["profileCountry"], "")
+        self.assertEqual(payload["summary"]["countryCode"], "")

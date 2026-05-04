@@ -8,6 +8,24 @@ from core.freeipa.user import FreeIPAUser
 from core.models import Organization
 from core.user_labels import user_choice_from_freeipa
 
+ORGANIZATION_CONTACT_GROUP_DESCRIPTORS = (
+    {
+        "key": "business",
+        "label": "Business",
+        "description": "We will send legal and billing notices to this email address, unless you tell us otherwise.",
+    },
+    {
+        "key": "marketing",
+        "label": "PR and marketing",
+        "description": "We will contact this person about press releases and sponsor marketing benefits.",
+    },
+    {
+        "key": "technical",
+        "label": "Technical",
+        "description": "We will send technical notices to this email address, unless you tell us otherwise.",
+    },
+)
+
 
 class OrganizationEditForm(StyledModelForm):
     representative = forms.ChoiceField(
@@ -75,6 +93,7 @@ class OrganizationEditForm(StyledModelForm):
     @override
     def __init__(self, *args, **kwargs) -> None:
         self.can_select_representatives: bool = bool(kwargs.pop("can_select_representatives", False))
+        representative_search_url = str(kwargs.pop("representative_search_url", "") or "").strip()
         super().__init__(*args, **kwargs)
 
         self.fields["business_contact_name"].required = True
@@ -114,6 +133,9 @@ class OrganizationEditForm(StyledModelForm):
             # Representative is defaulted to the creator; only membership admins can change.
             del self.fields["representative"]
         else:
+            if representative_search_url:
+                self.fields["representative"].widget.attrs["data-ajax-url"] = representative_search_url
+
             # Select2 uses AJAX, so only include currently-selected value as a choice.
             current = ""
             if self.is_bound:

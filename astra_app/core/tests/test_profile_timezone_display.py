@@ -23,7 +23,7 @@ class ProfileTimezoneDisplayTests(TestCase):
         setattr(request, "_messages", FallbackStorage(request))
         return request
 
-    def test_profile_prefers_freeipa_fasTimezone_for_display(self):
+    def test_user_profile_detail_prefers_freeipa_fasTimezone_for_display(self):
         factory = RequestFactory()
         request = factory.get("/")
         self._add_session_and_messages(request)
@@ -59,11 +59,20 @@ class ProfileTimezoneDisplayTests(TestCase):
             patch("core.views_users._is_membership_committee_viewer", autospec=True, return_value=False),
             patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]),
             patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
-            patch("core.views_users.resolve_avatar_urls_for_users", autospec=True, return_value=({}, 0, 0)),
+            patch(
+                "core.views_users.membership_review_permissions",
+                autospec=True,
+                return_value={
+                    "membership_can_view": False,
+                    "membership_can_add": False,
+                    "membership_can_change": False,
+                    "membership_can_delete": False,
+                },
+            ),
         ):
-            response = views_users.user_profile_api(request, "alice")
+            response = views_users.user_profile_detail_api(request, "alice")
 
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.content)
         self.assertEqual(payload["summary"]["timezoneName"], "Europe/Paris")
-        self.assertTrue(payload["summary"]["currentTimeLabel"])
+        self.assertNotIn("currentTimeLabel", payload["summary"])

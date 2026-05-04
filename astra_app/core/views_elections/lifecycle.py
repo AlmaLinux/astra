@@ -168,14 +168,13 @@ def election_send_mail_credentials(request: HttpRequest, election_id: int) -> Ht
     election = _get_active_election(election_id)
     result = _send_mail_credentials_result(request=request, election=election, data=_request_data(request))
 
-    if result.success and result.redirect_url:
-        return redirect(result.redirect_url)
+    if not result.success:
+        if result.status_code == 429:
+            return HttpResponse(result.message, status=429)
+        messages.error(request, result.message)
+        return redirect("election-detail", election_id=election.id)
 
-    if result.status_code == 429:
-        return HttpResponse(result.message, status=429)
-
-    messages.error(request, result.message)
-    return redirect("election-detail", election_id=election.id)
+    return redirect(result.redirect_url)
 
 
 def _request_data(request: HttpRequest) -> Mapping[str, object]:
@@ -247,13 +246,11 @@ def election_conclude(request, election_id: int):
 
     result = _conclude_election(request=request, election=election, skip_tally=skip_tally)
     if result.ok:
-        if result.tally_failed:
-            messages.warning(request, result.message)
-        else:
-            messages.success(request, result.message)
-        return redirect("election-detail", election_id=election.id)
+        message_writer = messages.warning if result.tally_failed else messages.success
+    else:
+        message_writer = messages.error
 
-    messages.error(request, result.message)
+    message_writer(request, result.message)
     return redirect("election-detail", election_id=election.id)
 
 
@@ -267,12 +264,12 @@ def election_extend_end(request, election_id: int):
         return HttpResponseBadRequest("Confirmation required.")
 
     result = _extend_election_end_from_post(request=request, election=election, data=data)
-    if not result.success:
+    if result.success:
+        messages.success(request, "Election end date extended.")
+    else:
         for msg in result.errors:
             messages.error(request, str(msg))
-        return redirect("election-detail", election_id=election.id)
 
-    messages.success(request, "Election end date extended.")
     return redirect("election-detail", election_id=election.id)
 
 
@@ -286,18 +283,18 @@ def election_extend_end_api(request: HttpRequest, election_id: int) -> JsonRespo
         return JsonResponse({"ok": False, "errors": ["Confirmation required."]}, status=400)
 
     result = _extend_election_end_from_post(request=request, election=election, data=data)
-    if not result.success:
-        return JsonResponse({"ok": False, "errors": list(result.errors)}, status=400)
-
-    return JsonResponse(
-        {
-            "ok": True,
-            "election": {
-                "id": election.id,
-                "end_datetime": election.end_datetime.isoformat(),
-            },
+    payload: dict[str, object] = {"ok": result.success}
+    status_code = 200
+    if result.success:
+        payload["election"] = {
+            "id": election.id,
+            "end_datetime": election.end_datetime.isoformat(),
         }
-    )
+    else:
+        payload["errors"] = list(result.errors)
+        status_code = 400
+
+    return JsonResponse(payload, status=status_code)
 
 
 @require_POST
@@ -314,22 +311,25 @@ def election_conclude_api(request: HttpRequest, election_id: int) -> JsonRespons
         election=election,
         skip_tally=bool(data.get("skip_tally")),
     )
-    if not result.ok:
-        return JsonResponse({"ok": False, "errors": [result.message]}, status=400)
+    payload: dict[str, object] = {"ok": result.ok}
+    status_code = 200
+    if result.ok:
+        election.refresh_from_db(fields=["status"])
+        payload.update(
+            {
+                "message": result.message,
+                "tally_failed": result.tally_failed,
+                "election": {
+                    "id": election.id,
+                    "status": election.status,
+                },
+            }
+        )
+    else:
+        payload["errors"] = [result.message]
+        status_code = 400
 
-    election.refresh_from_db(fields=["status"])
-
-    return JsonResponse(
-        {
-            "ok": True,
-            "message": result.message,
-            "tally_failed": result.tally_failed,
-            "election": {
-                "id": election.id,
-                "status": election.status,
-            },
-        }
-    )
+    return JsonResponse(payload, status=status_code)
 
 
 @require_POST
@@ -365,13 +365,15 @@ def election_send_mail_credentials_api(request: HttpRequest, election_id: int) -
     election = _get_active_election(election_id)
     result = _send_mail_credentials_result(request=request, election=election, data=_request_data(request))
 
-    if not result.success:
-        return JsonResponse({"ok": False, "errors": [result.message]}, status=result.status_code)
+    payload: dict[str, object] = {"ok": result.success}
+    if result.success:
+        payload.update(
+            {
+                "redirect_url": result.redirect_url,
+                "recipient_count": result.recipient_count,
+            }
+        )
+    else:
+        payload["errors"] = [result.message]
 
-    return JsonResponse(
-        {
-            "ok": True,
-            "redirect_url": result.redirect_url,
-            "recipient_count": result.recipient_count,
-        }
-    )
+    return JsonResponse(payload, status=result.status_code if not result.success else 200)

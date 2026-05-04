@@ -15,15 +15,16 @@ from django.utils.timezone import localtime
 from django.views.decorators.http import require_http_methods
 
 from core.account_invitations import (
+    _mark_invitation_accepted_from_email_match,
+    _send_account_invitation_email,
+    dismiss_account_invitations,
     find_account_invitation_matches,
     refresh_account_invitations,
 )
 from core.logging_extras import current_exception_log_fields
-from core.models import AccountInvitation, AccountInvitationSend
+from core.models import AccountInvitation
 from core.permissions import ASTRA_ADD_MEMBERSHIP
 from core.rate_limit import allow_request
-from core.templated_email import queue_templated_email
-from core.views_account_invitations import _build_invitation_email_context
 from core.views_utils import get_username
 
 logger = logging.getLogger(__name__)
@@ -279,9 +280,17 @@ def account_invitations_resend_api(request: HttpRequest, pk: int) -> JsonRespons
 
     try:
         username = get_username(request)
+        now = timezone.now()
 
         # Check if email now matches a FreeIPA user (transition to accepted)
-        _mark_invitation_accepted_from_email_match(invitation)
+        matches = find_account_invitation_matches(invitation.email)
+        if matches:
+            _mark_invitation_accepted_from_email_match(
+                invitation=invitation,
+                matched_usernames=matches,
+                actor_username=username,
+                now=now,
+            )
         invitation.refresh_from_db()
 
         # If already accepted, indicate that
@@ -305,29 +314,17 @@ def account_invitations_resend_api(request: HttpRequest, pk: int) -> JsonRespons
                 "error": "Too many resend attempts. Try again shortly.",
             }, status=429)
 
-        # Queue email send
-        queued_email = queue_templated_email(
-            recipients=[invitation.email],
-            sender=settings.DEFAULT_FROM_EMAIL,
-            template_name=invitation.email_template_name,
-            context=_build_invitation_email_context(
-                invitation=invitation,
-                actor_username=username,
-            ),
-        )
-
-        invitation.last_sent_at = timezone.now()
-        invitation.send_count += 1
-        invitation.save(update_fields=["last_sent_at", "send_count"])
-
-        # Record send attempt
-        AccountInvitationSend.objects.create(
+        result = _send_account_invitation_email(
             invitation=invitation,
-            sent_by_username=username,
+            actor_username=username,
             template_name=invitation.email_template_name,
-            post_office_email_id=queued_email.id if queued_email else None,
-            result=AccountInvitationSend.Result.queued,
+            now=now,
         )
+        if result != "queued":
+            return JsonResponse({
+                "ok": False,
+                "error": "Failed to resend invitation",
+            }, status=500)
 
         return JsonResponse({
             "ok": True,
@@ -343,24 +340,6 @@ def account_invitations_resend_api(request: HttpRequest, pk: int) -> JsonRespons
             "ok": False,
             "error": "Failed to resend invitation",
         }, status=500)
-
-
-def _mark_invitation_accepted_from_email_match(invitation: AccountInvitation) -> None:
-    """
-    Check if invitation email matches a FreeIPA user and mark accepted if so.
-    """
-    if invitation.accepted_at:
-        return
-
-    # Check for email match in FreeIPA
-    matched_usernames = find_account_invitation_matches(invitation.email)
-    if matched_usernames:
-        invitation.accepted_at = timezone.now()
-        invitation.accepted_username = matched_usernames[0]
-        invitation.freeipa_matched_usernames = matched_usernames
-        invitation.freeipa_last_checked_at = timezone.now()
-        invitation.save()
-
 
 @require_http_methods(["POST"])
 @_json_membership_permission_required
@@ -378,9 +357,11 @@ def account_invitations_dismiss_api(request: HttpRequest, pk: int) -> JsonRespon
 
     try:
         username = get_username(request)
-        invitation.dismissed_at = timezone.now()
-        invitation.dismissed_by_username = username
-        invitation.save(update_fields=["dismissed_at", "dismissed_by_username"])
+        dismiss_account_invitations(
+            invitations=[invitation],
+            actor_username=username,
+            now=timezone.now(),
+        )
 
         return JsonResponse({
             "ok": True,
@@ -463,9 +444,10 @@ def account_invitations_bulk_api(request: HttpRequest) -> JsonResponse:
             elif bulk_scope == "accepted":
                 queryset = queryset.filter(accepted_at__isnull=False, dismissed_at__isnull=True)
 
-            updated_count = queryset.update(
-                dismissed_at=timezone.now(),
-                dismissed_by_username=username,
+            updated_count = dismiss_account_invitations(
+                invitations=queryset,
+                actor_username=username,
+                now=timezone.now(),
             )
             return JsonResponse({
                 "ok": True,
@@ -498,34 +480,16 @@ def account_invitations_bulk_api(request: HttpRequest) -> JsonResponse:
                 }, status=429)
 
             resent_count = 0
+            now = timezone.now()
             for invitation in queryset:
-                try:
-                    queued_email = queue_templated_email(
-                        recipients=[invitation.email],
-                        sender=settings.DEFAULT_FROM_EMAIL,
-                        template_name=invitation.email_template_name,
-                        context=_build_invitation_email_context(
-                            invitation=invitation,
-                            actor_username=username,
-                        ),
-                    )
-                    invitation.last_sent_at = timezone.now()
-                    invitation.send_count += 1
-                    invitation.save(update_fields=["last_sent_at", "send_count"])
-
-                    AccountInvitationSend.objects.create(
-                        invitation=invitation,
-                        sent_by_username=username,
-                        template_name=invitation.email_template_name,
-                        post_office_email_id=queued_email.id if queued_email else None,
-                        result=AccountInvitationSend.Result.queued,
-                    )
+                result = _send_account_invitation_email(
+                    invitation=invitation,
+                    actor_username=username,
+                    template_name=invitation.email_template_name,
+                    now=now,
+                )
+                if result == "queued":
                     resent_count += 1
-                except Exception:
-                    logger.exception(
-                        f"Failed to resend invitation {invitation.pk} in bulk",
-                        extra=current_exception_log_fields(),
-                    )
 
             return JsonResponse({
                 "ok": True,

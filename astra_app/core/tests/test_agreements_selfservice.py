@@ -38,9 +38,9 @@ class AgreementsSelfServiceTests(TestCase):
         assert match is not None
         return cast(dict[str, object], json.loads(match.group(1)))
 
-    def test_profile_includes_signed_agreements(self):
+    def test_user_profile_detail_includes_signed_agreements(self):
         factory = RequestFactory()
-        request = factory.get("/user/alice/")
+        request = factory.get(reverse("api-user-profile-detail", args=["alice"]))
         request.user = self._auth_user("alice")
 
         fu = SimpleNamespace(
@@ -79,17 +79,26 @@ class AgreementsSelfServiceTests(TestCase):
             patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]),
             patch("core.freeipa.agreement.FreeIPAFASAgreement.all", autospec=True, return_value=agreements),
             patch("core.freeipa.agreement.FreeIPAFASAgreement.get", autospec=True, return_value=agreement_detail),
-            patch("core.views_users.resolve_avatar_urls_for_users", autospec=True, return_value=({}, 0, 0)),
+            patch(
+                "core.views_users.membership_review_permissions",
+                autospec=True,
+                return_value={
+                    "membership_can_view": False,
+                    "membership_can_add": False,
+                    "membership_can_change": False,
+                    "membership_can_delete": False,
+                },
+            ),
         ):
-            resp = views_users.user_profile_api(request, "alice")
+            resp = views_users.user_profile_detail_api(request, "alice")
 
         self.assertEqual(resp.status_code, 200)
         payload = json.loads(resp.content)
         self.assertEqual(payload["groups"]["agreements"], ["cla"])
 
-    def test_profile_shows_missing_required_agreements_for_member_group_with_link_for_self(self):
+    def test_user_profile_detail_shows_missing_required_agreements_for_member_group(self):
         factory = RequestFactory()
-        request = factory.get("/user/alice/")
+        request = factory.get(reverse("api-user-profile-detail", args=["alice"]))
         request.user = self._auth_user("alice")
 
         fu = SimpleNamespace(
@@ -125,9 +134,18 @@ class AgreementsSelfServiceTests(TestCase):
             patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[fas_group]),
             patch("core.agreements.FreeIPAFASAgreement.all", autospec=True, return_value=[agreement_summary]),
             patch("core.agreements.FreeIPAFASAgreement.get", autospec=True, return_value=agreement_full),
-            patch("core.views_users.resolve_avatar_urls_for_users", autospec=True, return_value=({}, 0, 0)),
+            patch(
+                "core.views_users.membership_review_permissions",
+                autospec=True,
+                return_value={
+                    "membership_can_view": False,
+                    "membership_can_add": False,
+                    "membership_can_change": False,
+                    "membership_can_delete": False,
+                },
+            ),
         ):
-            resp = views_users.user_profile_api(request, "alice")
+            resp = views_users.user_profile_detail_api(request, "alice")
 
         self.assertEqual(resp.status_code, 200)
         payload = json.loads(resp.content)

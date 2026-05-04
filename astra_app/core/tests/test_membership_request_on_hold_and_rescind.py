@@ -540,6 +540,34 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
         self.assertEqual(req.status, MembershipRequest.Status.pending)
         self.assertEqual(req.responses, [{"Contributions": "Old"}])
 
+    def test_legacy_membership_request_detail_alias_redirects_to_canonical_route(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.pending,
+            responses=[{"Contributions": "Old"}],
+        )
+
+        self._add_freeipa_user(username="alice", email="alice@example.com")
+        self._login_as_freeipa_user("alice")
+
+        response = self.client.get(reverse("membership-request-detail-legacy", args=[req.pk]), follow=False)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("membership-request-detail", args=[req.pk]))
+
     def test_on_hold_request_page_uses_shared_bootstrap_validation_flow(self) -> None:
         from core.models import MembershipType
 
@@ -1609,6 +1637,9 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
         self.assertEqual(resp_post.status_code, 200)
         self.assertContains(resp_post, "Please update your request before resubmitting it")
         self.assertNotContains(resp_post, "['")
+        self.assertContains(resp_post, 'data-membership-request-detail-root=""')
+        self.assertContains(resp_post, 'data-membership-request-detail-initial-payload')
+        self.assertNotContains(resp_post, 'id="membership-request-form"')
 
         req.refresh_from_db()
         self.assertEqual(req.status, MembershipRequest.Status.on_hold)

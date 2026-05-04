@@ -540,7 +540,7 @@ def stats_membership_summary_api(request: HttpRequest) -> HttpResponse:
     return JsonResponse(payload)
 
 
-def _build_membership_stats_composition_payloads(*, now: datetime.datetime) -> tuple[dict[str, object], dict[str, object]]:
+def _build_membership_stats_composition_payloads(*, now: datetime.datetime) -> dict[str, object]:
     def membership_type_rows(active_memberships: object) -> list[dict[str, object]]:
         rows = (
             active_memberships.values("membership_type_id", "membership_type__name")
@@ -593,47 +593,14 @@ def _build_membership_stats_composition_payloads(*, now: datetime.datetime) -> t
     nationality_active_members = nationality_rows(active_member_users)
     generated_at = timezone.localtime(now).isoformat()
 
-    return (
-        {
-            "generated_at": generated_at,
-            "charts": {
-                "membership_types": {
-                    "labels": [row["membership_type"]["name"] for row in membership_types],
-                    "counts": [row["count"] for row in membership_types],
-                },
-                "nationality_all_users": {
-                    "labels": [row["country_code"] for row in nationality_all_users],
-                    "counts": [row["count"] for row in nationality_all_users],
-                },
-                "nationality_active_members": {
-                    "labels": [row["country_code"] for row in nationality_active_members],
-                    "counts": [row["count"] for row in nationality_active_members],
-                },
-            },
+    return {
+        "generated_at": generated_at,
+        "charts": {
+            "membership_types": membership_types,
+            "nationality_all_users": nationality_all_users,
+            "nationality_active_members": nationality_active_members,
         },
-        {
-            "generated_at": generated_at,
-            "charts": {
-                "membership_types": membership_types,
-                "nationality_all_users": nationality_all_users,
-                "nationality_active_members": nationality_active_members,
-            },
-        },
-    )
-
-
-@json_permission_required_any(MEMBERSHIP_PERMISSIONS)
-def stats_membership_composition_charts_api(request: HttpRequest) -> HttpResponse:
-    """Days-independent composition charts: membership types and nationality distributions."""
-    now = timezone.now()
-
-    def compute() -> dict[str, object]:
-        legacy_payload, _detail_payload = _build_membership_stats_composition_payloads(now=now)
-        return legacy_payload
-
-    cache_key = "membership_stats:composition:v1"
-    payload = cache.get_or_set(cache_key, compute, timeout=300)
-    return JsonResponse(payload)
+    }
 
 
 @json_permission_required_any(MEMBERSHIP_PERMISSIONS)
@@ -641,8 +608,7 @@ def stats_membership_composition_charts_detail_api(request: HttpRequest) -> Http
     now = timezone.now()
 
     def compute() -> dict[str, object]:
-        _legacy_payload, detail_payload = _build_membership_stats_composition_payloads(now=now)
-        return detail_payload
+        return _build_membership_stats_composition_payloads(now=now)
 
     cache_key = "membership_stats:composition:v2:detail"
     payload = cache.get_or_set(cache_key, compute, timeout=300)
@@ -654,7 +620,7 @@ def _build_membership_stats_trends_payloads(
     now: datetime.datetime,
     days_param: str,
     days_window: int | None,
-) -> tuple[dict[str, object], dict[str, object]]:
+) -> dict[str, object]:
     trend_start = now - datetime.timedelta(days=days_window) if days_window is not None else None
     decision_statuses = [
         MembershipRequest.Status.approved,
@@ -696,8 +662,6 @@ def _build_membership_stats_trends_payloads(
         for label in [period_label(row["period"])]
         if label is not None
     ]
-    decision_periods = sorted({row["period"] for row in decisions_rows})
-    decision_index = {(row["period"], row["status"]): int(row["count"]) for row in decisions_rows}
 
     exp_rows = (
         Membership.objects.filter(
@@ -735,64 +699,15 @@ def _build_membership_stats_trends_payloads(
             current = next_month(current)
 
     generated_at = timezone.localtime(now).isoformat()
-    return (
-        {
-            "generated_at": generated_at,
-            "days_param": days_param,
-            "charts": {
-                "requests_trend": {
-                    "labels": [row["period"] for row in requests_rows],
-                    "counts": [row["count"] for row in requests_rows],
-                },
-                "decisions_trend": {
-                    "labels": decision_periods,
-                    "datasets": [
-                        {
-                            "label": str(status),
-                            "data": [decision_index.get((period, status), 0) for period in decision_periods],
-                        }
-                        for status in decision_statuses
-                    ],
-                },
-                "expirations_upcoming": {
-                    "labels": [row["period"] for row in expirations_rows],
-                    "counts": [row["count"] for row in expirations_rows],
-                },
-            },
+    return {
+        "generated_at": generated_at,
+        "days_param": days_param,
+        "charts": {
+            "requests_trend": requests_rows,
+            "decisions_trend": decisions_rows,
+            "expirations_upcoming": expirations_rows,
         },
-        {
-            "generated_at": generated_at,
-            "days_param": days_param,
-            "charts": {
-                "requests_trend": requests_rows,
-                "decisions_trend": decisions_rows,
-                "expirations_upcoming": expirations_rows,
-            },
-        },
-    )
-
-
-@json_permission_required_any(MEMBERSHIP_PERMISSIONS)
-def stats_membership_trends_charts_api(request: HttpRequest) -> HttpResponse:
-    """Days-dependent trend charts: requests_trend, decisions_trend, expirations_upcoming."""
-    try:
-        days_param, days_window = _parse_membership_stats_days_param(request)
-    except ValueError as exc:
-        return JsonResponse({"error": str(exc)}, status=400)
-
-    now = timezone.now()
-
-    def compute() -> dict[str, object]:
-        legacy_payload, _detail_payload = _build_membership_stats_trends_payloads(
-            now=now,
-            days_param=days_param,
-            days_window=days_window,
-        )
-        return legacy_payload
-
-    cache_key = f"membership_stats:trends:v1:days={days_param}"
-    payload = cache.get_or_set(cache_key, compute, timeout=300)
-    return JsonResponse(payload)
+    }
 
 
 @json_permission_required_any(MEMBERSHIP_PERMISSIONS)
@@ -805,19 +720,18 @@ def stats_membership_trends_charts_detail_api(request: HttpRequest) -> HttpRespo
     now = timezone.now()
 
     def compute() -> dict[str, object]:
-        _legacy_payload, detail_payload = _build_membership_stats_trends_payloads(
+        return _build_membership_stats_trends_payloads(
             now=now,
             days_param=days_param,
             days_window=days_window,
         )
-        return detail_payload
 
     cache_key = f"membership_stats:trends:v2:detail:days={days_param}"
     payload = cache.get_or_set(cache_key, compute, timeout=300)
     return JsonResponse(payload)
 
 
-def _build_membership_stats_retention_payloads(*, now: datetime.datetime) -> tuple[dict[str, object], dict[str, object]]:
+def _build_membership_stats_retention_payloads(*, now: datetime.datetime) -> dict[str, object]:
     configured_cohort_limit = int(settings.MEMBERSHIP_STATS_RETENTION_COHORTS_LIMIT)
     _retention_summary, retention_chart = _compute_retention_cohort_12m(
         now=now,
@@ -839,34 +753,12 @@ def _build_membership_stats_retention_payloads(*, now: datetime.datetime) -> tup
         for index in range(len(labels))
     ]
     generated_at = timezone.localtime(now).isoformat()
-    return (
-        {
-            "generated_at": generated_at,
-            "charts": {
-                "retention_cohorts_12m": retention_chart,
-            },
+    return {
+        "generated_at": generated_at,
+        "charts": {
+            "retention_cohorts_12m": rows,
         },
-        {
-            "generated_at": generated_at,
-            "charts": {
-                "retention_cohorts_12m": rows,
-            },
-        },
-    )
-
-
-@json_permission_required_any(MEMBERSHIP_PERMISSIONS)
-def stats_membership_retention_chart_api(request: HttpRequest) -> HttpResponse:
-    """Days-independent retention cohort chart."""
-    now = timezone.now()
-
-    def compute() -> dict[str, object]:
-        legacy_payload, _detail_payload = _build_membership_stats_retention_payloads(now=now)
-        return legacy_payload
-
-    cache_key = "membership_stats:retention:v1"
-    payload = cache.get_or_set(cache_key, compute, timeout=300)
-    return JsonResponse(payload)
+    }
 
 
 @json_permission_required_any(MEMBERSHIP_PERMISSIONS)
@@ -874,8 +766,7 @@ def stats_membership_retention_chart_detail_api(request: HttpRequest) -> HttpRes
     now = timezone.now()
 
     def compute() -> dict[str, object]:
-        _legacy_payload, detail_payload = _build_membership_stats_retention_payloads(now=now)
-        return detail_payload
+        return _build_membership_stats_retention_payloads(now=now)
 
     cache_key = "membership_stats:retention:v2:detail"
     payload = cache.get_or_set(cache_key, compute, timeout=300)

@@ -304,26 +304,7 @@
       </div>
     </div>
 
-    <div class="modal fade" id="edit-template-changed-modal" tabindex="-1" role="dialog" aria-labelledby="edit-template-changed-modal-label" aria-hidden="true">
-      <div class="modal-dialog" role="document">
-        <div class="modal-content">
-          <div class="modal-header">
-            <h5 class="modal-title" id="edit-template-changed-modal-label">Email template changed</h5>
-            <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog">
-              <span aria-hidden="true">&times;</span>
-            </button>
-          </div>
-          <div class="modal-body">
-            <p class="mb-0">You changed the email template selection. Do you want to save the new template + contents to this election, or keep the previously saved email configuration?</p>
-          </div>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-outline-secondary" data-dismiss="modal" title="Close dialog without saving">Cancel</button>
-            <button type="button" class="btn btn-outline-primary" id="edit-keep-existing-email-btn" title="Keep the existing email content">Keep previously saved email</button>
-            <button type="button" class="btn btn-primary" id="edit-save-email-btn" title="Save the new template and contents">Save template + contents</button>
-          </div>
-        </div>
-      </div>
-    </div>
+    {% include "core/_modal_base.html" with modal_id="edit-template-changed-modal" title="Email template changed" body="You changed the email template selection. Do you want to save the new template + contents to this election, or keep the previously saved email configuration?" render_default_footer=1 cancel_title="Close dialog without saving" secondary_button_label="Keep previously saved email" secondary_button_id="edit-keep-existing-email-btn" secondary_button_title="Keep the existing email content" submit_label="Save template + contents" submit_button_id="edit-save-email-btn" submit_button_title="Save the new template and contents" %}
   </form>
 
   {% if election and election.status == 'draft' %}

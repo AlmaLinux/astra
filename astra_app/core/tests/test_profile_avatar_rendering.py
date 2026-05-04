@@ -38,7 +38,7 @@ class ProfileAvatarRenderingTests(TestCase):
             "avatar.providers.DefaultAvatarProvider",
         ),
     )
-    def test_profile_renders_gravatar_url_when_email_present(self):
+    def test_user_profile_detail_renders_gravatar_url_when_email_present(self):
         factory = RequestFactory()
         request = factory.get("/")
         self._add_session_and_messages(request)
@@ -60,9 +60,19 @@ class ProfileAvatarRenderingTests(TestCase):
             patch("core.views_users._is_membership_committee_viewer", autospec=True, return_value=False),
             patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]),
             patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
+            patch(
+                "core.views_users.membership_review_permissions",
+                autospec=True,
+                return_value={
+                    "membership_can_view": False,
+                    "membership_can_add": False,
+                    "membership_can_change": False,
+                    "membership_can_delete": False,
+                },
+            ),
         ):
             mocked_get_full_user.return_value = fake_user
-            response = views_users.user_profile_api(request, "alice")
+            response = views_users.user_profile_detail_api(request, "alice")
 
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.content)
@@ -78,7 +88,7 @@ class ProfileAvatarRenderingTests(TestCase):
             "avatar.providers.DefaultAvatarProvider",
         ),
     )
-    def test_profile_avatar_tags_work_with_freeipa_lazy_user(self):
+    def test_user_profile_detail_avatar_flow_works_with_freeipa_lazy_user(self):
         factory = RequestFactory()
         request = factory.get("/")
         self._add_session_and_messages(request)
@@ -102,9 +112,19 @@ class ProfileAvatarRenderingTests(TestCase):
             patch("core.views_users._is_membership_committee_viewer", autospec=True, return_value=False),
             patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]),
             patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
+            patch(
+                "core.views_users.membership_review_permissions",
+                autospec=True,
+                return_value={
+                    "membership_can_view": False,
+                    "membership_can_add": False,
+                    "membership_can_change": False,
+                    "membership_can_delete": False,
+                },
+            ),
         ):
             mocked_get_full_user.return_value = fu
-            response = views_users.user_profile_api(request, "alice")
+            response = views_users.user_profile_detail_api(request, "alice")
 
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.content)

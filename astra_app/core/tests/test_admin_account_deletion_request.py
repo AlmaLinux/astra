@@ -1,4 +1,5 @@
 import datetime
+import re
 from unittest.mock import call, patch
 
 from django.contrib.admin.models import CHANGE, LogEntry
@@ -205,6 +206,133 @@ class AdminAccountDeletionRequestTests(TestCase):
         self.assertContains(response, "Mark as pending privilege check")
         self.assertContains(response, "Reject request(s)")
         self.assertContains(response, "Cancel request(s)")
+
+    def test_admin_change_page_renders_approve_and_reject_buttons(self) -> None:
+        deletion_request = self._create_request(
+            username="bob",
+            manual_review_required=False,
+            blocker_codes=[],
+        )
+        self._login_as_freeipa_admin("admin")
+        admin_user = self._admin_user("admin")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
+            response = self.client.get(
+                reverse("admin:core_accountdeletionrequest_change", args=[deletion_request.pk])
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Approve and delete")
+        self.assertContains(response, "Approve this request and delete the FreeIPA account?")
+        self.assertContains(response, "Reject request")
+        self.assertContains(response, "Reject this account deletion request?")
+
+        content = response.content.decode()
+        history_marker = f'href="/admin/core/accountdeletionrequest/{deletion_request.pk}/history/"'
+        object_tools_markup = content[content.index('<div class="object-tools">') : content.index(history_marker)]
+
+        self.assertIn('data-target="#account-deletion-approve-modal"', object_tools_markup)
+        self.assertIn('data-target="#account-deletion-reject-modal"', object_tools_markup)
+        self.assertRegex(
+            object_tools_markup,
+            re.compile(
+                r"<li>\s*<button[^>]*data-target=\"#account-deletion-approve-modal\"",
+                re.DOTALL,
+            ),
+        )
+        self.assertRegex(
+            object_tools_markup,
+            re.compile(
+                r"<li>\s*<button[^>]*data-target=\"#account-deletion-reject-modal\"",
+                re.DOTALL,
+            ),
+        )
+        self.assertNotIn('<div class="modal fade"', object_tools_markup)
+        self.assertLess(content.index(history_marker), content.index('id="account-deletion-approve-modal"'))
+        self.assertLess(content.index(history_marker), content.index('id="account-deletion-reject-modal"'))
+
+    def test_admin_change_page_hides_object_actions_for_completed_request(self) -> None:
+        deletion_request = self._create_request(
+            username="bob",
+            status=AccountDeletionRequest.Status.completed,
+            manual_review_required=False,
+            blocker_codes=[],
+        )
+        self._login_as_freeipa_admin("admin")
+        admin_user = self._admin_user("admin")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
+            response = self.client.get(
+                reverse("admin:core_accountdeletionrequest_change", args=[deletion_request.pk])
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Approve and delete")
+        self.assertNotContains(response, "Reject request")
+
+    def test_admin_change_page_object_action_routes_require_post_confirmation(self) -> None:
+        deletion_request = self._create_request(
+            username="bob",
+            manual_review_required=False,
+            blocker_codes=[],
+        )
+        self._login_as_freeipa_admin("admin")
+        admin_user = self._admin_user("admin")
+        change_url = reverse("admin:core_accountdeletionrequest_change", args=[deletion_request.pk])
+        approve_url = reverse("admin:core_accountdeletionrequest_approve", args=[deletion_request.pk])
+        reject_url = reverse("admin:core_accountdeletionrequest_reject", args=[deletion_request.pk])
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
+            for method, action_url in (("get", approve_url), ("post", approve_url), ("get", reject_url), ("post", reject_url)):
+                with self.subTest(method=method, action_url=action_url):
+                    response = getattr(self.client, method)(action_url, data={})
+
+                    self.assertEqual(response.status_code, 302)
+                    self.assertEqual(response["Location"], change_url)
+                    deletion_request.refresh_from_db()
+                    self.assertEqual(deletion_request.status, AccountDeletionRequest.Status.pending_review)
+
+    def test_admin_change_page_approve_button_executes_existing_approve_flow(self) -> None:
+        deletion_request = self._create_request(
+            username="bob",
+            manual_review_required=False,
+            blocker_codes=[],
+        )
+        self._login_as_freeipa_admin("admin")
+        admin_user = self._admin_user("admin")
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
+            patch("core.account_deletion.FreeIPAUser.delete", autospec=True, return_value=None) as delete_mock,
+        ):
+            response = self.client.post(
+                reverse("admin:core_accountdeletionrequest_approve", args=[deletion_request.pk]),
+                data={"post": "yes"},
+                follow=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        deletion_request.refresh_from_db()
+        self.assertEqual(deletion_request.status, AccountDeletionRequest.Status.completed)
+        delete_mock.assert_called_once()
+        self.assertContains(response, "Approved and executed 1 request(s).")
+
+    def test_admin_change_page_reject_button_executes_existing_reject_flow(self) -> None:
+        deletion_request = self._create_request()
+        self._login_as_freeipa_admin("admin")
+        admin_user = self._admin_user("admin")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
+            response = self.client.post(
+                reverse("admin:core_accountdeletionrequest_reject", args=[deletion_request.pk]),
+                data={"post": "yes"},
+                follow=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        deletion_request.refresh_from_db()
+        self.assertEqual(deletion_request.status, AccountDeletionRequest.Status.rejected)
+        self.assertContains(response, "Updated 1 request(s) to Rejected.")
 
     def test_admin_action_approve_executes_deletion_and_completes_request(self) -> None:
         deletion_request = self._create_request(

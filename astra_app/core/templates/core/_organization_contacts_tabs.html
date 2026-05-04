@@ -20,7 +20,7 @@
       {% for group in contact_groups %}
         <li class="nav-item">
           <a
-            class="nav-link {% if active_contact == group.key %}active{% endif %}{% if group.name_field.errors or group.email_field.errors or group.phone_field.errors %} alx-tab-error{% endif %}"
+            class="nav-link {% if active_contact == group.key %}active{% endif %}{% if group.has_errors %} alx-tab-error{% endif %}"
             id="contacts-{{ group.key }}-tab"
             data-toggle="pill"
             href="#contacts-{{ group.key }}"

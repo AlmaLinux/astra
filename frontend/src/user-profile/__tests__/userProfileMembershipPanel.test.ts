@@ -148,6 +148,35 @@ describe("UserProfileMembershipPanel", () => {
     expect(wrapper.find(".membership-action-required.alx-status-badge--action").exists()).toBe(true);
   });
 
+  it("derives the Under review badge from pending status", () => {
+    const wrapper = mount(UserProfileMembershipPanel, {
+      props: {
+        membership: makeMembershipSection({
+          entries: [],
+          pendingEntries: [
+            {
+              kind: "pending",
+              key: "pending-41",
+              membershipType: { name: "Individual", code: "individual", description: "Pending individual membership" },
+              requestId: 41,
+              status: "pending",
+              organizationName: "",
+            },
+          ],
+        }),
+        timezoneName: "UTC",
+        membershipHistoryUrlTemplate: "/membership/log/__username__/?username=__username__",
+        membershipRequestUrl: "/membership/request/",
+        membershipRequestDetailUrlTemplate: "/membership/request/__request_id__/",
+        membershipManagement,
+        membershipNotes: membershipNotesDisabled,
+      },
+    });
+
+    expect(wrapper.text()).toContain("Under review");
+    expect(wrapper.find(".membership-under-review.alx-status-badge--review").exists()).toBe(true);
+  });
+
   it("preserves higher-precision urgent expiration text including timezone", () => {
     const wrapper = mount(UserProfileMembershipPanel, {
       props: {
@@ -229,5 +258,37 @@ describe("UserProfileMembershipPanel", () => {
     expect(wrapper.find('input[name="csrfmiddlewaretoken"]').attributes("value")).toBe("csrf-token");
     expect(wrapper.find('input[name="next"]').attributes("value")).toBe("/user/alice/");
     expect(wrapper.find('[data-test="notes-card"]').exists()).toBe(true);
+  });
+
+  it("shows the change-tier action when canRequestTierChange is true", () => {
+    const wrapper = mount(UserProfileMembershipPanel, {
+      props: {
+        membership: makeMembershipSection({
+          entries: [
+            {
+              kind: "membership",
+              key: "membership-individual",
+              requestId: 11,
+              membershipType: { name: "Individual", code: "individual", description: "" },
+              createdAt: "2024-01-15T12:00:00Z",
+              expiresAt: null,
+              isExpiringSoon: false,
+              canRenew: false,
+              canRequestTierChange: true,
+              canManage: false,
+            },
+          ],
+        }),
+        timezoneName: "UTC",
+        membershipHistoryUrlTemplate: "/membership/log/__username__/?username=__username__",
+        membershipRequestUrl: "/membership/request/",
+        membershipRequestDetailUrlTemplate: "/membership/request/__request_id__/",
+        membershipManagement,
+        membershipNotes: membershipNotesDisabled,
+      },
+    });
+
+    expect(wrapper.find('a[href="/membership/request/?membership_type=individual"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain("Change tier");
   });
 });

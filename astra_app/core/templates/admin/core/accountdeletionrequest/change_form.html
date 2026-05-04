@@ -1,0 +1,45 @@
+{% extends "admin/change_form.html" %}
+
+{% block content %}
+  {{ block.super }}
+  {% if change and has_change_permission %}
+    {% if show_account_deletion_approve_button %}
+      {% include "core/_modal_confirm.html" with modal_id="account-deletion-approve-modal" title="Approve and delete" body="Approve this request and delete the FreeIPA account?" action_url=account_deletion_approve_url submit_label="Approve and delete" submit_class="btn-danger" form_fields_template="core/_modal_confirm_fields.html" confirm_post=True %}
+    {% endif %}
+    {% if show_account_deletion_reject_button %}
+      {% include "core/_modal_confirm.html" with modal_id="account-deletion-reject-modal" title="Reject request" body="Reject this account deletion request?" action_url=account_deletion_reject_url submit_label="Reject request" submit_class="btn-outline-secondary" form_fields_template="core/_modal_confirm_fields.html" confirm_post=True %}
+    {% endif %}
+  {% endif %}
+{% endblock %}
+
+{% block object-tools-items %}
+  {% if change and has_change_permission %}
+    {% if show_account_deletion_approve_button %}
+      <li>
+        <button
+          type="button"
+          class="btn btn-block btn-danger btn-sm"
+          data-toggle="modal"
+          data-target="#account-deletion-approve-modal"
+          title="Approve and delete"
+        >
+          Approve and delete
+        </button>
+      </li>
+    {% endif %}
+    {% if show_account_deletion_reject_button %}
+      <li>
+        <button
+          type="button"
+          class="btn btn-block btn-outline-secondary btn-sm"
+          data-toggle="modal"
+          data-target="#account-deletion-reject-modal"
+          title="Reject request"
+        >
+          Reject request
+        </button>
+      </li>
+    {% endif %}
+  {% endif %}
+  {{ block.super }}
+{% endblock %}

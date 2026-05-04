@@ -1,5 +1,3 @@
-import json
-
 from django import forms
 from django.contrib import messages
 from django.contrib.auth.decorators import permission_required
@@ -15,25 +13,32 @@ from post_office.models import EmailTemplate
 from core.forms_base import StyledForm
 from core.permissions import ASTRA_ADD_ELECTION, ASTRA_ADD_SEND_MAIL, json_permission_required_any
 from core.templated_email import (
-    create_email_template_unique,
     email_template_to_dict,
+    execute_email_template_save,
     locked_email_template_names,
     placeholder_context_from_sources,
     render_templated_email_preview,
     render_templated_email_preview_response,
-    update_email_template,
     validate_email_subject,
 )
 
 
 def _preview_and_variables(
-    *, subject: str, html_content: str, text_content: str
+    *, form: EmailTemplateManageForm, template: EmailTemplate | None
 ) -> tuple[dict[str, str], list[tuple[str, str]]]:
-    """Compute rendered preview + available variable list from raw template sources.
+    """Compute rendered preview + available variables from the current editor state."""
 
-    Returns (rendered_preview dict, available_variables list). Used by both the
-    create and edit views to avoid repeating the same placeholder→render logic.
-    """
+    if form.is_bound:
+        subject = str(form.data.get("subject") or "")
+        html_content = str(form.data.get("html_content") or "")
+        text_content = str(form.data.get("text_content") or "")
+    else:
+        subject = str(form.initial.get("subject") or ("" if template is None else template.subject or ""))
+        html_content = str(
+            form.initial.get("html_content") or ("" if template is None else template.html_content or "")
+        )
+        text_content = str(form.initial.get("text_content") or ("" if template is None else template.content or ""))
+
     ctx = placeholder_context_from_sources(subject, html_content, text_content)
     available_variables = list(ctx.items())
     rendered_preview = {"html": "", "text": "", "subject": ""}
@@ -136,9 +141,8 @@ def _build_email_template_editor_payload(
     template: EmailTemplate | None,
     is_create: bool,
     is_locked: bool,
-    rendered_preview: dict[str, str],
-    available_variables: list[tuple[str, str]],
 ) -> dict[str, object]:
+    rendered_preview, available_variables = _preview_and_variables(form=form, template=template)
     return {
         "mode": "create" if is_create else "edit",
         "template": None
@@ -205,63 +209,19 @@ def email_templates(request: HttpRequest):
 @require_http_methods(["GET", "POST"])
 @permission_required(ASTRA_ADD_SEND_MAIL, login_url=reverse_lazy("users"))
 def email_template_create(request: HttpRequest):
-    rendered_preview = {"html": "", "text": "", "subject": ""}
-    available_variables: list[tuple[str, str]] = []
-
-    if request.method == "POST":
-        form = EmailTemplateManageForm(request.POST)
-        if form.is_valid():
-            name = form.cleaned_data["name"]
-            if EmailTemplate.objects.filter(name=name).exists():
-                form.add_error("name", "A template with this name already exists.")
-            else:
-                tpl = EmailTemplate.objects.create(
-                    name=name,
-                    description=form.cleaned_data["description"],
-                    subject=str(form.cleaned_data.get("subject") or ""),
-                    content=str(form.cleaned_data.get("text_content") or ""),
-                    html_content=str(form.cleaned_data.get("html_content") or ""),
-                )
-                messages.success(request, f"Created template: {tpl.name}.")
-                return redirect("email-template-edit", template_id=tpl.pk)
-        rendered_preview, available_variables = _preview_and_variables(
-            subject=str(form.data.get("subject") or ""),
-            html_content=str(form.data.get("html_content") or ""),
-            text_content=str(form.data.get("text_content") or ""),
-        )
-    else:
-        form = EmailTemplateManageForm()
-
-    return render(
-        request,
-        "core/email_template_edit.html",
-        {
-            "is_create": True,
-            "email_template_editor_api_url": reverse("api-email-template-create-detail"),
-            "email_template_list_url": reverse("email-templates"),
-            "email_template_submit_url": reverse("email-template-create"),
-            "email_template_preview_url": reverse("email-template-render-preview"),
-            "email_template_editor_initial_payload": _build_email_template_editor_payload(
-                form=form,
-                template=None,
-                is_create=True,
-                is_locked=False,
-                rendered_preview=rendered_preview,
-                available_variables=available_variables,
-            ),
-        },
-    )
+    return email_template_edit(request=request)
 
 
 @require_http_methods(["GET", "POST"])
 @permission_required(ASTRA_ADD_SEND_MAIL, login_url=reverse_lazy("users"))
-def email_template_edit(request: HttpRequest, template_id: int):
-    tpl = EmailTemplate.objects.filter(pk=template_id).first()
-    if tpl is None:
+def email_template_edit(request: HttpRequest, template_id: int | None = None):
+    tpl = None if template_id is None else EmailTemplate.objects.filter(pk=template_id).first()
+    if template_id is not None and tpl is None:
         raise Http404("Template not found")
 
-    locked_names = locked_email_template_names()
-    is_locked = tpl.name in locked_names
+    is_create = tpl is None
+    locked_names = locked_email_template_names() if tpl is not None else frozenset()
+    is_locked = tpl is not None and tpl.name in locked_names
 
     if request.method == "POST":
         form = EmailTemplateManageForm(request.POST)
@@ -271,34 +231,44 @@ def email_template_edit(request: HttpRequest, template_id: int):
             form.fields["name"].initial = tpl.name
         if form.is_valid():
             name = form.cleaned_data["name"]
-            requested_name = str(request.POST.get("name") or "").strip()
-            if tpl.name in locked_names and requested_name and requested_name != tpl.name:
-                msg = (
-                    "This template is referenced by the app configuration and cannot be renamed."
-                    " Update settings (or switch to a different template) first."
-                )
-                form.add_error("name", msg)
-                messages.error(request, msg)
-            elif EmailTemplate.objects.exclude(pk=tpl.pk).filter(name=name).exists():
-                form.add_error("name", "A template with this name already exists.")
+            if is_create:
+                if EmailTemplate.objects.filter(name=name).exists():
+                    form.add_error("name", "A template with this name already exists.")
+                else:
+                    created_template = EmailTemplate.objects.create(
+                        name=name,
+                        description=form.cleaned_data["description"],
+                        subject=str(form.cleaned_data.get("subject") or ""),
+                        content=str(form.cleaned_data.get("text_content") or ""),
+                        html_content=str(form.cleaned_data.get("html_content") or ""),
+                    )
+                    messages.success(request, f"Created template: {created_template.name}.")
+                    return redirect("email-template-edit", template_id=created_template.pk)
             else:
-                tpl.name = name
-                tpl.description = form.cleaned_data["description"]
-                tpl.subject = str(form.cleaned_data.get("subject") or "")
-                tpl.content = str(form.cleaned_data.get("text_content") or "")
-                tpl.html_content = str(form.cleaned_data.get("html_content") or "")
-                tpl.save(update_fields=["name", "description", "subject", "content", "html_content"])
-                messages.success(request, f"Saved template: {tpl.name}.")
-                return redirect("email-template-edit", template_id=tpl.pk)
-
-        rendered_preview, available_variables = _preview_and_variables(
-            subject=str(form.data.get("subject") or ""),
-            html_content=str(form.data.get("html_content") or ""),
-            text_content=str(form.data.get("text_content") or ""),
-        )
+                requested_name = str(request.POST.get("name") or "").strip()
+                if is_locked and requested_name and requested_name != tpl.name:
+                    msg = (
+                        "This template is referenced by the app configuration and cannot be renamed."
+                        " Update settings (or switch to a different template) first."
+                    )
+                    form.add_error("name", msg)
+                    messages.error(request, msg)
+                elif EmailTemplate.objects.exclude(pk=tpl.pk).filter(name=name).exists():
+                    form.add_error("name", "A template with this name already exists.")
+                else:
+                    tpl.name = name
+                    tpl.description = form.cleaned_data["description"]
+                    tpl.subject = str(form.cleaned_data.get("subject") or "")
+                    tpl.content = str(form.cleaned_data.get("text_content") or "")
+                    tpl.html_content = str(form.cleaned_data.get("html_content") or "")
+                    tpl.save(update_fields=["name", "description", "subject", "content", "html_content"])
+                    messages.success(request, f"Saved template: {tpl.name}.")
+                    return redirect("email-template-edit", template_id=tpl.pk)
     else:
         form = EmailTemplateManageForm(
-            initial={
+            initial={}
+            if tpl is None
+            else {
                 "name": tpl.name,
                 "description": tpl.description,
                 "subject": tpl.subject,
@@ -308,29 +278,28 @@ def email_template_edit(request: HttpRequest, template_id: int):
         )
         if is_locked:
             form.fields["name"].disabled = True
-        rendered_preview, available_variables = _preview_and_variables(
-            subject=str(tpl.subject or ""),
-            html_content=str(tpl.html_content or ""),
-            text_content=str(tpl.content or ""),
-        )
 
     return render(
         request,
         "core/email_template_edit.html",
         {
-            "is_create": False,
-            "email_template_editor_api_url": reverse("api-email-template-edit-detail", kwargs={"template_id": tpl.pk}),
+            "is_create": is_create,
+            "email_template_editor_api_url": reverse("api-email-template-create-detail")
+            if is_create
+            else reverse("api-email-template-edit-detail", kwargs={"template_id": tpl.pk}),
             "email_template_list_url": reverse("email-templates"),
-            "email_template_submit_url": reverse("email-template-edit", kwargs={"template_id": tpl.pk}),
+            "email_template_submit_url": reverse("email-template-create")
+            if is_create
+            else reverse("email-template-edit", kwargs={"template_id": tpl.pk}),
             "email_template_preview_url": reverse("email-template-render-preview"),
-            "email_template_delete_url": reverse("email-template-delete", kwargs={"template_id": tpl.pk}),
+            "email_template_delete_url": None
+            if is_create
+            else reverse("email-template-delete", kwargs={"template_id": tpl.pk}),
             "email_template_editor_initial_payload": _build_email_template_editor_payload(
                 form=form,
                 template=tpl,
-                is_create=False,
+                is_create=is_create,
                 is_locked=is_locked,
-                rendered_preview=rendered_preview,
-                available_variables=available_variables,
             ),
         },
     )
@@ -380,29 +349,22 @@ def email_templates_detail_api(request: HttpRequest) -> JsonResponse:
 @require_GET
 @json_permission_required_any(_MANAGE_TEMPLATE_PERMISSIONS)
 def email_template_create_detail_api(request: HttpRequest) -> JsonResponse:
-    form = EmailTemplateManageForm()
-    return JsonResponse(
-        _build_email_template_editor_payload(
-            form=form,
-            template=None,
-            is_create=True,
-            is_locked=False,
-            rendered_preview={"html": "", "text": "", "subject": ""},
-            available_variables=[],
-        )
-    )
+    return email_template_edit_detail_api(request=request)
 
 
 @require_GET
 @json_permission_required_any(_MANAGE_TEMPLATE_PERMISSIONS)
-def email_template_edit_detail_api(request: HttpRequest, template_id: int) -> JsonResponse:
-    template = EmailTemplate.objects.filter(pk=template_id).first()
-    if template is None:
+def email_template_edit_detail_api(request: HttpRequest, template_id: int | None = None) -> JsonResponse:
+    template = None if template_id is None else EmailTemplate.objects.filter(pk=template_id).first()
+    if template_id is not None and template is None:
         raise Http404("Template not found")
 
-    is_locked = template.name in locked_email_template_names()
+    is_create = template is None
+    is_locked = template is not None and template.name in locked_email_template_names()
     form = EmailTemplateManageForm(
-        initial={
+        initial={}
+        if template is None
+        else {
             "name": template.name,
             "description": template.description,
             "subject": template.subject,
@@ -413,19 +375,12 @@ def email_template_edit_detail_api(request: HttpRequest, template_id: int) -> Js
     if is_locked:
         form.fields["name"].disabled = True
 
-    rendered_preview, available_variables = _preview_and_variables(
-        subject=str(template.subject or ""),
-        html_content=str(template.html_content or ""),
-        text_content=str(template.content or ""),
-    )
     return JsonResponse(
         _build_email_template_editor_payload(
             form=form,
             template=template,
-            is_create=False,
+            is_create=is_create,
             is_locked=is_locked,
-            rendered_preview=rendered_preview,
-            available_variables=available_variables,
         )
     )
 
@@ -453,8 +408,9 @@ def email_template_save(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"ok": False, "error": "Template not found"}, status=404)
 
     try:
-        update_email_template(
+        template = execute_email_template_save(
             template=template,
+            raw_name=None,
             subject=str(request.POST.get("subject") or ""),
             html_content=str(request.POST.get("html_content") or ""),
             text_content=str(request.POST.get("text_content") or ""),
@@ -473,7 +429,8 @@ def email_template_save_as(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"ok": False, "error": "name is required"}, status=400)
 
     try:
-        template = create_email_template_unique(
+        template = execute_email_template_save(
+            template=None,
             raw_name=raw_name,
             subject=str(request.POST.get("subject") or ""),
             html_content=str(request.POST.get("html_content") or ""),

@@ -206,6 +206,45 @@ class EmailTemplatesUiTests(TestCase):
         self.assertNotIn("list_url", payload)
         self.assertNotIn("page_title", payload)
 
+    def test_execute_email_template_save_chooses_update_or_create_mutation(self) -> None:
+        from core.templated_email import execute_email_template_save
+
+        original = EmailTemplate.objects.create(
+            name="shared-save-original",
+            description="Original",
+            subject="Original subject",
+            content="Original text",
+            html_content="<p>Original html</p>",
+        )
+
+        updated = execute_email_template_save(
+            template=original,
+            raw_name=None,
+            subject="Updated subject",
+            html_content="<p>Updated html</p>",
+            text_content="Updated text",
+        )
+
+        self.assertEqual(updated.pk, original.pk)
+        updated.refresh_from_db()
+        self.assertEqual(updated.subject, "Updated subject")
+        self.assertEqual(updated.html_content, "<p>Updated html</p>")
+        self.assertEqual(updated.content, "Updated text")
+
+        created = execute_email_template_save(
+            template=None,
+            raw_name="shared-save-created",
+            subject="Created subject",
+            html_content="<p>Created html</p>",
+            text_content="Created text",
+        )
+
+        self.assertNotEqual(created.pk, original.pk)
+        self.assertEqual(created.name, "shared-save-created")
+        self.assertEqual(created.subject, "Created subject")
+        self.assertEqual(created.html_content, "<p>Created html</p>")
+        self.assertEqual(created.content, "Created text")
+
     def test_create_edit_delete_template(self) -> None:
         from post_office.models import EmailTemplate
 

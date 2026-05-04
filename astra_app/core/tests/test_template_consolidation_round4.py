@@ -35,6 +35,18 @@ class Round4TemplateConsolidationTests(SimpleTestCase):
 
         self.assertNotIn("_membership_request_shared_modals.html", source)
 
+    def test_membership_request_user_view_keeps_repaired_detail_url_template_helpers(self) -> None:
+        source = self._python_source("core/views_membership/user.py")
+
+        self.assertNotIn("class MembershipRequestFormPageState", source)
+        self.assertNotIn("def _build_membership_request_form_page_state(", source)
+        self.assertIn("def _membership_request_detail_user_profile_url_template(", source)
+        self.assertIn("def _membership_request_detail_organization_detail_url_template(", source)
+        self.assertNotIn(
+            "access_context: MembershipRequestCreateAccessContext,\n    payload: dict[str, object],",
+            source,
+        )
+
     def test_phase9_bulk_pages_use_expected_action_modules(self) -> None:
         invitations = self._template_source("account_invitations_vue.html")
         requests = self._template_source("membership_requests.html")
@@ -71,7 +83,7 @@ class Round4TemplateConsolidationTests(SimpleTestCase):
 
     def test_phase9_compose_template_is_markup_only_and_uses_include_contract(self) -> None:
         compose = self._template_source("_templated_email_compose.html")
-        send_mail = self._template_source("send_mail.html")
+        send_mail_shell = self._template_source("send_mail_shell.html")
         election_edit = self._template_source("election_edit.html")
         email_template_edit = self._template_source("email_template_edit.html")
 
@@ -79,10 +91,13 @@ class Round4TemplateConsolidationTests(SimpleTestCase):
         self.assertNotIn("<script src=", compose)
         self.assertNotIn("<style>", compose)
 
-        self.assertIn("_templated_email_compose_assets_head.html", send_mail)
+        self.assertIn("_templated_email_compose_assets_head.html", send_mail_shell)
         self.assertIn("_templated_email_compose_assets_head.html", election_edit)
         self.assertIn("_templated_email_compose_assets_head.html", email_template_edit)
 
-        self.assertIn("_templated_email_compose_assets_scripts.html", send_mail)
+        self.assertIn("_templated_email_compose_assets_scripts.html", send_mail_shell)
         self.assertIn("_templated_email_compose_assets_scripts.html", election_edit)
         self.assertIn("_templated_email_compose_assets_scripts.html", email_template_edit)
+
+        self.assertIn("data-send-mail-root", send_mail_shell)
+        self.assertNotIn("data-templated-email-compose", send_mail_shell)

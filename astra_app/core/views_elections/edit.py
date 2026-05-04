@@ -1,7 +1,5 @@
 """Election creation and editing views."""
 
-import datetime
-
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import permission_required
@@ -27,10 +25,18 @@ from core.forms_elections import (
     ElectionVotingEmailForm,
     ExclusionGroupWizardFormSet,
     is_self_nomination,
+    parse_datetime_local_value,
 )
 from core.freeipa.user import FreeIPAUser
 from core.ipa_user_attrs import _get_freeipa_timezone_name
-from core.models import AuditLogEntry, Candidate, Election, ExclusionGroup, ExclusionGroupCandidate, Organization
+from core.models import (
+    AuditLogEntry,
+    Candidate,
+    Election,
+    ExclusionGroup,
+    ExclusionGroupCandidate,
+    Organization,
+)
 from core.permissions import ASTRA_ADD_ELECTION
 from core.templated_email import placeholderize_empty_values, render_templated_email_preview
 from core.user_labels import user_choice_from_freeipa
@@ -40,52 +46,6 @@ from core.views_elections._helpers import (
     _get_active_election,
 )
 from core.views_utils import get_username
-
-# ---------------------------------------------------------------------------
-# election_edit helpers
-# ---------------------------------------------------------------------------
-
-
-def _candidate_queryset(election: Election | None):
-    """Candidate queryset for the given election, or empty if unsaved."""
-    if election is not None and election.pk is not None:
-        return Candidate.objects.filter(election=election).order_by("id")
-    return Candidate.objects.none()
-
-
-def _group_queryset(election: Election | None):
-    """ExclusionGroup queryset for the given election, or empty if unsaved."""
-    if election is not None and election.pk is not None:
-        return ExclusionGroup.objects.filter(election=election).order_by("name", "id")
-    return ExclusionGroup.objects.none()
-
-
-def _disable_details_form_for_started(
-    election: Election | None, details_form: ElectionDetailsForm,
-) -> None:
-    """Disable configuration fields once an election has started."""
-    if election is None or election.status == Election.Status.draft:
-        return
-    for field_name in (
-        "name", "description", "url", "start_datetime",
-        "number_of_seats", "quorum",
-    ):
-        details_form.fields[field_name].disabled = True
-    if election.status != Election.Status.open:
-        details_form.fields["end_datetime"].disabled = True
-
-
-def _disable_formset_fields(
-    candidate_formset: CandidateWizardFormSet,
-    group_formset: ExclusionGroupWizardFormSet,
-) -> None:
-    """Disable all formset fields for non-draft elections."""
-    for form in candidate_formset.forms:
-        for field in form.fields.values():
-            field.disabled = True
-    for form in group_formset.forms:
-        for field in form.fields.values():
-            field.disabled = True
 
 
 def _configure_candidate_choices(
@@ -290,20 +250,6 @@ def _save_candidates_and_groups(
             if c is None:
                 continue
             ExclusionGroupCandidate.objects.create(exclusion_group=group, candidate=c)
-
-
-def _parse_optional_local_datetime(raw_value: str) -> datetime.datetime | None:
-    """Parse an HTML datetime-local value into an aware datetime."""
-    raw = str(raw_value or "").strip()
-    if not raw:
-        return None
-    try:
-        parsed = datetime.datetime.fromisoformat(raw)
-    except ValueError:
-        return None
-    if timezone.is_naive(parsed):
-        return timezone.make_aware(parsed)
-    return parsed
 
 
 def _issue_and_email_credentials(
@@ -565,6 +511,12 @@ def _handle_start_election(
 def election_edit(request, election_id: int):
     is_create = election_id == 0
     election = None if is_create else _get_active_election(election_id)
+    candidate_queryset = Candidate.objects.none()
+    group_queryset = ExclusionGroup.objects.none()
+    if election is not None and election.pk is not None:
+        candidate_queryset = Candidate.objects.filter(election=election).order_by("id")
+        group_queryset = ExclusionGroup.objects.filter(election=election).order_by("name", "id")
+    election_locked = election is not None and election.status != Election.Status.draft
 
     templates = list(EmailTemplate.objects.all().order_by("name"))
     default_template = EmailTemplate.objects.filter(name=settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME).first()
@@ -613,21 +565,27 @@ def election_edit(request, election_id: int):
         details_form = ElectionDetailsForm(request.POST, instance=election)
         email_form = ElectionVotingEmailForm(request.POST)
 
-        _disable_details_form_for_started(election, details_form)
+        if election_locked:
+            for field_name in (
+                "name", "description", "url", "start_datetime", "number_of_seats", "quorum",
+            ):
+                details_form.fields[field_name].disabled = True
+            if election.status != Election.Status.open:
+                details_form.fields["end_datetime"].disabled = True
 
         if action == "save_draft":
             candidate_formset = CandidateWizardFormSet(
-                request.POST, queryset=_candidate_queryset(election), prefix="candidates",
+                request.POST, queryset=candidate_queryset, prefix="candidates",
             )
             group_formset = ExclusionGroupWizardFormSet(
-                request.POST, queryset=_group_queryset(election), prefix="groups",
+                request.POST, queryset=group_queryset, prefix="groups",
             )
         elif action == "extend_end":
             candidate_formset = CandidateWizardFormSet(
-                queryset=_candidate_queryset(election), prefix="candidates",
+                queryset=candidate_queryset, prefix="candidates",
             )
             group_formset = ExclusionGroupWizardFormSet(
-                queryset=_group_queryset(election), prefix="groups",
+                queryset=group_queryset, prefix="groups",
             )
         else:
             candidate_formset = CandidateWizardFormSet(queryset=Candidate.objects.none(), prefix="candidates")
@@ -640,8 +598,11 @@ def election_edit(request, election_id: int):
             _configure_candidate_choices(request, election, candidate_formset)
             _configure_group_choices_for_formset(request, election, candidate_formset, group_formset)
 
-        if election is not None and election.status != Election.Status.draft:
-            _disable_formset_fields(candidate_formset, group_formset)
+        if election_locked:
+            for formset in (candidate_formset, group_formset):
+                for form in formset.forms:
+                    for field in form.fields.values():
+                        field.disabled = True
 
         candidate_usernames: list[str] = []
         nominator_usernames: list[str] = []
@@ -701,8 +662,8 @@ def election_edit(request, election_id: int):
                 if "eligible_group_cn" in request.POST:
                     election.eligible_group_cn = str(request.POST.get("eligible_group_cn") or "").strip()
 
-                parsed_start = _parse_optional_local_datetime(str(request.POST.get("start_datetime") or ""))
-                parsed_end = _parse_optional_local_datetime(str(request.POST.get("end_datetime") or ""))
+                parsed_start = parse_datetime_local_value(str(request.POST.get("start_datetime") or ""))
+                parsed_end = parse_datetime_local_value(str(request.POST.get("end_datetime") or ""))
 
                 fallback_start = election.start_datetime if election.start_datetime else timezone.now()
                 election.start_datetime = parsed_start if parsed_start is not None else fallback_start
@@ -797,7 +758,13 @@ def election_edit(request, election_id: int):
             messages.error(request, "Please correct the errors below.")
     else:
         details_form = ElectionDetailsForm(instance=election)
-        _disable_details_form_for_started(election, details_form)
+        if election_locked:
+            for field_name in (
+                "name", "description", "url", "start_datetime", "number_of_seats", "quorum",
+            ):
+                details_form.fields[field_name].disabled = True
+            if election.status != Election.Status.open:
+                details_form.fields["end_datetime"].disabled = True
 
         selected_template = default_template
         if election is not None and election.voting_email_template_id is not None:
@@ -826,14 +793,17 @@ def election_edit(request, election_id: int):
         email_form = ElectionVotingEmailForm(initial=initial_email)
 
         candidate_formset = CandidateWizardFormSet(
-            queryset=_candidate_queryset(election), prefix="candidates",
+            queryset=candidate_queryset, prefix="candidates",
         )
         group_formset = ExclusionGroupWizardFormSet(
-            queryset=_group_queryset(election), prefix="groups",
+            queryset=group_queryset, prefix="groups",
         )
 
-        if election is not None and election.status != Election.Status.draft:
-            _disable_formset_fields(candidate_formset, group_formset)
+        if election_locked:
+            for formset in (candidate_formset, group_formset):
+                for form in formset.forms:
+                    for field in form.fields.values():
+                        field.disabled = True
 
         _configure_candidate_choices(request, election, candidate_formset)
         _configure_group_choices_for_formset(request, election, candidate_formset, group_formset)

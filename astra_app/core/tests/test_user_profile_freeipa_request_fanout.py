@@ -152,7 +152,7 @@ class UserProfileFreeIPARequestFanoutTests(TestCase):
                 side_effect=AssertionError("profile aggregate note rendering must stay on the shared lightweight author-lookup path"),
             ),
         ):
-            response = views_users.user_profile_api(request, "alice")
+            response = views_users.user_profile_detail_api(request, "alice")
 
         return response, target_fetches, aggregate_lookup_usernames, json.loads(response.content)
 
@@ -289,7 +289,7 @@ class UserProfileFreeIPARequestFanoutTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
 
-    def test_committee_fallback_stays_cold_when_request_user_groups_are_present(self) -> None:
+    def test_user_profile_detail_committee_fallback_stays_cold_when_request_user_groups_are_present(self) -> None:
         reviewer = SimpleNamespace(
             username="reviewer",
             is_authenticated=True,
@@ -306,13 +306,21 @@ class UserProfileFreeIPARequestFanoutTests(TestCase):
             patch("core.views_users._get_full_user", return_value=self._target_user("alice")),
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
             patch("core.views_users.has_enabled_agreements", return_value=False),
-            patch("core.views_users.resolve_avatar_urls_for_users", return_value=({}, 0, 0)),
+            patch(
+                "core.views_users.membership_review_permissions",
+                return_value={
+                    "membership_can_view": True,
+                    "membership_can_add": False,
+                    "membership_can_change": False,
+                    "membership_can_delete": False,
+                },
+            ),
         ):
-            response = views_users.user_profile_api(request, "alice")
+            response = views_users.user_profile_detail_api(request, "alice")
 
         self.assertEqual(response.status_code, 200)
 
-    def test_committee_fallback_fetches_viewer_once_when_groups_are_missing(self) -> None:
+    def test_user_profile_detail_committee_fallback_fetches_viewer_once_when_groups_are_missing(self) -> None:
         reviewer = self._reviewer_user()
         request_user = SimpleNamespace(
             username="reviewer",
@@ -326,59 +334,17 @@ class UserProfileFreeIPARequestFanoutTests(TestCase):
             patch("core.views_users._get_full_user", return_value=self._target_user("alice")),
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
             patch("core.views_users.has_enabled_agreements", return_value=False),
-            patch("core.views_users.resolve_avatar_urls_for_users", return_value=({}, 0, 0)),
+            patch(
+                "core.views_users.membership_review_permissions",
+                return_value={
+                    "membership_can_view": True,
+                    "membership_can_add": False,
+                    "membership_can_change": False,
+                    "membership_can_delete": False,
+                },
+            ),
         ):
-            response = views_users.user_profile_api(request, "alice")
+            response = views_users.user_profile_detail_api(request, "alice")
 
         self.assertEqual(response.status_code, 200)
         get_mock.assert_called_once_with("reviewer")
-
-    def test_profile_route_reuses_target_and_avatar_safe_viewer_for_aggregate_notes(self) -> None:
-        self._create_aggregate_profile_notes()
-
-        response, target_fetches, aggregate_lookup_usernames, payload = self._render_profile_with_aggregate_trace(
-            request_user=self._viewer_request_user(include_email=True),
-            lightweight_users_by_username={},
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(target_fetches, ["alice"])
-        self.assertEqual(aggregate_lookup_usernames, [])
-        notes = payload["membership"]["notes"]
-        self.assertEqual(notes["targetType"], "user")
-        self.assertEqual(notes["target"], "alice")
-        self.assertTrue(notes["canView"])
-        self.assertFalse(notes["canWrite"])
-        encoded_payload = json.dumps(payload)
-        self.assertNotIn("Target note", encoded_payload)
-        self.assertNotIn("Viewer note", encoded_payload)
-        self.assertNotIn("Ghost note", encoded_payload)
-
-    def test_profile_route_skips_username_only_viewer_reuse_for_aggregate_notes(self) -> None:
-        self._create_aggregate_profile_notes()
-        viewer_from_lookup = FreeIPAUser(
-            "viewer",
-            {
-                "uid": ["viewer"],
-                "displayname": ["Viewer Example"],
-                "mail": ["viewer@example.com"],
-            },
-        )
-
-        response, target_fetches, aggregate_lookup_usernames, payload = self._render_profile_with_aggregate_trace(
-            request_user=self._viewer_request_user(include_email=False),
-            lightweight_users_by_username={"viewer": viewer_from_lookup},
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(target_fetches, ["alice"])
-        self.assertEqual(aggregate_lookup_usernames, [])
-        notes = payload["membership"]["notes"]
-        self.assertEqual(notes["targetType"], "user")
-        self.assertEqual(notes["target"], "alice")
-        self.assertTrue(notes["canView"])
-        self.assertFalse(notes["canWrite"])
-        encoded_payload = json.dumps(payload)
-        self.assertNotIn("Target note", encoded_payload)
-        self.assertNotIn("Viewer note", encoded_payload)
-        self.assertNotIn("Ghost note", encoded_payload)

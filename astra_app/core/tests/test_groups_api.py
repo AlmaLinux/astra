@@ -37,29 +37,67 @@ class GroupsApiTests(TestCase):
             },
         )
 
-    def test_groups_api_returns_filtered_paginated_payload(self) -> None:
+    def test_groups_api_returns_description_matches_excludes_non_fas_groups_and_preserves_payload_shape(self) -> None:
         self._login_as_freeipa_user("alice")
         viewer = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
 
-        alpha = self._make_group("alpha-team", description="Alpha Team", members=["a", "b"])
+        alpha = self._make_group("alpha-team", description="Core Ops Team", members=["a", "b"])
         beta = self._make_group("beta-team", description="Beta Team", members=["c"])
+        hidden = FreeIPAGroup(
+            "ops-shadow",
+            {
+                "cn": ["ops-shadow"],
+                "description": ["Core Ops Shadow"],
+                "member_user": ["d"],
+                "membermanager_user": [],
+                "membermanager_group": [],
+                "member_group": [],
+                "objectclass": [],
+            },
+        )
         alpha.member_count_recursive = MagicMock(return_value=2)
         beta.member_count_recursive = MagicMock(return_value=1)
+        hidden.member_count_recursive = MagicMock(return_value=7)
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
-            with patch("core.views_groups.FreeIPAGroup.all", return_value=[alpha, beta]):
+            with patch("core.views_groups.FreeIPAGroup.all", return_value=[alpha, beta, hidden]):
                 response = self.client.get(
                     reverse("api-groups"),
-                    {"q": "alpha", "page": "1"},
+                    {"q": "OPS", "page": "1"},
                     HTTP_ACCEPT="application/json",
                 )
 
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.content)
-        self.assertEqual(payload["q"], "alpha")
+        self.assertEqual(payload["q"], "OPS")
         self.assertEqual([item["cn"] for item in payload["items"]], ["alpha-team"])
         self.assertEqual(payload["items"][0]["member_count"], 2)
         self.assertNotIn("detail_url", payload["items"][0])
+        self.assertEqual(payload["pagination"]["page"], 1)
+        hidden.member_count_recursive.assert_not_called()
+
+    def test_groups_api_sorts_items_by_lowercase_group_name(self) -> None:
+        self._login_as_freeipa_user("alice")
+        viewer = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
+
+        zulu = self._make_group("Zulu", description="Zulu Team", members=["z"])
+        alpha = self._make_group("alpha", description="Alpha Team", members=["a"])
+        beta = self._make_group("Beta", description="Beta Team", members=["b"])
+        zulu.member_count_recursive = MagicMock(return_value=1)
+        alpha.member_count_recursive = MagicMock(return_value=1)
+        beta.member_count_recursive = MagicMock(return_value=1)
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
+            with patch("core.views_groups.FreeIPAGroup.all", return_value=[zulu, alpha, beta]):
+                response = self.client.get(
+                    reverse("api-groups"),
+                    {"page": "1"},
+                    HTTP_ACCEPT="application/json",
+                )
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        self.assertEqual([item["cn"] for item in payload["items"]], ["alpha", "Beta", "Zulu"])
         self.assertEqual(payload["pagination"]["page"], 1)
 
     def test_groups_page_renders_route_templates_for_vue_shell(self) -> None:

@@ -47,7 +47,6 @@ from core.views_utils import (
     get_username,
     normalize_freeipa_username,
     settings_url,
-    try_get_username_from_user,
 )
 
 logger = logging.getLogger(__name__)
@@ -697,7 +696,7 @@ def _build_user_profile_summary_data(context: dict[str, object]) -> dict[str, ob
     summary = _build_user_profile_summary_bootstrap(context)
     summary.pop("currentTimeLabel", None)
     summary.pop("profileCountry", None)
-    summary["countryCode"] = str(context["country_code"]) if bool(context["viewer_is_membership_committee"]) else ""
+    summary["countryCode"] = str(context["country_code"] or "") if bool(context["viewer_is_membership_committee"]) else ""
     summary["socialProfiles"] = cast(list[dict[str, object]], context["social_profile_urls"])
     summary["websiteUrls"] = cast(list[str], context["website_url_values"])
     summary["rssUrls"] = cast(list[str], context["rss_url_values"])
@@ -1140,15 +1139,6 @@ def _serialize_user_profile_membership_data(context: dict[str, object], request:
     }
 
 
-def _build_user_profile_payload(context: dict[str, object], request: HttpRequest) -> dict[str, object]:
-    return {
-        "summary": _build_user_profile_summary_bootstrap(context),
-        "groups": _build_user_profile_groups_bootstrap(context),
-        "membership": _serialize_user_profile_membership(context, request),
-        "accountSetup": _serialize_user_profile_account_setup(context),
-    }
-
-
 def _build_user_profile_detail_payload(context: dict[str, object], request: HttpRequest) -> dict[str, object]:
     return {
         "summary": _build_user_profile_summary_data(context),
@@ -1204,11 +1194,6 @@ def user_profile(request: HttpRequest, username: str) -> HttpResponse:
             "membership_notes_can_write": membership_can_write,
         },
     )
-
-
-def user_profile_api(request: HttpRequest, username: str) -> JsonResponse:
-    context = _profile_context_for_request(request, username)
-    return JsonResponse(_build_user_profile_payload(context, request))
 
 
 @require_GET

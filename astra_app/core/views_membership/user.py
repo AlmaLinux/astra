@@ -59,13 +59,6 @@ class MembershipRequestCreateAccessContext:
     target_username: str | None
 
 
-@dataclass(slots=True)
-class MembershipRequestFormPageState:
-    form: MembershipRequestForm
-    payload: dict[str, object]
-    bootstrap: dict[str, str]
-
-
 def _membership_request_form_json(value: object) -> str:
     return json.dumps(value, separators=(",", ":")).replace("</", "<\\/")
 
@@ -181,14 +174,13 @@ def _build_membership_request_form_page_payload(
     }
 
 
-def _build_membership_request_form_page_state(
-    *,
+def _render_membership_request_form_page(
     request: HttpRequest,
-    access_context: MembershipRequestCreateAccessContext,
+    *,
     form: MembershipRequestForm,
-    no_types_available: bool,
-    prefill_type_unavailable_name: str | None,
-) -> MembershipRequestFormPageState:
+    access_context: MembershipRequestCreateAccessContext,
+    initial_payload: dict[str, object] | None = None,
+) -> HttpResponse:
     organization = access_context.organization
     if organization is not None:
         api_url = reverse("api-organization-membership-request-form-detail", args=[organization.pk])
@@ -197,47 +189,23 @@ def _build_membership_request_form_page_state(
         api_url = reverse("api-membership-request-form-detail")
         submit_url = reverse("membership-request")
 
-    return MembershipRequestFormPageState(
-        form=form,
-        payload=_build_membership_request_form_page_payload(
-            form=form,
-            organization=organization,
-            no_types_available=no_types_available,
-            prefill_type_unavailable_name=prefill_type_unavailable_name,
-        ),
-        bootstrap={
-            "api_url": api_url,
-            "cancel_url": _membership_request_cancel_url(
-                username=access_context.username,
-                organization=organization,
-            ),
-            "submit_url": submit_url,
-            "page_title": "Request Membership",
-            "privacy_policy_url": reverse("privacy-policy"),
-        },
-    )
-
-
-def _render_membership_request_form_page(
-    request: HttpRequest,
-    *,
-    state: MembershipRequestFormPageState,
-    initial_payload: dict[str, object] | None = None,
-) -> HttpResponse:
     return render(
         request,
         "core/membership_request.html",
         {
-            "membership_request_form_title": state.bootstrap["page_title"],
-            "membership_request_form_api_url": state.bootstrap["api_url"],
-            "membership_request_form_cancel_url": state.bootstrap["cancel_url"],
-            "membership_request_form_submit_url": state.bootstrap["submit_url"],
-            "membership_request_form_privacy_policy_url": state.bootstrap["privacy_policy_url"],
+            "membership_request_form_title": "Request Membership",
+            "membership_request_form_api_url": api_url,
+            "membership_request_form_cancel_url": _membership_request_cancel_url(
+                username=access_context.username,
+                organization=organization,
+            ),
+            "membership_request_form_submit_url": submit_url,
+            "membership_request_form_privacy_policy_url": reverse("privacy-policy"),
             "membership_request_form_csrf_token": get_token(request),
             "membership_request_form_initial_payload_json": None
             if initial_payload is None
             else _membership_request_form_json(initial_payload),
-            "form": state.form,
+            "form": form,
         },
     )
 
@@ -312,11 +280,11 @@ def _load_membership_request_create_access_context(
     )
 
 
-def _build_membership_request_get_form_state(
+def _build_membership_request_get_form_payload(
     request: HttpRequest,
     *,
     access_context: MembershipRequestCreateAccessContext,
-) -> MembershipRequestFormPageState:
+) -> tuple[MembershipRequestForm, dict[str, object]]:
     prefill_membership_type = str(request.GET.get("membership_type") or "").strip()
     organization = access_context.organization
     if access_context.is_org_request and not prefill_membership_type:
@@ -368,10 +336,9 @@ def _build_membership_request_get_form_state(
             if blocked_type is not None:
                 prefill_type_unavailable_name = blocked_type.name
 
-    return _build_membership_request_form_page_state(
-        request=request,
-        access_context=access_context,
+    return form, _build_membership_request_form_page_payload(
         form=form,
+        organization=organization,
         no_types_available=no_types_available,
         prefill_type_unavailable_name=prefill_type_unavailable_name,
     )
@@ -428,6 +395,7 @@ def membership_request(request: HttpRequest, organization_id: int | None = None)
     organization = access_context.organization
     is_org_request = access_context.is_org_request
     target_username = access_context.target_username
+    initial_payload: dict[str, object] | None = None
 
     if request.method == "POST":
         form = MembershipRequestForm(request.POST, username=target_username, organization=organization)
@@ -525,29 +493,27 @@ def membership_request(request: HttpRequest, organization_id: int | None = None)
                             existing_request.pk,
                         ),
                     )
-        no_types_available = (
-            not is_org_request
-            and not form.fields["membership_type"].queryset.exists()
-        )
-        prefill_type_unavailable_name = None
-        state = _build_membership_request_form_page_state(
-            request=request,
-            access_context=access_context,
+        initial_payload = _build_membership_request_form_page_payload(
             form=form,
-            no_types_available=no_types_available,
-            prefill_type_unavailable_name=prefill_type_unavailable_name,
+            organization=organization,
+            no_types_available=(
+                not is_org_request
+                and not form.fields["membership_type"].queryset.exists()
+            ),
+            prefill_type_unavailable_name=None,
         )
-        return _render_membership_request_form_page(
+    else:
+        form, _payload = _build_membership_request_get_form_payload(
             request,
-            state=state,
-            initial_payload=state.payload,
+            access_context=access_context,
         )
 
-    state = _build_membership_request_get_form_state(
+    return _render_membership_request_form_page(
         request,
+        form=form,
         access_context=access_context,
+        initial_payload=initial_payload,
     )
-    return _render_membership_request_form_page(request, state=state)
 
 
 def membership_request_form_detail_api(
@@ -569,11 +535,11 @@ def membership_request_form_detail_api(
     if isinstance(access_context, HttpResponse):
         return _membership_request_json_response({"error": "Not found."}, status=404)
 
-    state = _build_membership_request_get_form_state(
+    _form, payload = _build_membership_request_get_form_payload(
         request,
         access_context=access_context,
     )
-    return _membership_request_json_response(state.payload)
+    return _membership_request_json_response(payload)
 
 
 def _user_can_access_membership_request(*, username: str, membership_request: MembershipRequest) -> bool:
@@ -968,6 +934,26 @@ def _is_json_compatibility_mode(request: HttpRequest) -> bool:
     return _normalize_str(request.headers.get("X-Astra-Compatibility-Mode")).lower() == "json"
 
 
+def _render_membership_request_detail_page(
+    request: HttpRequest,
+    *,
+    state: MembershipRequestDetailState,
+    initial_payload: dict[str, object] | None = None,
+) -> HttpResponse:
+    return render(
+        request,
+        "core/membership_request_detail.html",
+        {
+            "membership_request_detail_api_url": reverse("api-membership-request-detail", args=[state.membership_request.pk]),
+            **state.bootstrap,
+            "membership_request_detail_title": str(state.bootstrap["page_title"]),
+            "membership_request_detail_initial_payload_json": None
+            if initial_payload is None
+            else _membership_request_form_json(initial_payload),
+        },
+    )
+
+
 def _compatibility_form_error_payload(*, form: MembershipRequestUpdateResponsesForm) -> dict[str, object]:
     return {
         "ok": False,
@@ -990,63 +976,45 @@ def _handle_self_service_detail_post(
 
     self_service = state.payload["self_service"]
 
+    is_json_mode = _is_json_compatibility_mode(request)
     form = MembershipRequestUpdateResponsesForm(request.POST, membership_request=membership_request)
     if not form.is_valid():
-        if _is_json_compatibility_mode(request):
+        if is_json_mode:
             payload = _compatibility_form_error_payload(form=form)
             payload["form"] = _serialize_update_form(form=form)
             return JsonResponse(payload, status=400)
 
         messages.error(request, "Invalid request update.")
-        self_service["form"] = _serialize_update_form(form=form)
-        return render(
-            request,
-            "core/membership_request_detail.html",
-            {
-                "membership_request_detail_api_url": reverse("api-membership-request-detail", args=[state.membership_request.pk]),
-                **state.bootstrap,
-                "membership_request_detail_title": str(state.bootstrap["page_title"]),
-                "membership_request_detail_initial_payload_json": _membership_request_form_json(state.payload),
-            },
-        )
+    else:
+        try:
+            resubmit_membership_request(
+                membership_request=membership_request,
+                actor_username=state.username,
+                updated_responses=form.responses(),
+            )
+        except ValidationError as error:
+            message = error.messages[0] if error.messages else str(error)
+            form.add_error(None, message)
+            if is_json_mode:
+                payload = _compatibility_form_error_payload(form=form)
+                payload["form"] = _serialize_update_form(form=form)
+                return JsonResponse(payload, status=400)
+        else:
+            if is_json_mode:
+                return JsonResponse(
+                    {
+                        "ok": True,
+                        "message": "Your request has been resubmitted for review.",
+                        "redirect_url": None,
+                        "reread_targets": ["detail"],
+                    }
+                )
 
-    try:
-        resubmit_membership_request(
-            membership_request=membership_request,
-            actor_username=state.username,
-            updated_responses=form.responses(),
-        )
-    except ValidationError as error:
-        message = error.messages[0] if error.messages else str(error)
-        form.add_error(None, message)
-        if _is_json_compatibility_mode(request):
-            payload = _compatibility_form_error_payload(form=form)
-            payload["form"] = _serialize_update_form(form=form)
-            return JsonResponse(payload, status=400)
-        self_service["form"] = _serialize_update_form(form=form)
-        return render(
-            request,
-            "core/membership_request_detail.html",
-            {
-                "membership_request_detail_api_url": reverse("api-membership-request-detail", args=[state.membership_request.pk]),
-                **state.bootstrap,
-                "membership_request_detail_title": str(state.bootstrap["page_title"]),
-                "membership_request_detail_initial_payload_json": _membership_request_form_json(state.payload),
-            },
-        )
+            messages.success(request, "Your request has been resubmitted for review.")
+            return redirect("membership-request-detail", pk=membership_request.pk)
 
-    if _is_json_compatibility_mode(request):
-        return JsonResponse(
-            {
-                "ok": True,
-                "message": "Your request has been resubmitted for review.",
-                "redirect_url": None,
-                "reread_targets": ["detail"],
-            }
-        )
-
-    messages.success(request, "Your request has been resubmitted for review.")
-    return redirect("membership-request-detail", pk=membership_request.pk)
+    self_service["form"] = _serialize_update_form(form=form)
+    return _render_membership_request_detail_page(request, state=state, initial_payload=state.payload)
 
 
 def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
@@ -1063,15 +1031,7 @@ def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
             raise PermissionDenied
         return _handle_self_service_detail_post(request=request, state=state)
 
-    return render(
-        request,
-        "core/membership_request_detail.html",
-        {
-            "membership_request_detail_api_url": reverse("api-membership-request-detail", args=[state.membership_request.pk]),
-            **state.bootstrap,
-            "membership_request_detail_title": str(state.bootstrap["page_title"]),
-        },
-    )
+    return _render_membership_request_detail_page(request, state=state)
 
 
 def membership_request_detail_api(request: HttpRequest, pk: int) -> JsonResponse:

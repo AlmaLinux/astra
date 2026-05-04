@@ -13,7 +13,7 @@ class ProfileRenderingWithoutEmailTests(TestCase):
         session["_freeipa_username"] = username
         session.save()
 
-    def test_profile_page_renders_when_freeipa_user_has_no_email(self):
+    def test_user_profile_detail_renders_when_freeipa_user_has_no_email(self):
         """Regression: django-avatar gravatar provider crashes on email=None."""
 
         username = "admin"
@@ -29,8 +29,17 @@ class ProfileRenderingWithoutEmailTests(TestCase):
             patch("core.views_users._is_membership_committee_viewer", return_value=False),
             patch("core.views_users.FreeIPAGroup.all", return_value=[]),
             patch("core.views_users.has_enabled_agreements", return_value=False),
+            patch(
+                "core.views_users.membership_review_permissions",
+                return_value={
+                    "membership_can_view": False,
+                    "membership_can_add": False,
+                    "membership_can_change": False,
+                    "membership_can_delete": False,
+                },
+            ),
         ):
-            resp = self.client.get(reverse("api-user-profile", args=[username]))
+            resp = self.client.get(reverse("api-user-profile-detail", args=[username]))
 
         # Desired behavior: profile API should render even without an email.
         self.assertEqual(resp.status_code, 200)

@@ -7,6 +7,26 @@ Required context:
 Optional:
 - modal_id: str
 - dialog_style: str (inline style for .modal-dialog)
+- body: str
+- body_class: str (default: mb-0)
+- render_default_footer: bool
+- cancel_label: str (default: Cancel)
+- cancel_button_class: str (default: btn-outline-secondary)
+- cancel_button_id: str
+- cancel_title: str
+- secondary_button_label: str
+- secondary_button_class: str (default: btn-outline-primary)
+- secondary_button_id: str
+- secondary_button_title: str
+- secondary_button_type: str (default: button)
+- secondary_button_onclick: str
+- submit_label: str
+- submit_button_class: str (default: btn-primary)
+- submit_button_id: str
+- submit_button_title: str
+- submit_button_type: str (default: button)
+- submit_button_onclick: str
+- submit_button_allow_invalid: bool
 {% endcomment %}
 
 <div class="modal fade"{% if modal_id %} id="{{ modal_id }}"{% endif %} tabindex="-1" role="dialog" aria-hidden="true"{% if modal_id %} aria-labelledby="{{ modal_id }}-title"{% endif %}>
@@ -19,9 +39,25 @@ Optional:
         </button>
       </div>
       <div class="modal-body">
-        {% block modal_body %}{% endblock %}
+        {% block modal_body %}
+          {% if body %}
+            <p class="{{ body_class|default:'mb-0' }}">{{ body }}</p>
+          {% endif %}
+        {% endblock %}
       </div>
-      {% block modal_footer %}{% endblock %}
+      {% block modal_footer %}
+        {% if render_default_footer %}
+          <div class="modal-footer">
+            <button type="button" class="btn {{ cancel_button_class|default:'btn-outline-secondary' }}" data-dismiss="modal"{% if cancel_button_id %} id="{{ cancel_button_id }}"{% endif %} title="{{ cancel_title|default:'Close dialog without applying changes' }}">{{ cancel_label|default:"Cancel" }}</button>
+            {% if secondary_button_label %}
+              <button type="{{ secondary_button_type|default:'button' }}" class="btn {{ secondary_button_class|default:'btn-outline-primary' }}"{% if secondary_button_id %} id="{{ secondary_button_id }}"{% endif %}{% if secondary_button_onclick %} onclick="{{ secondary_button_onclick }}"{% endif %} title="{{ secondary_button_title|default:'' }}">{{ secondary_button_label }}</button>
+            {% endif %}
+            {% if submit_label %}
+              <button type="{{ submit_button_type|default:'button' }}" class="btn {{ submit_button_class|default:'btn-primary' }}"{% if submit_button_id %} id="{{ submit_button_id }}"{% endif %}{% if submit_button_onclick %} onclick="{{ submit_button_onclick }}"{% endif %}{% if submit_button_allow_invalid %} data-allow-invalid-submit="true"{% endif %} title="{{ submit_button_title|default:'Confirm and apply this action' }}">{{ submit_label }}</button>
+            {% endif %}
+          </div>
+        {% endif %}
+      {% endblock %}
     </div>
   </div>
 </div>
