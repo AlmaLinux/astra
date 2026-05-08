@@ -19,7 +19,7 @@ export interface ChatLink {
   external: boolean;
 }
 
-type ChatKind = "nickname" | "channel";
+export type ChatKind = "nickname" | "channel";
 type ChatScheme = "irc" | "matrix" | "mattermost";
 
 interface BuildChatLinkOptions {

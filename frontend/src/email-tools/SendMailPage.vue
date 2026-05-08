@@ -179,8 +179,8 @@ onMounted(async () => {
       <input type="hidden" name="save_as_name" id="send-mail-save-as-name" value="">
       <input type="hidden" name="recipient_mode" id="send-mail-recipient-mode" :value="payload.selectedRecipientMode">
       <input type="hidden" name="action_status" :value="payload.actionStatus">
-      <input type="hidden" name="invitation_action" :id="field('invitation_action')?.id || 'id_invitation_action'" value="" :value="stringFieldValue('invitation_action')">
-      <input type="hidden" name="invitation_org_id" :id="field('invitation_org_id')?.id || 'id_invitation_org_id'" value="" :value="stringFieldValue('invitation_org_id')">
+      <input type="hidden" name="invitation_action" :id="field('invitation_action')?.id || 'id_invitation_action'" :value="stringFieldValue('invitation_action')">
+      <input type="hidden" name="invitation_org_id" :id="field('invitation_org_id')?.id || 'id_invitation_org_id'" :value="stringFieldValue('invitation_org_id')">
       <input type="hidden" name="extra_context_json" :id="field('extra_context_json')?.id || 'id_extra_context_json'" :value="stringFieldValue('extra_context_json')">
       <input type="hidden" id="send-mail-has-saved-csv" :value="payload.hasSavedCsvRecipients ? '1' : '0'">
       <input type="hidden" id="send-mail-autoload-template-id" :value="payload.createdTemplateId === null ? '' : String(payload.createdTemplateId)">

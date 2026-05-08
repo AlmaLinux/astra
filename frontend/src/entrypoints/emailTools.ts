@@ -8,21 +8,6 @@ import MailImagesPage from "../email-tools/MailImagesPage.vue";
 import SendMailPage from "../email-tools/SendMailPage.vue";
 import { readEmailTemplateEditorBootstrap, readEmailTemplatesBootstrap, readMailImagesBootstrap, readSendMailBootstrap } from "../email-tools/types";
 
-function mountIntoRoot<T>(root: HTMLElement | null, component: T, props: object, vueRootAttr: string): App<Element> | null {
-  if (root === null) {
-    return null;
-  }
-
-  root.innerHTML = "";
-  const mountPoint = document.createElement("div");
-  mountPoint.setAttribute(vueRootAttr, "");
-  root.appendChild(mountPoint);
-
-  const app = createApp(component as never, props);
-  app.mount(mountPoint);
-  return app;
-}
-
 export function mountEmailTemplatesPage(root: HTMLElement | null): App<Element> | null {
   if (root === null) {
     return null;
@@ -31,7 +16,15 @@ export function mountEmailTemplatesPage(root: HTMLElement | null): App<Element> 
   if (bootstrap === null) {
     return null;
   }
-  return mountIntoRoot(root, EmailTemplatesPage, { bootstrap }, "data-email-templates-vue-root");
+
+  root.innerHTML = "";
+  const mountPoint = document.createElement("div");
+  mountPoint.setAttribute("data-email-templates-vue-root", "");
+  root.appendChild(mountPoint);
+
+  const app = createApp(EmailTemplatesPage, { bootstrap });
+  app.mount(mountPoint);
+  return app;
 }
 
 export function mountEmailTemplateEditorPage(root: HTMLElement | null): App<Element> | null {
@@ -42,7 +35,15 @@ export function mountEmailTemplateEditorPage(root: HTMLElement | null): App<Elem
   if (bootstrap === null) {
     return null;
   }
-  return mountIntoRoot(root, EmailTemplateEditorPage, { bootstrap }, "data-email-template-editor-vue-root");
+
+  root.innerHTML = "";
+  const mountPoint = document.createElement("div");
+  mountPoint.setAttribute("data-email-template-editor-vue-root", "");
+  root.appendChild(mountPoint);
+
+  const app = createApp(EmailTemplateEditorPage, { bootstrap });
+  app.mount(mountPoint);
+  return app;
 }
 
 export function mountMailImagesPage(root: HTMLElement | null): App<Element> | null {
@@ -53,7 +54,15 @@ export function mountMailImagesPage(root: HTMLElement | null): App<Element> | nu
   if (bootstrap === null) {
     return null;
   }
-  return mountIntoRoot(root, MailImagesPage, { bootstrap }, "data-mail-images-vue-root");
+
+  root.innerHTML = "";
+  const mountPoint = document.createElement("div");
+  mountPoint.setAttribute("data-mail-images-vue-root", "");
+  root.appendChild(mountPoint);
+
+  const app = createApp(MailImagesPage, { bootstrap });
+  app.mount(mountPoint);
+  return app;
 }
 
 export function mountSendMailPage(root: HTMLElement | null): App<Element> | null {
@@ -64,5 +73,13 @@ export function mountSendMailPage(root: HTMLElement | null): App<Element> | null
   if (bootstrap === null) {
     return null;
   }
-  return mountIntoRoot(root, SendMailPage, { bootstrap }, "data-send-mail-vue-root");
+
+  root.innerHTML = "";
+  const mountPoint = document.createElement("div");
+  mountPoint.setAttribute("data-send-mail-vue-root", "");
+  root.appendChild(mountPoint);
+
+  const app = createApp(SendMailPage, { bootstrap });
+  app.mount(mountPoint);
+  return app;
 }

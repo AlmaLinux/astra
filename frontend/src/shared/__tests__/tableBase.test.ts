@@ -18,7 +18,7 @@ describe("TableBase", () => {
         totalPages: 1,
         isLoading: false,
         error: "",
-        getRowId: (row: { id: number }) => row.id,
+        getRowId: (row) => (row as { id: number }).id,
         columns: [
           { key: "name", label: "Name" },
           { key: "status", label: "Status" },
@@ -31,12 +31,16 @@ describe("TableBase", () => {
         ],
       },
       slots: {
+        "header-tools": "",
+        "header-meta": "",
         "row-cells": '<td class="name-cell">{{ row.name }}</td><td>{{ row.status }}</td>',
+        "empty-state": "",
+        "footer-meta": "",
       },
     });
 
-    const rowCheckbox = wrapper.get('tbody input[type="checkbox"][name="selected"][value="11"]');
-    await rowCheckbox.setChecked(true);
+    const rowCheckbox = wrapper.get<HTMLInputElement>('tbody input[type="checkbox"][name="selected"][value="11"]');
+    await rowCheckbox.setValue(true);
     await wrapper.find("select[name='bulk_action']").setValue("approve");
     await wrapper.find("form").trigger("submit");
 
@@ -57,14 +61,18 @@ describe("TableBase", () => {
         totalPages: 1,
         isLoading: true,
         error: "",
-        getRowId: (row: { id: number }) => row.id,
+        getRowId: (row) => (row as { id: number }).id,
         columns: [{ key: "name", label: "Name" }],
         colspan: 2,
         checkboxClass: "shared-checkbox",
         paginationAriaLabel: "Shared pagination",
       },
       slots: {
+        "header-tools": "",
+        "header-meta": "",
         "row-cells": "<td></td>",
+        "empty-state": "",
+        "footer-meta": "",
       },
     });
     expect(loadingWrapper.get("tbody td").attributes("colspan")).toBe("2");

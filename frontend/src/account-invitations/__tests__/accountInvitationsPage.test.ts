@@ -117,7 +117,7 @@ describe("AccountInvitationsPage", () => {
     await flushPromises();
     await flushPromises();
 
-    const urls = fetchMock.mock.calls.map(([url]) => String(url));
+    const urls = (fetchMock.mock.calls as unknown as Array<[unknown, ...unknown[]]>).map(([url]) => String(url));
     expect(urls.some((url) => url.includes("/pending/detail") && url.includes("start=25") && url.includes("draw=2"))).toBe(true);
     expect(urls.some((url) => url.includes("/accepted/detail") && url.includes("start=75") && url.includes("draw=4"))).toBe(true);
   });

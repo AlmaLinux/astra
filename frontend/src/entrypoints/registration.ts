@@ -7,21 +7,6 @@ import RegistrationConfirmPage from "../registration/RegistrationConfirmPage.vue
 import RegistrationPage from "../registration/RegistrationPage.vue";
 import { readRegisterActivateBootstrap, readRegisterConfirmBootstrap, readRegisterPageBootstrap } from "../registration/types";
 
-function mountIntoRoot<T>(root: HTMLElement | null, component: T, props: object, vueRootAttr: string): App<Element> | null {
-  if (root === null) {
-    return null;
-  }
-
-  root.innerHTML = "";
-  const mountPoint = document.createElement("div");
-  mountPoint.setAttribute(vueRootAttr, "");
-  root.appendChild(mountPoint);
-
-  const app = createApp(component as never, props);
-  app.mount(mountPoint);
-  return app;
-}
-
 export function mountRegisterPage(root: HTMLElement | null): App<Element> | null {
   if (root === null) {
     return null;
@@ -30,7 +15,15 @@ export function mountRegisterPage(root: HTMLElement | null): App<Element> | null
   if (bootstrap === null) {
     return null;
   }
-  return mountIntoRoot(root, RegistrationPage, { bootstrap }, "data-register-vue-root");
+
+  root.innerHTML = "";
+  const mountPoint = document.createElement("div");
+  mountPoint.setAttribute("data-register-vue-root", "");
+  root.appendChild(mountPoint);
+
+  const app = createApp(RegistrationPage, { bootstrap });
+  app.mount(mountPoint);
+  return app;
 }
 
 export function mountRegisterConfirmPage(root: HTMLElement | null): App<Element> | null {
@@ -41,7 +34,15 @@ export function mountRegisterConfirmPage(root: HTMLElement | null): App<Element>
   if (bootstrap === null) {
     return null;
   }
-  return mountIntoRoot(root, RegistrationConfirmPage, { bootstrap }, "data-register-confirm-vue-root");
+
+  root.innerHTML = "";
+  const mountPoint = document.createElement("div");
+  mountPoint.setAttribute("data-register-confirm-vue-root", "");
+  root.appendChild(mountPoint);
+
+  const app = createApp(RegistrationConfirmPage, { bootstrap });
+  app.mount(mountPoint);
+  return app;
 }
 
 export function mountRegisterActivatePage(root: HTMLElement | null): App<Element> | null {
@@ -52,7 +53,15 @@ export function mountRegisterActivatePage(root: HTMLElement | null): App<Element
   if (bootstrap === null) {
     return null;
   }
-  return mountIntoRoot(root, RegistrationActivatePage, { bootstrap }, "data-register-activate-vue-root");
+
+  root.innerHTML = "";
+  const mountPoint = document.createElement("div");
+  mountPoint.setAttribute("data-register-activate-vue-root", "");
+  root.appendChild(mountPoint);
+
+  const app = createApp(RegistrationActivatePage, { bootstrap });
+  app.mount(mountPoint);
+  return app;
 }
 
 function mountFromDocument(): void {

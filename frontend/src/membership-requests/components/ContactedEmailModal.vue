@@ -66,7 +66,7 @@ const deliveryLogs = computed(() => props.contactedEmail.logs ?? []);
           <iframe
             v-if="contactedEmail.html"
             :srcdoc="contactedEmail.html"
-            sandbox
+            sandbox=""
             title="Email HTML preview"
             style="width: 100%; height: 320px; border: 1px solid #dee2e6; border-radius: .25rem;"
           ></iframe>

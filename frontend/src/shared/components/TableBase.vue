@@ -21,7 +21,7 @@ interface BulkSubmitPayload {
 }
 
 const props = withDefaults(defineProps<{
-  rows: unknown[];
+  rows: readonly unknown[];
   count: number;
   currentPage: number;
   totalPages: number;

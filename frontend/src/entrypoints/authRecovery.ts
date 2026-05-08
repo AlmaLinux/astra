@@ -13,21 +13,6 @@ import {
   readPasswordResetRequestBootstrap,
 } from "../auth-recovery/types";
 
-function mountIntoRoot<T>(root: HTMLElement | null, component: T, props: object, vueRootAttr: string): App<Element> | null {
-  if (root === null) {
-    return null;
-  }
-
-  root.innerHTML = "";
-  const mountPoint = document.createElement("div");
-  mountPoint.setAttribute(vueRootAttr, "");
-  root.appendChild(mountPoint);
-
-  const app = createApp(component as never, props);
-  app.mount(mountPoint);
-  return app;
-}
-
 export function mountPasswordResetRequestPage(root: HTMLElement | null): App<Element> | null {
   if (root === null) {
     return null;
@@ -36,7 +21,15 @@ export function mountPasswordResetRequestPage(root: HTMLElement | null): App<Ele
   if (bootstrap === null) {
     return null;
   }
-  return mountIntoRoot(root, PasswordResetRequestPage, { bootstrap }, "data-auth-recovery-password-reset-vue-root");
+
+  root.innerHTML = "";
+  const mountPoint = document.createElement("div");
+  mountPoint.setAttribute("data-auth-recovery-password-reset-vue-root", "");
+  root.appendChild(mountPoint);
+
+  const app = createApp(PasswordResetRequestPage, { bootstrap });
+  app.mount(mountPoint);
+  return app;
 }
 
 export function mountPasswordResetConfirmPage(root: HTMLElement | null): App<Element> | null {
@@ -47,7 +40,15 @@ export function mountPasswordResetConfirmPage(root: HTMLElement | null): App<Ele
   if (bootstrap === null) {
     return null;
   }
-  return mountIntoRoot(root, PasswordResetConfirmPage, { bootstrap }, "data-auth-recovery-password-reset-confirm-vue-root");
+
+  root.innerHTML = "";
+  const mountPoint = document.createElement("div");
+  mountPoint.setAttribute("data-auth-recovery-password-reset-confirm-vue-root", "");
+  root.appendChild(mountPoint);
+
+  const app = createApp(PasswordResetConfirmPage, { bootstrap });
+  app.mount(mountPoint);
+  return app;
 }
 
 export function mountPasswordExpiredPage(root: HTMLElement | null): App<Element> | null {
@@ -58,7 +59,15 @@ export function mountPasswordExpiredPage(root: HTMLElement | null): App<Element>
   if (bootstrap === null) {
     return null;
   }
-  return mountIntoRoot(root, PasswordExpiredPage, { bootstrap }, "data-auth-recovery-password-expired-vue-root");
+
+  root.innerHTML = "";
+  const mountPoint = document.createElement("div");
+  mountPoint.setAttribute("data-auth-recovery-password-expired-vue-root", "");
+  root.appendChild(mountPoint);
+
+  const app = createApp(PasswordExpiredPage, { bootstrap });
+  app.mount(mountPoint);
+  return app;
 }
 
 export function mountOtpSyncPage(root: HTMLElement | null): App<Element> | null {
@@ -69,7 +78,15 @@ export function mountOtpSyncPage(root: HTMLElement | null): App<Element> | null 
   if (bootstrap === null) {
     return null;
   }
-  return mountIntoRoot(root, OtpSyncPage, { bootstrap }, "data-auth-recovery-otp-sync-vue-root");
+
+  root.innerHTML = "";
+  const mountPoint = document.createElement("div");
+  mountPoint.setAttribute("data-auth-recovery-otp-sync-vue-root", "");
+  root.appendChild(mountPoint);
+
+  const app = createApp(OtpSyncPage, { bootstrap });
+  app.mount(mountPoint);
+  return app;
 }
 
 function mountFromDocument(): void {

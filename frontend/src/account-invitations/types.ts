@@ -18,14 +18,10 @@ export interface AccountInvitationRow {
   // Accepted-specific
   accepted_at?: string;
   accepted_username?: string;
-  freeipa_matched_usernames?: string[];
+  freeipa_matched_usernames?: readonly string[];
   // Organization info if linked
   organization_id?: number;
   organization_name?: string;
-}
-
-export interface DataTableRow {
-  [key: string]: string | number | null | string[] | undefined;
 }
 
 export interface AccountInvitationsBootstrap {
@@ -78,7 +74,7 @@ export interface DataTablesQuery {
   "columns[0][search][regex]": string;
 }
 
-export interface DataTablesResponse<T extends DataTableRow = AccountInvitationRow> {
+export interface DataTablesResponse<T = AccountInvitationRow> {
   draw: number;
   recordsTotal: number;
   recordsFiltered: number;

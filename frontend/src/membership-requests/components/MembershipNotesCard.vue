@@ -4,7 +4,7 @@ import { computed, nextTick, onMounted, ref } from "vue";
 import "./membershipNotes.css";
 
 import { useMembershipNotes } from "../composables/useMembershipNotes";
-import { replaceTemplateToken, type NoteEntry, type NoteGroup } from "../types";
+import { replaceTemplateToken, type ContactedEmail, type NoteEntry, type NoteGroup } from "../types";
 import ContactedEmailModal from "./ContactedEmailModal.vue";
 
 const props = defineProps<{
@@ -132,7 +132,7 @@ const noteCountTitle = computed(() => {
 const approvalsLabel = computed(() => (summary.value === null ? "..." : String(summary.value.approvals ?? 0)));
 const disapprovalsLabel = computed(() => (summary.value === null ? "..." : String(summary.value.disapprovals ?? 0)));
 const contactedEmailEntries = computed(() => {
-  const entries: Array<{ key: string; contactedEmail: NoteEntry["contacted_email"] }> = [];
+  const entries: Array<{ key: string; contactedEmail: ContactedEmail }> = [];
   const seen = new Set<string>();
 
   for (const group of details.value?.groups ?? []) {

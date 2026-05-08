@@ -5,6 +5,17 @@ import { describe, expect, it } from "vitest";
 import SettingsPage from "../SettingsPage.vue";
 import type { SettingsBootstrap } from "../types";
 
+const initialPayload: NonNullable<SettingsBootstrap["initialPayload"]> = {
+  activeTab: "emails",
+  tabs: ["profile", "emails", "keys", "security", "privacy", "membership"],
+  profile: { form: { isBound: false, nonFieldErrors: [], fields: [] }, avatarUrl: "https://example.com/avatar.png", avatarProvider: "Libravatar", avatarIsLocal: false, avatarManageUrl: "", highlight: "", chatDefaults: { mattermostServer: "chat.almalinux.org", mattermostTeam: "almalinux", ircServer: "irc.libera.chat", matrixServer: "matrix.org" }, localeOptions: [], timezoneOptions: [] },
+  emails: { form: { isBound: false, nonFieldErrors: [], fields: [{ name: "mail", id: "id_mail", widget: "email", value: "alice@example.org", required: true, disabled: false, errors: [], attrs: { class: "form-control" } }] }, emailIsBlacklisted: true },
+  keys: { form: { isBound: false, nonFieldErrors: [], fields: [] } },
+  security: { usingOtp: false, password: { form: { isBound: false, nonFieldErrors: [], fields: [] } }, otpAdd: { form: { isBound: false, nonFieldErrors: [], fields: [] } }, otpConfirm: { form: { isBound: false, nonFieldErrors: [], fields: [] }, otpUri: null, otpQrPngB64: null }, otpTokens: [] },
+  privacy: { form: { isBound: false, nonFieldErrors: [], fields: [] }, accountDeletionForm: null, activeDeletionRequest: null, privacyWarnings: [] },
+  membership: { activeMemberships: [], history: [] },
+};
+
 const bootstrap: SettingsBootstrap = {
   apiUrl: "/api/v1/settings/detail?tab=emails",
   submitUrl: "/settings/",
@@ -27,16 +38,7 @@ const bootstrap: SettingsBootstrap = {
     groupDetailUrlTemplate: "/group/__group_name__/",
     agreementDetailUrlTemplate: "/settings/?tab=agreements&agreement=__agreement_cn__",
   },
-  initialPayload: {
-    activeTab: "emails",
-    tabs: ["profile", "emails", "keys", "security", "privacy", "membership"],
-    profile: { form: { isBound: false, nonFieldErrors: [], fields: [] }, avatarUrl: "https://example.com/avatar.png", avatarProvider: "Libravatar", avatarIsLocal: false, avatarManageUrl: "", highlight: "", chatDefaults: { mattermostServer: "chat.almalinux.org", mattermostTeam: "almalinux", ircServer: "irc.libera.chat", matrixServer: "matrix.org" }, localeOptions: [], timezoneOptions: [] },
-    emails: { form: { isBound: false, nonFieldErrors: [], fields: [{ name: "mail", id: "id_mail", widget: "email", value: "alice@example.org", required: true, disabled: false, errors: [], attrs: { class: "form-control" } }] }, emailIsBlacklisted: true },
-    keys: { form: { isBound: false, nonFieldErrors: [], fields: [] } },
-    security: { usingOtp: false, password: { form: { isBound: false, nonFieldErrors: [], fields: [] } }, otpAdd: { form: { isBound: false, nonFieldErrors: [], fields: [] } }, otpConfirm: { form: { isBound: false, nonFieldErrors: [], fields: [] }, otpUri: null, otpQrPngB64: null }, otpTokens: [] },
-    privacy: { form: { isBound: false, nonFieldErrors: [], fields: [] }, accountDeletionForm: null, activeDeletionRequest: null, privacyWarnings: [] },
-    membership: { activeMemberships: [], history: [] },
-  },
+  initialPayload,
 };
 
 describe("SettingsPage", () => {
@@ -58,7 +60,7 @@ describe("SettingsPage", () => {
         bootstrap: {
           ...bootstrap,
           initialPayload: {
-            ...bootstrap.initialPayload,
+            ...initialPayload,
             security: {
               usingOtp: false,
               password: {
@@ -144,7 +146,7 @@ describe("SettingsPage", () => {
         bootstrap: {
           ...bootstrap,
           initialPayload: {
-            ...bootstrap.initialPayload,
+            ...initialPayload,
             activeTab: "security",
             security: {
               usingOtp: true,
@@ -177,7 +179,7 @@ describe("SettingsPage", () => {
         bootstrap: {
           ...bootstrap,
           initialPayload: {
-            ...bootstrap.initialPayload,
+            ...initialPayload,
             activeTab: "privacy",
             privacy: {
               form: {
@@ -232,7 +234,7 @@ describe("SettingsPage", () => {
         bootstrap: {
           ...bootstrap,
           initialPayload: {
-            ...bootstrap.initialPayload,
+            ...initialPayload,
             activeTab: "privacy",
             privacy: {
               form: { isBound: false, nonFieldErrors: [], fields: [] },
@@ -294,16 +296,15 @@ describe("SettingsPage", () => {
         bootstrap: {
           ...bootstrap,
           initialPayload: {
-            ...bootstrap.initialPayload,
+            ...initialPayload,
             activeTab: "agreements",
             tabs: ["profile", "emails", "keys", "security", "privacy", "membership", "agreements"],
             agreements: {
+              agreement: null,
               agreements: [
                 {
                   cn: "cla",
-                  description: "Contributor License Agreement",
                   signed: false,
-                  signedAt: null,
                   groups: ["packagers"],
                 },
               ],

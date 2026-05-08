@@ -101,7 +101,7 @@ describe("MembershipSponsorsPage", () => {
     await flushPromises();
     await flushPromises();
 
-    const fetchCalls = fetchMock.mock.calls.map(([url]) => String(url));
+    const fetchCalls = (fetchMock.mock.calls as unknown as Array<[unknown, ...unknown[]]>).map(([url]) => String(url));
     expect(fetchCalls.some((url) => url.includes("q=new"))).toBe(true);
 
     const lastCall = historySpy.mock.calls.at(-1);

@@ -7,7 +7,7 @@ import { formatDateTime } from "../types";
 
 interface Props {
   bootstrap: AccountInvitationsBootstrap;
-  rows: AccountInvitationRow[];
+  rows: readonly AccountInvitationRow[];
   count: number;
   currentPage: number;
   totalPages: number;
@@ -79,6 +79,10 @@ function rowId(row: unknown): string | number {
 
 function invitationRow(row: unknown): AccountInvitationRow {
   return row as AccountInvitationRow;
+}
+
+function matchedUsernames(row: unknown): readonly string[] {
+  return invitationRow(row).freeipa_matched_usernames ?? [];
 }
 
 function clearInlineErrors(): void {
@@ -237,11 +241,11 @@ async function handleBulkAction(payload: BulkSubmitPayload): Promise<void> {
 
       <template v-else>
         <td>
-          <template v-if="invitationRow(row).freeipa_matched_usernames && invitationRow(row).freeipa_matched_usernames.length > 1">
+          <template v-if="matchedUsernames(row).length > 1">
             Accepted (multiple matches)
             <div class="text-muted small">
-              <template v-for="(username, idx) in invitationRow(row).freeipa_matched_usernames" :key="username">
-                <a :href="`/user/${username}/`">{{ username }}</a><span v-if="idx < invitationRow(row).freeipa_matched_usernames.length - 1">, </span>
+              <template v-for="(username, idx) in matchedUsernames(row)" :key="username">
+                <a :href="`/user/${username}/`">{{ username }}</a><span v-if="idx < matchedUsernames(row).length - 1">, </span>
               </template>
             </div>
             <div v-if="invitationRow(row).accepted_username" class="text-muted small">

@@ -2,7 +2,7 @@ import { mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
 
 import UserProfileMembershipPanel from "../UserProfileMembershipPanel.vue";
-import type { UserProfileMembershipSection } from "../types";
+import type { UserProfileMembershipNotes, UserProfileMembershipSection } from "../types";
 
 const membershipManagement = {
   expiryUrlTemplate: "/membership/manage/__username__/__membership_type_code__/expiry/",
@@ -11,7 +11,7 @@ const membershipManagement = {
   nextUrl: "/user/alice/",
 };
 
-const membershipNotesDisabled = {
+const membershipNotesDisabled: UserProfileMembershipNotes = {
   summaryUrl: "/api/v1/membership-notes/aggregate/summary/?target_type=user&target=alice",
   detailUrl: "/api/v1/membership-notes/aggregate/?target_type=user&target=alice",
   addUrl: "/api/v1/membership-notes/aggregate/add/",
@@ -19,6 +19,8 @@ const membershipNotesDisabled = {
   nextUrl: "/user/alice/",
   canView: false,
   canWrite: false,
+  targetType: "user",
+  target: "alice",
 };
 
 function makeMembershipSection(overrides: Partial<UserProfileMembershipSection> = {}): UserProfileMembershipSection {
@@ -241,6 +243,8 @@ describe("UserProfileMembershipPanel", () => {
           nextUrl: "/user/alice/",
           canView: true,
           canWrite: true,
+          targetType: "user",
+          target: "alice",
         },
       } as never,
       global: {

@@ -6,7 +6,7 @@ import type { UserProfileGroupsBootstrap } from "../types";
 
 const bootstrap: UserProfileGroupsBootstrap = {
   username: "alice",
-  groups: [{ cn: "infra", role: "Member" }, { cn: "sig-core", role: "Sponsor" }],
+  groups: [{ cn: "infra", role: "member" }, { cn: "sig-core", role: "sponsor" }],
   agreements: ["Code of Conduct"],
   missingAgreements: [{ cn: "Export Policy", requiredBy: ["infra"] }],
   isSelf: true,

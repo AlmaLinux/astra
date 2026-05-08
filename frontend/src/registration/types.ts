@@ -109,12 +109,15 @@ function normalizeFormPayload(payload: RegistrationFormApiPayload): Registration
   };
 }
 
-function readInitialPayload<T>(root: HTMLElement, normalizer: (payload: T) => unknown): ReturnType<typeof normalizer> | null {
+function readInitialPayload<TApiPayload, TPayload>(
+  root: HTMLElement,
+  normalizer: (payload: TApiPayload) => TPayload,
+): TPayload | null {
   const script = root.querySelector<HTMLScriptElement>("script[data-registration-initial-payload]");
   if (!script?.textContent) {
     return null;
   }
-  return normalizer(JSON.parse(script.textContent) as T);
+  return normalizer(JSON.parse(script.textContent) as TApiPayload);
 }
 
 function normalizeRegisterPagePayload(payload: RegisterPageApiPayload): RegisterPagePayload {

@@ -92,7 +92,8 @@ describe("ElectionsTurnoutReportPage", () => {
     expect(wrapper.text()).toContain("58.33%");
     expect(wrapper.text()).toContain("credentials not yet issued");
     expect(chartMock).toHaveBeenCalledOnce();
-    expect(chartMock.mock.calls[0]?.[1]).toMatchObject({
+    const firstChartCall = chartMock.mock.calls[0] as unknown as [unknown, unknown] | undefined;
+    expect(firstChartCall?.[1]).toMatchObject({
       data: {
         labels: ["2026-04-01: Board election", "2026-05-01: Council election"],
         datasets: [
