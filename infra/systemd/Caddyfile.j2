@@ -12,6 +12,11 @@
 {% endif %}
 
 {{ http_addrs | unique | join(", ") }} {
+    @blocked_scanners {
+        path /.env /.git/config /phpinfo.php /vendor/phpunit* /wp-admin /wp-admin/* /wp-login.php /xmlrpc.php
+    }
+    abort @blocked_scanners
+
     redir https://{host}{uri} permanent
 }
 
@@ -19,6 +24,11 @@
     # Staging-friendly HTTPS without needing a public DNS name you control.
     # Clients must trust Caddy's internal CA (or use curl -k).
     tls internal
+
+    @blocked_scanners {
+        path /.env /.git/config /phpinfo.php /vendor/phpunit* /wp-admin /wp-admin/* /wp-login.php /xmlrpc.php
+    }
+    abort @blocked_scanners
 
     reverse_proxy 127.0.0.1:8001 127.0.0.1:8002 {
         header_up X-Forwarded-For {http.request.remote.host}
@@ -28,6 +38,11 @@
 }
 {% else %}
 :80 {
+    @blocked_scanners {
+        path /.env /.git/config /phpinfo.php /vendor/phpunit* /wp-admin /wp-admin/* /wp-login.php /xmlrpc.php
+    }
+    abort @blocked_scanners
+
     redir https://{host}{uri} permanent
 }
 
@@ -35,6 +50,11 @@
     # Staging-friendly HTTPS without needing a public DNS name.
     # Clients must trust Caddy's internal CA (or use curl -k).
     tls internal
+
+    @blocked_scanners {
+        path /.env /.git/config /phpinfo.php /vendor/phpunit* /wp-admin /wp-admin/* /wp-login.php /xmlrpc.php
+    }
+    abort @blocked_scanners
 
     reverse_proxy 127.0.0.1:8001 127.0.0.1:8002 {
         header_up X-Forwarded-For {http.request.remote.host}

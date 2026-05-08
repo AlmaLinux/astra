@@ -105,9 +105,83 @@ class SentryBrowserTemplateTests(TestCase):
 
 
 class SentryCaddyConfigTests(SimpleTestCase):
+    blocked_scanner_path_matcher = (
+        "path /.env /.git/config /phpinfo.php /vendor/phpunit* "
+        "/wp-admin /wp-admin/* /wp-login.php /xmlrpc.php"
+    )
+
     def test_caddy_configs_forward_sentry_trace_headers(self) -> None:
         repo_root = Path(__file__).resolve().parents[3]
         for relative_path in ("infra/systemd/Caddyfile", "infra/systemd/Caddyfile.j2"):
             source = (repo_root / relative_path).read_text(encoding="utf-8")
             self.assertIn("header_up sentry-trace", source)
             self.assertIn("header_up baggage", source)
+
+    def test_caddy_configs_block_scanner_paths_with_tightened_wordpress_matchers(self) -> None:
+        repo_root = Path(__file__).resolve().parents[3]
+
+        tracked_source = (repo_root / "infra/systemd/Caddyfile").read_text(encoding="utf-8")
+        self.assertIn(self.blocked_scanner_path_matcher, tracked_source)
+        self.assertIn("abort @blocked_scanners", tracked_source)
+
+        templated_source = (repo_root / "infra/systemd/Caddyfile.j2").read_text(encoding="utf-8")
+        self.assertIn(
+            """{{ http_addrs | unique | join(\", \") }} {
+    @blocked_scanners {
+        path /.env /.git/config /phpinfo.php /vendor/phpunit* /wp-admin /wp-admin/* /wp-login.php /xmlrpc.php
+    }
+    abort @blocked_scanners
+
+    redir https://{host}{uri} permanent
+}""",
+            templated_source,
+        )
+        self.assertIn(
+            """{{ https_addrs | unique | join(\", \") }} {
+    # Staging-friendly HTTPS without needing a public DNS name you control.
+    # Clients must trust Caddy's internal CA (or use curl -k).
+    tls internal
+
+    @blocked_scanners {
+        path /.env /.git/config /phpinfo.php /vendor/phpunit* /wp-admin /wp-admin/* /wp-login.php /xmlrpc.php
+    }
+    abort @blocked_scanners
+
+    reverse_proxy 127.0.0.1:8001 127.0.0.1:8002 {
+        header_up X-Forwarded-For {http.request.remote.host}
+        header_up sentry-trace {http.request.header.sentry-trace}
+        header_up baggage {http.request.header.baggage}
+    }
+}""",
+            templated_source,
+        )
+        self.assertIn(
+            """:80 {
+    @blocked_scanners {
+        path /.env /.git/config /phpinfo.php /vendor/phpunit* /wp-admin /wp-admin/* /wp-login.php /xmlrpc.php
+    }
+    abort @blocked_scanners
+
+    redir https://{host}{uri} permanent
+}""",
+            templated_source,
+        )
+        self.assertIn(
+            """:443 {
+    # Staging-friendly HTTPS without needing a public DNS name.
+    # Clients must trust Caddy's internal CA (or use curl -k).
+    tls internal
+
+    @blocked_scanners {
+        path /.env /.git/config /phpinfo.php /vendor/phpunit* /wp-admin /wp-admin/* /wp-login.php /xmlrpc.php
+    }
+    abort @blocked_scanners
+
+    reverse_proxy 127.0.0.1:8001 127.0.0.1:8002 {
+        header_up X-Forwarded-For {http.request.remote.host}
+        header_up sentry-trace {http.request.header.sentry-trace}
+        header_up baggage {http.request.header.baggage}
+    }
+}""",
+            templated_source,
+        )

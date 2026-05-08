@@ -5,6 +5,11 @@ accounts.almalinux.org {
     }
     respond @blocked_health 404
 
+    @blocked_scanners {
+        path /.env /.git/config /phpinfo.php /vendor/phpunit* /wp-admin /wp-admin/* /wp-login.php /xmlrpc.php
+    }
+    abort @blocked_scanners
+
     @cf header CF-Connecting-IP *
     reverse_proxy @cf 127.0.0.1:8001 127.0.0.1:8002 {
         lb_policy least_conn
