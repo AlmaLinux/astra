@@ -525,7 +525,7 @@ def stats_membership_summary_api(request: HttpRequest) -> HttpResponse:
         configured_cohort_limit = int(settings.MEMBERSHIP_STATS_RETENTION_COHORTS_LIMIT)
         retention_summary, _retention_chart = _compute_retention_cohort_12m(
             now=now,
-            cohort_limit=max(0, min(configured_cohort_limit, 12)),
+            cohort_limit=max(0, configured_cohort_limit),
         )
         summary["retention_cohort_12m"] = retention_summary
 
@@ -735,7 +735,7 @@ def _build_membership_stats_retention_payloads(*, now: datetime.datetime) -> dic
     configured_cohort_limit = int(settings.MEMBERSHIP_STATS_RETENTION_COHORTS_LIMIT)
     _retention_summary, retention_chart = _compute_retention_cohort_12m(
         now=now,
-        cohort_limit=max(0, min(configured_cohort_limit, 12)),
+        cohort_limit=max(0, configured_cohort_limit),
     )
     labels = list(retention_chart["labels"])
     cohort_sizes = list(retention_chart["cohort_sizes"])

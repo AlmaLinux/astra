@@ -67,19 +67,29 @@ const RETENTION_PAYLOAD = {
   },
 };
 
-function makeSuccessfulFetch(): ReturnType<typeof vi.fn> {
+function makeSuccessfulFetch({
+  summaryPayload = SUMMARY_PAYLOAD,
+  compositionPayload = COMPOSITION_PAYLOAD,
+  trendsPayload = TRENDS_PAYLOAD,
+  retentionPayload = RETENTION_PAYLOAD,
+}: {
+  summaryPayload?: typeof SUMMARY_PAYLOAD;
+  compositionPayload?: typeof COMPOSITION_PAYLOAD;
+  trendsPayload?: typeof TRENDS_PAYLOAD;
+  retentionPayload?: typeof RETENTION_PAYLOAD;
+} = {}) {
   return vi.fn(async (url: string) => {
     if (String(url).includes("/summary")) {
-      return new Response(JSON.stringify(SUMMARY_PAYLOAD));
+      return new Response(JSON.stringify(summaryPayload));
     }
     if (String(url).includes("/composition")) {
-      return new Response(JSON.stringify(COMPOSITION_PAYLOAD));
+      return new Response(JSON.stringify(compositionPayload));
     }
     if (String(url).includes("/trends")) {
-      return new Response(JSON.stringify(TRENDS_PAYLOAD));
+      return new Response(JSON.stringify(trendsPayload));
     }
     if (String(url).includes("/retention")) {
-      return new Response(JSON.stringify(RETENTION_PAYLOAD));
+      return new Response(JSON.stringify(retentionPayload));
     }
     return new Response("{}", { status: 404 });
   });
@@ -151,6 +161,33 @@ describe("MembershipStatsPage", () => {
     expect(wrapper.text()).toContain("87");
     expect(wrapper.text()).toContain("12");
     expect(wrapper.text()).toContain("3");
+  });
+
+  it("shows the retention empty state copy instead of a blank chart shell", async () => {
+    const chartCtor = vi.fn(() => ({ update: vi.fn(), destroy: vi.fn(), data: {} }));
+    vi.stubGlobal("Chart", chartCtor);
+    vi.stubGlobal(
+      "fetch",
+      makeSuccessfulFetch({
+        retentionPayload: {
+          generated_at: "2026-01-01T00:00:00+00:00",
+          charts: {
+            retention_cohorts_12m: [],
+          },
+        },
+      }),
+    );
+
+    const wrapper = mount(MembershipStatsPage, { props: { bootstrap: BOOTSTRAP } });
+
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Member Renewal by Join Month (12-Month Cohorts)");
+    expect(wrapper.text()).toContain("Cohorts Tracked (12m)");
+    expect(wrapper.text()).toContain("No join-month cohorts have reached the 12-month renewal window yet.");
+    expect(wrapper.find("#retention-cohorts-chart").exists()).toBe(false);
+    expect(chartCtor).toHaveBeenCalledTimes(6);
   });
 
   it("renders days filter buttons with the active preset highlighted", async () => {

@@ -290,6 +290,12 @@ function renderCharts(): void {
   );
 
   const retention = retentionCharts.value.retention_cohorts_12m;
+  if (retention.labels.length === 0) {
+    destroyChart("retention");
+    hideChartLoading("retention");
+    return;
+  }
+
   renderStackedBar("retention", retention.labels ?? [], [
     {
       label: "Retained",
@@ -369,6 +375,10 @@ function formatHoursDuration(hours: number | null): string {
 function retentionTotal(values: number[] | undefined): number {
   if (!values) return 0;
   return values.reduce((acc, value) => acc + value, 0);
+}
+
+function hasRetentionCohortRows(): boolean {
+  return (stats.retentionCharts.value?.retention_cohorts_12m.labels.length ?? 0) > 0;
 }
 </script>
 
@@ -523,7 +533,7 @@ function retentionTotal(values: number[] | undefined): number {
         <div class="info-box">
           <span class="info-box-icon bg-primary"><i class="fas fa-layer-group"></i></span>
           <div class="info-box-content">
-            <span class="info-box-text">Members Tracked (12m)</span>
+            <span class="info-box-text">Cohorts Tracked (12m)</span>
             <span class="info-box-number" data-stat-key="retention_cohorts_count">
               <span v-if="!stats.summary.value" class="spinner-border spinner-border-sm" role="status" aria-hidden="true" />
               <template v-else>{{ stats.summary.value.retention_cohort_12m.cohorts }}</template>
@@ -681,7 +691,7 @@ function retentionTotal(values: number[] | undefined): number {
     <div class="row">
       <div class="col-12">
         <div class="card">
-          <div class="card-header"><h3 class="card-title">Member Renewal by Join Month</h3></div>
+          <div class="card-header"><h3 class="card-title">Member Renewal by Join Month (12-Month Cohorts)</h3></div>
           <div class="card-body" style="position: relative; min-height: 320px">
             <div v-if="chartLoading.retention" class="d-flex align-items-center justify-content-center" data-chart-loading="retention-cohorts" style="position: absolute; inset: 0">
               <div class="text-center">
@@ -689,7 +699,10 @@ function retentionTotal(values: number[] | undefined): number {
                 <div class="mt-2 text-muted">Loading…</div>
               </div>
             </div>
-            <canvas ref="canvasRetention" id="retention-cohorts-chart" height="260" />
+            <div v-else-if="!hasRetentionCohortRows()" class="d-flex align-items-center justify-content-center h-100 text-center text-muted px-3">
+              No join-month cohorts have reached the 12-month renewal window yet.
+            </div>
+            <canvas v-else ref="canvasRetention" id="retention-cohorts-chart" height="260" />
           </div>
         </div>
       </div>

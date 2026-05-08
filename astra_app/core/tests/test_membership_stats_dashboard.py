@@ -1121,7 +1121,8 @@ class MembershipStatsDashboardTests(TestCase):
         self.assertEqual(charts_resp.status_code, 200)
         self.assertEqual(charts_resp.json()["charts"]["retention_cohorts_12m"], [])
 
-    def test_membership_stats_retention_limits_to_last_12_cohort_months(self) -> None:
+    @override_settings(MEMBERSHIP_STATS_RETENTION_COHORTS_LIMIT=12)
+    def test_membership_stats_retention_respects_configured_12_cohort_limit(self) -> None:
         cache.clear()
         self._grant_membership_stats_permission()
         self._create_membership_type_for_requests()
@@ -1145,6 +1146,32 @@ class MembershipStatsDashboardTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         cohorts = resp.json()["charts"]["retention_cohorts_12m"]
         self.assertEqual(len(cohorts), 12)
+
+    @override_settings(MEMBERSHIP_STATS_RETENTION_COHORTS_LIMIT=24)
+    def test_membership_stats_retention_honors_configured_cohort_limit_above_12(self) -> None:
+        cache.clear()
+        self._grant_membership_stats_permission()
+        self._create_membership_type_for_requests()
+
+        base = timezone.now().astimezone(datetime.UTC).replace(day=1, hour=12, minute=0, second=0, microsecond=0)
+        for idx in range(13):
+            approved_at = base - datetime.timedelta(days=(idx + 13) * 31)
+            self._create_membership_log(
+                username=f"wide-cohort-user-{idx}",
+                action=MembershipLog.Action.approved,
+                created_at=approved_at,
+                expires_at=approved_at + datetime.timedelta(days=60),
+            )
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = self._reviewer_user()
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
+                resp = self.client.get(reverse("api-stats-membership-retention-chart-detail"))
+
+        self.assertEqual(resp.status_code, 200)
+        cohorts = resp.json()["charts"]["retention_cohorts_12m"]
+        self.assertEqual(len(cohorts), 13)
 
     def test_membership_stats_data_returns_expected_top_level_shape(self) -> None:
         # Covered by MembershipStatsSplitApiTests which validates all 4 split endpoint shapes.
