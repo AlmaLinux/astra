@@ -119,9 +119,22 @@ class SentryBrowserTemplateTests(TestCase):
         self.assertContains(response, '"tracesSampleRate": 0.25')
         self.assertContains(response, '"tunnel": "/_ci/envelope/"')
         self.assertContains(response, 'data-sentry-feedback-link=""')
+        self.assertContains(response, '>Contact Support<', html=False)
+        self.assertContains(response, 'href="mailto:astra@almalinux.org"', html=False)
+        self.assertNotContains(response, '>Support<', html=False)
+        self.assertNotContains(response, 'Report a bug')
+
+    @override_settings(DEFAULT_FROM_EMAIL="Astra Support <support-test@example.com>")
+    def test_login_page_support_link_omits_mailto_email_for_anonymous_user(self) -> None:
+        response = self.client.get("/login/")
+
+        self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'data-sentry-feedback-footer=""')
-        self.assertContains(response, '>Report a bug<', html=False)
         self.assertContains(response, 'data-sentry-feedback-hidden="true"')
+        self.assertContains(response, 'data-sentry-feedback-link=""')
+        self.assertContains(response, '>Contact Support<', html=False)
+        self.assertNotContains(response, 'href="mailto:support-test@example.com"', html=False)
+        self.assertNotContains(response, 'support-test@example.com')
 
 
 class SentryBlockedTemplateMarkerTests(SimpleTestCase):

@@ -417,19 +417,13 @@
         <a class="text-muted" href="{% url 'privacy-policy' %}">Privacy Policy</a>
         {% if request.user.is_authenticated %}
           <span class="mx-2">·</span>
-          <a class="text-muted" href="mailto:{{ default_from_email_address }}">Contact Support</a>
+          <a class="text-muted" href="mailto:{{ default_from_email_address }}" data-sentry-feedback-link="">Contact Support</a>
+        {% else %}
+          <span class="d-none" data-sentry-feedback-footer="" data-sentry-feedback-hidden="true">
+            <span class="mx-2" aria-hidden="true">·</span>
+            <button type="button" class="btn btn-link text-muted p-0 border-0 align-baseline" data-sentry-feedback-link="">Contact Support</button>
+          </span>
         {% endif %}
-        <span class="d-none" data-sentry-feedback-footer="" data-sentry-feedback-hidden="true">
-          <span class="mx-2" aria-hidden="true">·</span>
-          <a
-            class="text-muted"
-            href="#"
-            data-sentry-feedback-link=""
-            data-sentry-feedback-hidden="true"
-            aria-hidden="true"
-            tabindex="-1"
-          >Report a bug</a>
-        </span>
         <span class="mx-2">·</span>
         Powered by AlmaLinux Astra
         {% if build_sha %}

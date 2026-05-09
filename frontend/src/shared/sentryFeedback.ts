@@ -1,6 +1,8 @@
 type SentryFeedbackAttachmentOptions = {
   autoInject?: boolean;
   enableScreenshot?: boolean;
+  onFormOpen?: () => void;
+  onFormSubmitted?: () => void;
   showBranding?: boolean;
   showEmail?: boolean;
   showName?: boolean;
@@ -21,6 +23,61 @@ export type SentryFeedbackTriggerOptions = {
   surface: string;
 };
 
+const SUPPORT_FALLBACK_SELECTOR = "[data-astra-support-fallback]";
+
+function findFeedbackShadowRoot(): ShadowRoot | null {
+  for (const element of document.querySelectorAll<HTMLElement>("body *")) {
+    const shadowRoot = element.shadowRoot;
+
+    if (
+      shadowRoot !== null
+      && (
+        shadowRoot.querySelector("form.form") !== null
+        || shadowRoot.querySelector('[data-sentry-feedback="true"]') !== null
+      )
+    ) {
+      return shadowRoot;
+    }
+  }
+
+  return null;
+}
+
+function injectSupportFallbackIntoDialog(footerLink: HTMLElement): void {
+  const mailtoHref = footerLink.getAttribute("href");
+  if (mailtoHref === null || !mailtoHref.startsWith("mailto:")) {
+    return;
+  }
+
+  const shadowRoot = findFeedbackShadowRoot();
+  if (shadowRoot === null) {
+    return;
+  }
+
+  const target = shadowRoot.querySelector<HTMLElement>('[data-sentry-feedback="true"]')
+    ?? shadowRoot.querySelector<HTMLElement>("form.form")
+    ?? shadowRoot.querySelector<HTMLElement>(".dialog__content");
+  if (target === null || target.querySelector(SUPPORT_FALLBACK_SELECTOR) !== null) {
+    return;
+  }
+
+  // The SDK exposes form lifecycle hooks but no stable footer slot, so Astra injects
+  // one minimal fallback mailto note into the rendered dialog when it opens.
+  const fallback = document.createElement("p");
+  fallback.setAttribute("data-astra-support-fallback", "");
+  fallback.style.cssText = "margin: 0.75rem 0 0; font-size: 0.875rem; line-height: 1.4; opacity: 0.72;";
+  fallback.append(document.createTextNode("Prefer email? "));
+
+  const fallbackLink = document.createElement("a");
+  fallbackLink.setAttribute("data-astra-support-fallback-link", "");
+  fallbackLink.href = mailtoHref;
+  fallbackLink.textContent = "Email support";
+  fallbackLink.style.cssText = "color: inherit; text-decoration: underline;";
+  fallback.append(fallbackLink, document.createTextNode("."));
+
+  target.append(fallback);
+}
+
 function getSentryGlobal(): SentryGlobal | undefined {
   return (window as Window & { Sentry?: SentryGlobal }).Sentry;
 }
@@ -33,7 +90,7 @@ export function attachSentryFeedbackTrigger(
     return false;
   }
 
-  const footerLink = document.querySelector<HTMLAnchorElement>("[data-sentry-feedback-link]");
+  const footerLink = document.querySelector<HTMLElement>("[data-sentry-feedback-link]");
   if (footerLink === null) {
     return false;
   }
@@ -47,9 +104,13 @@ export function attachSentryFeedbackTrigger(
 
   footerWrapper?.classList.remove("d-none");
   footerWrapper?.setAttribute("data-sentry-feedback-hidden", "false");
-  footerLink.setAttribute("data-sentry-feedback-hidden", "false");
-  footerLink.removeAttribute("aria-hidden");
-  footerLink.removeAttribute("tabindex");
+
+  if (footerLink.getAttribute("data-sentry-feedback-click-bound") !== "true") {
+    footerLink.addEventListener("click", (event: MouseEvent) => {
+      event.preventDefault();
+    });
+    footerLink.setAttribute("data-sentry-feedback-click-bound", "true");
+  }
 
   if (footerLink.getAttribute("data-sentry-feedback-bound") === "true") {
     return true;
@@ -58,6 +119,9 @@ export function attachSentryFeedbackTrigger(
   feedback.attachTo(footerLink, {
     autoInject: false,
     enableScreenshot: options.allowScreenshot,
+    onFormOpen: () => {
+      injectSupportFallbackIntoDialog(footerLink);
+    },
     showBranding: false,
     showEmail: true,
     showName: true,

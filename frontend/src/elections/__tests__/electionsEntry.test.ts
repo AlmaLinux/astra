@@ -22,13 +22,10 @@ describe("mountElectionsPage", () => {
     const footer = document.createElement("footer");
     footer.innerHTML = `
       <a
-        class="text-muted d-none"
-        href="#"
+        class="text-muted"
+        href="mailto:support@example.com"
         data-sentry-feedback-link=""
-        data-sentry-feedback-hidden="true"
-        aria-hidden="true"
-        tabindex="-1"
-      >Report a bug</a>
+      >Support</a>
     `;
     document.body.appendChild(footer);
     return footer.querySelector("[data-sentry-feedback-link]") as HTMLAnchorElement;
@@ -77,8 +74,8 @@ describe("mountElectionsPage", () => {
     expect(app).not.toBeNull();
     expect(root.querySelector("[data-elections-vue-root]")).not.toBeNull();
     expect(root.querySelector("[data-sentry-feedback-trigger]")).toBeNull();
-    expect(footerLink.textContent).toBe("Report a bug");
-    expect(footerLink.classList.contains("d-none")).toBe(false);
+    expect(footerLink.textContent).toBe("Support");
+    expect(footerLink.getAttribute("href")).toBe("mailto:support@example.com");
     expect(attachTo).toHaveBeenCalledTimes(1);
     expect(attachTo).toHaveBeenCalledWith(
       footerLink,

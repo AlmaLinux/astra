@@ -43,13 +43,22 @@ class AuthPagesRedirectLoggedInUsersTests(TestCase):
         self.assertEqual(resp.redirect_chain[-1], (profile_url, 302))
         self.assertContains(resp, "Contact Support")
         self.assertContains(resp, "mailto:support-test@example.com")
+        self.assertNotContains(resp, ">Support<", html=False)
+        self.assertNotContains(resp, "Report a bug")
 
-    def test_login_page_hides_footer_support_link_for_anonymous_user(self) -> None:
+    @override_settings(DEFAULT_FROM_EMAIL="Astra Support <support-test@example.com>")
+    def test_login_page_footer_support_link_hides_email_for_anonymous_user(self) -> None:
         response = self.client.get(reverse("login"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, "Contact Support")
-        self.assertNotContains(response, "mailto:astra@almalinux.org")
+        self.assertContains(response, 'data-sentry-feedback-footer=""')
+        self.assertContains(response, 'data-sentry-feedback-hidden="true"')
+        self.assertContains(response, 'data-sentry-feedback-link=""')
+        self.assertContains(response, "Contact Support")
+        self.assertNotContains(response, ">Support<", html=False)
+        self.assertNotContains(response, "mailto:support-test@example.com")
+        self.assertNotContains(response, "support-test@example.com")
+        self.assertNotContains(response, "Report a bug")
 
     def test_password_expired_redirects_logged_in_user(self) -> None:
         client = Client()
