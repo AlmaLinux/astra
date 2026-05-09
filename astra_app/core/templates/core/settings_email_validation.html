@@ -6,7 +6,7 @@
 
 {% block extra_head %}
   {{ block.super }}
-  <meta name="sentry-capture-disabled" content="true">
+  <meta name="sentry-replay-disabled" content="true">
   {% vite_hmr_client %}
   {% vite_asset 'src/entrypoints/settingsEmailValidation.ts' %}
 {% endblock %}
@@ -18,7 +18,7 @@
 {% block content %}
   <div
     data-settings-email-validation-root=""
-    data-sentry-capture-disabled=""
+    data-sentry-replay-disabled=""
     data-settings-email-validation-api-url="{{ settings_email_validation_api_url }}"
     data-settings-email-validation-submit-url="{{ settings_email_validation_submit_url }}"
     data-settings-email-validation-cancel-url="{{ settings_email_validation_cancel_url }}"

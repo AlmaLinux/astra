@@ -7,7 +7,7 @@
 
 {% block extra_head %}
   {{ block.super }}
-  <meta name="sentry-capture-disabled" content="true">
+  <meta name="sentry-replay-disabled" content="true">
   {% vite_hmr_client %}
   {% vite_asset 'src/entrypoints/settings.ts' %}
 {% endblock %}
@@ -19,7 +19,7 @@
 {% block content %}
   <div
     data-settings-root=""
-    data-sentry-capture-disabled=""
+    data-sentry-replay-disabled=""
     data-settings-api-url="{{ settings_api_url }}"
     data-settings-submit-url="{{ settings_submit_url }}"
     data-settings-csrf-token="{{ settings_csrf_token }}"

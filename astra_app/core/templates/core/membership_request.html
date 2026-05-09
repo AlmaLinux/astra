@@ -6,19 +6,15 @@
 
 {% block extra_head %}
   {{ block.super }}
-  <meta name="sentry-capture-disabled" content="true">
   {% vite_hmr_client %}
   {% vite_asset 'src/entrypoints/membershipRequestForm.ts' %}
 {% endblock %}
-
-{% block sentry_replay_integration %}{% endblock %}
 
 {% block header %}{% endblock %}
 
 {% block content %}
   <div
     data-membership-request-form-root=""
-    data-sentry-capture-disabled=""
     data-membership-request-form-api-url="{{ membership_request_form_api_url }}"
     data-membership-request-form-cancel-url="{{ membership_request_form_cancel_url }}"
     data-membership-request-form-submit-url="{{ membership_request_form_submit_url }}"

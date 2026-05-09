@@ -28,18 +28,22 @@
     <script type="module">
       (function () {
         var configElement = document.getElementById("sentry-browser-config");
-        if (!configElement || !(window.Sentry && window.Sentry.init)) {
+        if (!configElement) {
+          return;
+        }
+
+        if (!(window.Sentry && window.Sentry.init)) {
           return;
         }
 
         var config = JSON.parse(configElement.textContent);
-        var captureDisabled = document.querySelector('meta[name="sentry-capture-disabled"][content="true"]') !== null;
+        var replayDisabled = document.querySelector('meta[name="sentry-replay-disabled"][content="true"]') !== null;
         var integrations = [
           window.Sentry.browserTracingIntegration(),
           window.Sentry.browserSessionIntegration(),
         ];
 
-        if (!captureDisabled && typeof window.Sentry.feedbackIntegration === "function") {
+        if (typeof window.Sentry.feedbackIntegration === "function") {
           integrations.push(
             window.Sentry.feedbackIntegration({
               autoInject: false,
@@ -53,12 +57,12 @@
         }
 
         {% block sentry_replay_integration %}
-        if (!captureDisabled && typeof window.Sentry.replayIntegration === "function") {
+        if (!replayDisabled && typeof window.Sentry.replayIntegration === "function") {
           integrations.push(
             window.Sentry.replayIntegration({
-              maskAllText: true,
+              maskAllText: false,
               maskAllInputs: true,
-              blockAllMedia: true,
+              blockAllMedia: false,
             }),
           );
         }
@@ -73,7 +77,7 @@
           sendDefaultPii: config.sendDefaultPii === true,
           initialScope: {
             tags: {
-              sentry_capture_disabled: captureDisabled ? "true" : "false",
+              sentry_replay_disabled: replayDisabled ? "true" : "false",
               thin_shell_path: window.location.pathname,
             },
           },
@@ -81,6 +85,7 @@
           replaysSessionSampleRate: config.replaysSessionSampleRate,
           replaysOnErrorSampleRate: config.replaysOnErrorSampleRate,
         });
+        document.dispatchEvent(new CustomEvent("astra:sentry-ready"));
       })();
     </script>
   {% endif %}

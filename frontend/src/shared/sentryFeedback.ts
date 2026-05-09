@@ -101,7 +101,7 @@ export function attachSentryFeedbackTrigger(
   root: HTMLElement | null,
   options: SentryFeedbackTriggerOptions,
 ): boolean {
-  if (root === null || root.closest("[data-sentry-capture-disabled]") !== null) {
+  if (root === null) {
     return false;
   }
 

@@ -5,12 +5,9 @@
 
 {% block extra_head %}
   {{ block.super }}
-  <meta name="sentry-capture-disabled" content="true">
   {% vite_hmr_client %}
   {% vite_asset 'src/entrypoints/membershipAuditLog.ts' %}
 {% endblock %}
-
-{% block sentry_replay_integration %}{% endblock %}
 
 {% block header %}
   <h1 class="m-0">
@@ -22,7 +19,6 @@
 {% block content %}
   <div
     data-membership-audit-log-root
-    data-sentry-capture-disabled=""
     data-membership-audit-log-api-url="{% url 'api-membership-audit-log-detail' %}"
     data-membership-audit-log-page-size="50"
     data-membership-audit-log-initial-q="{{ initial_q }}"

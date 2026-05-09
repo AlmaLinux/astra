@@ -181,7 +181,7 @@ describe("attachSentryFeedbackTrigger", () => {
     );
   });
 
-  it("does not attach feedback on blocked roots", () => {
+  it("still attaches feedback on replay-disabled roots", () => {
     const attachTo = vi.fn();
     (window as typeof window & { Sentry?: unknown }).Sentry = {
       getFeedback: () => ({ attachTo }),
@@ -189,31 +189,31 @@ describe("attachSentryFeedbackTrigger", () => {
 
     const root = buildRoot();
     const footerLink = buildFooterLink();
-    root.setAttribute("data-sentry-capture-disabled", "");
+    root.setAttribute("data-sentry-replay-disabled", "");
 
     const attached = attachSentryFeedbackTrigger(root, {
       allowScreenshot: false,
       surface: "settings",
     });
 
-    expect(attached).toBe(false);
+    expect(attached).toBe(true);
     expect(root.querySelector("[data-sentry-feedback-trigger]")).toBeNull();
     expect(footerLink.getAttribute("href")).toBe("mailto:support@example.com");
 
     const clickEvent = new MouseEvent("click", { bubbles: true, cancelable: true });
     footerLink.dispatchEvent(clickEvent);
-    expect(clickEvent.defaultPrevented).toBe(false);
-    expect(attachTo).not.toHaveBeenCalled();
+    expect(clickEvent.defaultPrevented).toBe(true);
+    expect(attachTo).toHaveBeenCalledTimes(1);
   });
 
-  it("does not attach feedback when the mounted root sits inside a blocked ancestor boundary", () => {
+  it("still attaches feedback when the mounted root sits inside a replay-disabled ancestor boundary", () => {
     const attachTo = vi.fn();
     (window as typeof window & { Sentry?: unknown }).Sentry = {
       getFeedback: () => ({ attachTo }),
     };
 
     const blockedBoundary = document.createElement("section");
-    blockedBoundary.setAttribute("data-sentry-capture-disabled", "");
+    blockedBoundary.setAttribute("data-sentry-replay-disabled", "");
     document.body.appendChild(blockedBoundary);
 
     const root = buildRoot();
@@ -225,10 +225,10 @@ describe("attachSentryFeedbackTrigger", () => {
       surface: "auth-recovery",
     });
 
-    expect(attached).toBe(false);
+    expect(attached).toBe(true);
     expect(root.querySelector("[data-sentry-feedback-trigger]")).toBeNull();
     expect(footerLink.getAttribute("href")).toBe("mailto:support@example.com");
-    expect(attachTo).not.toHaveBeenCalled();
+    expect(attachTo).toHaveBeenCalledTimes(1);
   });
 
   it("does not create a page trigger when the shared footer link is absent", () => {

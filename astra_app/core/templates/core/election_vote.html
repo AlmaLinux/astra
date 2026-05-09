@@ -5,7 +5,7 @@
 
 {% block extra_head %}
   {{ block.super }}
-  <meta name="sentry-capture-disabled" content="true">
+  <meta name="sentry-replay-disabled" content="true">
   {% vite_hmr_client %}
   {% vite_asset 'src/entrypoints/electionVote.ts' %}
 {% endblock %}
@@ -20,7 +20,7 @@
 {% block content %}
   <div
     data-election-vote-root
-    data-sentry-capture-disabled=""
+    data-sentry-replay-disabled=""
     data-election-vote-api-url="{% url 'api-election-vote' election.id %}"
     data-election-vote-detail-url-template="{{ election_detail_url_template }}"
     data-election-vote-verify-url="{{ ballot_verify_url }}"

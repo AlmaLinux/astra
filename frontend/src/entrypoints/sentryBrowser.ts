@@ -7,20 +7,37 @@ import { attachSentryFeedbackTrigger } from "../shared/sentryFeedback";
 declare global {
   interface Window {
     Sentry?: typeof SentryBrowser;
+    __astraSentryBrowserState?: {
+      footerFeedbackBound: boolean;
+      readyListenerInstalled: boolean;
+    };
   }
 }
 
 window.Sentry = SentryBrowser;
 
+const browserState = window.__astraSentryBrowserState ?? {
+  footerFeedbackBound: false,
+  readyListenerInstalled: false,
+};
+window.__astraSentryBrowserState = browserState;
+
 function bindGlobalFooterFeedback(): void {
-  if (document.querySelector('meta[name="sentry-capture-disabled"][content="true"]') !== null) {
+  if (browserState.footerFeedbackBound) {
     return;
   }
 
-  attachSentryFeedbackTrigger(document.body, {
+  browserState.footerFeedbackBound = attachSentryFeedbackTrigger(document.body, {
     allowScreenshot: true,
     surface: "global-footer",
   });
+}
+
+if (!browserState.readyListenerInstalled) {
+  document.addEventListener("astra:sentry-ready", () => {
+    bindGlobalFooterFeedback();
+  });
+  browserState.readyListenerInstalled = true;
 }
 
 if (document.readyState !== "loading") {

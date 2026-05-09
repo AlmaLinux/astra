@@ -6,18 +6,14 @@
 
 {% block extra_head %}
   {{ block.super }}
-  <meta name="sentry-capture-disabled" content="true">
   {% vite_hmr_client %}
   {% vite_asset 'src/entrypoints/userProfile.ts' %}
 {% endblock %}
-
-{% block sentry_replay_integration %}{% endblock %}
 
 {% block content %}
 <div class="profile-page">
   <div
     data-user-profile-root
-    data-sentry-capture-disabled=""
     data-user-profile-api-url="{% url 'api-user-profile-detail' profile_username %}"
     data-user-profile-chat-irc-default-server="{{ chat_irc_default_server }}"
     data-user-profile-chat-matrix-default-server="{{ chat_matrix_default_server }}"

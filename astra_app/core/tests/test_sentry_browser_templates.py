@@ -99,8 +99,8 @@ class SentryBrowserTemplateTests(TestCase):
     def _assert_rendered_page_disables_sentry_replay(self, response) -> None:
         self.assertContains(response, 'id="sentry-browser-config"')
         self.assertContains(response, "window.Sentry && window.Sentry.init")
-        self.assertContains(response, '<meta name="sentry-capture-disabled" content="true">', html=True)
-        self.assertContains(response, 'data-sentry-capture-disabled=""')
+        self.assertContains(response, '<meta name="sentry-replay-disabled" content="true">', html=True)
+        self.assertContains(response, 'data-sentry-replay-disabled=""')
         self.assertNotContains(response, "window.Sentry.replayIntegration")
 
     @override_settings(
@@ -171,8 +171,9 @@ class SentryBrowserTemplateTests(TestCase):
         response = self.client.get("/login/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, '<meta name="sentry-capture-disabled" content="true">', html=True)
-        self.assertContains(response, 'data-sentry-capture-disabled=""')
+        self.assertContains(response, '<meta name="sentry-replay-disabled" content="true">', html=True)
+        self.assertContains(response, 'data-sentry-replay-disabled=""')
+        self.assertContains(response, "window.Sentry.feedbackIntegration")
         self.assertNotContains(response, "window.Sentry.replayIntegration")
 
     @override_settings(
@@ -291,17 +292,17 @@ class SentryBlockedTemplateMarkerTests(SimpleTestCase):
         repo_root = Path(__file__).resolve().parents[3]
         source = (repo_root / "astra_app/core/templates/core/login.html").read_text(encoding="utf-8")
 
-        self.assertIn('<meta name="sentry-capture-disabled" content="true">', source)
-        self.assertIn('data-sentry-capture-disabled=""', source)
+        self.assertIn('<meta name="sentry-replay-disabled" content="true">', source)
+        self.assertIn('data-sentry-replay-disabled=""', source)
         self.assertIn("{% block sentry_replay_integration %}{% endblock %}", source)
 
     def test_register_marks_root_as_sentry_capture_disabled(self) -> None:
         repo_root = Path(__file__).resolve().parents[3]
         source = (repo_root / "astra_app/core/templates/core/register.html").read_text(encoding="utf-8")
 
-        self.assertIn('<meta name="sentry-capture-disabled" content="true">', source)
+        self.assertIn('<meta name="sentry-replay-disabled" content="true">', source)
         self.assertIn('data-register-root=""', source)
-        self.assertIn('data-sentry-capture-disabled=""', source)
+        self.assertIn('data-sentry-replay-disabled=""', source)
         self.assertIn("{% block sentry_replay_integration %}{% endblock %}", source)
 
     def test_settings_email_validation_marks_root_as_sentry_capture_disabled(self) -> None:
@@ -310,46 +311,46 @@ class SentryBlockedTemplateMarkerTests(SimpleTestCase):
             encoding="utf-8"
         )
 
-        self.assertIn('<meta name="sentry-capture-disabled" content="true">', source)
+        self.assertIn('<meta name="sentry-replay-disabled" content="true">', source)
         self.assertIn('data-settings-email-validation-root=""', source)
-        self.assertIn('data-sentry-capture-disabled=""', source)
+        self.assertIn('data-sentry-replay-disabled=""', source)
         self.assertIn("{% block sentry_replay_integration %}{% endblock %}", source)
 
-    def test_user_profile_marks_root_as_sentry_capture_disabled(self) -> None:
+    def test_user_profile_does_not_mark_root_as_sentry_capture_disabled(self) -> None:
         repo_root = Path(__file__).resolve().parents[3]
         source = (repo_root / "astra_app/core/templates/core/user_profile.html").read_text(encoding="utf-8")
 
-        self.assertIn('<meta name="sentry-capture-disabled" content="true">', source)
         self.assertIn("data-user-profile-root", source)
-        self.assertIn('data-sentry-capture-disabled=""', source)
-        self.assertIn("{% block sentry_replay_integration %}{% endblock %}", source)
+        self.assertNotIn('<meta name="sentry-replay-disabled" content="true">', source)
+        self.assertNotIn('data-sentry-replay-disabled=""', source)
+        self.assertNotIn("{% block sentry_replay_integration %}{% endblock %}", source)
 
-    def test_membership_request_templates_mark_root_as_sentry_capture_disabled(self) -> None:
+    def test_membership_request_templates_do_not_mark_root_as_sentry_capture_disabled(self) -> None:
         repo_root = Path(__file__).resolve().parents[3]
-        blocked_templates = {
+        unblocked_templates = {
             "membership_request.html": 'data-membership-request-form-root=""',
             "membership_request_detail.html": 'data-membership-request-detail-root=""',
             "membership_audit_log.html": '<table class="table table-striped mb-0">',
             "membership_audit_log_vue.html": 'data-membership-audit-log-root',
         }
 
-        for template_name, root_marker in blocked_templates.items():
+        for template_name, root_marker in unblocked_templates.items():
             with self.subTest(template=template_name):
                 source = (repo_root / f"astra_app/core/templates/core/{template_name}").read_text(
                     encoding="utf-8"
                 )
 
-                self.assertIn('<meta name="sentry-capture-disabled" content="true">', source)
                 self.assertIn(root_marker, source)
-                self.assertIn('data-sentry-capture-disabled=""', source)
-                self.assertIn("{% block sentry_replay_integration %}{% endblock %}", source)
+                self.assertNotIn('<meta name="sentry-replay-disabled" content="true">', source)
+                self.assertNotIn('data-sentry-replay-disabled=""', source)
+                self.assertNotIn("{% block sentry_replay_integration %}{% endblock %}", source)
 
     def test_settings_shell_marks_root_as_sentry_capture_disabled(self) -> None:
         repo_root = Path(__file__).resolve().parents[3]
         source = (repo_root / "astra_app/core/templates/core/settings_shell.html").read_text(encoding="utf-8")
 
         self.assertIn('data-settings-root=""', source)
-        self.assertIn('data-sentry-capture-disabled=""', source)
+        self.assertIn('data-sentry-replay-disabled=""', source)
         self.assertIn("{% block sentry_replay_integration %}{% endblock %}", source)
 
     def test_election_vote_marks_root_as_sentry_capture_disabled(self) -> None:
@@ -357,7 +358,7 @@ class SentryBlockedTemplateMarkerTests(SimpleTestCase):
         source = (repo_root / "astra_app/core/templates/core/election_vote.html").read_text(encoding="utf-8")
 
         self.assertIn("data-election-vote-root", source)
-        self.assertIn("data-sentry-capture-disabled", source)
+        self.assertIn("data-sentry-replay-disabled", source)
         self.assertIn("{% block sentry_replay_integration %}{% endblock %}", source)
 
     def test_sync_token_marks_root_as_sentry_capture_disabled(self) -> None:
@@ -365,7 +366,7 @@ class SentryBlockedTemplateMarkerTests(SimpleTestCase):
         source = (repo_root / "astra_app/core/templates/core/sync_token.html").read_text(encoding="utf-8")
 
         self.assertIn('data-auth-recovery-otp-sync-root=""', source)
-        self.assertIn('data-sentry-capture-disabled=""', source)
+        self.assertIn('data-sentry-replay-disabled=""', source)
         self.assertIn("{% block sentry_replay_integration %}{% endblock %}", source)
 
     def test_auth_recovery_templates_mark_capture_as_disabled(self) -> None:
@@ -380,9 +381,9 @@ class SentryBlockedTemplateMarkerTests(SimpleTestCase):
             with self.subTest(template=template_name):
                 source = (repo_root / f"astra_app/core/templates/core/{template_name}").read_text(encoding="utf-8")
 
-                self.assertIn('<meta name="sentry-capture-disabled" content="true">', source)
+                self.assertIn('<meta name="sentry-replay-disabled" content="true">', source)
                 self.assertIn(root_marker, source)
-                self.assertIn('data-sentry-capture-disabled=""', source)
+                self.assertIn('data-sentry-replay-disabled=""', source)
                 self.assertIn("{% block sentry_replay_integration %}{% endblock %}", source)
 
 

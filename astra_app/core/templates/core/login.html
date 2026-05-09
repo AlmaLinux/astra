@@ -4,7 +4,7 @@
 
 {% block extra_head %}
   {{ block.super }}
-  <meta name="sentry-capture-disabled" content="true">
+  <meta name="sentry-replay-disabled" content="true">
 {% endblock %}
 
 {% block sentry_replay_integration %}{% endblock %}
@@ -12,7 +12,7 @@
 {% block header %}{% endblock %}
 
 {% block content %}
-<div class="row align-items-start public-auth-layout" data-sentry-capture-disabled="">
+<div class="row align-items-start public-auth-layout" data-sentry-replay-disabled="">
   {% include 'core/_public_auth_hero.html' %}
 
   <div class="col-12 col-lg-5">

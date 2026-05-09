@@ -55,8 +55,8 @@ describe("sentryBrowser entrypoint", () => {
     );
   });
 
-  it("does not bind the shared footer support control on blocked pages", async () => {
-    document.head.innerHTML = '<meta name="sentry-capture-disabled" content="true">';
+  it("still binds the shared footer support control on replay-disabled pages", async () => {
+    document.head.innerHTML = '<meta name="sentry-replay-disabled" content="true">';
     document.body.innerHTML = `
       <footer>
         <a href="mailto:support@example.com" data-sentry-feedback-link="">Contact Support</a>
@@ -66,6 +66,40 @@ describe("sentryBrowser entrypoint", () => {
     await import("../sentryBrowser");
     document.dispatchEvent(new Event("DOMContentLoaded"));
 
-    expect(attachSentryFeedbackTrigger).not.toHaveBeenCalled();
+    expect(attachSentryFeedbackTrigger).toHaveBeenCalledTimes(1);
+    expect(attachSentryFeedbackTrigger).toHaveBeenCalledWith(
+      document.body,
+      {
+        allowScreenshot: true,
+        surface: "global-footer",
+      },
+    );
+  });
+
+  it("retries binding when Sentry becomes ready after the first attempt", async () => {
+    document.body.innerHTML = `
+      <footer>
+        <a href="mailto:support@example.com" data-sentry-feedback-link="">Contact Support</a>
+      </footer>
+    `;
+    attachSentryFeedbackTrigger
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true);
+
+    await import("../sentryBrowser");
+
+    expect(attachSentryFeedbackTrigger).toHaveBeenCalledTimes(1);
+
+    document.dispatchEvent(new CustomEvent("astra:sentry-ready"));
+
+    expect(attachSentryFeedbackTrigger).toHaveBeenCalledTimes(2);
+    expect(attachSentryFeedbackTrigger).toHaveBeenNthCalledWith(
+      2,
+      document.body,
+      {
+        allowScreenshot: true,
+        surface: "global-footer",
+      },
+    );
   });
 });
