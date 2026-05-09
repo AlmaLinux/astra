@@ -24,6 +24,7 @@ export type SentryFeedbackTriggerOptions = {
 };
 
 const SUPPORT_FALLBACK_SELECTOR = "[data-astra-support-fallback]";
+const SUPPORT_FALLBACK_MAX_ATTEMPTS = 10;
 
 function findFeedbackShadowRoot(): ShadowRoot | null {
   for (const element of document.querySelectorAll<HTMLElement>("body *")) {
@@ -43,22 +44,22 @@ function findFeedbackShadowRoot(): ShadowRoot | null {
   return null;
 }
 
-function injectSupportFallbackIntoDialog(footerLink: HTMLElement): void {
+function injectSupportFallbackIntoDialog(footerLink: HTMLElement): boolean {
   const mailtoHref = footerLink.getAttribute("href");
   if (mailtoHref === null || !mailtoHref.startsWith("mailto:")) {
-    return;
+    return true;
   }
 
   const shadowRoot = findFeedbackShadowRoot();
   if (shadowRoot === null) {
-    return;
+    return false;
   }
 
   const target = shadowRoot.querySelector<HTMLElement>('[data-sentry-feedback="true"]')
     ?? shadowRoot.querySelector<HTMLElement>("form.form")
     ?? shadowRoot.querySelector<HTMLElement>(".dialog__content");
   if (target === null || target.querySelector(SUPPORT_FALLBACK_SELECTOR) !== null) {
-    return;
+    return target !== null;
   }
 
   // The SDK exposes form lifecycle hooks but no stable footer slot, so Astra injects
@@ -76,6 +77,20 @@ function injectSupportFallbackIntoDialog(footerLink: HTMLElement): void {
   fallback.append(fallbackLink, document.createTextNode("."));
 
   target.append(fallback);
+  return true;
+}
+
+function injectSupportFallbackWhenReady(
+  footerLink: HTMLElement,
+  attemptsRemaining: number = SUPPORT_FALLBACK_MAX_ATTEMPTS,
+): void {
+  if (injectSupportFallbackIntoDialog(footerLink) || attemptsRemaining <= 1) {
+    return;
+  }
+
+  window.setTimeout(() => {
+    injectSupportFallbackWhenReady(footerLink, attemptsRemaining - 1);
+  }, 0);
 }
 
 function getSentryGlobal(): SentryGlobal | undefined {
@@ -120,7 +135,7 @@ export function attachSentryFeedbackTrigger(
     autoInject: false,
     enableScreenshot: options.allowScreenshot,
     onFormOpen: () => {
-      injectSupportFallbackIntoDialog(footerLink);
+      injectSupportFallbackWhenReady(footerLink);
     },
     showBranding: false,
     showEmail: true,

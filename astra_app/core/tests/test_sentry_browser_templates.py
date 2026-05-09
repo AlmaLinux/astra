@@ -135,6 +135,7 @@ class SentryBrowserTemplateTests(TestCase):
         self.assertContains(response, '>Contact Support<', html=False)
         self.assertNotContains(response, 'href="mailto:support-test@example.com"', html=False)
         self.assertNotContains(response, 'support-test@example.com')
+        self.assertNotContains(response, 'btn btn-link', html=False)
 
 
 class SentryBlockedTemplateMarkerTests(SimpleTestCase):

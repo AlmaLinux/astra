@@ -22,15 +22,15 @@ function buildFooterLink(): HTMLElement {
   return footer.querySelector("[data-sentry-feedback-link]") as HTMLElement;
 }
 
-function buildHiddenAnonymousFooterButton(): HTMLElement {
+function buildHiddenAnonymousFooterLink(): HTMLElement {
   const footer = document.createElement("footer");
   footer.innerHTML = `
     <span class="d-none" data-sentry-feedback-footer="" data-sentry-feedback-hidden="true">
-      <button
-        type="button"
-        class="btn btn-link text-muted p-0 border-0 align-baseline"
+      <a
+        class="text-muted"
+        role="button"
         data-sentry-feedback-link=""
-      >Contact Support</button>
+      >Contact Support</a>
     </span>
   `;
   document.body.appendChild(footer);
@@ -116,6 +116,37 @@ describe("attachSentryFeedbackTrigger", () => {
     expect(shadowRoot.querySelectorAll("[data-astra-support-fallback]")).toHaveLength(1);
   });
 
+  it("injects the fallback email link even when the feedback dialog renders after onFormOpen", async () => {
+    const attachTo = vi.fn();
+    (window as typeof window & { Sentry?: unknown }).Sentry = {
+      getFeedback: () => ({ attachTo }),
+    };
+
+    const root = buildRoot();
+    const footerLink = buildFooterLink();
+
+    const attached = attachSentryFeedbackTrigger(root, {
+      allowScreenshot: true,
+      surface: "groups-detail",
+    });
+
+    expect(attached).toBe(true);
+    expect(attachTo).toHaveBeenCalledTimes(1);
+
+    const attachOptions = attachTo.mock.calls[0]?.[1];
+    expect(attachOptions).toBeDefined();
+
+    attachOptions.onFormOpen();
+
+    const shadowRoot = buildFeedbackShadowForm();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+
+    const fallbackLink = shadowRoot.querySelector("[data-astra-support-fallback-link]") as HTMLAnchorElement | null;
+    expect(fallbackLink?.textContent).toBe("Email support");
+    expect(fallbackLink?.getAttribute("href")).toBe("mailto:support@example.com");
+    expect(footerLink.getAttribute("href")).toBe("mailto:support@example.com");
+  });
+
   it("reveals the hidden anonymous contact-support scaffold only after feedback binds", () => {
     const attachTo = vi.fn();
     (window as typeof window & { Sentry?: unknown }).Sentry = {
@@ -123,7 +154,7 @@ describe("attachSentryFeedbackTrigger", () => {
     };
 
     const root = buildRoot();
-    const footerLink = buildHiddenAnonymousFooterButton();
+    const footerLink = buildHiddenAnonymousFooterLink();
     const footerWrapper = document.querySelector("[data-sentry-feedback-footer]") as HTMLElement;
 
     expect(footerWrapper.classList.contains("d-none")).toBe(true);
