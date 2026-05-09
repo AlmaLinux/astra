@@ -6,15 +6,19 @@
 
 {% block extra_head %}
   {{ block.super }}
+  <meta name="sentry-capture-disabled" content="true">
   {% vite_hmr_client %}
   {% vite_asset 'src/entrypoints/registration.ts' %}
 {% endblock %}
+
+{% block sentry_replay_integration %}{% endblock %}
 
 {% block header %}{% endblock %}
 
 {% block content %}
 <div
   data-register-root=""
+  data-sentry-capture-disabled=""
   data-register-api-url="{{ register_api_url }}"
   data-register-login-url="{{ register_login_url }}"
   data-register-register-url="{{ register_register_url }}"

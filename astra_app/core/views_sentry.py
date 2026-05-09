@@ -32,11 +32,19 @@ def _configured_sentry_envelope_url() -> str | None:
     return f"{scheme}://{netloc}/api/{project_id}/envelope/"
 
 
-def _read_envelope_dsn(request: HttpRequest) -> str | None:
-    if not request.body:
+def _read_bounded_envelope_body(request: HttpRequest) -> bytes | None:
+    envelope_body = request.read(settings.MAX_SENTRY_ENVELOPE_BYTES + 1)
+    if len(envelope_body) > settings.MAX_SENTRY_ENVELOPE_BYTES:
         return None
 
-    header_line = request.body.split(b"\n", maxsplit=1)[0]
+    return envelope_body
+
+
+def _read_envelope_dsn(envelope_body: bytes) -> str | None:
+    if not envelope_body:
+        return None
+
+    header_line = envelope_body.split(b"\n", maxsplit=1)[0]
     if not header_line:
         return None
 
@@ -52,9 +60,13 @@ def _read_envelope_dsn(request: HttpRequest) -> str | None:
 @csrf_exempt
 @require_POST
 def sentry_browser_tunnel(request: HttpRequest) -> HttpResponse:
+    envelope_body = _read_bounded_envelope_body(request)
+    if envelope_body is None:
+        return JsonResponse({"ok": False, "error": "Sentry envelope too large."}, status=400)
+
     upstream_url = _configured_sentry_envelope_url()
     expected_dsn = _parse_sentry_dsn(settings.SENTRY_DSN)
-    request_dsn = _parse_sentry_dsn(_read_envelope_dsn(request) or "")
+    request_dsn = _parse_sentry_dsn(_read_envelope_dsn(envelope_body) or "")
 
     if upstream_url is None or expected_dsn is None or request_dsn != expected_dsn:
         return JsonResponse({"ok": False, "error": "Invalid Sentry envelope DSN."}, status=400)
@@ -62,7 +74,7 @@ def sentry_browser_tunnel(request: HttpRequest) -> HttpResponse:
     try:
         upstream_response = requests.post(
             upstream_url,
-            data=request.body,
+            data=envelope_body,
             headers={"Content-Type": request.content_type or "application/x-sentry-envelope"},
             timeout=_SENTRY_TUNNEL_TIMEOUT_SECONDS,
             allow_redirects=False,

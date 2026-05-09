@@ -15,6 +15,8 @@
   <a class="btn btn-link px-0" href="{% url 'election-detail' election.id %}" title="Return to election details">Back to election detail</a>
 {% endblock %}
 
+{% block sentry_replay_integration %}{% endblock %}
+
 {% block content %}
   <div
     data-election-vote-root

@@ -1,11 +1,18 @@
+import json
 from unittest.mock import Mock, patch
 
 import requests
-from django.test import SimpleTestCase, override_settings
+from django.conf import settings
+from django.test import RequestFactory, SimpleTestCase, override_settings
+
+from core.views_sentry import sentry_browser_tunnel
 
 
 @override_settings(SENTRY_DSN="https://public@example.ingest.sentry.io/1")
 class SentryTunnelViewTests(SimpleTestCase):
+    def setUp(self) -> None:
+        self.factory = RequestFactory()
+
     def test_tunnel_url_is_wired(self) -> None:
         response = self.client.get("/_ci/envelope/")
 
@@ -60,3 +67,70 @@ class SentryTunnelViewTests(SimpleTestCase):
 
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.json(), {"ok": False, "error": "Failed to forward Sentry envelope."})
+
+    @override_settings(MAX_SENTRY_ENVELOPE_BYTES=32)
+    def test_tunnel_rejects_oversized_envelope_before_forwarding(self) -> None:
+        envelope = (
+            b'{"dsn":"https://public@example.ingest.sentry.io/1"}\n'
+            + b'{"type":"replay_event"}\n'
+            + (b"x" * settings.MAX_SENTRY_ENVELOPE_BYTES)
+        )
+
+        with patch("core.views_sentry.requests.post") as post_mock:
+            response = self.client.post(
+                "/_ci/envelope/",
+                data=envelope,
+                content_type="application/x-sentry-envelope",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"ok": False, "error": "Sentry envelope too large."})
+        post_mock.assert_not_called()
+
+    @override_settings(MAX_SENTRY_ENVELOPE_BYTES=32)
+    def test_tunnel_rejects_oversized_envelope_without_content_length(self) -> None:
+        envelope = (
+            b'{"dsn":"https://public@example.ingest.sentry.io/1"}\n'
+            + b'{"type":"replay_event"}\n'
+            + (b"x" * settings.MAX_SENTRY_ENVELOPE_BYTES)
+        )
+        request = self.factory.post(
+            "/_ci/envelope/",
+            data=envelope,
+            content_type="application/x-sentry-envelope",
+        )
+        del request.META["CONTENT_LENGTH"]
+
+        with patch("core.views_sentry.requests.post") as post_mock:
+            response = sentry_browser_tunnel(request)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            json.loads(response.content),
+            {"ok": False, "error": "Sentry envelope too large."},
+        )
+        post_mock.assert_not_called()
+
+    @override_settings(MAX_SENTRY_ENVELOPE_BYTES=32)
+    def test_tunnel_rejects_oversized_envelope_with_negative_content_length(self) -> None:
+        envelope = (
+            b'{"dsn":"https://public@example.ingest.sentry.io/1"}\n'
+            + b'{"type":"replay_event"}\n'
+            + (b"x" * settings.MAX_SENTRY_ENVELOPE_BYTES)
+        )
+        request = self.factory.post(
+            "/_ci/envelope/",
+            data=envelope,
+            content_type="application/x-sentry-envelope",
+        )
+        request.META["CONTENT_LENGTH"] = "-1"
+
+        with patch("core.views_sentry.requests.post") as post_mock:
+            response = sentry_browser_tunnel(request)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            json.loads(response.content),
+            {"ok": False, "error": "Sentry envelope too large."},
+        )
+        post_mock.assert_not_called()

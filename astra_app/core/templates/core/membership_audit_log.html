@@ -4,6 +4,13 @@
 
 {% block title %}Membership Audit Log{% endblock %}
 
+{% block extra_head %}
+  {{ block.super }}
+  <meta name="sentry-capture-disabled" content="true">
+{% endblock %}
+
+{% block sentry_replay_integration %}{% endblock %}
+
 {% block header %}
   <h1 class="m-0">
     Membership Audit Log
@@ -12,7 +19,7 @@
 {% endblock %}
 
 {% block content %}
-  <div class="card">
+  <div class="card" data-sentry-capture-disabled="">
     <div class="card-header">
       <div class="card-tools">
         {% include 'core/_search_form.html' with search_value=q search_placeholder="Search" search_aria_label="Search membership audit log" search_submit_title="Search audit log" search_width="260px" search_hidden_fields_template="core/_audit_log_search_hidden_fields.html" %}

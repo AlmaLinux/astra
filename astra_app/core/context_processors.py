@@ -57,6 +57,8 @@ def build_info(_request) -> dict[str, object]:
             "release": settings.SENTRY_RELEASE,
             "sendDefaultPii": False,
             "tracesSampleRate": settings.SENTRY_TRACES_SAMPLE_RATE,
+            "replaysSessionSampleRate": settings.SENTRY_REPLAY_SESSION_SAMPLE_RATE,
+            "replaysOnErrorSampleRate": settings.SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE,
             "tunnel": reverse("sentry-browser-tunnel"),
         }
         sentry_trace = sentry_sdk.get_traceparent() or ""

@@ -52,6 +52,18 @@
           );
         }
 
+        {% block sentry_replay_integration %}
+        if (!captureDisabled && typeof window.Sentry.replayIntegration === "function") {
+          integrations.push(
+            window.Sentry.replayIntegration({
+              maskAllText: true,
+              maskAllInputs: true,
+              blockAllMedia: true,
+            }),
+          );
+        }
+        {% endblock %}
+
         window.Sentry.init({
           dsn: config.dsn,
           environment: config.environment,
@@ -65,7 +77,9 @@
               thin_shell_path: window.location.pathname,
             },
           },
-          tracesSampleRate: config.tracesSampleRate
+          tracesSampleRate: config.tracesSampleRate,
+          replaysSessionSampleRate: config.replaysSessionSampleRate,
+          replaysOnErrorSampleRate: config.replaysOnErrorSampleRate,
         });
       })();
     </script>

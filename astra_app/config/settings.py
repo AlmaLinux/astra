@@ -120,6 +120,9 @@ SENTRY_RELEASE = _env_str("ASTRA_BUILD_SHA", default=None)
 SENTRY_SEND_DEFAULT_PII = _env_bool("SENTRY_SEND_DEFAULT_PII", default=True)
 SENTRY_TRACES_SAMPLE_RATE = None
 SENTRY_PROFILES_SAMPLE_RATE = None
+SENTRY_REPLAY_SESSION_SAMPLE_RATE = 1.0
+SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE = 1.0
+MAX_SENTRY_ENVELOPE_BYTES = _env_int("MAX_SENTRY_ENVELOPE_BYTES", default=5 * 1024 * 1024)
 if _sentry_dsn:
     try:
         import sentry_sdk
@@ -202,6 +205,30 @@ if _sentry_dsn:
     except (TypeError, ValueError) as e:
         raise ImproperlyConfigured(
             f"SENTRY_PROFILES_SAMPLE_RATE must be a float env var, got {_sentry_profiles_sample_rate_raw!r}."
+        ) from e
+
+    _sentry_replay_session_sample_rate_raw = _env_str(
+        "SENTRY_REPLAY_SESSION_SAMPLE_RATE",
+        default="1.0",
+    )
+    _sentry_replay_on_error_sample_rate_raw = _env_str(
+        "SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE",
+        default="1.0",
+    )
+    try:
+        SENTRY_REPLAY_SESSION_SAMPLE_RATE = float(_sentry_replay_session_sample_rate_raw)
+    except (TypeError, ValueError) as e:
+        raise ImproperlyConfigured(
+            "SENTRY_REPLAY_SESSION_SAMPLE_RATE must be a float env var, "
+            f"got {_sentry_replay_session_sample_rate_raw!r}."
+        ) from e
+
+    try:
+        SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE = float(_sentry_replay_on_error_sample_rate_raw)
+    except (TypeError, ValueError) as e:
+        raise ImproperlyConfigured(
+            "SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE must be a float env var, "
+            f"got {_sentry_replay_on_error_sample_rate_raw!r}."
         ) from e
 
     sentry_sdk.init(
