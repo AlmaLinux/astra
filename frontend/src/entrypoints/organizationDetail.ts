@@ -4,6 +4,7 @@ import { createApp, type App } from "vue";
 
 import OrganizationDetailPage from "../organization-detail/OrganizationDetailPage.vue";
 import { readOrganizationDetailBootstrap, type OrganizationDetailBootstrap } from "../organization-detail/types";
+import { attachSentryFeedbackTrigger } from "../shared/sentryFeedback";
 
 export function mountOrganizationDetailPage(root: HTMLElement | null): App<Element> | null {
   if (root === null) {
@@ -19,6 +20,7 @@ export function mountOrganizationDetailPage(root: HTMLElement | null): App<Eleme
     bootstrap,
   } satisfies { bootstrap: OrganizationDetailBootstrap });
   app.mount(root);
+  attachSentryFeedbackTrigger(root, { allowScreenshot: true, surface: "organization-detail" });
   return app;
 }
 

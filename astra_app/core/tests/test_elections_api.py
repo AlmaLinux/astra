@@ -1,6 +1,6 @@
 import datetime
 import json
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 from django.conf import settings
 from django.core.cache import cache
@@ -1349,7 +1349,7 @@ class ElectionsApiTests(TestCase):
         self.assertEqual(election.status, Election.Status.tallied)
         self.assertEqual(election.tally_result["elected"], [candidate.id])
 
-    def test_election_send_mail_credentials_api_returns_send_mail_redirect_and_payload(self) -> None:
+    def test_election_send_mail_credentials_api_sends_directly_and_returns_success_payload(self) -> None:
         self._login_as_freeipa_user("admin")
         FreeIPAPermissionGrant.objects.create(
             principal_type=FreeIPAPermissionGrant.PrincipalType.user,
@@ -1384,7 +1384,10 @@ class ElectionsApiTests(TestCase):
                 {"uid": [username], "mail": [f"{username}@example.com"], "memberof_group": []},
             )
 
-        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.views_elections.lifecycle.elections_services.send_voting_credential_email", autospec=True) as send_mock,
+        ):
             response = self.client.post(
                 reverse("api-election-send-mail-credentials", args=[election.id]),
                 data=json.dumps({"username": "alice"}),
@@ -1394,15 +1397,84 @@ class ElectionsApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.content)
         self.assertTrue(payload["ok"])
-        self.assertIn(reverse("send-mail"), payload["redirect_url"])
+        self.assertEqual(payload["message"], "Queued voting credential email for 1 recipient.")
         self.assertEqual(payload["recipient_count"], 1)
+        self.assertNotIn("redirect_url", payload)
+        send_mock.assert_called_once_with(
+            request=ANY,
+            election=election,
+            username="alice",
+            email="alice@example.com",
+            credential_public_id="cred-alice",
+            tz_name=None,
+        )
+        self.assertIsNone(self.client.session.get("send_mail_csv_payload_v1"))
 
-        raw_csv_payload = self.client.session.get("send_mail_csv_payload_v1")
-        self.assertTrue(raw_csv_payload)
-        session_payload = json.loads(str(raw_csv_payload))
-        self.assertEqual(len(session_payload["recipients"]), 1)
-        self.assertEqual(session_payload["recipients"][0]["username"], "alice")
-        self.assertEqual(session_payload["recipients"][0]["credential_public_id"], "cred-alice")
+    def test_election_send_mail_credentials_api_reports_partial_success(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Reminder API election partial",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+        Candidate.objects.create(
+            election=election,
+            freeipa_username="alice",
+            nominated_by="nominator",
+        )
+        VotingCredential.objects.create(
+            election=election,
+            public_id="cred-alice",
+            freeipa_username="alice",
+            weight=1,
+        )
+        VotingCredential.objects.create(
+            election=election,
+            public_id="cred-bob",
+            freeipa_username="bob",
+            weight=1,
+        )
+
+        def _get_user(username: str, respect_privacy: bool = True):
+            return FreeIPAUser(
+                username,
+                {"uid": [username], "mail": [f"{username}@example.com"], "memberof_group": []},
+            )
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch(
+                "core.views_elections.lifecycle.elections_services.send_voting_credential_email",
+                autospec=True,
+                side_effect=[None, RuntimeError("queue failed")],
+            ) as send_mock,
+        ):
+            response = self.client.post(
+                reverse("api-election-send-mail-credentials", args=[election.id]),
+                data=json.dumps({}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(
+            payload["message"],
+            "Queued voting credential email for 1 recipient. Failed to queue 1 email.",
+        )
+        self.assertEqual(payload["recipient_count"], 1)
+        self.assertEqual(payload["errors"], ["Failed to queue 1 email."])
+        self.assertEqual(send_mock.call_count, 2)
 
     @override_settings(
         ELECTION_RATE_LIMIT_CREDENTIAL_RESEND_LIMIT=1,

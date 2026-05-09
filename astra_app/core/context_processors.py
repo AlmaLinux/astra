@@ -2,7 +2,6 @@ from email.utils import parseaddr
 
 import sentry_sdk
 from django.conf import settings
-from django.contrib.staticfiles.storage import staticfiles_storage
 from django.urls import reverse
 
 from core.build_info import get_build_sha
@@ -51,11 +50,12 @@ def build_info(_request) -> dict[str, object]:
     sentry_trace = ""
     sentry_baggage = ""
     if settings.SENTRY_DSN:
-        sentry_browser_bundle_src = staticfiles_storage.url("core/vendor/sentry/bundle.tracing.min.js")
+        sentry_browser_bundle_src = "src/entrypoints/sentryBrowser.ts"
         sentry_browser_config = {
             "dsn": settings.SENTRY_DSN,
             "environment": settings.SENTRY_ENVIRONMENT,
             "release": settings.SENTRY_RELEASE,
+            "sendDefaultPii": False,
             "tracesSampleRate": settings.SENTRY_TRACES_SAMPLE_RATE,
             "tunnel": reverse("sentry-browser-tunnel"),
         }

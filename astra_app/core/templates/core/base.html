@@ -1,5 +1,6 @@
 {% load static %}
 {% load avatar_tags %}
+{% load django_vite %}
 <!doctype html>
 <html lang="en">
 <head>
@@ -18,12 +19,13 @@
   {% if not request.user.is_authenticated %}
     <link rel="stylesheet" href="{% static 'core/css/login.css' %}" />
   {% endif %}
+  {% block extra_head %}{% endblock %}
   {% if sentry_browser_bundle_src and sentry_browser_config %}
     {% if sentry_trace %}<meta name="sentry-trace" content="{{ sentry_trace }}">{% endif %}
     {% if sentry_baggage %}<meta name="baggage" content="{{ sentry_baggage }}">{% endif %}
     {{ sentry_browser_config|json_script:"sentry-browser-config" }}
-    <script src="{{ sentry_browser_bundle_src }}"></script>
-    <script>
+    {% vite_asset sentry_browser_bundle_src %}
+    <script type="module">
       (function () {
         var configElement = document.getElementById("sentry-browser-config");
         if (!configElement || !(window.Sentry && window.Sentry.init)) {
@@ -31,18 +33,43 @@
         }
 
         var config = JSON.parse(configElement.textContent);
+        var captureDisabled = document.querySelector('meta[name="sentry-capture-disabled"][content="true"]') !== null;
+        var integrations = [
+          window.Sentry.browserTracingIntegration(),
+          window.Sentry.browserSessionIntegration(),
+        ];
+
+        if (!captureDisabled && typeof window.Sentry.feedbackIntegration === "function") {
+          integrations.push(
+            window.Sentry.feedbackIntegration({
+              autoInject: false,
+              enableScreenshot: false,
+              showBranding: false,
+              useSentryUser: false,
+              showEmail: true,
+              showName: true,
+            }),
+          );
+        }
+
         window.Sentry.init({
           dsn: config.dsn,
           environment: config.environment,
           release: config.release || undefined,
           tunnel: config.tunnel,
-          integrations: [window.Sentry.browserTracingIntegration()],
+          integrations: integrations,
+          sendDefaultPii: config.sendDefaultPii === true,
+          initialScope: {
+            tags: {
+              sentry_capture_disabled: captureDisabled ? "true" : "false",
+              thin_shell_path: window.location.pathname,
+            },
+          },
           tracesSampleRate: config.tracesSampleRate
         });
       })();
     </script>
   {% endif %}
-  {% block extra_head %}{% endblock %}
 </head>
 
 <body class="hold-transition {% if request.user.is_authenticated %}sidebar-mini layout-fixed{% else %}layout-top-nav public-auth{% endif %}">
@@ -392,6 +419,17 @@
           <span class="mx-2">·</span>
           <a class="text-muted" href="mailto:{{ default_from_email_address }}">Contact Support</a>
         {% endif %}
+        <span class="d-none" data-sentry-feedback-footer="" data-sentry-feedback-hidden="true">
+          <span class="mx-2" aria-hidden="true">·</span>
+          <a
+            class="text-muted"
+            href="#"
+            data-sentry-feedback-link=""
+            data-sentry-feedback-hidden="true"
+            aria-hidden="true"
+            tabindex="-1"
+          >Report a bug</a>
+        </span>
         <span class="mx-2">·</span>
         Powered by AlmaLinux Astra
         {% if build_sha %}

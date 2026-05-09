@@ -2,6 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { mountGroupDetailPage } from "../../entrypoints/groupDetail";
 
+function flushPromises(): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+}
+
 function buildRoot(attributes: Record<string, string>): HTMLDivElement {
   const root = document.createElement("div");
   root.setAttribute("data-group-detail-root", "");
@@ -18,7 +24,11 @@ describe("mountGroupDetailPage", () => {
     vi.restoreAllMocks();
   });
 
-  it("mounts when required group detail bootstrap data exists", () => {
+  it("mounts when required group detail bootstrap data exists", async () => {
+    const attachTo = vi.fn();
+    (window as typeof window & { Sentry?: unknown }).Sentry = {
+      getFeedback: () => ({ attachTo }),
+    };
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input) => {
@@ -67,6 +77,11 @@ describe("mountGroupDetailPage", () => {
       "data-group-detail-leaders-api-url": "/api/v1/groups/infra/leaders",
       "data-group-detail-members-api-url": "/api/v1/groups/infra/members",
       "data-group-detail-action-url": "/api/v1/groups/infra/action",
+      "data-group-detail-chat-irc-default-server": "irc.libera.chat",
+      "data-group-detail-chat-matrix-default-server": "matrix.org",
+      "data-group-detail-chat-mattermost-default-server": "chat.almalinux.org",
+      "data-group-detail-chat-mattermost-default-team": "almalinux",
+      "data-group-detail-current-username": "alice",
       "data-group-detail-url-template": "/group/__group_name__/",
       "data-group-detail-edit-url-template": "/group/__group_name__/edit/",
       "data-group-detail-agreement-detail-url-template": "/settings/?tab=agreements&agreement=__agreement_cn__",
@@ -77,5 +92,8 @@ describe("mountGroupDetailPage", () => {
 
     expect(app).not.toBeNull();
     expect(root.querySelector("[data-group-detail-vue-root]")).not.toBeNull();
+    await flushPromises();
+    expect(root.querySelector("[data-sentry-feedback-trigger]")).not.toBeNull();
+    expect(attachTo).toHaveBeenCalledTimes(1);
   });
 });

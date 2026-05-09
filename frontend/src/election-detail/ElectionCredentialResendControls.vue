@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 
 import type { ElectionCredentialResendBootstrap } from "./types";
 
@@ -9,8 +9,10 @@ const props = defineProps<{
 
 const username = ref("");
 const errors = ref<string[]>([]);
+const successMessage = ref("");
 const isSubmittingAll = ref(false);
 const isSubmittingSingle = ref(false);
+const isSubmitting = computed(() => isSubmittingAll.value || isSubmittingSingle.value);
 
 function readCsrfToken(): string {
   for (const cookie of document.cookie.split(";")) {
@@ -23,12 +25,17 @@ function readCsrfToken(): string {
 }
 
 async function submit(targetUsername: string, mode: "all" | "single"): Promise<void> {
+  if (isSubmitting.value) {
+    return;
+  }
+
   if (mode == "all") {
     isSubmittingAll.value = true;
   } else {
     isSubmittingSingle.value = true;
   }
   errors.value = [];
+  successMessage.value = "";
 
   try {
     const response = await fetch(props.bootstrap.sendMailCredentialsApiUrl, {
@@ -43,16 +50,20 @@ async function submit(targetUsername: string, mode: "all" | "single"): Promise<v
     });
 
     const payload = (await response.json().catch(() => ({ errors: ["Unable to prepare the credential resend right now."] }))) as {
-      redirect_url?: string;
       errors?: string[];
+      message?: string;
+      ok?: boolean;
     };
 
-    if (!response.ok || !payload.redirect_url) {
+    if (!response.ok || payload.ok !== true || !payload.message) {
       errors.value = payload.errors && payload.errors.length > 0 ? payload.errors : ["Unable to prepare the credential resend right now."];
       return;
     }
 
-    window.location.assign(payload.redirect_url);
+    successMessage.value = payload.message;
+    if (mode == "single") {
+      username.value = "";
+    }
   } catch {
     errors.value = ["Unable to prepare the credential resend right now."];
   } finally {
@@ -75,13 +86,17 @@ async function submitSingle(): Promise<void> {
 
 <template>
   <div data-election-credential-resend-vue-root>
+    <div v-if="successMessage" class="alert alert-success" role="status">
+      <p class="mb-0">{{ successMessage }}</p>
+    </div>
+
     <div v-if="errors.length > 0" class="alert alert-danger" role="alert">
       <p v-for="error in errors" :key="error" class="mb-0">{{ error }}</p>
     </div>
 
     <div class="mb-3">
       <form class="mb-0" @submit.prevent="submitAll">
-        <button type="submit" class="btn btn-outline-primary btn-sm" title="Resend credentials to all eligible voters">
+        <button type="submit" class="btn btn-outline-primary btn-sm" title="Resend credentials to all eligible voters" :disabled="isSubmitting">
           Resend all credentials
         </button>
       </form>
@@ -99,9 +114,10 @@ async function submitSingle(): Promise<void> {
           placeholder="username"
           list="eligible-voter-usernames"
           autocomplete="off"
+          :disabled="isSubmitting"
         >
         <div class="input-group-append">
-          <button type="submit" class="btn btn-outline-primary" title="Resend credential to the selected user">
+          <button type="submit" class="btn btn-outline-primary" title="Resend credential to the selected user" :disabled="isSubmitting">
             Resend voting credential
           </button>
         </div>

@@ -19,8 +19,7 @@ from core.models import Election, VotingCredential
 from core.permissions import ASTRA_ADD_ELECTION, json_permission_required
 from core.rate_limit import allow_request
 from core.views_elections._helpers import _extend_election_end_from_post, _get_active_election
-from core.views_send_mail import _CSV_SESSION_KEY
-from core.views_utils import get_username, send_mail_url
+from core.views_utils import get_username
 
 
 @dataclass(frozen=True)
@@ -30,6 +29,8 @@ class ElectionCredentialResendResult:
     message: str
     redirect_url: str | None = None
     recipient_count: int = 0
+    success_message: str | None = None
+    error_message: str | None = None
 
 
 @dataclass(frozen=True)
@@ -93,7 +94,7 @@ def _send_mail_credentials_result(*, request: HttpRequest, election: Election, d
             message="That user does not have a voting credential for this election.",
         )
 
-    recipients: list[dict[str, str]] = []
+    deliveries: list[tuple[str, str, str, str | None]] = []
     for credential in credential_list:
         username = str(credential.freeipa_username or "").strip()
         if not username:
@@ -105,60 +106,69 @@ def _send_mail_credentials_result(*, request: HttpRequest, election: Election, d
 
         tz_name = _get_freeipa_timezone_name(user)
 
-        ctx = elections_services.build_voting_credential_email_context(
-            request=request,
-            election=election,
-            username=username,
-            credential_public_id=str(credential.public_id),
-            tz_name=tz_name,
-            user=user,
+        deliveries.append(
+            (
+                username,
+                user.email,
+                str(credential.public_id),
+                tz_name,
+            )
         )
-        recipients.append({str(k): str(v) for k, v in ctx.items()})
 
-    if not recipients:
+    if not deliveries:
         return ElectionCredentialResendResult(
             success=False,
             status_code=400,
             message="No credential recipients are available (missing email addresses?).",
         )
 
-    request.session[_CSV_SESSION_KEY] = json.dumps(
-        {
-            "header_to_var": {
-                "Email": "email",
-                "Username": "username",
-                "First name": "first_name",
-                "Last name": "last_name",
-                "Full name": "full_name",
-                "Election ID": "election_id",
-                "Election name": "election_name",
-                "Election description": "election_description",
-                "Election URL": "election_url",
-                "Election start": "election_start_datetime",
-                "Election end": "election_end_datetime",
-                "Number of seats": "election_number_of_seats",
-                "Credential": "credential_public_id",
-                "Vote URL": "vote_url",
-                "Vote URL (with credential)": "vote_url_with_credential_fragment",
-            },
-            "recipients": recipients,
-        }
-    )
+    recipient_count = 0
+    failure_count = 0
+    for username, email, credential_public_id, tz_name in deliveries:
+        try:
+            elections_services.send_voting_credential_email(
+                request=request,
+                election=election,
+                username=username,
+                email=email,
+                credential_public_id=credential_public_id,
+                tz_name=tz_name,
+            )
+            recipient_count += 1
+        except Exception:
+            failure_count += 1
 
-    redirect_url = send_mail_url(
-        to_type="csv",
-        to="",
-        template_name=settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME,
-        extra_context={"election_committee_email": settings.ELECTION_COMMITTEE_EMAIL},
-        reply_to=settings.ELECTION_COMMITTEE_EMAIL,
-    )
+    if recipient_count == 0 and failure_count > 0:
+        failure_label = "email" if failure_count == 1 else "emails"
+        failure_message = f"Failed to queue {failure_count} {failure_label}."
+        return ElectionCredentialResendResult(
+            success=False,
+            status_code=400,
+            message=failure_message,
+            error_message=failure_message,
+        )
+
+    recipient_label = "recipient" if recipient_count == 1 else "recipients"
+    success_message = f"Queued voting credential email for {recipient_count} {recipient_label}."
+
+    if failure_count > 0:
+        failure_label = "email" if failure_count == 1 else "emails"
+        failure_message = f"Failed to queue {failure_count} {failure_label}."
+        return ElectionCredentialResendResult(
+            success=True,
+            status_code=200,
+            message=f"{success_message} {failure_message}",
+            recipient_count=recipient_count,
+            success_message=success_message,
+            error_message=failure_message,
+        )
 
     return ElectionCredentialResendResult(
         success=True,
         status_code=200,
-        message="Credential resend prepared.",
-        redirect_url=redirect_url,
-        recipient_count=len(recipients),
+        message=success_message,
+        recipient_count=recipient_count,
+        success_message=success_message,
     )
 
 
@@ -174,7 +184,11 @@ def election_send_mail_credentials(request: HttpRequest, election_id: int) -> Ht
         messages.error(request, result.message)
         return redirect("election-detail", election_id=election.id)
 
-    return redirect(result.redirect_url)
+    if result.success_message:
+        messages.success(request, result.success_message)
+    if result.error_message:
+        messages.error(request, result.error_message)
+    return redirect("election-detail", election_id=election.id)
 
 
 def _request_data(request: HttpRequest) -> Mapping[str, object]:
@@ -369,10 +383,12 @@ def election_send_mail_credentials_api(request: HttpRequest, election_id: int) -
     if result.success:
         payload.update(
             {
-                "redirect_url": result.redirect_url,
+                "message": result.message,
                 "recipient_count": result.recipient_count,
             }
         )
+        if result.error_message:
+            payload["errors"] = [result.error_message]
     else:
         payload["errors"] = [result.message]
 

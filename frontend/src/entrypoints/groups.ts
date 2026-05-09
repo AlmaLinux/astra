@@ -4,6 +4,7 @@ import { createApp, type App } from "vue";
 
 import GroupsPage from "../groups/GroupsPage.vue";
 import { readGroupsBootstrap, type GroupsBootstrap } from "../groups/types";
+import { attachSentryFeedbackTrigger } from "../shared/sentryFeedback";
 
 export function mountGroupsPage(root: HTMLElement | null): App<Element> | null {
   if (root === null) {
@@ -19,6 +20,7 @@ export function mountGroupsPage(root: HTMLElement | null): App<Element> | null {
     bootstrap,
   } satisfies { bootstrap: GroupsBootstrap });
   app.mount(root);
+  attachSentryFeedbackTrigger(root, { allowScreenshot: true, surface: "groups" });
   return app;
 }
 

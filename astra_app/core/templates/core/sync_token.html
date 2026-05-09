@@ -6,6 +6,7 @@
 
 {% block extra_head %}
   {{ block.super }}
+  <meta name="sentry-capture-disabled" content="true">
   {% vite_hmr_client %}
   {% vite_asset 'src/entrypoints/authRecovery.ts' %}
 {% endblock %}
@@ -15,6 +16,7 @@
 {% block content %}
 <div
   data-auth-recovery-otp-sync-root=""
+  data-sentry-capture-disabled=""
   data-auth-recovery-otp-sync-api-url="{{ auth_recovery_otp_sync_api_url }}"
   data-auth-recovery-otp-sync-submit-url="{{ auth_recovery_otp_sync_submit_url }}"
   data-auth-recovery-otp-sync-login-url="{{ auth_recovery_otp_sync_login_url }}"

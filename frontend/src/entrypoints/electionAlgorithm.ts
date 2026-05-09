@@ -4,6 +4,7 @@ import { createApp, type App } from "vue";
 
 import ElectionAlgorithmPage from "../election-algorithm/ElectionAlgorithmPage.vue";
 import { readElectionAlgorithmBootstrap, type ElectionAlgorithmBootstrap } from "../election-algorithm/types";
+import { attachSentryFeedbackTrigger } from "../shared/sentryFeedback";
 
 export function mountElectionAlgorithmPage(root: HTMLElement | null): App<Element> | null {
   if (root === null) {
@@ -19,6 +20,7 @@ export function mountElectionAlgorithmPage(root: HTMLElement | null): App<Elemen
     bootstrap,
   } satisfies { bootstrap: ElectionAlgorithmBootstrap });
   app.mount(root);
+  attachSentryFeedbackTrigger(root, { allowScreenshot: true, surface: "election-algorithm" });
   return app;
 }
 

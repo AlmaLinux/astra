@@ -1,7 +1,6 @@
 
 import datetime
-import json
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 from django.conf import settings
 from django.contrib.messages import constants as message_constants
@@ -156,7 +155,7 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
         self.assertEqual([item["username"] for item in payload["items"]], ["alice"])
         self.assertEqual(payload["usernames"], ["alice"])
 
-    def test_resend_all_credentials_opens_send_mail_with_voting_credential_context(self) -> None:
+    def test_resend_all_credentials_sends_voting_credential_email_directly(self) -> None:
         self._login_as_freeipa_user("viewer")
 
         FreeIPAPermissionGrant.objects.get_or_create(
@@ -206,22 +205,33 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
                 )
             return FreeIPAUser(username, {"uid": [username], "mail": [f"{username}@example.com"], "memberof_group": []})
 
-        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
-            resp = self.client.post(reverse("election-send-mail-credentials", args=[election.id]))
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.views_elections.lifecycle.elections_services.send_voting_credential_email", autospec=True) as send_mock,
+        ):
+            resp = self.client.post(
+                reverse("election-send-mail-credentials", args=[election.id]),
+                follow=True,
+            )
 
-        self.assertEqual(resp.status_code, 302)
-        location = str(resp["Location"])
-        self.assertIn(reverse("send-mail"), location)
-        self.assertIn("template=", location)
-        self.assertIn(settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME, location)
-        self.assertIn("type=csv", location)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.request["PATH_INFO"], reverse("election-detail", args=[election.id]))
+        flashed = list(get_messages(resp.wsgi_request))
+        self.assertEqual(
+            [(message.level, message.message) for message in flashed],
+            [(message_constants.SUCCESS, "Queued voting credential email for 1 recipient.")],
+        )
+        send_mock.assert_called_once_with(
+            request=ANY,
+            election=election,
+            username="alice",
+            email="alice@example.com",
+            credential_public_id="cred-alice",
+            tz_name=None,
+        )
+        self.assertIsNone(self.client.session.get("send_mail_csv_payload_v1"))
 
-        raw_csv_payload = self.client.session.get("send_mail_csv_payload_v1")
-        self.assertTrue(raw_csv_payload)
-        payload = json.loads(str(raw_csv_payload))
-        self.assertEqual(payload["recipients"][0]["credential_public_id"], "cred-alice")
-
-    def test_resend_single_credential_opens_send_mail_for_one_user(self) -> None:
+    def test_resend_single_credential_sends_directly_for_one_user(self) -> None:
         self._login_as_freeipa_user("viewer")
 
         FreeIPAPermissionGrant.objects.get_or_create(
@@ -268,20 +278,103 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
         def _get_user(username: str, respect_privacy: bool = True):
             return FreeIPAUser(username, {"uid": [username], "mail": [f"{username}@example.com"], "memberof_group": []})
 
-        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.views_elections.lifecycle.elections_services.send_voting_credential_email", autospec=True) as send_mock,
+        ):
             resp = self.client.post(
                 reverse("election-send-mail-credentials", args=[election.id]),
                 data={"username": "alice"},
+                follow=True,
             )
 
-        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.request["PATH_INFO"], reverse("election-detail", args=[election.id]))
+        flashed = list(get_messages(resp.wsgi_request))
+        self.assertEqual(
+            [(message.level, message.message) for message in flashed],
+            [(message_constants.SUCCESS, "Queued voting credential email for 1 recipient.")],
+        )
+        send_mock.assert_called_once_with(
+            request=ANY,
+            election=election,
+            username="alice",
+            email="alice@example.com",
+            credential_public_id="cred-alice",
+            tz_name=None,
+        )
+        self.assertIsNone(self.client.session.get("send_mail_csv_payload_v1"))
 
-        raw_csv_payload = self.client.session.get("send_mail_csv_payload_v1")
-        self.assertTrue(raw_csv_payload)
-        payload = json.loads(str(raw_csv_payload))
-        self.assertEqual(len(payload["recipients"]), 1)
-        self.assertEqual(payload["recipients"][0]["username"], "alice")
-        self.assertEqual(payload["recipients"][0]["credential_public_id"], "cred-alice")
+    def test_resend_all_credentials_reports_partial_success_when_a_later_send_fails(self) -> None:
+        self._login_as_freeipa_user("viewer")
+
+        FreeIPAPermissionGrant.objects.get_or_create(
+            permission=ASTRA_ADD_ELECTION,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="viewer",
+        )
+
+        EmailTemplate.objects.create(
+            name=settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME,
+            subject="Subject",
+            html_content="HTML",
+            content="Text",
+        )
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Reminder election (partial failure)",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+        Candidate.objects.create(
+            election=election,
+            freeipa_username="alice",
+            nominated_by="nominator",
+        )
+        VotingCredential.objects.create(
+            election=election,
+            public_id="cred-alice",
+            freeipa_username="alice",
+            weight=1,
+        )
+        VotingCredential.objects.create(
+            election=election,
+            public_id="cred-bob",
+            freeipa_username="bob",
+            weight=1,
+        )
+
+        def _get_user(username: str, respect_privacy: bool = True):
+            return FreeIPAUser(username, {"uid": [username], "mail": [f"{username}@example.com"], "memberof_group": []})
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch(
+                "core.views_elections.lifecycle.elections_services.send_voting_credential_email",
+                autospec=True,
+                side_effect=[None, RuntimeError("queue failed")],
+            ) as send_mock,
+        ):
+            resp = self.client.post(
+                reverse("election-send-mail-credentials", args=[election.id]),
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.request["PATH_INFO"], reverse("election-detail", args=[election.id]))
+        flashed = list(get_messages(resp.wsgi_request))
+        self.assertEqual(
+            [(message.level, message.message) for message in flashed],
+            [
+                (message_constants.SUCCESS, "Queued voting credential email for 1 recipient."),
+                (message_constants.ERROR, "Failed to queue 1 email."),
+            ],
+        )
+        self.assertEqual(send_mock.call_count, 2)
 
     def test_conclude_requires_confirmation(self) -> None:
         self._login_as_freeipa_user("viewer")
@@ -554,15 +647,27 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
                 return FreeIPAUser("nominator", {"uid": ["nominator"], "displayname": ["Nom"], "memberof_group": []})
             return None
 
-        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
-            resp = self.client.post(reverse("election-send-mail-credentials", args=[election.id]), data={"username": "alice"})
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.views_elections.lifecycle.elections_services.send_voting_credential_email", autospec=True) as send_mock,
+        ):
+            resp = self.client.post(
+                reverse("election-send-mail-credentials", args=[election.id]),
+                data={"username": "alice"},
+                follow=True,
+            )
 
-        self.assertEqual(resp.status_code, 302)
-
-        raw_csv_payload = self.client.session.get("send_mail_csv_payload_v1")
-        self.assertTrue(raw_csv_payload)
-        payload = json.loads(str(raw_csv_payload))
-        self.assertEqual(payload["recipients"][0]["credential_public_id"], "cred-alice-existing")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.request["PATH_INFO"], reverse("election-detail", args=[election.id]))
+        send_mock.assert_called_once_with(
+            request=ANY,
+            election=election,
+            username="alice",
+            email="alice@example.com",
+            credential_public_id="cred-alice-existing",
+            tz_name=None,
+        )
+        self.assertIsNone(self.client.session.get("send_mail_csv_payload_v1"))
 
 
 class ElectionVoteNoJsFallbackTests(_CoreCategoriesTestCase):

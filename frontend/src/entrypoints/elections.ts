@@ -4,6 +4,7 @@ import { createApp, type App } from "vue";
 
 import ElectionsPage from "../elections/ElectionsPage.vue";
 import { readElectionsBootstrap, type ElectionsBootstrap } from "../elections/types";
+import { attachSentryFeedbackTrigger } from "../shared/sentryFeedback";
 
 export function mountElectionsPage(root: HTMLElement | null): App<Element> | null {
   if (root === null) {
@@ -19,6 +20,7 @@ export function mountElectionsPage(root: HTMLElement | null): App<Element> | nul
     bootstrap,
   } satisfies { bootstrap: ElectionsBootstrap });
   app.mount(root);
+  attachSentryFeedbackTrigger(root, { allowScreenshot: true, surface: "elections" });
   return app;
 }
 

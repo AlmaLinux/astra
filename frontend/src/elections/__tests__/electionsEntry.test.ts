@@ -18,7 +18,27 @@ describe("mountElectionsPage", () => {
     vi.restoreAllMocks();
   });
 
+  function buildFooterLink(): HTMLAnchorElement {
+    const footer = document.createElement("footer");
+    footer.innerHTML = `
+      <a
+        class="text-muted d-none"
+        href="#"
+        data-sentry-feedback-link=""
+        data-sentry-feedback-hidden="true"
+        aria-hidden="true"
+        tabindex="-1"
+      >Report a bug</a>
+    `;
+    document.body.appendChild(footer);
+    return footer.querySelector("[data-sentry-feedback-link]") as HTMLAnchorElement;
+  }
+
   it("mounts when required elections bootstrap data exists", () => {
+    const attachTo = vi.fn();
+    (window as typeof window & { Sentry?: unknown }).Sentry = {
+      getFeedback: () => ({ attachTo }),
+    };
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
@@ -44,6 +64,7 @@ describe("mountElectionsPage", () => {
         ),
       ),
     );
+    const footerLink = buildFooterLink();
 
     const root = buildRoot({
       "data-elections-api-url": "/api/v1/elections",
@@ -55,6 +76,18 @@ describe("mountElectionsPage", () => {
 
     expect(app).not.toBeNull();
     expect(root.querySelector("[data-elections-vue-root]")).not.toBeNull();
+    expect(root.querySelector("[data-sentry-feedback-trigger]")).toBeNull();
+    expect(footerLink.textContent).toBe("Report a bug");
+    expect(footerLink.classList.contains("d-none")).toBe(false);
+    expect(attachTo).toHaveBeenCalledTimes(1);
+    expect(attachTo).toHaveBeenCalledWith(
+      footerLink,
+      expect.objectContaining({
+        tags: expect.objectContaining({
+          feedback_surface: "elections",
+        }),
+      }),
+    );
   });
 
   it("does not mount when required elections bootstrap data is missing", () => {
