@@ -35,6 +35,26 @@ describe("sentryBrowser entrypoint", () => {
     );
   });
 
+  it("binds immediately when the module loads after DOMContentLoaded at interactive readyState", async () => {
+    vi.spyOn(document, "readyState", "get").mockReturnValue("interactive");
+    document.body.innerHTML = `
+      <footer>
+        <a href="mailto:support@example.com" data-sentry-feedback-link="">Contact Support</a>
+      </footer>
+    `;
+
+    await import("../sentryBrowser");
+
+    expect(attachSentryFeedbackTrigger).toHaveBeenCalledTimes(1);
+    expect(attachSentryFeedbackTrigger).toHaveBeenCalledWith(
+      document.body,
+      {
+        allowScreenshot: true,
+        surface: "global-footer",
+      },
+    );
+  });
+
   it("does not bind the shared footer support control on blocked pages", async () => {
     document.head.innerHTML = '<meta name="sentry-capture-disabled" content="true">';
     document.body.innerHTML = `

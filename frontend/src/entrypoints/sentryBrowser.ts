@@ -23,7 +23,7 @@ function bindGlobalFooterFeedback(): void {
   });
 }
 
-if (document.readyState === "complete") {
+if (document.readyState !== "loading") {
   bindGlobalFooterFeedback();
 } else {
   document.addEventListener("DOMContentLoaded", () => {
