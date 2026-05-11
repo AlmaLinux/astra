@@ -355,36 +355,38 @@ onBeforeUnmount(() => {
     <div v-if="error" class="alert alert-danger">{{ error }}</div>
 
     <template v-else-if="election">
-      <div class="card card-outline card-primary">
-        <div class="card-body">
-          <dl class="row mb-0">
-            <dt class="col-sm-4">Status</dt>
-            <dd class="col-sm-8">{{ statusLabel(election.status) }}</dd>
-            <dt class="col-sm-4">Voting window</dt>
-            <dd class="col-sm-8">
-              {{ formatVotingWindow(election) }}
-              <i
-                v-if="election.status === 'open'"
-                class="fas fa-info-circle text-muted"
-                data-toggle="tooltip"
-                title="Election administrators may extend the end date if quorum is not reached."
-              ></i>
-            </dd>
-            <dt class="col-sm-4">Seats</dt>
-            <dd class="col-sm-8">{{ election.number_of_seats }}</dd>
-          </dl>
+      <div data-election-detail-status-card>
+        <div class="card card-outline card-primary">
+          <div class="card-body">
+            <dl class="row mb-0">
+              <dt class="col-sm-4">Status</dt>
+              <dd class="col-sm-8">{{ statusLabel(election.status) }}</dd>
+              <dt class="col-sm-4">Voting window</dt>
+              <dd class="col-sm-8">
+                {{ formatVotingWindow(election) }}
+                <i
+                  v-if="election.status === 'open'"
+                  class="fas fa-info-circle text-muted"
+                  data-toggle="tooltip"
+                  title="Election administrators may extend the end date if quorum is not reached."
+                ></i>
+              </dd>
+              <dt class="col-sm-4">Seats</dt>
+              <dd class="col-sm-8">{{ election.number_of_seats }}</dd>
+            </dl>
 
-          <p v-if="election.description">{{ election.description }}</p>
+            <p v-if="election.description">{{ election.description }}</p>
 
-          <p v-if="election.url" class="mb-2">
-            <strong>URL:</strong>
-            <a :href="election.url" target="_blank" rel="noopener noreferrer">{{ election.url }}</a>
-          </p>
+            <p v-if="election.url" class="mb-2">
+              <strong>URL:</strong>
+              <a :href="election.url" target="_blank" rel="noopener noreferrer">{{ election.url }}</a>
+            </p>
+          </div>
         </div>
       </div>
 
-      <div v-if="election.status === 'tallied'" class="row">
-        <div class="col-12">
+      <Teleport to="[data-election-detail-wide-sections]">
+        <div v-if="election.status === 'tallied'" class="col-12">
           <div class="card card-success">
             <div class="card-header">
               <h3 class="card-title">Results</h3>
@@ -455,10 +457,8 @@ onBeforeUnmount(() => {
             </div>
           </div>
         </div>
-      </div>
 
-      <div v-if="turnoutChartPayload(election).labels.length > 0" class="row">
-        <div class="col-12">
+        <div v-if="turnoutChartPayload(election).labels.length > 0" class="col-12">
           <div class="card card-outline card-secondary">
             <div class="card-header">
               <h3 class="card-title">Participation{{ election.status === "open" ? " so far" : "" }}</h3>
@@ -511,9 +511,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
         </div>
-      </div>
 
-      <div class="row">
         <div class="col-12">
           <div class="card card-outline card-success">
             <div class="card-header">
@@ -574,7 +572,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
         </div>
-      </div>
+      </Teleport>
     </template>
   </div>
 </template>

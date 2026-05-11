@@ -514,7 +514,7 @@ onMounted(async () => {
               <p class="mb-0">
                 Votes are counted using <strong>Meek STV (High-Precision Variant)</strong>.
                 This is a Meek-family STV method with fractional transfers, implemented using fixed-point arithmetic at <strong>80-digit precision</strong> to eliminate rounding ambiguity.
-                The count is <strong>fully deterministic</strong> (the same ballots always produce the same result) and produces a detailed audit trail that can be <strong>independently verified</strong>. For details, see the election audit log and published artifacts.
+                The count is <strong>fully deterministic</strong> (the same ballots always produce the same result) and produces a detailed audit trail that can be <strong>independently verified</strong>. For details, see the election audit log and published artifacts once the election is concluded.
               </p>
             </div>
           </div>

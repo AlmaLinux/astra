@@ -1,5 +1,5 @@
 import { mount } from "@vue/test-utils";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import ElectionDetailSummaryPage from "../ElectionDetailSummaryPage.vue";
 import type { ElectionDetailBootstrap } from "../types";
@@ -17,8 +17,13 @@ const bootstrap: ElectionDetailBootstrap = {
 };
 
 describe("ElectionDetailSummaryPage", () => {
+  beforeEach(() => {
+    document.body.innerHTML = '<div data-test-mount-root></div><div class="row" data-election-detail-wide-sections></div>';
+  });
+
   afterEach(() => {
     delete (window as Window & { Chart?: unknown }).Chart;
+    document.body.innerHTML = "";
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
@@ -117,6 +122,7 @@ describe("ElectionDetailSummaryPage", () => {
 
     const wrapper = mount(ElectionDetailSummaryPage, {
       props: { bootstrap },
+      attachTo: document.querySelector<HTMLElement>("[data-test-mount-root]") ?? undefined,
     });
 
     await flushPromises();
@@ -126,18 +132,19 @@ describe("ElectionDetailSummaryPage", () => {
     expect(wrapper.text()).toContain("Status");
     expect(wrapper.text()).toContain("Tallied");
     expect(wrapper.text()).toContain("2026-04-01 10:00 UTC → 2026-04-10 10:00 UTC");
-    expect(wrapper.text()).toContain("Results");
-    expect(wrapper.text()).toContain("Alice Example");
-    expect(wrapper.text()).toContain("Experienced candidate");
-    expect(wrapper.text()).toContain("Bob Example");
-    expect(wrapper.text()).toContain("Empty seats: 1");
-    expect(wrapper.text()).toContain("Ballots submitted over time");
-    expect(wrapper.text()).toContain(
+    const pageText = document.body.textContent ?? "";
+    expect(pageText).toContain("Results");
+    expect(pageText).toContain("Alice Example");
+    expect(pageText).toContain("Experienced candidate");
+    expect(pageText).toContain("Bob Example");
+    expect(pageText).toContain("Empty seats: 1");
+    expect(pageText).toContain("Ballots submitted over time");
+    expect(pageText).toContain(
       "Alice Example (alice) belong to the Employees exclusion group: only 1 candidate of the group can be elected.",
     );
-    expect(wrapper.find('a[href="/user/alice/"]').exists()).toBe(true);
-    expect(wrapper.find('a[href="/user/bob/"]').exists()).toBe(true);
-    expect(wrapper.find("canvas").exists()).toBe(true);
+    expect(document.querySelector('a[href="/user/alice/"]')).not.toBeNull();
+    expect(document.querySelector('a[href="/user/bob/"]')).not.toBeNull();
+    expect(document.querySelector("canvas")).not.toBeNull();
     expect(chartMock).toHaveBeenCalledOnce();
     expect(chartMock).toHaveBeenCalledWith(
       expect.anything(),
@@ -164,9 +171,16 @@ describe("ElectionDetailSummaryPage", () => {
       }),
     );
     expect(wrapper.find("table").exists()).toBe(false);
-    expect(wrapper.find(".card.card-primary.h-100").exists()).toBe(true);
-    expect(wrapper.find('img.img-circle[src="/avatars/alice.png"]').exists()).toBe(true);
-    expect(wrapper.find("hr.candidate-card-divider").exists()).toBe(true);
+    const root = wrapper.find("[data-election-detail-vue-root]");
+    const statusCard = wrapper.find("[data-election-detail-status-card]");
+    expect(statusCard.element.parentElement).toBe(root.element);
+    const wideSections = document.querySelector("[data-election-detail-wide-sections]");
+    expect(wideSections).not.toBeNull();
+    expect(document.querySelector(".card.card-outline.card-secondary")?.parentElement).toBe(wideSections?.children[1]);
+    expect(document.querySelector(".card.card-outline.card-success")?.parentElement).toBe(wideSections?.children[2]);
+    expect(document.querySelector(".card.card-primary.h-100")).not.toBeNull();
+    expect(document.querySelector('img.img-circle[src="/avatars/alice.png"]')).not.toBeNull();
+    expect(document.querySelector("hr.candidate-card-divider")).not.toBeNull();
   });
 
   it("renders a zero-filled turnout chart across the election range when turnout rows are empty", async () => {
