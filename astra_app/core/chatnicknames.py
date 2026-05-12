@@ -499,11 +499,16 @@ def normalize_chat_channels_text(value: str, *, max_item_len: int = 64) -> str:
                 path = (parsed.path or "").lstrip("/")
                 parts = [p for p in path.split("/") if p]
                 channel = ""
-                if len(parts) >= 3 and parts[1] == "channels":
+                if server == "channels":
+                    if len(parts) != 1:
+                        raise ValueError(
+                            "Mattermost channels must be like mattermost://channels/<channel> or mattermost://server/team/channels/<channel>."
+                        )
+                    server = default_server
+                    channel = parts[0]
+                elif len(parts) == 3 and parts[1] == "channels":
                     team = parts[0]
                     channel = parts[2]
-                elif len(parts) >= 2 and parts[0] == "channels":
-                    channel = parts[1]
                 else:
                     raise ValueError(
                         "Mattermost channels must be like mattermost://channels/<channel> or mattermost://server/team/channels/<channel>."

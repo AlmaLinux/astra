@@ -5,7 +5,7 @@ GroupEditForm, so we test the standalone functions directly.
 """
 
 from django import forms
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from core.form_validators import (
     clean_fas_discussion_url_value,
@@ -58,6 +58,65 @@ class CleanFasMailingListValueTests(TestCase):
 
 
 class CleanFasIrcChannelsValueTests(TestCase):
+    @override_settings(
+        CHAT_NETWORKS={
+            "irc": {"default_server": "irc.libera.chat"},
+            "matrix": {"default_server": "matrix.org"},
+            "mattermost": {
+                "default_server": "chat.almalinux.org",
+                "default_team": "almalinux",
+            },
+        }
+    )
+    def test_irc_shorthand_url_is_accepted(self) -> None:
+        result = clean_fas_irc_channels_value("irc://#general")
+
+        assert result == ["irc://#general"]
+
+    @override_settings(
+        CHAT_NETWORKS={
+            "irc": {"default_server": "irc.libera.chat"},
+            "matrix": {"default_server": "matrix.org"},
+            "mattermost": {
+                "default_server": "chat.almalinux.org",
+                "default_team": "almalinux",
+            },
+        }
+    )
+    def test_matrix_shorthand_url_is_accepted(self) -> None:
+        result = clean_fas_irc_channels_value("matrix:/#general")
+
+        assert result == ["matrix://#general"]
+
+    @override_settings(
+        CHAT_NETWORKS={
+            "irc": {"default_server": "irc.libera.chat"},
+            "matrix": {"default_server": "matrix.org"},
+            "mattermost": {
+                "default_server": "chat.almalinux.org",
+                "default_team": "almalinux",
+            },
+        }
+    )
+    def test_mattermost_shorthand_url_is_accepted(self) -> None:
+        result = clean_fas_irc_channels_value("mattermost://channels/general")
+
+        assert result == ["mattermost://channels/general"]
+
+    @override_settings(
+        CHAT_NETWORKS={
+            "irc": {"default_server": "irc.libera.chat"},
+            "matrix": {"default_server": "matrix.org"},
+            "mattermost": {
+                "default_server": "chat.almalinux.org",
+                "default_team": "almalinux",
+            },
+        }
+    )
+    def test_mattermost_shorthand_url_with_extra_segments_is_rejected(self) -> None:
+        with self.assertRaises(forms.ValidationError):
+            clean_fas_irc_channels_value("mattermost://channels/general/extra")
+
     def test_single_channel(self) -> None:
         result = clean_fas_irc_channels_value("#channel")
         assert isinstance(result, list)
