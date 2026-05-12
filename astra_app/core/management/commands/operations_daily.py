@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 class Command(BaseCommand):
     help = (
         "Run the daily operations: expiration warnings, expired cleanup, "
-        "committee pending-request notifications, and embargoed-members notifications."
+        "committee pending-request notifications, team-leads sync, and embargoed-members notifications."
     )
 
     @override
@@ -41,6 +41,7 @@ class Command(BaseCommand):
             ("membership_expired_cleanup", {"force": force, "dry_run": dry_run}),
             ("membership_expiration_notifications", {"force": force, "dry_run": dry_run}),
             ("freeipa_membership_reconcile", {"report": True, "dry_run": dry_run}),
+            ("freeipa_team_leads_sync", {"dry_run": dry_run}),
             ("membership_pending_requests", {"force": force, "dry_run": dry_run}),
             ("membership_embargoed_members", {"force": force, "dry_run": dry_run}),
             ("selfservice_lifecycle_cleanup", {"dry_run": dry_run}),

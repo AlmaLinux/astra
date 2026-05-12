@@ -953,6 +953,14 @@ if not _ALLOW_MISSING_RUNTIME_SECRETS and not FREEIPA_SERVICE_PASSWORD:
 FREEIPA_ADMIN_GROUP = _env_str("FREEIPA_ADMIN_GROUP", default="admins")
 FREEIPA_MEMBERSHIP_COMMITTEE_GROUP = _env_str("FREEIPA_MEMBERSHIP_COMMITTEE_GROUP", default="membership-committee")
 FREEIPA_ELECTION_COMMITTEE_GROUP = _env_str("FREEIPA_ELECTION_COMMITTEE_GROUP", default="election-committee")
+MATERIALIZED_TEAM_LEADS_SOURCE_GROUP_CN = _env_str(
+    "MATERIALIZED_TEAM_LEADS_SOURCE_GROUP_CN",
+    default="almalinux_sigs",
+)
+MATERIALIZED_TEAM_LEADS_DESTINATION_GROUP_CN = _env_str(
+    "MATERIALIZED_TEAM_LEADS_DESTINATION_GROUP_CN",
+    default="team_leads",
+)
 
 # Users to exclude from directory listings/searches (these accounts can still log in).
 # This prevents service/admin accounts from appearing in user pickers, search results, etc.

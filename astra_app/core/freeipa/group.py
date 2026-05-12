@@ -1,5 +1,6 @@
 import logging
 
+from django.conf import settings
 from django.core.cache import cache
 from python_freeipa import ClientMeta, exceptions
 
@@ -79,6 +80,83 @@ def get_freeipa_group_for_elections(*, cn: str, require_fresh: bool = False) -> 
 
     cache.set(cache_key, group_data)
     return FreeIPAGroup(group_cn, group_data)
+
+
+def resolve_materialized_team_leads_usernames() -> set[str]:
+    source_group_cn = settings.MATERIALIZED_TEAM_LEADS_SOURCE_GROUP_CN
+    source_group = FreeIPAGroup.get(source_group_cn)
+    if source_group is None:
+        raise FreeIPAMisconfiguredError(f"FreeIPA group not found: {source_group_cn}")
+
+    usernames: set[str] = set()
+    for child_cn in sorted(set(source_group.member_groups), key=str.lower):
+        child_group = FreeIPAGroup.get(child_cn)
+        if child_group is None:
+            raise FreeIPAMisconfiguredError(f"FreeIPA group not found: {child_cn}")
+        usernames.update(child_group.sponsors)
+    return usernames
+
+
+def sync_materialized_team_leads_group(*, dry_run: bool = False) -> dict[str, object]:
+    source_group_cn = settings.MATERIALIZED_TEAM_LEADS_SOURCE_GROUP_CN
+    destination_group_cn = settings.MATERIALIZED_TEAM_LEADS_DESTINATION_GROUP_CN
+    desired_usernames = resolve_materialized_team_leads_usernames()
+    destination_group = FreeIPAGroup.get(destination_group_cn)
+    create_destination = destination_group is None
+    if destination_group is None:
+        if not dry_run:
+            created_group = FreeIPAGroup.create(
+                destination_group_cn,
+                fas_group=False,
+            )
+            if created_group is None:
+                raise FreeIPAOperationFailed(f"Failed to create FreeIPA group: {destination_group_cn}")
+            destination_group = created_group
+        else:
+            destination_group = FreeIPAGroup(
+                destination_group_cn,
+                {
+                    "cn": [destination_group_cn],
+                    "member_user": [],
+                    "member_group": [],
+                    "membermanager_user": [],
+                    "membermanager_group": [],
+                },
+            )
+
+    current_usernames = set(destination_group.members)
+    add_members = sorted(desired_usernames - current_usernames, key=str.lower)
+    remove_members = sorted(current_usernames - desired_usernames, key=str.lower)
+    remove_member_groups = sorted(set(destination_group.member_groups), key=str.lower)
+    remove_sponsors = sorted(set(destination_group.sponsors), key=str.lower)
+    remove_sponsor_groups = sorted(set(destination_group.sponsor_groups), key=str.lower)
+    report: dict[str, object] = {
+        "dry_run": dry_run,
+        "source_group_cn": source_group_cn,
+        "destination_group_cn": destination_group_cn,
+        "create_destination": create_destination,
+        "add_members": add_members,
+        "remove_members": remove_members,
+        "remove_member_groups": remove_member_groups,
+        "remove_sponsors": remove_sponsors,
+        "remove_sponsor_groups": remove_sponsor_groups,
+    }
+
+    if dry_run:
+        return report
+
+    for username in remove_members:
+        destination_group.remove_member(username)
+    for group_cn in remove_member_groups:
+        destination_group.remove_member_group(group_cn)
+    for username in remove_sponsors:
+        destination_group.remove_sponsor(username)
+    for group_cn in remove_sponsor_groups:
+        destination_group.remove_sponsor_group(group_cn)
+    for username in add_members:
+        destination_group.add_member(username)
+
+    return report
 
 
 class FreeIPAGroup(_FreeIPAClientMixin):
@@ -600,4 +678,9 @@ class FreeIPAGroup(_FreeIPAClientMixin):
         return len(self.member_usernames_recursive(fas_only=fas_only))
 
 
-__all__ = ["FreeIPAGroup", "get_freeipa_group_for_elections"]
+__all__ = [
+    "FreeIPAGroup",
+    "get_freeipa_group_for_elections",
+    "resolve_materialized_team_leads_usernames",
+    "sync_materialized_team_leads_group",
+]
