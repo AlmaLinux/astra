@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 from django.test import TestCase
 from django.urls import reverse
 
+from core.freeipa.exceptions import FreeIPAOperationFailed
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import FreeIPAUser
 
@@ -297,6 +298,86 @@ class GroupsApiTests(TestCase):
         self.assertEqual(payload["members"]["items"][0]["avatar_url"], "/avatars/bob.png")
         self.assertEqual(payload["members"]["pagination"]["page"], 1)
 
+    def test_group_members_api_includes_member_groups(self) -> None:
+        self._login_as_freeipa_user("alice")
+        viewer = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
+
+        group = self._make_group(
+            "infra-team",
+            description="Infra Team",
+            members=["alice", "bob"],
+            sponsors=["alice"],
+        )
+        group.member_groups = ["child-zulu", "child-alpha"]
+        group.member_count_recursive = MagicMock(return_value=2)
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
+            with patch("core.views_groups.FreeIPAGroup.get", return_value=group):
+                with patch("core.views_groups.required_agreements_for_group", return_value=[]):
+                    with patch(
+                        "core.views_groups.resolve_avatar_urls_for_users",
+                        return_value=({"alice": "/avatars/alice.png", "bob": "/avatars/bob.png"}, 2, 0),
+                    ):
+                        response = self.client.get(
+                            reverse("api-group-detail-members", args=["infra-team"]),
+                            HTTP_ACCEPT="application/json",
+                        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        self.assertEqual([item["cn"] for item in payload["member_groups"]["items"]], ["child-alpha", "child-zulu"])
+
+    def test_group_members_api_excludes_non_fas_member_groups(self) -> None:
+        self._login_as_freeipa_user("alice")
+        viewer = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
+
+        group = self._make_group(
+            "infra-team",
+            description="Infra Team",
+            members=["alice", "bob"],
+            sponsors=["alice"],
+        )
+        group.member_groups = ["child-visible", "child-hidden"]
+        group.member_count_recursive = MagicMock(return_value=2)
+        visible_child = self._make_group("child-visible", description="Visible Child")
+        hidden_child = FreeIPAGroup(
+            "child-hidden",
+            {
+                "cn": ["child-hidden"],
+                "description": ["Hidden Child"],
+                "member_user": [],
+                "membermanager_user": [],
+                "membermanager_group": [],
+                "member_group": [],
+                "objectclass": [],
+            },
+        )
+
+        def get_group(cn: str) -> FreeIPAGroup | None:
+            if cn == "infra-team":
+                return group
+            if cn == "child-visible":
+                return visible_child
+            if cn == "child-hidden":
+                return hidden_child
+            return None
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
+            with patch("core.views_groups.FreeIPAGroup.get", side_effect=get_group):
+                with patch("core.views_groups.required_agreements_for_group", return_value=[]):
+                    with patch(
+                        "core.views_groups.resolve_avatar_urls_for_users",
+                        return_value=({"alice": "/avatars/alice.png", "bob": "/avatars/bob.png"}, 2, 0),
+                    ):
+                        response = self.client.get(
+                            reverse("api-group-detail-members", args=["infra-team"]),
+                            HTTP_ACCEPT="application/json",
+                        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        self.assertEqual([item["cn"] for item in payload["member_groups"]["items"]], ["child-visible"])
+
     def test_group_action_api_requires_team_lead_for_member_management(self) -> None:
         self._login_as_freeipa_user("alice")
         viewer = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
@@ -317,6 +398,118 @@ class GroupsApiTests(TestCase):
         payload = json.loads(response.content)
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["error"], "Only Team Leads can manage group members.")
+
+    def test_group_action_api_allows_team_lead_to_add_and_remove_member_groups(self) -> None:
+        self._login_as_freeipa_user("alice")
+        viewer = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
+
+        group = self._make_group("infra-team", members=["alice"], sponsors=["alice"])
+        group.add_member_group = MagicMock()
+        group.remove_member_group = MagicMock()
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
+            with patch("core.views_groups.FreeIPAGroup.get", return_value=group):
+                with patch("core.views_groups.required_agreements_for_group", return_value=[]):
+                    add_response = self.client.post(
+                        reverse("api-group-action", args=["infra-team"]),
+                        data=json.dumps({"action": "add_member_group", "group_name": "child-team"}),
+                        content_type="application/json",
+                        HTTP_ACCEPT="application/json",
+                    )
+                    remove_response = self.client.post(
+                        reverse("api-group-action", args=["infra-team"]),
+                        data=json.dumps({"action": "remove_member_group", "group_name": "child-team"}),
+                        content_type="application/json",
+                        HTTP_ACCEPT="application/json",
+                    )
+
+        self.assertEqual(add_response.status_code, 200)
+        self.assertTrue(add_response.json()["ok"])
+        group.add_member_group.assert_called_once_with("child-team")
+
+        self.assertEqual(remove_response.status_code, 200)
+        self.assertTrue(remove_response.json()["ok"])
+        group.remove_member_group.assert_called_once_with("child-team")
+
+    def test_group_action_api_maps_member_group_operation_failure_to_400(self) -> None:
+        self._login_as_freeipa_user("alice")
+        viewer = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
+
+        group = self._make_group("infra-team", members=["alice"], sponsors=["alice"])
+        group.remove_member_group = MagicMock(side_effect=FreeIPAOperationFailed("Cannot remove child-team."))
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
+            with patch("core.views_groups.FreeIPAGroup.get", return_value=group):
+                with patch("core.views_groups.required_agreements_for_group", return_value=[]):
+                    response = self.client.post(
+                        reverse("api-group-action", args=["infra-team"]),
+                        data=json.dumps({"action": "remove_member_group", "group_name": "child-team"}),
+                        content_type="application/json",
+                        HTTP_ACCEPT="application/json",
+                    )
+
+        self.assertEqual(response.status_code, 400)
+        payload = json.loads(response.content)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"], "Cannot remove child-team.")
+
+    def test_group_action_api_allows_team_lead_to_manage_group_team_leads(self) -> None:
+        self._login_as_freeipa_user("alice")
+        viewer = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
+
+        promote_group = self._make_group(
+            "infra-team",
+            members=["alice"],
+            sponsors=["alice"],
+        )
+        promote_group.member_groups = ["child-team"]
+        promote_group.sponsor_groups = []
+        promote_group.add_sponsor_group = MagicMock()
+
+        demote_group = self._make_group(
+            "infra-team",
+            members=["alice"],
+            sponsors=["alice"],
+            sponsor_groups=["child-team"],
+        )
+        demote_group.member_groups = ["child-team"]
+        demote_group.remove_sponsor_group = MagicMock()
+
+        child_group = self._make_group("child-team", description="Child Team")
+        current_group = promote_group
+
+        def get_group(cn: str) -> FreeIPAGroup | None:
+            if cn == "infra-team":
+                return current_group
+            if cn == "child-team":
+                return child_group
+            return None
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
+            with patch("core.views_groups.FreeIPAGroup.get", side_effect=get_group):
+                with patch("core.views_groups.required_agreements_for_group", return_value=[]):
+                    promote_response = self.client.post(
+                        reverse("api-group-action", args=["infra-team"]),
+                        data=json.dumps({"action": "promote_member_group", "group_name": "child-team"}),
+                        content_type="application/json",
+                        HTTP_ACCEPT="application/json",
+                    )
+
+                    current_group = demote_group
+                    demote_response = self.client.post(
+                        reverse("api-group-action", args=["infra-team"]),
+                        data=json.dumps({"action": "demote_sponsor_group", "group_name": "child-team"}),
+                        content_type="application/json",
+                        HTTP_ACCEPT="application/json",
+                    )
+
+        self.assertEqual(promote_response.status_code, 200)
+        self.assertTrue(promote_response.json()["ok"])
+        promote_group.add_sponsor_group.assert_called_once_with("child-team")
+
+        self.assertEqual(demote_response.status_code, 200)
+        self.assertTrue(demote_response.json()["ok"])
+        demote_group.remove_sponsor_group.assert_called_once_with("child-team")
 
     def test_group_edit_api_get_and_put_roundtrip(self) -> None:
         self._login_as_freeipa_user("alice")

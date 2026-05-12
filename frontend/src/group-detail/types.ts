@@ -7,6 +7,10 @@ export interface GroupMemberItem {
   is_leader?: boolean;
 }
 
+export interface GroupMemberGroupItem {
+  cn: string;
+}
+
 export interface GroupSponsorItem {
   username: string;
   full_name: string;
@@ -58,6 +62,10 @@ export interface GroupMembersPayload {
   pagination: GroupDetailPagination;
 }
 
+export interface GroupMemberGroupsPayload {
+  items: GroupMemberGroupItem[];
+}
+
 export interface GroupLeadersPayload {
   items: GroupLeaderItem[];
   pagination: GroupDetailPagination;
@@ -87,6 +95,7 @@ export interface GroupLeadersResponse {
 
 export interface GroupMembersResponse {
   members: GroupMembersPayload;
+  member_groups: GroupMemberGroupsPayload;
 }
 
 export interface GroupDetailBootstrap {

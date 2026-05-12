@@ -8,6 +8,7 @@ import {
   buildGroupDetailRouteUrl,
   readGroupDetailRouteState,
   type GroupDetailBootstrap,
+  type GroupMemberGroupsPayload,
   type GroupInfoResponse,
   type GroupLeadersResponse,
   type GroupMembersResponse,
@@ -15,9 +16,22 @@ import {
   type GroupLeaderItem,
   type GroupLeaderUserItem,
   type GroupMemberItem,
+  type GroupMemberGroupItem,
   type GroupDetailRouteState,
 } from "./types";
 import { fillUrlTemplate } from "../shared/urlTemplates";
+
+type MemberGridUserItem = {
+  kind: "user";
+  member: GroupMemberItem;
+};
+
+type MemberGridGroupItem = {
+  kind: "group";
+  group: GroupMemberGroupItem;
+};
+
+type MemberGridItem = MemberGridUserItem | MemberGridGroupItem;
 
 const props = defineProps<{
   bootstrap: GroupDetailBootstrap;
@@ -25,7 +39,7 @@ const props = defineProps<{
 
 const groupInfo = ref<GroupInfoResponse["group"] | null>(null);
 const leadersPayload = ref<GroupLeadersResponse["leaders"] | null>(null);
-const membersPayload = ref<GroupMembersResponse["members"] | null>(null);
+const membersPayload = ref<(GroupMembersResponse["members"] & { member_groups: GroupMemberGroupsPayload }) | null>(null);
 const error = ref("");
 const actionError = ref("");
 const isLoading = ref(false);
@@ -38,11 +52,26 @@ const q = ref("");
 const currentPage = ref(1);
 const leadersPage = ref(1);
 const addMemberUsername = ref("");
+const addMemberGroupName = ref("");
 const addMemberSuggestions = ref<string[]>([]);
 const confirmModalOpen = ref(false);
-const pendingAction = ref<{ action: string; username: string }>({ action: "", username: "" });
+const pendingAction = ref<{ action: string; username: string; groupName: string }>({
+  action: "",
+  username: "",
+  groupName: "",
+});
 
 const membersRows = computed<GroupMemberItem[]>(() => membersPayload.value?.items || []);
+const memberGroupsRows = computed<GroupMemberGroupItem[]>(() => membersPayload.value?.member_groups?.items || []);
+const leaderGroupNames = computed<Set<string>>(() => new Set(
+  leaderItems.value
+    .filter((item) => item.kind === "group")
+    .map((item) => item.cn),
+));
+const memberGridItems = computed<MemberGridItem[]>(() => [
+  ...memberGroupsRows.value.map((group) => ({ kind: "group", group }) satisfies MemberGridGroupItem),
+  ...membersRows.value.map((member) => ({ kind: "user", member }) satisfies MemberGridUserItem),
+]);
 const membersCount = computed(() => membersPayload.value?.pagination.count || groupInfo.value?.member_count || 0);
 const membersPagination = computed(() => membersPayload.value?.pagination || null);
 const leaderItems = computed<GroupLeaderItem[]>(() => leadersPayload.value?.items || []);
@@ -68,7 +97,27 @@ function asLeaderGroup(row: unknown): GroupLeaderGroupItem {
   return row as GroupLeaderGroupItem;
 }
 
+function asMemberGroup(row: unknown): GroupMemberGroupItem {
+  return row as GroupMemberGroupItem;
+}
+
+function asMemberGridItem(row: unknown): MemberGridItem {
+  return row as MemberGridItem;
+}
+
+function asMemberGridUser(row: unknown): GroupMemberItem {
+  return (row as MemberGridUserItem).member;
+}
+
+function asMemberGridGroup(row: unknown): GroupMemberGroupItem {
+  return (row as MemberGridGroupItem).group;
+}
+
 function isLeaderGroup(item: GroupLeaderItem): item is GroupLeaderGroupItem {
+  return item.kind === "group";
+}
+
+function isMemberGridGroup(item: MemberGridItem): item is MemberGridGroupItem {
   return item.kind === "group";
 }
 
@@ -114,6 +163,14 @@ function groupDetailHref(groupName: string): string {
 
 function groupEditHref(groupName: string): string {
   return fillUrlTemplate(props.bootstrap.editUrlTemplate, "__group_name__", groupName);
+}
+
+function groupActionButtonStyle(index: number): Record<string, string> {
+  return {
+    top: ".35rem",
+    right: index === 0 ? ".35rem" : `${0.35 + index * 2.25}rem`,
+    zIndex: "10",
+  };
 }
 
 function agreementDetailHref(agreementCn: string): string {
@@ -189,6 +246,73 @@ function memberActions(member: GroupMemberItem): Array<{
             onClick: () => openConfirmModal("promote_member", username),
           },
         ]),
+  ];
+}
+
+function memberGroupActions(groupName: string): Array<{
+  key: string;
+  ariaLabel: string;
+  title: string;
+  buttonClass: string;
+  iconClass: string;
+  disabled?: boolean;
+  onClick: () => void;
+}> {
+  if (!groupInfo.value?.is_sponsor) {
+    return [];
+  }
+
+  const isExistingSponsorGroup = leadersPayload.value !== null && leaderGroupNames.value.has(groupName);
+
+  return [
+    {
+      key: `remove-member-group-${groupName}`,
+      ariaLabel: "Remove member group",
+      title: "Remove member group",
+      buttonClass: "btn btn-outline-danger btn-sm",
+      iconClass: "fas fa-user-minus",
+      disabled: actionSubmitting.value,
+      onClick: () => openConfirmModal("remove_member_group", undefined, groupName),
+    },
+    ...(isExistingSponsorGroup
+      ? []
+      : [
+          {
+            key: `promote-member-group-${groupName}`,
+            ariaLabel: "Promote group to Team Lead",
+            title: "Promote this member group to Team Lead",
+            buttonClass: "btn btn-outline-primary btn-sm",
+            iconClass: "fas fa-person-arrow-up-from-line",
+            disabled: actionSubmitting.value,
+            onClick: () => openConfirmModal("promote_member_group", undefined, groupName),
+          },
+        ]),
+  ];
+}
+
+function sponsorGroupActions(groupName: string): Array<{
+  key: string;
+  ariaLabel: string;
+  title: string;
+  buttonClass: string;
+  iconClass: string;
+  disabled?: boolean;
+  onClick: () => void;
+}> {
+  if (!groupInfo.value?.is_sponsor) {
+    return [];
+  }
+
+  return [
+    {
+      key: `demote-sponsor-group-${groupName}`,
+      ariaLabel: "Remove Team Lead",
+      title: "Remove Team Lead role from this group",
+      buttonClass: "btn btn-outline-danger btn-sm",
+      iconClass: "fas fa-person-arrow-down-to-line",
+      disabled: actionSubmitting.value,
+      onClick: () => openConfirmModal("demote_sponsor_group", undefined, groupName),
+    },
   ];
 }
 
@@ -310,7 +434,10 @@ async function loadMembers(pushState: boolean): Promise<boolean> {
     }
 
     const membersData = (await response.json()) as GroupMembersResponse;
-    membersPayload.value = membersData.members;
+    membersPayload.value = {
+      ...membersData.members,
+      member_groups: membersData.member_groups,
+    };
     q.value = membersData.members.q;
     currentPage.value = membersData.members.pagination.page;
     if (pushState) {
@@ -325,11 +452,19 @@ async function loadMembers(pushState: boolean): Promise<boolean> {
   }
 }
 
-async function postAction(action: string, username?: string): Promise<void> {
+async function postAction(action: string, options?: { username?: string; groupName?: string }): Promise<void> {
   actionSubmitting.value = true;
   actionError.value = "";
 
   try {
+    const payload: { action: string; username?: string; group_name?: string } = { action };
+    if (options?.username) {
+      payload.username = options.username;
+    }
+    if (options?.groupName) {
+      payload.group_name = options.groupName;
+    }
+
     const response = await fetch(props.bootstrap.actionUrl, {
       method: "POST",
       headers: {
@@ -338,7 +473,7 @@ async function postAction(action: string, username?: string): Promise<void> {
         "X-CSRFToken": getCsrfToken(),
       },
       credentials: "same-origin",
-      body: JSON.stringify({ action, username: username || "" }),
+      body: JSON.stringify(payload),
     });
 
     const responsePayload = (await response.json()) as { ok?: boolean; error?: string };
@@ -380,19 +515,28 @@ async function addMemberAction(event: Event): Promise<void> {
   if (!addMemberUsername.value.trim()) {
     return;
   }
-  await postAction("add_member", addMemberUsername.value.trim());
+  await postAction("add_member", { username: addMemberUsername.value.trim() });
   addMemberUsername.value = "";
   addMemberSuggestions.value = [];
 }
 
-function openConfirmModal(action: string, username?: string): void {
-  pendingAction.value = { action, username: username || "" };
+async function addMemberGroupAction(event: Event): Promise<void> {
+  event.preventDefault();
+  if (!addMemberGroupName.value.trim()) {
+    return;
+  }
+  await postAction("add_member_group", { groupName: addMemberGroupName.value.trim() });
+  addMemberGroupName.value = "";
+}
+
+function openConfirmModal(action: string, username?: string, groupName?: string): void {
+  pendingAction.value = { action, username: username || "", groupName: groupName || "" };
   confirmModalOpen.value = true;
 }
 
 function closeConfirmModal(): void {
   confirmModalOpen.value = false;
-  pendingAction.value = { action: "", username: "" };
+  pendingAction.value = { action: "", username: "", groupName: "" };
 }
 
 async function confirmAndAct(): Promise<void> {
@@ -401,8 +545,9 @@ async function confirmAndAct(): Promise<void> {
     return;
   }
   const username = pendingAction.value.username;
+  const groupName = pendingAction.value.groupName;
   closeConfirmModal();
-  await postAction(action, username || undefined);
+  await postAction(action, { username: username || undefined, groupName: groupName || undefined });
 }
 
 function confirmModalId(): string {
@@ -428,10 +573,19 @@ function confirmModalTitle(): string {
   if (pendingAction.value.action === "remove_member") {
     return "Remove member?";
   }
+  if (pendingAction.value.action === "remove_member_group") {
+    return "Remove member group?";
+  }
   if (pendingAction.value.action === "promote_member") {
     return "Promote member to Team Lead?";
   }
+  if (pendingAction.value.action === "promote_member_group") {
+    return "Promote member group to Team Lead?";
+  }
   if (pendingAction.value.action === "demote_sponsor") {
+    return "Demote Team Lead?";
+  }
+  if (pendingAction.value.action === "demote_sponsor_group") {
     return "Demote Team Lead?";
   }
   return "Confirm action";
@@ -439,6 +593,7 @@ function confirmModalTitle(): string {
 
 function confirmModalBody(): string {
   const username = pendingAction.value.username;
+  const groupName = pendingAction.value.groupName;
   if (pendingAction.value.action === "leave") {
     return "Are you sure you want to leave this group?";
   }
@@ -448,11 +603,20 @@ function confirmModalBody(): string {
   if (pendingAction.value.action === "remove_member") {
     return `Remove ${username} from this group?`;
   }
+  if (pendingAction.value.action === "remove_member_group") {
+    return `Remove ${groupName} from this group?`;
+  }
   if (pendingAction.value.action === "promote_member") {
     return `Promote ${username} to Team Lead for this group?`;
   }
+  if (pendingAction.value.action === "promote_member_group") {
+    return `Promote ${groupName} to Team Lead for this group?`;
+  }
   if (pendingAction.value.action === "demote_sponsor") {
     return `Remove Team Lead access for ${username}?`;
+  }
+  if (pendingAction.value.action === "demote_sponsor_group") {
+    return `Remove Team Lead access for ${groupName}?`;
   }
   return "Are you sure you want to continue?";
 }
@@ -627,6 +791,21 @@ onMounted(async () => {
                 </div>
               </form>
 
+              <form class="mb-2" data-member-group-form="true" @submit.prevent="addMemberGroupAction">
+                <div class="input-group">
+                  <input
+                    v-model="addMemberGroupName"
+                    type="text"
+                    name="group_name"
+                    class="form-control"
+                    placeholder="Add member group by name"
+                    autocomplete="off"
+                    :disabled="actionSubmitting"
+                  >
+                  <button class="btn btn-primary" type="submit" :disabled="actionSubmitting" title="Add group">Add group</button>
+                </div>
+              </form>
+
               <datalist id="sponsor-user-suggestions">
                 <option v-for="username in addMemberSuggestions" :key="username" :value="username"></option>
               </datalist>
@@ -663,12 +842,27 @@ onMounted(async () => {
             @page-change="onLeaderPageChange"
           >
             <template #item="{ item }">
-              <a v-if="isLeaderGroup(asLeaderItem(item))" :href="groupDetailHref(asLeaderGroup(item).cn)" class="card" style="text-decoration: none; color: inherit;">
-                <div class="card-body">
-                  <h5 class="card-title">{{ asLeaderGroup(item).cn }}</h5>
-                  <p class="card-text small text-muted">Group</p>
-                </div>
-              </a>
+              <div v-if="isLeaderGroup(asLeaderItem(item))" class="position-relative mb-4">
+                <button
+                  v-for="(action, index) in sponsorGroupActions(asLeaderGroup(item).cn)"
+                  :key="action.key"
+                  type="button"
+                  :aria-label="action.ariaLabel"
+                  :title="action.title"
+                  :class="`${action.buttonClass} position-absolute`"
+                  :style="groupActionButtonStyle(index)"
+                  :disabled="action.disabled"
+                  @click="action.onClick"
+                >
+                  <i :class="action.iconClass" />
+                </button>
+                <a :href="groupDetailHref(asLeaderGroup(item).cn)" class="card" style="text-decoration: none; color: inherit;">
+                  <div class="card-body">
+                    <h5 class="card-title">{{ asLeaderGroup(item).cn }}</h5>
+                    <p class="card-text small text-muted">Group</p>
+                  </div>
+                </a>
+              </div>
               <WidgetUser
                 v-else
                 :username="asLeaderUser(item).username"
@@ -718,7 +912,7 @@ onMounted(async () => {
 
         <div class="card-body">
           <WidgetGrid
-            :items="membersRows"
+            :items="memberGridItems"
             :is-loading="membersLoading"
             :error="membersError"
             empty-message="No members found."
@@ -727,18 +921,40 @@ onMounted(async () => {
             @page-change="onMemberPageChange"
           >
             <template #item="{ item }">
+              <div v-if="isMemberGridGroup(asMemberGridItem(item))" class="position-relative mb-4">
+                <button
+                  v-for="(action, index) in memberGroupActions(asMemberGridGroup(item).cn)"
+                  :key="action.key"
+                  type="button"
+                  :aria-label="action.ariaLabel"
+                  :title="action.title"
+                  :class="`${action.buttonClass} position-absolute`"
+                  :style="groupActionButtonStyle(index)"
+                  :disabled="action.disabled"
+                  @click="action.onClick"
+                >
+                  <i :class="action.iconClass" />
+                </button>
+                <a :href="groupDetailHref(asMemberGridGroup(item).cn)" class="card" style="text-decoration: none; color: inherit;">
+                  <div class="card-body d-flex flex-column">
+                    <h5 class="card-title">{{ asMemberGridGroup(item).cn }}</h5>
+                    <p class="card-text small text-muted mb-0">Group</p>
+                  </div>
+                </a>
+              </div>
               <WidgetUser
-                :username="asMember(item).username"
-                :full-name="asMember(item).full_name"
-                :avatar-url="asMember(item).avatar_url"
-                :dimmed="isUnsigned(asMember(item).username)"
-                :secondary-text="isUnsigned(asMember(item).username) ? 'Unsigned' : undefined"
-                :actions="memberActions(asMember(item))"
+                v-else
+                :username="asMemberGridUser(item).username"
+                :full-name="asMemberGridUser(item).full_name"
+                :avatar-url="asMemberGridUser(item).avatar_url"
+                :dimmed="isUnsigned(asMemberGridUser(item).username)"
+                :secondary-text="isUnsigned(asMemberGridUser(item).username) ? 'Unsigned' : undefined"
+                :actions="memberActions(asMemberGridUser(item))"
               />
             </template>
-          </WidgetGrid>
+            </WidgetGrid>
+          </div>
         </div>
-      </div>
 
       <div
         v-if="confirmModalOpen"

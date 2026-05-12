@@ -108,6 +108,12 @@ def _group_membership_context(request: HttpRequest, group: FreeIPAGroup) -> dict
     except AttributeError:
         members = set()
 
+    try:
+        member_groups = set(group.member_groups)
+    except AttributeError:
+        member_groups = set()
+    member_groups = {group_name for group_name in member_groups if _is_fas_group(group_name)}
+
     user_groups: set[str] = set()
     if isinstance(request.user, FreeIPAUser):
         user_groups = set(request.user.groups_list)
@@ -151,6 +157,7 @@ def _group_membership_context(request: HttpRequest, group: FreeIPAGroup) -> dict
         "sponsors": sponsors,
         "sponsor_groups": sponsor_groups,
         "members": members,
+        "member_groups": member_groups,
         "is_sponsor": is_sponsor,
         "is_member": is_member,
         "sponsors_list": sponsors_list,
@@ -404,6 +411,10 @@ def group_detail_members_api(request: HttpRequest, name: str) -> JsonResponse:
     ]
     members_page_items, members_page_ctx = paginate_detail_items(request, cast(list[object], members_filtered))
     sponsor_usernames = set(membership_ctx["sponsors_list"])
+    member_group_items = [
+        {"cn": group_name}
+        for group_name in sorted(cast(set[str], membership_ctx["member_groups"]), key=lambda value: value.lower())
+    ]
 
     return JsonResponse(
         {
@@ -411,7 +422,10 @@ def group_detail_members_api(request: HttpRequest, name: str) -> JsonResponse:
                 "q": members_q,
                 "items": _serialize_group_user_list_items(cast(list[str], members_page_items), leader_usernames=sponsor_usernames),
                 "pagination": serialize_pagination(members_page_ctx),
-            }
+            },
+            "member_groups": {
+                "items": member_group_items,
+            },
         }
     )
 
@@ -443,6 +457,7 @@ def group_action_api(request: HttpRequest, name: str) -> JsonResponse:
     payload = _json_dict_from_body(request)
     action = _normalize_str(payload.get("action")).lower()
     target = _normalize_str(payload.get("username"))
+    target_group = normalize_freeipa_group_name(_normalize_str(payload.get("group_name")))
 
     membership_ctx = _group_membership_context(request, group)
     username = membership_ctx["username"]
@@ -450,6 +465,8 @@ def group_action_api(request: HttpRequest, name: str) -> JsonResponse:
     is_member = bool(membership_ctx["is_member"])
     sponsors = membership_ctx["sponsors"]
     members = membership_ctx["members"]
+    sponsor_groups = membership_ctx["sponsor_groups"]
+    member_groups = membership_ctx["member_groups"]
 
     if action == "leave":
         if not is_member:
@@ -508,6 +525,69 @@ def group_action_api(request: HttpRequest, name: str) -> JsonResponse:
         except Exception:
             return _json_error("Failed to remove member due to an internal error.", status=500)
         return JsonResponse({"ok": True, "message": f"Removed {target} from the group."})
+
+    if action in {"add_member_group", "remove_member_group"}:
+        if not is_sponsor:
+            return _json_error("Only Team Leads can manage group members.", status=403)
+        if not target_group:
+            return _json_error("Please provide a group name.", status=400)
+
+        if action == "add_member_group":
+            try:
+                group.add_member_group(target_group)
+            except FreeIPAOperationFailed as exc:
+                return _json_error(str(exc), status=400)
+            except requests.exceptions.ConnectionError:
+                return _json_error(MSG_SERVICE_UNAVAILABLE, status=503)
+            except Exception:
+                return _json_error("Failed to add member group due to an internal error.", status=500)
+            return JsonResponse({"ok": True, "message": f"Added {target_group} to the group."})
+
+        try:
+            group.remove_member_group(target_group)
+        except FreeIPAOperationFailed as exc:
+            return _json_error(str(exc), status=400)
+        except requests.exceptions.ConnectionError:
+            return _json_error(MSG_SERVICE_UNAVAILABLE, status=503)
+        except Exception:
+            return _json_error("Failed to remove member group due to an internal error.", status=500)
+        return JsonResponse({"ok": True, "message": f"Removed {target_group} from the group."})
+
+    if action == "promote_member_group":
+        if not is_sponsor:
+            return _json_error("Only Team Leads can manage group members.", status=403)
+        if not target_group:
+            return _json_error("Please provide a group name.", status=400)
+        if target_group in sponsor_groups:
+            return _json_error(f"{target_group} is already a Team Lead of this group.", status=400)
+        if target_group not in member_groups:
+            return _json_error("Group must be a member before being promoted to Team Lead.", status=400)
+        try:
+            group.add_sponsor_group(target_group)
+        except FreeIPAOperationFailed as exc:
+            return _json_error(str(exc), status=400)
+        except requests.exceptions.ConnectionError:
+            return _json_error(MSG_SERVICE_UNAVAILABLE, status=503)
+        except Exception:
+            return _json_error("Failed to update sponsor status due to an internal error.", status=500)
+        return JsonResponse({"ok": True, "message": f"Promoted {target_group} to Team Lead."})
+
+    if action == "demote_sponsor_group":
+        if not is_sponsor:
+            return _json_error("Only Team Leads can manage group members.", status=403)
+        if not target_group:
+            return _json_error("Please provide a group name.", status=400)
+        if target_group not in sponsor_groups:
+            return _json_error("Group is not a Team Lead of this group.", status=400)
+        try:
+            group.remove_sponsor_group(target_group)
+        except FreeIPAOperationFailed as exc:
+            return _json_error(str(exc), status=400)
+        except requests.exceptions.ConnectionError:
+            return _json_error(MSG_SERVICE_UNAVAILABLE, status=503)
+        except Exception:
+            return _json_error("Failed to update sponsor status due to an internal error.", status=500)
+        return JsonResponse({"ok": True, "message": f"Removed {target_group} as a Team Lead."})
 
     if action == "promote_member":
         if not is_sponsor:
