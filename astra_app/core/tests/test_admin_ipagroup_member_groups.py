@@ -78,3 +78,40 @@ class AdminIPAGroupMemberGroupsTests(TestCase):
         # calls are asserted in the implementation tests once the methods exist.
         self.assertTrue(hasattr(existing_group, "member_groups"))
         self.assertTrue(hasattr(existing_group, "sponsor_groups"))
+
+    def test_admin_change_form_uses_team_leads_language(self) -> None:
+        self._login_as_freeipa_admin("alice")
+
+        admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})
+        existing_group = FreeIPAGroup(
+            "parent",
+            {
+                "cn": ["parent"],
+                "description": [""],
+                "member_user": [],
+                "member_group": [],
+                "membermanager_user": ["alice"],
+                "membermanager_group": ["team-leads"],
+                "objectclass": ["fasgroup"],
+            },
+        )
+
+        all_users = [admin_user]
+        all_groups = [
+            FreeIPAGroup("parent", {"cn": ["parent"], "objectclass": ["fasgroup"]}),
+            FreeIPAGroup("team-leads", {"cn": ["team-leads"], "objectclass": ["fasgroup"]}),
+        ]
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
+            patch("core.admin.FreeIPAUser.all", return_value=all_users),
+            patch("core.admin.FreeIPAGroup.all", return_value=all_groups),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=existing_group),
+        ):
+            resp = self.client.get(reverse("admin:auth_ipagroup_change", args=["parent"]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Team leads")
+        self.assertContains(resp, "Team lead groups")
+        self.assertContains(resp, "Select the users that should be team leads (memberManager) of this group.")
+        self.assertContains(resp, "Select the groups that should be team leads (memberManager) of this group.")

@@ -1052,7 +1052,8 @@ class IPAGroupForm(FreeIPAFormMixin, forms.ModelForm):
     sponsors = forms.MultipleChoiceField(
         required=False,
         widget=_duallistbox_widget(),
-        help_text="Select the users that should be sponsors (memberManager) of this group.",
+        label="Team leads",
+        help_text="Select the users that should be team leads (memberManager) of this group.",
     )
     member_groups = forms.MultipleChoiceField(
         required=False,
@@ -1063,8 +1064,8 @@ class IPAGroupForm(FreeIPAFormMixin, forms.ModelForm):
     sponsor_groups = forms.MultipleChoiceField(
         required=False,
         widget=_duallistbox_widget(),
-        help_text="Select the groups that should be sponsors (memberManager) of this group.",
-        label="Sponsor groups",
+        help_text="Select the groups that should be team leads (memberManager) of this group.",
+        label="Team lead groups",
     )
     fas_url = forms.CharField(
         required=False,
