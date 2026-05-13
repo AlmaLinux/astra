@@ -12,7 +12,14 @@ from post_office.models import EmailTemplate
 from core.freeipa.user import FreeIPAUser
 from core.membership import FreeIPAGroupRemovalOutcome
 from core.membership_log_side_effects import apply_membership_log_side_effects
-from core.models import Membership, MembershipLog, MembershipType, MembershipTypeCategory, Organization
+from core.models import (
+    Membership,
+    MembershipLog,
+    MembershipRequest,
+    MembershipType,
+    MembershipTypeCategory,
+    Organization,
+)
 from core.public_urls import normalize_public_base_url
 
 
@@ -215,6 +222,92 @@ class MembershipExpiredCleanupCommandTests(TestCase):
             f"Expected a cleanup summary log, got: {logs.output}",
         )
 
+    def test_command_skips_user_cleanup_when_same_category_request_is_pending(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="associate",
+            defaults={
+                "name": "Associate",
+                "group_cn": "almalinux-associate",
+                "category_id": "individual",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.com"],
+                "fasTimezone": ["UTC"],
+                "memberof_group": ["almalinux-individual"],
+            },
+        )
+
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            expired_at = timezone.now() - datetime.timedelta(days=1)
+            self._create_membership_log_with_side_effects(
+                actor_username="reviewer",
+                target_username="alice",
+                membership_type_id="individual",
+                requested_group_cn="almalinux-individual",
+                action=MembershipLog.Action.approved,
+                expires_at=expired_at,
+            )
+            MembershipRequest.objects.create(
+                requested_username="alice",
+                membership_type_id="associate",
+                status=MembershipRequest.Status.pending,
+            )
+
+            with (
+                patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
+                patch(
+                    "core.management.commands.membership_expired_cleanup.remove_user_from_group",
+                    autospec=True,
+                ) as remove_user_from_group_mock,
+                patch(
+                    "core.management.commands.membership_expired_cleanup.send_membership_notification",
+                    autospec=True,
+                ) as send_membership_notification_mock,
+            ):
+                call_command("membership_expired_cleanup")
+
+        self.assertTrue(
+            Membership.objects.filter(target_username="alice", membership_type_id="individual").exists()
+        )
+        membership = Membership.objects.get(target_username="alice", membership_type_id="individual")
+        self.assertGreater(membership.expires_at, frozen_now)
+        self.assertTrue(
+            Membership.objects.active(at=frozen_now).filter(
+                target_username="alice",
+                membership_type_id="individual",
+            ).exists()
+        )
+        remove_user_from_group_mock.assert_not_called()
+        send_membership_notification_mock.assert_not_called()
+
+        from post_office.models import Email
+
+        self.assertFalse(
+            Email.objects.filter(
+                to="alice@example.com",
+                template__name=settings.MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
+                context__membership_type_code="individual",
+            ).exists()
+        )
+
     def test_command_removes_org_sponsorship_and_sends_email(self) -> None:
         membership_type, _ = MembershipType.objects.update_or_create(
             code="gold",
@@ -340,6 +433,90 @@ class MembershipExpiredCleanupCommandTests(TestCase):
 
         remove_mock.assert_not_called()
         self.assertTrue(Membership.objects.filter(target_organization=org).exists())
+
+        from post_office.models import Email
+
+        self.assertFalse(
+            Email.objects.filter(
+                to="rep1@example.com",
+                template__name=settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
+                context__organization_id=org.pk,
+                context__membership_type_code="gold",
+            ).exists()
+        )
+
+    def test_command_skips_org_cleanup_when_same_category_request_is_on_hold(self) -> None:
+        membership_type, _ = MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor",
+                "group_cn": "almalinux-gold",
+                "category_id": "sponsorship",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={
+                "name": "Silver Sponsor",
+                "group_cn": "almalinux-silver",
+                "category_id": "sponsorship",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
+        org = Organization.objects.create(
+            name="Acme",
+            representative="rep1",
+        )
+        Membership.objects.create(
+            target_organization=org,
+            membership_type=membership_type,
+            expires_at=frozen_now - datetime.timedelta(days=1),
+        )
+        MembershipRequest.objects.create(
+            requested_organization=org,
+            membership_type_id="silver",
+            status=MembershipRequest.Status.on_hold,
+        )
+
+        rep = FreeIPAUser(
+            "rep1",
+            {
+                "uid": ["rep1"],
+                "mail": ["rep1@example.com"],
+                "memberof_group": ["almalinux-gold"],
+            },
+        )
+
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            with (
+                patch("core.freeipa.user.FreeIPAUser.get", return_value=rep),
+                patch(
+                    "core.management.commands.membership_expired_cleanup.remove_organization_representative_from_group_if_present",
+                    autospec=True,
+                ) as remove_rep_from_group_mock,
+                patch(
+                    "core.management.commands.membership_expired_cleanup.send_membership_notification",
+                    autospec=True,
+                ) as send_membership_notification_mock,
+            ):
+                call_command("membership_expired_cleanup")
+
+        self.assertTrue(Membership.objects.filter(target_organization=org, membership_type=membership_type).exists())
+        sponsorship = Membership.objects.get(target_organization=org, membership_type=membership_type)
+        self.assertGreater(sponsorship.expires_at, frozen_now)
+        self.assertTrue(
+            Membership.objects.active(at=frozen_now).filter(
+                target_organization=org,
+                membership_type=membership_type,
+            ).exists()
+        )
+        remove_rep_from_group_mock.assert_not_called()
+        send_membership_notification_mock.assert_not_called()
 
         from post_office.models import Email
 

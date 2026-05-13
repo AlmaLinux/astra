@@ -303,7 +303,9 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
             ).exists()
         )
 
-    def test_command_sends_expiring_soon_email_when_active_request_is_for_different_type(self) -> None:
+    def test_command_extends_membership_by_one_day_when_expiring_tomorrow_and_active_request_exists_for_different_type_in_same_category(
+        self,
+    ) -> None:
         MembershipType.objects.update_or_create(
             code="individual",
             defaults={
@@ -356,6 +358,85 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
             MembershipRequest.objects.create(
                 requested_username="alice",
                 membership_type_id="associate",
+                status=MembershipRequest.Status.pending,
+            )
+
+            with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
+                call_command("membership_expiration_notifications")
+
+        membership = Membership.objects.get(target_username="alice", membership_type_id="individual")
+        self.assertEqual(membership.expires_at, expires_at_utc + datetime.timedelta(days=1))
+
+        from post_office.models import Email
+
+        self.assertFalse(
+            Email.objects.filter(
+                to="alice@example.com",
+                template__name=settings.MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+                context__membership_type_code="individual",
+            ).exists()
+        )
+
+    def test_command_sends_expiring_soon_email_when_active_request_is_for_different_category(self) -> None:
+        MembershipTypeCategory.objects.update_or_create(
+            pk="mirror",
+            defaults={
+                "is_organization": True,
+                "sort_order": 2,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="mirror-sponsor",
+            defaults={
+                "name": "Mirror Sponsor",
+                "group_cn": "almalinux-mirror-sponsor",
+                "category_id": "mirror",
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+
+        frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["alice@example.com"],
+                "memberof_group": [],
+            },
+        )
+
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            today_utc = timezone.now().astimezone(datetime.UTC).date()
+            expires_in_days = 1
+            expires_on_utc = today_utc + datetime.timedelta(days=expires_in_days)
+            expires_at_utc = datetime.datetime.combine(
+                expires_on_utc, datetime.time(23, 59, 59), tzinfo=datetime.UTC
+            )
+
+            self._create_membership_log_with_side_effects(
+                actor_username="reviewer",
+                target_username="alice",
+                membership_type_id="individual",
+                requested_group_cn="almalinux-individual",
+                action=MembershipLog.Action.approved,
+                expires_at=expires_at_utc,
+            )
+            MembershipRequest.objects.create(
+                requested_username="alice",
+                membership_type_id="mirror-sponsor",
                 status=MembershipRequest.Status.pending,
             )
 
@@ -588,6 +669,308 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
         self.assertEqual(email.cc, [settings.MEMBERSHIP_COMMITTEE_EMAIL])
         self.assertEqual((email.headers or {}).get("Reply-To"), settings.MEMBERSHIP_COMMITTEE_EMAIL)
         self.assertIn("/organization/", ctx.get("extend_url", ""))
+
+    def test_command_extends_org_sponsorship_by_one_day_when_expiring_tomorrow_and_active_request_exists_for_same_type(
+        self,
+    ) -> None:
+        membership_type, _ = MembershipType.objects.update_or_create(
+            code="sponsor",
+            defaults={
+                "name": "Sponsor",
+                "group_cn": "almalinux-sponsor",
+                "category_id": "sponsorship",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        organization = Organization.objects.create(
+            name="Example Org",
+            representative="org-rep",
+        )
+
+        frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
+        rep_user = FreeIPAUser(
+            "org-rep",
+            {
+                "uid": ["org-rep"],
+                "givenname": ["Org"],
+                "sn": ["Rep"],
+                "mail": ["rep@example.com"],
+                "fasTimezone": ["America/New_York"],
+                "memberof_group": [],
+            },
+        )
+
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            today_utc = timezone.now().astimezone(datetime.UTC).date()
+            expires_on_utc = today_utc + datetime.timedelta(days=1)
+            expires_at_utc = datetime.datetime.combine(
+                expires_on_utc, datetime.time(23, 59, 59), tzinfo=datetime.UTC
+            )
+
+            Membership.objects.create(
+                target_organization=organization,
+                membership_type=membership_type,
+                expires_at=expires_at_utc,
+            )
+            MembershipRequest.objects.create(
+                requested_organization=organization,
+                membership_type=membership_type,
+                status=MembershipRequest.Status.pending,
+            )
+
+            with patch("core.freeipa.user.FreeIPAUser.get", return_value=rep_user):
+                call_command("membership_expiration_notifications")
+
+        sponsorship = Membership.objects.get(
+            target_organization=organization,
+            membership_type=membership_type,
+        )
+        self.assertEqual(sponsorship.expires_at, expires_at_utc + datetime.timedelta(days=1))
+
+        from post_office.models import Email
+
+        self.assertFalse(
+            Email.objects.filter(
+                to="rep@example.com",
+                template__name=settings.ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+                context__organization_id=organization.pk,
+                context__membership_type_code=membership_type.code,
+            ).exists()
+        )
+
+    def test_command_skips_org_sponsorship_expiring_soon_email_when_on_hold_request_exists_for_same_type(
+        self,
+    ) -> None:
+        membership_type, _ = MembershipType.objects.update_or_create(
+            code="sponsor",
+            defaults={
+                "name": "Sponsor",
+                "group_cn": "almalinux-sponsor",
+                "category_id": "sponsorship",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        organization = Organization.objects.create(
+            name="Example Org",
+            representative="org-rep",
+        )
+
+        frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
+        rep_user = FreeIPAUser(
+            "org-rep",
+            {
+                "uid": ["org-rep"],
+                "givenname": ["Org"],
+                "sn": ["Rep"],
+                "mail": ["rep@example.com"],
+                "fasTimezone": ["America/New_York"],
+                "memberof_group": [],
+            },
+        )
+
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            today_utc = timezone.now().astimezone(datetime.UTC).date()
+            expires_in_days = settings.MEMBERSHIP_EXPIRING_SOON_DAYS // 2
+            expires_on_utc = today_utc + datetime.timedelta(days=expires_in_days)
+            expires_at_utc = datetime.datetime.combine(
+                expires_on_utc, datetime.time(23, 59, 59), tzinfo=datetime.UTC
+            )
+
+            Membership.objects.create(
+                target_organization=organization,
+                membership_type=membership_type,
+                expires_at=expires_at_utc,
+            )
+            MembershipRequest.objects.create(
+                requested_organization=organization,
+                membership_type=membership_type,
+                status=MembershipRequest.Status.on_hold,
+            )
+
+            with patch("core.freeipa.user.FreeIPAUser.get", return_value=rep_user):
+                call_command("membership_expiration_notifications")
+
+        from post_office.models import Email
+
+        self.assertFalse(
+            Email.objects.filter(
+                to="rep@example.com",
+                template__name=settings.ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+                context__organization_id=organization.pk,
+                context__membership_type_code=membership_type.code,
+            ).exists()
+        )
+
+    def test_command_extends_org_sponsorship_by_one_day_when_expiring_tomorrow_and_active_request_exists_for_different_type_in_same_category(
+        self,
+    ) -> None:
+        membership_type, _ = MembershipType.objects.update_or_create(
+            code="sponsor",
+            defaults={
+                "name": "Sponsor",
+                "group_cn": "almalinux-sponsor",
+                "category_id": "sponsorship",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="partner",
+            defaults={
+                "name": "Partner",
+                "group_cn": "almalinux-partner",
+                "category_id": "sponsorship",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+
+        organization = Organization.objects.create(
+            name="Example Org",
+            representative="org-rep",
+        )
+
+        frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
+        rep_user = FreeIPAUser(
+            "org-rep",
+            {
+                "uid": ["org-rep"],
+                "givenname": ["Org"],
+                "sn": ["Rep"],
+                "mail": ["rep@example.com"],
+                "fasTimezone": ["America/New_York"],
+                "memberof_group": [],
+            },
+        )
+
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            today_utc = timezone.now().astimezone(datetime.UTC).date()
+            expires_on_utc = today_utc + datetime.timedelta(days=1)
+            expires_at_utc = datetime.datetime.combine(
+                expires_on_utc, datetime.time(23, 59, 59), tzinfo=datetime.UTC
+            )
+
+            Membership.objects.create(
+                target_organization=organization,
+                membership_type=membership_type,
+                expires_at=expires_at_utc,
+            )
+            MembershipRequest.objects.create(
+                requested_organization=organization,
+                membership_type_id="partner",
+                status=MembershipRequest.Status.pending,
+            )
+
+            with patch("core.freeipa.user.FreeIPAUser.get", return_value=rep_user):
+                call_command("membership_expiration_notifications")
+
+        sponsorship = Membership.objects.get(
+            target_organization=organization,
+            membership_type=membership_type,
+        )
+        self.assertEqual(sponsorship.expires_at, expires_at_utc + datetime.timedelta(days=1))
+
+        from post_office.models import Email
+
+        self.assertFalse(
+            Email.objects.filter(
+                to="rep@example.com",
+                template__name=settings.ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+                context__organization_id=organization.pk,
+                context__membership_type_code=membership_type.code,
+            ).exists()
+        )
+
+    def test_command_sends_org_sponsorship_expiring_soon_email_when_active_request_is_for_different_category(
+        self,
+    ) -> None:
+        MembershipTypeCategory.objects.update_or_create(
+            pk="mirror",
+            defaults={
+                "is_organization": True,
+                "sort_order": 2,
+            },
+        )
+        membership_type, _ = MembershipType.objects.update_or_create(
+            code="sponsor",
+            defaults={
+                "name": "Sponsor",
+                "group_cn": "almalinux-sponsor",
+                "category_id": "sponsorship",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="mirror-sponsor",
+            defaults={
+                "name": "Mirror Sponsor",
+                "group_cn": "almalinux-mirror-sponsor",
+                "category_id": "mirror",
+                "sort_order": 2,
+                "enabled": True,
+            },
+        )
+
+        organization = Organization.objects.create(
+            name="Example Org",
+            representative="org-rep",
+        )
+
+        frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
+        rep_user = FreeIPAUser(
+            "org-rep",
+            {
+                "uid": ["org-rep"],
+                "givenname": ["Org"],
+                "sn": ["Rep"],
+                "mail": ["rep@example.com"],
+                "fasTimezone": ["America/New_York"],
+                "memberof_group": [],
+            },
+        )
+
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            today_utc = timezone.now().astimezone(datetime.UTC).date()
+            expires_on_utc = today_utc + datetime.timedelta(days=1)
+            expires_at_utc = datetime.datetime.combine(
+                expires_on_utc, datetime.time(23, 59, 59), tzinfo=datetime.UTC
+            )
+
+            Membership.objects.create(
+                target_organization=organization,
+                membership_type=membership_type,
+                expires_at=expires_at_utc,
+            )
+            MembershipRequest.objects.create(
+                requested_organization=organization,
+                membership_type_id="mirror-sponsor",
+                status=MembershipRequest.Status.pending,
+            )
+
+            with patch("core.freeipa.user.FreeIPAUser.get", return_value=rep_user):
+                call_command("membership_expiration_notifications")
+
+        sponsorship = Membership.objects.get(
+            target_organization=organization,
+            membership_type=membership_type,
+        )
+        self.assertEqual(sponsorship.expires_at, expires_at_utc)
+
+        from post_office.models import Email
+
+        self.assertTrue(
+            Email.objects.filter(
+                to="rep@example.com",
+                template__name=settings.ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+                context__organization_id=organization.pk,
+                context__membership_type_code=membership_type.code,
+            ).exists()
+        )
 
     def test_command_dedupes_org_sponsorship_warnings_without_force(self) -> None:
         membership_type, _ = MembershipType.objects.update_or_create(

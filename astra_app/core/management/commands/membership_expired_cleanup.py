@@ -1,3 +1,4 @@
+import datetime
 import logging
 from collections.abc import Iterable
 from typing import override
@@ -18,6 +19,7 @@ from core.membership import (
     FreeIPACallerMode,
     FreeIPAGroupRemovalOutcome,
     FreeIPAMissingUserPolicy,
+    membership_request_queryset,
     remove_organization_representative_from_group_if_present,
     remove_user_from_group,
 )
@@ -27,9 +29,49 @@ from core.membership_notifications import (
     send_membership_notification,
     would_queue_membership_notification,
 )
-from core.models import Membership
+from core.models import Membership, MembershipRequest, MembershipType
 
 logger = logging.getLogger(__name__)
+
+
+def _open_membership_request_keys(
+    *,
+    requested_usernames: set[str],
+    requested_organization_ids: set[int],
+    membership_category_ids: set[str],
+) -> tuple[set[tuple[str, str]], set[tuple[int, str]]]:
+    if not membership_category_ids:
+        return set(), set()
+
+    open_requests = membership_request_queryset().filter(
+        membership_type__category_id__in=membership_category_ids,
+        status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
+    )
+
+    open_user_request_keys: set[tuple[str, str]] = set()
+    if requested_usernames:
+        open_user_request_keys = {
+            (requested_username, membership_category_id)
+            for requested_username, membership_category_id in open_requests.filter(
+                requested_username__in=requested_usernames,
+                requested_organization__isnull=True,
+            ).values_list("requested_username", "membership_type__category_id")
+        }
+
+    open_org_request_keys: set[tuple[int, str]] = set()
+    if requested_organization_ids:
+        open_org_request_keys = {
+            (requested_organization_id, membership_category_id)
+            for requested_organization_id, membership_category_id in open_requests.filter(
+                requested_organization_id__in=requested_organization_ids,
+            ).values_list("requested_organization_id", "membership_type__category_id")
+        }
+
+    return open_user_request_keys, open_org_request_keys
+
+
+def _preserved_expires_at(*, reference: datetime.datetime) -> datetime.datetime:
+    return reference + datetime.timedelta(days=1)
 
 
 class Command(BaseCommand):
@@ -85,6 +127,39 @@ class Command(BaseCommand):
             .order_by("target_organization_id", "membership_type_id")
         )
 
+        expired_membership_rows = list(expired_memberships)
+        expired_sponsorship_rows = list(expired_sponsorships)
+        membership_type_ids: set[str] = {
+            str(membership.membership_type.code or "").strip()
+            for membership in [*expired_membership_rows, *expired_sponsorship_rows]
+            if str(membership.membership_type.code or "").strip()
+        }
+        membership_category_by_type_id = {
+            str(type_id): str(category_id)
+            for type_id, category_id in MembershipType.objects.filter(code__in=membership_type_ids).values_list(
+                "code",
+                "category_id",
+            )
+        }
+        membership_category_ids: set[str] = {
+            category_id
+            for category_id in membership_category_by_type_id.values()
+            if category_id.strip()
+        }
+        open_user_request_keys, open_org_request_keys = _open_membership_request_keys(
+            requested_usernames={
+                str(membership.target_username or "").strip()
+                for membership in expired_membership_rows
+                if str(membership.target_username or "").strip()
+            },
+            requested_organization_ids={
+                int(sponsorship.target_organization.pk)
+                for sponsorship in expired_sponsorship_rows
+                if sponsorship.target_organization is not None
+            },
+            membership_category_ids=membership_category_ids,
+        )
+
         removed = 0
         emailed = 0
         skipped = 0
@@ -95,8 +170,25 @@ class Command(BaseCommand):
         sponsorship_failed = 0
         had_expired_memberships = False
 
-        for membership in expired_memberships:
+        for membership in expired_membership_rows:
             had_expired_memberships = True
+            membership_category_id = str(
+                membership_category_by_type_id.get(str(membership.membership_type.code or "").strip(), "") or ""
+            ).strip()
+            membership_request_key = (str(membership.target_username or "").strip(), membership_category_id)
+            if membership_request_key in open_user_request_keys:
+                preserved_expires_at = _preserved_expires_at(reference=now)
+                logger.info(
+                    "membership_expired_cleanup: skipped expired membership user=%s membership_category=%s due to open membership request; preserving through %s",
+                    membership.target_username,
+                    membership_category_id,
+                    preserved_expires_at,
+                )
+                if not dry_run:
+                    membership.expires_at = preserved_expires_at
+                    membership.save(update_fields=["expires_at"])
+                continue
+
             fu = FreeIPAUser.get(membership.target_username)
             logger.info(
                 "membership_expired_cleanup: processing expired membership user=%s membership_type=%s",
@@ -211,12 +303,29 @@ class Command(BaseCommand):
                     membership.membership_type_id,
                 )
 
-        for sponsorship in expired_sponsorships:
+        for sponsorship in expired_sponsorship_rows:
             had_expired_memberships = True
             org = sponsorship.target_organization
             if org is None:
                 continue
             membership_type = sponsorship.membership_type
+            sponsorship_category_id = str(
+                membership_category_by_type_id.get(str(membership_type.code or "").strip(), "") or ""
+            ).strip()
+            sponsorship_request_key = (org.pk, sponsorship_category_id)
+            if sponsorship_request_key in open_org_request_keys:
+                preserved_expires_at = _preserved_expires_at(reference=now)
+                logger.info(
+                    "membership_expired_cleanup: skipped expired sponsorship org_id=%s membership_category=%s due to open membership request; preserving through %s",
+                    org.pk,
+                    sponsorship_category_id,
+                    preserved_expires_at,
+                )
+                if not dry_run:
+                    sponsorship.expires_at = preserved_expires_at
+                    sponsorship.save(update_fields=["expires_at"])
+                continue
+
             group_cn = str(membership_type.group_cn or "").strip()
             rep_username = str(org.representative or "").strip()
             removal_failed = False
