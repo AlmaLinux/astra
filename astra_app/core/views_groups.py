@@ -336,7 +336,10 @@ def group_edit(request: HttpRequest, name: str) -> HttpResponse:
     return render(
         request,
         "core/group_edit.html",
-        {"group": group},
+        {
+            "group": group,
+            **chat_link_bootstrap_context(),
+        },
     )
 
 

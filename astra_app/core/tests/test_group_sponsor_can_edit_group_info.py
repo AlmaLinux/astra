@@ -34,6 +34,14 @@ class GroupSponsorCanEditGroupInfoTests(TestCase):
         )
 
     @override_settings(
+        CHAT_NETWORKS={
+            "irc": {"default_server": "irc.libera.chat"},
+            "matrix": {"default_server": "matrix.org"},
+            "mattermost": {
+                "default_server": "chat.almalinux.org",
+                "default_team": "almalinux",
+            },
+        },
         DJANGO_VITE={
             "default": {
                 "dev_mode": True,
@@ -59,7 +67,12 @@ class GroupSponsorCanEditGroupInfoTests(TestCase):
         self.assertContains(resp, "data-group-form-root")
         self.assertContains(resp, 'data-group-form-api-url="/api/v1/groups/fas1/edit"')
         self.assertContains(resp, 'data-group-form-detail-url="/group/fas1/"')
+        self.assertContains(resp, 'data-group-form-chat-mattermost-default-server="chat.almalinux.org"')
+        self.assertContains(resp, 'data-group-form-chat-mattermost-default-team="almalinux"')
+        self.assertContains(resp, 'data-group-form-chat-irc-default-server="irc.libera.chat"')
+        self.assertContains(resp, 'data-group-form-chat-matrix-default-server="matrix.org"')
         self.assertContains(resp, 'src="http://localhost:5173/src/entrypoints/groupForm.ts"')
+        self.assertContains(resp, "core/js/chat_channels_editor.js")
 
     def test_sponsor_can_get_edit_api_prefilled(self) -> None:
         self._login_as_freeipa("bob")
@@ -142,6 +155,37 @@ class GroupSponsorCanEditGroupInfoTests(TestCase):
         self.assertEqual(group.fas_mailing_list, "new@example.org")
         self.assertEqual(sorted(group.fas_irc_channels), ["irc://#new", "irc://#new-dev"])
         self.assertEqual(group.fas_discussion_url, "https://discussion.example.org/c/new")
+        group.save.assert_called_once()
+
+    def test_sponsor_can_put_mattermost_value_via_api(self) -> None:
+        self._login_as_freeipa("bob")
+        bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        group = self._group(sponsors=["bob"])
+        group.save = MagicMock()
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=group),
+        ):
+            resp = self.client.put(
+                reverse("api-group-edit", args=["fas1"]),
+                data=json.dumps(
+                    {
+                        "description": "Updated desc",
+                        "fas_url": "https://example.org/new",
+                        "fas_mailing_list": "new@example.org",
+                        "fas_irc_channels": "mattermost://channels/atomicsig",
+                        "fas_discussion_url": "https://discussion.example.org/c/new",
+                    }
+                ),
+                content_type="application/json",
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        payload = json.loads(resp.content)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(group.fas_irc_channels, ["mattermost://channels/atomicsig"])
         group.save.assert_called_once()
 
     def test_sponsor_invalid_put_returns_validation_errors(self) -> None:

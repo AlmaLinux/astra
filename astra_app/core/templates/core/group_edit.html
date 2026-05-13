@@ -1,5 +1,5 @@
 {% extends 'core/base.html' %}
-{% load django_vite %}
+{% load django_vite static %}
 
 {% block title %}Edit {{ group.cn }}{% endblock %}
 
@@ -7,6 +7,7 @@
   {{ block.super }}
   {% vite_hmr_client %}
   {% vite_asset 'src/entrypoints/groupForm.ts' %}
+  <script src="{% static 'core/js/chat_channels_editor.js' %}"></script>
 {% endblock %}
 
 {% block header %}
@@ -23,6 +24,10 @@
     data-group-form-root
     data-group-form-api-url="{% url 'api-group-edit' group.cn %}"
     data-group-form-detail-url="{% url 'group-detail' group.cn %}"
+    data-group-form-chat-mattermost-default-server="{{ chat_mattermost_default_server }}"
+    data-group-form-chat-mattermost-default-team="{{ chat_mattermost_default_team }}"
+    data-group-form-chat-irc-default-server="{{ chat_irc_default_server }}"
+    data-group-form-chat-matrix-default-server="{{ chat_matrix_default_server }}"
   >
     <div class="text-muted">Loading group editor...</div>
   </div>

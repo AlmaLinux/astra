@@ -38,6 +38,7 @@
 
         if (scheme === 'mattermost') {
           const pathParts = path.split('/').filter(Boolean);
+          const usesDefaultMattermostPath = server === 'channels';
           let team = '';
           let channel = '';
           if (pathParts.length >= 3 && pathParts[1] === 'channels') {
@@ -45,11 +46,13 @@
             channel = pathParts[2];
           } else if (pathParts.length >= 2 && pathParts[0] === 'channels') {
             channel = pathParts[1];
+          } else if (usesDefaultMattermostPath && pathParts.length >= 1) {
+            channel = pathParts[0];
           }
 
           const defaultServer = defaults.mattermostServer;
           const defaultTeam = defaults.mattermostTeam;
-          const effectiveServer = server || defaultServer;
+          const effectiveServer = usesDefaultMattermostPath ? defaultServer : (server || defaultServer);
           const effectiveTeam = team || (effectiveServer === defaultServer ? defaultTeam : '');
 
           const base = `~${String(channel || '').replace(/^~/, '')}`;
@@ -251,6 +254,7 @@
 
     const form = textarea && textarea.form;
     if (!textarea || !fallback || !tableBody || !addBtn || !form) return;
+    textarea.setAttribute('data-chat-channels-bound', '1');
 
     const defaults = {
       mattermostServer: root.getAttribute('data-mattermost-default-server') || 'chat.almalinux.org',
@@ -357,18 +361,33 @@
     textarea.setAttribute('data-chat-channels-bound', '1');
   }
 
-  onReady(function () {
-    const roots = document.querySelectorAll('.js-chat-channels-editor');
+  function initAllChatChannelsEditors(scope) {
+    const rootScope = scope || document;
+    const roots = rootScope.querySelectorAll ? rootScope.querySelectorAll('.js-chat-channels-editor') : [];
     for (const root of roots) {
+      if (root.dataset.chatChannelsEnhanced === '1') {
+        continue;
+      }
+      root.dataset.chatChannelsEnhanced = '1';
       initChatChannelsEditor(root);
     }
 
     const defaults = readChatNetworksDefaults();
-    const adminTextareas = document.querySelectorAll(
-      'textarea[data-chat-channels-editor="1"], textarea[name="fas_irc_channels"], textarea#id_fas_irc_channels'
-    );
+    const adminTextareas = rootScope.querySelectorAll
+      ? rootScope.querySelectorAll('textarea[data-chat-channels-editor="1"]')
+      : [];
     for (const textarea of adminTextareas) {
       initChatChannelsEditorForTextarea(textarea, defaults);
     }
+  }
+
+  window.ChatChannelsEditor = {
+    initAll: function (scope) {
+      initAllChatChannelsEditors(scope);
+    }
+  };
+
+  onReady(function () {
+    window.ChatChannelsEditor.initAll(document);
   });
 })();

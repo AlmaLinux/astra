@@ -18,9 +18,17 @@ export interface GroupFormPutResponse {
   error?: string;
 }
 
+export interface GroupFormChatDefaults {
+  mattermostServer: string;
+  mattermostTeam: string;
+  ircServer: string;
+  matrixServer: string;
+}
+
 export interface GroupFormBootstrap {
   apiUrl: string;
   detailUrl: string;
+  chatDefaults: GroupFormChatDefaults;
 }
 
 export function readGroupFormBootstrap(root: HTMLElement): GroupFormBootstrap | null {
@@ -29,5 +37,14 @@ export function readGroupFormBootstrap(root: HTMLElement): GroupFormBootstrap | 
   if (!apiUrl || !detailUrl) {
     return null;
   }
-  return { apiUrl, detailUrl };
+  return {
+    apiUrl,
+    detailUrl,
+    chatDefaults: {
+      mattermostServer: String(root.dataset.groupFormChatMattermostDefaultServer || "").trim(),
+      mattermostTeam: String(root.dataset.groupFormChatMattermostDefaultTeam || "").trim(),
+      ircServer: String(root.dataset.groupFormChatIrcDefaultServer || "").trim(),
+      matrixServer: String(root.dataset.groupFormChatMatrixDefaultServer || "").trim(),
+    },
+  };
 }

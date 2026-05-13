@@ -52,4 +52,7 @@ interface ChartConstructor {
 
 interface Window {
   Chart?: ChartConstructor | { Chart: ChartConstructor };
+  ChatChannelsEditor?: {
+    initAll?: (scope?: ParentNode) => void;
+  };
 }

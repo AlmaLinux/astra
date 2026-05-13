@@ -1,7 +1,15 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
+import { nextTick, onMounted, reactive, ref } from "vue";
 
 import { type GroupFormBootstrap, type GroupFormGetResponse, type GroupFormPutResponse } from "./types";
+
+declare global {
+  interface Window {
+    ChatChannelsEditor?: {
+      initAll?: (scope?: ParentNode) => void;
+    };
+  }
+}
 
 const props = defineProps<{
   bootstrap: GroupFormBootstrap;
@@ -11,6 +19,7 @@ const isLoading = ref(false);
 const isSubmitting = ref(false);
 const loadError = ref("");
 const submitError = ref("");
+const chatChannelsTextarea = ref<HTMLTextAreaElement | null>(null);
 const fieldErrors = reactive<Record<string, string[]>>({});
 
 const formState = reactive({
@@ -48,6 +57,12 @@ function applyPayload(payload: GroupFormGetResponse): void {
   formState.fas_irc_channels = payload.group.fas_irc_channels.join("\n");
 }
 
+function syncChatChannelsFromTextarea(): void {
+  if (chatChannelsTextarea.value) {
+    formState.fas_irc_channels = chatChannelsTextarea.value.value;
+  }
+}
+
 async function loadForm(): Promise<void> {
   isLoading.value = true;
   loadError.value = "";
@@ -73,6 +88,7 @@ async function loadForm(): Promise<void> {
 }
 
 async function submit(): Promise<void> {
+  syncChatChannelsFromTextarea();
   isSubmitting.value = true;
   submitError.value = "";
   clearFieldErrors();
@@ -120,6 +136,8 @@ async function submit(): Promise<void> {
 
 onMounted(async () => {
   await loadForm();
+  await nextTick();
+  window.ChatChannelsEditor?.initAll?.(document);
 });
 </script>
 
@@ -162,9 +180,35 @@ onMounted(async () => {
 
               <div class="form-group mb-0">
                 <label for="group-irc-channels">Chat channels</label>
-                <small class="form-text text-muted mb-2">One channel per line. Example: #infra</small>
-                <textarea id="group-irc-channels" v-model="formState.fas_irc_channels" name="fas_irc_channels" rows="4" class="form-control" />
-                <div v-for="errorItem in fieldErrors.fas_irc_channels || []" :key="errorItem" class="invalid-feedback d-block">{{ errorItem }}</div>
+                <div class="help mb-2">
+                  Chat channels:
+                  <ul class="mb-0">
+                    <li>Mattermost: <strong>~channel</strong> or <strong>~channel:server.name:team</strong> (default <strong>{{ props.bootstrap.chatDefaults.mattermostServer }}</strong>, team <strong>{{ props.bootstrap.chatDefaults.mattermostTeam }}</strong>)</li>
+                    <li>IRC: <strong>#channel</strong> or <strong>#channel:server.name</strong> (default <strong>{{ props.bootstrap.chatDefaults.ircServer }}</strong>)</li>
+                    <li>Matrix: <strong>matrix:/#channel</strong> or <strong>matrix://server.name/#channel</strong> (default <strong>{{ props.bootstrap.chatDefaults.matrixServer }}</strong>)</li>
+                  </ul>
+                </div>
+                <div
+                  id="group-chat-channels-widget"
+                  class="d-none js-chat-channels-editor"
+                  data-textarea-id="group-irc-channels"
+                  data-fallback-id="group-chat-channels-fallback"
+                  :data-mattermost-default-server="props.bootstrap.chatDefaults.mattermostServer"
+                  :data-mattermost-default-team="props.bootstrap.chatDefaults.mattermostTeam"
+                  :data-irc-default-server="props.bootstrap.chatDefaults.ircServer"
+                  :data-matrix-default-server="props.bootstrap.chatDefaults.matrixServer"
+                >
+                  <div class="table-responsive">
+                    <table class="table table-sm table-bordered align-middle mb-2">
+                      <tbody></tbody>
+                    </table>
+                  </div>
+                  <button type="button" class="btn btn-sm btn-outline-secondary js-chat-channels-add" title="Add another chat channel">Add channel</button>
+                </div>
+                <div id="group-chat-channels-fallback">
+                  <textarea id="group-irc-channels" ref="chatChannelsTextarea" v-model="formState.fas_irc_channels" name="fas_irc_channels" rows="4" class="form-control" />
+                </div>
+                <div v-for="errorItem in fieldErrors.fas_irc_channels || []" :key="errorItem" data-chat-channels-error class="invalid-feedback d-block mt-2">{{ errorItem }}</div>
               </div>
 
               <div v-if="submitError" class="mt-3 alert alert-danger">{{ submitError }}</div>
