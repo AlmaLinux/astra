@@ -115,9 +115,10 @@ def apply_org_side_effects(*, log: MembershipLog) -> None:
         existing = (
             Membership.objects.filter(
                 target_organization_id=log.target_organization_id,
-                membership_type=log.membership_type,
+                membership_type__category_id=log.membership_type.category_id,
             )
             .only("created_at", "expires_at")
+            .order_by("created_at")
             .first()
         )
 

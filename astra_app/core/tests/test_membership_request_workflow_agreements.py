@@ -568,11 +568,13 @@ class MembershipRequestWorkflowAgreementTests(TestCase):
             },
         )
         org = Organization.objects.create(name="Acme", representative="bob")
-        Membership.objects.create(
+        previous_membership = Membership.objects.create(
             target_organization=org,
             membership_type=membership_type_old,
             expires_at=timezone.now() + datetime.timedelta(days=60),
         )
+        previous_created_at = timezone.now() - datetime.timedelta(days=180)
+        Membership.objects.filter(pk=previous_membership.pk).update(created_at=previous_created_at)
         membership_request = MembershipRequest.objects.create(
             requested_username="",
             requested_organization=org,
@@ -614,12 +616,11 @@ class MembershipRequestWorkflowAgreementTests(TestCase):
                 membership_type=membership_type_old,
             ).exists()
         )
-        self.assertTrue(
-            Membership.objects.filter(
-                target_organization=org,
-                membership_type=membership_type_new,
-            ).exists()
+        replacement_membership = Membership.objects.get(
+            target_organization=org,
+            membership_type=membership_type_new,
         )
+        self.assertEqual(replacement_membership.created_at, previous_created_at)
         sync_helper.assert_called_once_with(
             representative_username="bob",
             group_cns=("almalinux-platinum",),
