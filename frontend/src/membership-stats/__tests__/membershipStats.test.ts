@@ -291,6 +291,51 @@ describe("MembershipStatsPage", () => {
     expect(nestedChartCtor).toHaveBeenCalled();
   });
 
+  it("shows doughnut tooltip percentages using only currently visible slices", async () => {
+    const chartCtor = vi.fn(() => ({ update: vi.fn(), destroy: vi.fn(), data: {} }));
+    vi.stubGlobal("Chart", chartCtor);
+    vi.stubGlobal(
+      "fetch",
+      makeSuccessfulFetch({
+        compositionPayload: {
+          ...COMPOSITION_PAYLOAD,
+          charts: {
+            ...COMPOSITION_PAYLOAD.charts,
+            membership_types: [
+              { membership_type: { code: "individual", name: "Individual" }, count: 30 },
+              { membership_type: { code: "sustaining", name: "Sustaining" }, count: 50 },
+              { membership_type: { code: "student", name: "Student" }, count: 20 },
+            ],
+          },
+        },
+      }),
+    );
+
+    mount(MembershipStatsPage, { props: { bootstrap: BOOTSTRAP } });
+
+    await flushPromises();
+    await flushPromises();
+
+    const membershipTypesConfig = chartCtor.mock.calls[0]?.[1];
+    const tooltipLabel = membershipTypesConfig?.options?.plugins?.tooltip?.callbacks?.label;
+
+    expect(tooltipLabel).toBeTypeOf("function");
+    expect(
+      tooltipLabel({
+        label: "Individual",
+        parsed: 30,
+        dataIndex: 0,
+        chart: {
+          data: {
+            labels: ["Individual", "Sustaining", "Student"],
+            datasets: [{ data: [30, 50, 20] }],
+          },
+          getDataVisibility: (index: number) => index !== 2,
+        },
+      }),
+    ).toBe("Individual: 30 (37.5%)");
+  });
+
   it("preserves the legacy fixed decision-status datasets with zero-filled missing series", () => {
     const charts = trendsChartsFromApi({
       requests_trend: [],

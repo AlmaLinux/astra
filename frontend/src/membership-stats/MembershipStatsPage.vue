@@ -143,6 +143,37 @@ function renderChartSafely(key: ChartKey, renderFn: () => void): void {
   }
 }
 
+function formatDoughnutTooltipLabel(context: {
+  label?: string;
+  parsed?: unknown;
+  dataIndex: number;
+  chart: {
+    data?: {
+      datasets?: Array<{
+        data?: unknown[];
+      }>;
+    };
+    getDataVisibility?: (index: number) => boolean;
+  };
+}): string {
+  const label = context.label ?? "";
+  const value = typeof context.parsed === "number" ? context.parsed : Number(context.parsed ?? 0);
+  const dataset = context.chart.data?.datasets?.[0]?.data ?? [];
+  let visibleTotal = 0;
+  for (const [index, entry] of dataset.entries()) {
+    if (context.chart.getDataVisibility && !context.chart.getDataVisibility(index)) {
+      continue;
+    }
+    const numericEntry = typeof entry === "number" ? entry : Number(entry ?? 0);
+    if (Number.isFinite(numericEntry)) {
+      visibleTotal += numericEntry;
+    }
+  }
+  const percentage = visibleTotal > 0 ? (value / visibleTotal) * 100 : 0;
+
+  return `${label}: ${value} (${percentage.toFixed(1)}%)`;
+}
+
 function renderDoughnut(key: ChartKey, labels: string[], data: number[], title: string): void {
   renderChartSafely(key, () => {
     buildChart(key, {
@@ -159,6 +190,13 @@ function renderDoughnut(key: ChartKey, labels: string[], data: number[], title: 
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        plugins: {
+          tooltip: {
+            callbacks: {
+              label: formatDoughnutTooltipLabel,
+            },
+          },
+        },
       },
     });
   });
