@@ -11,6 +11,7 @@ export interface MembershipStatsBootstrap {
   apiCompositionUrl: string;
   apiTrendsUrl: string;
   apiRetentionUrl: string;
+  apiActiveMembershipsUrl: string;
 }
 
 export function readMembershipStatsBootstrap(root: HTMLElement): MembershipStatsBootstrap | null {
@@ -20,13 +21,15 @@ export function readMembershipStatsBootstrap(root: HTMLElement): MembershipStats
     membershipStatsApiCompositionUrl,
     membershipStatsApiTrendsUrl,
     membershipStatsApiRetentionUrl,
+    membershipStatsApiActiveMembershipsUrl,
   } = root.dataset;
 
   if (
     !membershipStatsApiSummaryUrl ||
     !membershipStatsApiCompositionUrl ||
     !membershipStatsApiTrendsUrl ||
-    !membershipStatsApiRetentionUrl
+    !membershipStatsApiRetentionUrl ||
+    !membershipStatsApiActiveMembershipsUrl
   ) {
     return null;
   }
@@ -39,6 +42,7 @@ export function readMembershipStatsBootstrap(root: HTMLElement): MembershipStats
     apiCompositionUrl: membershipStatsApiCompositionUrl,
     apiTrendsUrl: membershipStatsApiTrendsUrl,
     apiRetentionUrl: membershipStatsApiRetentionUrl,
+    apiActiveMembershipsUrl: membershipStatsApiActiveMembershipsUrl,
   };
 }
 
@@ -91,6 +95,11 @@ export interface DecisionDataset {
   data: number[];
 }
 
+export interface TimeSeriesDataset {
+  label: string;
+  data: number[];
+}
+
 export interface TrendBarChart {
   labels: string[];
   counts: number[];
@@ -120,6 +129,11 @@ export interface TrendsChartsData {
   expirations_upcoming: TrendBarChart;
 }
 
+export interface ActiveMembershipsOverTimeChart {
+  labels: string[];
+  datasets: TimeSeriesDataset[];
+}
+
 export interface PeriodCountRow {
   period: string;
   count: number;
@@ -131,8 +145,21 @@ export interface DecisionTrendRow {
   count: number;
 }
 
+export interface MembershipTypePeriodCountRow {
+  period: string;
+  membership_type: {
+    code: string;
+    name: string;
+  };
+  count: number;
+}
+
 export interface RetentionChartsData {
   retention_cohorts_12m: RetentionCohortChart;
+}
+
+export interface ActiveMembershipsChartsData {
+  active_memberships_over_time: ActiveMembershipsOverTimeChart;
 }
 
 export interface RetentionCohortRow {
@@ -153,6 +180,10 @@ export interface TrendsChartsApiData {
   requests_trend: PeriodCountRow[];
   decisions_trend: DecisionTrendRow[];
   expirations_upcoming: PeriodCountRow[];
+}
+
+export interface ActiveMembershipsChartsApiData {
+  active_memberships_over_time: MembershipTypePeriodCountRow[];
 }
 
 const DECISION_TREND_STATUSES = ["approved", "rejected", "ignored", "rescinded"] as const;
@@ -207,6 +238,28 @@ export function retentionChartsFromApi(charts: RetentionChartsApiData): Retentio
       retained: charts.retention_cohorts_12m.map((row) => row.retained),
       lapsed_then_renewed: charts.retention_cohorts_12m.map((row) => row.lapsed_then_renewed),
       lapsed_not_renewed: charts.retention_cohorts_12m.map((row) => row.lapsed_not_renewed),
+    },
+  };
+}
+
+export function activeMembershipsChartsFromApi(charts: ActiveMembershipsChartsApiData): ActiveMembershipsChartsData {
+  const periods = Array.from(new Set(charts.active_memberships_over_time.map((row) => row.period))).sort();
+  const orderedTypes = Array.from(
+    new Map(
+      charts.active_memberships_over_time.map((row) => [row.membership_type.code, row.membership_type.name]),
+    ).entries(),
+  ).sort((left, right) => left[1].localeCompare(right[1]));
+  const countIndex = new Map(
+    charts.active_memberships_over_time.map((row) => [`${row.period}:${row.membership_type.code}`, row.count]),
+  );
+
+  return {
+    active_memberships_over_time: {
+      labels: periods,
+      datasets: orderedTypes.map(([code, name]) => ({
+        label: name,
+        data: periods.map((period) => countIndex.get(`${period}:${code}`) || 0),
+      })),
     },
   };
 }

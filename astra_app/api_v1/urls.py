@@ -53,6 +53,7 @@ from core.views_membership.admin import (
 )
 from core.views_membership_admin import (
     membership_audit_log_detail_api,
+    stats_membership_active_memberships_chart_detail_api,
     stats_membership_composition_charts_detail_api,
     stats_membership_retention_chart_detail_api,
     stats_membership_trends_charts_detail_api,
@@ -449,6 +450,11 @@ urlpatterns = [
         "stats/membership/charts/trends/detail",
         stats_membership_trends_charts_detail_api,
         name="api-stats-membership-trends-charts-detail",
+    ),
+    path(
+        "stats/membership/charts/active-memberships/detail",
+        stats_membership_active_memberships_chart_detail_api,
+        name="api-stats-membership-active-memberships-chart-detail",
     ),
     path(
         "stats/membership/charts/retention/detail",

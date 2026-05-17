@@ -6,6 +6,7 @@
 {% block extra_head %}
   {{ block.super }}
   <script src="{% static 'core/vendor/chartjs/chart.umd.min.js' %}"></script>
+  <script src="{% static 'core/vendor/chartjs/chartjs-plugin-autocolors.min.js' %}"></script>
   {% vite_hmr_client %}
   {% vite_asset 'src/entrypoints/membershipStats.ts' %}
 {% endblock %}
@@ -22,5 +23,6 @@
     data-membership-stats-api-composition-url="{{ api_composition_charts_url }}"
     data-membership-stats-api-trends-url="{{ api_trends_charts_url }}"
     data-membership-stats-api-retention-url="{{ api_retention_chart_url }}"
+    data-membership-stats-api-active-memberships-url="{{ api_active_memberships_chart_url }}"
   ></div>
 {% endblock %}

@@ -20,6 +20,7 @@ const BOOTSTRAP: MembershipStatsBootstrap = {
   apiCompositionUrl: "/api/v1/stats/membership/charts/composition/detail",
   apiTrendsUrl: "/api/v1/stats/membership/charts/trends/detail",
   apiRetentionUrl: "/api/v1/stats/membership/charts/retention/detail",
+  apiActiveMembershipsUrl: "/api/v1/stats/membership/charts/active-memberships/detail",
 };
 
 const SUMMARY_PAYLOAD = {
@@ -67,16 +68,30 @@ const RETENTION_PAYLOAD = {
   },
 };
 
+const ACTIVE_MEMBERSHIPS_PAYLOAD = {
+  generated_at: "2026-01-01T00:00:00+00:00",
+  days_param: "365",
+  charts: {
+    active_memberships_over_time: [
+      { period: "2025-11", membership_type: { code: "individual", name: "Individual" }, count: 12 },
+      { period: "2025-12", membership_type: { code: "individual", name: "Individual" }, count: 14 },
+      { period: "2025-12", membership_type: { code: "sponsor-standard", name: "Sponsor Standard" }, count: 3 },
+    ],
+  },
+};
+
 function makeSuccessfulFetch({
   summaryPayload = SUMMARY_PAYLOAD,
   compositionPayload = COMPOSITION_PAYLOAD,
   trendsPayload = TRENDS_PAYLOAD,
   retentionPayload = RETENTION_PAYLOAD,
+  activeMembershipsPayload = ACTIVE_MEMBERSHIPS_PAYLOAD,
 }: {
   summaryPayload?: typeof SUMMARY_PAYLOAD;
   compositionPayload?: typeof COMPOSITION_PAYLOAD;
   trendsPayload?: typeof TRENDS_PAYLOAD;
   retentionPayload?: typeof RETENTION_PAYLOAD;
+  activeMembershipsPayload?: typeof ACTIVE_MEMBERSHIPS_PAYLOAD;
 } = {}) {
   return vi.fn(async (url: string) => {
     if (String(url).includes("/summary")) {
@@ -90,6 +105,9 @@ function makeSuccessfulFetch({
     }
     if (String(url).includes("/retention")) {
       return new Response(JSON.stringify(retentionPayload));
+    }
+    if (String(url).includes("/active-memberships")) {
+      return new Response(JSON.stringify(activeMembershipsPayload));
     }
     return new Response("{}", { status: 404 });
   });
@@ -107,11 +125,13 @@ describe("readMembershipStatsBootstrap", () => {
     el.dataset.membershipStatsApiCompositionUrl = "/c";
     el.dataset.membershipStatsApiTrendsUrl = "/t";
     el.dataset.membershipStatsApiRetentionUrl = "/r";
+    el.dataset.membershipStatsApiActiveMembershipsUrl = "/a";
 
     const result = readMembershipStatsBootstrap(el);
     expect(result).not.toBeNull();
     expect(result?.currentDays).toBe("365");
     expect(result?.apiSummaryUrl).toBe("/s");
+    expect(result).toMatchObject({ apiActiveMembershipsUrl: "/a" });
   });
 
   it("reads a valid days preset from the element dataset", () => {
@@ -121,6 +141,7 @@ describe("readMembershipStatsBootstrap", () => {
     el.dataset.membershipStatsApiCompositionUrl = "/c";
     el.dataset.membershipStatsApiTrendsUrl = "/t";
     el.dataset.membershipStatsApiRetentionUrl = "/r";
+    el.dataset.membershipStatsApiActiveMembershipsUrl = "/a";
 
     const result = readMembershipStatsBootstrap(el);
     expect(result?.currentDays).toBe("90");
@@ -133,6 +154,7 @@ describe("readMembershipStatsBootstrap", () => {
     el.dataset.membershipStatsApiCompositionUrl = "/c";
     el.dataset.membershipStatsApiTrendsUrl = "/t";
     el.dataset.membershipStatsApiRetentionUrl = "/r";
+    el.dataset.membershipStatsApiActiveMembershipsUrl = "/a";
 
     const result = readMembershipStatsBootstrap(el);
     expect(result?.currentDays).toBe("365");
@@ -187,7 +209,7 @@ describe("MembershipStatsPage", () => {
     expect(wrapper.text()).toContain("Cohorts Tracked (12m)");
     expect(wrapper.text()).toContain("No join-month cohorts have reached the 12-month renewal window yet.");
     expect(wrapper.find("#retention-cohorts-chart").exists()).toBe(false);
-    expect(chartCtor).toHaveBeenCalledTimes(6);
+    expect(chartCtor).toHaveBeenCalledTimes(7);
   });
 
   it("renders days filter buttons with the active preset highlighted", async () => {
@@ -334,6 +356,97 @@ describe("MembershipStatsPage", () => {
         },
       }),
     ).toBe("Individual: 30 (37.5%)");
+  });
+
+  it("registers autocolors and applies plugin plus shared-period tooltip settings to membership stats charts", async () => {
+    const chartCtor = vi.fn(() => ({ update: vi.fn(), destroy: vi.fn(), data: {} }));
+    const register = vi.fn();
+    const autocolorsPlugin = { id: "autocolors" };
+    vi.stubGlobal("Chart", Object.assign(chartCtor, { register }));
+    Object.defineProperty(window, "chartjs-plugin-autocolors", {
+      value: autocolorsPlugin,
+      configurable: true,
+    });
+    vi.stubGlobal("fetch", makeSuccessfulFetch());
+
+    mount(MembershipStatsPage, { props: { bootstrap: BOOTSTRAP } });
+
+    await flushPromises();
+    await flushPromises();
+
+    expect(register).toHaveBeenCalledWith(autocolorsPlugin);
+
+    for (const config of chartCtor.mock.calls.map((call) => call[1])) {
+      expect(config?.options?.plugins?.autocolors).toBeTruthy();
+    }
+
+    const doughnutConfigs = chartCtor.mock.calls.map((call) => call[1]).filter((config) => config?.type === "doughnut");
+    expect(doughnutConfigs.length).toBeGreaterThan(0);
+    for (const config of doughnutConfigs) {
+      expect(config?.options?.plugins?.autocolors).toMatchObject({ mode: "data" });
+    }
+
+    const requestsTrendConfig = chartCtor.mock.calls.find(
+      (call) => call[1]?.data?.datasets?.[0]?.label === "Requests",
+    )?.[1];
+    const activeMembershipsConfig = chartCtor.mock.calls.find(
+      (call) => call[1]?.data?.datasets?.[0]?.label === "Individual",
+    )?.[1];
+    const decisionsTrendConfig = chartCtor.mock.calls.find(
+      (call) => call[1]?.type === "bar" && call[1]?.data?.datasets?.[0]?.label === "approved",
+    )?.[1];
+
+    expect(requestsTrendConfig?.options?.interaction).toMatchObject({ mode: "index", intersect: false });
+    expect(activeMembershipsConfig?.options?.interaction).toMatchObject({ mode: "index", intersect: false });
+    expect(decisionsTrendConfig?.options?.interaction).toMatchObject({ mode: "index", intersect: false });
+  });
+
+  it("renders the active memberships over time card, fetches its endpoint, and builds stacked filled datasets", async () => {
+    const chartCtor = vi.fn(() => ({ update: vi.fn(), destroy: vi.fn(), data: {} }));
+    vi.stubGlobal("Chart", chartCtor);
+    const fetchMock = makeSuccessfulFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const wrapper = mount(MembershipStatsPage, {
+      props: {
+        bootstrap: {
+          ...BOOTSTRAP,
+          apiActiveMembershipsUrl: "/api/v1/stats/membership/charts/active-memberships/detail",
+        } as MembershipStatsBootstrap,
+      },
+    });
+
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Active Memberships Over Time (by Membership Type)");
+    expect(wrapper.text()).toContain(
+      "Affects approval time cards, Requests Trend, Decision Outcomes, and Active Memberships Over Time.",
+    );
+    expect(fetchMock.mock.calls.map((call) => String(call[0]))).toContain(
+      "/api/v1/stats/membership/charts/active-memberships/detail?days=365",
+    );
+
+    const activeMembershipsConfig = chartCtor.mock.calls.find(
+      (call) => call[1]?.data?.datasets?.[0]?.label === "Individual",
+    )?.[1];
+
+    expect(activeMembershipsConfig?.type).toBe("line");
+    expect(activeMembershipsConfig?.options?.scales?.x?.stacked).toBe(true);
+    expect(activeMembershipsConfig?.options?.scales?.y?.stacked).toBe(true);
+    expect(activeMembershipsConfig?.data?.labels).toEqual(["2025-11", "2025-12"]);
+    expect(activeMembershipsConfig?.data?.datasets).toEqual([
+      expect.objectContaining({
+        label: "Individual",
+        data: [12, 14],
+        fill: true,
+      }),
+      expect.objectContaining({
+        label: "Sponsor Standard",
+        data: [0, 3],
+        fill: true,
+      }),
+    ]);
   });
 
   it("preserves the legacy fixed decision-status datasets with zero-filled missing series", () => {

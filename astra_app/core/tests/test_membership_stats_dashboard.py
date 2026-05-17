@@ -486,8 +486,18 @@ class MembershipStatsDashboardTests(TestCase):
         self.assertEqual(resp.json(), {"error": "Permission denied."})
 
     def test_membership_stats_page_renders_chart_assets_for_authorized_user(self) -> None:
-        # Covered by MembershipStatsSplitApiTests.test_stats_page_renders_vue_root_with_new_api_urls
-        pass
+        self._grant_membership_stats_permission()
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = self._reviewer_user()
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.get(reverse("membership-stats"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "data-membership-stats-root")
+        self.assertContains(resp, '<script src="/static/core/vendor/chartjs/chart.umd.min.js"></script>', html=True)
+        self.assertContains(resp, '<script src="/static/core/vendor/chartjs/chartjs-plugin-autocolors.min.js"></script>', html=True)
 
     def test_membership_stats_page_includes_total_freeipa_users_summary_card(self) -> None:
         FreeIPAPermissionGrant.objects.get_or_create(
@@ -1671,6 +1681,55 @@ class MembershipStatsSplitApiTests(TestCase):
             return self._reviewer
         return None
 
+    def _create_membership_type(
+        self,
+        *,
+        code: str = "individual",
+        name: str = "Individual",
+        category_name: str = "individual",
+        is_individual: bool = True,
+        is_organization: bool = False,
+    ) -> None:
+        MembershipTypeCategory.objects.update_or_create(
+            name=category_name,
+            defaults={
+                "is_individual": is_individual,
+                "is_organization": is_organization,
+                "sort_order": 0,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code=code,
+            defaults={
+                "name": name,
+                "group_cn": f"almalinux-{code}",
+                "category_id": category_name,
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+    def _create_membership_log_event(
+        self,
+        *,
+        username: str = "",
+        action: str,
+        created_at: datetime.datetime,
+        expires_at: datetime.datetime | None,
+        membership_type_id: str = "individual",
+        organization: Organization | None = None,
+    ) -> None:
+        log = MembershipLog.objects.create(
+            actor_username="committee",
+            target_username=username,
+            target_organization=organization,
+            membership_type_id=membership_type_id,
+            requested_group_cn=f"almalinux-{membership_type_id}",
+            action=action,
+            expires_at=expires_at,
+        )
+        MembershipLog.objects.filter(pk=log.pk).update(created_at=created_at, expires_at=expires_at)
+
     def test_summary_detail_endpoint_requires_permission(self) -> None:
         FreeIPAPermissionGrant.objects.all().delete()
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
@@ -1838,6 +1897,7 @@ class MembershipStatsSplitApiTests(TestCase):
         self.assertContains(resp, reverse("api-stats-membership-composition-charts-detail"))
         self.assertContains(resp, reverse("api-stats-membership-trends-charts-detail"))
         self.assertContains(resp, reverse("api-stats-membership-retention-chart-detail"))
+        self.assertContains(resp, reverse("api-stats-membership-active-memberships-chart-detail"))
 
     def test_summary_detail_endpoint_returns_same_data_only_shape(self) -> None:
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
@@ -1874,6 +1934,344 @@ class MembershipStatsSplitApiTests(TestCase):
         self.assertEqual(charts["requests_trend"], [])
         self.assertEqual(charts["decisions_trend"], [])
         self.assertEqual(charts["expirations_upcoming"], [])
+
+    def test_trends_detail_endpoint_uses_daily_periods_for_30_day_window(self) -> None:
+        frozen_now = datetime.datetime(2026, 2, 15, 12, 0, 0, tzinfo=datetime.UTC)
+        self._create_membership_type()
+        membership_type = MembershipType.objects.get(code="individual")
+        pending_request = MembershipRequest.objects.create(
+            requested_username="member-one",
+            membership_type=membership_type,
+            status=MembershipRequest.Status.pending,
+        )
+        MembershipRequest.objects.filter(pk=pending_request.pk).update(
+            requested_at=datetime.datetime(2026, 2, 1, 10, 0, 0, tzinfo=datetime.UTC),
+        )
+        approved_request = MembershipRequest.objects.create(
+            requested_username="member-two",
+            membership_type=membership_type,
+            status=MembershipRequest.Status.pending,
+        )
+        MembershipRequest.objects.filter(pk=approved_request.pk).update(
+            requested_at=datetime.datetime(2026, 2, 3, 10, 0, 0, tzinfo=datetime.UTC),
+            decided_at=datetime.datetime(2026, 2, 4, 9, 0, 0, tzinfo=datetime.UTC),
+            status=MembershipRequest.Status.approved,
+        )
+
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
+                resp = self.client.get(reverse("api-stats-membership-trends-charts-detail"), {"days": "30"})
+
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["charts"]["requests_trend"], [
+            {"period": "2026-02-01", "count": 1},
+            {"period": "2026-02-03", "count": 1},
+        ])
+        self.assertEqual(payload["charts"]["decisions_trend"], [
+            {"period": "2026-02-04", "status": MembershipRequest.Status.approved, "count": 1},
+        ])
+
+    def test_trends_detail_endpoint_uses_weekly_periods_for_365_day_window(self) -> None:
+        frozen_now = datetime.datetime(2026, 2, 15, 12, 0, 0, tzinfo=datetime.UTC)
+        self._create_membership_type()
+        membership_type = MembershipType.objects.get(code="individual")
+        first_pending_request = MembershipRequest.objects.create(
+            requested_username="member-one",
+            membership_type=membership_type,
+            status=MembershipRequest.Status.pending,
+        )
+        MembershipRequest.objects.filter(pk=first_pending_request.pk).update(
+            requested_at=datetime.datetime(2026, 1, 6, 10, 0, 0, tzinfo=datetime.UTC),
+        )
+        second_pending_request = MembershipRequest.objects.create(
+            requested_username="member-two",
+            membership_type=membership_type,
+            status=MembershipRequest.Status.pending,
+        )
+        MembershipRequest.objects.filter(pk=second_pending_request.pk).update(
+            requested_at=datetime.datetime(2026, 1, 10, 10, 0, 0, tzinfo=datetime.UTC),
+        )
+        rejected_request = MembershipRequest.objects.create(
+            requested_username="member-three",
+            membership_type=membership_type,
+            status=MembershipRequest.Status.pending,
+        )
+        MembershipRequest.objects.filter(pk=rejected_request.pk).update(
+            requested_at=datetime.datetime(2026, 1, 20, 10, 0, 0, tzinfo=datetime.UTC),
+            decided_at=datetime.datetime(2026, 1, 22, 11, 0, 0, tzinfo=datetime.UTC),
+            status=MembershipRequest.Status.rejected,
+        )
+
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
+                resp = self.client.get(reverse("api-stats-membership-trends-charts-detail"), {"days": "365"})
+
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["charts"]["requests_trend"], [
+            {"period": "2026-01-05", "count": 2},
+            {"period": "2026-01-19", "count": 1},
+        ])
+        self.assertEqual(payload["charts"]["decisions_trend"], [
+            {"period": "2026-01-19", "status": MembershipRequest.Status.rejected, "count": 1},
+        ])
+
+    def test_trends_detail_endpoint_uses_weekly_periods_for_90_day_window(self) -> None:
+        frozen_now = datetime.datetime(2026, 2, 15, 12, 0, 0, tzinfo=datetime.UTC)
+        self._create_membership_type()
+        membership_type = MembershipType.objects.get(code="individual")
+
+        for offset in range(61):
+            request = MembershipRequest.objects.create(
+                requested_username=f"member-{offset}",
+                membership_type=membership_type,
+                status=MembershipRequest.Status.pending,
+            )
+            requested_at = frozen_now - datetime.timedelta(days=offset)
+            MembershipRequest.objects.filter(pk=request.pk).update(requested_at=requested_at)
+
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
+                resp = self.client.get(reverse("api-stats-membership-trends-charts-detail"), {"days": "90"})
+
+        self.assertEqual(resp.status_code, 200)
+        requests_rows = resp.json()["charts"]["requests_trend"]
+        self.assertEqual(len(requests_rows), 9)
+        self.assertEqual(requests_rows[0], {"period": "2025-12-15", "count": 5})
+        self.assertEqual(requests_rows[1], {"period": "2025-12-22", "count": 7})
+        self.assertEqual(requests_rows[-1], {"period": "2026-02-09", "count": 7})
+
+    def test_active_memberships_over_time_detail_endpoint_returns_raw_period_membership_type_rows(self) -> None:
+        frozen_now = datetime.datetime(2026, 2, 15, 12, 0, 0, tzinfo=datetime.UTC)
+        self._create_membership_type()
+        self._create_membership_type(
+            code="sponsor-standard",
+            name="Sponsor Standard",
+            category_name="sponsorship",
+            is_individual=False,
+            is_organization=True,
+        )
+        self._create_membership_log_event(
+            username="member-one",
+            action=MembershipLog.Action.approved,
+            created_at=datetime.datetime(2025, 12, 1, 0, 0, 0, tzinfo=datetime.UTC),
+            expires_at=datetime.datetime(2026, 12, 1, 0, 0, 0, tzinfo=datetime.UTC),
+        )
+        self._create_membership_log_event(
+            username="member-two",
+            action=MembershipLog.Action.approved,
+            created_at=datetime.datetime(2026, 1, 1, 0, 0, 0, tzinfo=datetime.UTC),
+            expires_at=datetime.datetime(2027, 1, 1, 0, 0, 0, tzinfo=datetime.UTC),
+        )
+
+        organization = Organization.objects.create(name="Sponsor Org", representative="reviewer")
+        self._create_membership_log_event(
+            action=MembershipLog.Action.approved,
+            created_at=datetime.datetime(2026, 2, 1, 0, 0, 0, tzinfo=datetime.UTC),
+            expires_at=datetime.datetime(2027, 2, 1, 0, 0, 0, tzinfo=datetime.UTC),
+            membership_type_id="sponsor-standard",
+            organization=organization,
+        )
+
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
+                resp = self.client.get(
+                    reverse("api-stats-membership-active-memberships-chart-detail"),
+                    {"days": "all"},
+                )
+
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["days_param"], "all")
+        self.assertEqual(
+            payload["charts"]["active_memberships_over_time"],
+            [
+                {
+                    "period": "2025-12",
+                    "membership_type": {"code": "individual", "name": "Individual"},
+                    "count": 1,
+                },
+                {
+                    "period": "2025-12",
+                    "membership_type": {"code": "sponsor-standard", "name": "Sponsor Standard"},
+                    "count": 0,
+                },
+                {
+                    "period": "2026-01",
+                    "membership_type": {"code": "individual", "name": "Individual"},
+                    "count": 2,
+                },
+                {
+                    "period": "2026-01",
+                    "membership_type": {"code": "sponsor-standard", "name": "Sponsor Standard"},
+                    "count": 0,
+                },
+                {
+                    "period": "2026-02",
+                    "membership_type": {"code": "individual", "name": "Individual"},
+                    "count": 2,
+                },
+                {
+                    "period": "2026-02",
+                    "membership_type": {"code": "sponsor-standard", "name": "Sponsor Standard"},
+                    "count": 1,
+                },
+            ],
+        )
+
+    def test_active_memberships_over_time_detail_endpoint_does_not_leak_pre_window_activity_into_first_bounded_period(self) -> None:
+        frozen_now = datetime.datetime(2026, 2, 15, 12, 0, 0, tzinfo=datetime.UTC)
+        self._create_membership_type()
+        self._create_membership_log_event(
+            username="former-member",
+            action=MembershipLog.Action.approved,
+            created_at=datetime.datetime(2026, 1, 1, 9, 0, 0, tzinfo=datetime.UTC),
+            expires_at=datetime.datetime(2026, 4, 1, 0, 0, 0, tzinfo=datetime.UTC),
+        )
+        self._create_membership_log_event(
+            username="former-member",
+            action=MembershipLog.Action.terminated,
+            created_at=datetime.datetime(2026, 1, 10, 18, 0, 0, tzinfo=datetime.UTC),
+            expires_at=datetime.datetime(2026, 1, 10, 18, 0, 0, tzinfo=datetime.UTC),
+        )
+
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
+                resp = self.client.get(
+                    reverse("api-stats-membership-active-memberships-chart-detail"),
+                    {"days": "30"},
+                )
+
+        self.assertEqual(resp.status_code, 200)
+        rows = resp.json()["charts"]["active_memberships_over_time"]
+        self.assertNotIn("2026-01-01", {row["period"] for row in rows})
+        self.assertIn(
+            {
+                "period": "2026-01-16",
+                "membership_type": {"code": "individual", "name": "Individual"},
+                "count": 0,
+            },
+            rows,
+        )
+
+    def test_active_memberships_over_time_detail_endpoint_uses_termination_history_for_bounded_daily_snapshots(self) -> None:
+        frozen_now = datetime.datetime(2026, 2, 15, 12, 0, 0, tzinfo=datetime.UTC)
+        self._create_membership_type()
+        self._create_membership_log_event(
+            username="former-member",
+            action=MembershipLog.Action.approved,
+            created_at=datetime.datetime(2026, 1, 1, 9, 0, 0, tzinfo=datetime.UTC),
+            expires_at=datetime.datetime(2026, 4, 1, 0, 0, 0, tzinfo=datetime.UTC),
+        )
+        self._create_membership_log_event(
+            username="former-member",
+            action=MembershipLog.Action.terminated,
+            created_at=datetime.datetime(2026, 2, 5, 8, 0, 0, tzinfo=datetime.UTC),
+            expires_at=datetime.datetime(2026, 2, 5, 8, 0, 0, tzinfo=datetime.UTC),
+        )
+
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
+                resp = self.client.get(
+                    reverse("api-stats-membership-active-memberships-chart-detail"),
+                    {"days": "30"},
+                )
+
+        self.assertEqual(resp.status_code, 200)
+        counts_by_period = {
+            row["period"]: row["count"]
+            for row in resp.json()["charts"]["active_memberships_over_time"]
+            if row["membership_type"]["code"] == "individual"
+        }
+        self.assertEqual(counts_by_period["2026-02-04"], 1)
+        self.assertEqual(counts_by_period["2026-02-05"], 0)
+
+    def test_active_memberships_over_time_detail_endpoint_uses_weekly_periods_for_365_day_window(self) -> None:
+        frozen_now = datetime.datetime(2026, 2, 15, 12, 0, 0, tzinfo=datetime.UTC)
+        self._create_membership_type()
+        self._create_membership_log_event(
+            username="member-one",
+            action=MembershipLog.Action.approved,
+            created_at=datetime.datetime(2026, 1, 6, 9, 0, 0, tzinfo=datetime.UTC),
+            expires_at=datetime.datetime(2026, 4, 1, 0, 0, 0, tzinfo=datetime.UTC),
+        )
+        self._create_membership_log_event(
+            username="member-two",
+            action=MembershipLog.Action.approved,
+            created_at=datetime.datetime(2026, 1, 10, 9, 0, 0, tzinfo=datetime.UTC),
+            expires_at=datetime.datetime(2026, 4, 1, 0, 0, 0, tzinfo=datetime.UTC),
+        )
+
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
+                resp = self.client.get(
+                    reverse("api-stats-membership-active-memberships-chart-detail"),
+                    {"days": "365"},
+                )
+
+        self.assertEqual(resp.status_code, 200)
+        rows = [
+            row
+            for row in resp.json()["charts"]["active_memberships_over_time"]
+            if row["membership_type"]["code"] == "individual" and row["count"] > 0
+        ]
+        self.assertEqual(rows[0], {
+            "period": "2026-01-05",
+            "membership_type": {"code": "individual", "name": "Individual"},
+            "count": 2,
+        })
+
+    def test_active_memberships_over_time_detail_endpoint_uses_weekly_periods_for_90_day_window(self) -> None:
+        frozen_now = datetime.datetime(2026, 2, 15, 12, 0, 0, tzinfo=datetime.UTC)
+        self._create_membership_type()
+        self._create_membership_log_event(
+            username="member-one",
+            action=MembershipLog.Action.approved,
+            created_at=datetime.datetime(2025, 12, 17, 9, 0, 0, tzinfo=datetime.UTC),
+            expires_at=datetime.datetime(2026, 4, 1, 0, 0, 0, tzinfo=datetime.UTC),
+        )
+        self._create_membership_log_event(
+            username="member-two",
+            action=MembershipLog.Action.approved,
+            created_at=datetime.datetime(2025, 12, 18, 9, 0, 0, tzinfo=datetime.UTC),
+            expires_at=datetime.datetime(2026, 4, 1, 0, 0, 0, tzinfo=datetime.UTC),
+        )
+        self._create_membership_log_event(
+            username="member-three",
+            action=MembershipLog.Action.approved,
+            created_at=datetime.datetime(2025, 12, 19, 9, 0, 0, tzinfo=datetime.UTC),
+            expires_at=datetime.datetime(2026, 4, 1, 0, 0, 0, tzinfo=datetime.UTC),
+        )
+
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
+                resp = self.client.get(
+                    reverse("api-stats-membership-active-memberships-chart-detail"),
+                    {"days": "90"},
+                )
+
+        self.assertEqual(resp.status_code, 200)
+        rows = [
+            row
+            for row in resp.json()["charts"]["active_memberships_over_time"]
+            if row["membership_type"]["code"] == "individual" and row["count"] > 0
+        ]
+        self.assertEqual(rows[0], {
+            "period": "2025-12-15",
+            "membership_type": {"code": "individual", "name": "Individual"},
+            "count": 3,
+        })
+        self.assertEqual(rows[1], {
+            "period": "2025-12-22",
+            "membership_type": {"code": "individual", "name": "Individual"},
+            "count": 3,
+        })
+
+    def test_active_memberships_over_time_detail_endpoint_invalid_days_returns_400(self) -> None:
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
+            resp = self.client.get(reverse("api-stats-membership-active-memberships-chart-detail"), {"days": "7"})
+        self.assertEqual(resp.status_code, 400)
 
     def test_retention_detail_endpoint_returns_raw_cohort_rows_instead_of_chart_labels(self) -> None:
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):

@@ -2,15 +2,17 @@ import datetime
 import logging
 import math
 import statistics
+from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from collections.abc import Mapping
+from enum import StrEnum
 from urllib.parse import urlencode
 
 from django.conf import settings
 from django.contrib.auth.decorators import permission_required, user_passes_test
 from django.core.cache import cache
 from django.db.models import Count, Q
-from django.db.models.functions import TruncMonth
+from django.db.models.functions import TruncDay, TruncMonth, TruncWeek
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.template.defaultfilters import date as format_date
@@ -52,6 +54,59 @@ def _add_months_utc(value: datetime.datetime, months: int) -> datetime.datetime:
     year = value.year + (month_index // 12)
     month = (month_index % 12) + 1
     return value.replace(year=year, month=month, day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
+class MembershipStatsTimeBucket(StrEnum):
+    day = "day"
+    week = "week"
+    month = "month"
+
+
+def _resolve_stats_time_bucket(*, days_window: int | None) -> MembershipStatsTimeBucket:
+    if days_window is None:
+        return MembershipStatsTimeBucket.month
+    if days_window <= 30:
+        return MembershipStatsTimeBucket.day
+    return MembershipStatsTimeBucket.week
+
+
+def _stats_period_start_local(
+    *,
+    value: datetime.datetime,
+    bucket: MembershipStatsTimeBucket,
+    local_tz: datetime.tzinfo,
+    anchor_local: datetime.datetime | None = None,
+) -> datetime.datetime:
+    local_value = timezone.localtime(value, local_tz).replace(hour=0, minute=0, second=0, microsecond=0)
+    if bucket == MembershipStatsTimeBucket.day:
+        return local_value
+    if bucket == MembershipStatsTimeBucket.week:
+        week_start = local_value.date() - datetime.timedelta(days=local_value.weekday())
+        return datetime.datetime.combine(week_start, datetime.time.min, tzinfo=local_tz)
+    return local_value.replace(day=1)
+
+
+def _stats_next_period_start_local(
+    *,
+    value: datetime.datetime,
+    bucket: MembershipStatsTimeBucket,
+) -> datetime.datetime:
+    if bucket == MembershipStatsTimeBucket.day:
+        return value + datetime.timedelta(days=1)
+    if bucket == MembershipStatsTimeBucket.week:
+        return value + datetime.timedelta(days=7)
+    if value.month == 12:
+        return value.replace(year=value.year + 1, month=1, day=1)
+    return value.replace(month=value.month + 1, day=1)
+
+
+def _format_stats_period_label(*, value: datetime.datetime | None, bucket: MembershipStatsTimeBucket) -> str | None:
+    if value is None:
+        return None
+    local_value = timezone.localtime(value)
+    if bucket == MembershipStatsTimeBucket.month:
+        return local_value.strftime("%Y-%m")
+    return local_value.date().isoformat()
 
 
 def _compute_retention_cohort_12m(
@@ -420,6 +475,7 @@ def membership_stats(request: HttpRequest) -> HttpResponse:
             "api_composition_charts_url": reverse("api-stats-membership-composition-charts-detail"),
             "api_trends_charts_url": reverse("api-stats-membership-trends-charts-detail"),
             "api_retention_chart_url": reverse("api-stats-membership-retention-chart-detail"),
+            "api_active_memberships_chart_url": reverse("api-stats-membership-active-memberships-chart-detail"),
         },
     )
 
@@ -622,6 +678,7 @@ def _build_membership_stats_trends_payloads(
     days_window: int | None,
 ) -> dict[str, object]:
     trend_start = now - datetime.timedelta(days=days_window) if days_window is not None else None
+    bucket = _resolve_stats_time_bucket(days_window=days_window)
     decision_statuses = [
         MembershipRequest.Status.approved,
         MembershipRequest.Status.rejected,
@@ -630,15 +687,22 @@ def _build_membership_stats_trends_payloads(
     ]
 
     def period_label(value: datetime.datetime | None) -> str | None:
-        if value is None:
-            return None
-        return timezone.localtime(value).strftime("%Y-%m")
+        return _format_stats_period_label(value=value, bucket=bucket)
+
+    requests_period = TruncMonth("requested_at")
+    decisions_period = TruncMonth("decided_at")
+    if bucket == MembershipStatsTimeBucket.day:
+        requests_period = TruncDay("requested_at")
+        decisions_period = TruncDay("decided_at")
+    elif bucket == MembershipStatsTimeBucket.week:
+        requests_period = TruncWeek("requested_at")
+        decisions_period = TruncWeek("decided_at")
 
     requests_qs = MembershipRequest.objects.all()
     if trend_start is not None:
         requests_qs = requests_qs.filter(requested_at__gte=trend_start)
     request_rows = (
-        requests_qs.annotate(period=TruncMonth("requested_at")).values("period").annotate(count=Count("id")).order_by("period")
+        requests_qs.annotate(period=requests_period).values("period").annotate(count=Count("id")).order_by("period")
     )
     requests_rows = [
         {"period": label, "count": int(row["count"])}
@@ -651,7 +715,7 @@ def _build_membership_stats_trends_payloads(
     if trend_start is not None:
         decisions_qs = decisions_qs.filter(decided_at__gte=trend_start)
     decision_rows = (
-        decisions_qs.annotate(period=TruncMonth("decided_at"))
+        decisions_qs.annotate(period=decisions_period)
         .values("period", "status")
         .annotate(count=Count("id"))
         .order_by("period", "status")
@@ -710,6 +774,139 @@ def _build_membership_stats_trends_payloads(
     }
 
 
+def _build_membership_stats_active_memberships_chart_payloads(
+    *,
+    now: datetime.datetime,
+    days_param: str,
+    days_window: int | None,
+) -> dict[str, object]:
+    bucket = _resolve_stats_time_bucket(days_window=days_window)
+    relevant_actions = [
+        MembershipLog.Action.approved,
+        MembershipLog.Action.expiry_changed,
+        MembershipLog.Action.terminated,
+    ]
+    events = list(
+        MembershipLog.objects.filter(action__in=relevant_actions)
+        .select_related("membership_type")
+        .order_by(
+            "membership_type_id",
+            "target_username",
+            "target_organization_code",
+            "created_at",
+            "id",
+        )
+    )
+
+    if not events:
+        rows: list[dict[str, object]] = []
+    else:
+        local_tz = timezone.get_current_timezone()
+        now_utc = now.astimezone(datetime.UTC)
+
+        checkpoints: list[tuple[str, datetime.datetime]] = []
+        if days_window is None:
+            earliest_event_at = min(event.created_at for event in events)
+            current_period = _stats_period_start_local(
+                value=earliest_event_at,
+                bucket=bucket,
+                local_tz=local_tz,
+            )
+        else:
+            current_period = _stats_period_start_local(
+                value=now - datetime.timedelta(days=days_window),
+                bucket=bucket,
+                local_tz=local_tz,
+            )
+        period_anchor_local = current_period
+
+        current_bucket = _stats_period_start_local(
+            value=now,
+            bucket=bucket,
+            local_tz=local_tz,
+            anchor_local=period_anchor_local,
+        )
+        while current_period <= current_bucket:
+            next_period = _stats_next_period_start_local(value=current_period, bucket=bucket)
+            snapshot_at = now_utc if current_period == current_bucket else next_period.astimezone(datetime.UTC)
+            label = _format_stats_period_label(value=current_period, bucket=bucket)
+            if label is not None:
+                checkpoints.append((label, snapshot_at))
+            current_period = next_period
+
+        checkpoints_at = [snapshot_at for _label, snapshot_at in checkpoints]
+        intervals_by_type: dict[str, list[tuple[datetime.datetime, datetime.datetime | None]]] = defaultdict(list)
+        type_names: dict[str, str] = {}
+        events_by_membership: dict[tuple[str, str], list[MembershipLog]] = defaultdict(list)
+        for event in events:
+            target_key = f"user:{event.target_username}" if event.target_username else f"org:{event.organization_identifier}"
+            events_by_membership[(target_key, str(event.membership_type_id))].append(event)
+            type_names[str(event.membership_type_id)] = str(event.membership_type.name)
+
+        for (_target_key, membership_type_id), membership_events in events_by_membership.items():
+            current_start: datetime.datetime | None = None
+            current_end: datetime.datetime | None = None
+            for event in membership_events:
+                event_created_at = event.created_at.astimezone(datetime.UTC)
+                event_expires_at = event.expires_at.astimezone(datetime.UTC) if event.expires_at is not None else None
+                if event.action in {MembershipLog.Action.approved, MembershipLog.Action.expiry_changed}:
+                    if current_start is None or (current_end is not None and current_end <= event_created_at):
+                        current_start = event_created_at
+                    current_end = event_expires_at
+                    continue
+
+                if current_start is None:
+                    continue
+
+                interval_end = event_created_at if current_end is None else min(event_created_at, current_end)
+                if interval_end > current_start:
+                    intervals_by_type[membership_type_id].append((current_start, interval_end))
+                current_start = None
+                current_end = None
+
+            if current_start is not None and (current_end is None or current_end > current_start):
+                intervals_by_type[membership_type_id].append((current_start, current_end))
+
+        deltas_by_type = {
+            membership_type_id: [0] * (len(checkpoints) + 1)
+            for membership_type_id in sorted(type_names)
+        }
+        for membership_type_id, intervals in intervals_by_type.items():
+            deltas = deltas_by_type[membership_type_id]
+            for interval_start, interval_end in intervals:
+                start_index = bisect_right(checkpoints_at, interval_start)
+                if start_index >= len(checkpoints):
+                    continue
+                end_index = len(checkpoints) if interval_end is None else bisect_left(checkpoints_at, interval_end)
+                deltas[start_index] += 1
+                deltas[end_index] -= 1
+
+        ordered_types = sorted(type_names.items(), key=lambda item: (item[1], item[0]))
+        rows = []
+        running_counts = {membership_type_id: 0 for membership_type_id in deltas_by_type}
+        for checkpoint_index, (label, _snapshot_at) in enumerate(checkpoints):
+            for membership_type_id, _name in ordered_types:
+                running_counts[membership_type_id] += deltas_by_type[membership_type_id][checkpoint_index]
+                rows.append(
+                    {
+                        "period": label,
+                        "membership_type": {
+                            "code": membership_type_id,
+                            "name": type_names[membership_type_id],
+                        },
+                        "count": running_counts[membership_type_id],
+                    }
+                )
+
+    return {
+        "generated_at": timezone.localtime(now).isoformat(),
+        "days_param": days_param,
+        "charts": {
+            "active_memberships_over_time": rows,
+        },
+    }
+
+
 @json_permission_required_any(MEMBERSHIP_PERMISSIONS)
 def stats_membership_trends_charts_detail_api(request: HttpRequest) -> HttpResponse:
     try:
@@ -726,7 +923,28 @@ def stats_membership_trends_charts_detail_api(request: HttpRequest) -> HttpRespo
             days_window=days_window,
         )
 
-    cache_key = f"membership_stats:trends:v2:detail:days={days_param}"
+    cache_key = f"membership_stats:trends:v3:detail:days={days_param}"
+    payload = cache.get_or_set(cache_key, compute, timeout=300)
+    return JsonResponse(payload)
+
+
+@json_permission_required_any(MEMBERSHIP_PERMISSIONS)
+def stats_membership_active_memberships_chart_detail_api(request: HttpRequest) -> HttpResponse:
+    try:
+        days_param, days_window = _parse_membership_stats_days_param(request)
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+
+    now = timezone.now()
+
+    def compute() -> dict[str, object]:
+        return _build_membership_stats_active_memberships_chart_payloads(
+            now=now,
+            days_param=days_param,
+            days_window=days_window,
+        )
+
+    cache_key = f"membership_stats:active_memberships:v3:detail:days={days_param}"
     payload = cache.get_or_set(cache_key, compute, timeout=300)
     return JsonResponse(payload)
 

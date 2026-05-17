@@ -20,10 +20,12 @@ const canvasRequestsTrend = ref<HTMLCanvasElement | null>(null);
 const canvasDecisionsTrend = ref<HTMLCanvasElement | null>(null);
 const canvasExpirations = ref<HTMLCanvasElement | null>(null);
 const canvasRetention = ref<HTMLCanvasElement | null>(null);
+const canvasActiveMemberships = ref<HTMLCanvasElement | null>(null);
 
 type ChartKey =
   | "membershipTypes"
   | "requestsTrend"
+  | "activeMemberships"
   | "decisionsTrend"
   | "expirations"
   | "nationalityAll"
@@ -34,6 +36,7 @@ type ChartRef = { instance: ChartInstance | null };
 const charts: Record<ChartKey, ChartRef> = {
   membershipTypes: { instance: null },
   requestsTrend: { instance: null },
+  activeMemberships: { instance: null },
   decisionsTrend: { instance: null },
   expirations: { instance: null },
   nationalityAll: { instance: null },
@@ -44,12 +47,17 @@ const charts: Record<ChartKey, ChartRef> = {
 const chartLoading = ref<Record<ChartKey, boolean>>({
   membershipTypes: true,
   requestsTrend: true,
+  activeMemberships: true,
   decisionsTrend: true,
   expirations: true,
   nationalityAll: true,
   nationalityMembers: true,
   retention: true,
 });
+
+const SHARED_PERIOD_TOOLTIP_OPTIONS = { mode: "index", intersect: false } as const;
+
+let autocolorsRegistered = false;
 
 function destroyChart(key: ChartKey): void {
   charts[key].instance?.destroy();
@@ -59,6 +67,7 @@ function destroyChart(key: ChartKey): void {
 function destroyAllCharts(): void {
   destroyChart("membershipTypes");
   destroyChart("requestsTrend");
+  destroyChart("activeMemberships");
   destroyChart("decisionsTrend");
   destroyChart("expirations");
   destroyChart("nationalityAll");
@@ -70,6 +79,7 @@ function resetChartLoading(): void {
   chartLoading.value = {
     membershipTypes: true,
     requestsTrend: true,
+    activeMemberships: true,
     decisionsTrend: true,
     expirations: true,
     nationalityAll: true,
@@ -85,6 +95,7 @@ function hideChartLoading(key: ChartKey): void {
 function hideAllChartLoading(): void {
   hideChartLoading("membershipTypes");
   hideChartLoading("requestsTrend");
+  hideChartLoading("activeMemberships");
   hideChartLoading("decisionsTrend");
   hideChartLoading("expirations");
   hideChartLoading("nationalityAll");
@@ -96,6 +107,7 @@ function getCanvas(key: ChartKey): HTMLCanvasElement | null {
   const map: Record<ChartKey, HTMLCanvasElement | null> = {
     membershipTypes: canvasMembershipTypes.value,
     requestsTrend: canvasRequestsTrend.value,
+    activeMemberships: canvasActiveMemberships.value,
     decisionsTrend: canvasDecisionsTrend.value,
     expirations: canvasExpirations.value,
     nationalityAll: canvasNationalityAll.value,
@@ -129,6 +141,11 @@ function buildChart(key: ChartKey, config: ChartConfiguration): void {
   if (!canvas) return;
   const ChartCtor = resolveChartConstructor();
   if (!ChartCtor) return;
+  const autocolorsPlugin = window["chartjs-plugin-autocolors"];
+  if (!autocolorsRegistered && autocolorsPlugin && typeof ChartCtor.register === "function") {
+    ChartCtor.register(autocolorsPlugin);
+    autocolorsRegistered = true;
+  }
   // Chart.js is loaded as a global static asset
   charts[key].instance = new ChartCtor(canvas, config);
 }
@@ -191,6 +208,10 @@ function renderDoughnut(key: ChartKey, labels: string[], data: number[], title: 
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
+          autocolors: {
+            enabled: true,
+            mode: "data",
+          },
           tooltip: {
             callbacks: {
               label: formatDoughnutTooltipLabel,
@@ -202,28 +223,44 @@ function renderDoughnut(key: ChartKey, labels: string[], data: number[], title: 
   });
 }
 
-function renderLine(key: ChartKey, labels: string[], data: number[], title: string): void {
+function renderLineDatasets(
+  key: ChartKey,
+  labels: string[],
+  datasets: Array<{
+    label: string;
+    data: number[];
+  }>,
+  options: {
+    stacked?: boolean;
+    fill?: boolean;
+  } = {},
+): void {
+  const { stacked = false, fill = false } = options;
   renderChartSafely(key, () => {
     buildChart(key, {
       type: "line",
       data: {
         labels,
-        datasets: [
-          {
-            label: title,
-            data,
-            borderColor: "rgba(60,141,188,0.8)",
-            backgroundColor: "rgba(60,141,188,0.2)",
-            fill: true,
-            tension: 0.2,
-          },
-        ],
+        datasets: datasets.map((dataset) => ({
+          ...dataset,
+          fill,
+          tension: 0.2,
+        })),
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        interaction: SHARED_PERIOD_TOOLTIP_OPTIONS,
+        plugins: {
+          autocolors: {
+            enabled: true,
+          },
+          tooltip: SHARED_PERIOD_TOOLTIP_OPTIONS,
+        },
         scales: {
+          x: { stacked },
           y: {
+            stacked,
             beginAtZero: true,
             ticks: { precision: 0 },
           },
@@ -231,6 +268,10 @@ function renderLine(key: ChartKey, labels: string[], data: number[], title: stri
       },
     });
   });
+}
+
+function renderLine(key: ChartKey, labels: string[], data: number[], title: string): void {
+  renderLineDatasets(key, labels, [{ label: title, data }], { fill: true });
 }
 
 function renderStackedBar(
@@ -252,6 +293,13 @@ function renderStackedBar(
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        interaction: SHARED_PERIOD_TOOLTIP_OPTIONS,
+        plugins: {
+          autocolors: {
+            enabled: true,
+          },
+          tooltip: SHARED_PERIOD_TOOLTIP_OPTIONS,
+        },
         scales: {
           x: { stacked: true },
           y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } },
@@ -271,13 +319,19 @@ function renderBar(key: ChartKey, labels: string[], data: number[], title: strin
           {
             label: title,
             data,
-            backgroundColor: "rgba(60,141,188,0.7)",
           },
         ],
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        interaction: SHARED_PERIOD_TOOLTIP_OPTIONS,
+        plugins: {
+          autocolors: {
+            enabled: true,
+          },
+          tooltip: SHARED_PERIOD_TOOLTIP_OPTIONS,
+        },
         scales: {
           y: { beginAtZero: true, ticks: { precision: 0 } },
         },
@@ -287,8 +341,8 @@ function renderBar(key: ChartKey, labels: string[], data: number[], title: strin
 }
 
 function renderCharts(): void {
-  const { compositionCharts, trendsCharts, retentionCharts } = stats;
-  if (!compositionCharts.value || !trendsCharts.value || !retentionCharts.value) {
+  const { compositionCharts, trendsCharts, retentionCharts, activeMembershipsCharts } = stats;
+  if (!compositionCharts.value || !trendsCharts.value || !retentionCharts.value || !activeMembershipsCharts.value) {
     return;
   }
 
@@ -297,6 +351,12 @@ function renderCharts(): void {
 
   const requests = trendsCharts.value.requests_trend;
   renderLine("requestsTrend", requests.labels ?? [], requests.counts ?? [], "Requests");
+
+  const activeMemberships = activeMembershipsCharts.value.active_memberships_over_time;
+  renderLineDatasets("activeMemberships", activeMemberships.labels ?? [], activeMemberships.datasets ?? [], {
+    stacked: true,
+    fill: true,
+  });
 
   const decisions = trendsCharts.value.decisions_trend;
   renderStackedBar(
@@ -338,22 +398,19 @@ function renderCharts(): void {
     {
       label: "Retained",
       data: retention.retained ?? [],
-      backgroundColor: "rgba(40,167,69,0.75)",
     },
     {
       label: "Lapsed then renewed",
       data: retention.lapsed_then_renewed ?? [],
-      backgroundColor: "rgba(255,193,7,0.8)",
     },
     {
       label: "Lapsed (not renewed)",
       data: retention.lapsed_not_renewed ?? [],
-      backgroundColor: "rgba(220,53,69,0.75)",
     },
   ]);
 }
 
-watch([stats.compositionCharts, stats.trendsCharts, stats.retentionCharts], () => {
+watch([stats.compositionCharts, stats.trendsCharts, stats.retentionCharts, stats.activeMembershipsCharts], () => {
   renderCharts();
 });
 
@@ -439,7 +496,7 @@ function hasRetentionCohortRows(): boolean {
             </button>
           </div>
           <small class="text-muted ml-3">
-            Affects approval time cards, Requests Trend, and Decision Outcomes.
+            Affects approval time cards, Requests Trend, Decision Outcomes, and Active Memberships Over Time.
           </small>
         </div>
       </div>
@@ -652,6 +709,28 @@ function hasRetentionCohortRows(): boolean {
               </div>
             </div>
             <canvas ref="canvasRequestsTrend" id="requests-trend-chart" height="260" />
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col-12">
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">Active Memberships Over Time (by Membership Type)</h3>
+            <div class="card-tools">
+              <span class="badge badge-secondary">{{ stats.currentDays.value === 'all' ? 'All time' : `Last ${stats.currentDays.value} days` }}</span>
+            </div>
+          </div>
+          <div class="card-body" style="position: relative; min-height: 320px">
+            <div v-if="chartLoading.activeMemberships" class="d-flex align-items-center justify-content-center" data-chart-loading="active-memberships" style="position: absolute; inset: 0">
+              <div class="text-center">
+                <div class="spinner-border" role="status" aria-hidden="true" />
+                <div class="mt-2 text-muted">Loading…</div>
+              </div>
+            </div>
+            <canvas ref="canvasActiveMemberships" id="active-memberships-over-time-chart" height="260" />
           </div>
         </div>
       </div>

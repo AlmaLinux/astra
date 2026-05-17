@@ -31,6 +31,7 @@ interface ChartOptions {
   maintainAspectRatio?: boolean;
   scales?: Record<string, unknown>;
   plugins?: Record<string, unknown>;
+  interaction?: Record<string, unknown>;
   indexAxis?: string;
 }
 
@@ -47,11 +48,13 @@ interface ChartInstance {
 }
 
 interface ChartConstructor {
+  register?: (plugin: unknown) => void;
   new (canvas: HTMLCanvasElement, config: ChartConfiguration): ChartInstance;
 }
 
 interface Window {
   Chart?: ChartConstructor | { Chart: ChartConstructor };
+  "chartjs-plugin-autocolors"?: unknown;
   ChatChannelsEditor?: {
     initAll?: (scope?: ParentNode) => void;
   };
