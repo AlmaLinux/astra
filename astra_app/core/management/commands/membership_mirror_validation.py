@@ -89,6 +89,7 @@ class Command(BaseCommand):
                 if validation.membership_request.status in _CLOSED_MEMBERSHIP_REQUEST_STATUSES:
                     logger.info("dry-run: would delete closed-request validation for request %s", request_id)
                     continue
+                run_validation(membership_request=validation.membership_request)
                 logger.info("dry-run: would validate request %s status=%s", request_id, validation.status)
             for request_id in missing_request_ids:
                 logger.info("dry-run: missing mirror validation row for request %s", request_id)
@@ -247,6 +248,7 @@ class Command(BaseCommand):
             return
 
         if dry_run:
+            run_validation(membership_request=membership_request)
             logger.info("dry-run: would validate request ID %s via --request-id", request_id)
             return
 

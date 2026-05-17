@@ -45,10 +45,10 @@ _BUBBLE_BG_COLORS: list[str] = [
 ]
 _MIRROR_VALIDATION_NOTE_HEADER = "Mirror validation summary"
 _MIRROR_VALIDATION_BOLD_LABELS = {
-    "Domain",
-    "Mirror status",
-    "AlmaLinux mirror network",
-    "GitHub pull request",
+    "Domain responds",
+    "Mirror timestamp is current",
+    "AlmaLinux mirror network registration",
+    "GitHub pull request is valid",
 }
 _MEMBERSHIP_NOTE_MARKDOWN_SETTINGS = "membership_note"
 

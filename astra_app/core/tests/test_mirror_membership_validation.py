@@ -17,12 +17,18 @@ from core.mirror_membership_validation import (
     InaccessibleMirrorTargetError,
     UnsafeMirrorTargetError,
     ValidationOutcome,
+    _describe_github_result,
+    _parse_mirror_timestamp_value,
+    _sanitize_timestamp_url_for_storage,
+    _timestamp_candidate_urls,
     _validate_almalinux_mirror_network_registration,
     _validate_github_reference,
+    build_validation_note_content,
     finalize_validation,
     mirror_answers_fingerprint,
     mirror_request_answers,
     mirror_request_answers_from_responses,
+    run_validation,
     schedule_mirror_membership_validation,
 )
 from core.models import MembershipRequest, MembershipType, MirrorMembershipValidation, Note, Organization
@@ -139,13 +145,129 @@ class MirrorMembershipValidationTests(TestCase):
             responses=responses or self._mirror_responses(),
         )
 
+    def test_parse_mirror_timestamp_accepts_12_hour_utc_format(self) -> None:
+        parsed = _parse_mirror_timestamp_value(b"Sun May 17 08:00:07 AM UTC 2026\n")
+
+        self.assertEqual(
+            parsed,
+            datetime.datetime(2026, 5, 17, 8, 0, 7, tzinfo=datetime.UTC),
+        )
+
+    def test_describe_github_retryable_failure_falls_back_to_http_status(self) -> None:
+        description = _describe_github_result(
+            {
+                "status": "retryable_upstream_failure",
+                "http_status": 503,
+                "url": "https://github.com/AlmaLinux/mirrors/pull/123",
+            }
+        )
+
+        self.assertEqual(description, "retryable upstream failure (503)")
+
+    def test_build_validation_note_content_uses_action_oriented_labels_and_symbols(self) -> None:
+        validation = MirrorMembershipValidation(
+            result={
+                "domain": {"status": "reachable", "url": "https://mirror.example.org", "http_status": 200},
+                "timestamp": {"status": "retryable_failure", "detail": "timeout", "checked_urls": []},
+                "almalinux_mirror_network": {
+                    "status": "not_registered",
+                    "url": "https://raw.githubusercontent.com/AlmaLinux/mirrors/refs/heads/master/mirrors.d/mirror.example.org.yml",
+                    "http_status": 404,
+                },
+                "github": {"status": "not_checked", "detail": "request closed before validation"},
+            }
+        )
+
+        self.assertEqual(
+            build_validation_note_content(validation=validation),
+            "\n".join(
+                [
+                    "Mirror validation summary",
+                    "Domain responds: ✓ reachable",
+                    "Mirror timestamp is current: ? retryable failure (timeout)",
+                    "AlmaLinux mirror network registration: ✗ not registered",
+                    "GitHub pull request is valid: ? request closed before validation",
+                ]
+            ),
+        )
+
+    def test_timestamp_candidate_urls_use_time_suffix_in_existing_prefix_order(self) -> None:
+        self.assertEqual(
+            _timestamp_candidate_urls("https://mirror.example.org/pub"),
+            (
+                "https://mirror.example.org/TIME",
+                "https://mirror.example.org/almalinux/TIME",
+                "https://mirror.example.org/almalinux-kitten/TIME",
+                "https://mirror.example.org/alma/TIME",
+            ),
+        )
+
+    def test_sanitize_timestamp_url_for_storage_preserves_root_time_path(self) -> None:
+        self.assertEqual(
+            _sanitize_timestamp_url_for_storage("https://mirror.example.org/TIME"),
+            "https://mirror.example.org/TIME",
+        )
+
+    def test_run_validation_prefers_retryable_over_soft_terminal_timestamp_failure(self) -> None:
+        membership_request = self._create_user_request()
+
+        with (
+            patch(
+                "core.mirror_membership_validation._validate_domain",
+                return_value={"status": "reachable", "url": "https://mirror.example.org", "http_status": 200},
+                autospec=True,
+            ),
+            patch(
+                "core.mirror_membership_validation._validate_timestamp_files",
+                return_value={"status": "not_found", "detail": "timestamp files not found", "checked_urls": []},
+                autospec=True,
+            ),
+            patch(
+                "core.mirror_membership_validation._validate_almalinux_mirror_network_registration",
+                return_value={
+                    "status": "registered",
+                    "expected_file_path": "mirrors.d/mirror.example.org.yml",
+                },
+                autospec=True,
+            ),
+            patch(
+                "core.mirror_membership_validation._validate_github_reference",
+                return_value={"status": "retryable_upstream_failure", "http_status": 503},
+                autospec=True,
+            ),
+        ):
+            outcome = run_validation(membership_request=membership_request)
+
+        self.assertEqual(outcome.overall_status, MirrorMembershipValidation.Status.failed_retryable)
+        self.assertTrue(outcome.should_retry)
+
+    def test_run_validation_keeps_unsafe_target_terminal_even_when_github_is_retryable(self) -> None:
+        membership_request = self._create_user_request()
+
+        with (
+            patch(
+                "core.mirror_membership_validation._validate_domain",
+                return_value={"status": "unsafe_target", "detail": "unsafe_target", "url": "https://mirror.example.org"},
+                autospec=True,
+            ),
+            patch(
+                "core.mirror_membership_validation._validate_github_reference",
+                return_value={"status": "retryable_upstream_failure", "http_status": 503},
+                autospec=True,
+            ),
+        ):
+            outcome = run_validation(membership_request=membership_request)
+
+        self.assertEqual(outcome.overall_status, MirrorMembershipValidation.Status.failed_terminal)
+        self.assertFalse(outcome.should_retry)
+
     def _requests_get(self, url: str, **kwargs) -> _FakeResponse:
         _ = kwargs
         if url == "https://mirror.example.org":
             return _FakeResponse(status_code=200)
-        if url == "https://mirror.example.org/almalinux/timestamp.txt":
+        if url == "https://mirror.example.org/almalinux/TIME":
             return _FakeResponse(status_code=200)
-        if url == "https://mirror.example.org/almalinux-kitten/timestamp.txt":
+        if url == "https://mirror.example.org/almalinux-kitten/TIME":
             return _FakeResponse(status_code=404)
         if url == "https://github.com/AlmaLinux/mirrors/pull/123":
             return _FakeResponse(status_code=200)
@@ -179,11 +301,11 @@ class MirrorMembershipValidationTests(TestCase):
     def _bound_http_get(self, url: str) -> _FakeResponse:
         if url == "https://mirror.example.org":
             return _FakeResponse(status_code=200)
-        if url == "https://mirror.example.org/timestamp.txt":
+        if url == "https://mirror.example.org/TIME":
             return _FakeResponse(status_code=404)
-        if url == "https://mirror.example.org/almalinux/timestamp.txt":
+        if url == "https://mirror.example.org/almalinux/TIME":
             return _FakeResponse(status_code=200, body=self._alma_timestamp_text(age=datetime.timedelta(hours=2)))
-        if url == "https://mirror.example.org/almalinux-kitten/timestamp.txt":
+        if url == "https://mirror.example.org/almalinux-kitten/TIME":
             return _FakeResponse(status_code=404)
         raise AssertionError(f"unexpected bound URL: {url}")
 
@@ -732,11 +854,11 @@ class MirrorMembershipValidationTests(TestCase):
         notes = list(Note.objects.filter(membership_request=membership_request, username=CUSTOS).order_by("pk"))
         self.assertEqual(len(notes), 1)
         self.assertIn("Mirror validation summary", notes[0].content)
-        self.assertIn("Domain: reachable", notes[0].content)
-        self.assertIn("Mirror status: up-to-date", notes[0].content)
-        self.assertIn("AlmaLinux mirror network: registered", notes[0].content)
+        self.assertIn("Domain responds: ✓ reachable", notes[0].content)
+        self.assertIn("Mirror timestamp is current: ✓ up-to-date", notes[0].content)
+        self.assertIn("AlmaLinux mirror network registration: ✓ registered", notes[0].content)
         self.assertIn(
-            "GitHub pull request: valid; touches mirrors.d/mirror.example.org.yml",
+            "GitHub pull request is valid: ✓ valid; touches mirrors.d/mirror.example.org.yml",
             notes[0].content,
         )
 
@@ -754,11 +876,11 @@ class MirrorMembershipValidationTests(TestCase):
         def bound_http_get(url: str) -> _FakeResponse:
             if url == "https://not-registered.example.org":
                 return _FakeResponse(status_code=200)
-            if url == "https://not-registered.example.org/timestamp.txt":
+            if url == "https://not-registered.example.org/TIME":
                 return _FakeResponse(status_code=404)
-            if url == "https://not-registered.example.org/almalinux/timestamp.txt":
+            if url == "https://not-registered.example.org/almalinux/TIME":
                 return _FakeResponse(status_code=200, body=self._alma_timestamp_text(age=datetime.timedelta(hours=2)))
-            if url == "https://not-registered.example.org/almalinux-kitten/timestamp.txt":
+            if url == "https://not-registered.example.org/almalinux-kitten/TIME":
                 return _FakeResponse(status_code=404)
             raise AssertionError(f"unexpected bound URL: {url}")
 
@@ -792,7 +914,7 @@ class MirrorMembershipValidationTests(TestCase):
         note = Note.objects.get(membership_request=membership_request, username=CUSTOS)
         self.assertEqual(validation.status, MirrorMembershipValidation.Status.failed_terminal)
         self.assertEqual(validation.result["almalinux_mirror_network"]["status"], "not_registered")
-        self.assertIn("AlmaLinux mirror network: not registered", note.content)
+        self.assertIn("AlmaLinux mirror network registration: ✗ not registered", note.content)
 
     def test_command_rejects_github_reference_that_does_not_touch_expected_mirror_file(self) -> None:
         membership_request = self._create_user_request()
@@ -835,7 +957,7 @@ class MirrorMembershipValidationTests(TestCase):
         self.assertEqual(validation.result["github"]["status"], "invalid_missing_expected_file")
         self.assertEqual(validation.result["github"]["expected_file_status"], "missing")
         self.assertIn(
-            "GitHub pull request: does not touch mirrors.d/mirror.example.org.yml",
+            "GitHub pull request is valid: ✗ does not touch mirrors.d/mirror.example.org.yml",
             note.content,
         )
 
@@ -851,11 +973,11 @@ class MirrorMembershipValidationTests(TestCase):
         def bound_http_get(url: str) -> _FakeResponse:
             if url == "https://mirror.example.org":
                 return _FakeResponse(status_code=200)
-            if url == "https://mirror.example.org/timestamp.txt":
+            if url == "https://mirror.example.org/TIME":
                 return _FakeResponse(status_code=404)
-            if url == "https://mirror.example.org/almalinux/timestamp.txt":
+            if url == "https://mirror.example.org/almalinux/TIME":
                 return _FakeResponse(status_code=200, body=self._alma_timestamp_text(age=datetime.timedelta(days=2)))
-            if url == "https://mirror.example.org/almalinux-kitten/timestamp.txt":
+            if url == "https://mirror.example.org/almalinux-kitten/TIME":
                 return _FakeResponse(status_code=404)
             raise AssertionError(f"unexpected bound URL: {url}")
 
@@ -873,9 +995,9 @@ class MirrorMembershipValidationTests(TestCase):
         note = Note.objects.get(membership_request=membership_request, username=CUSTOS)
         self.assertEqual(validation.status, MirrorMembershipValidation.Status.failed_terminal)
         self.assertEqual(validation.result["timestamp"]["status"], "stale")
-        self.assertIn("Mirror status: stale", note.content)
+        self.assertIn("Mirror timestamp is current: ✗ stale", note.content)
 
-    def test_command_treats_invalid_timestamp_content_as_not_found(self) -> None:
+    def test_command_treats_invalid_time_content_as_not_found(self) -> None:
         membership_request = self._create_user_request()
         with self.captureOnCommitCallbacks(execute=True):
             record_membership_request_created(
@@ -887,15 +1009,13 @@ class MirrorMembershipValidationTests(TestCase):
         def bound_http_get(url: str) -> _FakeResponse:
             if url == "https://mirror.example.org":
                 return _FakeResponse(status_code=200)
-            if url == "https://mirror.example.org/timestamp.txt":
+            if url == "https://mirror.example.org/TIME":
                 return _FakeResponse(status_code=404)
-            if url == "https://mirror.example.org/almalinux/timestamp.txt":
+            if url == "https://mirror.example.org/almalinux/TIME":
                 return _FakeResponse(status_code=200, body=b"not-a-real-timestamp\n")
-            if url == "https://mirror.example.org/almalinux-kitten/timestamp.txt":
+            if url == "https://mirror.example.org/almalinux-kitten/TIME":
                 return _FakeResponse(status_code=404)
-            if url == "https://mirror.example.org/alma/timestamp.txt":
-                return _FakeResponse(status_code=404)
-            if url == "https://mirror.example.org/timestamp.txt":
+            if url == "https://mirror.example.org/alma/TIME":
                 return _FakeResponse(status_code=404)
             raise AssertionError(f"unexpected bound URL: {url}")
 
@@ -913,9 +1033,9 @@ class MirrorMembershipValidationTests(TestCase):
         note = Note.objects.get(membership_request=membership_request, username=CUSTOS)
         self.assertEqual(validation.status, MirrorMembershipValidation.Status.failed_terminal)
         self.assertEqual(validation.result["timestamp"]["status"], "not_found")
-        self.assertIn("Mirror status: not found", note.content)
+        self.assertIn("Mirror timestamp is current: ✗ not found", note.content)
 
-    def test_command_accepts_alma_prefix_timestamp_file_when_standard_paths_missing(self) -> None:
+    def test_command_accepts_alma_prefix_time_file_when_standard_paths_missing(self) -> None:
         membership_request = self._create_user_request(
             responses=self._mirror_responses(domain="https://almalinux.mirrors.itworxx.de/"),
         )
@@ -929,13 +1049,13 @@ class MirrorMembershipValidationTests(TestCase):
         def bound_http_get(url: str) -> _FakeResponse:
             if url == "https://almalinux.mirrors.itworxx.de":
                 return _FakeResponse(status_code=200)
-            if url == "https://almalinux.mirrors.itworxx.de/timestamp.txt":
+            if url == "https://almalinux.mirrors.itworxx.de/TIME":
                 return _FakeResponse(status_code=404)
-            if url == "https://almalinux.mirrors.itworxx.de/almalinux/timestamp.txt":
+            if url == "https://almalinux.mirrors.itworxx.de/almalinux/TIME":
                 return _FakeResponse(status_code=404)
-            if url == "https://almalinux.mirrors.itworxx.de/almalinux-kitten/timestamp.txt":
+            if url == "https://almalinux.mirrors.itworxx.de/almalinux-kitten/TIME":
                 return _FakeResponse(status_code=404)
-            if url == "https://almalinux.mirrors.itworxx.de/alma/timestamp.txt":
+            if url == "https://almalinux.mirrors.itworxx.de/alma/TIME":
                 return _FakeResponse(status_code=200, body=self._alma_timestamp_text(age=datetime.timedelta(hours=2)))
             raise AssertionError(f"unexpected bound URL: {url}")
 
@@ -971,18 +1091,18 @@ class MirrorMembershipValidationTests(TestCase):
         self.assertEqual(validation.result["timestamp"]["status"], "up_to_date")
         self.assertEqual(
             validation.result["timestamp"]["url"],
-            "https://almalinux.mirrors.itworxx.de/alma/timestamp.txt",
+            "https://almalinux.mirrors.itworxx.de/alma/TIME",
         )
         self.assertEqual(
             validation.result["timestamp"]["checked_urls"],
             [
-                "https://almalinux.mirrors.itworxx.de",
-                "https://almalinux.mirrors.itworxx.de/almalinux/timestamp.txt",
-                "https://almalinux.mirrors.itworxx.de/almalinux-kitten/timestamp.txt",
-                "https://almalinux.mirrors.itworxx.de/alma/timestamp.txt",
+                "https://almalinux.mirrors.itworxx.de/TIME",
+                "https://almalinux.mirrors.itworxx.de/almalinux/TIME",
+                "https://almalinux.mirrors.itworxx.de/almalinux-kitten/TIME",
+                "https://almalinux.mirrors.itworxx.de/alma/TIME",
             ],
         )
-        self.assertIn("Mirror status: up-to-date", note.content)
+        self.assertIn("Mirror timestamp is current: ✓ up-to-date", note.content)
 
     def test_command_redacts_userinfo_from_stored_mirror_urls_and_notes(self) -> None:
         membership_request = self._create_user_request(
@@ -998,10 +1118,10 @@ class MirrorMembershipValidationTests(TestCase):
             )
 
         sanitized_domain_url = "https://mirror.example.org:8443"
-        sanitized_timestamp_url = "https://mirror.example.org:8443/almalinux/timestamp.txt"
+        sanitized_timestamp_url = "https://mirror.example.org:8443/almalinux/TIME"
         checked_domain_url = "https://mirror.example.org:8443/private/token123"
-        checked_root_timestamp_url = "https://mirror.example.org:8443/timestamp.txt"
-        checked_timestamp_url = "https://mirror.example.org:8443/almalinux/timestamp.txt"
+        checked_root_timestamp_url = "https://mirror.example.org:8443/TIME"
+        checked_timestamp_url = "https://mirror.example.org:8443/almalinux/TIME"
 
         def bound_http_get(url: str) -> _FakeResponse:
             if url == checked_domain_url:
@@ -1010,7 +1130,7 @@ class MirrorMembershipValidationTests(TestCase):
                 return _FakeResponse(status_code=404)
             if url == checked_timestamp_url:
                 return _FakeResponse(status_code=200, body=self._alma_timestamp_text(age=datetime.timedelta(hours=2)))
-            if url == "https://mirror.example.org:8443/almalinux-kitten/timestamp.txt":
+            if url == "https://mirror.example.org:8443/almalinux-kitten/TIME":
                 return _FakeResponse(status_code=404)
             return _FakeResponse(status_code=404)
 
@@ -1033,7 +1153,7 @@ class MirrorMembershipValidationTests(TestCase):
         self.assertEqual(
             validation.result["timestamp"]["checked_urls"],
             [
-                sanitized_domain_url,
+                f"{sanitized_domain_url}/TIME",
                 sanitized_timestamp_url,
             ],
         )
@@ -1044,7 +1164,7 @@ class MirrorMembershipValidationTests(TestCase):
         self.assertNotIn("user:secret@", note.content)
         self.assertNotIn("token=secret", note.content)
         self.assertNotIn("private/token123", note.content)
-        self.assertIn("Mirror status: up-to-date", note.content)
+        self.assertIn("Mirror timestamp is current: ✓ up-to-date", note.content)
         self.assertNotIn(sanitized_timestamp_url, note.content)
 
     def test_command_rejects_private_target_without_outbound_http(self) -> None:
@@ -1511,7 +1631,7 @@ class MirrorMembershipValidationTests(TestCase):
                 overall_status=MirrorMembershipValidation.Status.completed,
                 result={
                     "domain": {"status": "reachable", "url": "https://mirror.example.org"},
-                    "timestamp": {"status": "up_to_date", "url": "https://mirror.example.org/almalinux/timestamp.txt"},
+                    "timestamp": {"status": "up_to_date", "url": "https://mirror.example.org/almalinux/TIME"},
                     "github": {"status": "valid", "url": "https://github.com/AlmaLinux/mirrors/pull/123"},
                 },
                 should_retry=False,
@@ -1539,20 +1659,88 @@ class MirrorMembershipValidationTests(TestCase):
             )
 
         validation = MirrorMembershipValidation.objects.get(membership_request=membership_request)
+        validation.status = MirrorMembershipValidation.Status.failed_retryable
+        validation.result = {"domain": {"status": "failed", "detail": "stale result"}}
+        validation.attempt_count = 2
+        validation.last_attempt_at = timezone.now() - datetime.timedelta(hours=2)
+        validation.next_run_at = timezone.now() - datetime.timedelta(minutes=5)
+        validation.claimed_at = timezone.now() - datetime.timedelta(hours=1)
+        validation.claim_expires_at = timezone.now() - datetime.timedelta(minutes=55)
+        validation.noted_result_fingerprint = "prior-note-fingerprint"
+        validation.noted_at = timezone.now() - datetime.timedelta(hours=3)
+        validation.save(
+            update_fields=[
+                "status",
+                "result",
+                "attempt_count",
+                "last_attempt_at",
+                "next_run_at",
+                "claimed_at",
+                "claim_expires_at",
+                "noted_result_fingerprint",
+                "noted_at",
+            ]
+        )
+        expected_persisted_state = {
+            "status": validation.status,
+            "answer_fingerprint": validation.answer_fingerprint,
+            "result": validation.result,
+            "attempt_count": validation.attempt_count,
+            "last_attempt_at": validation.last_attempt_at,
+            "next_run_at": validation.next_run_at,
+            "claimed_at": validation.claimed_at,
+            "claim_expires_at": validation.claim_expires_at,
+            "noted_result_fingerprint": validation.noted_result_fingerprint,
+            "noted_at": validation.noted_at,
+            "updated_at": validation.updated_at,
+        }
 
-        with patch(
-            "core.mirror_membership_validation.requests.get",
-            side_effect=self._requests_get,
-            autospec=True,
+        with (
+            patch(
+                "core.mirror_membership_validation._bound_http_get",
+                side_effect=self._bound_http_get,
+                autospec=True,
+            ) as bound_get_mock,
+            patch(
+                "core.mirror_membership_validation.requests.get",
+                side_effect=self._requests_get,
+                autospec=True,
+            ) as get_mock,
         ):
             command_output = self._call_membership_mirror_validation_command("--dry-run")
 
         validation.refresh_from_db()
-        self.assertEqual(validation.status, MirrorMembershipValidation.Status.pending)
-        self.assertEqual(validation.attempt_count, 0)
+        self.assertEqual(
+            {
+                "status": validation.status,
+                "answer_fingerprint": validation.answer_fingerprint,
+                "result": validation.result,
+                "attempt_count": validation.attempt_count,
+                "last_attempt_at": validation.last_attempt_at,
+                "next_run_at": validation.next_run_at,
+                "claimed_at": validation.claimed_at,
+                "claim_expires_at": validation.claim_expires_at,
+                "noted_result_fingerprint": validation.noted_result_fingerprint,
+                "noted_at": validation.noted_at,
+                "updated_at": validation.updated_at,
+            },
+            expected_persisted_state,
+        )
         self.assertFalse(Note.objects.filter(membership_request=membership_request, username=CUSTOS).exists())
         self.assertIn("dry-run", command_output.lower())
         self.assertIn(str(membership_request.pk), command_output)
+        self.assertGreaterEqual(bound_get_mock.call_count, 3)
+        self.assertGreaterEqual(get_mock.call_count, 3)
+
+        bound_urls = [mock_call.args[0] for mock_call in bound_get_mock.call_args_list]
+        self.assertIn("https://mirror.example.org", bound_urls)
+        self.assertIn("https://mirror.example.org/TIME", bound_urls)
+        self.assertIn("https://mirror.example.org/almalinux/TIME", bound_urls)
+
+        requested_urls = [mock_call.args[0] for mock_call in get_mock.call_args_list]
+        self.assertIn(self._mirror_network_lookup_url("mirror.example.org"), requested_urls)
+        self.assertIn("https://github.com/AlmaLinux/mirrors/pull/123", requested_urls)
+        self.assertIn("https://github.com/AlmaLinux/mirrors/pull/123.diff", requested_urls)
 
     def test_command_force_processes_retryable_row_before_next_run(self) -> None:
         membership_request = self._create_user_request()
@@ -1727,8 +1915,8 @@ class MirrorMembershipValidationTests(TestCase):
         validation.save(update_fields=["status", "attempt_count", "next_run_at", "result"])
 
         checked_domain_url = "https://mirror.example.org:8443/private/token123"
-        checked_root_timestamp_url = "https://mirror.example.org:8443/timestamp.txt"
-        checked_timestamp_url = "https://mirror.example.org:8443/almalinux/timestamp.txt"
+        checked_root_timestamp_url = "https://mirror.example.org:8443/TIME"
+        checked_timestamp_url = "https://mirror.example.org:8443/almalinux/TIME"
 
         def bound_http_get(url: str) -> _FakeResponse:
             if url == checked_domain_url:
@@ -1737,7 +1925,7 @@ class MirrorMembershipValidationTests(TestCase):
                 return _FakeResponse(status_code=404)
             if url == checked_timestamp_url:
                 return _FakeResponse(status_code=200, body=self._alma_timestamp_text(age=datetime.timedelta(hours=2)))
-            if url == "https://mirror.example.org:8443/almalinux-kitten/timestamp.txt":
+            if url == "https://mirror.example.org:8443/almalinux-kitten/TIME":
                 return _FakeResponse(status_code=404)
             raise AssertionError(f"unexpected bound URL: {url}")
 
@@ -1762,7 +1950,7 @@ class MirrorMembershipValidationTests(TestCase):
             command_output,
         )
         self.assertIn(
-            "debug: mirror targets=https://mirror.example.org:8443, https://mirror.example.org:8443/almalinux/timestamp.txt result=up_to_date",
+            "debug: mirror targets=https://mirror.example.org:8443/TIME, https://mirror.example.org:8443/almalinux/TIME result=up_to_date",
             command_output,
         )
         self.assertIn(
@@ -1843,13 +2031,51 @@ class MirrorMembershipValidationTests(TestCase):
         validation = MirrorMembershipValidation.objects.get(membership_request=membership_request)
         validation.status = MirrorMembershipValidation.Status.completed
         validation.attempt_count = 2
+        validation.last_attempt_at = timezone.now() - datetime.timedelta(hours=4)
         validation.next_run_at = timezone.now() + datetime.timedelta(days=1)
+        validation.claimed_at = timezone.now() - datetime.timedelta(hours=1)
+        validation.claim_expires_at = timezone.now() - datetime.timedelta(minutes=30)
         validation.result = {"domain": {"status": "reachable", "url": "https://mirror.example.org"}}
-        validation.save(update_fields=["status", "attempt_count", "next_run_at", "result"])
+        validation.noted_result_fingerprint = "persisted-fingerprint"
+        validation.noted_at = timezone.now() - datetime.timedelta(hours=6)
+        validation.save(
+            update_fields=[
+                "status",
+                "attempt_count",
+                "last_attempt_at",
+                "next_run_at",
+                "claimed_at",
+                "claim_expires_at",
+                "result",
+                "noted_result_fingerprint",
+                "noted_at",
+            ]
+        )
+        expected_persisted_state = {
+            "status": validation.status,
+            "answer_fingerprint": validation.answer_fingerprint,
+            "result": validation.result,
+            "attempt_count": validation.attempt_count,
+            "last_attempt_at": validation.last_attempt_at,
+            "next_run_at": validation.next_run_at,
+            "claimed_at": validation.claimed_at,
+            "claim_expires_at": validation.claim_expires_at,
+            "noted_result_fingerprint": validation.noted_result_fingerprint,
+            "noted_at": validation.noted_at,
+            "updated_at": validation.updated_at,
+        }
 
         with (
-            patch("core.mirror_membership_validation._bound_http_get", autospec=True) as bound_get_mock,
-            patch("core.mirror_membership_validation.requests.get", autospec=True) as get_mock,
+            patch(
+                "core.mirror_membership_validation._bound_http_get",
+                side_effect=self._bound_http_get,
+                autospec=True,
+            ) as bound_get_mock,
+            patch(
+                "core.mirror_membership_validation.requests.get",
+                side_effect=self._requests_get,
+                autospec=True,
+            ) as get_mock,
         ):
             output = self._call_membership_mirror_validation_command(
                 "--request-id",
@@ -1858,16 +2084,40 @@ class MirrorMembershipValidationTests(TestCase):
             )
 
         validation.refresh_from_db()
-        self.assertEqual(validation.status, MirrorMembershipValidation.Status.completed)
-        self.assertEqual(validation.attempt_count, 2)
+        self.assertEqual(
+            {
+                "status": validation.status,
+                "answer_fingerprint": validation.answer_fingerprint,
+                "result": validation.result,
+                "attempt_count": validation.attempt_count,
+                "last_attempt_at": validation.last_attempt_at,
+                "next_run_at": validation.next_run_at,
+                "claimed_at": validation.claimed_at,
+                "claim_expires_at": validation.claim_expires_at,
+                "noted_result_fingerprint": validation.noted_result_fingerprint,
+                "noted_at": validation.noted_at,
+                "updated_at": validation.updated_at,
+            },
+            expected_persisted_state,
+        )
         self.assertFalse(Note.objects.filter(membership_request=membership_request, username=CUSTOS).exists())
         self.assertIn(
             f"dry-run: would validate request ID {membership_request.pk} via --request-id",
             output,
         )
         self.assertNotIn("debug:", output)
-        bound_get_mock.assert_not_called()
-        get_mock.assert_not_called()
+        self.assertGreaterEqual(bound_get_mock.call_count, 3)
+        self.assertGreaterEqual(get_mock.call_count, 3)
+
+        bound_urls = [mock_call.args[0] for mock_call in bound_get_mock.call_args_list]
+        self.assertIn("https://mirror.example.org", bound_urls)
+        self.assertIn("https://mirror.example.org/TIME", bound_urls)
+        self.assertIn("https://mirror.example.org/almalinux/TIME", bound_urls)
+
+        requested_urls = [mock_call.args[0] for mock_call in get_mock.call_args_list]
+        self.assertIn(self._mirror_network_lookup_url("mirror.example.org"), requested_urls)
+        self.assertIn("https://github.com/AlmaLinux/mirrors/pull/123", requested_urls)
+        self.assertIn("https://github.com/AlmaLinux/mirrors/pull/123.diff", requested_urls)
 
     def test_command_request_id_rejects_nonexistent_request_id(self) -> None:
         with self.assertRaisesMessage(CommandError, "membership request ID 999999 does not exist"):
@@ -2045,3 +2295,30 @@ class MirrorMembershipValidationTests(TestCase):
         self.assertNotIn("token=secret", output)
         self.assertNotIn("/private/token123", output)
         bound_get_mock.assert_called_once()
+
+    def test_command_request_id_does_not_write_note_on_first_retryable_upstream_failure(self) -> None:
+        membership_request = self._create_user_request()
+
+        def retryable_requests_get(url: str, **kwargs) -> _FakeResponse:
+            _ = kwargs
+            if url == "https://github.com/AlmaLinux/mirrors/pull/123":
+                return _FakeResponse(status_code=503)
+            return self._requests_get(url, **kwargs)
+
+        with (
+            patch("core.mirror_membership_validation._bound_http_get", side_effect=self._bound_http_get, autospec=True),
+            patch(
+                "core.mirror_membership_validation.requests.get",
+                side_effect=retryable_requests_get,
+                autospec=True,
+            ),
+        ):
+            output = self._call_membership_mirror_validation_command(
+                "--request-id",
+                str(membership_request.pk),
+            )
+
+        validation = MirrorMembershipValidation.objects.get(membership_request=membership_request)
+        self.assertEqual(validation.status, MirrorMembershipValidation.Status.failed_retryable)
+        self.assertFalse(Note.objects.filter(membership_request=membership_request, username=CUSTOS).exists())
+        self.assertNotIn("mirror_validation.wrote_note_direct", output)

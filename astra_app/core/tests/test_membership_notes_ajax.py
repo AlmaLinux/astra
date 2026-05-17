@@ -597,10 +597,10 @@ class MembershipNotesAjaxTests(TestCase):
             username=CUSTOS,
             content=(
                 "Mirror validation summary\n"
-                "Domain: reachable\n"
-                "Mirror status: up-to-date\n"
-                "AlmaLinux mirror network: registered\n"
-                "GitHub pull request: valid; touches mirrors.d/mirror.example.org.yml"
+                "Domain responds: ✓ reachable\n"
+                "Mirror timestamp is current: ✓ up-to-date\n"
+                "AlmaLinux mirror network registration: ✓ registered\n"
+                "GitHub pull request is valid: ✓ valid; touches mirrors.d/mirror.example.org.yml"
             ),
             action={},
         )
@@ -624,11 +624,11 @@ class MembershipNotesAjaxTests(TestCase):
         detail_payload = self._fetch_request_notes_detail_payload(req.pk)
         detail_json = json.dumps(detail_payload)
         self.assertIn("Mirror validation summary<br>", detail_json)
-        self.assertIn("Domain: <strong>reachable</strong>", detail_json)
-        self.assertIn("Mirror status: <strong>up-to-date</strong>", detail_json)
-        self.assertIn("AlmaLinux mirror network: <strong>registered</strong>", detail_json)
+        self.assertIn("Domain responds: <strong>\\u2713 reachable</strong>", detail_json)
+        self.assertIn("Mirror timestamp is current: <strong>\\u2713 up-to-date</strong>", detail_json)
+        self.assertIn("AlmaLinux mirror network registration: <strong>\\u2713 registered</strong>", detail_json)
         self.assertIn(
-            "GitHub pull request: <strong>valid; touches mirrors.d/mirror.example.org.yml</strong>",
+            "GitHub pull request is valid: <strong>\\u2713 valid; touches mirrors.d/mirror.example.org.yml</strong>",
             detail_json,
         )
 

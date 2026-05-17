@@ -29,6 +29,7 @@ _MAX_ATTEMPTS = 3
 _CLAIM_LEASE = datetime.timedelta(minutes=5)
 _MIRROR_STALE_AFTER = datetime.timedelta(hours=24)
 _TIMESTAMP_CONTENT_READ_LIMIT_BYTES = 256
+_TIMESTAMP_FILENAME = "TIME"
 _TIMESTAMP_PATH_PREFIXES = (
     "/almalinux",
     "/almalinux-kitten",
@@ -43,6 +44,13 @@ _ALLOWED_SCHEMES = {"http", "https"}
 _NON_HTTP_URL_SCHEME_PREFIXES = {"data", "file", "ftp", "javascript", "mailto", "ssh", "tel"}
 _GITHUB_HOSTS = {"github.com", "www.github.com"}
 _GITHUB_RETRYABLE_STATUS_CODES = {403, 429, 500, 502, 503, 504}
+_NOTE_SUCCESS_STATUSES = {"reachable", "up_to_date", "found", "registered", "valid", "commit"}
+_NOTE_UNKNOWN_STATUSES = {
+    "not_checked",
+    "retryable_failure",
+    "retryable_upstream_failure",
+    "unknown",
+}
 _CLOSED_MEMBERSHIP_REQUEST_STATUSES = {
     MembershipRequest.Status.approved,
     MembershipRequest.Status.rejected,
@@ -354,15 +362,11 @@ def run_validation(*, membership_request: MembershipRequest) -> ValidationOutcom
         "answers": sanitized_answers,
     }
 
-    terminal_failure = any(
+    hard_terminal_failure = any(
         item.get("status")
         in {
             "unsafe_target",
             "malformed",
-            "inaccessible",
-            "not_found",
-            "not_registered",
-            "stale",
             "invalid_malformed",
             "invalid_wrong_repo",
             "invalid_not_found",
@@ -374,8 +378,12 @@ def run_validation(*, membership_request: MembershipRequest) -> ValidationOutcom
         item.get("status") in {"retryable_failure", "retryable_upstream_failure"}
         for item in (domain_result, timestamp_result, almalinux_mirror_network_result, github_result)
     )
+    soft_terminal_failure = any(
+        item.get("status") in {"inaccessible", "not_found", "not_registered", "stale"}
+        for item in (domain_result, timestamp_result, almalinux_mirror_network_result, github_result)
+    )
 
-    if terminal_failure:
+    if hard_terminal_failure:
         return ValidationOutcome(
             overall_status=MirrorMembershipValidation.Status.failed_terminal,
             result=result,
@@ -386,6 +394,12 @@ def run_validation(*, membership_request: MembershipRequest) -> ValidationOutcom
             overall_status=MirrorMembershipValidation.Status.failed_retryable,
             result=result,
             should_retry=True,
+        )
+    if soft_terminal_failure:
+        return ValidationOutcome(
+            overall_status=MirrorMembershipValidation.Status.failed_terminal,
+            result=result,
+            should_retry=False,
         )
     return ValidationOutcome(
         overall_status=MirrorMembershipValidation.Status.completed,
@@ -497,12 +511,25 @@ def finalize_validation(
 def build_validation_note_content(*, validation: MirrorMembershipValidation) -> str:
     result = validation.result or {}
     lines = ["Mirror validation summary"]
-    lines.append(f"Domain: {_describe_domain_result(result.get('domain', {}))}")
-    lines.append(f"Mirror status: {_describe_timestamp_result(result.get('timestamp', {}))}")
-    lines.append(
-        f"AlmaLinux mirror network: {_describe_almalinux_mirror_network_result(result.get('almalinux_mirror_network', {}))}"
-    )
-    lines.append(f"GitHub pull request: {_describe_github_result(result.get('github', {}))}")
+    for label, result_key, describe_result in (
+        ("Domain responds", "domain", _describe_domain_result),
+        ("Mirror timestamp is current", "timestamp", _describe_timestamp_result),
+        (
+            "AlmaLinux mirror network registration",
+            "almalinux_mirror_network",
+            _describe_almalinux_mirror_network_result,
+        ),
+        ("GitHub pull request is valid", "github", _describe_github_result),
+    ):
+        check_result = result.get(result_key, {})
+        status = str(check_result.get("status") or "unknown")
+        if status in _NOTE_SUCCESS_STATUSES:
+            symbol = "✓"
+        elif status in _NOTE_UNKNOWN_STATUSES:
+            symbol = "?"
+        else:
+            symbol = "✗"
+        lines.append(f"{label}: {symbol} {describe_result(check_result)}")
     if result.get("retry_exhausted"):
         lines.append(f"retry exhausted after {result.get('retry_exhausted_after', validation.attempt_count)} attempts.")
     return "\n".join(lines)
@@ -670,11 +697,13 @@ def _parse_mirror_timestamp_value(raw_value: bytes) -> datetime.datetime | None:
         except (OverflowError, OSError, ValueError):
             return None
 
-    try:
-        parsed = datetime.datetime.strptime(text, "%a %b %d %H:%M:%S UTC %Y")
-    except ValueError:
-        return None
-    return parsed.replace(tzinfo=datetime.UTC)
+    for timestamp_format in ("%a %b %d %H:%M:%S UTC %Y", "%a %b %d %I:%M:%S %p UTC %Y"):
+        try:
+            parsed = datetime.datetime.strptime(text, timestamp_format)
+        except ValueError:
+            continue
+        return parsed.replace(tzinfo=datetime.UTC)
+    return None
 
 
 def _validate_github_reference(
@@ -925,10 +954,16 @@ def _timestamp_candidate_urls(url: str) -> tuple[str, ...]:
     split = urlsplit(url)
     candidates: list[str] = []
     for prefix in ("",) + _TIMESTAMP_PATH_PREFIXES:
-        candidate = _replace_path(split, f"{prefix}/timestamp.txt")
+        candidate = _replace_path(split, _timestamp_candidate_path(prefix))
         if candidate not in candidates:
             candidates.append(candidate)
     return tuple(candidates)
+
+
+def _timestamp_candidate_path(prefix: str) -> str:
+    if prefix:
+        return f"{prefix}/{_TIMESTAMP_FILENAME}"
+    return f"/{_TIMESTAMP_FILENAME}"
 
 
 def _replace_path(split: SplitResult, path: str) -> str:
@@ -979,9 +1014,9 @@ def _sanitize_timestamp_url_for_storage(url: str) -> str:
         return origin_url
 
     normalized_path = urlsplit(str(url or "").strip()).path.rstrip("/")
-    for prefix in _TIMESTAMP_PATH_PREFIXES:
-        path = f"{prefix}/timestamp.txt" if prefix else "/timestamp.txt"
-        if normalized_path.endswith(path):
+    for prefix in ("",) + _TIMESTAMP_PATH_PREFIXES:
+        path = _timestamp_candidate_path(prefix)
+        if normalized_path == path:
             return f"{origin_url}{path}"
     return origin_url
 
@@ -1134,7 +1169,8 @@ def _describe_github_result(result: dict[str, object]) -> str:
             return f"does not touch {expected_file_path}"
         return "does not touch expected mirror file"
     if status == "retryable_upstream_failure":
-        return f"retryable upstream failure ({result.get('detail')})"
+        retry_detail = result.get("detail") or result.get("http_status") or "unknown"
+        return f"retryable upstream failure ({retry_detail})"
     if status == "invalid_wrong_repo":
         return "invalid wrong repo"
     if status == "invalid_not_found":
