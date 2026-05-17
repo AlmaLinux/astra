@@ -13,6 +13,7 @@ from core.mirror_membership_validation import (
     dry_run_validations,
     finalize_validation,
     is_mirror_membership_request,
+    preview_validation_finalization,
     run_validation,
     schedule_mirror_membership_validation,
 )
@@ -248,8 +249,24 @@ class Command(BaseCommand):
             return
 
         if dry_run:
-            run_validation(membership_request=membership_request)
+            validation = closed_validation_queryset.first()
+            if validation is None:
+                validation = MirrorMembershipValidation(membership_request=membership_request)
+            outcome = run_validation(membership_request=membership_request)
+            note_preview = preview_validation_finalization(
+                validation=validation,
+                outcome=outcome,
+                now=timezone.now(),
+            ).note_content
             logger.info("dry-run: would validate request ID %s via --request-id", request_id)
+            if note_preview is not None:
+                logger.info(
+                    "dry-run: note preview for request ID %s via --request-id\n%s",
+                    request_id,
+                    note_preview,
+                )
+            else:
+                logger.info("dry-run: no note would be written for request ID %s via --request-id", request_id)
             return
 
         now = timezone.now()

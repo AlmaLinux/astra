@@ -2105,6 +2105,18 @@ class MirrorMembershipValidationTests(TestCase):
             f"dry-run: would validate request ID {membership_request.pk} via --request-id",
             output,
         )
+        self.assertIn(
+            f"dry-run: note preview for request ID {membership_request.pk} via --request-id",
+            output,
+        )
+        self.assertIn("Mirror validation summary", output)
+        self.assertIn("Domain responds: ✓ reachable", output)
+        self.assertIn("Mirror timestamp is current: ✓ up-to-date", output)
+        self.assertIn("AlmaLinux mirror network registration: ✓ registered", output)
+        self.assertIn(
+            "GitHub pull request is valid: ✓ valid",
+            output,
+        )
         self.assertNotIn("debug:", output)
         self.assertGreaterEqual(bound_get_mock.call_count, 3)
         self.assertGreaterEqual(get_mock.call_count, 3)
@@ -2118,6 +2130,75 @@ class MirrorMembershipValidationTests(TestCase):
         self.assertIn(self._mirror_network_lookup_url("mirror.example.org"), requested_urls)
         self.assertIn("https://github.com/AlmaLinux/mirrors/pull/123", requested_urls)
         self.assertIn("https://github.com/AlmaLinux/mirrors/pull/123.diff", requested_urls)
+
+    def test_command_request_id_dry_run_skips_note_preview_when_retryable_result_would_not_write_note(self) -> None:
+        membership_request = self._create_user_request()
+
+        def retryable_requests_get(url: str, **kwargs) -> _FakeResponse:
+            _ = kwargs
+            if url == "https://github.com/AlmaLinux/mirrors/pull/123":
+                return _FakeResponse(status_code=503)
+            return self._requests_get(url, **kwargs)
+
+        with (
+            patch("core.mirror_membership_validation._bound_http_get", side_effect=self._bound_http_get, autospec=True),
+            patch(
+                "core.mirror_membership_validation.requests.get",
+                side_effect=retryable_requests_get,
+                autospec=True,
+            ),
+        ):
+            output = self._call_membership_mirror_validation_command(
+                "--request-id",
+                str(membership_request.pk),
+                "--dry-run",
+            )
+
+        self.assertIn(
+            f"dry-run: would validate request ID {membership_request.pk} via --request-id",
+            output,
+        )
+        self.assertNotIn("dry-run: note preview for request ID", output)
+        self.assertNotIn("Mirror validation summary", output)
+        self.assertFalse(Note.objects.filter(membership_request=membership_request, username=CUSTOS).exists())
+        self.assertFalse(MirrorMembershipValidation.objects.filter(membership_request=membership_request).exists())
+
+    def test_command_request_id_dry_run_skips_note_preview_when_matching_note_already_exists(self) -> None:
+        membership_request = self._create_user_request()
+        with self.captureOnCommitCallbacks(execute=True):
+            record_membership_request_created(
+                membership_request=membership_request,
+                actor_username="alice",
+                send_submitted_email=False,
+            )
+
+        with (
+            patch("core.mirror_membership_validation._bound_http_get", side_effect=self._bound_http_get, autospec=True),
+            patch(
+                "core.mirror_membership_validation.requests.get",
+                side_effect=self._requests_get,
+                autospec=True,
+            ),
+        ):
+            first_output = self._call_membership_mirror_validation_command(
+                "--request-id",
+                str(membership_request.pk),
+            )
+            dry_run_output = self._call_membership_mirror_validation_command(
+                "--request-id",
+                str(membership_request.pk),
+                "--dry-run",
+            )
+
+        self.assertIn(f"mirror_validation.wrote_note_direct: {membership_request.pk}", first_output)
+        self.assertEqual(Note.objects.filter(membership_request=membership_request, username=CUSTOS).count(), 1)
+        self.assertIn(
+            f"dry-run: would validate request ID {membership_request.pk} via --request-id",
+            dry_run_output,
+        )
+        self.assertNotIn("dry-run: note preview for request ID", dry_run_output)
+        self.assertNotIn("Mirror validation summary", dry_run_output)
+        self.assertEqual(Note.objects.filter(membership_request=membership_request, username=CUSTOS).count(), 1)
 
     def test_command_request_id_rejects_nonexistent_request_id(self) -> None:
         with self.assertRaisesMessage(CommandError, "membership request ID 999999 does not exist"):

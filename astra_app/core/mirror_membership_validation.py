@@ -82,6 +82,17 @@ class ValidationOutcome:
     should_retry: bool
 
 
+@dataclass(frozen=True, slots=True)
+class ValidationFinalizationPreview:
+    status: str
+    answer_fingerprint: str
+    attempt_count: int
+    next_run_at: datetime.datetime
+    result: dict[str, object]
+    note_content: str | None
+    note_fingerprint: str | None
+
+
 class MirrorValidationError(RuntimeError):
     def __init__(self, *, category: str) -> None:
         super().__init__(category)
@@ -441,55 +452,29 @@ def finalize_validation(
 
     validation = current_validation
 
-    answers = mirror_request_answers(validation.membership_request)
-    if answers is None:
-        validation.answer_fingerprint = ""
-    else:
-        validation.answer_fingerprint = mirror_answers_fingerprint(answers)
+    preview = preview_validation_finalization(
+        validation=validation,
+        outcome=outcome,
+        now=now,
+    )
 
-    validation.attempt_count += 1
+    validation.status = preview.status
+    validation.answer_fingerprint = preview.answer_fingerprint
+    validation.attempt_count = preview.attempt_count
     validation.last_attempt_at = now
-    validation.result = outcome.result
+    validation.next_run_at = preview.next_run_at
     validation.claimed_at = None
     validation.claim_expires_at = None
+    validation.result = preview.result
 
-    should_note = False
-    note_content: str | None = None
-    if outcome.overall_status == MirrorMembershipValidation.Status.failed_retryable:
-        if validation.attempt_count >= _MAX_ATTEMPTS:
-            validation.status = MirrorMembershipValidation.Status.failed_terminal
-            validation.next_run_at = now
-            validation.result = {
-                **outcome.result,
-                "retry_exhausted": True,
-                "retry_exhausted_after": validation.attempt_count,
-            }
-            should_note = True
-        else:
-            validation.status = MirrorMembershipValidation.Status.failed_retryable
-            validation.next_run_at = now + _retry_backoff_for_attempt(validation.attempt_count)
-    else:
-        validation.status = outcome.overall_status
-        validation.next_run_at = now
-        should_note = validation.status in {
-            MirrorMembershipValidation.Status.completed,
-            MirrorMembershipValidation.Status.failed_terminal,
-            MirrorMembershipValidation.Status.skipped,
-        }
-
-    if should_note:
-        note_content = build_validation_note_content(validation=validation)
-        note_fingerprint = _sha256_hexdigest(f"{validation.answer_fingerprint}\n{note_content}")
-        if note_fingerprint != validation.noted_result_fingerprint:
-            add_note(
-                membership_request=validation.membership_request,
-                username=CUSTOS,
-                content=note_content,
-            )
-            validation.noted_result_fingerprint = note_fingerprint
-            validation.noted_at = now
-        else:
-            note_content = None
+    if preview.note_content is not None and preview.note_fingerprint is not None:
+        add_note(
+            membership_request=validation.membership_request,
+            username=CUSTOS,
+            content=preview.note_content,
+        )
+        validation.noted_result_fingerprint = preview.note_fingerprint
+        validation.noted_at = now
 
     validation.save(
         update_fields=[
@@ -505,7 +490,67 @@ def finalize_validation(
             "noted_at",
         ]
     )
-    return note_content
+    return preview.note_content
+
+
+def preview_validation_finalization(
+    *,
+    validation: MirrorMembershipValidation,
+    outcome: ValidationOutcome,
+    now: datetime.datetime,
+) -> ValidationFinalizationPreview:
+    answers = mirror_request_answers(validation.membership_request)
+    if answers is None:
+        answer_fingerprint = ""
+    else:
+        answer_fingerprint = mirror_answers_fingerprint(answers)
+
+    attempt_count = validation.attempt_count + 1
+    result = outcome.result
+    if outcome.overall_status == MirrorMembershipValidation.Status.failed_retryable:
+        if attempt_count >= _MAX_ATTEMPTS:
+            status = MirrorMembershipValidation.Status.failed_terminal
+            next_run_at = now
+            result = {
+                **outcome.result,
+                "retry_exhausted": True,
+                "retry_exhausted_after": attempt_count,
+            }
+        else:
+            status = MirrorMembershipValidation.Status.failed_retryable
+            next_run_at = now + _retry_backoff_for_attempt(attempt_count)
+    else:
+        status = outcome.overall_status
+        next_run_at = now
+
+    note_content: str | None = None
+    note_fingerprint: str | None = None
+    if status in {
+        MirrorMembershipValidation.Status.completed,
+        MirrorMembershipValidation.Status.failed_terminal,
+        MirrorMembershipValidation.Status.skipped,
+    }:
+        preview_validation = MirrorMembershipValidation(
+            membership_request=validation.membership_request,
+            status=status,
+            attempt_count=attempt_count,
+            result=result,
+        )
+        note_content = build_validation_note_content(validation=preview_validation)
+        note_fingerprint = _sha256_hexdigest(f"{answer_fingerprint}\n{note_content}")
+        if note_fingerprint == validation.noted_result_fingerprint:
+            note_content = None
+            note_fingerprint = None
+
+    return ValidationFinalizationPreview(
+        status=status,
+        answer_fingerprint=answer_fingerprint,
+        attempt_count=attempt_count,
+        next_run_at=next_run_at,
+        result=result,
+        note_content=note_content,
+        note_fingerprint=note_fingerprint,
+    )
 
 
 def build_validation_note_content(*, validation: MirrorMembershipValidation) -> str:
