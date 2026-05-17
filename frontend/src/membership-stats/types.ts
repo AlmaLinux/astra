@@ -1,5 +1,6 @@
 export const DAYS_PRESETS = ["30", "90", "180", "365", "all"] as const;
 export type DaysPreset = (typeof DAYS_PRESETS)[number];
+export type PeriodBucket = "day" | "week" | "month";
 
 export function isDaysPreset(value: string): value is DaysPreset {
   return (DAYS_PRESETS as readonly string[]).includes(value);
@@ -46,8 +47,6 @@ export function readMembershipStatsBootstrap(root: HTMLElement): MembershipStats
   };
 }
 
-// --- API response shapes ---
-
 export interface ApprovalTimeStats {
   mean_hours: number | null;
   median_hours: number | null;
@@ -90,32 +89,27 @@ export interface CountryDistributionRow {
   count: number;
 }
 
+export interface TimePoint {
+  x: number;
+  y: number;
+}
+
 export interface DecisionDataset {
   label: string;
-  data: number[];
+  data: TimePoint[];
 }
 
 export interface TimeSeriesDataset {
   label: string;
-  data: number[];
+  data: TimePoint[];
 }
 
-export interface TrendBarChart {
-  labels: string[];
-  counts: number[];
+export interface TimestampChart {
+  periodBucket: PeriodBucket;
+  datasets: TimeSeriesDataset[];
 }
 
-export interface TrendDecisionsChart {
-  labels: string[];
-  datasets: DecisionDataset[];
-}
-
-export interface RetentionCohortChart {
-  labels: string[];
-  retained: number[];
-  lapsed_then_renewed: number[];
-  lapsed_not_renewed: number[];
-}
+export interface RetentionCohortChart extends TimestampChart {}
 
 export interface CompositionChartsData {
   membership_types: ChartDistribution;
@@ -124,29 +118,29 @@ export interface CompositionChartsData {
 }
 
 export interface TrendsChartsData {
-  requests_trend: TrendBarChart;
-  decisions_trend: TrendDecisionsChart;
-  expirations_upcoming: TrendBarChart;
+  requests_trend: TimestampChart;
+  decisions_trend: TimestampChart;
+  expirations_upcoming: TimestampChart;
 }
 
-export interface ActiveMembershipsOverTimeChart {
-  labels: string[];
-  datasets: TimeSeriesDataset[];
-}
+export interface ActiveMembershipsOverTimeChart extends TimestampChart {}
 
 export interface PeriodCountRow {
   period: string;
+  period_start_ms: number;
   count: number;
 }
 
 export interface DecisionTrendRow {
   period: string;
+  period_start_ms: number;
   status: string;
   count: number;
 }
 
 export interface MembershipTypePeriodCountRow {
   period: string;
+  period_start_ms: number;
   membership_type: {
     code: string;
     name: string;
@@ -164,6 +158,7 @@ export interface ActiveMembershipsChartsData {
 
 export interface RetentionCohortRow {
   cohort_month: string;
+  period_start_ms: number;
   cohort_size: number;
   retained: number;
   lapsed_then_renewed: number;
@@ -182,6 +177,12 @@ export interface TrendsChartsApiData {
   expirations_upcoming: PeriodCountRow[];
 }
 
+export interface TrendsChartPeriodBuckets {
+  requests_trend: PeriodBucket;
+  decisions_trend: PeriodBucket;
+  expirations_upcoming: PeriodBucket;
+}
+
 export interface ActiveMembershipsChartsApiData {
   active_memberships_over_time: MembershipTypePeriodCountRow[];
 }
@@ -190,6 +191,14 @@ const DECISION_TREND_STATUSES = ["approved", "rejected", "ignored", "rescinded"]
 
 export interface RetentionChartsApiData {
   retention_cohorts_12m: RetentionCohortRow[];
+}
+
+function sortByTimestamp<T extends { period_start_ms: number }>(rows: T[]): T[] {
+  return [...rows].sort((left, right) => left.period_start_ms - right.period_start_ms);
+}
+
+function point(x: number, y: number): TimePoint {
+  return { x, y };
 }
 
 export function compositionChartsFromApi(charts: CompositionChartsApiData): CompositionChartsData {
@@ -209,56 +218,99 @@ export function compositionChartsFromApi(charts: CompositionChartsApiData): Comp
   };
 }
 
-export function trendsChartsFromApi(charts: TrendsChartsApiData): TrendsChartsData {
-  const decisionPeriods = Array.from(new Set(charts.decisions_trend.map((row) => row.period))).sort();
-  const decisionIndex = new Map(charts.decisions_trend.map((row) => [`${row.period}:${row.status}`, row.count]));
+export function trendsChartsFromApi(
+  charts: TrendsChartsApiData,
+  periodBucket: PeriodBucket = "month",
+  chartPeriodBuckets?: TrendsChartPeriodBuckets,
+): TrendsChartsData {
+  const requestsRows = sortByTimestamp(charts.requests_trend);
+  const decisionPeriods = Array.from(new Set(charts.decisions_trend.map((row) => row.period_start_ms))).sort(
+    (left, right) => left - right,
+  );
+  const decisionIndex = new Map(charts.decisions_trend.map((row) => [`${row.period_start_ms}:${row.status}`, row.count]));
+  const expirationsRows = sortByTimestamp(charts.expirations_upcoming);
+  const requestsPeriodBucket = chartPeriodBuckets?.requests_trend ?? periodBucket;
+  const decisionsPeriodBucket = chartPeriodBuckets?.decisions_trend ?? periodBucket;
+  const expirationsPeriodBucket = chartPeriodBuckets?.expirations_upcoming ?? "month";
+
   return {
     requests_trend: {
-      labels: charts.requests_trend.map((row) => row.period),
-      counts: charts.requests_trend.map((row) => row.count),
+      periodBucket: requestsPeriodBucket,
+      datasets: [
+        {
+          label: "Requests",
+          data: requestsRows.map((row) => point(row.period_start_ms, row.count)),
+        },
+      ],
     },
     decisions_trend: {
-      labels: decisionPeriods,
+      periodBucket: decisionsPeriodBucket,
       datasets: DECISION_TREND_STATUSES.map((status) => ({
         label: status,
-        data: decisionPeriods.map((period) => decisionIndex.get(`${period}:${status}`) || 0),
+        data: decisionPeriods.map((periodStartMs) => point(periodStartMs, decisionIndex.get(`${periodStartMs}:${status}`) || 0)),
       })),
     },
     expirations_upcoming: {
-      labels: charts.expirations_upcoming.map((row) => row.period),
-      counts: charts.expirations_upcoming.map((row) => row.count),
+      periodBucket: expirationsPeriodBucket,
+      datasets: [
+        {
+          label: "Upcoming Expirations",
+          data: expirationsRows.map((row) => point(row.period_start_ms, row.count)),
+        },
+      ],
     },
   };
 }
 
-export function retentionChartsFromApi(charts: RetentionChartsApiData): RetentionChartsData {
+export function retentionChartsFromApi(
+  charts: RetentionChartsApiData,
+  periodBucket: PeriodBucket = "month",
+): RetentionChartsData {
+  const rows = sortByTimestamp(charts.retention_cohorts_12m);
+
   return {
     retention_cohorts_12m: {
-      labels: charts.retention_cohorts_12m.map((row) => row.cohort_month),
-      retained: charts.retention_cohorts_12m.map((row) => row.retained),
-      lapsed_then_renewed: charts.retention_cohorts_12m.map((row) => row.lapsed_then_renewed),
-      lapsed_not_renewed: charts.retention_cohorts_12m.map((row) => row.lapsed_not_renewed),
+      periodBucket,
+      datasets: [
+        {
+          label: "Retained",
+          data: rows.map((row) => point(row.period_start_ms, row.retained)),
+        },
+        {
+          label: "Lapsed then renewed",
+          data: rows.map((row) => point(row.period_start_ms, row.lapsed_then_renewed)),
+        },
+        {
+          label: "Lapsed (not renewed)",
+          data: rows.map((row) => point(row.period_start_ms, row.lapsed_not_renewed)),
+        },
+      ],
     },
   };
 }
 
-export function activeMembershipsChartsFromApi(charts: ActiveMembershipsChartsApiData): ActiveMembershipsChartsData {
-  const periods = Array.from(new Set(charts.active_memberships_over_time.map((row) => row.period))).sort();
+export function activeMembershipsChartsFromApi(
+  charts: ActiveMembershipsChartsApiData,
+  periodBucket: PeriodBucket = "month",
+): ActiveMembershipsChartsData {
+  const periods = Array.from(new Set(charts.active_memberships_over_time.map((row) => row.period_start_ms))).sort(
+    (left, right) => left - right,
+  );
   const orderedTypes = Array.from(
     new Map(
       charts.active_memberships_over_time.map((row) => [row.membership_type.code, row.membership_type.name]),
     ).entries(),
   ).sort((left, right) => left[1].localeCompare(right[1]));
   const countIndex = new Map(
-    charts.active_memberships_over_time.map((row) => [`${row.period}:${row.membership_type.code}`, row.count]),
+    charts.active_memberships_over_time.map((row) => [`${row.period_start_ms}:${row.membership_type.code}`, row.count]),
   );
 
   return {
     active_memberships_over_time: {
-      labels: periods,
+      periodBucket,
       datasets: orderedTypes.map(([code, name]) => ({
         label: name,
-        data: periods.map((period) => countIndex.get(`${period}:${code}`) || 0),
+        data: periods.map((periodStartMs) => point(periodStartMs, countIndex.get(`${periodStartMs}:${code}`) || 0)),
       })),
     },
   };

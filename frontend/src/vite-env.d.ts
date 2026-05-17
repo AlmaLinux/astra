@@ -13,12 +13,13 @@ declare module "vite/modulepreload-polyfill";
 // a minimal interface here instead of importing from the npm package.
 interface ChartDataset {
   label?: string;
-  data: number[];
+  data: Array<number | { x: number; y: number }>;
   backgroundColor?: string | string[];
   borderColor?: string | string[];
   borderWidth?: number;
   fill?: boolean;
   tension?: number;
+  pointRadius?: number;
 }
 
 interface ChartData {
@@ -55,6 +56,13 @@ interface ChartConstructor {
 interface Window {
   Chart?: ChartConstructor | { Chart: ChartConstructor };
   "chartjs-plugin-autocolors"?: unknown;
+  luxon?: {
+    DateTime?: {
+      fromMillis: (value: number) => {
+        toFormat: (format: string) => string;
+      };
+    };
+  };
   ChatChannelsEditor?: {
     initAll?: (scope?: ParentNode) => void;
   };

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from "vue";
+import { nextTick, onMounted, ref, watch } from "vue";
 
 import { useMembershipStats } from "./composables/useMembershipStats";
 import type { DaysPreset } from "./types";
@@ -56,6 +56,14 @@ const chartLoading = ref<Record<ChartKey, boolean>>({
 });
 
 const SHARED_PERIOD_TOOLTIP_OPTIONS = { mode: "index", intersect: false } as const;
+
+type PeriodBucket = "day" | "week" | "month";
+type TimePoint = { x: number; y: number };
+type TimeChartDataset = {
+  label: string;
+  data: TimePoint[];
+  backgroundColor?: string | string[];
+};
 
 let autocolorsRegistered = false;
 
@@ -191,6 +199,35 @@ function formatDoughnutTooltipLabel(context: {
   return `${label}: ${value} (${percentage.toFixed(1)}%)`;
 }
 
+function formatTimestampForBucket(timestamp: number, bucket: PeriodBucket): string {
+  const dateTime = window.luxon?.DateTime?.fromMillis?.(timestamp);
+  if (dateTime) {
+    if (bucket === "month") {
+      return dateTime.toFormat("yyyy-LL");
+    }
+    return dateTime.toFormat("yyyy-LL-dd");
+  }
+
+  const date = new Date(timestamp);
+  if (bucket === "month") {
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+  }
+  return date.toISOString().slice(0, 10);
+}
+
+function tooltipTitleForBucket(bucket: PeriodBucket) {
+  return (items: Array<{ raw?: unknown; parsed?: { x?: number } }>): string => {
+    const firstItem = items[0];
+    const raw = firstItem?.raw;
+    const rawX =
+      raw && typeof raw === "object" && "x" in raw && typeof (raw as { x?: unknown }).x === "number"
+        ? (raw as { x: number }).x
+        : firstItem?.parsed?.x;
+
+    return typeof rawX === "number" ? formatTimestampForBucket(rawX, bucket) : "";
+  };
+}
+
 function renderDoughnut(key: ChartKey, labels: string[], data: number[], title: string): void {
   renderChartSafely(key, () => {
     buildChart(key, {
@@ -223,13 +260,10 @@ function renderDoughnut(key: ChartKey, labels: string[], data: number[], title: 
   });
 }
 
-function renderLineDatasets(
+function renderTimestampLineDatasets(
   key: ChartKey,
-  labels: string[],
-  datasets: Array<{
-    label: string;
-    data: number[];
-  }>,
+  periodBucket: PeriodBucket,
+  datasets: TimeChartDataset[],
   options: {
     stacked?: boolean;
     fill?: boolean;
@@ -240,11 +274,11 @@ function renderLineDatasets(
     buildChart(key, {
       type: "line",
       data: {
-        labels,
         datasets: datasets.map((dataset) => ({
           ...dataset,
           fill,
           tension: 0.2,
+          pointRadius: 0,
         })),
       },
       options: {
@@ -255,10 +289,18 @@ function renderLineDatasets(
           autocolors: {
             enabled: true,
           },
-          tooltip: SHARED_PERIOD_TOOLTIP_OPTIONS,
+          tooltip: {
+            ...SHARED_PERIOD_TOOLTIP_OPTIONS,
+            callbacks: {
+              title: tooltipTitleForBucket(periodBucket),
+            },
+          },
         },
         scales: {
-          x: { stacked },
+          x: {
+            type: "timestack",
+            stacked,
+          },
           y: {
             stacked,
             beginAtZero: true,
@@ -270,24 +312,19 @@ function renderLineDatasets(
   });
 }
 
-function renderLine(key: ChartKey, labels: string[], data: number[], title: string): void {
-  renderLineDatasets(key, labels, [{ label: title, data }], { fill: true });
+function renderTimeLine(key: ChartKey, periodBucket: PeriodBucket, datasets: TimeChartDataset[]): void {
+  renderTimestampLineDatasets(key, periodBucket, datasets, { fill: true });
 }
 
-function renderStackedBar(
+function renderTimestampStackedBar(
   key: ChartKey,
-  labels: string[],
-  datasets: Array<{
-    label: string;
-    data: number[];
-    backgroundColor?: string | string[];
-  }>,
+  periodBucket: PeriodBucket,
+  datasets: TimeChartDataset[],
 ): void {
   renderChartSafely(key, () => {
     buildChart(key, {
       type: "bar",
       data: {
-        labels,
         datasets,
       },
       options: {
@@ -298,10 +335,21 @@ function renderStackedBar(
           autocolors: {
             enabled: true,
           },
-          tooltip: SHARED_PERIOD_TOOLTIP_OPTIONS,
+          tooltip: {
+            ...SHARED_PERIOD_TOOLTIP_OPTIONS,
+            callbacks: {
+              title: tooltipTitleForBucket(periodBucket),
+            },
+          },
         },
         scales: {
-          x: { stacked: true },
+          x: {
+            type: "time",
+            stacked: true,
+            time: {
+              unit: periodBucket,
+            },
+          },
           y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } },
         },
       },
@@ -309,18 +357,12 @@ function renderStackedBar(
   });
 }
 
-function renderBar(key: ChartKey, labels: string[], data: number[], title: string): void {
+function renderTimestampBar(key: ChartKey, periodBucket: PeriodBucket, datasets: TimeChartDataset[]): void {
   renderChartSafely(key, () => {
     buildChart(key, {
       type: "bar",
       data: {
-        labels,
-        datasets: [
-          {
-            label: title,
-            data,
-          },
-        ],
+        datasets,
       },
       options: {
         responsive: true,
@@ -330,9 +372,20 @@ function renderBar(key: ChartKey, labels: string[], data: number[], title: strin
           autocolors: {
             enabled: true,
           },
-          tooltip: SHARED_PERIOD_TOOLTIP_OPTIONS,
+          tooltip: {
+            ...SHARED_PERIOD_TOOLTIP_OPTIONS,
+            callbacks: {
+              title: tooltipTitleForBucket(periodBucket),
+            },
+          },
         },
         scales: {
+          x: {
+            type: "time",
+            time: {
+              unit: periodBucket,
+            },
+          },
           y: { beginAtZero: true, ticks: { precision: 0 } },
         },
       },
@@ -350,26 +403,23 @@ function renderCharts(): void {
   renderDoughnut("membershipTypes", types.labels ?? [], types.counts ?? [], "Membership types");
 
   const requests = trendsCharts.value.requests_trend;
-  renderLine("requestsTrend", requests.labels ?? [], requests.counts ?? [], "Requests");
+  renderTimeLine("requestsTrend", requests.periodBucket, requests.datasets ?? []);
 
   const activeMemberships = activeMembershipsCharts.value.active_memberships_over_time;
-  renderLineDatasets("activeMemberships", activeMemberships.labels ?? [], activeMemberships.datasets ?? [], {
+  renderTimestampLineDatasets("activeMemberships", activeMemberships.periodBucket, activeMemberships.datasets ?? [], {
     stacked: true,
     fill: true,
   });
 
   const decisions = trendsCharts.value.decisions_trend;
-  renderStackedBar(
+  renderTimestampStackedBar(
     "decisionsTrend",
-    decisions.labels ?? [],
-    (decisions.datasets ?? []).map((dataset) => ({
-      label: dataset.label,
-      data: dataset.data,
-    })),
+    decisions.periodBucket,
+    decisions.datasets ?? [],
   );
 
   const expirations = trendsCharts.value.expirations_upcoming;
-  renderBar("expirations", expirations.labels ?? [], expirations.counts ?? [], "Expirations");
+  renderTimestampBar("expirations", expirations.periodBucket, expirations.datasets ?? []);
 
   const nationalityAll = compositionCharts.value.nationality_all_users;
   renderDoughnut(
@@ -388,29 +438,30 @@ function renderCharts(): void {
   );
 
   const retention = retentionCharts.value.retention_cohorts_12m;
-  if (retention.labels.length === 0) {
+  if ((retention.datasets[0]?.data.length ?? 0) === 0) {
     destroyChart("retention");
     hideChartLoading("retention");
     return;
   }
 
-  renderStackedBar("retention", retention.labels ?? [], [
-    {
-      label: "Retained",
-      data: retention.retained ?? [],
-    },
-    {
-      label: "Lapsed then renewed",
-      data: retention.lapsed_then_renewed ?? [],
-    },
-    {
-      label: "Lapsed (not renewed)",
-      data: retention.lapsed_not_renewed ?? [],
-    },
-  ]);
+  renderTimestampStackedBar("retention", retention.periodBucket, retention.datasets ?? []);
 }
 
-watch([stats.compositionCharts, stats.trendsCharts, stats.retentionCharts, stats.activeMembershipsCharts], () => {
+watch(
+  [stats.compositionCharts, stats.trendsCharts, stats.retentionCharts, stats.activeMembershipsCharts],
+  async () => {
+    await nextTick();
+    renderCharts();
+  },
+  { flush: "post" },
+);
+
+watch(canvasRetention, async (canvas) => {
+  if (!canvas || !stats.retentionCharts.value) {
+    return;
+  }
+
+  await nextTick();
   renderCharts();
 });
 
@@ -467,13 +518,13 @@ function formatHoursDuration(hours: number | null): string {
   return `${(numericHours / 168).toFixed(1)} weeks`;
 }
 
-function retentionTotal(values: number[] | undefined): number {
+function retentionTotal(values: Array<number | TimePoint> | undefined): number {
   if (!values) return 0;
-  return values.reduce((acc, value) => acc + value, 0);
+  return values.reduce((acc, value) => acc + (typeof value === "number" ? value : value.y), 0);
 }
 
 function hasRetentionCohortRows(): boolean {
-  return (stats.retentionCharts.value?.retention_cohorts_12m.labels.length ?? 0) > 0;
+  return (stats.retentionCharts.value?.retention_cohorts_12m.datasets[0]?.data.length ?? 0) > 0;
 }
 </script>
 
@@ -644,7 +695,7 @@ function hasRetentionCohortRows(): boolean {
             <span class="info-box-text">Retained</span>
             <span class="info-box-number" data-stat-key="retention_retained_count">
               <span v-if="!stats.retentionCharts.value" class="spinner-border spinner-border-sm" role="status" aria-hidden="true" />
-              <template v-else>{{ retentionTotal(stats.retentionCharts.value.retention_cohorts_12m.retained) }}</template>
+              <template v-else>{{ retentionTotal(stats.retentionCharts.value.retention_cohorts_12m.datasets[0]?.data) }}</template>
             </span>
           </div>
         </div>
@@ -657,7 +708,7 @@ function hasRetentionCohortRows(): boolean {
             <span class="info-box-text">Lapsed Then Renewed</span>
             <span class="info-box-number" data-stat-key="retention_lapsed_then_renewed_count">
               <span v-if="!stats.retentionCharts.value" class="spinner-border spinner-border-sm" role="status" aria-hidden="true" />
-              <template v-else>{{ retentionTotal(stats.retentionCharts.value.retention_cohorts_12m.lapsed_then_renewed) }}</template>
+              <template v-else>{{ retentionTotal(stats.retentionCharts.value.retention_cohorts_12m.datasets[1]?.data) }}</template>
             </span>
           </div>
         </div>
@@ -670,7 +721,7 @@ function hasRetentionCohortRows(): boolean {
             <span class="info-box-text">Lapsed (Not Renewed)</span>
             <span class="info-box-number" data-stat-key="retention_lapsed_not_renewed_count">
               <span v-if="!stats.retentionCharts.value" class="spinner-border spinner-border-sm" role="status" aria-hidden="true" />
-              <template v-else>{{ retentionTotal(stats.retentionCharts.value.retention_cohorts_12m.lapsed_not_renewed) }}</template>
+              <template v-else>{{ retentionTotal(stats.retentionCharts.value.retention_cohorts_12m.datasets[2]?.data) }}</template>
             </span>
           </div>
         </div>

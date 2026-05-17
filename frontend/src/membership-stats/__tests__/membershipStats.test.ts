@@ -1,7 +1,9 @@
 import { mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { nextTick } from "vue";
 
 import MembershipStatsPage from "../MembershipStatsPage.vue";
+import { activeMembershipsChartsFromApi } from "../types";
 import { compositionChartsFromApi } from "../types";
 import { readMembershipStatsBootstrap } from "../types";
 import { retentionChartsFromApi } from "../types";
@@ -54,28 +56,45 @@ const COMPOSITION_PAYLOAD = {
 
 const TRENDS_PAYLOAD = {
   generated_at: "2026-01-01T00:00:00+00:00",
+  period_bucket: "month",
+  chart_period_buckets: {
+    requests_trend: "month",
+    decisions_trend: "month",
+    expirations_upcoming: "month",
+  },
   charts: {
-    requests_trend: [{ period: "2025-12", count: 10 }],
-    decisions_trend: [{ period: "2025-12", status: "approved", count: 8 }],
-    expirations_upcoming: [{ period: "2026-02", count: 5 }],
+    requests_trend: [{ period: "2025-12", period_start_ms: 1764547200000, count: 10 }],
+    decisions_trend: [{ period: "2025-12", period_start_ms: 1764547200000, status: "approved", count: 8 }],
+    expirations_upcoming: [{ period: "2026-02", period_start_ms: 1769904000000, count: 5 }],
   },
 };
 
 const RETENTION_PAYLOAD = {
   generated_at: "2026-01-01T00:00:00+00:00",
+  period_bucket: "month",
   charts: {
-    retention_cohorts_12m: [{ cohort_month: "2025-01", retained: 5, lapsed_then_renewed: 2, lapsed_not_renewed: 1 }],
+    retention_cohorts_12m: [
+      {
+        cohort_month: "2025-01",
+        period_start_ms: 1735689600000,
+        cohort_size: 8,
+        retained: 5,
+        lapsed_then_renewed: 2,
+        lapsed_not_renewed: 1,
+      },
+    ],
   },
 };
 
 const ACTIVE_MEMBERSHIPS_PAYLOAD = {
   generated_at: "2026-01-01T00:00:00+00:00",
   days_param: "365",
+  period_bucket: "month",
   charts: {
     active_memberships_over_time: [
-      { period: "2025-11", membership_type: { code: "individual", name: "Individual" }, count: 12 },
-      { period: "2025-12", membership_type: { code: "individual", name: "Individual" }, count: 14 },
-      { period: "2025-12", membership_type: { code: "sponsor-standard", name: "Sponsor Standard" }, count: 3 },
+      { period: "2025-11", period_start_ms: 1761955200000, membership_type: { code: "individual", name: "Individual" }, count: 12 },
+      { period: "2025-12", period_start_ms: 1764547200000, membership_type: { code: "individual", name: "Individual" }, count: 14 },
+      { period: "2025-12", period_start_ms: 1764547200000, membership_type: { code: "sponsor-standard", name: "Sponsor Standard" }, count: 3 },
     ],
   },
 };
@@ -305,10 +324,13 @@ describe("MembershipStatsPage", () => {
     vi.stubGlobal("Chart", { Chart: nestedChartCtor });
     vi.stubGlobal("fetch", makeSuccessfulFetch());
 
-    mount(MembershipStatsPage, { props: { bootstrap: BOOTSTRAP } });
+    const wrapper = mount(MembershipStatsPage, { props: { bootstrap: BOOTSTRAP } });
 
     await flushPromises();
     await flushPromises();
+    await nextTick();
+
+    expect(wrapper.find("#retention-cohorts-chart").exists()).toBe(true);
 
     expect(nestedChartCtor).toHaveBeenCalled();
   });
@@ -432,39 +454,227 @@ describe("MembershipStatsPage", () => {
     )?.[1];
 
     expect(activeMembershipsConfig?.type).toBe("line");
-    expect(activeMembershipsConfig?.options?.scales?.x?.stacked).toBe(true);
+    expect(activeMembershipsConfig?.options?.scales?.x?.type).toBe("timestack");
     expect(activeMembershipsConfig?.options?.scales?.y?.stacked).toBe(true);
-    expect(activeMembershipsConfig?.data?.labels).toEqual(["2025-11", "2025-12"]);
+    expect(activeMembershipsConfig?.data?.labels).toBeUndefined();
     expect(activeMembershipsConfig?.data?.datasets).toEqual([
       expect.objectContaining({
         label: "Individual",
-        data: [12, 14],
+        data: [
+          { x: 1761955200000, y: 12 },
+          { x: 1764547200000, y: 14 },
+        ],
         fill: true,
       }),
       expect.objectContaining({
         label: "Sponsor Standard",
-        data: [0, 3],
+        data: [
+          { x: 1761955200000, y: 0 },
+          { x: 1764547200000, y: 3 },
+        ],
         fill: true,
       }),
     ]);
   });
 
-  it("preserves the legacy fixed decision-status datasets with zero-filled missing series", () => {
+  it("maps timestamped trend rows into sorted point datasets and preserves fixed decision statuses", () => {
+    const charts = trendsChartsFromApi({
+      requests_trend: [
+        { period: "2026-02-10", period_start_ms: 1770681600000, count: 1 },
+        { period: "2026-02-03", period_start_ms: 1770076800000, count: 3 },
+      ],
+      decisions_trend: [
+        { period: "2026-02-10", period_start_ms: 1770681600000, status: "approved", count: 2 },
+        { period: "2026-02-03", period_start_ms: 1770076800000, status: "rejected", count: 1 },
+      ],
+      expirations_upcoming: [
+        { period: "2026-03", period_start_ms: 1772323200000, count: 5 },
+      ],
+    } as never, "week", {
+      requests_trend: "week",
+      decisions_trend: "week",
+      expirations_upcoming: "day",
+    }) as any;
+
+    expect(charts.requests_trend.datasets).toEqual([
+      {
+        label: "Requests",
+        data: [
+          { x: 1770076800000, y: 3 },
+          { x: 1770681600000, y: 1 },
+        ],
+      },
+    ]);
+    expect(charts.decisions_trend.datasets).toEqual([
+      {
+        label: "approved",
+        data: [
+          { x: 1770076800000, y: 0 },
+          { x: 1770681600000, y: 2 },
+        ],
+      },
+      {
+        label: "rejected",
+        data: [
+          { x: 1770076800000, y: 1 },
+          { x: 1770681600000, y: 0 },
+        ],
+      },
+      {
+        label: "ignored",
+        data: [
+          { x: 1770076800000, y: 0 },
+          { x: 1770681600000, y: 0 },
+        ],
+      },
+      {
+        label: "rescinded",
+        data: [
+          { x: 1770076800000, y: 0 },
+          { x: 1770681600000, y: 0 },
+        ],
+      },
+    ]);
+    expect(charts.expirations_upcoming.datasets).toEqual([
+      { label: "Upcoming Expirations", data: [{ x: 1772323200000, y: 5 }] },
+    ]);
+    expect(charts.requests_trend.periodBucket).toBe("week");
+    expect(charts.decisions_trend.periodBucket).toBe("week");
+    expect(charts.expirations_upcoming.periodBucket).toBe("day");
+  });
+
+  it("maps timestamped active-membership rows into zero-filled point datasets", () => {
+    const charts = activeMembershipsChartsFromApi({
+      active_memberships_over_time: [
+        { period: "2026-02-03", period_start_ms: 1770076800000, membership_type: { code: "individual", name: "Individual" }, count: 3 },
+        { period: "2026-02-10", period_start_ms: 1770681600000, membership_type: { code: "individual", name: "Individual" }, count: 5 },
+        { period: "2026-02-10", period_start_ms: 1770681600000, membership_type: { code: "sponsor", name: "Sponsor" }, count: 1 },
+      ],
+    } as never) as any;
+
+    expect(charts.active_memberships_over_time.datasets).toEqual([
+      {
+        label: "Individual",
+        data: [
+          { x: 1770076800000, y: 3 },
+          { x: 1770681600000, y: 5 },
+        ],
+      },
+      {
+        label: "Sponsor",
+        data: [
+          { x: 1770076800000, y: 0 },
+          { x: 1770681600000, y: 1 },
+        ],
+      },
+    ]);
+  });
+
+  it("renders timestamp-driven chart configs with timestack for line charts and time for bar charts", async () => {
+    const chartCtor = vi.fn(() => ({ update: vi.fn(), destroy: vi.fn(), data: {} }));
+    vi.stubGlobal("Chart", chartCtor);
+    vi.stubGlobal("fetch", makeSuccessfulFetch());
+
+    mount(MembershipStatsPage, { props: { bootstrap: BOOTSTRAP } });
+
+    await flushPromises();
+    await flushPromises();
+
+    const requestsTrendConfig = chartCtor.mock.calls.find(
+      (call) => call[1]?.data?.datasets?.[0]?.label === "Requests",
+    )?.[1];
+    const activeMembershipsConfig = chartCtor.mock.calls.find(
+      (call) => call[1]?.data?.datasets?.[0]?.label === "Individual",
+    )?.[1];
+    const decisionsTrendConfig = chartCtor.mock.calls.find(
+      (call) => call[1]?.type === "bar" && call[1]?.data?.datasets?.[0]?.label === "approved",
+    )?.[1];
+    const expirationsConfig = chartCtor.mock.calls.find(
+      (call) => call[1]?.type === "bar" && call[1]?.data?.datasets?.[0]?.label === "Upcoming Expirations",
+    )?.[1];
+    const retentionConfig = chartCtor.mock.calls.filter((call) => call[1]?.type === "bar").at(-1)?.[1];
+
+    expect(requestsTrendConfig?.options?.scales?.x?.type).toBe("timestack");
+    expect(activeMembershipsConfig?.options?.scales?.x?.type).toBe("timestack");
+    expect(decisionsTrendConfig?.options?.scales?.x?.type).toBe("time");
+    expect(expirationsConfig?.options?.scales?.x?.type).toBe("time");
+    expect(retentionConfig?.options?.scales?.x?.type).toBe("time");
+    expect(requestsTrendConfig?.data?.labels).toBeUndefined();
+    expect(activeMembershipsConfig?.data?.labels).toBeUndefined();
+    expect(decisionsTrendConfig?.data?.labels).toBeUndefined();
+    expect(expirationsConfig?.data?.labels).toBeUndefined();
+    expect(retentionConfig?.data?.labels).toBeUndefined();
+  });
+
+  it("keeps Decision Outcomes, Upcoming Expirations, and Member Renewal by Join Month on the supported timestamp-aware bar scale path", async () => {
+    const chartCtor = vi.fn(() => ({ update: vi.fn(), destroy: vi.fn(), data: {} }));
+    vi.stubGlobal("Chart", chartCtor);
+    vi.stubGlobal("fetch", makeSuccessfulFetch());
+
+    const wrapper = mount(MembershipStatsPage, { props: { bootstrap: BOOTSTRAP } });
+
+    await flushPromises();
+    await flushPromises();
+    await nextTick();
+
+    expect(wrapper.find("#retention-cohorts-chart").exists()).toBe(true);
+    expect(chartCtor.mock.calls.length).toBeGreaterThanOrEqual(8);
+
+    const chartConfigForCanvas = (canvasId: string) =>
+      chartCtor.mock.calls.find((call) => (call[0] as HTMLCanvasElement | undefined)?.id === canvasId)?.[1];
+
+    const decisionsTrendConfig = chartConfigForCanvas("decisions-trend-chart");
+    const expirationsConfig = chartConfigForCanvas("expirations-upcoming-chart");
+    const retentionConfig = chartCtor.mock.calls.find(
+      (call) => call[1]?.type === "bar" && call[1]?.data?.datasets?.length === 3,
+    )?.[1];
+
+    expect(decisionsTrendConfig?.type).toBe("bar");
+    expect(decisionsTrendConfig?.options?.scales?.x).toMatchObject({ type: "time", stacked: true, time: { unit: "month" } });
+    expect(decisionsTrendConfig?.data?.datasets?.map((dataset: { data: Array<{ x: number; y: number }> }) => dataset.data)).toEqual([
+      [{ x: 1764547200000, y: 8 }],
+      [{ x: 1764547200000, y: 0 }],
+      [{ x: 1764547200000, y: 0 }],
+      [{ x: 1764547200000, y: 0 }],
+    ]);
+    expect(decisionsTrendConfig?.data?.labels).toBeUndefined();
+
+    expect(expirationsConfig?.type).toBe("bar");
+    expect(expirationsConfig?.options?.scales?.x).toMatchObject({ type: "time", time: { unit: "month" } });
+    expect(expirationsConfig?.data?.datasets).toEqual([
+      expect.objectContaining({
+        label: "Upcoming Expirations",
+        data: [{ x: 1769904000000, y: 5 }],
+      }),
+    ]);
+    expect(expirationsConfig?.data?.labels).toBeUndefined();
+
+    expect(retentionConfig?.type).toBe("bar");
+    expect(retentionConfig?.options?.scales?.x).toMatchObject({ type: "time", stacked: true, time: { unit: "month" } });
+    expect(retentionConfig?.data?.datasets).toEqual([
+      expect.objectContaining({ label: "Retained", data: [{ x: 1735689600000, y: 5 }] }),
+      expect.objectContaining({ label: "Lapsed then renewed", data: [{ x: 1735689600000, y: 2 }] }),
+      expect.objectContaining({ label: "Lapsed (not renewed)", data: [{ x: 1735689600000, y: 1 }] }),
+    ]);
+    expect(retentionConfig?.data?.labels).toBeUndefined();
+  });
+
+  it("preserves fixed decision statuses while zero-filling missing timestamp buckets", () => {
     const charts = trendsChartsFromApi({
       requests_trend: [],
       decisions_trend: [
-        { period: "2025-12", status: "approved", count: 8 },
-        { period: "2025-12", status: "rejected", count: 2 },
+        { period: "2025-12", period_start_ms: 1764547200000, status: "approved", count: 8 },
+        { period: "2025-12", period_start_ms: 1764547200000, status: "rejected", count: 2 },
       ],
       expirations_upcoming: [],
-    });
+    } as never) as any;
 
-    expect(charts.decisions_trend.labels).toEqual(["2025-12"]);
+    expect(charts.decisions_trend.periodBucket).toBe("month");
     expect(charts.decisions_trend.datasets).toEqual([
-      { label: "approved", data: [8] },
-      { label: "rejected", data: [2] },
-      { label: "ignored", data: [0] },
-      { label: "rescinded", data: [0] },
+      { label: "approved", data: [{ x: 1764547200000, y: 8 }] },
+      { label: "rejected", data: [{ x: 1764547200000, y: 2 }] },
+      { label: "ignored", data: [{ x: 1764547200000, y: 0 }] },
+      { label: "rescinded", data: [{ x: 1764547200000, y: 0 }] },
     ]);
   });
 
@@ -503,6 +713,7 @@ describe("MembershipStatsPage", () => {
       retention_cohorts_12m: [
         {
           cohort_month: "2025-01",
+          period_start_ms: 1735689600000,
           cohort_size: 8,
           retained: 5,
           lapsed_then_renewed: 2,
@@ -510,6 +721,7 @@ describe("MembershipStatsPage", () => {
         },
         {
           cohort_month: "2025-02",
+          period_start_ms: 1738368000000,
           cohort_size: 6,
           retained: 4,
           lapsed_then_renewed: 1,
@@ -519,10 +731,30 @@ describe("MembershipStatsPage", () => {
     });
 
     expect(charts.retention_cohorts_12m).toEqual({
-      labels: ["2025-01", "2025-02"],
-      retained: [5, 4],
-      lapsed_then_renewed: [2, 1],
-      lapsed_not_renewed: [1, 1],
+      periodBucket: "month",
+      datasets: [
+        {
+          label: "Retained",
+          data: [
+            { x: 1735689600000, y: 5 },
+            { x: 1738368000000, y: 4 },
+          ],
+        },
+        {
+          label: "Lapsed then renewed",
+          data: [
+            { x: 1735689600000, y: 2 },
+            { x: 1738368000000, y: 1 },
+          ],
+        },
+        {
+          label: "Lapsed (not renewed)",
+          data: [
+            { x: 1735689600000, y: 1 },
+            { x: 1738368000000, y: 1 },
+          ],
+        },
+      ],
     });
   });
 });

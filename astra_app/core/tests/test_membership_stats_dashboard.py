@@ -21,6 +21,22 @@ from core.models import (
 from core.permissions import ASTRA_VIEW_MEMBERSHIP
 
 
+def _epoch_ms(value: datetime.datetime) -> int:
+    return int(value.astimezone(datetime.UTC).timestamp() * 1000)
+
+
+def _period_start_ms_from_iso_date(label: str) -> int:
+    year, month, day = [int(part) for part in label.split("-")]
+    local_tz = timezone.get_current_timezone()
+    return _epoch_ms(datetime.datetime(year, month, day, tzinfo=local_tz))
+
+
+def _period_start_ms_from_iso_month(label: str) -> int:
+    year, month = [int(part) for part in label.split("-")]
+    local_tz = timezone.get_current_timezone()
+    return _epoch_ms(datetime.datetime(year, month, 1, tzinfo=local_tz))
+
+
 class MembershipStatsDashboardTests(TestCase):
     def _login_as_freeipa_user(self, username: str) -> None:
         session = self.client.session
@@ -497,7 +513,26 @@ class MembershipStatsDashboardTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "data-membership-stats-root")
         self.assertContains(resp, '<script src="/static/core/vendor/chartjs/chart.umd.min.js"></script>', html=True)
+        self.assertContains(resp, '<script src="/static/core/vendor/chartjs/luxon.min.js"></script>', html=True)
+        self.assertContains(resp, '<script src="/static/core/vendor/chartjs/chartjs-scale-timestack.min.js"></script>', html=True)
         self.assertContains(resp, '<script src="/static/core/vendor/chartjs/chartjs-plugin-autocolors.min.js"></script>', html=True)
+        content = resp.content.decode()
+        self.assertLess(
+            content.index('/static/core/vendor/chartjs/chart.umd.min.js'),
+            content.index('/static/core/vendor/chartjs/luxon.min.js'),
+        )
+        self.assertLess(
+            content.index('/static/core/vendor/chartjs/luxon.min.js'),
+            content.index('/static/core/vendor/chartjs/chartjs-scale-timestack.min.js'),
+        )
+        self.assertLess(
+            content.index('/static/core/vendor/chartjs/chartjs-scale-timestack.min.js'),
+            content.index('/static/core/vendor/chartjs/chartjs-plugin-autocolors.min.js'),
+        )
+        self.assertLess(
+            content.index('/static/core/vendor/chartjs/chartjs-plugin-autocolors.min.js'),
+            content.index('src/entrypoints/membershipStats.ts'),
+        )
 
     def test_membership_stats_page_includes_total_freeipa_users_summary_card(self) -> None:
         FreeIPAPermissionGrant.objects.get_or_create(
@@ -1811,6 +1846,7 @@ class MembershipStatsSplitApiTests(TestCase):
         self.assertIn("decisions_trend", payload["charts"])
         self.assertIn("expirations_upcoming", payload["charts"])
         self.assertIn("days_param", payload)
+        self.assertIn("period_bucket", payload)
 
     def test_trends_detail_endpoint_uses_shared_builder_boundary(self) -> None:
         detail_payload = {
@@ -1934,6 +1970,14 @@ class MembershipStatsSplitApiTests(TestCase):
         self.assertEqual(charts["requests_trend"], [])
         self.assertEqual(charts["decisions_trend"], [])
         self.assertEqual(charts["expirations_upcoming"], [])
+        self.assertEqual(
+            payload["chart_period_buckets"],
+            {
+                "requests_trend": "week",
+                "decisions_trend": "week",
+                "expirations_upcoming": "month",
+            },
+        )
 
     def test_trends_detail_endpoint_uses_daily_periods_for_30_day_window(self) -> None:
         frozen_now = datetime.datetime(2026, 2, 15, 12, 0, 0, tzinfo=datetime.UTC)
@@ -1965,12 +2009,26 @@ class MembershipStatsSplitApiTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
         self.assertEqual(payload["charts"]["requests_trend"], [
-            {"period": "2026-02-01", "count": 1},
-            {"period": "2026-02-03", "count": 1},
+            {"period": "2026-02-01", "period_start_ms": _period_start_ms_from_iso_date("2026-02-01"), "count": 1},
+            {"period": "2026-02-03", "period_start_ms": _period_start_ms_from_iso_date("2026-02-03"), "count": 1},
         ])
         self.assertEqual(payload["charts"]["decisions_trend"], [
-            {"period": "2026-02-04", "status": MembershipRequest.Status.approved, "count": 1},
+            {
+                "period": "2026-02-04",
+                "period_start_ms": _period_start_ms_from_iso_date("2026-02-04"),
+                "status": MembershipRequest.Status.approved,
+                "count": 1,
+            },
         ])
+        self.assertEqual(payload["period_bucket"], "day")
+        self.assertEqual(
+            payload["chart_period_buckets"],
+            {
+                "requests_trend": "day",
+                "decisions_trend": "day",
+                "expirations_upcoming": "month",
+            },
+        )
 
     def test_trends_detail_endpoint_uses_weekly_periods_for_365_day_window(self) -> None:
         frozen_now = datetime.datetime(2026, 2, 15, 12, 0, 0, tzinfo=datetime.UTC)
@@ -2010,12 +2068,26 @@ class MembershipStatsSplitApiTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
         self.assertEqual(payload["charts"]["requests_trend"], [
-            {"period": "2026-01-05", "count": 2},
-            {"period": "2026-01-19", "count": 1},
+            {"period": "2026-01-05", "period_start_ms": _period_start_ms_from_iso_date("2026-01-05"), "count": 2},
+            {"period": "2026-01-19", "period_start_ms": _period_start_ms_from_iso_date("2026-01-19"), "count": 1},
         ])
         self.assertEqual(payload["charts"]["decisions_trend"], [
-            {"period": "2026-01-19", "status": MembershipRequest.Status.rejected, "count": 1},
+            {
+                "period": "2026-01-19",
+                "period_start_ms": _period_start_ms_from_iso_date("2026-01-19"),
+                "status": MembershipRequest.Status.rejected,
+                "count": 1,
+            },
         ])
+        self.assertEqual(payload["period_bucket"], "week")
+        self.assertEqual(
+            payload["chart_period_buckets"],
+            {
+                "requests_trend": "week",
+                "decisions_trend": "week",
+                "expirations_upcoming": "month",
+            },
+        )
 
     def test_trends_detail_endpoint_uses_weekly_periods_for_90_day_window(self) -> None:
         frozen_now = datetime.datetime(2026, 2, 15, 12, 0, 0, tzinfo=datetime.UTC)
@@ -2036,11 +2108,21 @@ class MembershipStatsSplitApiTests(TestCase):
                 resp = self.client.get(reverse("api-stats-membership-trends-charts-detail"), {"days": "90"})
 
         self.assertEqual(resp.status_code, 200)
-        requests_rows = resp.json()["charts"]["requests_trend"]
+        payload = resp.json()
+        requests_rows = payload["charts"]["requests_trend"]
         self.assertEqual(len(requests_rows), 9)
-        self.assertEqual(requests_rows[0], {"period": "2025-12-15", "count": 5})
-        self.assertEqual(requests_rows[1], {"period": "2025-12-22", "count": 7})
-        self.assertEqual(requests_rows[-1], {"period": "2026-02-09", "count": 7})
+        self.assertEqual(requests_rows[0], {"period": "2025-12-15", "period_start_ms": _period_start_ms_from_iso_date("2025-12-15"), "count": 5})
+        self.assertEqual(requests_rows[1], {"period": "2025-12-22", "period_start_ms": _period_start_ms_from_iso_date("2025-12-22"), "count": 7})
+        self.assertEqual(requests_rows[-1], {"period": "2026-02-09", "period_start_ms": _period_start_ms_from_iso_date("2026-02-09"), "count": 7})
+        self.assertEqual(payload["period_bucket"], "week")
+        self.assertEqual(
+            payload["chart_period_buckets"],
+            {
+                "requests_trend": "week",
+                "decisions_trend": "week",
+                "expirations_upcoming": "month",
+            },
+        )
 
     def test_active_memberships_over_time_detail_endpoint_returns_raw_period_membership_type_rows(self) -> None:
         frozen_now = datetime.datetime(2026, 2, 15, 12, 0, 0, tzinfo=datetime.UTC)
@@ -2089,36 +2171,43 @@ class MembershipStatsSplitApiTests(TestCase):
             [
                 {
                     "period": "2025-12",
+                    "period_start_ms": _period_start_ms_from_iso_month("2025-12"),
                     "membership_type": {"code": "individual", "name": "Individual"},
                     "count": 1,
                 },
                 {
                     "period": "2025-12",
+                    "period_start_ms": _period_start_ms_from_iso_month("2025-12"),
                     "membership_type": {"code": "sponsor-standard", "name": "Sponsor Standard"},
                     "count": 0,
                 },
                 {
                     "period": "2026-01",
+                    "period_start_ms": _period_start_ms_from_iso_month("2026-01"),
                     "membership_type": {"code": "individual", "name": "Individual"},
                     "count": 2,
                 },
                 {
                     "period": "2026-01",
+                    "period_start_ms": _period_start_ms_from_iso_month("2026-01"),
                     "membership_type": {"code": "sponsor-standard", "name": "Sponsor Standard"},
                     "count": 0,
                 },
                 {
                     "period": "2026-02",
+                    "period_start_ms": _period_start_ms_from_iso_month("2026-02"),
                     "membership_type": {"code": "individual", "name": "Individual"},
                     "count": 2,
                 },
                 {
                     "period": "2026-02",
+                    "period_start_ms": _period_start_ms_from_iso_month("2026-02"),
                     "membership_type": {"code": "sponsor-standard", "name": "Sponsor Standard"},
                     "count": 1,
                 },
             ],
         )
+        self.assertEqual(payload["period_bucket"], "month")
 
     def test_active_memberships_over_time_detail_endpoint_does_not_leak_pre_window_activity_into_first_bounded_period(self) -> None:
         frozen_now = datetime.datetime(2026, 2, 15, 12, 0, 0, tzinfo=datetime.UTC)
@@ -2149,6 +2238,7 @@ class MembershipStatsSplitApiTests(TestCase):
         self.assertIn(
             {
                 "period": "2026-01-16",
+                "period_start_ms": _period_start_ms_from_iso_date("2026-01-16"),
                 "membership_type": {"code": "individual", "name": "Individual"},
                 "count": 0,
             },
@@ -2218,9 +2308,11 @@ class MembershipStatsSplitApiTests(TestCase):
         ]
         self.assertEqual(rows[0], {
             "period": "2026-01-05",
+            "period_start_ms": _period_start_ms_from_iso_date("2026-01-05"),
             "membership_type": {"code": "individual", "name": "Individual"},
             "count": 2,
         })
+        self.assertEqual(resp.json()["period_bucket"], "week")
 
     def test_active_memberships_over_time_detail_endpoint_uses_weekly_periods_for_90_day_window(self) -> None:
         frozen_now = datetime.datetime(2026, 2, 15, 12, 0, 0, tzinfo=datetime.UTC)
@@ -2259,14 +2351,17 @@ class MembershipStatsSplitApiTests(TestCase):
         ]
         self.assertEqual(rows[0], {
             "period": "2025-12-15",
+            "period_start_ms": _period_start_ms_from_iso_date("2025-12-15"),
             "membership_type": {"code": "individual", "name": "Individual"},
             "count": 3,
         })
         self.assertEqual(rows[1], {
             "period": "2025-12-22",
+            "period_start_ms": _period_start_ms_from_iso_date("2025-12-22"),
             "membership_type": {"code": "individual", "name": "Individual"},
             "count": 3,
         })
+        self.assertEqual(resp.json()["period_bucket"], "week")
 
     def test_active_memberships_over_time_detail_endpoint_invalid_days_returns_400(self) -> None:
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
@@ -2280,6 +2375,54 @@ class MembershipStatsSplitApiTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
         self.assertEqual(payload["charts"]["retention_cohorts_12m"], [])
+        self.assertEqual(payload["period_bucket"], "month")
+
+    def test_trends_detail_endpoint_expirations_include_period_start_ms(self) -> None:
+        frozen_now = datetime.datetime(2026, 2, 15, 12, 0, 0, tzinfo=datetime.UTC)
+        self._create_membership_type()
+        Membership.objects.create(
+            target_username="expiring-member",
+            membership_type_id="individual",
+            expires_at=datetime.datetime(2026, 3, 20, 0, 0, 0, tzinfo=datetime.UTC),
+        )
+
+        with patch("django.utils.timezone.now", return_value=frozen_now):
+            with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
+                resp = self.client.get(reverse("api-stats-membership-trends-charts-detail"), {"days": "30"})
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["charts"]["expirations_upcoming"], [
+            {"period": "2026-03", "period_start_ms": _period_start_ms_from_iso_month("2026-03"), "count": 1}
+        ])
+
+    def test_retention_detail_endpoint_includes_period_start_ms_for_cohort_rows(self) -> None:
+        cache.clear()
+        self._create_membership_type()
+        first_approved_at = datetime.datetime(2024, 9, 10, 12, 0, 0, tzinfo=datetime.UTC)
+        first_expires_at = first_approved_at + datetime.timedelta(days=90)
+        renewed_at = first_expires_at - datetime.timedelta(days=1)
+
+        self._create_membership_log_event(
+            username="retained-user",
+            action=MembershipLog.Action.approved,
+            created_at=first_approved_at,
+            expires_at=first_expires_at,
+        )
+        self._create_membership_log_event(
+            username="retained-user",
+            action=MembershipLog.Action.approved,
+            created_at=renewed_at,
+            expires_at=renewed_at + datetime.timedelta(days=90),
+        )
+
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=self._get_reviewer):
+            with patch("core.freeipa.user.FreeIPAUser.all", return_value=[]):
+                resp = self.client.get(reverse("api-stats-membership-retention-chart-detail"))
+
+        self.assertEqual(resp.status_code, 200)
+        row = resp.json()["charts"]["retention_cohorts_12m"][0]
+        self.assertEqual(row["cohort_month"], "2024-09")
+        self.assertEqual(row["period_start_ms"], _period_start_ms_from_iso_month("2024-09"))
 
     def test_legacy_membership_stats_routes_are_unregistered(self) -> None:
         for route_name in (

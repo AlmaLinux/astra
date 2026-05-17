@@ -6,6 +6,9 @@
 {% block extra_head %}
   {{ block.super }}
   <script src="{% static 'core/vendor/chartjs/chart.umd.min.js' %}"></script>
+  <script src="{% static 'core/vendor/chartjs/luxon.min.js' %}"></script>
+  <script src="{% static 'core/vendor/chartjs/chartjs-adapter-luxon.umd.min.js' %}"></script>
+  <script src="{% static 'core/vendor/chartjs/chartjs-scale-timestack.min.js' %}"></script>
   <script src="{% static 'core/vendor/chartjs/chartjs-plugin-autocolors.min.js' %}"></script>
   {% vite_hmr_client %}
   {% vite_asset 'src/entrypoints/membershipStats.ts' %}

@@ -62,6 +62,31 @@ class MembershipStatsTimeBucket(StrEnum):
     month = "month"
 
 
+def _stats_period_start_ms(*, value: datetime.datetime) -> int:
+    return int(value.astimezone(datetime.UTC).timestamp() * 1000)
+
+
+def _stats_bucket_start_ms(
+    *,
+    value: datetime.datetime,
+    bucket: MembershipStatsTimeBucket,
+    local_tz: datetime.tzinfo,
+) -> int:
+    return _stats_period_start_ms(
+        value=_stats_period_start_local(
+            value=value,
+            bucket=bucket,
+            local_tz=local_tz,
+        )
+    )
+
+
+def _stats_month_start_ms_from_label(label: str) -> int:
+    local_tz = timezone.get_current_timezone()
+    year, month = [int(part) for part in label.split("-")]
+    return _stats_period_start_ms(value=datetime.datetime(year, month, 1, tzinfo=local_tz))
+
+
 def _resolve_stats_time_bucket(*, days_window: int | None) -> MembershipStatsTimeBucket:
     if days_window is None:
         return MembershipStatsTimeBucket.month
@@ -679,6 +704,7 @@ def _build_membership_stats_trends_payloads(
 ) -> dict[str, object]:
     trend_start = now - datetime.timedelta(days=days_window) if days_window is not None else None
     bucket = _resolve_stats_time_bucket(days_window=days_window)
+    local_tz = timezone.get_current_timezone()
     decision_statuses = [
         MembershipRequest.Status.approved,
         MembershipRequest.Status.rejected,
@@ -705,7 +731,15 @@ def _build_membership_stats_trends_payloads(
         requests_qs.annotate(period=requests_period).values("period").annotate(count=Count("id")).order_by("period")
     )
     requests_rows = [
-        {"period": label, "count": int(row["count"])}
+        {
+            "period": label,
+            "period_start_ms": _stats_bucket_start_ms(
+                value=row["period"],
+                bucket=bucket,
+                local_tz=local_tz,
+            ),
+            "count": int(row["count"]),
+        }
         for row in request_rows
         for label in [period_label(row["period"])]
         if label is not None
@@ -721,7 +755,16 @@ def _build_membership_stats_trends_payloads(
         .order_by("period", "status")
     )
     decisions_rows = [
-        {"period": label, "status": str(row["status"]), "count": int(row["count"])}
+        {
+            "period": label,
+            "period_start_ms": _stats_bucket_start_ms(
+                value=row["period"],
+                bucket=bucket,
+                local_tz=local_tz,
+            ),
+            "status": str(row["status"]),
+            "count": int(row["count"]),
+        }
         for row in decision_rows
         for label in [period_label(row["period"])]
         if label is not None
@@ -757,6 +800,7 @@ def _build_membership_stats_trends_payloads(
             expirations_rows.append(
                 {
                     "period": timezone.localtime(current).strftime("%Y-%m"),
+                    "period_start_ms": _stats_period_start_ms(value=current),
                     "count": exp_index.get(current, 0),
                 }
             )
@@ -766,6 +810,12 @@ def _build_membership_stats_trends_payloads(
     return {
         "generated_at": generated_at,
         "days_param": days_param,
+        "period_bucket": bucket.value,
+        "chart_period_buckets": {
+            "requests_trend": bucket.value,
+            "decisions_trend": bucket.value,
+            "expirations_upcoming": MembershipStatsTimeBucket.month.value,
+        },
         "charts": {
             "requests_trend": requests_rows,
             "decisions_trend": decisions_rows,
@@ -781,6 +831,7 @@ def _build_membership_stats_active_memberships_chart_payloads(
     days_window: int | None,
 ) -> dict[str, object]:
     bucket = _resolve_stats_time_bucket(days_window=days_window)
+    local_tz = timezone.get_current_timezone()
     relevant_actions = [
         MembershipLog.Action.approved,
         MembershipLog.Action.expiry_changed,
@@ -801,10 +852,9 @@ def _build_membership_stats_active_memberships_chart_payloads(
     if not events:
         rows: list[dict[str, object]] = []
     else:
-        local_tz = timezone.get_current_timezone()
         now_utc = now.astimezone(datetime.UTC)
 
-        checkpoints: list[tuple[str, datetime.datetime]] = []
+        checkpoints: list[tuple[str, datetime.datetime, datetime.datetime]] = []
         if days_window is None:
             earliest_event_at = min(event.created_at for event in events)
             current_period = _stats_period_start_local(
@@ -831,10 +881,10 @@ def _build_membership_stats_active_memberships_chart_payloads(
             snapshot_at = now_utc if current_period == current_bucket else next_period.astimezone(datetime.UTC)
             label = _format_stats_period_label(value=current_period, bucket=bucket)
             if label is not None:
-                checkpoints.append((label, snapshot_at))
+                checkpoints.append((label, snapshot_at, current_period))
             current_period = next_period
 
-        checkpoints_at = [snapshot_at for _label, snapshot_at in checkpoints]
+        checkpoints_at = [snapshot_at for _label, snapshot_at, _period_start in checkpoints]
         intervals_by_type: dict[str, list[tuple[datetime.datetime, datetime.datetime | None]]] = defaultdict(list)
         type_names: dict[str, str] = {}
         events_by_membership: dict[tuple[str, str], list[MembershipLog]] = defaultdict(list)
@@ -884,12 +934,18 @@ def _build_membership_stats_active_memberships_chart_payloads(
         ordered_types = sorted(type_names.items(), key=lambda item: (item[1], item[0]))
         rows = []
         running_counts = {membership_type_id: 0 for membership_type_id in deltas_by_type}
-        for checkpoint_index, (label, _snapshot_at) in enumerate(checkpoints):
+        for checkpoint_index, (label, _snapshot_at, period_start_local) in enumerate(checkpoints):
+            period_start_ms = _stats_bucket_start_ms(
+                value=period_start_local,
+                bucket=bucket,
+                local_tz=local_tz,
+            )
             for membership_type_id, _name in ordered_types:
                 running_counts[membership_type_id] += deltas_by_type[membership_type_id][checkpoint_index]
                 rows.append(
                     {
                         "period": label,
+                        "period_start_ms": period_start_ms,
                         "membership_type": {
                             "code": membership_type_id,
                             "name": type_names[membership_type_id],
@@ -901,6 +957,7 @@ def _build_membership_stats_active_memberships_chart_payloads(
     return {
         "generated_at": timezone.localtime(now).isoformat(),
         "days_param": days_param,
+        "period_bucket": bucket.value,
         "charts": {
             "active_memberships_over_time": rows,
         },
@@ -923,7 +980,7 @@ def stats_membership_trends_charts_detail_api(request: HttpRequest) -> HttpRespo
             days_window=days_window,
         )
 
-    cache_key = f"membership_stats:trends:v3:detail:days={days_param}"
+    cache_key = f"membership_stats:trends:v4:detail:days={days_param}"
     payload = cache.get_or_set(cache_key, compute, timeout=300)
     return JsonResponse(payload)
 
@@ -963,6 +1020,7 @@ def _build_membership_stats_retention_payloads(*, now: datetime.datetime) -> dic
     rows = [
         {
             "cohort_month": str(labels[index]),
+            "period_start_ms": _stats_month_start_ms_from_label(str(labels[index])),
             "cohort_size": int(cohort_sizes[index]),
             "retained": int(retained[index]),
             "lapsed_then_renewed": int(lapsed_then_renewed[index]),
@@ -973,6 +1031,7 @@ def _build_membership_stats_retention_payloads(*, now: datetime.datetime) -> dic
     generated_at = timezone.localtime(now).isoformat()
     return {
         "generated_at": generated_at,
+        "period_bucket": MembershipStatsTimeBucket.month.value,
         "charts": {
             "retention_cohorts_12m": rows,
         },

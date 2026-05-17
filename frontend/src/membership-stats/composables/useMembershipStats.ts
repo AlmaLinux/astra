@@ -7,11 +7,13 @@ import type {
   CompositionChartsApiData,
   TrendsChartsData,
   TrendsChartsApiData,
+  TrendsChartPeriodBuckets,
   RetentionChartsData,
   RetentionChartsApiData,
   ActiveMembershipsChartsData,
   ActiveMembershipsChartsApiData,
   DaysPreset,
+  PeriodBucket,
 } from "../types";
 import {
   activeMembershipsChartsFromApi,
@@ -67,16 +69,27 @@ export function useMembershipStats(bootstrap: MembershipStatsBootstrap): Members
       const [summaryData, compositionData, trendsData, retentionData, activeMembershipsData] = await Promise.all([
         summaryResp.json() as Promise<{ summary: SummaryData }>,
         compositionResp.json() as Promise<{ charts: CompositionChartsApiData }>,
-        trendsResp.json() as Promise<{ charts: TrendsChartsApiData }>,
-        retentionResp.json() as Promise<{ charts: RetentionChartsApiData }>,
-        activeMembershipsResp.json() as Promise<{ charts: ActiveMembershipsChartsApiData }>,
+        trendsResp.json() as Promise<{
+          charts: TrendsChartsApiData;
+          period_bucket: PeriodBucket;
+          chart_period_buckets: TrendsChartPeriodBuckets;
+        }>,
+        retentionResp.json() as Promise<{ charts: RetentionChartsApiData; period_bucket: PeriodBucket }>,
+        activeMembershipsResp.json() as Promise<{ charts: ActiveMembershipsChartsApiData; period_bucket: PeriodBucket }>,
       ]);
 
       summary.value = summaryData.summary;
       compositionCharts.value = compositionChartsFromApi(compositionData.charts);
-      trendsCharts.value = trendsChartsFromApi(trendsData.charts);
-      retentionCharts.value = retentionChartsFromApi(retentionData.charts);
-      activeMembershipsCharts.value = activeMembershipsChartsFromApi(activeMembershipsData.charts);
+      trendsCharts.value = trendsChartsFromApi(
+        trendsData.charts,
+        trendsData.period_bucket,
+        trendsData.chart_period_buckets,
+      );
+      retentionCharts.value = retentionChartsFromApi(retentionData.charts, retentionData.period_bucket);
+      activeMembershipsCharts.value = activeMembershipsChartsFromApi(
+        activeMembershipsData.charts,
+        activeMembershipsData.period_bucket,
+      );
     } catch {
       error.value = "Network error loading statistics.";
     } finally {
