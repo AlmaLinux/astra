@@ -13,18 +13,20 @@ from django import forms
 from django.conf import settings
 from django.contrib import admin, messages
 from django.contrib.admin import helpers
-from django.contrib.admin.utils import model_ngettext
+from django.contrib.admin.options import IS_POPUP_VAR, TO_FIELD_VAR
+from django.contrib.admin.utils import flatten_fieldsets, model_ngettext, unquote
 from django.contrib.auth.models import Group as DjangoGroup
 from django.contrib.auth.models import User as DjangoUser
 from django.contrib.contenttypes.models import ContentType
 from django.core.cache import cache
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.uploadedfile import InMemoryUploadedFile
 from django.db import IntegrityError, transaction
 from django.http import Http404, HttpRequest, HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import redirect
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
+from django.utils import timezone
 from django.utils.html import format_html
 from django.utils.text import Truncator
 from django.utils.translation import gettext_lazy as _
@@ -55,6 +57,7 @@ from core.form_validators import (
     clean_fas_url_value,
     validate_http_urls,
 )
+from core.freeipa_directory import search_freeipa_users
 from core.forms_selfservice import (
     _GITHUB_USERNAME_RE,
     _GITLAB_USERNAME_RE,
@@ -91,6 +94,7 @@ from core.membership_csv_import import (
     MembershipCSVImportForm,
     MembershipCSVImportResource,
 )
+from core.membership_request_workflow import grant_direct_membership, update_direct_membership_dates
 from core.organization_claim import make_organization_claim_token
 from core.organization_csv_import import (
     _COLUMN_FALLBACK_NORMS,
@@ -115,7 +119,7 @@ from core.organization_representative_transition import apply_organization_repre
 from core.profanity import validate_no_profanity_or_hate_speech
 from core.protected_resources import protected_freeipa_group_cns
 from core.signals import CANONICAL_SIGNALS
-from core.user_labels import user_choice, user_choice_with_fallback, user_choices_from_users
+from core.user_labels import user_choice, user_choice_from_freeipa, user_choice_with_fallback, user_choices_from_users
 from core.views_utils import _normalize_str, get_username
 
 from .listbacked_queryset import _ListBackedQuerySet
@@ -1996,6 +2000,363 @@ class MembershipTypeAdmin(admin.ModelAdmin):
         if obj is not None and "code" not in readonly:
             readonly.append("code")
         return tuple(readonly)
+
+
+class MembershipAdminForm(forms.ModelForm):
+    TARGET_KIND_USER = "user"
+    TARGET_KIND_ORGANIZATION = "organization"
+    TARGET_KIND_CHOICES = (
+        (TARGET_KIND_USER, "User"),
+        (TARGET_KIND_ORGANIZATION, "Organization"),
+    )
+    TARGET_USERNAME_SEARCH_PLACEHOLDER = "Search users..."
+
+    target_kind = forms.ChoiceField(choices=TARGET_KIND_CHOICES)
+    target_username = forms.ChoiceField(
+        required=False,
+        choices=[],
+        widget=forms.Select(
+            attrs={
+                "class": "form-control alx-select2",
+                "data-placeholder": TARGET_USERNAME_SEARCH_PLACEHOLDER,
+            }
+        ),
+    )
+    target_organization = forms.ModelChoiceField(
+        queryset=Organization.objects.order_by("name"),
+        required=False,
+    )
+    starts_on = forms.DateField(required=True, widget=forms.DateInput(attrs={"type": "date"}))
+    expires_on = forms.DateField(required=True, widget=forms.DateInput(attrs={"type": "date"}))
+
+    class Meta:
+        model = Membership
+        fields = ("target_kind", "target_username", "target_organization", "membership_type")
+
+    @override
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        instance = self.instance
+        if instance.pk is not None:
+            self.fields["target_username"] = forms.CharField(
+                required=False,
+                widget=forms.TextInput(attrs={"autocomplete": "username"}),
+            )
+            if instance.target_organization_id is not None:
+                self.fields["target_kind"].initial = self.TARGET_KIND_ORGANIZATION
+                self.fields["target_organization"].initial = instance.target_organization
+            else:
+                self.fields["target_kind"].initial = self.TARGET_KIND_USER
+                self.fields["target_username"].initial = instance.target_username
+
+            self.fields["starts_on"].initial = instance.created_at.astimezone(datetime.UTC).date()
+            if instance.expires_at is not None:
+                self.fields["expires_on"].initial = instance.expires_at.astimezone(datetime.UTC).date()
+
+            for field_name in ("target_kind", "target_username", "target_organization", "membership_type"):
+                self.fields[field_name].disabled = True
+        else:
+            today_utc = timezone.now().astimezone(datetime.UTC).date()
+            self.fields["starts_on"].initial = today_utc
+            self.fields["expires_on"].initial = today_utc
+
+            current_username = str(self.data.get("target_username") or self.initial.get("target_username") or "").strip()
+            if current_username:
+                self.fields["target_username"].choices = [user_choice_from_freeipa(current_username)]
+
+    @classmethod
+    def configure_add_target_username_widget(cls, field: forms.Field, *, search_url: str) -> None:
+        field.widget = forms.Select(
+            attrs={
+                "class": "form-control alx-select2",
+                "data-ajax-url": search_url,
+                "data-placeholder": cls.TARGET_USERNAME_SEARCH_PLACEHOLDER,
+            }
+        )
+
+    def clean_target_username(self) -> str:
+        return str(self.cleaned_data.get("target_username") or "").strip()
+
+    @staticmethod
+    def _starts_at_from_date(value: datetime.date) -> datetime.datetime:
+        return datetime.datetime.combine(value, datetime.time(0, 0, 0), tzinfo=datetime.UTC)
+
+    @staticmethod
+    def _expires_at_from_date(value: datetime.date) -> datetime.datetime:
+        return datetime.datetime.combine(value, datetime.time(23, 59, 59), tzinfo=datetime.UTC)
+
+    def cleaned_starts_at(self) -> datetime.datetime:
+        return self._starts_at_from_date(self.cleaned_data["starts_on"])
+
+    def cleaned_expires_at(self) -> datetime.datetime:
+        return self._expires_at_from_date(self.cleaned_data["expires_on"])
+
+    @override
+    def clean(self):
+        cleaned_data = super().clean()
+
+        target_kind = str(cleaned_data.get("target_kind") or "").strip()
+        target_username = str(cleaned_data.get("target_username") or "").strip()
+        target_organization = cleaned_data.get("target_organization")
+        membership_type = cleaned_data.get("membership_type")
+        starts_on = cleaned_data.get("starts_on")
+        expires_on = cleaned_data.get("expires_on")
+
+        if target_kind == self.TARGET_KIND_USER:
+            if not target_username:
+                self.add_error("target_username", "Select a user membership target.")
+            if target_organization is not None:
+                self.add_error("target_organization", "User memberships cannot also target an organization.")
+        elif target_kind == self.TARGET_KIND_ORGANIZATION:
+            if target_organization is None:
+                self.add_error("target_organization", "Select an organization membership target.")
+            if target_username:
+                self.add_error("target_username", "Organization memberships cannot also target a user.")
+        else:
+            self.add_error("target_kind", "Select a valid membership target type.")
+
+        if starts_on is not None and expires_on is not None and starts_on > expires_on:
+            self.add_error("starts_on", "Start date cannot be later than expiration date.")
+
+        if membership_type is None:
+            return cleaned_data
+
+        if target_kind == self.TARGET_KIND_USER and not membership_type.category.is_individual:
+            self.add_error("membership_type", "This membership type cannot be assigned to users.")
+
+        if target_kind == self.TARGET_KIND_ORGANIZATION and not membership_type.category.is_organization:
+            self.add_error("membership_type", "This membership type cannot be assigned to organizations.")
+
+        if self.instance.pk is not None:
+            if target_kind == self.TARGET_KIND_USER and target_username != self.instance.target_username:
+                self.add_error("target_username", "Membership target cannot be changed here.")
+            if target_kind == self.TARGET_KIND_ORGANIZATION and target_organization != self.instance.target_organization:
+                self.add_error("target_organization", "Membership target cannot be changed here.")
+            if membership_type != self.instance.membership_type:
+                self.add_error("membership_type", "Membership type cannot be changed here.")
+            return cleaned_data
+
+        return cleaned_data
+
+
+@admin.register(Membership)
+class MembershipAdmin(admin.ModelAdmin):
+    form = MembershipAdminForm
+    fields = ("target_kind", "target_username", "target_organization", "membership_type", "starts_on", "expires_on")
+    list_display = ("membership_target", "membership_type", "start_on_display", "expires_at")
+    list_filter = ("membership_type__category", "membership_type")
+    ordering = ("target_username", "target_organization__name", "membership_type__code")
+    search_fields = ("target_username", "target_organization__name", "membership_type__name", "membership_type__code")
+
+    class Media:
+        css = {"all": ("admin/css/vendor/select2/select2.css",)}
+        js = (
+            "admin/js/vendor/select2/select2.full.js",
+            "core/js/admin_select2_ajax_init.js",
+        )
+
+    @admin.display(description="Target")
+    def membership_target(self, obj: Membership) -> str:
+        if obj.target_organization is not None:
+            return obj.target_organization.name
+        return obj.target_username
+
+    @admin.display(description="Start date")
+    def start_on_display(self, obj: Membership) -> str:
+        return obj.created_at.astimezone(datetime.UTC).date().isoformat()
+
+    @override
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("membership_type", "target_organization")
+
+    @override
+    def get_form(self, request, obj=None, change=False, **kwargs):
+        form_class = super().get_form(request, obj=obj, change=change, **kwargs)
+        if obj is None and "target_username" in form_class.base_fields:
+            MembershipAdminForm.configure_add_target_username_widget(
+                form_class.base_fields["target_username"],
+                search_url="../target-user-search/",
+            )
+        return form_class
+
+    @override
+    def get_urls(self):
+        urls = super().get_urls()
+        custom = [
+            path(
+                "target-user-search/",
+                self.admin_site.admin_view(self.target_user_search_view),
+                name="core_membership_target_user_search",
+            ),
+        ]
+        return custom + urls
+
+    def target_user_search_view(self, request: HttpRequest) -> JsonResponse:
+        if not self.has_add_permission(request):
+            raise PermissionDenied
+
+        search_query = _normalize_str(request.GET.get("q"))
+        if not search_query:
+            return JsonResponse({"results": []})
+
+        results = [
+            {"id": str(user.username), "text": user_choice(str(user.username), user=user)[1]}
+            for user in search_freeipa_users(query=search_query, limit=20)
+        ]
+        return JsonResponse({"results": results})
+
+    @override
+    def _changeform_view(self, request, object_id, form_url, extra_context):
+        to_field = request.POST.get(TO_FIELD_VAR, request.GET.get(TO_FIELD_VAR))
+        if to_field and not self.to_field_allowed(request, to_field):
+            raise admin.options.DisallowedModelAdminToField(f"The field {to_field} cannot be referenced.")
+
+        if request.method == "POST" and "_saveasnew" in request.POST:
+            object_id = None
+
+        add = object_id is None
+
+        if add:
+            if not self.has_add_permission(request):
+                raise PermissionDenied
+            obj = None
+        else:
+            obj = self.get_object(request, unquote(object_id), to_field)
+
+            if request.method == "POST":
+                if not self.has_change_permission(request, obj):
+                    raise PermissionDenied
+            elif not self.has_view_or_change_permission(request, obj):
+                raise PermissionDenied
+
+            if obj is None:
+                return self._get_obj_does_not_exist_redirect(request, self.opts, object_id)
+
+        fieldsets = self.get_fieldsets(request, obj)
+        model_form = self.get_form(request, obj, change=not add, fields=flatten_fieldsets(fieldsets))
+
+        if request.method == "POST":
+            form = model_form(request.POST, request.FILES, instance=obj)
+            formsets, inline_instances = self._create_formsets(request, form.instance, change=not add)
+            form_validated = form.is_valid()
+            if form_validated:
+                new_object = self.save_form(request, form, change=not add)
+            else:
+                new_object = form.instance
+
+            if admin.options.all_valid(formsets) and form_validated:
+                try:
+                    self.save_model(request, new_object, form, not add)
+                    self.save_related(request, form, formsets, not add)
+                except ValidationError as exc:
+                    form.add_error(None, exc)
+                    form_validated = False
+                else:
+                    change_message = self.construct_change_message(request, form, formsets, add)
+                    if add:
+                        self.log_addition(request, new_object, change_message)
+                        return self.response_add(request, new_object)
+
+                    self.log_change(request, new_object, change_message)
+                    return self.response_change(request, new_object)
+            else:
+                form_validated = False
+        else:
+            if add:
+                initial = self.get_changeform_initial_data(request)
+                form = model_form(initial=initial)
+                formsets, inline_instances = self._create_formsets(request, form.instance, change=False)
+            else:
+                form = model_form(instance=obj)
+                formsets, inline_instances = self._create_formsets(request, obj, change=True)
+            form_validated = False
+
+        if not add and not self.has_change_permission(request, obj):
+            readonly_fields = flatten_fieldsets(fieldsets)
+        else:
+            readonly_fields = self.get_readonly_fields(request, obj)
+
+        admin_form = helpers.AdminForm(
+            form,
+            list(fieldsets),
+            self.get_prepopulated_fields(request, obj) if add or self.has_change_permission(request, obj) else {},
+            readonly_fields,
+            model_admin=self,
+        )
+        media = self.media + admin_form.media
+
+        inline_formsets = self.get_inline_formsets(request, formsets, inline_instances, obj)
+        for inline_formset in inline_formsets:
+            media += inline_formset.media
+
+        if add:
+            title = _("Add %s")
+        elif self.has_change_permission(request, obj):
+            title = _("Change %s")
+        else:
+            title = _("View %s")
+
+        context = {
+            **self.admin_site.each_context(request),
+            "title": title % self.opts.verbose_name,
+            "subtitle": str(obj) if obj else None,
+            "adminform": admin_form,
+            "object_id": object_id,
+            "original": obj,
+            "is_popup": IS_POPUP_VAR in request.POST or IS_POPUP_VAR in request.GET,
+            "to_field": to_field,
+            "media": media,
+            "inline_admin_formsets": inline_formsets,
+            "errors": helpers.AdminErrorList(form, formsets),
+            "preserved_filters": self.get_preserved_filters(request),
+        }
+
+        if request.method == "POST" and not form_validated and "_saveasnew" in request.POST:
+            context["show_save"] = False
+            context["show_save_and_continue"] = False
+            add = False
+
+        context.update(extra_context or {})
+
+        return self.render_change_form(request, context, add=add, change=not add, obj=obj, form_url=form_url)
+
+    @override
+    def save_model(self, request, obj, form, change):
+        actor_username = get_username(request)
+        starts_at = form.cleaned_starts_at()
+        expires_at = form.cleaned_expires_at()
+
+        if change:
+            updated_membership = update_direct_membership_dates(
+                actor_username=actor_username,
+                membership=obj,
+                starts_at=starts_at,
+                expires_at=expires_at,
+            )
+            obj.__dict__.update(updated_membership.__dict__)
+            return
+
+        target_kind = form.cleaned_data["target_kind"]
+        if target_kind == MembershipAdminForm.TARGET_KIND_ORGANIZATION:
+            saved_membership = grant_direct_membership(
+                actor_username=actor_username,
+                membership_type=form.cleaned_data["membership_type"],
+                starts_at=starts_at,
+                expires_at=expires_at,
+                target_organization=form.cleaned_data["target_organization"],
+            )
+        else:
+            saved_membership = grant_direct_membership(
+                actor_username=actor_username,
+                membership_type=form.cleaned_data["membership_type"],
+                starts_at=starts_at,
+                expires_at=expires_at,
+                target_username=form.cleaned_data["target_username"],
+            )
+
+        obj.__dict__.update(saved_membership.__dict__)
+        obj._state.adding = False
 
 
 class CandidateInline(admin.TabularInline):

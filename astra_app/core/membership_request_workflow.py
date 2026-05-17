@@ -1,7 +1,8 @@
 import dataclasses
 import datetime
 import logging
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -408,6 +409,328 @@ def previous_expires_at_for_extension(
     return _active_expires_at(Membership.objects.filter(**filters))
 
 
+def _realign_membership_term_start(
+    *,
+    membership: Membership,
+    starts_at: datetime.datetime,
+) -> MembershipLog:
+    membership = (
+        Membership.objects.select_related("membership_type", "target_organization")
+        .select_for_update(of=("self",))
+        .get(pk=membership.pk)
+    )
+
+    log_filters = membership.target_identity.for_membership_log_filter()
+    approval_log = (
+        MembershipLog.objects.select_for_update(of=("self",))
+        .filter(
+            **log_filters,
+            membership_type=membership.membership_type,
+            action=MembershipLog.Action.approved,
+            created_at__gte=membership.created_at,
+        )
+        .order_by("created_at", "pk")
+        .first()
+    )
+    if approval_log is None:
+        raise ValidationError("Unable to locate the approval log for the current membership term")
+
+    MembershipLog.objects.filter(pk=approval_log.pk).update(created_at=starts_at)
+    Membership.objects.filter(pk=membership.pk).update(created_at=starts_at)
+
+    approval_log.created_at = starts_at
+    membership.created_at = starts_at
+    return approval_log
+
+
+def _execute_membership_grant(
+    *,
+    actor_username: str,
+    membership_type: MembershipType,
+    approved_at: datetime.datetime,
+    previous_expires_at: datetime.datetime | None,
+    log_prefix: str,
+    target_username: str = "",
+    target_organization: Organization | None = None,
+    membership_request: MembershipRequest | None = None,
+    on_group_add_success: Callable[[], None] | None = None,
+) -> MembershipLog:
+    normalized_target_username = str(target_username or "").strip()
+    if (not normalized_target_username) == (target_organization is None):
+        raise ValueError("Provide exactly one of target_username or target_organization")
+
+    request_id = membership_request.pk if membership_request is not None else None
+    group_add_payload: tuple[str, str] | None = None
+    representative_sync_payload: tuple[str, tuple[str, ...], str | None] | None = None
+
+    if target_organization is not None:
+        if membership_type.group_cn and target_organization.representative:
+            missing_agreements = missing_required_agreements_for_user_in_group(
+                target_organization.representative,
+                membership_type.group_cn,
+            )
+            if missing_agreements:
+                missing_list = ", ".join(missing_agreements)
+                raise ValidationError(
+                    "Representative must sign required agreements before approval: "
+                    f"{missing_list}"
+                )
+
+        old_membership = (
+            Membership.objects.select_related("membership_type")
+            .filter(
+                target_organization=target_organization,
+                membership_type__category=membership_type.category,
+            )
+            .first()
+        )
+
+        new_group_cn = str(membership_type.group_cn or "").strip()
+        if new_group_cn and target_organization.representative:
+            try:
+                representative = FreeIPAUser.get(target_organization.representative)
+            except Exception:
+                logger.exception(
+                    "%s: FreeIPAUser.get failed (org representative) request_id=%s org_id=%s representative=%r",
+                    log_prefix,
+                    request_id,
+                    target_organization.pk,
+                    target_organization.representative,
+                    extra=current_exception_log_fields(),
+                )
+                raise
+
+            if representative is None:
+                raise ValidationError("Unable to load the organization representative from FreeIPA")
+
+            old_group_cn_for_cleanup: str | None = None
+            if old_membership is not None and old_membership.membership_type.group_cn:
+                old_group_cn = str(old_membership.membership_type.group_cn or "").strip()
+                if old_group_cn and old_group_cn != new_group_cn:
+                    old_group_cn_for_cleanup = old_group_cn
+
+            representative_sync_payload = (
+                representative.username,
+                (new_group_cn,),
+                old_group_cn_for_cleanup,
+            )
+
+        log = MembershipLog.create_for_approval_at(
+            actor_username=actor_username,
+            membership_type=membership_type,
+            approved_at=approved_at,
+            previous_expires_at=previous_expires_at,
+            target_organization=target_organization,
+            membership_request=membership_request,
+        )
+    else:
+        if not membership_type.group_cn:
+            raise ValidationError("This membership type is not linked to a group")
+
+        missing_agreements = missing_required_agreements_for_user_in_group(
+            normalized_target_username,
+            membership_type.group_cn,
+        )
+        if missing_agreements:
+            missing_list = ", ".join(missing_agreements)
+            raise ValidationError(
+                "User must sign required agreements before approval: "
+                f"{missing_list}"
+            )
+
+        try:
+            user = FreeIPAUser.get(normalized_target_username, respect_privacy=False)
+        except Exception:
+            logger.exception(
+                "%s: FreeIPAUser.get failed request_id=%s target=%r",
+                log_prefix,
+                request_id,
+                normalized_target_username,
+                extra=current_exception_log_fields(),
+            )
+            raise
+        if user is None:
+            raise ValidationError("Unable to load the requested user from FreeIPA")
+
+        group_add_payload = (normalized_target_username, membership_type.group_cn)
+
+        log = MembershipLog.create_for_approval_at(
+            actor_username=actor_username,
+            membership_type=membership_type,
+            approved_at=approved_at,
+            previous_expires_at=previous_expires_at,
+            target_username=normalized_target_username,
+            membership_request=membership_request,
+        )
+
+    if group_add_payload is not None:
+        username_to_add, group_cn_to_add = group_add_payload
+
+        def _on_commit_add_user_to_group() -> None:
+            callback_should_run = False
+            try:
+                user_for_group_add = FreeIPAUser.get(username_to_add)
+            except Exception:
+                logger.exception(
+                    "%s: on_commit FreeIPAUser.get failed request_id=%s target=%r",
+                    log_prefix,
+                    request_id,
+                    username_to_add,
+                    extra=current_exception_log_fields(),
+                )
+                return
+
+            if user_for_group_add is None:
+                logger.warning(
+                    "%s: on_commit user missing for group add request_id=%s target=%r",
+                    log_prefix,
+                    request_id,
+                    username_to_add,
+                )
+                return
+
+            try:
+                user_for_group_add.add_to_group(group_name=group_cn_to_add)
+            except Exception as exc:
+                if _is_freeipa_noop_error(error=exc, is_add=True):
+                    callback_should_run = True
+                    logger.info(
+                        "astra.membership.freeipa_group.already_member group_cn=%s outcome=noop",
+                        group_cn_to_add,
+                        extra={
+                            "event": "astra.freeipa.group.mutation",
+                            "component": "membership",
+                            "outcome": "already_member",
+                        },
+                    )
+                else:
+                    logger.exception(
+                        "%s: on_commit add_to_group failed request_id=%s target=%r group_cn=%r",
+                        log_prefix,
+                        request_id,
+                        user_for_group_add.username,
+                        group_cn_to_add,
+                        extra=current_exception_log_fields(),
+                    )
+                    return
+            else:
+                callback_should_run = True
+
+            if callback_should_run and on_group_add_success is not None:
+                try:
+                    on_group_add_success()
+                except Exception:
+                    logger.exception(
+                        "%s: on_commit post-group-add callback failed request_id=%s target=%r group_cn=%r",
+                        log_prefix,
+                        request_id,
+                        username_to_add,
+                        group_cn_to_add,
+                        extra=current_exception_log_fields(),
+                    )
+
+        transaction.on_commit(_on_commit_add_user_to_group)
+    elif on_group_add_success is not None:
+        on_group_add_success()
+
+    if representative_sync_payload is not None:
+        representative_username, group_cns, old_group_cn_to_remove = representative_sync_payload
+
+        def _on_commit_sync_representative_groups() -> None:
+            sync_organization_representative_membership_groups(
+                representative_username=representative_username,
+                group_cns=group_cns,
+                old_group_cn_to_remove=old_group_cn_to_remove,
+                membership_request_id=request_id,
+                log_prefix=log_prefix,
+                caller_mode=FreeIPACallerMode.raise_on_error,
+                missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
+            )
+
+        transaction.on_commit(_on_commit_sync_representative_groups)
+
+    return log
+
+
+@transaction.atomic
+def grant_direct_membership(
+    *,
+    actor_username: str,
+    membership_type: MembershipType,
+    starts_at: datetime.datetime,
+    expires_at: datetime.datetime,
+    target_username: str = "",
+    target_organization: Organization | None = None,
+    on_group_add_success: Callable[[], None] | None = None,
+) -> Membership:
+    approval_log = _execute_membership_grant(
+        actor_username=actor_username,
+        membership_type=membership_type,
+        approved_at=starts_at,
+        previous_expires_at=None,
+        log_prefix="grant_direct_membership",
+        target_username=target_username,
+        target_organization=target_organization,
+        on_group_add_success=on_group_add_success,
+    )
+
+    membership_filters = approval_log.target_identity.for_membership_filter()
+    membership = Membership.objects.select_related("membership_type", "target_organization").get(
+        **membership_filters,
+        membership_type=membership_type,
+    )
+
+    if membership.created_at != starts_at:
+        _realign_membership_term_start(membership=membership, starts_at=starts_at)
+        membership.refresh_from_db()
+
+    if membership.expires_at != expires_at:
+        MembershipLog.create_for_expiry_change(
+            actor_username=actor_username,
+            membership_type=membership_type,
+            expires_at=expires_at,
+            target_username=target_username,
+            target_organization=target_organization,
+        )
+        membership = Membership.objects.select_related("membership_type", "target_organization").get(
+            **membership_filters,
+            membership_type=membership_type,
+        )
+
+    return membership
+
+
+@transaction.atomic
+def update_direct_membership_dates(
+    *,
+    actor_username: str,
+    membership: Membership,
+    starts_at: datetime.datetime,
+    expires_at: datetime.datetime,
+) -> Membership:
+    membership = Membership.objects.select_related("membership_type", "target_organization").get(pk=membership.pk)
+
+    if membership.created_at != starts_at:
+        _realign_membership_term_start(membership=membership, starts_at=starts_at)
+        membership.refresh_from_db()
+
+    if membership.expires_at != expires_at:
+        membership_filters = membership.target_identity.for_membership_filter()
+        MembershipLog.create_for_expiry_change(
+            actor_username=actor_username,
+            membership_type=membership.membership_type,
+            expires_at=expires_at,
+            target_username=membership.target_username,
+            target_organization=membership.target_organization,
+        )
+        membership = Membership.objects.select_related("membership_type", "target_organization").get(
+            **membership_filters,
+            membership_type=membership.membership_type,
+        )
+
+    return membership
+
+
 def record_membership_request_created(
     *,
     membership_request: MembershipRequest,
@@ -673,25 +996,10 @@ def approve_membership_request(
             raise ValidationError("Only pending or on-hold requests can be approved")
         raise ValidationError("Only pending requests can be approved")
 
-    group_add_payload: tuple[str, str] | None = None
-    representative_sync_payload: tuple[str, tuple[str, ...], str | None] | None = None
-
     if membership_request.target_kind == MembershipRequest.TargetKind.organization:
         org = membership_request.requested_organization
         if org is None:
             raise ValidationError("Organization not found")
-
-        if membership_type.group_cn and org.representative:
-            missing_agreements = missing_required_agreements_for_user_in_group(
-                org.representative,
-                membership_type.group_cn,
-            )
-            if missing_agreements:
-                missing_list = ", ".join(missing_agreements)
-                raise ValidationError(
-                    "Representative must sign required agreements before approval: "
-                    f"{missing_list}"
-                )
 
         email_recipient = _organization_notification_email(org)
 
@@ -726,43 +1034,6 @@ def approve_membership_request(
                 },
             )
 
-        old_membership = (
-            Membership.objects.select_related("membership_type")
-            .filter(
-                target_organization=org,
-                membership_type__category=membership_type.category,
-            )
-            .first()
-        )
-
-        new_group_cn = str(membership_type.group_cn or "").strip()
-
-        if new_group_cn and org.representative:
-            try:
-                representative = FreeIPAUser.get(org.representative)
-            except Exception:
-                logger.exception(
-                    "%s: FreeIPAUser.get failed (org representative) request_id=%s org_id=%s representative=%r",
-                    log_prefix,
-                    membership_request.pk,
-                    org.pk,
-                    org.representative,
-                    extra=current_exception_log_fields(),
-                )
-                raise
-
-            if representative is not None:
-                old_group_cn_for_cleanup: str | None = None
-                if old_membership is not None and old_membership.membership_type.group_cn:
-                    old_group_cn = str(old_membership.membership_type.group_cn or "").strip()
-                    if old_group_cn and old_group_cn != new_group_cn:
-                        old_group_cn_for_cleanup = old_group_cn
-                representative_sync_payload = (
-                    representative.username,
-                    (new_group_cn,),
-                    old_group_cn_for_cleanup,
-                )
-
         email_context: dict[str, object] = (
             {
                 **system_email_context(),
@@ -775,34 +1046,9 @@ def approve_membership_request(
             if template_name is not None
             else {}
         )
-        log_kwargs: dict[str, object] = {"target_organization": org}
 
     else:
-        if not membership_type.group_cn:
-            raise ValidationError("This membership type is not linked to a group")
-
-        missing_agreements = missing_required_agreements_for_user_in_group(
-            membership_request.requested_username,
-            membership_type.group_cn,
-        )
-        if missing_agreements:
-            missing_list = ", ".join(missing_agreements)
-            raise ValidationError(
-                "User must sign required agreements before approval: "
-                f"{missing_list}"
-            )
-
-        try:
-            user = FreeIPAUser.get(membership_request.requested_username, respect_privacy=False)
-        except Exception:
-            logger.exception(
-                "%s: FreeIPAUser.get failed request_id=%s target=%r",
-                log_prefix,
-                membership_request.pk,
-                membership_request.requested_username,
-                extra=current_exception_log_fields(),
-            )
-            raise
+        user = FreeIPAUser.get(membership_request.requested_username, respect_privacy=False)
         if user is None:
             raise ValidationError("Unable to load the requested user from FreeIPA")
 
@@ -838,8 +1084,6 @@ def approve_membership_request(
                     "action": "approved",
                 },
             )
-        group_add_payload = (membership_request.requested_username, membership_type.group_cn)
-
         email_context = (
             {
                 **system_email_context(),
@@ -852,7 +1096,6 @@ def approve_membership_request(
             if template_name is not None
             else {}
         )
-        log_kwargs = {"target_username": membership_request.requested_username}
 
     membership_request.status = MembershipRequest.Status.approved
     membership_request.on_hold_at = None
@@ -879,13 +1122,16 @@ def approve_membership_request(
             )
             raise
 
-    log = MembershipLog.create_for_approval_at(
+    log = _execute_membership_grant(
         actor_username=actor_username,
         membership_type=membership_type,
         approved_at=decided,
         previous_expires_at=previous_expires_at,
+        log_prefix=log_prefix,
+        target_username=membership_request.requested_username,
+        target_organization=membership_request.requested_organization,
         membership_request=membership_request,
-        **log_kwargs,
+        on_group_add_success=on_group_add_success,
     )
 
     _try_add_note(
@@ -912,92 +1158,6 @@ def approve_membership_request(
         email_kind="approved",
         log_prefix=log_prefix,
     )
-
-    if group_add_payload is not None:
-        username_to_add, group_cn_to_add = group_add_payload
-
-        def _on_commit_add_user_to_group() -> None:
-            callback_should_run = False
-            try:
-                user_for_group_add = FreeIPAUser.get(username_to_add)
-            except Exception:
-                logger.exception(
-                    "%s: on_commit FreeIPAUser.get failed request_id=%s target=%r",
-                    log_prefix,
-                    membership_request.pk,
-                    username_to_add,
-                    extra=current_exception_log_fields(),
-                )
-                return
-
-            if user_for_group_add is None:
-                logger.warning(
-                    "%s: on_commit user missing for group add request_id=%s target=%r",
-                    log_prefix,
-                    membership_request.pk,
-                    username_to_add,
-                )
-                return
-
-            try:
-                user_for_group_add.add_to_group(group_name=group_cn_to_add)
-            except Exception as exc:
-                if _is_freeipa_noop_error(error=exc, is_add=True):
-                    callback_should_run = True
-                    logger.info(
-                        "astra.membership.freeipa_group.already_member group_cn=%s outcome=noop",
-                        group_cn_to_add,
-                        extra={
-                            "event": "astra.freeipa.group.mutation",
-                            "component": "membership",
-                            "outcome": "already_member",
-                        },
-                    )
-                else:
-                    logger.exception(
-                        "%s: on_commit add_to_group failed request_id=%s target=%r group_cn=%r",
-                        log_prefix,
-                        membership_request.pk,
-                        user_for_group_add.username,
-                        group_cn_to_add,
-                        extra=current_exception_log_fields(),
-                    )
-                    return
-            else:
-                callback_should_run = True
-
-            if callback_should_run and on_group_add_success is not None:
-                try:
-                    on_group_add_success()
-                except Exception:
-                    logger.exception(
-                        "%s: on_commit post-group-add callback failed request_id=%s target=%r group_cn=%r",
-                        log_prefix,
-                        membership_request.pk,
-                        username_to_add,
-                        group_cn_to_add,
-                        extra=current_exception_log_fields(),
-                    )
-
-        transaction.on_commit(_on_commit_add_user_to_group)
-    elif on_group_add_success is not None:
-        on_group_add_success()
-
-    if representative_sync_payload is not None:
-        representative_username, group_cns, old_group_cn_to_remove = representative_sync_payload
-
-        def _on_commit_sync_representative_groups() -> None:
-            sync_organization_representative_membership_groups(
-                representative_username=representative_username,
-                group_cns=group_cns,
-                old_group_cn_to_remove=old_group_cn_to_remove,
-                membership_request_id=membership_request.pk,
-                log_prefix=log_prefix,
-                caller_mode=FreeIPACallerMode.raise_on_error,
-                missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
-            )
-
-        transaction.on_commit(_on_commit_sync_representative_groups)
 
     _emit_membership_request_signal_on_commit(
         membership_request=membership_request,

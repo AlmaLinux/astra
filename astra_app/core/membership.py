@@ -298,7 +298,7 @@ def sync_organization_representative_membership_groups(
     representative_username: str,
     group_cns: tuple[str, ...],
     old_group_cn_to_remove: str | None,
-    membership_request_id: int,
+    membership_request_id: int | None,
     log_prefix: str,
     caller_mode: FreeIPACallerMode,
     missing_user_policy: FreeIPAMissingUserPolicy,

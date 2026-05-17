@@ -467,6 +467,7 @@ JAZZMIN_SETTINGS = {
         {
             "name": "Membership Config",
             "models": [
+                "core.membership",
                 "core.membershiptypecategory",
                 "core.membershiptype",
             ],
