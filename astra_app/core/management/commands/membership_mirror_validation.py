@@ -8,6 +8,7 @@ from core.membership_constants import MembershipCategoryCode
 from core.mirror_membership_validation import (
     _CLOSED_MEMBERSHIP_REQUEST_STATUSES,
     build_validation_debug_lines,
+    build_validation_note_content,
     claim_next_validation,
     claim_validation_for_request,
     dry_run_validations,
@@ -253,20 +254,37 @@ class Command(BaseCommand):
             if validation is None:
                 validation = MirrorMembershipValidation(membership_request=membership_request)
             outcome = run_validation(membership_request=membership_request)
-            note_preview = preview_validation_finalization(
+            finalization_preview = preview_validation_finalization(
                 validation=validation,
                 outcome=outcome,
                 now=timezone.now(),
-            ).note_content
+            )
+            note_preview = build_validation_note_content(
+                validation=MirrorMembershipValidation(
+                    membership_request=membership_request,
+                    status=finalization_preview.status,
+                    attempt_count=finalization_preview.attempt_count,
+                    result=finalization_preview.result,
+                )
+            )
             logger.info("dry-run: would validate request ID %s via --request-id", request_id)
-            if note_preview is not None:
+            self._write_debug_output(request_id=request_id, result=outcome.result)
+            logger.info(
+                "dry-run: note preview for request ID %s via --request-id\n%s",
+                request_id,
+                note_preview,
+            )
+            if finalization_preview.note_content is None:
+                logger.info("dry-run: no note would be written for request ID %s via --request-id", request_id)
                 logger.info(
-                    "dry-run: note preview for request ID %s via --request-id\n%s",
+                    "dry-run: real run would not write note for request ID %s via --request-id",
                     request_id,
-                    note_preview,
                 )
             else:
-                logger.info("dry-run: no note would be written for request ID %s via --request-id", request_id)
+                logger.info(
+                    "dry-run: real run would write note for request ID %s via --request-id",
+                    request_id,
+                )
             return
 
         now = timezone.now()

@@ -2019,7 +2019,7 @@ class MirrorMembershipValidationTests(TestCase):
         bound_get_mock.assert_not_called()
         get_mock.assert_not_called()
 
-    def test_command_request_id_dry_run_does_not_mutate_state_or_emit_debug_output(self) -> None:
+    def test_command_request_id_dry_run_does_not_mutate_state_and_emits_debug_output_and_preview(self) -> None:
         membership_request = self._create_user_request()
         with self.captureOnCommitCallbacks(execute=True):
             record_membership_request_created(
@@ -2109,6 +2109,10 @@ class MirrorMembershipValidationTests(TestCase):
             f"dry-run: note preview for request ID {membership_request.pk} via --request-id",
             output,
         )
+        self.assertIn(
+            f"dry-run: real run would write note for request ID {membership_request.pk} via --request-id",
+            output,
+        )
         self.assertIn("Mirror validation summary", output)
         self.assertIn("Domain responds: ✓ reachable", output)
         self.assertIn("Mirror timestamp is current: ✓ up-to-date", output)
@@ -2117,7 +2121,22 @@ class MirrorMembershipValidationTests(TestCase):
             "GitHub pull request is valid: ✓ valid",
             output,
         )
-        self.assertNotIn("debug:", output)
+        self.assertIn(
+            "debug: domain target=https://mirror.example.org result=reachable",
+            output,
+        )
+        self.assertIn(
+            "debug: mirror targets=https://mirror.example.org/TIME, https://mirror.example.org/almalinux/TIME result=up_to_date",
+            output,
+        )
+        self.assertIn(
+            "debug: AlmaLinux mirror network target=https://raw.githubusercontent.com/AlmaLinux/mirrors/refs/heads/master/mirrors.d/mirror.example.org.yml result=registered",
+            output,
+        )
+        self.assertIn(
+            "debug: GitHub target=https://github.com/AlmaLinux/mirrors/pull/123 diff=https://github.com/AlmaLinux/mirrors/pull/123.diff result=valid",
+            output,
+        )
         self.assertGreaterEqual(bound_get_mock.call_count, 3)
         self.assertGreaterEqual(get_mock.call_count, 3)
 
@@ -2131,7 +2150,7 @@ class MirrorMembershipValidationTests(TestCase):
         self.assertIn("https://github.com/AlmaLinux/mirrors/pull/123", requested_urls)
         self.assertIn("https://github.com/AlmaLinux/mirrors/pull/123.diff", requested_urls)
 
-    def test_command_request_id_dry_run_skips_note_preview_when_retryable_result_would_not_write_note(self) -> None:
+    def test_command_request_id_dry_run_shows_note_preview_and_real_path_note_decision_for_retryable_result(self) -> None:
         membership_request = self._create_user_request()
 
         def retryable_requests_get(url: str, **kwargs) -> _FakeResponse:
@@ -2158,12 +2177,27 @@ class MirrorMembershipValidationTests(TestCase):
             f"dry-run: would validate request ID {membership_request.pk} via --request-id",
             output,
         )
-        self.assertNotIn("dry-run: note preview for request ID", output)
-        self.assertNotIn("Mirror validation summary", output)
+        self.assertIn(
+            f"dry-run: note preview for request ID {membership_request.pk} via --request-id",
+            output,
+        )
+        self.assertIn(
+            f"dry-run: real run would not write note for request ID {membership_request.pk} via --request-id",
+            output,
+        )
+        self.assertIn("Mirror validation summary", output)
+        self.assertIn("Domain responds: ✓ reachable", output)
+        self.assertIn("Mirror timestamp is current: ✓ up-to-date", output)
+        self.assertIn("AlmaLinux mirror network registration: ✓ registered", output)
+        self.assertIn("GitHub pull request is valid: ? retryable upstream failure (503)", output)
+        self.assertIn(
+            "debug: GitHub target=https://github.com/AlmaLinux/mirrors/pull/123 result=retryable_upstream_failure",
+            output,
+        )
         self.assertFalse(Note.objects.filter(membership_request=membership_request, username=CUSTOS).exists())
         self.assertFalse(MirrorMembershipValidation.objects.filter(membership_request=membership_request).exists())
 
-    def test_command_request_id_dry_run_skips_note_preview_when_matching_note_already_exists(self) -> None:
+    def test_command_request_id_dry_run_shows_note_preview_when_matching_note_already_exists(self) -> None:
         membership_request = self._create_user_request()
         with self.captureOnCommitCallbacks(execute=True):
             record_membership_request_created(
@@ -2196,8 +2230,19 @@ class MirrorMembershipValidationTests(TestCase):
             f"dry-run: would validate request ID {membership_request.pk} via --request-id",
             dry_run_output,
         )
-        self.assertNotIn("dry-run: note preview for request ID", dry_run_output)
-        self.assertNotIn("Mirror validation summary", dry_run_output)
+        self.assertIn(
+            f"dry-run: note preview for request ID {membership_request.pk} via --request-id",
+            dry_run_output,
+        )
+        self.assertIn(
+            f"dry-run: real run would not write note for request ID {membership_request.pk} via --request-id",
+            dry_run_output,
+        )
+        self.assertIn("Mirror validation summary", dry_run_output)
+        self.assertIn("Domain responds: ✓ reachable", dry_run_output)
+        self.assertIn("Mirror timestamp is current: ✓ up-to-date", dry_run_output)
+        self.assertIn("AlmaLinux mirror network registration: ✓ registered", dry_run_output)
+        self.assertIn("GitHub pull request is valid: ✓ valid", dry_run_output)
         self.assertEqual(Note.objects.filter(membership_request=membership_request, username=CUSTOS).count(), 1)
 
     def test_command_request_id_rejects_nonexistent_request_id(self) -> None:
