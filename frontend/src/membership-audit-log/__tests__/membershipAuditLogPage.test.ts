@@ -4,6 +4,22 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import MembershipAuditLogPage from "../MembershipAuditLogPage.vue";
 import type { MembershipAuditLogBootstrap } from "../types";
 
+function expectedLocalTimestamp(value: string): string {
+  const parsed = new Date(value);
+  const year = String(parsed.getFullYear());
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  const hour = String(parsed.getHours()).padStart(2, "0");
+  const minute = String(parsed.getMinutes()).padStart(2, "0");
+  const timezoneOffsetMinutes = -parsed.getTimezoneOffset();
+  const offsetSign = timezoneOffsetMinutes >= 0 ? "+" : "-";
+  const absoluteOffsetMinutes = Math.abs(timezoneOffsetMinutes);
+  const offsetHours = String(Math.floor(absoluteOffsetMinutes / 60)).padStart(2, "0");
+  const offsetMinutes = String(absoluteOffsetMinutes % 60).padStart(2, "0");
+
+  return `${year}-${month}-${day} ${hour}:${minute} UTC${offsetSign}${offsetHours}:${offsetMinutes}`;
+}
+
 function flushPromises(): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, 0);
@@ -27,6 +43,7 @@ describe("MembershipAuditLogPage", () => {
   });
 
   it("loads and renders audit log rows with request response details", async () => {
+    const createdAt = "2026-04-23T12:00:00+00:00";
     const fetchMock = vi.fn(async () => {
       return new Response(
         JSON.stringify({
@@ -36,7 +53,7 @@ describe("MembershipAuditLogPage", () => {
           data: [
             {
               log_id: 10,
-              created_at: "2026-04-23T12:00:00+00:00",
+              created_at: createdAt,
               actor_username: "reviewer",
               target: {
                 kind: "user",
@@ -77,7 +94,8 @@ describe("MembershipAuditLogPage", () => {
     expect(wrapper.text()).toContain("alice");
     expect(wrapper.text()).toContain("Individual");
     expect(wrapper.text()).toContain("Requested");
-    expect(wrapper.text()).toContain("Thu, 23 Apr 2026 12:00:00 +0000");
+    expect(wrapper.text()).toContain(expectedLocalTimestamp(createdAt));
+    expect(wrapper.text()).not.toContain("Thu, 23 Apr 2026 12:00:00 +0000");
     expect(wrapper.text()).toContain("Request responses");
     expect(wrapper.text()).toContain("Contributions");
     expect(wrapper.text()).toContain("Patch submissions");

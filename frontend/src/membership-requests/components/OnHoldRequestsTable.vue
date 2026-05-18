@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
+import { formatMembershipTimestamp } from "../../shared/membershipPresentation";
 import type { MembershipRequestActionIntent, MembershipRequestRow, MembershipRequestsBootstrap } from "../types";
-import { buildMembershipRequestsRouteUrl, formatLegacyDateTime, formatRelativeAgo, readMembershipRequestsRouteState } from "../types";
+import { buildMembershipRequestsRouteUrl, formatRelativeAgo, readMembershipRequestsRouteState } from "../types";
 import RequestsTable from "./RequestsTable.vue";
 
 const props = defineProps<{
@@ -86,7 +87,7 @@ function onPageChange(pageNumber: number): void {
       <template #row-extra-columns="{ row }">
         <td class="align-top">{{ row.membership_type.name }}</td>
         <td class="align-top">
-          <div>{{ formatLegacyDateTime(row.on_hold_since) }}</div>
+          <div>{{ formatMembershipTimestamp(row.on_hold_since) }}</div>
           <div class="small text-muted mt-1">{{ formatRelativeAgo(row.on_hold_since) }}</div>
         </td>
       </template>

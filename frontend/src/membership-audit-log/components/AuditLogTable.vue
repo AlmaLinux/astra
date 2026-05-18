@@ -2,8 +2,9 @@
 import { computed, ref } from "vue";
 
 import TableBase from "../../shared/components/TableBase.vue";
+import { formatMembershipTimestamp } from "../../shared/membershipPresentation";
 import { fillUrlTemplate } from "../../shared/urlTemplates";
-import { formatAuditLogAction, formatAuditLogDateTime, formatAuditLogExpiresAt } from "../types";
+import { formatAuditLogAction, formatAuditLogExpiresAt } from "../types";
 import type { AuditLogRequestResponseSegment, AuditLogRow } from "../types";
 
 const props = defineProps<{
@@ -132,7 +133,7 @@ function segmentKey(segment: AuditLogRequestResponseSegment, index: number): str
         <div v-if="asRow(row).request">
           <a :href="requestHref(asRow(row))">Request #{{ asRow(row).request?.request_id }}</a>
         </div>
-        <div>{{ formatAuditLogDateTime(asRow(row).created_at) }}</div>
+        <div>{{ formatMembershipTimestamp(asRow(row).created_at) }}</div>
       </td>
       <td>{{ asRow(row).actor_username }}</td>
       <td>

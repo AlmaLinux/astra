@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 
+import { formatMembershipTimestamp } from "../shared/membershipPresentation";
 import MembershipNotesCard from "../membership-requests/components/MembershipNotesCard.vue";
 import MembershipRequestDetailActions from "../membership-requests/components/MembershipRequestDetailActions.vue";
 import type {
@@ -263,7 +264,7 @@ onMounted(async () => {
             <dd class="col-sm-9">{{ statusDisplay }}</dd>
 
             <dt class="col-sm-3">Requested at</dt>
-            <dd class="col-sm-9">{{ payload.request.requested_at }}</dd>
+            <dd class="col-sm-9">{{ formatMembershipTimestamp(payload.request.requested_at) }}</dd>
 
             <template v-if="payload.request.requested_by.show">
               <dt class="col-sm-3">Requested by</dt>

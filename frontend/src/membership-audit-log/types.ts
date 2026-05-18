@@ -135,7 +135,6 @@ export function buildMembershipAuditLogRouteUrl(state: MembershipAuditLogRouteSt
   return `${url.pathname}${url.search}`;
 }
 
-const SHORT_WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const SHORT_MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const ACTION_LABELS: Record<string, string> = {
   requested: "Requested",
@@ -160,25 +159,6 @@ function parseDate(value: string | null | undefined): Date | null {
     return null;
   }
   return parsed;
-}
-
-function pad2(value: number): string {
-  return String(value).padStart(2, "0");
-}
-
-export function formatAuditLogDateTime(value: string): string {
-  const parsed = parseDate(value);
-  if (!parsed) {
-    return "";
-  }
-  const weekday = SHORT_WEEKDAY_NAMES[parsed.getUTCDay()] || "";
-  const day = pad2(parsed.getUTCDate());
-  const month = SHORT_MONTH_NAMES[parsed.getUTCMonth()] || "";
-  const year = parsed.getUTCFullYear();
-  const hour = pad2(parsed.getUTCHours());
-  const minute = pad2(parsed.getUTCMinutes());
-  const second = pad2(parsed.getUTCSeconds());
-  return `${weekday}, ${day} ${month} ${year} ${hour}:${minute}:${second} +0000`;
 }
 
 export function formatAuditLogAction(action: string): string {

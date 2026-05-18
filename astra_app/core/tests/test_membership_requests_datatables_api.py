@@ -585,6 +585,8 @@ class MembershipRequestsDataTablesApiTests(TestCase):
             membership_type_id="individual",
             status=MembershipRequest.Status.pending,
         )
+        note_timestamp = timezone.make_aware(datetime.datetime(2026, 4, 21, 12, 34, 56))
+        log_timestamp = timezone.make_aware(datetime.datetime(2026, 4, 21, 13, 45, 56))
         email = Email.objects.create(
             from_email="noreply@example.com",
             to="alice@example.com",
@@ -593,17 +595,19 @@ class MembershipRequestsDataTablesApiTests(TestCase):
             html_message="<p>HTML body</p>",
             headers={"Reply-To": "committee@example.com"},
         )
-        Log.objects.create(
+        log = Log.objects.create(
             email=email,
             status=STATUS.sent,
             message="sent",
             exception_type="",
         )
-        Note.objects.create(
+        Log.objects.filter(pk=log.pk).update(date=log_timestamp)
+        note = Note.objects.create(
             membership_request=pending_request,
             username="reviewer",
             action={"type": "contacted", "kind": "approved", "email_id": email.id},
         )
+        Note.objects.filter(pk=note.pk).update(timestamp=note_timestamp)
 
         reviewer = self._make_freeipa_user(
             "reviewer",
@@ -633,6 +637,8 @@ class MembershipRequestsDataTablesApiTests(TestCase):
         self.assertNotIn("approvals", payload)
         self.assertNotIn("disapprovals", payload)
         self.assertNotIn("current_user_vote", payload)
+        self.assertEqual(payload["groups"][0]["timestamp"], note_timestamp.isoformat())
+        self.assertEqual(payload["groups"][0]["timestamp_display"], "2026-04-21 12:34")
         contacted_email = payload["groups"][0]["entries"][0]["contacted_email"]
 
         self.assertEqual(contacted_email["email_id"], email.id)
@@ -642,6 +648,8 @@ class MembershipRequestsDataTablesApiTests(TestCase):
         self.assertEqual(contacted_email["reply_to"], "committee@example.com")
         self.assertEqual(contacted_email["html"], "<p>HTML body</p>")
         self.assertEqual(contacted_email["text"], "Plain text body")
+        self.assertEqual(contacted_email["logs"][0]["date"], log_timestamp.isoformat())
+        self.assertEqual(contacted_email["logs"][0]["date_display"], "2026-04-21 13:45")
 
     def test_pending_endpoint_rejects_undocumented_query_parameter(self) -> None:
         reviewer = self._make_freeipa_user(

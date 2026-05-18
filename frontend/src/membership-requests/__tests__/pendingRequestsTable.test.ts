@@ -4,6 +4,22 @@ import { afterEach, describe, expect, it } from "vitest";
 import PendingRequestsTable from "../components/PendingRequestsTable.vue";
 import type { MembershipRequestRow, MembershipRequestsBootstrap, PendingFilterOption } from "../types";
 
+function expectedLocalTimestamp(value: string): string {
+  const parsed = new Date(value);
+  const year = String(parsed.getFullYear());
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  const hour = String(parsed.getHours()).padStart(2, "0");
+  const minute = String(parsed.getMinutes()).padStart(2, "0");
+  const timezoneOffsetMinutes = -parsed.getTimezoneOffset();
+  const offsetSign = timezoneOffsetMinutes >= 0 ? "+" : "-";
+  const absoluteOffsetMinutes = Math.abs(timezoneOffsetMinutes);
+  const offsetHours = String(Math.floor(absoluteOffsetMinutes / 60)).padStart(2, "0");
+  const offsetMinutes = String(absoluteOffsetMinutes % 60).padStart(2, "0");
+
+  return `${year}-${month}-${day} ${hour}:${minute} UTC${offsetSign}${offsetHours}:${offsetMinutes}`;
+}
+
 const bootstrap: MembershipRequestsBootstrap = {
   clearFilterUrl: "/membership/requests/",
   pendingApiUrl: "/api/v1/membership/requests/pending",
@@ -111,7 +127,7 @@ describe("PendingRequestsTable", () => {
     expect(requestCell?.classes()).toEqual(expect.arrayContaining(["align-top", "text-muted", "text-nowrap"]));
     expect(requestCell?.attributes("style")).toContain("width: 1%;");
     expect(requestCell?.html()).toContain("<br>");
-    expect(requestCell?.text()).toContain("2026-04-21 12:00");
+    expect(requestCell?.text()).toContain(expectedLocalTimestamp(row.requested_at));
     expect(requestedForCell?.find('a[href="/user/alice/"]').text()).toContain("Alice Example (alice)");
     expect(requestedForCell?.text()).toContain("Requested by: Bob Reviewer (bob)");
     expect(requestedForCell?.find('a[href="/user/bob/"]').text()).toBe("Bob Reviewer (bob)");

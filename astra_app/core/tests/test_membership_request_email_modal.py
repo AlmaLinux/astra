@@ -1,9 +1,12 @@
 
+import datetime
 from unittest.mock import patch
 
 from django.conf import settings
-from django.test import TestCase
+from django.template import Context, Template
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 from post_office.models import STATUS, Email, EmailTemplate, Log, RecipientDeliveryStatus
 
 from core.freeipa.user import FreeIPAUser
@@ -11,6 +14,45 @@ from core.membership_notes import add_note
 from core.models import FreeIPAPermissionGrant, MembershipRequest, MembershipType
 from core.permissions import ASTRA_VIEW_MEMBERSHIP
 from core.tests.utils_test_data import ensure_core_categories
+
+
+class MembershipEmailModalTemplateTests(SimpleTestCase):
+    @override_settings(TIME_ZONE="UTC", USE_TZ=True)
+    def test_delivery_logs_render_canonical_timestamp_format(self) -> None:
+        rendered = Template(
+            """{% include 'core/_membership_email_modal.html' with modal=modal %}"""
+        ).render(
+            Context(
+                {
+                    "modal": {
+                        "modal_id": "membership-email-modal-1",
+                        "to": ["alice@example.com"],
+                        "subject": "Approval notice",
+                        "from_email": "noreply@example.com",
+                        "cc": [],
+                        "bcc": [],
+                        "reply_to": "committee@example.com",
+                        "recipient_delivery_summary": "Delivered",
+                        "recipient_delivery_summary_note": "",
+                        "headers": [],
+                        "html": "<p>HTML body</p>",
+                        "text": "Plain text body",
+                        "logs": [
+                            {
+                                "date": timezone.make_aware(datetime.datetime(2026, 4, 21, 12, 34, 56)),
+                                "status": "sent",
+                                "message": "sent",
+                                "exception_type": "",
+                            }
+                        ],
+                    }
+                }
+            )
+        )
+
+        self.assertIn("2026-04-21 12:34", rendered)
+        self.assertNotIn("2026-04-21 12:34:56", rendered)
+        self.assertNotIn("2026-04-21 12:34 UTC", rendered)
 
 
 class MembershipRequestEmailModalTests(TestCase):

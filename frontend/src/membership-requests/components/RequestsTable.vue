@@ -2,10 +2,10 @@
 import { computed, ref } from "vue";
 
 import TableBase from "../../shared/components/TableBase.vue";
+import { formatMembershipTimestamp } from "../../shared/membershipPresentation";
 import type { MembershipRequestActionIntent, MembershipRequestRow, MembershipRequestsBootstrap } from "../types";
 import {
   canLinkMembershipRequestTarget,
-  formatLegacyDateTime,
   membershipRequestActorLabel,
   replaceTemplateToken,
 } from "../types";
@@ -226,7 +226,7 @@ defineSlots<{
     <template #row-cells="{ row }">
       <td class="align-top text-muted text-nowrap" style="width: 1%;">
         <a :href="requestDetailUrl(asRow(row))">Request #{{ asRow(row).request_id }}</a>
-        <br>{{ formatLegacyDateTime(asRow(row).requested_at) }}
+        <br>{{ formatMembershipTimestamp(asRow(row).requested_at) }}
       </td>
       <td class="align-top">
         <div>

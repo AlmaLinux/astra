@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, ref } from "vue";
 
 import "./membershipNotes.css";
 
+import { formatMembershipTimestamp } from "../../shared/membershipPresentation";
 import { useMembershipNotes } from "../composables/useMembershipNotes";
 import { replaceTemplateToken, type ContactedEmail, type NoteEntry, type NoteGroup } from "../types";
 import ContactedEmailModal from "./ContactedEmailModal.vue";
@@ -220,6 +221,10 @@ function membershipRequestHref(group: NoteGroup): string {
   }
   return replaceTemplateToken(props.requestDetailTemplate, "__request_id__", group.membership_request_id);
 }
+
+function groupTimestampLabel(group: NoteGroup): string {
+  return formatMembershipTimestamp(group.timestamp ?? null) || group.timestamp_display;
+}
 </script>
 
 <template>
@@ -277,7 +282,7 @@ function membershipRequestHref(group: NoteGroup): string {
           <div v-else-if="details?.groups.length">
             <div
               v-for="(group, groupIndex) in details.groups"
-              :key="`${group.username}-${group.timestamp_display}`"
+              :key="`${group.username}-${group.timestamp ?? group.timestamp_display}`"
               class="direct-chat-msg"
               :class="{ right: group.is_self, 'mb-3': groupIndex + 1 < details.groups.length }"
             >
@@ -285,7 +290,7 @@ function membershipRequestHref(group: NoteGroup): string {
                 <template v-if="group.is_self">
                   <span class="direct-chat-name float-right">{{ group.display_username }}</span>
                   <span class="direct-chat-timestamp float-left">
-                    {{ group.timestamp_display }}
+                    {{ groupTimestampLabel(group) }}
                     <a v-if="group.membership_request_id && membershipRequestHref(group)" :href="membershipRequestHref(group)" class="text-muted ml-1">(req. #{{ group.membership_request_id }})</a>
                   </span>
                 </template>
@@ -293,7 +298,7 @@ function membershipRequestHref(group: NoteGroup): string {
                   <span class="direct-chat-name float-left">{{ group.display_username }}</span>
                   <span class="direct-chat-timestamp float-right">
                     <a v-if="group.membership_request_id && membershipRequestHref(group)" :href="membershipRequestHref(group)" class="text-muted mr-1">(req. #{{ group.membership_request_id }})</a>
-                    {{ group.timestamp_display }}
+                    {{ groupTimestampLabel(group) }}
                   </span>
                 </template>
               </div>

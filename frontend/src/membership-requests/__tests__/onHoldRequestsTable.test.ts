@@ -4,6 +4,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import OnHoldRequestsTable from "../components/OnHoldRequestsTable.vue";
 import type { MembershipRequestRow, MembershipRequestsBootstrap } from "../types";
 
+function expectedLocalTimestamp(value: string): string {
+  const parsed = new Date(value);
+  const year = String(parsed.getFullYear());
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  const hour = String(parsed.getHours()).padStart(2, "0");
+  const minute = String(parsed.getMinutes()).padStart(2, "0");
+  const timezoneOffsetMinutes = -parsed.getTimezoneOffset();
+  const offsetSign = timezoneOffsetMinutes >= 0 ? "+" : "-";
+  const absoluteOffsetMinutes = Math.abs(timezoneOffsetMinutes);
+  const offsetHours = String(Math.floor(absoluteOffsetMinutes / 60)).padStart(2, "0");
+  const offsetMinutes = String(absoluteOffsetMinutes % 60).padStart(2, "0");
+
+  return `${year}-${month}-${day} ${hour}:${minute} UTC${offsetSign}${offsetHours}:${offsetMinutes}`;
+}
+
 const bootstrap: MembershipRequestsBootstrap = {
   clearFilterUrl: "/membership/requests/",
   pendingApiUrl: "/api/v1/membership/requests/pending",
@@ -104,13 +120,13 @@ describe("OnHoldRequestsTable", () => {
     expect(requestCell?.classes()).toEqual(expect.arrayContaining(["align-top", "text-muted", "text-nowrap"]));
     expect(requestCell?.attributes("style")).toContain("width: 1%;");
     expect(requestCell?.html()).toContain("<br>");
-    expect(requestCell?.text()).toContain("2026-04-20 08:30");
+    expect(requestCell?.text()).toContain(expectedLocalTimestamp(row.requested_at));
     expect(requestedForCell?.find('a[href="/organization/42/"]').text()).toContain("Acme Org (sponsor@example.com)");
     expect(requestedForCell?.text()).toContain("Requested by: Carol Example (carol)");
     expect(requestedForCell?.find('a[href="/user/carol/"]').text()).toBe("Carol Example (carol)");
     expect(requestedForCell?.find(".mt-1").exists()).toBe(false);
     expect(requestedForCell?.find(".mt-2 [data-membership-notes-card-stub='true']").exists()).toBe(true);
-    expect(wrapper.text()).toContain("2026-04-21 12:00");
+    expect(wrapper.text()).toContain(expectedLocalTimestamp(row.on_hold_since));
     expect(wrapper.text()).toContain("1 day ago");
     expect(wrapper.find(".membership-request-actions.membership-request-actions--list").exists()).toBe(true);
     expect(wrapper.get('button[type="submit"].btn.btn-default').attributes("title")).toBe("Apply selected action to checked requests");

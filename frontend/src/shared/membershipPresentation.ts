@@ -18,6 +18,16 @@ function parseDate(value: string | null): Date | null {
   return parsed;
 }
 
+function formatUtcOffset(value: Date): string {
+  const timezoneOffsetMinutes = -value.getTimezoneOffset();
+  const offsetSign = timezoneOffsetMinutes >= 0 ? "+" : "-";
+  const absoluteOffsetMinutes = Math.abs(timezoneOffsetMinutes);
+  const offsetHours = String(Math.floor(absoluteOffsetMinutes / 60)).padStart(2, "0");
+  const offsetMinutes = String(absoluteOffsetMinutes % 60).padStart(2, "0");
+
+  return `UTC${offsetSign}${offsetHours}:${offsetMinutes}`;
+}
+
 function safeTimeZone(timezoneName: string): string {
   return String(timezoneName || "").trim() || "UTC";
 }
@@ -86,6 +96,22 @@ export function formatPreciseDateTime(value: string | null, timezoneName: string
   const minute = partValue(parts, "minute");
 
   return `${month} ${day}, ${year} ${hour}:${minute} (${timeZoneLabel})`;
+}
+
+export function formatMembershipTimestamp(value: string | null): string {
+  const parsed = parseDate(value);
+  if (!parsed) {
+    return "";
+  }
+
+  const year = String(parsed.getFullYear());
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  const hour = String(parsed.getHours()).padStart(2, "0");
+  const minute = String(parsed.getMinutes()).padStart(2, "0");
+  const utcOffset = formatUtcOffset(parsed);
+
+  return `${year}-${month}-${day} ${hour}:${minute} ${utcOffset}`;
 }
 
 export function formatFixedCurrentTime(date: Date, timezoneName: string): string {

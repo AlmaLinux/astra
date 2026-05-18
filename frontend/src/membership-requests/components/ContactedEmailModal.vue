@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
+import { formatMembershipTimestamp } from "../../shared/membershipPresentation";
 import type { ContactedEmail } from "../types";
 
 const props = defineProps<{
@@ -11,6 +12,10 @@ const props = defineProps<{
 const modalId = computed(() => `membership-email-modal-${props.requestId}-${props.contactedEmail.email_id ?? "email"}`);
 const headerRows = computed(() => props.contactedEmail.headers ?? []);
 const deliveryLogs = computed(() => props.contactedEmail.logs ?? []);
+
+function deliveryLogTimestampLabel(date: string | null | undefined, dateDisplay: string): string {
+  return formatMembershipTimestamp(date ?? null) || dateDisplay;
+}
 </script>
 
 <template>
@@ -84,8 +89,8 @@ const deliveryLogs = computed(() => props.contactedEmail.logs ?? []);
               </tr>
             </thead>
             <tbody>
-              <tr v-for="log in deliveryLogs" :key="`${log.date_display}-${log.status}-${log.message}`">
-                <td>{{ log.date_display }}</td>
+              <tr v-for="log in deliveryLogs" :key="`${log.date ?? log.date_display}-${log.status}-${log.message}`">
+                <td>{{ deliveryLogTimestampLabel(log.date, log.date_display) }}</td>
                 <td>{{ log.status }}</td>
                 <td>
                   {{ log.message }}

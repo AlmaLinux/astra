@@ -1,4 +1,5 @@
 from collections.abc import Callable, Mapping, Sequence
+from datetime import datetime
 
 from django.db.models import Prefetch, Q, QuerySet
 from django.templatetags.static import static
@@ -22,6 +23,12 @@ from core.templatetags.core_membership_notes import (
 )
 from core.templatetags.core_membership_responses import membership_response_value
 from core.views_utils import _normalize_str
+
+
+def _format_membership_timestamp_display(value: datetime | None) -> str:
+    if value is None:
+        return ""
+    return date_format(localtime(value), "Y-m-d H:i")
 
 
 def resolve_requested_by(
@@ -755,7 +762,8 @@ def serialize_note_group(
         "is_custos": bool(header_entry.get("is_custos", False)),
         "avatar_kind": avatar_kind,
         "avatar_url": avatar_url,
-        "timestamp_display": date_format(localtime(note.timestamp), "DATETIME_FORMAT"),
+        "timestamp": note.timestamp.isoformat() if note.timestamp is not None else None,
+        "timestamp_display": _format_membership_timestamp_display(note.timestamp),
         "entries": [
             serialize_note_entry(entry=entry, contacted_email_by_id=contacted_email_by_id)
             for entry in group.get("entries", [])
@@ -782,7 +790,8 @@ def _serialize_contacted_email_detail(email_modal: dict[str, object]) -> dict[st
         "recipient_delivery_summary_note": str(email_modal.get("recipient_delivery_summary_note") or ""),
         "logs": [
             {
-                "date_display": log["date"].strftime("%Y-%m-%d %H:%M:%S %Z") if log.get("date") else "",
+                "date": log["date"].isoformat() if isinstance(log.get("date"), datetime) else None,
+                "date_display": _format_membership_timestamp_display(log.get("date")),
                 "status": str(log.get("status") or ""),
                 "message": str(log.get("message") or ""),
                 "exception_type": str(log.get("exception_type") or ""),

@@ -1,3 +1,5 @@
+import { formatMembershipTimestamp } from "../shared/membershipPresentation";
+
 export interface MembershipRequestsBootstrap {
   clearFilterUrl: string;
   pendingApiUrl: string;
@@ -91,6 +93,7 @@ export interface NoteSummary {
 }
 
 export interface ContactedEmailLog {
+  date?: string | null;
   date_display: string;
   status: string;
   message: string;
@@ -139,6 +142,7 @@ export interface NoteGroup {
   is_custos: boolean;
   avatar_kind: string;
   avatar_url: string;
+  timestamp?: string | null;
   timestamp_display: string;
   membership_request_id?: number;
   entries: NoteEntry[];
@@ -217,22 +221,6 @@ export function formatDateTime(value: string | null): string {
   return date.toLocaleString();
 }
 
-export function formatLegacyDateTime(value: string | null): string {
-  if (!value) {
-    return "";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "";
-  }
-  const year = String(date.getFullYear());
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  return `${year}-${month}-${day} ${hours}:${minutes}`;
-}
-
 export function formatRelativeAgo(value: string | null, nowMs: number = Date.now()): string {
   if (!value) {
     return "";
@@ -256,6 +244,8 @@ export function formatRelativeAgo(value: string | null, nowMs: number = Date.now
   const days = Math.max(1, Math.floor(diffMs / dayMs));
   return `${days} day${days === 1 ? "" : "s"} ago`;
 }
+
+export { formatMembershipTimestamp };
 
 export interface PaginationWindow {
   pageNumbers: number[];

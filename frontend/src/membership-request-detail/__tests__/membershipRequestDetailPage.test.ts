@@ -4,6 +4,22 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import MembershipRequestDetailPage from "../MembershipRequestDetailPage.vue";
 import type { MembershipRequestDetailBootstrap } from "../types";
 
+function expectedLocalTimestamp(value: string): string {
+  const parsed = new Date(value);
+  const year = String(parsed.getFullYear());
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  const hour = String(parsed.getHours()).padStart(2, "0");
+  const minute = String(parsed.getMinutes()).padStart(2, "0");
+  const timezoneOffsetMinutes = -parsed.getTimezoneOffset();
+  const offsetSign = timezoneOffsetMinutes >= 0 ? "+" : "-";
+  const absoluteOffsetMinutes = Math.abs(timezoneOffsetMinutes);
+  const offsetHours = String(Math.floor(absoluteOffsetMinutes / 60)).padStart(2, "0");
+  const offsetMinutes = String(absoluteOffsetMinutes % 60).padStart(2, "0");
+
+  return `${year}-${month}-${day} ${hour}:${minute} UTC${offsetSign}${offsetHours}:${offsetMinutes}`;
+}
+
 function flushPromises(): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, 0);
@@ -39,6 +55,55 @@ const bootstrap: MembershipRequestDetailBootstrap = {
 describe("MembershipRequestDetailPage", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("renders requested-at with the shared membership timestamp format", async () => {
+    const requestedAt = "2026-04-26T10:00:00+00:00";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            viewer: {
+              mode: "committee",
+            },
+            request: {
+              id: 42,
+              status: "pending",
+              requested_at: requestedAt,
+              requested_by: { show: false, username: "", full_name: "", deleted: false },
+              requested_for: { show: false, kind: "user", label: "", username: "", organization_id: null, deleted: false },
+              membership_type: { name: "Mirror" },
+              responses: [],
+            },
+            committee: {
+              reopen: { show: false },
+              actions: {
+                canRequestInfo: true,
+                showOnHoldApprove: false,
+              },
+            },
+          }),
+        ),
+      ),
+    );
+
+    const wrapper = mount(MembershipRequestDetailPage, {
+      props: { bootstrap },
+      global: {
+        stubs: {
+          MembershipNotesCard: true,
+          MembershipRequestDetailActions: true,
+        },
+      },
+    });
+
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Requested at");
+    expect(wrapper.text()).toContain(expectedLocalTimestamp(requestedAt));
+    expect(wrapper.text()).not.toContain(requestedAt);
   });
 
   it("posts to the reopen endpoint with CSRF, refetches detail, and renders warning/deleted markers", async () => {

@@ -3,6 +3,22 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import MembershipNotesCard from "../components/MembershipNotesCard.vue";
 
+function expectedLocalTimestamp(value: string): string {
+  const parsed = new Date(value);
+  const year = String(parsed.getFullYear());
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  const hour = String(parsed.getHours()).padStart(2, "0");
+  const minute = String(parsed.getMinutes()).padStart(2, "0");
+  const timezoneOffsetMinutes = -parsed.getTimezoneOffset();
+  const offsetSign = timezoneOffsetMinutes >= 0 ? "+" : "-";
+  const absoluteOffsetMinutes = Math.abs(timezoneOffsetMinutes);
+  const offsetHours = String(Math.floor(absoluteOffsetMinutes / 60)).padStart(2, "0");
+  const offsetMinutes = String(absoluteOffsetMinutes % 60).padStart(2, "0");
+
+  return `${year}-${month}-${day} ${hour}:${minute} UTC${offsetSign}${offsetHours}:${offsetMinutes}`;
+}
+
 function flushPromises(): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, 0);
@@ -335,7 +351,7 @@ describe("MembershipNotesCard", () => {
                 is_custos: true,
                 avatar_kind: "custos",
                 avatar_url: "/static/core/images/almalinux-logo.svg",
-                timestamp_display: "April 21, 2026, noon",
+                timestamp_display: "2026-04-21 12:00",
                 membership_request_id: 123,
                 entries: [
                   {
@@ -388,7 +404,7 @@ describe("MembershipNotesCard", () => {
 
     expect(wrapper.find(".direct-chat-messages").attributes("style")).toContain("max-height: 260px");
     expect(wrapper.find(".direct-chat-infos .direct-chat-name.float-left").text()).toBe("Astra Custodia");
-    expect(wrapper.find(".direct-chat-infos .direct-chat-timestamp.float-right").text()).toContain("April 21, 2026, noon");
+    expect(wrapper.find(".direct-chat-infos .direct-chat-timestamp.float-right").text()).toContain("2026-04-21 12:00");
     expect(wrapper.find('.direct-chat-infos a[href="/membership/request/123/"]').text()).toContain("(req. #123)");
     expect(wrapper.find(".direct-chat-img").attributes("src")).toBe("/static/core/images/almalinux-logo.svg");
     expect(wrapper.findAll(".membership-notes-bubbles .direct-chat-text").at(0)?.attributes("style")).toContain("border: 1px dashed rgba(0, 0, 0, 0.15)");
@@ -416,7 +432,8 @@ describe("MembershipNotesCard", () => {
                 is_custos: false,
                 avatar_kind: "user",
                 avatar_url: "",
-                timestamp_display: "April 21, 2026, noon",
+                timestamp: "2026-04-21T13:45:00+00:00",
+                timestamp_display: "2026-04-21 13:45",
                 entries: [
                   {
                     kind: "action",
@@ -437,7 +454,8 @@ describe("MembershipNotesCard", () => {
                       text: "Plain text body",
                       logs: [
                         {
-                          date_display: "2026-04-21 12:00:00 UTC",
+                          date: "2026-04-21T13:45:00+00:00",
+                          date_display: "2026-04-21 13:45",
                           status: "sent",
                           message: "sent",
                           exception_type: "",
@@ -480,6 +498,11 @@ describe("MembershipNotesCard", () => {
     expect(wrapper.text()).toContain("Other headers");
     expect(wrapper.text()).toContain("Delivery logs");
     expect(wrapper.text()).toContain("Plain text body");
+    const expectedTimestamp = expectedLocalTimestamp("2026-04-21T13:45:00+00:00");
+
+    expect(wrapper.find(".direct-chat-infos .direct-chat-timestamp.float-left").text()).toContain(expectedTimestamp);
+    expect(wrapper.text()).toContain(expectedTimestamp);
+    expect(wrapper.text()).not.toContain("2026-04-21 13:45");
     expect(wrapper.find('iframe[title="Email HTML preview"]').attributes("srcdoc")).toContain("<img src=x onerror=alert('boom')><p>HTML body</p>");
     expect(wrapper.find('.modal-body img').exists()).toBe(false);
     expect(wrapper.find('.modal-body script').exists()).toBe(false);
