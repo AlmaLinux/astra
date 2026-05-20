@@ -1,5 +1,6 @@
 
 import datetime
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.test import TestCase
@@ -254,6 +255,29 @@ class ElectionQuorumStatusTests(TestCase):
             previous_chain_hash=genesis_hash,
             chain_hash=chain_hash,
         )
+
+    def test_draft_quorum_status_uses_start_eligible_voters_count(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Draft start electorate",
+            description="",
+            start_datetime=now + datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=2),
+            number_of_seats=1,
+            quorum=50,
+            status=Election.Status.draft,
+        )
+
+        with patch(
+            "core.elections_services.start_eligible_voters",
+            return_value=[SimpleNamespace(username="eligible", weight=3)],
+        ):
+            status = election_quorum_status(election=election)
+
+        self.assertEqual(status.get("eligible_voter_count"), 1)
+        self.assertEqual(status.get("eligible_vote_weight_total"), 3)
+        self.assertEqual(status.get("required_participating_voter_count"), 1)
+        self.assertEqual(status.get("required_participating_vote_weight_total"), 2)
 
     def test_quorum_requires_weight_and_count_thresholds(self) -> None:
         now = timezone.now()

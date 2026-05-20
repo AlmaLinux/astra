@@ -18,7 +18,7 @@ from django.utils import timezone
 from post_office.models import Email
 
 from core import signals as astra_signals
-from core.elections_eligibility import eligible_voters_from_memberships
+from core.elections_eligibility import start_eligible_voters
 from core.elections_timestamping import get_public_payload, schedule_attestation
 from core.email_context import (
     election_committee_email_context,
@@ -529,7 +529,7 @@ def election_quorum_status(*, election: Election) -> dict[str, int | bool]:
         eligible_voter_count = int(cred_agg.get("voters") or 0)
         eligible_vote_weight_total = int(cred_agg.get("votes") or 0)
     else:
-        eligible = eligible_voters_from_memberships(election=election)
+        eligible = start_eligible_voters(election=election)
         eligible_voter_count = len(eligible)
         eligible_vote_weight_total = sum(v.weight for v in eligible)
 
@@ -860,7 +860,7 @@ def _issue_voting_credentials_from_memberships(
     if AuditLogEntry.objects.filter(election=election, event_type="election_anonymized").exists():
         raise ElectionError("cannot issue credentials for an anonymized election")
 
-    eligible = eligible_voters_from_memberships(
+    eligible = start_eligible_voters(
         election=election,
         require_fresh=True,
     )

@@ -500,40 +500,44 @@ def _normalized_usernames(values: Iterable[str]) -> list[str]:
     return normalized
 
 
+def start_eligible_voters(
+    *,
+    election: Election,
+    eligible_group_cn: str | None = None,
+    require_fresh: bool = False,
+) -> list[EligibleVoter]:
+    return eligible_voters_from_memberships(
+        election=election,
+        eligible_group_cn=eligible_group_cn,
+        require_fresh=require_fresh,
+    )
+
+
 def eligible_candidate_usernames(
     *,
     election: Election,
     eligible_group_cn: str | None = None,
     require_fresh: bool = False,
 ) -> set[str]:
-    eligible_usernames = {
-        voter.username
-        for voter in eligible_voters_from_memberships(
-            election=election,
-            eligible_group_cn=eligible_group_cn,
-            require_fresh=require_fresh,
-        )
-    }
+    eligible_voters = eligible_voters_from_memberships(
+        election=election,
+        eligible_group_cn=eligible_group_cn,
+        require_fresh=require_fresh,
+    )
+    if not eligible_voters:
+        return set()
 
     disqualified_candidates, _disqualified_nominators = election_committee_disqualification(
-        candidate_usernames=eligible_usernames,
+        candidate_usernames=(voter.username for voter in eligible_voters),
         nominator_usernames=(),
         require_fresh=require_fresh,
     )
     disqualified_lower = {username.lower() for username in disqualified_candidates}
-    filtered = {username for username in eligible_usernames if username.lower() not in disqualified_lower}
-    logger.debug(
-        "Eligible candidate usernames resolved: eligible=%s disqualified=%s filtered=%s",
-        len(eligible_usernames),
-        len(disqualified_candidates),
-        len(filtered),
-    )
-    if disqualified_candidates:
-        logger.debug(
-            "Committee-disqualified candidates filtered from eligibility: %s",
-            sorted(disqualified_candidates, key=str.lower),
-        )
-    return filtered
+    return {
+        voter.username
+        for voter in eligible_voters
+        if voter.username.lower() not in disqualified_lower
+    }
 
 
 def eligible_nominator_usernames(*, election: Election, require_fresh: bool = False) -> set[str]:

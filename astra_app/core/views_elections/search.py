@@ -191,17 +191,21 @@ def election_eligible_users_search(request, election_id: int):
     if "eligible_group_cn" in request.GET:
         group_override = eligible_group_cn
 
+    count_only = str(request.GET.get("count_only") or "").strip()
     try:
+        if count_only in {"1", "true", "True", "yes", "on"}:
+            eligible_voters = elections_eligibility.eligible_voters_from_memberships(
+                election=election,
+                eligible_group_cn=group_override,
+            )
+            return JsonResponse({"count": len(eligible_voters)})
+
         eligible_usernames = elections_eligibility.eligible_candidate_usernames(
             election=election,
             eligible_group_cn=group_override,
         )
     except ElectionEligibilityError as exc:
         return JsonResponse({"error": str(exc)}, status=exc.status_code)
-
-    count_only = str(request.GET.get("count_only") or "").strip()
-    if count_only in {"1", "true", "True", "yes", "on"}:
-        return JsonResponse({"count": len(eligible_usernames)})
 
     q = str(request.GET.get("q") or "").strip()
     return JsonResponse({"results": _build_user_search_results(eligible_usernames, q)})

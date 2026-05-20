@@ -31,6 +31,7 @@ from core.elections_services import (
     submit_ballot,
     tally_election,
 )
+from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import FreeIPAUser
 from core.models import AuditLogEntry, Ballot, Candidate, Election, Membership, MembershipType, VotingCredential
 from core.tests.ballot_chain import compute_chain_hash
@@ -606,6 +607,46 @@ class ElectionBulkCredentialIssuanceTests(TestCase):
         self.assertEqual(len(issued), 1)
         credential = VotingCredential.objects.get(election=election, freeipa_username="alice")
         self.assertEqual(credential.weight, 2)
+
+    def test_issue_credentials_at_start_transition_includes_committee_members(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Committee eligible start election",
+            description="",
+            start_datetime=now,
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+
+        voter = MembershipType.objects.create(
+            code="voter_committee_filtered",
+            name="Voter",
+            votes=1,
+            category_id="individual",
+            enabled=True,
+        )
+        eligible_created_at = election.start_datetime - datetime.timedelta(days=200)
+        alice_membership = Membership.objects.create(target_username="alice", membership_type=voter, expires_at=None)
+        bob_membership = Membership.objects.create(target_username="bob", membership_type=voter, expires_at=None)
+        Membership.objects.filter(pk=alice_membership.pk).update(created_at=eligible_created_at)
+        Membership.objects.filter(pk=bob_membership.pk).update(created_at=eligible_created_at)
+
+        committee_group = FreeIPAGroup(
+            settings.FREEIPA_ELECTION_COMMITTEE_GROUP,
+            {"member_user": ["alice"]},
+        )
+
+        with patch(
+            "core.elections_eligibility.get_freeipa_group_for_elections",
+            return_value=committee_group,
+        ):
+            issued = issue_credentials_at_start_transition(election=election)
+
+        self.assertEqual({credential.freeipa_username for credential in issued}, {"alice", "bob"})
+        self.assertTrue(
+            VotingCredential.objects.filter(election=election, freeipa_username="alice").exists()
+        )
 
     def test_credential_creation_only_at_start_transition(self) -> None:
         now = timezone.now()

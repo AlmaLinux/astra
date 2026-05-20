@@ -226,6 +226,44 @@ class ElectionDraftDeletionTests(_CoreCategoriesTestCase):
         session["_freeipa_username"] = username
         session.save()
 
+    def test_draft_edit_page_eligible_voters_count_uses_membership_electorate(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Draft start count",
+            description="",
+            url="",
+            start_datetime=now + datetime.timedelta(days=10),
+            end_datetime=now + datetime.timedelta(days=11),
+            number_of_seats=1,
+            status=Election.Status.draft,
+        )
+
+        with (
+            patch(
+                "core.views_elections.edit.elections_eligibility.start_eligible_voters",
+                return_value=[SimpleNamespace(username="eligible", weight=1)],
+            ),
+            patch(
+                "core.views_elections.edit.elections_eligibility.eligible_voters_from_memberships",
+                return_value=[
+                    SimpleNamespace(username="eligible", weight=1),
+                    SimpleNamespace(username="committee-member", weight=1),
+                ],
+            ),
+        ):
+            resp = self.client.get(reverse("election-edit", args=[election.id]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["eligible_voters_count"], 2)
+        self.assertEqual(resp.context["nomination_eligible_voters_count"], 2)
+
     def test_draft_election_is_deletable(self) -> None:
         self._login_as_freeipa_user("admin")
         FreeIPAPermissionGrant.objects.create(

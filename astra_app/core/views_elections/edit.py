@@ -360,14 +360,11 @@ def _handle_start_election(
         return None
 
     try:
-        eligible_voter_usernames = {
-            v.username
-            for v in elections_eligibility.eligible_voters_from_memberships(
-                election=election,
-                require_fresh=True,
-            )
-        }
-        no_eligible_voters = not eligible_voter_usernames
+        start_eligible_voters = elections_eligibility.eligible_voters_from_memberships(
+            election=election,
+            require_fresh=True,
+        )
+        no_eligible_voters = not start_eligible_voters
         validation = elections_eligibility.validate_candidates_for_election(
             election=election,
             candidate_usernames=candidate_usernames,
@@ -524,7 +521,8 @@ def election_edit(request, election_id: int):
     def _membership_eligibility_sets(for_election: Election) -> tuple[set[str], set[str]]:
         try:
             eligible_usernames = {
-                v.username for v in elections_eligibility.eligible_voters_from_memberships(election=for_election)
+                v.username
+                for v in elections_eligibility.eligible_voters_from_memberships(election=for_election)
             }
             nomination_usernames = {
                 v.username

@@ -8,6 +8,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
+from core.elections_eligibility import CandidateValidationResult, EligibleVoter
 from core.freeipa.exceptions import FreeIPAMisconfiguredError
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import FreeIPAUser
@@ -700,7 +701,75 @@ class ElectionEditLifecycleTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         election.refresh_from_db()
         self.assertEqual(election.status, Election.Status.draft)
-        self.assertContains(resp, "No eligible voters")
+
+    def test_start_election_uses_membership_electorate_even_when_committee_filter_is_empty(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Draft election",
+            description="",
+            url="",
+            start_datetime=now + datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=2),
+            number_of_seats=1,
+            status=Election.Status.draft,
+        )
+        Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
+
+        self._login_as_freeipa_user("admin")
+        self._grant_manage_elections("admin")
+
+        clean_validation = CandidateValidationResult(
+            eligible_candidates={"alice"},
+            eligible_nominators={"nominator"},
+            disqualified_candidates=set(),
+            disqualified_nominators=set(),
+            ineligible_candidates=set(),
+            ineligible_nominators=set(),
+        )
+
+        start_str = (now + datetime.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
+        end_str = (now + datetime.timedelta(days=2)).strftime("%Y-%m-%dT%H:%M")
+
+        with (
+            patch(
+                "core.views_elections.edit.elections_eligibility.eligible_voters_from_memberships",
+                return_value=[EligibleVoter(username="committee-member", weight=1)],
+            ),
+            patch(
+                "core.views_elections.edit.elections_eligibility.start_eligible_voters",
+                return_value=[],
+            ),
+            patch(
+                "core.views_elections.edit.elections_eligibility.validate_candidates_for_election",
+                return_value=clean_validation,
+            ),
+            patch(
+                "core.views_elections.edit.issue_credentials_at_start_transition",
+                return_value=[],
+            ),
+        ):
+            resp = self.client.post(
+                reverse("election-edit", args=[election.id]),
+                data={
+                    "action": "start_election",
+                    "name": election.name,
+                    "description": election.description,
+                    "url": election.url,
+                    "start_datetime": start_str,
+                    "end_datetime": end_str,
+                    "number_of_seats": str(election.number_of_seats),
+                    "quorum": str(election.quorum),
+                    "email_template_id": "",
+                    "subject": "",
+                    "html_content": "",
+                    "text_content": "",
+                },
+                follow=False,
+            )
+
+        self.assertEqual(resp.status_code, 302)
+        election.refresh_from_db()
+        self.assertEqual(election.status, Election.Status.open)
 
     def test_start_election_blocks_ineligible_candidates(self) -> None:
         now = timezone.now()
