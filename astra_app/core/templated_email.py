@@ -387,7 +387,6 @@ def queue_composed_email(
         )
 
         template_engine = engines["post_office"]
-        subject_template = template_engine.from_string(subject_source)
         text_template = template_engine.from_string(preview_drop_inline_image_tags(text_source))
         html_template = template_engine.from_string(staged_html_content)
 
@@ -395,7 +394,9 @@ def queue_composed_email(
             **system_email_context(),
             **dict(context),
         }
-        rendered_subject = subject_template.render(rendered_context)
+        rendered_subject = validate_email_subject(
+            render_template_string(subject_source, rendered_context, autoescape=False)
+        )
         rendered_text = text_template.render(rendered_context)
         rendered_html = html_template.render(rendered_context)
         attachments = _attachments_from_html_template(
@@ -572,7 +573,7 @@ def placeholderize_empty_values(context: Mapping[str, object]) -> dict[str, obje
     return out
 
 
-def render_template_string(value: str, context: Mapping[str, object]) -> str:
+def render_template_string(value: str, context: Mapping[str, object], *, autoescape: bool = True) -> str:
     """Render a Django template string with a plain context.
 
     Raise ValueError for template syntax errors so callers can consistently
@@ -587,6 +588,10 @@ def render_template_string(value: str, context: Mapping[str, object]) -> str:
 
     if post_office_engine is not None:
         try:
+            if not autoescape:
+                return post_office_engine.engine.from_string(value or "").render(
+                    Context(dict(context), autoescape=False)
+                )
             return post_office_engine.from_string(value or "").render(dict(context))
         except TemplateSyntaxError as exc:
             raise ValueError(str(exc)) from exc
@@ -594,7 +599,7 @@ def render_template_string(value: str, context: Mapping[str, object]) -> str:
             raise ValueError(str(exc)) from exc
 
     try:
-        return Template(value or "").render(Context(dict(context)))
+        return Template(value or "").render(Context(dict(context), autoescape=autoescape))
     except TemplateSyntaxError as exc:
         raise ValueError(str(exc)) from exc
 
@@ -646,7 +651,7 @@ def render_templated_email_preview(*, subject: str, html_content: str, text_cont
     text_content = _apply_pluralize_placeholders(template=text_content, render_context=render_context)
 
     return {
-        "subject": render_template_string(subject, render_context),
+        "subject": render_template_string(subject, render_context, autoescape=False),
         "html": render_template_string(html_content, render_context),
         "text": render_template_string(text_content, render_context),
     }

@@ -626,6 +626,25 @@ class EmailTemplatesUiTests(TestCase):
         self.assertEqual(payload["html"], "<p>-name-</p>")
         self.assertEqual(payload["text"], "-name-")
 
+    def test_template_render_preview_endpoint_preserves_literal_subject_apostrophes_and_unicode(self) -> None:
+        self._login_as_freeipa_user("reviewer")
+        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            resp = self.client.post(
+                reverse("email-template-render-preview"),
+                data={
+                    "subject": "Who's ready for cafe? ☕",
+                    "html_content": "<p>Preview</p>",
+                    "text_content": "Preview",
+                },
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["subject"], "Who's ready for cafe? ☕")
+        self.assertNotEqual(payload["subject"], "Who&#x27;s ready for cafe? ☕")
+
     def test_template_render_preview_endpoint_rewrites_inline_image_tag_to_url(self) -> None:
         self._login_as_freeipa_user("reviewer")
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
