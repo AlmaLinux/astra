@@ -153,6 +153,44 @@ describe("UserProfilePage", () => {
     expect(wrapper.find('a[href="/group/infra/"]').exists()).toBe(true);
   });
 
+  it("renders the fuller account setup alert copy for required and recommended actions", async () => {
+    stubProfileFetch(
+      makePayload({
+        accountSetup: {
+          requiredActions: [
+            { id: "coc-not-signed-alert", agreementCn: "community-code-of-conduct" },
+            { id: "country-code-missing-alert" },
+            { id: "email-blacklisted-alert" },
+            { id: "membership-action-required-alert", requestId: 42 },
+            { id: "sponsorship-action-required-alert", requestId: 43 },
+          ],
+          requiredIsRfi: true,
+          recommendedActions: [{ id: "membership-request-recommended-alert" }],
+          recommendedDismissKey: "",
+        },
+      }),
+    );
+
+    const wrapper = mount(UserProfilePage, {
+      props: { bootstrap },
+    });
+
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Sign the Community Code of Conduct");
+    expect(wrapper.text()).toContain("Review & sign");
+    expect(wrapper.text()).toContain("Add a valid ISO 3166-1 alpha-2 country code");
+    expect(wrapper.text()).toContain("Set country code");
+    expect(wrapper.text()).toContain("We're having trouble delivering your emails: your address may have bounced or been marked as spam");
+    expect(wrapper.text()).toContain("Update your email address");
+    expect(wrapper.text()).toContain("Help us review your membership request");
+    expect(wrapper.text()).toContain("Help us review your sponsorship request");
+    expect(wrapper.text()).toContain("Add details");
+    expect(wrapper.text()).toContain("Request an individual membership");
+    expect(wrapper.text()).toContain("Request a membership");
+  });
+
   it("hides the recommended alert when it was previously dismissed", async () => {
     const dismissKey = "astra:profile-recommended-dismissed:alice";
     localStorage.setItem(dismissKey, "1");

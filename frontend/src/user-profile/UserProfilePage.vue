@@ -27,12 +27,15 @@ const summary = computed<UserProfileSummaryBootstrap | null>(() => {
 });
 
 const ACTION_COPY: Record<string, { label: string; urlLabel: string }> = {
-  "coc-not-signed-alert": { label: "Sign the Code of Conduct", urlLabel: "Review agreement" },
-  "country-code-missing-alert": { label: "Add your country", urlLabel: "Set country code" },
-  "email-blacklisted-alert": { label: "Fix your email address", urlLabel: "Review emails" },
-  "membership-action-required-alert": { label: "Respond to the membership request", urlLabel: "Open request" },
-  "sponsorship-action-required-alert": { label: "Respond to the sponsorship request", urlLabel: "Open request" },
-  "membership-request-recommended-alert": { label: "Request membership", urlLabel: "Request" },
+  "coc-not-signed-alert": { label: "Sign the Community Code of Conduct", urlLabel: "Review & sign" },
+  "country-code-missing-alert": { label: "Add a valid ISO 3166-1 alpha-2 country code", urlLabel: "Set country code" },
+  "email-blacklisted-alert": {
+    label: "We're having trouble delivering your emails: your address may have bounced or been marked as spam",
+    urlLabel: "Update your email address",
+  },
+  "membership-action-required-alert": { label: "Help us review your membership request", urlLabel: "Add details" },
+  "sponsorship-action-required-alert": { label: "Help us review your sponsorship request", urlLabel: "Add details" },
+  "membership-request-recommended-alert": { label: "Request an individual membership", urlLabel: "Request a membership" },
 };
 
 function updateCurrentTime(): void {
