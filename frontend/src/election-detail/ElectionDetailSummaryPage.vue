@@ -378,7 +378,6 @@ onBeforeUnmount(() => {
             <p v-if="election.description">{{ election.description }}</p>
 
             <p v-if="election.url" class="mb-2">
-              <strong>URL:</strong>
               <a :href="election.url" target="_blank" rel="noopener noreferrer">{{ election.url }}</a>
             </p>
           </div>
