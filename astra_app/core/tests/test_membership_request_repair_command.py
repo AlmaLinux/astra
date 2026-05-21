@@ -7,8 +7,8 @@ from django.core.management.base import CommandError
 from django.test import TestCase
 from django.utils import timezone
 
-from core.models import MembershipRequest, MembershipType, Note
 from core.membership_request_repairs import reset_rejected_membership_request_to_pending
+from core.models import MembershipRequest, MembershipType, Note
 
 
 class ResetRejectedMembershipRequestTests(TestCase):

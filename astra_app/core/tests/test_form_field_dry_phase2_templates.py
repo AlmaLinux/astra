@@ -1,6 +1,8 @@
 from django import forms
 from django.template import Context, Template
 from django.test import SimpleTestCase
+
+
 class _SampleForm(forms.Form):
     name = forms.CharField(help_text="Original help")
 

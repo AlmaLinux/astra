@@ -34,7 +34,7 @@
     <input type="hidden" name="email_save_mode" id="election-edit-email-save-mode" value="" />
     <input type="hidden" id="election-edit-has-election" value="{% if election %}1{% else %}0{% endif %}" />
     <input type="hidden" id="election-edit-election-status" value="{% if election %}{{ election.status }}{% else %}draft{% endif %}" />
-    <input type="hidden" id="election-edit-original-email-template-id" value="{% if election and election.voting_email_template_id %}{{ election.voting_email_template_id }}{% else %}{% endif %}" />
+    <input type="hidden" id="election-edit-original-email-template-id" value="{{ original_email_template_id }}" />
 
     <div class="row">
       <div class="col-lg-9">

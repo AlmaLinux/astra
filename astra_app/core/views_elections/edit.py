@@ -518,6 +518,14 @@ def election_edit(request, election_id: int):
     templates = list(EmailTemplate.objects.all().order_by("name"))
     default_template = EmailTemplate.objects.filter(name=settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME).first()
 
+    def _saved_email_template_id(for_election: Election | None) -> str:
+        if for_election is not None:
+            if for_election.voting_email_template_id is not None:
+                return str(for_election.voting_email_template_id)
+            if default_template is not None:
+                return str(default_template.pk)
+        return ""
+
     def _membership_eligibility_sets(for_election: Election) -> tuple[set[str], set[str]]:
         try:
             eligible_usernames = {
@@ -542,6 +550,8 @@ def election_edit(request, election_id: int):
     if election is not None:
         eligible_voter_usernames, nomination_eligible_usernames = _membership_eligibility_sets(election)
 
+    original_email_template_id = _saved_email_template_id(election)
+
     if request.method == "POST":
         action = str(request.POST.get("action") or "").strip()
 
@@ -562,6 +572,11 @@ def election_edit(request, election_id: int):
 
         details_form = ElectionDetailsForm(request.POST, instance=election)
         email_form = ElectionVotingEmailForm(request.POST)
+        original_email_template_id = str(
+            email_form.data.get("email_template_id")
+            or email_form.initial.get("email_template_id")
+            or ""
+        ).strip()
 
         if election_locked:
             for field_name in (
@@ -638,6 +653,8 @@ def election_edit(request, election_id: int):
                     messages.error(request, msg)
 
         email_save_mode = str(request.POST.get("email_save_mode") or "").strip()
+        if email_save_mode == "keep_existing":
+            original_email_template_id = _saved_email_template_id(election)
 
         details_form_valid = details_form.is_valid() if action == "save_draft" else False
         email_form_valid = email_form.is_valid() if action == "save_draft" else False
@@ -788,6 +805,8 @@ def election_edit(request, election_id: int):
             initial_email["html_content"] = selected_template.html_content or ""
             initial_email["text_content"] = selected_template.content or ""
 
+        original_email_template_id = initial_email["email_template_id"]
+
         email_form = ElectionVotingEmailForm(initial=initial_email)
 
         candidate_formset = CandidateWizardFormSet(
@@ -848,5 +867,6 @@ def election_edit(request, election_id: int):
             "rendered_preview": rendered_preview,
             "email_template_variables": email_template_variables,
             "default_template_name": settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME,
+            "original_email_template_id": original_email_template_id,
         },
     )

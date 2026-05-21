@@ -57,7 +57,6 @@ from core.form_validators import (
     clean_fas_url_value,
     validate_http_urls,
 )
-from core.freeipa_directory import search_freeipa_users
 from core.forms_selfservice import (
     _GITHUB_USERNAME_RE,
     _GITLAB_USERNAME_RE,
@@ -73,6 +72,7 @@ from core.freeipa.exceptions import FreeIPAOperationFailed
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import FreeIPAUser
 from core.freeipa.utils import _invalidate_agreement_cache, _invalidate_agreements_list_cache
+from core.freeipa_directory import search_freeipa_users
 from core.ipa_user_attrs import (
     _add_change_list_setattr,
     _add_change_setattr,

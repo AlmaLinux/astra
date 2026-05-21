@@ -102,6 +102,63 @@ describe("initElectionEditController", () => {
     expect(modal).toHaveBeenCalledWith("show");
   });
 
+  it("does not prompt when compose registers after init and the template id still matches", () => {
+    document.body.innerHTML = `
+      <form id="election-edit-form">
+        <input type="hidden" id="election-edit-action" value="save_draft" />
+        <input type="hidden" id="election-edit-email-save-mode" value="" />
+        <input type="hidden" id="election-edit-has-election" value="1" />
+        <input type="hidden" id="election-edit-election-status" value="draft" />
+        <input type="hidden" id="election-edit-original-email-template-id" value="17" />
+      </form>
+      <button type="button" id="edit-keep-existing-email-btn">Keep</button>
+      <button type="button" id="edit-save-email-btn">Save</button>
+      <div id="edit-template-changed-modal"></div>
+      <input id="id_candidates-TOTAL_FORMS" value="0" />
+      <template id="candidates-empty-form"></template>
+      <tbody id="candidates-formset-body"></tbody>
+      <input id="id_groups-TOTAL_FORMS" value="0" />
+      <template id="groups-empty-form"></template>
+      <tbody id="groups-formset-body"></tbody>
+    `;
+
+    const modal = vi.fn();
+    vi.stubGlobal("jQuery", Object.assign(
+      () => ({
+        modal,
+        on: vi.fn(),
+        fn: { modal },
+        closest: () => [],
+      }),
+      { fn: { modal } },
+    ));
+
+    delete (window as Window & { TemplatedEmailCompose?: unknown }).TemplatedEmailCompose;
+
+    initElectionEditController();
+
+    const select = document.createElement("select");
+    select.name = "email_template_id";
+    select.append(new Option("Existing", "17", true, true));
+    select.value = "17";
+
+    vi.stubGlobal("TemplatedEmailCompose", {
+      getTemplateSelectEl: () => select,
+      getValues: () => ({ subject: "", html_content: "", text_content: "" }),
+      setRestoreEnabled: vi.fn(),
+      markBaseline: vi.fn(),
+      getCsrfToken: () => "token",
+      getField: () => "",
+    });
+
+    const form = document.getElementById("election-edit-form") as HTMLFormElement;
+    const event = new Event("submit", { bubbles: true, cancelable: true });
+    form.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(modal).not.toHaveBeenCalled();
+  });
+
   it("triggers change after syncing group candidate options", () => {
     document.body.innerHTML = `
       <input id="id_candidates-TOTAL_FORMS" value="1" />

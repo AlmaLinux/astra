@@ -8,6 +8,7 @@ from django.conf import settings
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
+from post_office.models import EmailTemplate
 
 from core.elections_eligibility import CandidateValidationResult
 from core.freeipa.exceptions import FreeIPAMisconfiguredError
@@ -225,6 +226,133 @@ class ElectionDraftDeletionTests(_CoreCategoriesTestCase):
         session = self.client.session
         session["_freeipa_username"] = username
         session.save()
+
+    def test_draft_edit_page_aligns_hidden_original_template_with_selected_default_template(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        EmailTemplate.objects.filter(name=settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME).delete()
+        default_template = EmailTemplate.objects.create(
+            name=settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME,
+            subject="Default subject",
+            html_content="<p>Default html</p>",
+            content="Default text",
+        )
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Draft without saved template",
+            description="",
+            url="",
+            start_datetime=now + datetime.timedelta(days=10),
+            end_datetime=now + datetime.timedelta(days=11),
+            number_of_seats=1,
+            status=Election.Status.draft,
+        )
+
+        resp = self.client.get(reverse("election-edit", args=[election.id]))
+
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        hidden_match = re.search(
+            r'id="election-edit-original-email-template-id" value="([^"]*)"',
+            html,
+        )
+        self.assertIsNotNone(hidden_match)
+        select_match = re.search(
+            r'<select class="form-control" name="email_template_id">([\s\S]*?)</select>',
+            html,
+        )
+        self.assertIsNotNone(select_match)
+        selected_match = re.search(r'<option value="(\d+)" selected>', select_match.group(1))
+        self.assertIsNotNone(selected_match)
+        self.assertEqual(hidden_match.group(1), str(default_template.pk))
+        self.assertEqual(selected_match.group(1), str(default_template.pk))
+
+    def test_invalid_save_rerender_aligns_hidden_original_template_with_selected_template(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        EmailTemplate.objects.filter(name=settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME).delete()
+        default_template = EmailTemplate.objects.create(
+            name=settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME,
+            subject="Default subject",
+            html_content="<p>Default html</p>",
+            content="Default text",
+        )
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Draft invalid rerender",
+            description="",
+            url="",
+            start_datetime=now + datetime.timedelta(days=10),
+            end_datetime=now + datetime.timedelta(days=11),
+            number_of_seats=1,
+            status=Election.Status.draft,
+        )
+
+        resp = self.client.post(
+            reverse("election-edit", args=[election.id]),
+            data={
+                "action": "save_draft",
+                "name": "",
+                "description": "",
+                "url": "",
+                "start_datetime": (now + datetime.timedelta(days=10)).strftime("%Y-%m-%dT%H:%M"),
+                "end_datetime": (now + datetime.timedelta(days=11)).strftime("%Y-%m-%dT%H:%M"),
+                "number_of_seats": "1",
+                "quorum": "50",
+                "email_template_id": str(default_template.pk),
+                "subject": default_template.subject,
+                "html_content": default_template.html_content,
+                "text_content": default_template.content,
+                "candidates-TOTAL_FORMS": "1",
+                "candidates-INITIAL_FORMS": "0",
+                "candidates-MIN_NUM_FORMS": "0",
+                "candidates-MAX_NUM_FORMS": "1000",
+                "candidates-0-id": "",
+                "candidates-0-freeipa_username": "",
+                "candidates-0-nominated_by": "",
+                "candidates-0-description": "",
+                "candidates-0-url": "",
+                "candidates-0-DELETE": "",
+                "groups-TOTAL_FORMS": "1",
+                "groups-INITIAL_FORMS": "0",
+                "groups-MIN_NUM_FORMS": "0",
+                "groups-MAX_NUM_FORMS": "1000",
+                "groups-0-id": "",
+                "groups-0-name": "",
+                "groups-0-max_elected": "1",
+                "groups-0-candidate_usernames": "",
+                "groups-0-DELETE": "",
+            },
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Please correct the errors below.")
+
+        html = resp.content.decode()
+        hidden_match = re.search(
+            r'id="election-edit-original-email-template-id" value="([^"]*)"',
+            html,
+        )
+        self.assertIsNotNone(hidden_match)
+        select_match = re.search(
+            r'<select class="form-control" name="email_template_id">([\s\S]*?)</select>',
+            html,
+        )
+        self.assertIsNotNone(select_match)
+        selected_match = re.search(r'<option value="(\d+)" selected>', select_match.group(1))
+        self.assertIsNotNone(selected_match)
+        self.assertEqual(hidden_match.group(1), str(default_template.pk))
+        self.assertEqual(selected_match.group(1), str(default_template.pk))
 
     def test_draft_edit_page_eligible_voters_count_uses_membership_electorate(self) -> None:
         self._login_as_freeipa_user("admin")

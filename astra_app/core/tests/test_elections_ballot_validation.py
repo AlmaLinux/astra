@@ -4,7 +4,6 @@ import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from django.conf import settings
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -207,7 +206,6 @@ class ElectionBallotValidationTests(TestCase):
         self.assertEqual(Ballot.objects.filter(election=election).count(), 0)
 
     def test_vote_submit_requires_signed_coc(self) -> None:
-        from core.freeipa.agreement import FreeIPAFASAgreement
 
         now = timezone.now()
         election = Election.objects.create(

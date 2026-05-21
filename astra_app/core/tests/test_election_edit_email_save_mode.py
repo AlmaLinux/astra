@@ -1,5 +1,6 @@
 
 import datetime
+import re
 
 from django.test import TestCase
 from django.urls import reverse
@@ -41,6 +42,144 @@ class ElectionEditEmailSaveModeTests(TestCase):
         m = Membership.objects.create(target_username=username, membership_type=mt, expires_at=None)
         created_at = election.start_datetime - datetime.timedelta(days=200)
         Membership.objects.filter(pk=m.pk).update(created_at=created_at)
+
+    def test_keep_existing_invalid_rerender_preserves_saved_baseline_for_followup_save(self) -> None:
+        now = timezone.now()
+        saved_template = EmailTemplate.objects.create(
+            name="saved-template",
+            subject="Saved template subject",
+            html_content="<p>Saved template html</p>",
+            content="Saved template text",
+        )
+        changed_template = EmailTemplate.objects.create(
+            name="changed-template",
+            subject="Changed template subject",
+            html_content="<p>Changed template html</p>",
+            content="Changed template text",
+        )
+
+        election = Election.objects.create(
+            name="Draft",
+            description="",
+            url="",
+            start_datetime=now + datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=2),
+            number_of_seats=1,
+            status=Election.Status.draft,
+            voting_email_template=saved_template,
+            voting_email_subject="Saved subject",
+            voting_email_html="Saved html",
+            voting_email_text="Saved text",
+        )
+
+        candidate = Candidate.objects.create(
+            election=election,
+            freeipa_username="alice",
+            nominated_by="bob",
+        )
+        self._make_eligible(election=election, username="alice")
+        self._make_eligible(election=election, username="bob")
+
+        self._login_as_freeipa_user("admin")
+        self._grant_manage_elections("admin")
+
+        invalid_response = self.client.post(
+            reverse("election-edit", args=[election.id]),
+            data={
+                "action": "save_draft",
+                "email_save_mode": "keep_existing",
+                "name": "",
+                "description": election.description,
+                "url": election.url,
+                "start_datetime": (now + datetime.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M"),
+                "end_datetime": (now + datetime.timedelta(days=2)).strftime("%Y-%m-%dT%H:%M"),
+                "number_of_seats": str(election.number_of_seats),
+                "quorum": str(election.quorum),
+                "email_template_id": str(changed_template.pk),
+                "subject": "Unsaved changed subject",
+                "html_content": "Unsaved changed html",
+                "text_content": "Unsaved changed text",
+                "candidates-TOTAL_FORMS": "1",
+                "candidates-INITIAL_FORMS": "1",
+                "candidates-MIN_NUM_FORMS": "0",
+                "candidates-MAX_NUM_FORMS": "1000",
+                "candidates-0-id": str(candidate.id),
+                "candidates-0-freeipa_username": "alice",
+                "candidates-0-nominated_by": "bob",
+                "candidates-0-description": "",
+                "candidates-0-url": "",
+                "candidates-0-DELETE": "",
+                "groups-TOTAL_FORMS": "0",
+                "groups-INITIAL_FORMS": "0",
+                "groups-MIN_NUM_FORMS": "0",
+                "groups-MAX_NUM_FORMS": "1000",
+            },
+            follow=False,
+        )
+
+        self.assertEqual(invalid_response.status_code, 200)
+        self.assertContains(
+            invalid_response,
+            f'id="election-edit-original-email-template-id" value="{saved_template.pk}"',
+        )
+
+        html = invalid_response.content.decode("utf-8")
+        select_match = re.search(
+            r'<select class="form-control" name="email_template_id">([\s\S]*?)</select>',
+            html,
+        )
+        self.assertIsNotNone(select_match)
+        selected_match = re.search(r'<option value="(\d+)" selected>', select_match.group(1))
+        self.assertIsNotNone(selected_match)
+        self.assertEqual(selected_match.group(1), str(changed_template.pk))
+
+        election.refresh_from_db()
+        self.assertEqual(election.voting_email_template_id, saved_template.pk)
+        self.assertEqual(election.voting_email_subject, "Saved subject")
+        self.assertEqual(election.voting_email_html, "Saved html")
+        self.assertEqual(election.voting_email_text, "Saved text")
+
+        save_response = self.client.post(
+            reverse("election-edit", args=[election.id]),
+            data={
+                "action": "save_draft",
+                "email_save_mode": "keep_existing",
+                "name": "Draft renamed",
+                "description": election.description,
+                "url": election.url,
+                "start_datetime": (now + datetime.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M"),
+                "end_datetime": (now + datetime.timedelta(days=2)).strftime("%Y-%m-%dT%H:%M"),
+                "number_of_seats": str(election.number_of_seats),
+                "quorum": str(election.quorum),
+                "email_template_id": str(changed_template.pk),
+                "subject": "Unsaved changed subject",
+                "html_content": "Unsaved changed html",
+                "text_content": "Unsaved changed text",
+                "candidates-TOTAL_FORMS": "1",
+                "candidates-INITIAL_FORMS": "1",
+                "candidates-MIN_NUM_FORMS": "0",
+                "candidates-MAX_NUM_FORMS": "1000",
+                "candidates-0-id": str(candidate.id),
+                "candidates-0-freeipa_username": "alice",
+                "candidates-0-nominated_by": "bob",
+                "candidates-0-description": "",
+                "candidates-0-url": "",
+                "candidates-0-DELETE": "",
+                "groups-TOTAL_FORMS": "0",
+                "groups-INITIAL_FORMS": "0",
+                "groups-MIN_NUM_FORMS": "0",
+                "groups-MAX_NUM_FORMS": "1000",
+            },
+            follow=False,
+        )
+
+        self.assertEqual(save_response.status_code, 302)
+        election.refresh_from_db()
+        self.assertEqual(election.name, "Draft renamed")
+        self.assertEqual(election.voting_email_template_id, saved_template.pk)
+        self.assertEqual(election.voting_email_subject, "Saved subject")
+        self.assertEqual(election.voting_email_html, "Saved html")
+        self.assertEqual(election.voting_email_text, "Saved text")
 
     def test_save_draft_keep_existing_does_not_overwrite_email_snapshot(self) -> None:
         now = timezone.now()

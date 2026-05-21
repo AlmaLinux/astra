@@ -56,6 +56,10 @@ function getField(name: string): string {
   return compose ? compose.getField(name) : "";
 }
 
+function getTemplateSelectEl(): HTMLSelectElement | null {
+  return getCompose()?.getTemplateSelectEl?.() ?? null;
+}
+
 function scheduleEmailPreviewRefresh(compose: TemplatedEmailCompose | null, delayMs: number): void {
   const preview = currentWindow().TemplatedEmailComposePreview;
   if (!preview) {
@@ -498,7 +502,7 @@ export function initElectionEditController(): void {
   }
 
   const compose = getCompose();
-  const templateSelect = compose?.getTemplateSelectEl?.() ?? null;
+  const templateSelect = getTemplateSelectEl();
   if (templateSelect) {
     templateSelect.addEventListener("change", () => {
       resetEmailSaveMode();
@@ -512,7 +516,7 @@ export function initElectionEditController(): void {
   document.addEventListener("templated-email-compose:save-confirmed", (event) => {
     const preview = currentWindow().TemplatedEmailComposePreview;
     const composeForEvent = preview?.getComposeFromEvent(event) ?? getCompose();
-    const templateId = composeForEvent?.getTemplateId?.() ?? String(templateSelect?.value || "").trim();
+    const templateId = composeForEvent?.getTemplateId?.() ?? String(getTemplateSelectEl()?.value || "").trim();
     void saveTemplate(templateId);
   });
 
@@ -529,10 +533,11 @@ export function initElectionEditController(): void {
       return;
     }
 
-    if (templateSelect && payload.id != null) {
+    const liveTemplateSelect = getTemplateSelectEl();
+    if (liveTemplateSelect && payload.id != null) {
       const option = new Option(String(payload.name || name), String(payload.id), true, true);
-      templateSelect.append(option);
-      templateSelect.value = String(payload.id);
+      liveTemplateSelect.append(option);
+      liveTemplateSelect.value = String(payload.id);
     }
 
     const saveModeEl = byId("election-edit-email-save-mode") as HTMLInputElement | null;
@@ -632,7 +637,7 @@ export function initElectionEditController(): void {
     }
 
     const originalId = String((byId("election-edit-original-email-template-id") as HTMLInputElement | null)?.value || "").trim();
-    const currentId = String(templateSelect?.value || "").trim();
+    const currentId = String(getTemplateSelectEl()?.value || "").trim();
     const saveModeEl = byId("election-edit-email-save-mode") as HTMLInputElement | null;
     const saveMode = String(saveModeEl?.value || "").trim();
 
