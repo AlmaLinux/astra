@@ -57,7 +57,14 @@ describe("BallotVerifyPage", () => {
     await flushPromises();
     await flushPromises();
 
+    expect(wrapper.get('button[type="submit"]').attributes("title")).toBe(
+      "Check this ballot receipt code in the ballot ledger",
+    );
     expect(wrapper.text()).toContain("Board election");
+    expect(wrapper.text()).toContain(
+      "Enter the 64-character ballot receipt code you received after submitting your ballot. This page confirms whether a ballot with that code is recorded. It does not show your selections, your identity, or exact timestamps.",
+    );
+    expect(wrapper.text()).toContain("Yes — a ballot with this receipt code is recorded for this election.");
     expect(wrapper.text()).toContain("included in the final tally");
     expect(wrapper.find('a[href="/elections/1/public/ballots.json"]').exists()).toBe(true);
     expect(wrapper.find('a[href="/elections/1/"]').exists()).toBe(true);
@@ -97,10 +104,50 @@ describe("BallotVerifyPage", () => {
     await flushPromises();
     await flushPromises();
 
+    expect(wrapper.text()).toContain(
+      "Enter the 64-character ballot receipt code you received after submitting your ballot. This page confirms whether a ballot with that code is recorded. It does not show your selections, your identity, or exact timestamps.",
+    );
     expect(wrapper.text()).toContain("recorded and locked");
+    expect(wrapper.text()).toContain("Yes — a ballot with this receipt code is recorded for this election.");
     expect(wrapper.text()).toContain("Public verification");
     expect(wrapper.find('a[href="/elections/1/public/ballots.json"]').exists()).toBe(true);
     expect(wrapper.find('a[href="/elections/1/audit/"]').exists()).toBe(true);
+  });
+
+  it("renders the tightened missing-receipt warning", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            receipt: "c".repeat(64),
+            has_query: true,
+            is_valid_receipt: true,
+            found: false,
+            election: null,
+            election_status: null,
+            submitted_date: null,
+            is_superseded: false,
+            is_final_ballot: false,
+            public_ballots_url: null,
+            rate_limited: false,
+            verification_snippet: "",
+          }),
+        ),
+      ),
+    );
+
+    const wrapper = mount(BallotVerifyPage, {
+      props: { bootstrap },
+    });
+
+    await wrapper.get("#id_receipt").setValue("c".repeat(64));
+    await wrapper.get("form").trigger("submit");
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("No ballot with this receipt code was found.");
+    expect(wrapper.text()).not.toContain("No ballot with this ballot receipt code was found.");
   });
 
   it("removes the popstate listener on unmount", () => {

@@ -3,9 +3,9 @@
 Verify the public ballot chain (local check)
 
 This script checks that the downloaded ballots file forms an unbroken SHA-256 chain
-and that the computed final chain hash matches the one published for the election.
-It also checks whether your ballot hash appears in the file, and (optionally) whether
-the "previous chain hash" matches your receipt.
+and that the computed current ledger hash matches the one published for the election.
+It also checks whether your ballot receipt code appears in the file, and (optionally)
+whether the previous ledger hash matches your receipt.
 
 This script runs locally and does not contact the election server.
 
@@ -17,14 +17,21 @@ Source-of-truth (stable permalinks):
 """
 
 # ===== YOUR BALLOT DETAILS =====
-# Copy/paste these values from your voting receipt and the election page.
+# Copy/paste these values from the same labels shown in the Astra UI and email.
 
+# Find this on the ballot verification page for the election, or on the election page URL/export.
 election_id = 1
-your_ballot_hash = "your-ballot-hash-from-receipt"
-your_previous_chain_hash = "previous-chain-hash-from-receipt"  # Optional
-final_chain_hash = "final-chain-hash-from-election-page"  # After election closed
+# Ballot receipt code: find this in the vote receipt email or on the ballot verification page.
+ballot_receipt_code = "your-ballot-receipt-code"
+# Submission nonce: find this in the vote receipt email or in Advanced receipt info on the ballot verification page.
+# This script does not need it, but keeping it here makes it easier to confirm you copied the right receipt.
+submission_nonce = "your-submission-nonce"  # Optional
+# Previous ledger hash: find this in the vote receipt email or in Advanced receipt info on the ballot verification page.
+previous_ledger_hash = "previous-ledger-hash-from-receipt"  # Optional
+# Current ledger hash: find this on the election page after the election closes, or in the public-ballots.json export chain_head field.
+current_ledger_hash = "current-ledger-hash-from-election-page"
 
-# Download public-ballots.json from the election page and keep it next to this script.
+# Download public-ballots.json from the election page export and keep it next to this script.
 ballots_file = "public-ballots.json"
 # ===== END OF USER INPUT =====
 
@@ -131,8 +138,10 @@ if __name__ == "__main__":
     expected_head = str(export.get("chain_head") or "").strip()
     if not expected_head:
         raise SystemExit("public-ballots.json missing chain_head")
-    if str(final_chain_hash or "").strip() and str(final_chain_hash).strip() != expected_head:
-        raise SystemExit(f"final chain hash mismatch: election page={final_chain_hash} export={expected_head}")
+    if str(current_ledger_hash or "").strip() and str(current_ledger_hash).strip() != expected_head:
+        raise SystemExit(
+            f"current ledger hash mismatch: election page={current_ledger_hash} export={expected_head}"
+        )
 
     ballots_raw = export.get("ballots")
     if not isinstance(ballots_raw, list):
@@ -150,29 +159,29 @@ if __name__ == "__main__":
     print("=" * 60)
     print(f"Election ID:        {election_id}")
     print(f"Total ballots:      {len(ordered)}")
-    print(f"Your ballot hash:   {your_ballot_hash}")
+    print(f"Ballot receipt code: {ballot_receipt_code}")
     print()
 
     your_row = None
     for row in ordered:
-        if str(row.get("ballot_hash") or "") == your_ballot_hash:
+        if str(row.get("ballot_hash") or "") == ballot_receipt_code:
             your_row = row
             break
 
     if your_row is not None:
-        print("→ Your ballot hash appears in the public ballots export.")
+        print("→ Your ballot receipt code appears in the public ballots export.")
         exported_previous = str(your_row.get("previous_chain_hash") or "")
-        print(f"  Exported previous chain hash: {exported_previous}")
-        if str(your_previous_chain_hash or "").strip():
-            if exported_previous == your_previous_chain_hash:
-                print("  ✓ Previous chain hash matches your receipt.")
+        print(f"  Exported previous ledger hash: {exported_previous}")
+        if str(previous_ledger_hash or "").strip():
+            if exported_previous == previous_ledger_hash:
+                print("  ✓ Previous ledger hash matches your receipt.")
             else:
-                print("  ✗ Previous chain hash does not match your receipt.")
-                print(f"    Receipt previous chain hash: {your_previous_chain_hash}")
-        print(f"  Exported chain hash:          {your_row.get('chain_hash')}")
+                print("  ✗ Previous ledger hash does not match your receipt.")
+                print(f"    Receipt previous ledger hash: {previous_ledger_hash}")
+        print(f"  Exported current ledger hash:  {your_row.get('chain_hash')}")
         print()
     else:
-        print("✗ Your ballot hash was not found in the export.")
+        print("✗ Your ballot receipt code was not found in the export.")
         print()
 
     if computed_head != expected_head:
@@ -180,7 +189,7 @@ if __name__ == "__main__":
 
     print("✓ Chain integrity verified: genesis → head is a single, complete path")
     print(f"  Genesis hash: {genesis}")
-    print(f"  Chain head:   {computed_head}")
+    print(f"  Current ledger hash: {computed_head}")
 
     if your_row is None:
         raise SystemExit(3)

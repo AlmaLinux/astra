@@ -170,7 +170,7 @@ async function copyReceipt(): Promise<void> {
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(ballotHash.value);
-      setResult("Receipt copied to clipboard.", false);
+      setResult("Ballot receipt code copied to clipboard.", false);
       return;
     }
   } catch {
@@ -178,9 +178,9 @@ async function copyReceipt(): Promise<void> {
   }
 
   if (copyReceiptWithSelectionFallback()) {
-    setResult("Receipt copied to clipboard.", false);
+    setResult("Ballot receipt code copied to clipboard.", false);
   } else {
-    setResult("Copy failed. Please copy the receipt manually.", true);
+    setResult("Copy failed. Please copy the ballot receipt code manually.", true);
   }
 }
 
@@ -250,9 +250,9 @@ async function submitVote(): Promise<void> {
 
     setReceipt(payload);
     if (payload.email_queued) {
-      setResult("Your vote was recorded. A receipt was sent to your email.", false);
+      setResult("Your vote was recorded. A ballot receipt email was sent to your email address.", false);
     } else {
-      setResult("Your vote was recorded. (A receipt email could not be sent.)", false);
+      setResult("Your vote was recorded. (A ballot receipt email could not be sent.)", false);
     }
   } catch {
     setResult("Vote submission failed.", true);
@@ -393,19 +393,19 @@ onMounted(async () => {
                 <div class="input-group">
                   <input id="election-receipt" ref="receiptInput" class="form-control" :value="ballotHash" type="text" readonly />
                   <div class="input-group-append">
-                    <button id="election-receipt-copy" type="button" class="btn btn-outline-secondary" title="Copy receipt to clipboard" @click="copyReceipt">Copy</button>
+                    <button id="election-receipt-copy" type="button" class="btn btn-outline-secondary" title="Copy ballot receipt code to clipboard" @click="copyReceipt">Copy</button>
                   </div>
                 </div>
                 <div class="mt-2">
-                  <a id="election-receipt-verify" :href="verifyReceiptHref" target="_blank" rel="noopener noreferrer">Verify this receipt</a>
+                  <a id="election-receipt-verify" :href="verifyReceiptHref" target="_blank" rel="noopener noreferrer">Verify this ballot receipt code</a>
                 </div>
                 <div class="mt-2">
-                  <label class="text-muted" for="election-nonce">Submission Nonce</label>
+                  <label class="text-muted" for="election-nonce">Submission nonce</label>
                   <input id="election-nonce" class="form-control" :value="nonce" type="text" readonly />
-                  <div class="form-text text-muted">Save this together with your receipt.</div>
+                  <div class="form-text text-muted">Save this together with your ballot receipt code.</div>
                 </div>
                 <div class="mt-2">
-                  <label class="text-muted" for="election-previous-chain-hash">Previous chain hash</label>
+                  <label class="text-muted" for="election-previous-chain-hash">Previous ledger hash</label>
                   <input
                     id="election-previous-chain-hash"
                     class="form-control"
@@ -415,7 +415,7 @@ onMounted(async () => {
                   />
                 </div>
                 <div class="mt-2">
-                  <label class="text-muted" for="election-chain-hash">Chain hash</label>
+                  <label class="text-muted" for="election-chain-hash">Current ledger hash</label>
                   <input id="election-chain-hash" class="form-control" :value="chainHash" type="text" readonly />
                 </div>
               </div>

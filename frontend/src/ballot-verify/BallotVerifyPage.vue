@@ -96,7 +96,7 @@ onBeforeUnmount(() => {
             </div>
 
             <p class="text-muted">
-              Enter the 64-character receipt you received after submitting your ballot. This page confirms whether a ballot with that receipt is recorded. It does not show your selections, your identity, or exact timestamps.
+              Enter the 64-character ballot receipt code you received after submitting your ballot. This page confirms whether a ballot with that code is recorded. It does not show your selections, your identity, or exact timestamps.
             </p>
 
             <p class="text-muted">
@@ -127,23 +127,23 @@ onBeforeUnmount(() => {
                 />
               </div>
 
-              <button type="submit" class="btn btn-primary" title="Check receipt in the ballot ledger">Verify</button>
+              <button type="submit" class="btn btn-primary" title="Check this ballot receipt code in the ballot ledger">Verify</button>
             </form>
 
-            <div v-if="isLoading" class="text-muted">Verifying ballot receipt...</div>
+            <div v-if="isLoading" class="text-muted">Verifying ballot receipt code...</div>
             <div v-else-if="error !== ''" class="alert alert-danger">{{ error }}</div>
             <template v-else-if="result?.has_query">
               <div v-if="!result.is_valid_receipt" class="alert alert-danger" role="alert">
-                <strong>Invalid receipt.</strong> Please enter a 64-character lowercase hex value.
+                <strong>Invalid ballot receipt code.</strong> Please enter a 64-character lowercase hex value.
               </div>
               <div v-else-if="!result.found" class="alert alert-warning" role="alert">
-                <strong>No ballot with this receipt was found.</strong>
+                <strong>No ballot with this receipt code was found.</strong>
               </div>
               <div v-else class="card">
                 <div class="card-body">
                   <h5>Ballot status</h5>
                   <div class="alert alert-success mb-3" role="alert">
-                    Yes — a ballot with this receipt is recorded for this election.
+                    Yes — a ballot with this receipt code is recorded for this election.
                   </div>
 
                   <h5>Tally status</h5>
