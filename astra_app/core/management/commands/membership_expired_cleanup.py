@@ -168,10 +168,8 @@ class Command(BaseCommand):
         sponsorship_emailed = 0
         sponsorship_skipped = 0
         sponsorship_failed = 0
-        had_expired_memberships = False
 
         for membership in expired_membership_rows:
-            had_expired_memberships = True
             membership_category_id = str(
                 membership_category_by_type_id.get(str(membership.membership_type.code or "").strip(), "") or ""
             ).strip()
@@ -304,7 +302,6 @@ class Command(BaseCommand):
                 )
 
         for sponsorship in expired_sponsorship_rows:
-            had_expired_memberships = True
             org = sponsorship.target_organization
             if org is None:
                 continue
@@ -487,7 +484,7 @@ class Command(BaseCommand):
         else:
             logger.info(membership_summary)
             logger.info(sponsorship_summary)
-            if had_expired_memberships:
+            if removed + sponsorship_removed > 0:
                 astra_signals.membership_expired.send(
                     sender=astra_signals.MembershipExpirationCommand,
                     count=removed + sponsorship_removed,

@@ -9,6 +9,7 @@ from django.urls import reverse
 from django.utils import timezone
 from post_office.models import EmailTemplate
 
+from core import signals as astra_signals
 from core.freeipa.user import FreeIPAUser
 from core.membership import FreeIPAGroupRemovalOutcome
 from core.membership_log_side_effects import apply_membership_log_side_effects
@@ -103,11 +104,19 @@ class MembershipExpiredCleanupCommandTests(TestCase):
                 Membership.objects.filter(target_username="alice", membership_type_id="individual").exists()
             )
 
-            with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
-                with patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_mock:
+            with (
+                patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
+                patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_mock,
+                patch("core.signals.membership_expired.send", autospec=True) as membership_expired_send_mock,
+            ):
                     call_command("membership_expired_cleanup")
 
         remove_mock.assert_called_once()
+        membership_expired_send_mock.assert_called_once_with(
+            sender=astra_signals.MembershipExpirationCommand,
+            count=1,
+            membership_type="all",
+        )
         self.assertFalse(Membership.objects.filter(target_username="alice", membership_type_id="individual").exists())
 
         from post_office.models import Email
@@ -281,6 +290,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
                     "core.management.commands.membership_expired_cleanup.send_membership_notification",
                     autospec=True,
                 ) as send_membership_notification_mock,
+                patch("core.signals.membership_expired.send", autospec=True) as membership_expired_send_mock,
             ):
                 call_command("membership_expired_cleanup")
 
@@ -297,6 +307,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
         )
         remove_user_from_group_mock.assert_not_called()
         send_membership_notification_mock.assert_not_called()
+        membership_expired_send_mock.assert_not_called()
 
         from post_office.models import Email
 
@@ -503,6 +514,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
                     "core.management.commands.membership_expired_cleanup.send_membership_notification",
                     autospec=True,
                 ) as send_membership_notification_mock,
+                patch("core.signals.membership_expired.send", autospec=True) as membership_expired_send_mock,
             ):
                 call_command("membership_expired_cleanup")
 
@@ -517,6 +529,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
         )
         remove_rep_from_group_mock.assert_not_called()
         send_membership_notification_mock.assert_not_called()
+        membership_expired_send_mock.assert_not_called()
 
         from post_office.models import Email
 
