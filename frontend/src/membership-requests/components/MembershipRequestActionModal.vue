@@ -59,9 +59,15 @@ watch(
 
 const isOpen = computed(() => props.action !== null);
 
+const isBulkAction = computed(() => (props.action?.requestCount || 1) > 1);
+
 const modalTitle = computed(() => {
   if (!props.action) {
     return "";
+  }
+
+  if (isBulkAction.value && props.action.actionKind === "approve_on_hold") {
+    return `Approve ${props.action.requestCount} selected requests`;
   }
 
   if (props.action.actionKind === "approve") {
@@ -203,6 +209,16 @@ function onPresetChange(): void {
   message.value = selectedPreset.value;
 }
 
+function buildRequestBody(trimmedMessage: string): FormData {
+  const formData = new FormData();
+
+  if (fieldName.value && (trimmedMessage || requiresMessage.value)) {
+    formData.append(fieldName.value, trimmedMessage);
+  }
+
+  return formData;
+}
+
 function closeModal(): void {
   if (isSubmitting.value) {
     return;
@@ -224,12 +240,8 @@ async function submitAction(): Promise<void> {
   isSubmitting.value = true;
 
   try {
-    const formData = new FormData();
     const trimmedMessage = message.value.trim();
-
-    if (fieldName.value && (trimmedMessage || requiresMessage.value)) {
-      formData.append(fieldName.value, trimmedMessage);
-    }
+    const actionUrls = props.action.bulkActionUrls?.length ? props.action.bulkActionUrls : [props.action.actionUrl];
 
     const headers: Record<string, string> = {
       Accept: "application/json",
@@ -238,17 +250,20 @@ async function submitAction(): Promise<void> {
       headers["X-CSRFToken"] = props.csrfToken;
     }
 
-    const response = await fetch(props.action.actionUrl, {
-      method: "POST",
-      headers,
-      body: formData,
-      credentials: "same-origin",
-    });
+    let payload: { ok?: boolean; error?: string } = {};
+    for (const actionUrl of actionUrls) {
+      const response = await fetch(actionUrl, {
+        method: "POST",
+        headers,
+        body: buildRequestBody(trimmedMessage),
+        credentials: "same-origin",
+      });
 
-    const payload = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-    if (!response.ok || payload.ok === false) {
-      error.value = payload.error || "Failed to process request.";
-      return;
+      payload = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!response.ok || payload.ok === false) {
+        error.value = payload.error || "Failed to process request.";
+        return;
+      }
     }
 
     emit("success", {
@@ -280,9 +295,14 @@ async function submitAction(): Promise<void> {
           <div class="modal-body">
             <div class="alert alert-light border py-2 px-3 small" role="note">
               <div>Confirming action for:</div>
-              <div>Request #<strong>{{ action?.requestId }}</strong></div>
-              <div>Requested for <strong>{{ action?.requestTarget }}</strong></div>
-              <div>Membership type <strong>{{ action?.membershipType }}</strong></div>
+              <template v-if="isBulkAction">
+                <div><strong>{{ action?.requestCount }}</strong> selected requests</div>
+              </template>
+              <template v-else>
+                <div>Request #<strong>{{ action?.requestId }}</strong></div>
+                <div>Requested for <strong>{{ action?.requestTarget }}</strong></div>
+                <div>Membership type <strong>{{ action?.membershipType }}</strong></div>
+              </template>
             </div>
 
             <div v-if="bodyText" class="mb-3">{{ bodyText }}</div>

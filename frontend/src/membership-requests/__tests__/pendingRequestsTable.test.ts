@@ -1,5 +1,5 @@
 import { mount } from "@vue/test-utils";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import PendingRequestsTable from "../components/PendingRequestsTable.vue";
 import type { MembershipRequestRow, MembershipRequestsBootstrap, PendingFilterOption } from "../types";
@@ -85,8 +85,13 @@ const row: MembershipRequestRow = {
   ],
 };
 
+function flushPromises(): Promise<void> {
+  return Promise.resolve();
+}
+
 describe("PendingRequestsTable", () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     window.history.replaceState({}, "", "/");
   });
 
@@ -281,5 +286,49 @@ describe("PendingRequestsTable", () => {
 
     expect(errorWrapper.get("tbody td").text()).toContain("Failed to load membership requests.");
     expect(errorWrapper.find(".alert").exists()).toBe(false);
+  });
+
+  it("submits the pending screen bulk JSON payload with the accept alias and selected ids", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const wrapper = mount(PendingRequestsTable, {
+      props: {
+        bootstrap,
+        rows: [row],
+        count: 1,
+        filterOptions,
+        selectedFilter: "renewals",
+        currentPage: 1,
+        totalPages: 1,
+        pageSize: 25,
+        isLoading: false,
+        error: "",
+      },
+      global: {
+        stubs: {
+          MembershipNotesCard: true,
+        },
+      },
+    });
+
+    await wrapper.get<HTMLInputElement>('tbody input[type="checkbox"][name="selected"][value="101"]').setValue(true);
+    await wrapper.get('select[name="bulk_action"]').setValue("accept");
+    await wrapper.get("form").trigger("submit");
+    await flushPromises();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [requestUrl, requestInit] = fetchMock.mock.calls[0] ?? [];
+    expect(requestUrl).toBe(bootstrap.bulkUrl);
+    expect(requestInit).toMatchObject({
+      method: "POST",
+      credentials: "same-origin",
+    });
+    expect(JSON.parse(String(requestInit?.body))).toEqual({
+      bulk_action: "accept",
+      next: "/membership/requests/?filter=renewals",
+      bulk_scope: "pending",
+      selected: [101],
+    });
   });
 });

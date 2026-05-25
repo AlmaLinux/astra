@@ -1,4 +1,5 @@
 
+import json
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
@@ -2130,6 +2131,634 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
 
         self.assertEqual(response.status_code, 405)
         self.assertEqual(response.json(), {"error": "Method not allowed."})
+
+    def test_membership_bulk_api_accepts_pending_json_payload(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        pending_req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.pending,
+        )
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        self._add_freeipa_user(
+            username="reviewer",
+            email="reviewer@example.com",
+            groups=[committee_cn],
+            first_name="Reviewer",
+            last_name="User",
+        )
+        self._login_as_freeipa_user("reviewer")
+
+        with patch(
+            "core.views_membership.committee.approve_membership_request",
+            autospec=True,
+        ) as approve_mock:
+            response = self.client.post(
+                reverse("api-membership-requests-bulk"),
+                data=json.dumps(
+                    {
+                        "bulk_scope": "pending",
+                        "bulk_action": "approve",
+                        "selected": [pending_req.pk],
+                    }
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        approve_mock.assert_called_once()
+
+    def test_membership_bulk_api_accepts_pending_json_accept_alias_payload(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        pending_req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.pending,
+        )
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        self._add_freeipa_user(
+            username="reviewer",
+            email="reviewer@example.com",
+            groups=[committee_cn],
+            first_name="Reviewer",
+            last_name="User",
+        )
+        self._login_as_freeipa_user("reviewer")
+
+        with patch(
+            "core.views_membership.committee.approve_membership_request",
+            autospec=True,
+        ) as approve_mock:
+            response = self.client.post(
+                reverse("api-membership-requests-bulk"),
+                data=json.dumps(
+                    {
+                        "bulk_scope": "pending",
+                        "bulk_action": "accept",
+                        "selected": [pending_req.pk],
+                    }
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        approve_mock.assert_called_once()
+
+    def test_membership_bulk_api_accepts_on_hold_json_payload(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        on_hold_req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.on_hold,
+            on_hold_at=timezone.now(),
+        )
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        self._add_freeipa_user(
+            username="reviewer",
+            email="reviewer@example.com",
+            groups=[committee_cn],
+            first_name="Reviewer",
+            last_name="User",
+        )
+        self._login_as_freeipa_user("reviewer")
+
+        with patch(
+            "core.views_membership.committee.ignore_membership_request",
+            autospec=True,
+        ) as ignore_mock:
+            response = self.client.post(
+                reverse("api-membership-requests-bulk"),
+                data=json.dumps(
+                    {
+                        "bulk_scope": "on_hold",
+                        "bulk_action": "ignore",
+                        "selected": [on_hold_req.pk],
+                    }
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        ignore_mock.assert_called_once()
+
+    def test_membership_bulk_api_accepts_on_hold_reject_json_payload(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        on_hold_req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.on_hold,
+            on_hold_at=timezone.now(),
+        )
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        self._add_freeipa_user(
+            username="reviewer",
+            email="reviewer@example.com",
+            groups=[committee_cn],
+            first_name="Reviewer",
+            last_name="User",
+        )
+        self._login_as_freeipa_user("reviewer")
+
+        with patch(
+            "core.views_membership.committee.reject_membership_request",
+            autospec=True,
+            return_value=(None, None),
+        ) as reject_mock:
+            response = self.client.post(
+                reverse("api-membership-requests-bulk"),
+                data=json.dumps(
+                    {
+                        "bulk_scope": "on_hold",
+                        "bulk_action": "reject",
+                        "selected": [on_hold_req.pk],
+                    }
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        reject_mock.assert_called_once()
+
+    def test_membership_bulk_api_rejects_on_hold_json_accept_alias_payload(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        on_hold_req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.on_hold,
+            on_hold_at=timezone.now(),
+        )
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        self._add_freeipa_user(
+            username="reviewer",
+            email="reviewer@example.com",
+            groups=[committee_cn],
+            first_name="Reviewer",
+            last_name="User",
+        )
+        self._login_as_freeipa_user("reviewer")
+
+        with patch(
+            "core.views_membership.committee.approve_membership_request",
+            autospec=True,
+        ) as approve_mock:
+            response = self.client.post(
+                reverse("api-membership-requests-bulk"),
+                data=json.dumps(
+                    {
+                        "bulk_scope": "on_hold",
+                        "bulk_action": "accept",
+                        "selected": [on_hold_req.pk],
+                    }
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"ok": False, "error": "Choose a valid bulk action for on-hold requests."})
+        approve_mock.assert_not_called()
+
+    def test_membership_bulk_api_rejects_on_hold_json_raw_approve_payload(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        on_hold_req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.on_hold,
+            on_hold_at=timezone.now(),
+        )
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        self._add_freeipa_user(
+            username="reviewer",
+            email="reviewer@example.com",
+            groups=[committee_cn],
+            first_name="Reviewer",
+            last_name="User",
+        )
+        self._login_as_freeipa_user("reviewer")
+
+        with patch(
+            "core.views_membership.committee.approve_membership_request",
+            autospec=True,
+        ) as approve_mock:
+            response = self.client.post(
+                reverse("api-membership-requests-bulk"),
+                data=json.dumps(
+                    {
+                        "bulk_scope": "on_hold",
+                        "bulk_action": "approve",
+                        "selected": [on_hold_req.pk],
+                    }
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"ok": False, "error": "Choose a valid bulk action for on-hold requests."})
+        approve_mock.assert_not_called()
+
+    def test_membership_bulk_api_parses_selected_ids_from_json_array(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        first_req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.pending,
+        )
+        second_req = MembershipRequest.objects.create(
+            requested_username="bob",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.pending,
+        )
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        self._add_freeipa_user(
+            username="reviewer",
+            email="reviewer@example.com",
+            groups=[committee_cn],
+            first_name="Reviewer",
+            last_name="User",
+        )
+        self._login_as_freeipa_user("reviewer")
+
+        with patch(
+            "core.views_membership.committee.reject_membership_request",
+            autospec=True,
+            return_value=(None, None),
+        ) as reject_mock:
+            response = self.client.post(
+                reverse("api-membership-requests-bulk"),
+                data=json.dumps(
+                    {
+                        "bulk_scope": "pending",
+                        "bulk_action": "reject",
+                        "selected": [str(first_req.pk), second_req.pk, "not-an-int"],
+                    }
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        self.assertEqual(reject_mock.call_count, 2)
+        called_request_ids = sorted(
+            call.kwargs["membership_request"].pk for call in reject_mock.call_args_list
+        )
+        self.assertEqual(called_request_ids, [first_req.pk, second_req.pk])
+
+    def test_membership_bulk_api_accepts_pending_ignore_json_payload(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        pending_req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.pending,
+        )
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        self._add_freeipa_user(
+            username="reviewer",
+            email="reviewer@example.com",
+            groups=[committee_cn],
+            first_name="Reviewer",
+            last_name="User",
+        )
+        self._login_as_freeipa_user("reviewer")
+
+        with patch(
+            "core.views_membership.committee.ignore_membership_request",
+            autospec=True,
+        ) as ignore_mock:
+            response = self.client.post(
+                reverse("api-membership-requests-bulk"),
+                data=json.dumps(
+                    {
+                        "bulk_scope": "pending",
+                        "bulk_action": "ignore",
+                        "selected": [pending_req.pk],
+                    }
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        ignore_mock.assert_called_once()
+
+    def test_membership_bulk_form_rejects_on_hold_accept_alias_payload(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        on_hold_req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.on_hold,
+            on_hold_at=timezone.now(),
+        )
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        self._add_freeipa_user(
+            username="reviewer",
+            email="reviewer@example.com",
+            groups=[committee_cn],
+            first_name="Reviewer",
+            last_name="User",
+        )
+        self._login_as_freeipa_user("reviewer")
+
+        with patch(
+            "core.views_membership.committee.approve_membership_request",
+            autospec=True,
+        ) as approve_mock:
+            response = self.client.post(
+                reverse("membership-requests-bulk"),
+                data={
+                    "bulk_scope": "on_hold",
+                    "bulk_action": "accept",
+                    "selected": [str(on_hold_req.pk)],
+                },
+            )
+
+        self.assertEqual(response.status_code, 302)
+        approve_mock.assert_not_called()
+        messages = [message.message for message in get_messages(response.wsgi_request)]
+        self.assertEqual(messages, ["Choose a valid bulk action for on-hold requests."])
+
+    def test_membership_bulk_form_rejects_on_hold_raw_approve_payload(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        on_hold_req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.on_hold,
+            on_hold_at=timezone.now(),
+        )
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        self._add_freeipa_user(
+            username="reviewer",
+            email="reviewer@example.com",
+            groups=[committee_cn],
+            first_name="Reviewer",
+            last_name="User",
+        )
+        self._login_as_freeipa_user("reviewer")
+
+        with patch(
+            "core.views_membership.committee.approve_membership_request",
+            autospec=True,
+        ) as approve_mock:
+            response = self.client.post(
+                reverse("membership-requests-bulk"),
+                data={
+                    "bulk_scope": "on_hold",
+                    "bulk_action": "approve",
+                    "selected": [str(on_hold_req.pk)],
+                },
+            )
+
+        self.assertEqual(response.status_code, 302)
+        approve_mock.assert_not_called()
+        messages = [message.message for message in get_messages(response.wsgi_request)]
+        self.assertEqual(messages, ["Choose a valid bulk action for on-hold requests."])
+
+    def test_membership_bulk_api_preserves_form_encoded_payloads(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        pending_req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.pending,
+        )
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        self._add_freeipa_user(
+            username="reviewer",
+            email="reviewer@example.com",
+            groups=[committee_cn],
+            first_name="Reviewer",
+            last_name="User",
+        )
+        self._login_as_freeipa_user("reviewer")
+
+        with patch(
+            "core.views_membership.committee.approve_membership_request",
+            autospec=True,
+        ) as approve_mock:
+            response = self.client.post(
+                reverse("api-membership-requests-bulk"),
+                data={
+                    "bulk_scope": "pending",
+                    "bulk_action": "approve",
+                    "selected": [str(pending_req.pk)],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        approve_mock.assert_called_once()
+
+    def test_membership_bulk_api_processes_all_selected_ids_from_form_payload(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        first_req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.pending,
+        )
+        second_req = MembershipRequest.objects.create(
+            requested_username="bob",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.pending,
+        )
+
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        self._add_freeipa_user(
+            username="reviewer",
+            email="reviewer@example.com",
+            groups=[committee_cn],
+            first_name="Reviewer",
+            last_name="User",
+        )
+        self._login_as_freeipa_user("reviewer")
+
+        with patch(
+            "core.views_membership.committee.reject_membership_request",
+            autospec=True,
+            return_value=(None, None),
+        ) as reject_mock:
+            response = self.client.post(
+                reverse("api-membership-requests-bulk"),
+                data={
+                    "bulk_scope": "pending",
+                    "bulk_action": "reject",
+                    "selected": [str(first_req.pk), str(second_req.pk)],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        self.assertEqual(reject_mock.call_count, 2)
+        called_request_ids = sorted(
+            call.kwargs["membership_request"].pk for call in reject_mock.call_args_list
+        )
+        self.assertEqual(called_request_ids, [first_req.pk, second_req.pk])
+
+    def test_membership_bulk_api_malformed_json_uses_existing_selected_validation(self) -> None:
+        committee_cn = settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP
+        self._add_freeipa_user(
+            username="reviewer",
+            email="reviewer@example.com",
+            groups=[committee_cn],
+            first_name="Reviewer",
+            last_name="User",
+        )
+        self._login_as_freeipa_user("reviewer")
+
+        response = self.client.post(
+            reverse("api-membership-requests-bulk"),
+            data='{"bulk_scope": "pending",',
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json(),
+            {"ok": False, "error": "Select one or more requests first."},
+        )
 
     def test_membership_rescind_api_requires_ownership(self) -> None:
         from core.models import MembershipType

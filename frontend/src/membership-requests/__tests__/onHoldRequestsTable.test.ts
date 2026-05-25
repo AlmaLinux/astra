@@ -20,6 +20,10 @@ function expectedLocalTimestamp(value: string): string {
   return `${year}-${month}-${day} ${hour}:${minute} UTC${offsetSign}${offsetHours}:${offsetMinutes}`;
 }
 
+function flushPromises(): Promise<void> {
+  return Promise.resolve();
+}
+
 const bootstrap: MembershipRequestsBootstrap = {
   clearFilterUrl: "/membership/requests/",
   pendingApiUrl: "/api/v1/membership/requests/pending",
@@ -83,6 +87,7 @@ describe("OnHoldRequestsTable", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
     window.history.replaceState({}, "", "/");
   });
@@ -224,5 +229,67 @@ describe("OnHoldRequestsTable", () => {
 
     expect(errorWrapper.get("tbody td").text()).toContain("Failed to load membership requests.");
     expect(errorWrapper.find(".alert").exists()).toBe(false);
+  });
+
+  it("offers the accept bulk action alongside reject and ignore", () => {
+    const wrapper = mount(OnHoldRequestsTable, {
+      props: {
+        bootstrap,
+        rows: [row],
+        count: 1,
+        currentPage: 1,
+        totalPages: 1,
+        pageSize: 10,
+        isLoading: false,
+        error: "",
+      },
+      global: {
+        stubs: {
+          MembershipNotesCard: true,
+        },
+      },
+    });
+
+    expect(
+      wrapper.findAll('select[name="bulk_action"] option').slice(1).map((option) => ({
+        value: option.attributes("value"),
+        label: option.text(),
+      }))
+    ).toEqual([
+      { value: "accept", label: "Accept" },
+      { value: "reject", label: "Reject" },
+      { value: "ignore", label: "Ignore" },
+    ]);
+  });
+
+  it("emits an approve-on-hold bulk intent instead of posting the on-hold accept action to the bulk endpoint", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const wrapper = mount(OnHoldRequestsTable, {
+      props: {
+        bootstrap,
+        rows: [row],
+        count: 1,
+        currentPage: 1,
+        totalPages: 1,
+        pageSize: 10,
+        isLoading: false,
+        error: "",
+      },
+      global: {
+        stubs: {
+          MembershipNotesCard: true,
+        },
+      },
+    });
+
+    await wrapper.get<HTMLInputElement>('tbody input[type="checkbox"][name="selected"][value="88"]').setValue(true);
+    await wrapper.get('select[name="bulk_action"]').setValue("accept");
+    await wrapper.get("form").trigger("submit");
+    await flushPromises();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(wrapper.emitted("bulk-approve-on-hold")).toEqual([[{ requestIds: [88] }]]);
   });
 });

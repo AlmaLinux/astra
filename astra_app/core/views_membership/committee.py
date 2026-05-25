@@ -1,4 +1,6 @@
+import json
 import logging
+from collections.abc import Mapping
 
 from django.conf import settings
 from django.contrib import messages
@@ -71,6 +73,36 @@ logger = logging.getLogger(__name__)
 _MEMBERSHIP_REQUEST_ALLOWED_FILTERS: frozenset[str] = frozenset(
     {"all", "renewals", "sponsorships", "individuals", "mirrors"}
 )
+
+
+def _membership_request_data(request: HttpRequest) -> Mapping[str, object]:
+    if request.content_type and request.content_type.startswith("application/json"):
+        try:
+            raw = json.loads(request.body.decode("utf-8") or "{}")
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return {}
+        if isinstance(raw, dict):
+            return raw
+        return {}
+    return request.POST
+
+
+def _membership_request_selected_values(data: Mapping[str, object]) -> list[object]:
+    if hasattr(data, "getlist"):
+        return list(data.getlist("selected"))
+
+    selected = data.get("selected")
+    if isinstance(selected, list):
+        return selected
+    if selected is None:
+        return []
+    return [selected]
+
+
+def _normalized_membership_bulk_action(raw_action: str, bulk_scope: str) -> str:
+    if bulk_scope == "pending" and raw_action == "accept":
+        return "approve"
+    return raw_action
 
 
 def _custom_email_recipient_for_request(membership_request: MembershipRequest) -> tuple[str, str] | None:
@@ -796,6 +828,17 @@ def render_membership_request_detail_for_committee(
     )
 
 
+MEMBERSHIP_REQUEST_BULK_ALLOWED_STATUSES: dict[str, set[str]] = {
+    "pending": {MembershipRequest.Status.pending},
+    "on_hold": {MembershipRequest.Status.on_hold},
+}
+
+MEMBERSHIP_REQUEST_BULK_ALLOWED_ACTIONS: dict[str, set[str]] = {
+    "pending": {"approve", "reject", "ignore"},
+    "on_hold": {"reject", "ignore"},
+}
+
+
 @permission_required(ASTRA_ADD_MEMBERSHIP, login_url=reverse_lazy("users"))
 @post_only_404
 def membership_requests_bulk(request: HttpRequest) -> HttpResponse:
@@ -805,22 +848,15 @@ def membership_requests_bulk(request: HttpRequest) -> HttpResponse:
         use_referer=True,
     )
     bulk_scope = _normalize_str(request.POST.get("bulk_scope")).lower() or "pending"
-
-    allowed_statuses: set[str]
-    allowed_actions: set[str]
-    if bulk_scope == "on_hold":
-        allowed_statuses = {MembershipRequest.Status.on_hold}
-        allowed_actions = {"reject", "ignore"}
-    else:
+    if bulk_scope not in MEMBERSHIP_REQUEST_BULK_ALLOWED_STATUSES:
         # Default behavior matches the existing pending-requests bulk UI.
         bulk_scope = "pending"
-        allowed_statuses = {MembershipRequest.Status.pending}
-        allowed_actions = {"approve", "reject", "ignore"}
+
+    allowed_statuses = MEMBERSHIP_REQUEST_BULK_ALLOWED_STATUSES[bulk_scope]
+    allowed_actions = MEMBERSHIP_REQUEST_BULK_ALLOWED_ACTIONS[bulk_scope]
 
     raw_action = _normalize_str(request.POST.get("bulk_action"))
-    action = raw_action
-    if action == "accept":
-        action = "approve"
+    action = _normalized_membership_bulk_action(raw_action, bulk_scope)
 
     selected_raw = request.POST.getlist("selected")
     selected_ids: list[int] = []
@@ -1409,22 +1445,20 @@ def membership_requests_bulk_api(request: HttpRequest) -> JsonResponse:
     if request.method != "POST":
         return _membership_requests_datatables_error("Method not allowed.", status=405)
 
-    bulk_scope = _normalize_str(request.POST.get("bulk_scope")).lower() or "pending"
+    data = _membership_request_data(request)
 
-    allowed_statuses: set[str]
-    allowed_actions: set[str]
-    if bulk_scope == "on_hold":
-        allowed_statuses = {MembershipRequest.Status.on_hold}
-        allowed_actions = {"reject", "ignore"}
-    else:
+    bulk_scope = _normalize_str(data.get("bulk_scope")).lower() or "pending"
+
+    if bulk_scope not in MEMBERSHIP_REQUEST_BULK_ALLOWED_STATUSES:
         bulk_scope = "pending"
-        allowed_statuses = {MembershipRequest.Status.pending}
-        allowed_actions = {"approve", "reject", "ignore"}
 
-    raw_action = _normalize_str(request.POST.get("bulk_action"))
-    action = "approve" if raw_action == "accept" else raw_action
+    allowed_statuses = MEMBERSHIP_REQUEST_BULK_ALLOWED_STATUSES[bulk_scope]
+    allowed_actions = MEMBERSHIP_REQUEST_BULK_ALLOWED_ACTIONS[bulk_scope]
 
-    selected_raw = request.POST.getlist("selected")
+    raw_action = _normalize_str(data.get("bulk_action"))
+    action = _normalized_membership_bulk_action(raw_action, bulk_scope)
+
+    selected_raw = _membership_request_selected_values(data)
     selected_ids: list[int] = []
     for value in selected_raw:
         try:

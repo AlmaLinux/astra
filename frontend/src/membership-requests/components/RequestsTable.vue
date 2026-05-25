@@ -63,6 +63,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (event: "page-change", value: number): void;
   (event: "bulk-success", payload: { scope: "pending" | "on_hold" }): void;
+  (event: "bulk-approve-on-hold", payload: { requestIds: number[] }): void;
   (event: "open-action", payload: MembershipRequestActionIntent): void;
 }>();
 
@@ -145,6 +146,15 @@ async function submitBulkAction(payload: BulkSubmitPayload): Promise<void> {
     return;
   }
 
+  if (bulkScope.value === "on_hold" && payload.action === "accept") {
+    emit("bulk-approve-on-hold", {
+      requestIds: payload.selectedIds
+        .map((id) => Number.parseInt(id, 10))
+        .filter((id) => !Number.isNaN(id)),
+    });
+    return;
+  }
+
   bulkError.value = "";
   isBulkSubmitting.value = true;
 
@@ -214,6 +224,7 @@ defineSlots<{
     :header-error="actionError"
     @page-change="onPageChange"
     @bulk-submit="submitBulkAction"
+    @bulk-approve-on-hold="emit('bulk-approve-on-hold', $event)"
   >
     <template #header-tools>
       <slot name="header-tools" />

@@ -19,7 +19,7 @@ const bootstrap: MembershipRequestsBootstrap = {
   requestIdSentinel: "123456789",
   requestDetailTemplate: "/membership/request/123456789/",
   approveTemplate: "/membership/requests/123456789/approve/",
-  approveOnHoldTemplate: "/membership/requests/123456789/approve-on-hold/",
+  approveOnHoldTemplate: "/api/v1/membership/request/123456789/approve-on-hold",
   rejectTemplate: "/membership/requests/123456789/reject/",
   requestInfoTemplate: "/membership/requests/123456789/rfi/",
   ignoreTemplate: "/membership/requests/123456789/ignore/",
@@ -230,5 +230,120 @@ describe("MembershipRequestsPage", () => {
     await flushPromises();
 
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("queue_filter=renewals"))).toBe(true);
+  });
+
+  it("routes on-hold bulk accept through the approve-on-hold modal and reuses one justification for each selected request", async () => {
+    const onHoldRows = [11, 12].map((requestId) => ({
+      request_id: requestId,
+      status: "on_hold",
+      requested_at: "2026-04-20T12:00:00+00:00",
+      on_hold_since: "2026-04-20T12:00:00+00:00",
+      target: {
+        kind: "organization" as const,
+        label: `Acme Org ${requestId}`,
+        secondary_label: `sponsor${requestId}@example.com`,
+        organization_id: requestId,
+        deleted: false,
+      },
+      requested_by: {
+        show: true,
+        username: "bob",
+        full_name: "Bob Reviewer",
+        deleted: false,
+      },
+      membership_type: {
+        id: "sponsor",
+        code: "sponsor",
+        name: "Sponsor",
+        category: "sponsorship",
+      },
+      is_renewal: false,
+      responses: [],
+    }));
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith("/api/v1/membership/requests/pending")) {
+        return new Response(
+          JSON.stringify({
+            draw: 1,
+            recordsTotal: 0,
+            recordsFiltered: 0,
+            pending_filter: {
+              selected: "all",
+              options: [
+                { value: "all", label: "All", count: 0 },
+                { value: "renewals", label: "Renewals", count: 0 },
+              ],
+            },
+            data: [],
+          }),
+        );
+      }
+
+      if (url.startsWith("/api/v1/membership/requests/on-hold")) {
+        return new Response(
+          JSON.stringify({
+            draw: 1,
+            recordsTotal: onHoldRows.length,
+            recordsFiltered: onHoldRows.length,
+            data: onHoldRows,
+          }),
+        );
+      }
+
+      if (
+        url === "/api/v1/membership/request/11/approve-on-hold"
+        || url === "/api/v1/membership/request/12/approve-on-hold"
+      ) {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+
+      if (url === bootstrap.bulkUrl && init?.body) {
+        throw new Error("on-hold accept must not use the shared bulk endpoint");
+      }
+
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const wrapper = mount(MembershipRequestsPage, {
+      props: { bootstrap },
+      global: {
+        stubs: {
+          MembershipNotesCard: true,
+        },
+      },
+    });
+
+    await flushPromises();
+    await flushPromises();
+
+    await wrapper.get<HTMLInputElement>('tbody input[type="checkbox"][name="selected"][value="11"]').setValue(true);
+    await wrapper.get<HTMLInputElement>('tbody input[type="checkbox"][name="selected"][value="12"]').setValue(true);
+    await wrapper.findAll('select[name="bulk_action"]')[1]!.setValue("accept");
+    const onHoldBulkForm = wrapper.findAll("form").find((form) => form.find('input[name="bulk_scope"][value="on_hold"]').exists());
+    expect(onHoldBulkForm).toBeTruthy();
+    await onHoldBulkForm!.trigger("submit");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Committee override justification:");
+
+    await wrapper.get("#membership-request-action-text").setValue("Committee approved after reviewing the response.");
+    await wrapper.get('.modal .btn.btn-success').trigger("click");
+    await flushPromises();
+    await flushPromises();
+
+    const approveCalls = fetchMock.mock.calls.filter(([url]) => String(url).includes("approve-on-hold"));
+    expect(approveCalls).toHaveLength(2);
+    expect(approveCalls.map(([url]) => String(url))).toEqual([
+      "/api/v1/membership/request/11/approve-on-hold",
+      "/api/v1/membership/request/12/approve-on-hold",
+    ]);
+    expect(approveCalls.map(([, init]) => (init?.body as FormData).get("justification"))).toEqual([
+      "Committee approved after reviewing the response.",
+      "Committee approved after reviewing the response.",
+    ]);
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === bootstrap.bulkUrl)).toBe(false);
   });
 });

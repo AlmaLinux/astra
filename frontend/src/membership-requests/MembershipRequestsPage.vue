@@ -5,7 +5,8 @@ import { useMembershipRequestsTable } from "./composables/useMembershipRequestsT
 import MembershipRequestActionModal from "./components/MembershipRequestActionModal.vue";
 import PendingRequestsTable from "./components/PendingRequestsTable.vue";
 import OnHoldRequestsTable from "./components/OnHoldRequestsTable.vue";
-import type { MembershipRequestActionIntent, MembershipRequestsBootstrap } from "./types";
+import type { MembershipRequestActionIntent, MembershipRequestRow, MembershipRequestsBootstrap } from "./types";
+import { membershipRequestTargetContext, replaceTemplateToken } from "./types";
 
 type TableScope = "pending" | "on_hold";
 
@@ -14,6 +15,10 @@ interface MembershipActionSuccessEventDetail {
   requestStatus?: string;
   actionKind?: string;
   payload?: unknown;
+}
+
+interface BulkApproveOnHoldPayload {
+  requestIds: number[];
 }
 
 const props = defineProps<{
@@ -130,6 +135,32 @@ function onOpenAction(payload: MembershipRequestActionIntent): void {
   activeAction.value = payload;
 }
 
+function onBulkApproveOnHold(payload: BulkApproveOnHoldPayload): void {
+  const selectedRows = payload.requestIds
+    .map((requestId) => onHoldTable.rows.value.find((row) => row.request_id === requestId))
+    .filter((row): row is MembershipRequestRow => row !== undefined);
+
+  if (selectedRows.length === 0) {
+    return;
+  }
+
+  const firstRow = selectedRows[0];
+  const bulkActionUrls = selectedRows.map((row) => (
+    replaceTemplateToken(props.bootstrap.approveOnHoldTemplate, props.bootstrap.requestIdSentinel, row.request_id)
+  ));
+
+  activeAction.value = {
+    requestId: firstRow.request_id,
+    requestStatus: "on_hold",
+    actionKind: "approve_on_hold",
+    actionUrl: bulkActionUrls[0],
+    requestTarget: membershipRequestTargetContext(firstRow.target),
+    membershipType: firstRow.membership_type.name,
+    bulkActionUrls,
+    requestCount: selectedRows.length,
+  };
+}
+
 function closeActionModal(): void {
   activeAction.value = null;
 }
@@ -191,6 +222,7 @@ const onHoldTotalPages = computed(() => Math.max(1, Math.ceil(onHoldTable.totalR
       :error="onHoldTable.error.value"
       @page-change="onOnHoldPageChange"
       @bulk-success="onBulkSuccess"
+      @bulk-approve-on-hold="onBulkApproveOnHold"
       @open-action="onOpenAction"
     />
     <MembershipRequestActionModal

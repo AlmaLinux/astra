@@ -77,6 +77,8 @@ export interface MembershipRequestActionIntent {
   actionUrl: string;
   requestTarget: string;
   membershipType: string;
+  bulkActionUrls?: string[];
+  requestCount?: number;
 }
 
 export interface PendingFilterOption {

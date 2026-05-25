@@ -20,6 +20,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (event: "page-change", value: number): void;
   (event: "bulk-success", payload: { scope: "pending" | "on_hold" }): void;
+  (event: "bulk-approve-on-hold", payload: { requestIds: number[] }): void;
   (event: "open-action", payload: MembershipRequestActionIntent): void;
 }>();
 
@@ -70,6 +71,7 @@ function onPageChange(pageNumber: number): void {
       :build-page-href="onHoldPageHref"
       :columns="columns"
       :bulk-actions="[
+        { value: 'accept', label: 'Accept' },
         { value: 'reject', label: 'Reject' },
         { value: 'ignore', label: 'Ignore' },
       ]"
@@ -78,6 +80,7 @@ function onPageChange(pageNumber: number): void {
       :page-size="pageSize"
       @page-change="onPageChange"
       @bulk-success="emit('bulk-success', $event)"
+      @bulk-approve-on-hold="emit('bulk-approve-on-hold', $event)"
       @open-action="emit('open-action', $event)"
     >
       <template #header-meta>

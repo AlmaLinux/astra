@@ -877,6 +877,97 @@ class AccountInvitationsApiTests(TestCase):
         self.assertTrue(payload.get("ok"))
         self.assertIn("message", payload)
 
+    def test_bulk_endpoint_accepts_pending_resend_json_payload(self) -> None:
+        self._login_as_freeipa_user("committee")
+        invitation = AccountInvitation.objects.create(
+            email="pending-resend@example.com",
+            full_name="Pending User",
+            invited_by_username="committee",
+            email_template_name="account-invite",
+        )
+        queued_email = SimpleNamespace(id=790)
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
+            patch(
+                "core.views_invitations_api.find_account_invitation_matches",
+                side_effect=AssertionError("bulk resend should not run acceptance precheck"),
+            ),
+            patch("core.views_invitations_api.queue_templated_email", return_value=queued_email, create=True) as api_queue_mock,
+            patch("core.account_invitations.queue_templated_email", return_value=queued_email) as shared_queue_mock,
+        ):
+            response = self.client.post(
+                "/api/v1/membership/invitations/bulk",
+                data=json.dumps(
+                    {
+                        "bulk_action": "resend",
+                        "bulk_scope": "pending",
+                        "selected": [invitation.pk],
+                    }
+                ),
+                content_type="application/json",
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"ok": True, "message": "Resent 1 invitation(s)"})
+        invitation.refresh_from_db()
+        self.assertIsNone(invitation.accepted_at)
+        self.assertEqual(invitation.send_count, 1)
+        self.assertEqual(api_queue_mock.call_count + shared_queue_mock.call_count, 1)
+
+    def test_bulk_endpoint_accepts_accepted_dismiss_json_payload(self) -> None:
+        self._login_as_freeipa_user("committee")
+        invitation = AccountInvitation.objects.create(
+            email="accepted-dismiss@example.com",
+            invited_by_username="committee",
+            accepted_at=timezone.now(),
+            accepted_username="accepteduser",
+        )
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()):
+            response = self.client.post(
+                "/api/v1/membership/invitations/bulk",
+                data=json.dumps(
+                    {
+                        "bulk_action": "dismiss",
+                        "bulk_scope": "accepted",
+                        "selected": [invitation.pk],
+                    }
+                ),
+                content_type="application/json",
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"ok": True, "message": "Dismissed 1 invitation(s)"})
+        invitation.refresh_from_db()
+        self.assertIsNotNone(invitation.dismissed_at)
+        self.assertEqual(invitation.dismissed_by_username, "committee")
+
+    def test_bulk_endpoint_rejects_json_resend_for_accepted_scope(self) -> None:
+        self._login_as_freeipa_user("committee")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()):
+            response = self.client.post(
+                "/api/v1/membership/invitations/bulk",
+                data=json.dumps(
+                    {
+                        "bulk_action": "resend",
+                        "bulk_scope": "accepted",
+                        "selected": [123],
+                    }
+                ),
+                content_type="application/json",
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json(),
+            {"ok": False, "error": "Resend only works on pending invitations"},
+        )
+
     def test_bulk_endpoint_requires_permission(self) -> None:
         """Bulk action must reject unauthorized users."""
         self._assert_authenticated_permission_denied(
