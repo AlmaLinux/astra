@@ -14,6 +14,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core import elections_services
+from core.election_chain import build_config_manifest, config_manifest_sha256
 from core.elections_services import (
     BallotReceipt,
     ElectionError,
@@ -36,7 +37,7 @@ from core.freeipa.user import FreeIPAUser
 from core.models import AuditLogEntry, Ballot, Candidate, Election, Membership, MembershipType, VotingCredential
 from core.tests.ballot_chain import compute_chain_hash
 from core.tests.utils_test_data import ensure_core_categories, ensure_email_templates
-from core.tokens import election_genesis_chain_hash
+from core.tokens import election_chain_anchor_hash, election_genesis_chain_hash
 
 
 def setUpModule() -> None:
@@ -1721,6 +1722,57 @@ class ElectionEmailTimezoneTests(TestCase):
         self.assertIn("(Europe/Paris)", str(ctx.get("election_end_datetime") or ""))
         self.assertIn("15:00", str(ctx.get("election_end_datetime") or ""))
 
+    def test_vote_receipt_email_includes_v2_manifest_digest_context(self) -> None:
+        from post_office.models import Email, EmailTemplate
+
+        EmailTemplate.objects.get_or_create(
+            name=settings.ELECTION_VOTE_RECEIPT_EMAIL_TEMPLATE_NAME,
+            defaults={
+                "subject": "Receipt {{ config_manifest_sha256 }}",
+                "content": "Chain {{ chain_version }} Digest {{ config_manifest_sha256 }}",
+                "html_content": "",
+            },
+        )
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="V2 receipt election",
+            description="",
+            start_datetime=now - datetime.timedelta(hours=1),
+            end_datetime=now + datetime.timedelta(hours=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+            chain_version=2,
+            config_manifest_version=1,
+            config_manifest={"version": 1, "election": {}, "tally_rule": {}, "candidates": [], "exclusion_groups": []},
+            config_manifest_sha256="5" * 64,
+            chain_anchor_hash="6" * 64,
+        )
+
+        ballot = Ballot.objects.create(
+            election=election,
+            credential_public_id="cred-1",
+            ranking=[],
+            weight=1,
+            ballot_hash="b" * 64,
+            previous_chain_hash="6" * 64,
+            chain_hash="1" * 64,
+        )
+        receipt = BallotReceipt(ballot=ballot, nonce="n" * 32)
+
+        send_vote_receipt_email(
+            request=None,
+            election=election,
+            username="voter1",
+            email="voter1@example.com",
+            receipt=receipt,
+        )
+
+        queued = Email.objects.get()
+        context = queued.context or {}
+        self.assertEqual(context["chain_version"], 2)
+        self.assertEqual(context["config_manifest_sha256"], "5" * 64)
+
     def test_voting_credential_email_uses_recipient_timezone(self) -> None:
         from post_office.models import Email, EmailTemplate
 
@@ -1847,6 +1899,7 @@ class ElectionVoteEndpointTests(TestCase):
                 },
                 content_type="application/json",
             )
+
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json().get("error"), "Invalid credential.")
 
@@ -1904,8 +1957,68 @@ class ElectionVoteEndpointTests(TestCase):
                 content_type="application/json",
             )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json().get("error"), "Invalid credential.")
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(response.json().get("error"), "Invalid credential.")
+
+    def test_vote_submit_returns_v2_manifest_digest_checkpoint(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Vote election v2",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.draft,
+            chain_version=2,
+        )
+        candidate = Candidate.objects.create(
+            election=election,
+            freeipa_username="alice",
+            nominated_by="nominator",
+        )
+        manifest = build_config_manifest(election=election)
+        manifest_digest = config_manifest_sha256(manifest)
+        anchor_hash = election_chain_anchor_hash(
+            election_id=election.id,
+            config_manifest_sha256=manifest_digest,
+        )
+        Election.objects.filter(pk=election.pk).update(
+            status=Election.Status.open,
+            config_manifest_version=1,
+            config_manifest=manifest,
+            config_manifest_sha256=manifest_digest,
+            chain_anchor_hash=anchor_hash,
+        )
+        election.refresh_from_db()
+        credential = VotingCredential.objects.create(
+            election=election,
+            public_id="cred-v2-1",
+            freeipa_username="voter1",
+            weight=2,
+        )
+
+        self._login_as_freeipa_user("voter1")
+        voter = FreeIPAUser(
+            "voter1",
+            {"uid": ["voter1"], "memberof_group": [], "mail": ["voter1@example.com"]},
+        )
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=voter):
+            response = self.client.post(
+                reverse("election-vote-submit", args=[election.id]),
+                data=json.dumps(
+                    {
+                        "credential_public_id": credential.public_id,
+                        "ranking": [candidate.id],
+                    }
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["chain_version"], 2)
+        self.assertEqual(payload["config_manifest_sha256"], manifest_digest)
 
     def test_vote_submit_rejects_voter_with_revoked_membership(self) -> None:
         self._login_as_freeipa_user("voter1")

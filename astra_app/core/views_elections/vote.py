@@ -263,6 +263,8 @@ def election_vote_submit(request, election_id: int):
             "election_id": election.id,
             "email_queued": email_queued,
             "ballot_hash": receipt.ballot.ballot_hash,
+            "chain_version": int(election.chain_version or 1),
+            "config_manifest_sha256": str(election.config_manifest_sha256 or ""),
             "nonce": receipt.nonce,
             "previous_chain_hash": receipt.ballot.previous_chain_hash,
             "chain_hash": receipt.ballot.chain_hash,

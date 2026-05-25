@@ -18,6 +18,12 @@ from django.utils import timezone
 from post_office.models import Email
 
 from core import signals as astra_signals
+from core.election_chain import (
+    CHAIN_VERSION_CONFIG_ANCHOR_V2,
+    election_genesis_hash,
+    election_root_metadata,
+    validated_v2_manifest_state,
+)
 from core.elections_eligibility import start_eligible_voters
 from core.elections_timestamping import get_public_payload, schedule_attestation
 from core.email_context import (
@@ -36,7 +42,7 @@ from core.models import (
 )
 from core.public_urls import build_public_absolute_url
 from core.templated_email import queue_composed_email, queue_templated_email
-from core.tokens import election_chain_next_hash, election_genesis_chain_hash
+from core.tokens import election_chain_next_hash
 
 ELECTION_TALLY_ALGORITHM_NAME = "Meek STV (High-Precision Variant)"
 ELECTION_TALLY_ALGORITHM_VERSION = "1.0"
@@ -198,9 +204,18 @@ def candidate_username_by_id_map(candidates: Iterable[Candidate]) -> dict[int, s
     }
 
 
-def build_public_ballots_export(*, election: Election) -> dict[str, object]:
-    candidates = Candidate.objects.filter(election=election).only("id", "freeipa_username")
-    candidate_name_by_id = candidate_username_by_id_map(candidates)
+def build_public_ballots_export(
+    *,
+    election: Election,
+    published_at: datetime.datetime | None = None,
+) -> dict[str, object]:
+    v2_manifest_state: dict[str, object] | None = None
+    if int(election.chain_version or 1) == CHAIN_VERSION_CONFIG_ANCHOR_V2:
+        v2_manifest_state = validated_v2_manifest_state(election=election)
+        candidate_name_by_id = dict(v2_manifest_state["candidate_username_by_id"])
+    else:
+        candidates = Candidate.objects.filter(election=election).only("id", "freeipa_username")
+        candidate_name_by_id = candidate_username_by_id_map(candidates)
 
     ballots_qs = (
         Ballot.objects.filter(election=election)
@@ -227,6 +242,8 @@ def build_public_ballots_export(*, election: Election) -> dict[str, object]:
             except (TypeError, ValueError, OverflowError):
                 continue
             name = candidate_name_by_id.get(candidate_id)
+            if int(election.chain_version or 1) == CHAIN_VERSION_CONFIG_ANCHOR_V2 and name is None:
+                raise ValueError(f"v2 manifest missing candidate id {candidate_id} used by ballot export")
             ranking_usernames.append(name if name else str(candidate_id))
 
         ballots_payload.append(
@@ -246,15 +263,31 @@ def build_public_ballots_export(*, election: Election) -> dict[str, object]:
         )
 
     last_chain_hash = ballots_qs.values_list("chain_hash", flat=True).last()
-    chain_head = str(last_chain_hash or election_genesis_chain_hash(election.id))
+    genesis_hash = election_genesis_hash(election=election)
+    chain_head = str(last_chain_hash or genesis_hash)
+    effective_published_at = published_at if published_at is not None else election.artifacts_generated_at
 
-    return {
+    payload = {
+        **election_root_metadata(
+            election=election,
+            chain_head=chain_head,
+            v2_manifest_state=v2_manifest_state,
+            published_at=effective_published_at,
+        ),
         "ballots": ballots_payload,
-        "chain_head": chain_head,
     }
+    return payload
 
 
-def build_public_audit_export(*, election: Election) -> dict[str, object]:
+def build_public_audit_export(
+    *,
+    election: Election,
+    published_at: datetime.datetime | None = None,
+) -> dict[str, object]:
+    v2_manifest_state: dict[str, object] | None = None
+    if int(election.chain_version or 1) == CHAIN_VERSION_CONFIG_ANCHOR_V2:
+        v2_manifest_state = validated_v2_manifest_state(election=election)
+
     entries = (
         AuditLogEntry.objects.filter(election=election, is_public=True)
         .exclude(event_type="quorum_reached")
@@ -281,6 +314,7 @@ def build_public_audit_export(*, election: Election) -> dict[str, object]:
         }
 
         if entry.rekor_log_id:
+            event["timestamp_utc"] = entry.timestamp.astimezone(datetime.UTC).isoformat().replace("+00:00", "Z")
             event["timestamping"] = {
                 "version": 1,
                 "rekor_log_id": entry.rekor_log_id,
@@ -303,15 +337,27 @@ def build_public_audit_export(*, election: Election) -> dict[str, object]:
         if isinstance(algo, dict):
             algorithm = algo
 
+    genesis_hash = election_genesis_hash(election=election)
+    last_chain_hash = Ballot.objects.latest_chain_head_hash_for_election(election=election)
+    chain_head = str(last_chain_hash or genesis_hash)
+    effective_published_at = published_at if published_at is not None else election.artifacts_generated_at
+
     return {
+        **election_root_metadata(
+            election=election,
+            chain_head=chain_head,
+            v2_manifest_state=v2_manifest_state,
+            published_at=effective_published_at,
+        ),
         "algorithm": algorithm,
         "audit_log": audit_log,
     }
 
 
 def persist_public_election_artifacts(*, election: Election) -> None:
-    ballots_payload = build_public_ballots_export(election=election)
-    audit_payload = build_public_audit_export(election=election)
+    published_at = timezone.now()
+    ballots_payload = build_public_ballots_export(election=election, published_at=published_at)
+    audit_payload = build_public_audit_export(election=election, published_at=published_at)
 
     ballots_content = ContentFile(
         json.dumps(ballots_payload, cls=DjangoJSONEncoder, sort_keys=True).encode("utf-8")
@@ -322,7 +368,7 @@ def persist_public_election_artifacts(*, election: Election) -> None:
 
     election.public_ballots_file.save("public-ballots.json", ballots_content, save=False)
     election.public_audit_file.save("public-audit.json", audit_content, save=False)
-    election.artifacts_generated_at = timezone.now()
+    election.artifacts_generated_at = published_at
     election.save(update_fields=["public_ballots_file", "public_audit_file", "artifacts_generated_at"])
 
 
@@ -418,6 +464,8 @@ def send_vote_receipt_email(
         **election_committee_email_context(),
         **_election_email_context(election=election, tz_name=tz_name),
         "ballot_hash": receipt.ballot.ballot_hash,
+        "chain_version": int(election.chain_version or 1),
+        "config_manifest_sha256": str(election.config_manifest_sha256 or ""),
         "nonce": receipt.nonce,
         "weight": receipt.ballot.weight,
         "previous_chain_hash": receipt.ballot.previous_chain_hash,
@@ -616,8 +664,7 @@ def submit_ballot(*, election: Election, credential_public_id: str, ranking: lis
     )
 
     last_chain_hash = Ballot.objects.latest_chain_head_hash_for_election(election=election)
-    genesis_hash = election_genesis_chain_hash(election.id)
-    previous_chain_hash = str(last_chain_hash or genesis_hash)
+    previous_chain_hash = str(last_chain_hash or election_genesis_hash(election=election))
     chain_hash = election_chain_next_hash(previous_chain_hash=previous_chain_hash, ballot_hash=ballot_hash)
 
     current = (
@@ -944,8 +991,7 @@ def close_election(*, election: Election, actor: str | None = None) -> None:
 
             ended_at = timezone.now()
             last_chain_hash = Ballot.objects.latest_chain_head_hash_for_election(election=election)
-            genesis_hash = election_genesis_chain_hash(election.id)
-            chain_head = str(last_chain_hash or genesis_hash)
+            chain_head = str(last_chain_hash or election_genesis_hash(election=election))
 
             election.status = Election.Status.closed
             election.end_datetime = ended_at
@@ -1082,8 +1128,6 @@ def tally_election(*, election: Election, actor: str | None = None) -> dict[str,
             election.status = Election.Status.tallied
             election.save(update_fields=["tally_result", "status"])
 
-            persist_public_election_artifacts(election=election)
-
             for idx, round_payload in enumerate(result.get("rounds") or [], start=1):
                 AuditLogEntry.objects.create(
                     election=election,
@@ -1112,8 +1156,14 @@ def tally_election(*, election: Election, actor: str | None = None) -> dict[str,
                 is_public=True,
             )
             schedule_attestation(tally_completed_entry)
+            persist_public_election_artifacts(election=election)
 
             tallied_election_id = election.id
+
+            def _persist_tallied_public_artifacts() -> None:
+                persist_public_election_artifacts(election=Election.objects.get(pk=tallied_election_id))
+
+            transaction.on_commit(_persist_tallied_public_artifacts)
 
             def _send_tallied_signal() -> None:
                 committed_election = Election.objects.get(pk=tallied_election_id)

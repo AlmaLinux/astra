@@ -2365,6 +2365,24 @@ class CandidateInline(admin.TabularInline):
     fields = ("freeipa_username", "nominated_by", "url", "description")
     ordering = ("freeipa_username", "id")
 
+    @override
+    def get_readonly_fields(self, request: HttpRequest, obj: Election | None = None):
+        if isinstance(obj, Election) and obj.status != Election.Status.draft and int(obj.chain_version or 1) == 2:
+            return ("freeipa_username", "nominated_by")
+        return super().get_readonly_fields(request, obj)
+
+    @override
+    def has_add_permission(self, request: HttpRequest, obj: Election | None = None) -> bool:
+        if isinstance(obj, Election) and obj.status != Election.Status.draft and int(obj.chain_version or 1) == 2:
+            return False
+        return super().has_add_permission(request, obj)
+
+    @override
+    def has_delete_permission(self, request: HttpRequest, obj: Election | None = None) -> bool:
+        if isinstance(obj, Election) and obj.status != Election.Status.draft and int(obj.chain_version or 1) == 2:
+            return False
+        return super().has_delete_permission(request, obj)
+
 
 @admin.register(Election)
 class ElectionAdmin(admin.ModelAdmin):
@@ -2385,7 +2403,15 @@ class ElectionAdmin(admin.ModelAdmin):
         "close_elections_action",
         "tally_elections_action",
     )
+    exclude = ("chain_version",)
     readonly_fields = ("status",)
+
+    @override
+    def get_readonly_fields(self, request: HttpRequest, obj: object | None = None):
+        readonly = list(super().get_readonly_fields(request, obj=obj))
+        if isinstance(obj, Election) and obj.status != Election.Status.draft and int(obj.chain_version or 1) == 2:
+            readonly.extend(obj.v2_started_readonly_field_names())
+        return tuple(dict.fromkeys(readonly))
 
     def issue_credentials_from_memberships_action(self, request: HttpRequest, queryset) -> None:
         for election in queryset:
@@ -2439,6 +2465,13 @@ class CandidateAdmin(admin.ModelAdmin):
     ordering = ("election", "freeipa_username", "id")
 
     @override
+    def get_readonly_fields(self, request: HttpRequest, obj: object | None = None):
+        readonly = list(super().get_readonly_fields(request, obj=obj))
+        if isinstance(obj, Candidate) and obj.election.status != Election.Status.draft and int(obj.election.chain_version or 1) == 2:
+            readonly.extend(["election", "freeipa_username", "nominated_by", "tiebreak_uuid"])
+        return tuple(dict.fromkeys(readonly))
+
+    @override
     def has_delete_permission(self, request: HttpRequest, obj: object | None = None) -> bool:
         if isinstance(obj, Candidate) and obj.election.status != Election.Status.draft:
             return False
@@ -2456,6 +2489,24 @@ class ExclusionGroupCandidateInline(admin.TabularInline):
     extra = 0
     autocomplete_fields = ("candidate",)
 
+    @override
+    def get_readonly_fields(self, request: HttpRequest, obj: ExclusionGroup | None = None):
+        if isinstance(obj, ExclusionGroup) and obj.election.status != Election.Status.draft and int(obj.election.chain_version or 1) == 2:
+            return ("candidate",)
+        return super().get_readonly_fields(request, obj)
+
+    @override
+    def has_add_permission(self, request: HttpRequest, obj: ExclusionGroup | None = None) -> bool:
+        if isinstance(obj, ExclusionGroup) and obj.election.status != Election.Status.draft and int(obj.election.chain_version or 1) == 2:
+            return False
+        return super().has_add_permission(request, obj)
+
+    @override
+    def has_delete_permission(self, request: HttpRequest, obj: ExclusionGroup | None = None) -> bool:
+        if isinstance(obj, ExclusionGroup) and obj.election.status != Election.Status.draft and int(obj.election.chain_version or 1) == 2:
+            return False
+        return super().has_delete_permission(request, obj)
+
 
 @admin.register(ExclusionGroup)
 class ExclusionGroupAdmin(admin.ModelAdmin):
@@ -2464,6 +2515,19 @@ class ExclusionGroupAdmin(admin.ModelAdmin):
     search_fields = ("name", "election__name")
     ordering = ("election", "name", "id")
     inlines = (ExclusionGroupCandidateInline,)
+
+    @override
+    def get_readonly_fields(self, request: HttpRequest, obj: object | None = None):
+        readonly = list(super().get_readonly_fields(request, obj=obj))
+        if isinstance(obj, ExclusionGroup) and obj.election.status != Election.Status.draft and int(obj.election.chain_version or 1) == 2:
+            readonly.extend(["election", "name", "max_elected", "public_id", "candidates"])
+        return tuple(dict.fromkeys(readonly))
+
+    @override
+    def has_delete_permission(self, request: HttpRequest, obj: object | None = None) -> bool:
+        if isinstance(obj, ExclusionGroup) and obj.election.status != Election.Status.draft and int(obj.election.chain_version or 1) == 2:
+            return False
+        return super().has_delete_permission(request, obj)
 
 
 @admin.register(AuditLogEntry)

@@ -63,7 +63,7 @@ defineProps<{
             <ul>
               <li>The public ballots export contains hashes for each ballot and a chain hash that links ballots together.</li>
               <li>Because each ballot's chain hash depends on the previous ballot's chain hash, modifying or removing a ballot breaks the chain.</li>
-              <li>The export also includes a per-election genesis hash that prevents mixing ballots from different elections.</li>
+              <li>For chain_version 2 elections, ballot-chain verification also checks that the ledger is paired with the matching public-audit.json publication record.</li>
             </ul>
 
             <p><strong>3) Verify the published audit log and recount</strong></p>
@@ -76,9 +76,15 @@ defineProps<{
             <p>For maximum transparency, you can download and run these verification scripts locally:</p>
             <ul>
               <li><a :href="bootstrap.verifyBallotHashUrl">verify-ballot-hash.py</a> — Verify your ballot hash matches your voting intent (uses values from your receipt)</li>
-              <li><a :href="bootstrap.verifyBallotChainUrl">verify-ballot-chain.py</a> — Verify the complete ballot chain is unbroken and includes your ballot</li>
-              <li><a :href="bootstrap.verifyAuditLogUrl">verify-audit-log.py</a> — Verify Rekor transparency-log attestations in the public audit log (offline digest check; optional online Rekor query)</li>
+              <li><a :href="bootstrap.verifyBallotChainUrl">verify-ballot-chain.py</a> — Verify the ballot ledger chain is unbroken and includes your ballot</li>
+              <li><a :href="bootstrap.verifyAuditLogUrl">verify-audit-log.py</a> — Verify Rekor transparency-log attestations in public-audit.json only (offline digest check; optional online Rekor query)</li>
             </ul>
+            <p>
+              For chain_version 2 ballot-chain verification, verify-ballot-chain.py uses public-ballots.json together with the matching public-audit.json publication pair.
+            </p>
+            <p>
+              verify-audit-log.py validates the audit and attestation record only; it does not prove ballot-ledger integrity by itself.
+            </p>
             <p>
               These scripts run locally on your computer and use the same algorithms as the election system. By default they do not contact any server; <code>verify-audit-log.py</code> can optionally query Rekor online when you set <code>verify_rekor_online = True</code>.
             </p>

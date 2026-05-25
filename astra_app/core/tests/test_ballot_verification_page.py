@@ -7,9 +7,10 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
+from core.election_chain import build_config_manifest, config_manifest_sha256
 from core.models import Ballot, Candidate, Election
 from core.tests.ballot_chain import compute_chain_hash
-from core.tokens import election_genesis_chain_hash
+from core.tokens import election_chain_anchor_hash, election_genesis_chain_hash
 
 
 class BallotVerificationPageTests(TestCase):
@@ -56,6 +57,7 @@ class BallotVerificationPageTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "data-ballot-verify-root")
         self.assertContains(resp, reverse("api-ballot-verify"))
+        self.assertContains(resp, reverse("verify-audit-log-download"))
         self.assertContains(resp, 'data-ballot-verify-election-detail-url-template="/elections/__election_id__/"')
         self.assertContains(resp, 'data-ballot-verify-audit-log-url-template="/elections/__election_id__/audit/"')
 
@@ -82,6 +84,7 @@ class BallotVerificationPageTests(TestCase):
             start_datetime=now - datetime.timedelta(days=1),
             end_datetime=now + datetime.timedelta(days=1),
             number_of_seats=1,
+            chain_version=1,
             status=Election.Status.open,
         )
         c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="n")
@@ -114,6 +117,7 @@ class BallotVerificationPageTests(TestCase):
             start_datetime=now - datetime.timedelta(days=10),
             end_datetime=now - datetime.timedelta(days=1),
             number_of_seats=1,
+            chain_version=1,
             status=Election.Status.closed,
         )
         c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="n")
@@ -145,6 +149,7 @@ class BallotVerificationPageTests(TestCase):
             start_datetime=now - datetime.timedelta(days=10),
             end_datetime=now - datetime.timedelta(days=1),
             number_of_seats=1,
+            chain_version=1,
             status=Election.Status.tallied,
             tally_result={"quota": "1", "elected": [], "eliminated": [], "forced_excluded": [], "rounds": []},
         )
@@ -169,6 +174,53 @@ class BallotVerificationPageTests(TestCase):
         self.assertNotIn("audit_log_url", payload)
         self.assertFalse(payload["is_superseded"])
 
+    def test_verify_page_returns_v2_integrity_metadata(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Tallied v2 election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=10),
+            end_datetime=now - datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.draft,
+            chain_version=2,
+            tally_result={"quota": "1", "elected": [], "eliminated": [], "forced_excluded": [], "rounds": []},
+        )
+        candidate = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="n")
+        manifest = build_config_manifest(election=election)
+        manifest_digest = config_manifest_sha256(manifest)
+        anchor_hash = election_chain_anchor_hash(
+            election_id=election.id,
+            config_manifest_sha256=manifest_digest,
+        )
+        Election.objects.filter(pk=election.pk).update(
+            status=Election.Status.tallied,
+            config_manifest_version=1,
+            config_manifest=manifest,
+            config_manifest_sha256=manifest_digest,
+            chain_anchor_hash=anchor_hash,
+        )
+        election.refresh_from_db()
+
+        created_at = timezone.make_aware(datetime.datetime(2026, 1, 2, 12, 34, 56))
+        ballot = self._create_ballot(
+            election=election,
+            credential_public_id="cred-1",
+            ranking=[candidate.id],
+            weight=1,
+            previous_chain_hash=anchor_hash,
+            created_at=created_at,
+        )
+
+        resp = self.client.get(reverse("api-ballot-verify"), data={"receipt": ballot.ballot_hash}, HTTP_ACCEPT="application/json")
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["chain_version"], 2)
+        self.assertEqual(payload["config_manifest_sha256"], manifest_digest)
+        self.assertEqual(payload["genesis_hash"], anchor_hash)
+        self.assertNotIn("chain_anchor_hash", payload)
+        self.assertTrue(payload["public_audit_url"].endswith(reverse("election-public-audit", args=[election.id])))
+
     def test_verify_page_superseded_ballot_does_not_reveal_replacement_receipt(self) -> None:
         now = timezone.now()
         election = Election.objects.create(
@@ -177,6 +229,7 @@ class BallotVerificationPageTests(TestCase):
             start_datetime=now - datetime.timedelta(days=10),
             end_datetime=now - datetime.timedelta(days=1),
             number_of_seats=1,
+            chain_version=1,
             status=Election.Status.tallied,
             tally_result={"quota": "1", "elected": [], "eliminated": [], "forced_excluded": [], "rounds": []},
         )
@@ -232,6 +285,7 @@ class BallotVerificationPageTests(TestCase):
             start_datetime=now - datetime.timedelta(days=1),
             end_datetime=now + datetime.timedelta(days=1),
             number_of_seats=1,
+            chain_version=1,
             status=Election.Status.open,
         )
         c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="n")
@@ -264,6 +318,7 @@ class BallotVerificationPageTests(TestCase):
             start_datetime=now - datetime.timedelta(days=1),
             end_datetime=now + datetime.timedelta(days=1),
             number_of_seats=1,
+            chain_version=1,
             status=Election.Status.open,
         )
         c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="n")

@@ -53,6 +53,8 @@ describe("ElectionVotePage", () => {
             election_id: 1,
             email_queued: true,
             ballot_hash: "receipt-123",
+            chain_version: 2,
+            config_manifest_sha256: "d".repeat(64),
             nonce: "nonce-123",
             previous_chain_hash: "prev-123",
             chain_hash: "chain-123",
@@ -84,6 +86,8 @@ describe("ElectionVotePage", () => {
     expect(wrapper.text()).toContain("Submission nonce");
     expect(wrapper.text()).toContain("Previous ledger hash");
     expect(wrapper.text()).toContain("Current ledger hash");
+    expect(wrapper.text()).toContain("Election definition digest");
+    expect((wrapper.get("#election-config-manifest-sha256").element as HTMLInputElement).value).toBe("d".repeat(64));
     expect(wrapper.text()).not.toContain("Submission Nonce");
     expect(wrapper.text()).not.toContain("Previous chain hash");
     expect(wrapper.text()).not.toContain("Chain hash");
@@ -226,6 +230,37 @@ describe("ElectionVotePage", () => {
     expect(tooltip.classes()).toContain("show");
     expect(tooltip.text()).toContain("Individual member");
     expect(tooltip.text()).toContain("Total Votes");
+  });
+
+  it("shows only the positive eligibility message when the voter has exactly one vote", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            election: {
+              id: 1,
+              name: "Board election",
+              start_datetime: "2026-04-01T10:00:00+00:00",
+              end_datetime: "2026-04-10T10:00:00+00:00",
+              submit_url: "/api/v1/elections/1/vote/submit",
+              can_submit_vote: true,
+              voter_votes: 1,
+            },
+            vote_weight_breakdown: [],
+            candidates: [],
+          }),
+        ),
+      ),
+    );
+
+    const wrapper = mount(ElectionVotePage, { props: { bootstrap } });
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("You have 1 vote for this election.");
+    expect(wrapper.text()).not.toContain("You do not appear to be eligible for this election.");
+    expect(wrapper.text()).not.toContain("These votes are applied as extra weight to your single ranked ballot.");
   });
 
   it("falls back to selecting the receipt input when clipboard API is unavailable", async () => {

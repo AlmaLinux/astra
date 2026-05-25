@@ -31,6 +31,10 @@ ATTESTED_EVENT_TYPES: frozenset[str] = frozenset(
 CANONICAL_MESSAGE_VERSION = 1
 
 
+class ElectionAttestationError(Exception):
+    pass
+
+
 def get_public_payload(entry: AuditLogEntry) -> Any:
     if entry.event_type == "rekor_attestation_failed":
         return {}
@@ -39,19 +43,30 @@ def get_public_payload(entry: AuditLogEntry) -> Any:
     if isinstance(payload, dict):
         if entry.event_type == "election_started":
             public_payload: dict[str, object] = {}
-            if "genesis_chain_hash" in payload:
-                public_payload["genesis_chain_hash"] = payload["genesis_chain_hash"]
-            candidates = payload.get("candidates")
-            if isinstance(candidates, list):
-                public_payload["candidates"] = [
-                    {
-                        "id": candidate.get("id"),
-                        "freeipa_username": candidate.get("freeipa_username"),
-                        "tiebreak_uuid": candidate.get("tiebreak_uuid"),
-                    }
-                    for candidate in candidates
-                    if isinstance(candidate, dict)
-                ]
+            if int(payload.get("chain_version") or 1) == 2:
+                for key in (
+                    "chain_version",
+                    "config_manifest_version",
+                    "config_manifest_sha256",
+                    "chain_anchor_hash",
+                    "config_manifest",
+                ):
+                    if key in payload:
+                        public_payload[key] = payload[key]
+            else:
+                if "genesis_chain_hash" in payload:
+                    public_payload["genesis_chain_hash"] = payload["genesis_chain_hash"]
+                candidates = payload.get("candidates")
+                if isinstance(candidates, list):
+                    public_payload["candidates"] = [
+                        {
+                            "id": candidate.get("id"),
+                            "freeipa_username": candidate.get("freeipa_username"),
+                            "tiebreak_uuid": candidate.get("tiebreak_uuid"),
+                        }
+                        for candidate in candidates
+                        if isinstance(candidate, dict)
+                    ]
             return public_payload
 
         public_payload = dict(payload)
@@ -92,6 +107,21 @@ def _load_private_key() -> ec.EllipticCurvePrivateKey:
     return loaded_key
 
 
+def rekor_signing_public_key_material(
+    *, private_key: ec.EllipticCurvePrivateKey
+) -> tuple[bytes, str]:
+    public_key = private_key.public_key()
+    public_key_pem_bytes = public_key.public_bytes(
+        serialization.Encoding.PEM,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    public_key_der_bytes = public_key.public_bytes(
+        serialization.Encoding.DER,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    return public_key_pem_bytes, hashlib.sha256(public_key_der_bytes).hexdigest()
+
+
 def _extract_conflict_uuid(response: requests.Response) -> str:
     location = str(response.headers.get("Location") or "").strip()
     if location:
@@ -125,10 +155,7 @@ def _attest_entry(entry: AuditLogEntry) -> None:
     private_key = _load_private_key()
     signature_der_bytes = private_key.sign(canonical_bytes, ec.ECDSA(hashes.SHA256()))
     # Rekor hashedrekord requires base64(PEM), not base64(DER), for the public key.
-    pubkey_pem_bytes = private_key.public_key().public_bytes(
-        serialization.Encoding.PEM,
-        serialization.PublicFormat.SubjectPublicKeyInfo,
-    )
+    pubkey_pem_bytes, _public_key_fingerprint = rekor_signing_public_key_material(private_key=private_key)
 
     payload: dict[str, object] = {
         "apiVersion": "0.0.1",
@@ -264,3 +291,19 @@ def schedule_attestation(entry: AuditLogEntry) -> None:
             entry.id,
             extra=current_exception_log_fields(),
         )
+
+
+def attest_entry_or_raise(entry: AuditLogEntry) -> None:
+    endpoint = str(settings.ELECTION_REKOR_ENDPOINT or "").strip()
+    signing_key = str(settings.ELECTION_REKOR_SIGNING_KEY or "").strip()
+    if not endpoint:
+        raise ElectionAttestationError("Election start did not complete: Rekor endpoint is not configured.")
+    if not signing_key:
+        raise ElectionAttestationError("Election start did not complete: Rekor signing key is not configured.")
+    if entry.event_type not in ATTESTED_EVENT_TYPES:
+        raise ElectionAttestationError(f"Election start did not complete: unsupported attested event {entry.event_type}.")
+
+    try:
+        _attest_entry(entry)
+    except Exception as exc:
+        raise ElectionAttestationError("Election start did not complete because attestation failed.") from exc

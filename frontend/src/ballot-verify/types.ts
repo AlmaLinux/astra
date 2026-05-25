@@ -12,6 +12,10 @@ export interface BallotVerifyElection {
   name: string;
 }
 
+export interface BallotVerifyPublicationBundle {
+  published_at: string;
+}
+
 export interface BallotVerifyResponse {
   receipt: string;
   has_query: boolean;
@@ -23,6 +27,11 @@ export interface BallotVerifyResponse {
   is_superseded: boolean;
   is_final_ballot: boolean;
   public_ballots_url: string;
+  public_audit_url: string;
+  publication_bundle: BallotVerifyPublicationBundle | null;
+  chain_version: number;
+  config_manifest_sha256: string;
+  genesis_hash: string;
   rate_limited: boolean;
   verification_snippet: string;
 }

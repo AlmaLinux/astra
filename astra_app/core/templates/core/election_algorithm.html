@@ -18,7 +18,7 @@
     data-election-algorithm-runbook-url="https://github.com/AlmaLinux/astra/blob/{% if build_sha %}{{ build_sha }}{% else %}master{% endif %}/docs/runbooks/meek-stv-elections.md"
     data-election-algorithm-verify-ballot-hash-url="{% static 'verify-ballot-hash.py' %}"
     data-election-algorithm-verify-ballot-chain-url="{% static 'verify-ballot-chain.py' %}"
-    data-election-algorithm-verify-audit-log-url="{% static 'verify-audit-log.py' %}"
+    data-election-algorithm-verify-audit-log-url="{% url 'verify-audit-log-download' %}"
   >
   <div class="row justify-content-center">
     <div class="col-md-10 col-lg-9">
@@ -85,13 +85,22 @@
           <ul>
             <li>The public ballots export contains hashes for each ballot and a chain hash that links ballots together.</li>
             <li>Because each ballot's chain hash depends on the previous ballot's chain hash, modifying or removing a ballot breaks the chain.</li>
-            <li>The export also includes a per-election genesis hash that prevents mixing ballots from different elections.</li>
+            <li>For newer elections, the first link is anchored to a frozen election-definition digest instead of a legacy genesis hash.</li>
+            <li>That digest lets you confirm the election definition that was committed when voting opened.</li>
           </ul>
 
           <p><strong>3) Verify the published audit log and recount</strong></p>
           <ul>
             <li>The public audit log includes a per-iteration record of what happened (who met quota, who was elected/eliminated, tie-break reasons).</li>
+            <li>For v2 elections, the public audit log also includes the election-definition digest and the chain anchor committed at start.</li>
             <li>An auditor can re-run the tally algorithm on the published ballots and confirm the same winners.</li>
+          </ul>
+
+          <p><strong>4) Verify the election definition committed at start</strong></p>
+          <ul>
+            <li>Your vote receipt email and the ballot verification page may show an election definition digest for v2 elections.</li>
+            <li>You can compare that digest with the value published in the public audit log.</li>
+            <li><code>verify-ballot-chain.py</code> checks the local manifest-to-anchor-to-ballot-chain relationship, while <code>verify-audit-log.py</code> is the step that independently confirms the Rekor-backed election-start evidence.</li>
           </ul>
 
           <h4>Independent verification tools</h4>
@@ -105,11 +114,11 @@
             </li>
             <li>
               <a href="{% static 'verify-ballot-chain.py' %}">verify-ballot-chain.py</a>
-              — Verify the complete ballot chain is unbroken and includes your ballot
+              — Verify the complete ballot chain is unbroken and, for v2 elections, that it matches the published election-definition digest and chain anchor
             </li>
             <li>
-              <a href="{% static 'verify-audit-log.py' %}">verify-audit-log.py</a>
-              — Verify Rekor transparency-log attestations in the public audit log (offline digest check; optional online Rekor query)
+              <a href="{% url 'verify-audit-log-download' %}">verify-audit-log.py</a>
+              — Verify Rekor transparency-log attestations in the public audit log and confirm whether v2 election-definition verification is `valid`, `invalid`, or `untrusted_local_only`
             </li>
           </ul>
           <p>

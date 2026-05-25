@@ -382,8 +382,9 @@ class ElectionsTimestampingTests(TestCase):
 
     def test_build_public_audit_export_includes_timestamping_block(self) -> None:
         election = self._create_election()
+        event_timestamp = datetime.datetime(2026, 1, 2, 3, 4, 1, tzinfo=datetime.UTC)
         integrated_time = datetime.datetime(2026, 1, 2, 3, 4, 5, tzinfo=datetime.UTC)
-        AuditLogEntry.objects.create(
+        entry = AuditLogEntry.objects.create(
             election=election,
             event_type="election_closed",
             payload={"chain_head": "abc", "actor": "alice"},
@@ -395,6 +396,7 @@ class ElectionsTimestampingTests(TestCase):
             rekor_message_digest_hex="a" * 64,
             rekor_canonical_message_version=1,
         )
+        AuditLogEntry.objects.filter(pk=entry.pk).update(timestamp=event_timestamp)
 
         payload = build_public_audit_export(election=election)
         event = payload["audit_log"][0]
@@ -410,3 +412,4 @@ class ElectionsTimestampingTests(TestCase):
         )
         self.assertEqual(event["timestamping"]["message_digest_hex"], "a" * 64)
         self.assertEqual(event["timestamping"]["canonical_message_version"], 1)
+        self.assertEqual(event["timestamp_utc"], "2026-01-02T03:04:01Z")

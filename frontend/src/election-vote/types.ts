@@ -35,6 +35,8 @@ export interface VoteSubmitSuccess {
   election_id: number;
   email_queued: boolean;
   ballot_hash: string;
+  chain_version: number;
+  config_manifest_sha256: string;
   nonce: string;
   previous_chain_hash: string;
   chain_hash: string;

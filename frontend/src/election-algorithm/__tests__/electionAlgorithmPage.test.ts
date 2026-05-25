@@ -19,6 +19,15 @@ describe("ElectionAlgorithmPage", () => {
 
     expect(wrapper.text()).toContain("Meek STV (High-Precision Variant)");
     expect(wrapper.text()).toContain("80-digit precision");
+    expect(wrapper.text()).toContain(
+      "For chain_version 2 ballot-chain verification, verify-ballot-chain.py uses public-ballots.json together with the matching public-audit.json publication pair.",
+    );
+    expect(wrapper.text()).toContain(
+      "verify-audit-log.py validates the audit and attestation record only; it does not prove ballot-ledger integrity by itself.",
+    );
+    expect(wrapper.text()).not.toContain(
+      "The export also includes a per-election genesis hash that prevents mixing ballots from different elections.",
+    );
     expect(wrapper.find('a[href="https://example.com/runbook"]').exists()).toBe(true);
     expect(wrapper.find('a[href="/static/verify-ballot-hash.py"]').exists()).toBe(true);
   });

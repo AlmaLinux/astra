@@ -2,13 +2,25 @@
 import datetime
 from unittest.mock import patch
 
+from django.contrib import admin
 from django.test import TestCase
+from django.test.client import RequestFactory
 from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
 
 from core import elections_services
 from core.freeipa.user import FreeIPAUser
-from core.models import AuditLogEntry, Ballot, Candidate, Election, Membership, MembershipType, VotingCredential
+from core.models import (
+    AuditLogEntry,
+    Ballot,
+    Candidate,
+    Election,
+    ExclusionGroup,
+    ExclusionGroupCandidate,
+    Membership,
+    MembershipType,
+    VotingCredential,
+)
 from core.tests.ballot_chain import compute_chain_hash
 from core.tests.utils_test_data import ensure_core_categories, ensure_email_templates
 from core.tokens import election_genesis_chain_hash
@@ -24,6 +36,38 @@ class AdminElectionLifecycleActionTests(TestCase):
         session = self.client.session
         session["_freeipa_username"] = username
         session.save()
+
+    def test_election_admin_add_does_not_expose_chain_version_field(self) -> None:
+        self._login_as_freeipa_admin("alice")
+        admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
+            response = self.client.get(reverse("admin:core_election_add"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'name="chain_version"')
+
+    def test_election_admin_draft_change_does_not_expose_chain_version_field(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Draft admin chain version hidden",
+            description="",
+            url="",
+            start_datetime=now + datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=2),
+            number_of_seats=1,
+            quorum=10,
+            status=Election.Status.draft,
+        )
+
+        self._login_as_freeipa_admin("alice")
+        admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
+            response = self.client.get(reverse("admin:core_election_change", args=[election.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'name="chain_version"')
 
     def test_admin_add_allows_zero_candidate_draft_creation(self) -> None:
         self._login_as_freeipa_admin("alice")
@@ -120,6 +164,7 @@ class AdminElectionLifecycleActionTests(TestCase):
             end_datetime=now + datetime.timedelta(days=1),
             number_of_seats=1,
             status=Election.Status.open,
+            chain_version=1,
         )
         VotingCredential.objects.create(
             election=election,
@@ -161,6 +206,7 @@ class AdminElectionLifecycleActionTests(TestCase):
             end_datetime=now + datetime.timedelta(days=1),
             number_of_seats=1,
             status=Election.Status.open,
+            chain_version=1,
         )
         VotingCredential.objects.create(
             election=election,
@@ -200,6 +246,7 @@ class AdminElectionLifecycleActionTests(TestCase):
             end_datetime=now - datetime.timedelta(days=1),
             number_of_seats=1,
             status=Election.Status.closed,
+            chain_version=1,
         )
         c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
         c2 = Candidate.objects.create(election=election, freeipa_username="bob", nominated_by="nominator")
@@ -342,6 +389,179 @@ class AdminElectionLifecycleActionTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, 'name="status"')
+
+    def test_started_v2_election_admin_manifest_fields_are_readonly(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Readonly manifest election",
+            description="",
+            url="https://example.com/election",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            quorum=10,
+            eligible_group_cn="voters",
+            status=Election.Status.open,
+            chain_version=2,
+        )
+
+        self._login_as_freeipa_admin("alice")
+        admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
+            url = reverse("admin:core_election_change", args=[election.id])
+            response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'name="name"')
+        self.assertContains(response, 'name="description"')
+        self.assertContains(response, 'name="url"')
+        self.assertNotContains(response, 'name="start_datetime"')
+        self.assertNotContains(response, 'name="number_of_seats"')
+        self.assertNotContains(response, 'name="quorum"')
+        self.assertNotContains(response, 'name="eligible_group_cn"')
+
+    def test_started_v2_election_admin_readonly_fields_follow_model_ssot(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Readonly field ssot election",
+            description="",
+            url="https://example.com/election",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            quorum=10,
+            eligible_group_cn="voters",
+            status=Election.Status.open,
+            chain_version=2,
+        )
+
+        request = RequestFactory().get("/")
+        model_admin = admin.site._registry[Election]
+
+        self.assertEqual(
+            election.v2_started_readonly_field_names(),
+            (
+                *election.v2_immutable_field_names(),
+                "chain_version",
+                "config_manifest_version",
+                "config_manifest",
+                "config_manifest_sha256",
+                "chain_anchor_hash",
+            ),
+        )
+        self.assertEqual(
+            model_admin.get_readonly_fields(request, election),
+            ("status", *election.v2_started_readonly_field_names()),
+        )
+
+    def test_started_v2_election_admin_candidate_inline_keeps_profile_fields_editable(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Readonly candidate inline election",
+            description="",
+            url="https://example.com/election",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            quorum=10,
+            eligible_group_cn="voters",
+            status=Election.Status.draft,
+            chain_version=2,
+        )
+        Candidate.objects.create(
+            election=election,
+            freeipa_username="alice",
+            nominated_by="nominator",
+            url="https://example.com/candidates/alice",
+            description="candidate",
+        )
+        election.status = Election.Status.open
+        election.save(update_fields=["status", "updated_at"])
+
+        self._login_as_freeipa_admin("alice")
+        admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
+            url = reverse("admin:core_election_change", args=[election.id])
+            response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'name="candidates-0-freeipa_username"')
+        self.assertNotContains(response, 'name="candidates-0-nominated_by"')
+        self.assertContains(response, 'name="candidates-0-url"')
+        self.assertContains(response, 'name="candidates-0-description"')
+
+    def test_started_v2_candidate_admin_keeps_profile_fields_editable(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Readonly candidate detail election",
+            description="",
+            url="https://example.com/election",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            quorum=10,
+            eligible_group_cn="voters",
+            status=Election.Status.draft,
+            chain_version=2,
+        )
+        candidate = Candidate.objects.create(
+            election=election,
+            freeipa_username="alice",
+            nominated_by="nominator",
+            url="https://example.com/candidates/alice",
+            description="candidate",
+        )
+        election.status = Election.Status.open
+        election.save(update_fields=["status", "updated_at"])
+
+        self._login_as_freeipa_admin("alice")
+        admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
+            url = reverse("admin:core_candidate_change", args=[candidate.id])
+            response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'name="freeipa_username"')
+        self.assertNotContains(response, 'name="nominated_by"')
+        self.assertContains(response, 'name="url"')
+        self.assertContains(response, 'name="description"')
+
+    def test_started_v2_exclusion_group_membership_inline_is_not_editable(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Readonly group membership election",
+            description="",
+            url="https://example.com/election",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            quorum=10,
+            eligible_group_cn="voters",
+            status=Election.Status.draft,
+            chain_version=2,
+        )
+        candidate = Candidate.objects.create(
+            election=election,
+            freeipa_username="alice",
+            nominated_by="nominator",
+        )
+        group = ExclusionGroup.objects.create(election=election, name="Employees", max_elected=1)
+        ExclusionGroupCandidate.objects.create(exclusion_group=group, candidate=candidate)
+        election.status = Election.Status.open
+        election.save(update_fields=["status", "updated_at"])
+
+        self._login_as_freeipa_admin("alice")
+        admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
+            url = reverse("admin:core_exclusiongroup_change", args=[group.id])
+            response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'name="group_candidates-0-candidate"')
 
     def test_ballots_and_voting_credentials_are_not_registered_in_admin(self) -> None:
         with self.assertRaises(NoReverseMatch):

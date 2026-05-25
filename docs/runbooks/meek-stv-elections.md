@@ -24,7 +24,7 @@ Starting an election is a `start_election` action from the edit flow. On start, 
 - Sets `start_datetime` to `timezone.now()`.
 - Sets `status = open`.
 - Issues and emails voting credentials.
-- Writes a public `election_started` audit event that includes `genesis_chain_hash`.[^fn7]
+- Writes a public `election_started` audit event. The stored version-specific payload still uses `genesis_chain_hash` for `chain_version = 1` and `chain_anchor_hash` for `chain_version = 2`, while public/operator-facing readers re-expose the first chain hash as `genesis_hash`.[^fn7]
 
 Voting routes are available at `/elections/<id>/vote/` and `/elections/<id>/vote/submit.json`. The vote page returns a 410 closed template for `closed`/`tallied` elections.[^fn8][^fn9]
 
@@ -89,7 +89,7 @@ Ballot receipt hash input includes `(election_id, credential_public_id, ranking,
 
 `nonce` is random (`token_hex(16)`), used in hash generation, and intentionally not stored.[^fn34]
 
-Ballot chaining uses previous chain head (or election genesis) and stores both `previous_chain_hash` and `chain_hash` on ballot rows.[^fn35]
+Ballot chaining uses the previous chain head and stores both `previous_chain_hash` and `chain_hash` on ballot rows. The initial chain origin is versioned: `chain_version = 1` starts from the election genesis hash, while `chain_version = 2` starts from the manifest-derived anchor that public readers expose as `genesis_hash`.[^fn35]
 
 If a credential re-votes, Astra supersedes prior final ballot by pointer flips so only one final counted ballot remains for that credential.[^fn36][^fn37]
 
@@ -123,22 +123,24 @@ The post-close model keeps ballots, audit data, and credential rows, but usernam
 
 ## 5. Ballot Chain Integrity
 
-Genesis chain hash is election-specific, preventing cross-election chain splicing from a shared genesis. The exact preimage string hashed (UTF-8) is:
+For `chain_version = 1`, the genesis chain hash is election-specific, preventing cross-election chain splicing from a shared genesis. The exact preimage string hashed (UTF-8) is:
 
 - `f"election:{election_id}. alex estuvo aquí, dejándose el alma."`
 
 and the genesis hash is `sha256(preimage_bytes).hexdigest()`.[^fn41]
 
+For both `chain_version = 1` and `chain_version = 2`, top-level public export metadata publishes one canonical chain-start field: `genesis_hash`. For `chain_version = 1`, `genesis_hash` is the election-specific genesis hash. For `chain_version = 2`, `genesis_hash` carries the manifest-derived chain anchor value. Version-specific event payload semantics remain separate: `election_started` uses `genesis_chain_hash` for v1 payloads and `chain_anchor_hash` for v2 payloads. Legacy top-level `chain_root_hash` and `chain_anchor_hash` values remain compatibility-only inputs for historical bundles.[^fn41]
+
 Next chain hash is `sha256(f"{previous_chain_hash}:{ballot_hash}")`.[^fn42]
 
-`public-ballots.json` includes per-ballot `ballot_hash`, `previous_chain_hash`, `chain_hash`, `is_counted`, `superseded_by`, and export-level `chain_head`.[^fn43]
+`public-ballots.json` includes per-ballot `ballot_hash`, `previous_chain_hash`, `chain_hash`, `is_counted`, `superseded_by`, and export-level `chain_head`. For both chain versions, the top-level origin field is `genesis_hash`. For `chain_version = 2`, the export also publishes `config_manifest_version` and `config_manifest_sha256`; new exports do not publish duplicate top-level `chain_root_hash` or `chain_anchor_hash` values.[^fn43]
 
 At close, Astra also records `chain_head` in public close event payload.[^fn44]
 
 The published verification scripts implement local checks:
 
 - `verify-ballot-hash.py`: recomputes ballot hash from receipt inputs with the same payload and SHA-256 method as model code.[^fn45]
-- `verify-ballot-chain.py`: reconstructs chain from genesis, verifies per-row hash links, and fails on fork, cycle, disconnected graph, missing genesis linkage, or head mismatch.[^fn46]
+- `verify-ballot-chain.py`: reconstructs the chain from the versioned origin carried by top-level `genesis_hash`, verifies per-row hash links, and fails on fork, cycle, disconnected graph, missing origin linkage, or head mismatch. The verifier accepts historical top-level aliases (`chain_root_hash` and, for v2 bundles, `chain_anchor_hash`) as deprecated compatibility inputs.[^fn46]
 - `verify-audit-log.py`: verifies Rekor transparency-log attestations in `public-audit.json`, recomputing canonical event digests and (optionally) querying each Rekor entry URL online.[^fn103]
 
 ## 6. Quorum Rules
@@ -326,7 +328,7 @@ Astra's security properties depend on who is trusted and to what degree.
 
 - **Tally integrity:** The Meek STV count is deterministic given the published ballot set, candidate tie-break UUIDs, and convergence parameters. Tally round artifacts in `public-audit.json` document every round.
 - **Inclusion and chain-position verifiability:** Each voter receives `ballot_hash`, `previous_chain_hash`, and `chain_hash` in their receipt email. They can independently recompute their ballot hash from their ranking and nonce, verify the chain update formula, and confirm both that their ballot appears in `public-ballots.json` and that the chain hash at their position matches. Any tampering with an intermediate ballot would conflict with that voter's receipt and cascade to all subsequent voters' `previous_chain_hash` values.
-- **Chain integrity:** The full ballot hash chain from genesis to chain head is independently verifiable using the published `verify-ballot-chain.py` script. The `election_started` payload includes the chain origin (`genesis_chain_hash`), and the `election_closed` payload includes the chain terminus (`chain_head`). If Astra is configured to use [Sigstore's Rekor](https://docs.sigstore.dev/logging/overview/) (intended default) and Rekor is working, Astra will attempt to attest those events (and other critical events) to Rekor; if Rekor is not configured or attestation fails, the events are still present in `public-audit.json` but may not have Rekor metadata.
+- **Chain integrity:** The full ballot hash chain from genesis hash to chain head is independently verifiable using the published `verify-ballot-chain.py` script. For `chain_version = 1`, `genesis_hash` is the election genesis hash; for `chain_version = 2`, `genesis_hash` is the manifest-derived chain anchor. The attested `election_started` payload still carries the version-specific internal field names. If Astra is configured to use [Sigstore's Rekor](https://docs.sigstore.dev/logging/overview/) (intended default) and Rekor is working, Astra will attempt to attest those events (and other critical events) to Rekor; if Rekor is not configured or attestation fails, the events are still present in `public-audit.json` but may not have Rekor metadata.
 - **Post-election auditability:** Public artifacts (`public-ballots.json`, `public-audit.json`) are generated at tally and allow third-party review of the count, ballot set, and anonymized voter weights.
 - **Pseudonymization at close:** Direct username-to-ballot linkage is removed at close time.
 
@@ -363,7 +365,7 @@ Ballots in the published export appear in submission order (not necessarily iden
 - The `public-ballots.json` export includes **all** ballots—including superseded (re-voted) and un-counted ones—marked via the `is_counted` field. The chain is not limited to final counted ballots.[^fn43]
 - The ballot-verify endpoint intentionally does not reveal ranking, voter IP addresses, or precise timestamps; it exposes only a submission date. This is a deliberate privacy guardrail.[^fn71]
 - Rate-limit scoping: vote submission is scoped per (election, username); ballot verification is scoped per client IP address.[^fn50][^fn71]
-- Empty-election chain head: if no ballots are cast, the chain head equals the election genesis hash. Independent verifiers should account for this case when no ballot rows are present.[^fn41]
+- Empty-election chain head: if no ballots are cast, the chain head equals the versioned genesis hash. For `chain_version = 1` that is the election genesis hash; for `chain_version = 2` that is the manifest-derived chain anchor exposed publicly as `genesis_hash`. Independent verifiers should account for this case when no ballot rows are present.[^fn41]
 - Quorum and closure: the election model's `quorum` help text implies quorum affects whether an election can be concluded, but `close_election` does not block when quorum is unmet. Quorum is informational/tracked, and extension is a separate explicit action. Auditors should verify participation independently via the `public-audit.json` `quorum_reached` event (or its absence).[^fn49][^fn51]
 
 [^fn1]: https://github.com/AlmaLinux/astra/blob/bd07b766/astra_app/core/elections_services.py#L39

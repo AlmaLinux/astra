@@ -107,8 +107,9 @@ onBeforeUnmount(() => {
               <strong>Local verification scripts</strong>
               <ul>
                 <li>Recompute your ballot hash locally: <a :href="bootstrap.verifyBallotHashUrl" download>Download verify-ballot-hash.py</a></li>
-                <li>Verify the public ballot chain after the election closes: <a :href="bootstrap.verifyBallotChainUrl" download>Download verify-ballot-chain.py</a></li>
-                <li>Verify Rekor audit-log attestations after the election closes: <a :href="bootstrap.verifyAuditLogUrl" download>Download verify-audit-log.py</a></li>
+                <li>Verify the ballot ledger chain after the election closes: <a :href="bootstrap.verifyBallotChainUrl" download>Download verify-ballot-chain.py</a></li>
+                <li>For chain_version 2 ballot-chain verification, verify-ballot-chain.py uses public-ballots.json together with the matching public-audit.json publication pair.</li>
+                <li>verify-audit-log.py checks the audit and attestation record only; it does not prove ballot-ledger integrity by itself. <a :href="bootstrap.verifyAuditLogUrl" download>Download verify-audit-log.py</a></li>
               </ul>
             </div>
 
@@ -163,12 +164,39 @@ onBeforeUnmount(() => {
                     <p v-else>This ballot was included in the final tally.</p>
                   </template>
 
-                  <template v-if="result.public_ballots_url || result.election">
+                  <template
+                    v-if="
+                      result.election_status === 'tallied'
+                      && (result.public_ballots_url || result.public_audit_url || result.publication_bundle)
+                    "
+                  >
                     <h5>Public verification</h5>
+                    <p v-if="result.publication_bundle">
+                      <strong>Matched publication pair published at:</strong>
+                      {{ result.publication_bundle.published_at }}
+                    </p>
+                    <p v-if="result.chain_version === 2" class="text-muted">
+                      For strongest chain_version 2 ballot-chain verification, download both public-ballots.json and public-audit.json from the same published pair.
+                    </p>
                     <ul>
-                      <li v-if="result.public_ballots_url"><a :href="result.public_ballots_url">Public ballots ledger (JSON)</a></li>
+                      <li v-if="result.public_ballots_url"><a :href="result.public_ballots_url">public-ballots.json ballot ledger (JSON)</a></li>
+                      <li v-if="result.public_audit_url"><a :href="result.public_audit_url">public-audit.json audit and attestation record (JSON)</a></li>
                       <li v-if="result.election"><a :href="auditLogHref(result.election.id)">Audit log</a></li>
                     </ul>
+                    <p class="text-muted">
+                      verify-audit-log.py checks the audit and attestation record only; it does not prove ballot-ledger integrity by itself.
+                    </p>
+                  </template>
+
+                  <template v-if="result.chain_version === 2 && result.config_manifest_sha256 !== ''">
+                    <h5>Election definition</h5>
+                    <p>
+                      <strong>Election definition digest:</strong>&nbsp;
+                      <code>{{ result.config_manifest_sha256 }}</code>
+                    </p>
+                    <p class="text-muted">
+                      This digest is the frozen election definition committed at start. Compare it with your receipt email and the public audit log JSON for v2 verification.
+                    </p>
                   </template>
 
                   <h5>Ballot Information</h5>

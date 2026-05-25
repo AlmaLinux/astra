@@ -1,5 +1,6 @@
 """Ballot verification view."""
 
+import datetime
 import re
 from typing import Any
 
@@ -9,6 +10,7 @@ from django.shortcuts import render
 from django.urls import reverse
 from django.views.decorators.http import require_GET
 
+from core.election_chain import election_genesis_hash
 from core.models import Ballot, Candidate, Election
 from core.rate_limit import allow_request
 
@@ -42,6 +44,11 @@ def _ballot_verify_context(request) -> tuple[dict[str, Any], int]:
                 "is_superseded": False,
                 "is_final_ballot": False,
                 "public_ballots_url": "",
+                "public_audit_url": "",
+                "publication_bundle": None,
+                "chain_version": 0,
+                "config_manifest_sha256": "",
+                "genesis_hash": "",
                 "rate_limited": True,
                 "verification_snippet": "",
             },
@@ -58,6 +65,9 @@ def _ballot_verify_context(request) -> tuple[dict[str, Any], int]:
                 "created_at",
                 "is_counted",
                 "superseded_by_id",
+                "election__chain_anchor_hash",
+                "election__chain_version",
+                "election__config_manifest_sha256",
                 "election__id",
                 "election__name",
                 "election__status",
@@ -79,10 +89,22 @@ def _ballot_verify_context(request) -> tuple[dict[str, Any], int]:
 
     has_public_verification = election is not None and election.status in {Election.Status.closed, Election.Status.tallied}
     public_ballots_url = ""
+    public_audit_url = ""
+    publication_bundle: dict[str, str] | None = None
     if election is not None and has_public_verification:
         public_ballots_url = election.public_ballots_file.url if election.public_ballots_file else reverse(
             "election-public-ballots", args=[election.id]
         )
+        public_audit_url = election.public_audit_file.url if election.public_audit_file else reverse(
+            "election-public-audit", args=[election.id]
+        )
+        if election.artifacts_generated_at is not None:
+            publication_bundle = {
+                "published_at": election.artifacts_generated_at.astimezone(datetime.UTC)
+                .replace(microsecond=0)
+                .isoformat()
+                .replace("+00:00", "Z"),
+            }
 
     verification_snippet = ""
     if found and election is not None and ballot is not None:
@@ -114,6 +136,11 @@ def _ballot_verify_context(request) -> tuple[dict[str, Any], int]:
             "is_superseded": is_superseded,
             "is_final_ballot": is_final_ballot,
             "public_ballots_url": public_ballots_url,
+            "public_audit_url": public_audit_url,
+            "publication_bundle": publication_bundle,
+            "chain_version": int(election.chain_version) if election is not None else 0,
+            "config_manifest_sha256": str(election.config_manifest_sha256 or "") if election is not None else "",
+            "genesis_hash": election_genesis_hash(election=election) if election is not None else "",
             "rate_limited": False,
             "verification_snippet": verification_snippet,
         },
@@ -160,6 +187,11 @@ def ballot_verify_api(request):
             "is_superseded": context["is_superseded"],
             "is_final_ballot": context["is_final_ballot"],
             "public_ballots_url": context["public_ballots_url"],
+            "public_audit_url": context["public_audit_url"],
+            "publication_bundle": context["publication_bundle"],
+            "chain_version": context["chain_version"],
+            "config_manifest_sha256": context["config_manifest_sha256"],
+            "genesis_hash": context["genesis_hash"],
             "rate_limited": context["rate_limited"],
             "verification_snippet": context["verification_snippet"],
         },

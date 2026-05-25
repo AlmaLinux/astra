@@ -793,6 +793,151 @@ class ElectionDraftDeletionTests(_CoreCategoriesTestCase):
         election.refresh_from_db()
         self.assertEqual(election.status, Election.Status.draft)
 
+    def test_open_v2_election_save_draft_with_new_candidate_row_does_not_500(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Open v2 election",
+            description="",
+            url="",
+            start_datetime=now + datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=2),
+            number_of_seats=1,
+            quorum=10,
+            status=Election.Status.draft,
+            chain_version=2,
+        )
+        existing_candidate = Candidate.objects.create(
+            election=election,
+            freeipa_username="carol",
+            nominated_by="dave",
+        )
+        Election.objects.filter(pk=election.pk).update(status=Election.Status.open)
+        election.refresh_from_db()
+
+        resp = self.client.post(
+            reverse("election-edit", args=[election.id]),
+            data={
+                "action": "save_draft",
+                "name": election.name,
+                "description": election.description,
+                "url": election.url,
+                "start_datetime": election.start_datetime.strftime("%Y-%m-%dT%H:%M"),
+                "end_datetime": election.end_datetime.strftime("%Y-%m-%dT%H:%M"),
+                "number_of_seats": str(election.number_of_seats),
+                "quorum": str(election.quorum),
+                "eligible_group_cn": str(election.eligible_group_cn or ""),
+                "email_template_id": "",
+                "subject": "",
+                "html_content": "",
+                "text_content": "",
+                "candidates-TOTAL_FORMS": "2",
+                "candidates-INITIAL_FORMS": "1",
+                "candidates-MIN_NUM_FORMS": "0",
+                "candidates-MAX_NUM_FORMS": "1000",
+                "candidates-0-id": str(existing_candidate.id),
+                "candidates-0-freeipa_username": "carol",
+                "candidates-0-nominated_by": "dave",
+                "candidates-0-description": "",
+                "candidates-0-url": "",
+                "candidates-0-DELETE": "",
+                "candidates-1-id": "",
+                "candidates-1-freeipa_username": "alice",
+                "candidates-1-nominated_by": "bob",
+                "candidates-1-description": "",
+                "candidates-1-url": "",
+                "candidates-1-DELETE": "",
+                "groups-TOTAL_FORMS": "0",
+                "groups-INITIAL_FORMS": "0",
+                "groups-MIN_NUM_FORMS": "0",
+                "groups-MAX_NUM_FORMS": "1000",
+            },
+            follow=False,
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Please correct the errors below.")
+        self.assertContains(resp, "This election is no longer in draft; draft changes are locked.")
+        self.assertFalse(Candidate.objects.filter(election=election, freeipa_username="alice").exists())
+
+    def test_open_v2_election_save_draft_with_new_group_row_does_not_500(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Open v2 group election",
+            description="",
+            url="",
+            start_datetime=now + datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=2),
+            number_of_seats=1,
+            quorum=10,
+            status=Election.Status.draft,
+            chain_version=2,
+        )
+        existing_candidate = Candidate.objects.create(
+            election=election,
+            freeipa_username="alice",
+            nominated_by="bob",
+        )
+        Election.objects.filter(pk=election.pk).update(status=Election.Status.open)
+        election.refresh_from_db()
+
+        resp = self.client.post(
+            reverse("election-edit", args=[election.id]),
+            data={
+                "action": "save_draft",
+                "name": election.name,
+                "description": election.description,
+                "url": election.url,
+                "start_datetime": election.start_datetime.strftime("%Y-%m-%dT%H:%M"),
+                "end_datetime": election.end_datetime.strftime("%Y-%m-%dT%H:%M"),
+                "number_of_seats": str(election.number_of_seats),
+                "quorum": str(election.quorum),
+                "eligible_group_cn": str(election.eligible_group_cn or ""),
+                "email_template_id": "",
+                "subject": "",
+                "html_content": "",
+                "text_content": "",
+                "candidates-TOTAL_FORMS": "1",
+                "candidates-INITIAL_FORMS": "1",
+                "candidates-MIN_NUM_FORMS": "0",
+                "candidates-MAX_NUM_FORMS": "1000",
+                "candidates-0-id": str(existing_candidate.id),
+                "candidates-0-freeipa_username": "alice",
+                "candidates-0-nominated_by": "bob",
+                "candidates-0-description": "",
+                "candidates-0-url": "",
+                "candidates-0-DELETE": "",
+                "groups-TOTAL_FORMS": "1",
+                "groups-INITIAL_FORMS": "0",
+                "groups-MIN_NUM_FORMS": "0",
+                "groups-MAX_NUM_FORMS": "1000",
+                "groups-0-id": "",
+                "groups-0-name": "Employees",
+                "groups-0-max_elected": "1",
+                "groups-0-candidate_usernames": ["alice"],
+                "groups-0-DELETE": "",
+            },
+            follow=False,
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Please correct the errors below.")
+        self.assertContains(resp, "This election is no longer in draft; draft changes are locked.")
+        self.assertFalse(ExclusionGroup.objects.filter(election=election, name="Employees").exists())
+
     @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=1)
     def test_save_draft_rejects_self_nomination_and_does_not_save_candidate(self) -> None:
         self._login_as_freeipa_user("admin")

@@ -59,3 +59,29 @@ class ElectionVoteReceiptTemplateCopyMigrationTests(TestCase):
             "a ballot corresponding to your ballot receipt code exists in the system",
             template.content,
         )
+
+    def test_followup_migration_adds_election_definition_digest_guidance(self) -> None:
+        from post_office.models import EmailTemplate
+
+        EmailTemplate.objects.update_or_create(
+            name=settings.ELECTION_VOTE_RECEIPT_EMAIL_TEMPLATE_NAME,
+            defaults={
+                "subject": "Old subject",
+                "content": "Receipt code {{ ballot_hash }} and nonce {{ nonce }}",
+                "html_content": "<p>Receipt code {{ ballot_hash }}</p>",
+            },
+        )
+
+        migration = import_module(
+            "core.migrations.0098_update_election_vote_receipt_template_manifest_digest_copy"
+        )
+        migration.update_election_vote_receipt_template_manifest_digest_copy(apps, None)
+
+        template = EmailTemplate.objects.get(name=settings.ELECTION_VOTE_RECEIPT_EMAIL_TEMPLATE_NAME)
+
+        self.assertIn("Election definition digest:", template.content)
+        self.assertIn("{{ config_manifest_sha256 }}", template.content)
+        self.assertIn("Compare this digest with the public audit log", template.content)
+        self.assertIn("Election definition digest:", template.html_content)
+        self.assertIn("{{ config_manifest_sha256 }}", template.html_content)
+        self.assertIn("Compare this digest with the public audit log", template.html_content)

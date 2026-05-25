@@ -135,6 +135,14 @@ def election_genesis_chain_hash(election_id: int) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def election_chain_anchor_hash(*, election_id: int, config_manifest_sha256: str) -> str:
+    data = (
+        f"election-v2:{election_id}:{config_manifest_sha256}. "
+        "alex estuvo aquí, dejándose el alma."
+    ).encode()
+    return hashlib.sha256(data).hexdigest()
+
+
 def election_chain_next_hash(*, previous_chain_hash: str, ballot_hash: str) -> str:
     """
     Compute the next chain hash by linking the ballot to the previous chain.

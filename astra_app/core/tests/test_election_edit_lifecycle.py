@@ -384,6 +384,172 @@ class ElectionEditLifecycleTests(TestCase):
         self.assertIsInstance(audit.payload, dict)
         self.assertEqual(audit.payload.get("actor"), "admin")
 
+    @override_settings(
+        ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=1,
+        ELECTION_REKOR_ENDPOINT="",
+        ELECTION_REKOR_SIGNING_KEY="",
+    )
+    def test_start_legacy_election_preserves_legacy_chain_version(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Legacy draft election",
+            description="",
+            url="",
+            start_datetime=now + datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=2),
+            number_of_seats=1,
+            status=Election.Status.draft,
+            voting_email_subject="Hello {{ username }}",
+            voting_email_html="<p>Hi {{ username }}</p>",
+            voting_email_text="Hi {{ username }}",
+            chain_version=1,
+        )
+        Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
+
+        mt = MembershipType.objects.create(
+            code="voter",
+            name="Voter",
+            description="",
+            category_id="individual",
+            sort_order=1,
+            enabled=True,
+            votes=1,
+        )
+        membership = Membership.objects.create(target_username="voter1", membership_type=mt, expires_at=None)
+        Membership.objects.filter(pk=membership.pk).update(created_at=now - datetime.timedelta(days=200))
+
+        candidate_membership = Membership.objects.create(target_username="alice", membership_type=mt, expires_at=None)
+        Membership.objects.filter(pk=candidate_membership.pk).update(created_at=now - datetime.timedelta(days=200))
+        nominator_membership = Membership.objects.create(
+            target_username="nominator",
+            membership_type=mt,
+            expires_at=None,
+        )
+        Membership.objects.filter(pk=nominator_membership.pk).update(created_at=now - datetime.timedelta(days=200))
+
+        self._login_as_freeipa_user("admin")
+        self._grant_manage_elections("admin")
+
+        admin_user = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+        voter_user = FreeIPAUser(
+            "voter1",
+            {"uid": ["voter1"], "memberof_group": [], "mail": ["voter1@example.com"]},
+        )
+
+        def get_user(username: str, **_: object):
+            if username == "admin":
+                return admin_user
+            if username == "voter1":
+                return voter_user
+            return None
+
+        start_str = election.start_datetime.strftime("%Y-%m-%dT%H:%M")
+        end_str = election.end_datetime.strftime("%Y-%m-%dT%H:%M")
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=get_user),
+            patch(
+                "core.views_elections.edit.elections_services.send_voting_credential_email",
+                autospec=True,
+            ),
+        ):
+            response = self.client.post(
+                reverse("election-edit", args=[election.id]),
+                data={
+                    "action": "start_election",
+                    "name": election.name,
+                    "description": election.description,
+                    "url": election.url,
+                    "start_datetime": start_str,
+                    "end_datetime": end_str,
+                    "number_of_seats": str(election.number_of_seats),
+                    "quorum": str(election.quorum),
+                    "email_template_id": "",
+                    "subject": election.voting_email_subject,
+                    "html_content": election.voting_email_html,
+                    "text_content": election.voting_email_text,
+                },
+                follow=False,
+            )
+
+        self.assertEqual(response.status_code, 302)
+        election.refresh_from_db()
+        self.assertEqual(election.status, Election.Status.open)
+        self.assertEqual(election.chain_version, 1)
+
+    @override_settings(
+        ELECTION_REKOR_ENDPOINT="",
+        ELECTION_REKOR_SIGNING_KEY="",
+    )
+    def test_start_v2_election_fails_closed_without_attestation_configuration(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Draft v2 election",
+            description="",
+            url="",
+            start_datetime=now + datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=2),
+            number_of_seats=1,
+            status=Election.Status.draft,
+            voting_email_subject="Hello {{ username }}",
+            voting_email_html="<p>Hi {{ username }}</p>",
+            voting_email_text="Hi {{ username }}",
+            chain_version=2,
+        )
+        Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
+
+        self._login_as_freeipa_user("admin")
+        self._grant_manage_elections("admin")
+
+        validation = CandidateValidationResult(
+            disqualified_candidates=[],
+            disqualified_nominators=[],
+            ineligible_candidates=[],
+            ineligible_nominators=[],
+            eligible_candidates=["alice"],
+            eligible_nominators=["nominator"],
+        )
+        eligible_voter = EligibleVoter(username="voter1", weight=1)
+        start_str = (now + datetime.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
+        end_str = (now + datetime.timedelta(days=2)).strftime("%Y-%m-%dT%H:%M")
+
+        with (
+            patch(
+                "core.views_elections.edit.elections_eligibility.eligible_voters_from_memberships",
+                return_value=[eligible_voter],
+            ),
+            patch(
+                "core.views_elections.edit.elections_eligibility.validate_candidates_for_election",
+                return_value=validation,
+            ),
+            patch("core.views_elections.edit._issue_and_email_credentials") as issue_mock,
+        ):
+            response = self.client.post(
+                reverse("election-edit", args=[election.id]),
+                data={
+                    "action": "start_election",
+                    "name": election.name,
+                    "description": election.description,
+                    "url": election.url,
+                    "start_datetime": start_str,
+                    "end_datetime": end_str,
+                    "number_of_seats": str(election.number_of_seats),
+                    "quorum": str(election.quorum),
+                    "email_template_id": "",
+                    "subject": election.voting_email_subject,
+                    "html_content": election.voting_email_html,
+                    "text_content": election.voting_email_text,
+                },
+                follow=False,
+            )
+
+        election.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(election.status, Election.Status.draft)
+        self.assertFalse(AuditLogEntry.objects.filter(election=election, event_type="election_started").exists())
+        issue_mock.assert_not_called()
+        self.assertContains(response, "start did not complete", status_code=200)
+
     @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=1)
     def test_start_election_blocks_self_nominating_candidate(self) -> None:
         now = timezone.now()

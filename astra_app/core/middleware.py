@@ -474,6 +474,7 @@ class LoginRequiredMiddleware:
             "/logout",
             "/otp/sync",
             "/password-expired",
+            "/elections/verify-audit-log.py",
             "/api/v1/password-reset/detail",
             "/api/v1/password-reset/confirm/detail",
             "/api/v1/password-expired/detail",

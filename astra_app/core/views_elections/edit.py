@@ -3,6 +3,7 @@
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import permission_required
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest
 from django.shortcuts import redirect, render
@@ -12,13 +13,16 @@ from post_office.models import EmailTemplate
 
 from core import elections_eligibility, elections_services
 from core import signals as astra_signals
+from core.election_chain import (
+    CONFIG_MANIFEST_VERSION,
+    build_config_manifest,
+    config_manifest_sha256,
+    load_locked_manifest_source_rows,
+)
 from core.election_nominators import parse_nominator_identifier
 from core.elections_eligibility import ElectionEligibilityError
-from core.elections_services import (
-    election_genesis_chain_hash,
-    issue_credentials_at_start_transition,
-)
-from core.elections_timestamping import schedule_attestation
+from core.elections_services import issue_credentials_at_start_transition
+from core.elections_timestamping import ElectionAttestationError, attest_entry_or_raise, schedule_attestation
 from core.forms_elections import (
     CandidateWizardFormSet,
     ElectionDetailsForm,
@@ -39,6 +43,7 @@ from core.models import (
 )
 from core.permissions import ASTRA_ADD_ELECTION
 from core.templated_email import placeholderize_empty_values, render_templated_email_preview
+from core.tokens import election_chain_anchor_hash, election_genesis_chain_hash
 from core.user_labels import user_choice_from_freeipa
 from core.views_elections._helpers import (
     _election_email_preview_context,
@@ -46,6 +51,35 @@ from core.views_elections._helpers import (
     _get_active_election,
 )
 from core.views_utils import get_username
+
+_DRAFT_LOCKED_MESSAGE = "This election is no longer in draft; draft changes are locked."
+
+
+def _lock_draft_election_for_save(*, election_id: int) -> Election:
+    locked_election = Election.objects.select_for_update().get(pk=election_id)
+    if locked_election.status != Election.Status.draft:
+        raise ValidationError(_DRAFT_LOCKED_MESSAGE)
+    return locked_election
+
+
+def _copy_draft_editable_fields(*, source: Election, target: Election) -> None:
+    target.name = source.name
+    target.description = source.description
+    target.url = source.url
+    target.eligible_group_cn = source.eligible_group_cn
+    target.start_datetime = source.start_datetime
+    target.end_datetime = source.end_datetime
+    target.number_of_seats = source.number_of_seats
+    target.quorum = source.quorum
+
+
+def _replace_group_memberships(*, group: ExclusionGroup, selected_candidates: list[Candidate]) -> None:
+    _lock_draft_election_for_save(election_id=group.election_id)
+    memberships = list(ExclusionGroupCandidate.objects.filter(exclusion_group=group))
+    for membership in memberships:
+        membership.delete()
+    for candidate in selected_candidates:
+        ExclusionGroupCandidate.objects.create(exclusion_group=group, candidate=candidate)
 
 
 def _configure_candidate_choices(
@@ -203,53 +237,57 @@ def _save_candidates_and_groups(
     group_formset: ExclusionGroupWizardFormSet,
 ) -> None:
     """Persist candidate and exclusion-group formsets to the database."""
-    for form in candidate_formset.forms:
-        if not hasattr(form, "cleaned_data"):
-            continue
-        if form.cleaned_data.get("DELETE"):
-            if form.instance.pk:
-                form.instance.delete()
-            continue
+    with transaction.atomic():
+        locked_election = _lock_draft_election_for_save(election_id=election.pk)
 
-        username = str(form.cleaned_data.get("freeipa_username") or "").strip()
-        if not username:
-            continue
-
-        candidate = form.save(commit=False)
-        candidate.election = election
-        candidate.save()
-
-    for form in group_formset.forms:
-        if not hasattr(form, "cleaned_data"):
-            continue
-        if form.cleaned_data.get("DELETE"):
-            if form.instance.pk:
-                form.instance.delete()
-            continue
-
-        group_name = str(form.cleaned_data.get("name") or "").strip()
-        if not group_name:
-            continue
-
-        group = form.save(commit=False)
-        group.election = election
-        group.save()
-
-        selected_usernames = [
-            str(u).strip() for u in (form.cleaned_data.get("candidate_usernames") or [])
-        ]
-        selected_usernames = [u for u in selected_usernames if u]
-        candidates = list(
-            Candidate.objects.filter(election=election, freeipa_username__in=selected_usernames).only("id")
-        )
-        by_username = {c.freeipa_username: c for c in candidates}
-
-        ExclusionGroupCandidate.objects.filter(exclusion_group=group).delete()
-        for u in selected_usernames:
-            c = by_username.get(u)
-            if c is None:
+        for form in candidate_formset.forms:
+            if not hasattr(form, "cleaned_data"):
                 continue
-            ExclusionGroupCandidate.objects.create(exclusion_group=group, candidate=c)
+            if form.cleaned_data.get("DELETE"):
+                if form.instance.pk:
+                    form.instance.delete()
+                continue
+
+            username = str(form.cleaned_data.get("freeipa_username") or "").strip()
+            if not username:
+                continue
+
+            candidate = form.save(commit=False)
+            candidate.election = locked_election
+            candidate.save()
+
+        for form in group_formset.forms:
+            if not hasattr(form, "cleaned_data"):
+                continue
+            if form.cleaned_data.get("DELETE"):
+                if form.instance.pk:
+                    form.instance.delete()
+                continue
+
+            group_name = str(form.cleaned_data.get("name") or "").strip()
+            if not group_name:
+                continue
+
+            group = form.save(commit=False)
+            group.election = locked_election
+            group.save()
+
+            selected_usernames = [
+                str(u).strip() for u in (form.cleaned_data.get("candidate_usernames") or [])
+            ]
+            selected_usernames = [u for u in selected_usernames if u]
+            candidates = list(
+                Candidate.objects.filter(
+                    election=locked_election,
+                    freeipa_username__in=selected_usernames,
+                ).only("id", "freeipa_username")
+            )
+            by_username = {candidate.freeipa_username: candidate for candidate in candidates}
+            ordered_candidates = [
+                candidate for username in selected_usernames if (candidate := by_username.get(username)) is not None
+            ]
+
+            _replace_group_memberships(group=group, selected_candidates=ordered_candidates)
 
 
 def _issue_and_email_credentials(
@@ -322,6 +360,9 @@ def _handle_start_election(
         return None
     if election.status != Election.Status.draft:
         messages.error(request, "Only draft elections can be started.")
+        return None
+    if not Election.objects.filter(pk=election.pk, status=Election.Status.draft).exists():
+        messages.error(request, "This election has already been started.")
         return None
     if not details_form.is_valid() or not email_form.is_valid():
         messages.error(request, "Please correct the errors below.")
@@ -429,71 +470,112 @@ def _handle_start_election(
     # All validations passed — commit the election start.
     started_at = timezone.now()
 
-    with transaction.atomic():
-        locked = Election.objects.select_for_update().get(pk=election.pk)
-        if locked.status != Election.Status.draft:
-            messages.error(request, "This election has already been started.")
-            return None
+    try:
+        with transaction.atomic():
+            locked = Election.objects.select_for_update().get(pk=election.pk)
+            if locked.status != Election.Status.draft:
+                messages.error(request, "This election has already been started.")
+                return None
 
-        # Re-bind details to the locked row so concurrent updates cannot race this write.
-        locked_form = ElectionDetailsForm(details_form.data, instance=locked)
-        if not locked_form.is_valid():
-            messages.error(request, "Please correct the errors below.")
-            return None
-        locked = locked_form.save(commit=False)
+            # Re-bind details to the locked row so concurrent updates cannot race this write.
+            locked_form = ElectionDetailsForm(details_form.data, instance=locked)
+            if not locked_form.is_valid():
+                messages.error(request, "Please correct the errors below.")
+                return None
+            locked = locked_form.save(commit=False)
 
-        # Align the published start timestamp with when the election actually opens.
-        locked.start_datetime = started_at
-        _apply_email_template_from_form(locked, email_form)
+            # Align the published start timestamp with when the election actually opens.
+            locked.start_datetime = started_at
+            _apply_email_template_from_form(locked, email_form)
 
-        locked.status = Election.Status.open
-        locked.save()
+            candidate_rows, groups, group_candidates = load_locked_manifest_source_rows(election=locked)
+            payload: dict[str, object] = {
+                "chain_version": locked.chain_version,
+                "eligible_voters": len(start_eligible_voters),
+            }
 
-        total_credentials, emailed, skipped, failures = _issue_and_email_credentials(request, locked)
+            if int(locked.chain_version or 1) == 2:
+                manifest = build_config_manifest(
+                    election=locked,
+                    candidate_rows=candidate_rows,
+                    groups=groups,
+                    group_candidates=group_candidates,
+                )
+                manifest_digest = config_manifest_sha256(manifest)
+                locked.config_manifest_version = CONFIG_MANIFEST_VERSION
+                locked.config_manifest = manifest
+                locked.config_manifest_sha256 = manifest_digest
+                locked.chain_anchor_hash = election_chain_anchor_hash(
+                    election_id=locked.id,
+                    config_manifest_sha256=manifest_digest,
+                )
+                payload.update(
+                    {
+                        "config_manifest_version": locked.config_manifest_version,
+                        "config_manifest_sha256": locked.config_manifest_sha256,
+                        "chain_anchor_hash": locked.chain_anchor_hash,
+                        "config_manifest": locked.config_manifest,
+                    }
+                )
+            else:
+                payload.update(
+                    {
+                        "genesis_chain_hash": election_genesis_chain_hash(locked.id),
+                        "candidates": [
+                            {
+                                "id": candidate.id,
+                                "freeipa_username": candidate.freeipa_username,
+                                "tiebreak_uuid": str(candidate.tiebreak_uuid),
+                            }
+                            for candidate in candidate_rows
+                        ],
+                    }
+                )
 
-        username = get_username(request)
-        candidate_snapshot = list(
-            Candidate.objects.filter(election=locked)
-            .only("id", "freeipa_username", "tiebreak_uuid")
-            .order_by("freeipa_username", "id")
-        )
-        payload: dict[str, object] = {
-            "eligible_voters": total_credentials,
-            "emailed": emailed,
-            "skipped": skipped,
-            "failures": failures,
-            "genesis_chain_hash": election_genesis_chain_hash(locked.id),
-            "candidates": [
-                {
-                    "id": c.id,
-                    "freeipa_username": c.freeipa_username,
-                    "tiebreak_uuid": str(c.tiebreak_uuid),
-                }
-                for c in candidate_snapshot
-            ],
-        }
-        if username:
-            payload["actor"] = username
+            locked.save()
 
-        audit_entry = AuditLogEntry.objects.create(
-            election=locked,
-            event_type="election_started",
-            payload=payload,
-            is_public=True,
-        )
-        schedule_attestation(audit_entry)
+            username = get_username(request)
+            if username:
+                payload["actor"] = username
 
-        opened_election_id = locked.id
-
-        def _send_opened_signal() -> None:
-            committed_election = Election.objects.get(pk=opened_election_id)
-            astra_signals.election_opened.send(
-                sender=Election,
-                election=committed_election,
-                actor=username,
+            audit_entry = AuditLogEntry.objects.create(
+                election=locked,
+                event_type="election_started",
+                payload=payload,
+                is_public=True,
             )
+            if int(locked.chain_version or 1) == 2:
+                attest_entry_or_raise(audit_entry)
+            else:
+                schedule_attestation(audit_entry)
 
-        transaction.on_commit(_send_opened_signal)
+            locked.status = Election.Status.open
+            locked.save(update_fields=["status", "updated_at"])
+
+            total_credentials, emailed, skipped, failures = _issue_and_email_credentials(request, locked)
+            audit_entry.payload = {
+                **payload,
+                "eligible_voters": total_credentials,
+                "emailed": emailed,
+                "skipped": skipped,
+                "failures": failures,
+            }
+            audit_entry.save(update_fields=["payload"])
+
+            opened_election_id = locked.id
+
+            def _send_opened_signal() -> None:
+                committed_election = Election.objects.get(pk=opened_election_id)
+                astra_signals.election_opened.send(
+                    sender=Election,
+                    election=committed_election,
+                    actor=username,
+                )
+
+            transaction.on_commit(_send_opened_signal)
+    except ElectionAttestationError as exc:
+        messages.error(request, str(exc))
+        return None
 
     if emailed:
         messages.success(request, f"Election started; emailed {emailed} voter(s).")
@@ -754,16 +836,27 @@ def election_edit(request, election_id: int):
                         formsets_ok = False
 
             if formsets_ok:
-                election.status = Election.Status.draft
+                try:
+                    with transaction.atomic():
+                        if election.pk is not None:
+                            locked_election = _lock_draft_election_for_save(election_id=election.pk)
+                            _copy_draft_editable_fields(source=election, target=locked_election)
+                            election = locked_election
 
-                if election_id == 0 or email_save_mode != "keep_existing":
-                    _apply_email_template_from_form(election, email_form)
+                        election.status = Election.Status.draft
 
-                election.save()
-                _save_candidates_and_groups(election, candidate_formset, group_formset)
+                        if election_id == 0 or email_save_mode != "keep_existing":
+                            _apply_email_template_from_form(election, email_form)
 
-                messages.success(request, "Draft saved.")
-                return redirect("election-edit", election_id=election.id)
+                        election.save()
+                        _save_candidates_and_groups(election, candidate_formset, group_formset)
+                except ValidationError as exc:
+                    for message in exc.messages:
+                        messages.error(request, message)
+                    formsets_ok = False
+                else:
+                    messages.success(request, "Draft saved.")
+                    return redirect("election-edit", election_id=election.id)
 
         if action == "start_election":
             result = _handle_start_election(request, election, details_form, email_form)

@@ -838,13 +838,16 @@ class ElectionsApiTests(TestCase):
 
     def test_ballot_verify_api_returns_tallied_verification_details(self) -> None:
         now = timezone.now()
+        published_at = timezone.make_aware(datetime.datetime(2026, 4, 11, 10, 15, 0))
         election = Election.objects.create(
             name="Tallied verification election",
             description="",
             start_datetime=now - datetime.timedelta(days=10),
             end_datetime=now - datetime.timedelta(days=1),
             number_of_seats=1,
+            chain_version=1,
             status=Election.Status.tallied,
+            artifacts_generated_at=published_at,
             tally_result={"quota": "1", "elected": [], "eliminated": [], "forced_excluded": [], "rounds": []},
         )
         candidate = Candidate.objects.create(
@@ -892,7 +895,10 @@ class ElectionsApiTests(TestCase):
         self.assertFalse(payload["is_superseded"])
         self.assertTrue(payload["is_final_ballot"])
         self.assertTrue(payload["public_ballots_url"].endswith(reverse("election-public-ballots", args=[election.id])))
+        self.assertTrue(payload["public_audit_url"].endswith(reverse("election-public-audit", args=[election.id])))
+        self.assertEqual(payload["publication_bundle"], {"published_at": "2026-04-11T10:15:00Z"})
         self.assertNotIn("audit_log_url", payload)
+        self.assertNotIn("public_bundle_url", payload)
         self.assertIn(f"election_id = {election.id}", payload["verification_snippet"])
 
     def test_election_vote_submit_api_alias_uses_existing_submission_contract(self) -> None:

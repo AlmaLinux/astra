@@ -127,9 +127,33 @@ function payloadBooleanText(item: ElectionAuditItem, key: string): string {
   return item.payload[key] ? "true" : "false";
 }
 
+function payloadConfigManifest(item: ElectionAuditItem): Record<string, unknown> | null {
+  const configManifest = item.payload.config_manifest;
+  return configManifest !== null && typeof configManifest === "object" && !Array.isArray(configManifest)
+    ? (configManifest as Record<string, unknown>)
+    : null;
+}
+
+function isV2ElectionStarted(item: ElectionAuditItem): boolean {
+  if (payloadValue(item, "chain_version") === "2") {
+    return true;
+  }
+  return payloadValue(item, "chain_root_kind") === "config_anchor_v2" || payloadValue(item, "config_manifest_sha256") !== "";
+}
+
 function payloadCandidates(item: ElectionAuditItem): Array<{ id: unknown; freeipa_username: unknown; tiebreak_uuid: unknown }> {
   const candidates = item.payload.candidates;
-  return Array.isArray(candidates) ? candidates : [];
+  if (Array.isArray(candidates)) {
+    return candidates as Array<{ id: unknown; freeipa_username: unknown; tiebreak_uuid: unknown }>;
+  }
+  const configManifestCandidates = payloadConfigManifest(item)?.candidates;
+  return Array.isArray(configManifestCandidates)
+    ? (configManifestCandidates as Array<{ id: unknown; freeipa_username: unknown; tiebreak_uuid: unknown }>)
+    : [];
+}
+
+function electionStartedChainOriginValue(item: ElectionAuditItem): string {
+  return payloadValue(item, "genesis_hash");
 }
 
 function textLines(value: string | null | undefined): string[] {
@@ -466,10 +490,15 @@ onBeforeUnmount(() => {
                       </template>
 
                       <template v-else-if="item.event_type === 'election_started'">
-                        <p class="mb-2">
-                          <strong>Genesis chain head:</strong>
-                          <code class="ml-2" :title="payloadValue(item, 'genesis_chain_hash')">{{ shortHash(payloadValue(item, "genesis_chain_hash")) }}</code>
-                          <button type="button" class="btn btn-outline-secondary btn-xs ml-2 js-copy-hash" :data-hash="payloadValue(item, 'genesis_chain_hash')" aria-label="Copy genesis chain head" title="Copy genesis chain head" @click="copyText(payloadValue(item, 'genesis_chain_hash'))"><i class="fas fa-copy" aria-hidden="true"></i></button>
+                        <p v-if="electionStartedChainOriginValue(item)" class="mb-2">
+                          <strong>Genesis hash:</strong>
+                          <code class="ml-2" :title="electionStartedChainOriginValue(item)">{{ shortHash(electionStartedChainOriginValue(item)) }}</code>
+                          <button type="button" class="btn btn-outline-secondary btn-xs ml-2 js-copy-hash" :data-hash="electionStartedChainOriginValue(item)" aria-label="Copy genesis hash" title="Copy genesis hash" @click="copyText(electionStartedChainOriginValue(item))"><i class="fas fa-copy" aria-hidden="true"></i></button>
+                        </p>
+                        <p v-if="isV2ElectionStarted(item)" class="mb-2">
+                          <strong>Manifest digest:</strong>
+                          <code class="ml-2" :title="payloadValue(item, 'config_manifest_sha256')">{{ shortHash(payloadValue(item, "config_manifest_sha256")) }}</code>
+                          <button type="button" class="btn btn-outline-secondary btn-xs ml-2 js-copy-hash" :data-hash="payloadValue(item, 'config_manifest_sha256')" aria-label="Copy manifest digest" title="Copy manifest digest" @click="copyText(payloadValue(item, 'config_manifest_sha256'))"><i class="fas fa-copy" aria-hidden="true"></i></button>
                         </p>
                         <template v-if="payloadCandidates(item).length > 0">
                           <p class="mb-1"><strong>Candidates (tie-break order):</strong></p>

@@ -7,11 +7,12 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core import elections_services
+from core.election_chain import build_config_manifest, config_manifest_sha256
 from core.freeipa.user import FreeIPAUser
 from core.models import AuditLogEntry, Ballot, Candidate, Election, FreeIPAPermissionGrant
 from core.permissions import ASTRA_ADD_ELECTION
 from core.tests.ballot_chain import compute_chain_hash
-from core.tokens import election_genesis_chain_hash
+from core.tokens import election_chain_anchor_hash, election_genesis_chain_hash
 from core.views_elections._helpers import _elected_candidate_display
 
 
@@ -106,6 +107,7 @@ class ElectionAuditLogPageTests(TestCase):
             end_datetime=now - datetime.timedelta(days=1),
             number_of_seats=1,
             status=Election.Status.closed,
+            chain_version=1,
         )
         c1 = Candidate.objects.create(
             election=election,
@@ -155,6 +157,138 @@ class ElectionAuditLogPageTests(TestCase):
         # Quota is floor(total/(seats+1)) + 1 = floor(1/2) + 1 = 1.
         self.assertEqual(summary_resp.status_code, 200)
         self.assertEqual(str(summary_resp.json()["summary"]["quota"]), "1")
+
+    def test_audit_log_api_exposes_v2_start_root_metadata(self) -> None:
+        self._login_as_freeipa_user("viewer")
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Audit log v2 metadata",
+            description="",
+            url="https://example.com/elections/audit-v2",
+            start_datetime=now - datetime.timedelta(days=2),
+            end_datetime=now - datetime.timedelta(days=1),
+            number_of_seats=1,
+            quorum=10,
+            eligible_group_cn="voters",
+            status=Election.Status.draft,
+            chain_version=2,
+        )
+        candidate = Candidate.objects.create(
+            election=election,
+            freeipa_username="alice",
+            nominated_by="nominator",
+        )
+        manifest = build_config_manifest(election=election)
+        manifest_digest = config_manifest_sha256(manifest)
+        anchor_hash = election_chain_anchor_hash(
+            election_id=election.id,
+            config_manifest_sha256=manifest_digest,
+        )
+        Election.objects.filter(pk=election.pk).update(
+            status=Election.Status.closed,
+            config_manifest_version=1,
+            config_manifest=manifest,
+            config_manifest_sha256=manifest_digest,
+            chain_anchor_hash=anchor_hash,
+        )
+        AuditLogEntry.objects.create(
+            election=election,
+            event_type="election_started",
+            payload={
+                "chain_version": 2,
+                "config_manifest_version": 1,
+                "config_manifest_sha256": manifest_digest,
+                "chain_anchor_hash": anchor_hash,
+                "config_manifest": manifest,
+                "candidates": [
+                    {
+                        "id": candidate.id,
+                        "freeipa_username": candidate.freeipa_username,
+                        "tiebreak_uuid": str(candidate.tiebreak_uuid),
+                    }
+                ],
+            },
+            is_public=True,
+        )
+
+        viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "memberof_group": []})
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
+            api_resp = self.client.get(reverse("api-election-audit-log", args=[election.id]), HTTP_ACCEPT="application/json")
+
+        self.assertEqual(api_resp.status_code, 200)
+        started = next(item for item in api_resp.json()["audit_log"]["items"] if item["event_type"] == "election_started")
+        self.assertEqual(started["payload"]["chain_version"], 2)
+        self.assertEqual(started["payload"]["config_manifest_version"], 1)
+        self.assertEqual(started["payload"]["config_manifest_sha256"], manifest_digest)
+        self.assertEqual(started["payload"]["genesis_hash"], anchor_hash)
+        self.assertNotIn("chain_anchor_hash", started["payload"])
+        self.assertNotIn("chain_root_kind", started["payload"])
+        self.assertNotIn("chain_root_hash", started["payload"])
+
+    def test_audit_log_api_derives_v2_start_candidates_from_config_manifest(self) -> None:
+        self._login_as_freeipa_user("viewer")
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Audit log v2 manifest candidates",
+            description="",
+            url="https://example.com/elections/audit-v2-candidates",
+            start_datetime=now - datetime.timedelta(days=2),
+            end_datetime=now - datetime.timedelta(days=1),
+            number_of_seats=1,
+            quorum=10,
+            eligible_group_cn="voters",
+            status=Election.Status.draft,
+            chain_version=2,
+        )
+        candidate = Candidate.objects.create(
+            election=election,
+            freeipa_username="alice",
+            nominated_by="nominator",
+        )
+        manifest = build_config_manifest(election=election)
+        manifest_digest = config_manifest_sha256(manifest)
+        anchor_hash = election_chain_anchor_hash(
+            election_id=election.id,
+            config_manifest_sha256=manifest_digest,
+        )
+        Election.objects.filter(pk=election.pk).update(
+            status=Election.Status.closed,
+            config_manifest_version=1,
+            config_manifest=manifest,
+            config_manifest_sha256=manifest_digest,
+            chain_anchor_hash=anchor_hash,
+        )
+        AuditLogEntry.objects.create(
+            election=election,
+            event_type="election_started",
+            payload={
+                "chain_version": 2,
+                "config_manifest_version": 1,
+                "config_manifest_sha256": manifest_digest,
+                "chain_anchor_hash": anchor_hash,
+                "config_manifest": manifest,
+            },
+            is_public=True,
+        )
+
+        viewer = FreeIPAUser("viewer", {"uid": ["viewer"], "memberof_group": []})
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=viewer):
+            api_resp = self.client.get(reverse("api-election-audit-log", args=[election.id]), HTTP_ACCEPT="application/json")
+
+        self.assertEqual(api_resp.status_code, 200)
+        started = next(item for item in api_resp.json()["audit_log"]["items"] if item["event_type"] == "election_started")
+        self.assertEqual(
+            started["payload"]["candidates"],
+            [
+                {
+                    "id": candidate.id,
+                    "freeipa_username": candidate.freeipa_username,
+                    "tiebreak_uuid": str(candidate.tiebreak_uuid),
+                }
+            ],
+        )
 
     def test_audit_log_shows_full_name_and_username_for_elected_candidates_in_both_sections(self) -> None:
         self._login_as_freeipa_user("viewer")

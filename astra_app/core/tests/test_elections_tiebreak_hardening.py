@@ -13,17 +13,19 @@ import uuid
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.db import DatabaseError, connection
+from django.test import TestCase, TransactionTestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from core.election_chain import CHAIN_VERSION_CONFIG_ANCHOR_V2
 from core.freeipa.user import FreeIPAUser
-from core.models import AuditLogEntry, Ballot, Candidate, Election
+from core.models import AuditLogEntry, Ballot, Candidate, Election, ExclusionGroup, ExclusionGroupCandidate
 from core.tests.ballot_chain import compute_chain_hash
 from core.tokens import election_genesis_chain_hash
 
 
-def _make_election(status: str) -> Election:
+def _make_election(status: str, *, chain_version: int = 1) -> Election:
     now = timezone.now()
     return Election.objects.create(
         name=f"Tiebreak hardening test ({status})",
@@ -32,6 +34,7 @@ def _make_election(status: str) -> Election:
         end_datetime=now - datetime.timedelta(days=1),
         number_of_seats=1,
         status=status,
+        chain_version=chain_version,
     )
 
 
@@ -45,6 +48,26 @@ def _make_candidate(election: Election, username: str = "alice") -> Candidate:
 
 class CandidateTiebreakImmutabilityTests(TestCase):
     """Candidate.save() must reject tiebreak_uuid changes on non-draft elections."""
+
+    def test_election_chain_version_defaults_to_newest_on_create(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Default chain version election",
+            description="",
+            start_datetime=now + datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=2),
+            number_of_seats=1,
+            status=Election.Status.draft,
+        )
+
+        self.assertEqual(election.chain_version, CHAIN_VERSION_CONFIG_ANCHOR_V2)
+
+    def test_chain_version_immutable_on_draft_election_after_creation(self) -> None:
+        election = _make_election(Election.Status.draft, chain_version=1)
+        election.chain_version = CHAIN_VERSION_CONFIG_ANCHOR_V2
+
+        with self.assertRaises(ValidationError):
+            election.save()
 
     def test_tiebreak_uuid_immutable_for_open_election(self) -> None:
         election = _make_election(Election.Status.open)
@@ -93,6 +116,121 @@ class CandidateTiebreakImmutabilityTests(TestCase):
         candidate.save()  # must not raise
         candidate.refresh_from_db()
         self.assertEqual(candidate.description, "Post-tally edit")
+
+    def test_v2_candidate_manifest_backed_fields_are_immutable_for_open_election(self) -> None:
+        election = _make_election(Election.Status.draft, chain_version=2)
+        candidate = _make_candidate(election)
+        election.status = Election.Status.open
+        election.save(update_fields=["status", "updated_at"])
+        candidate.freeipa_username = "mallory"
+        with self.assertRaises(ValidationError):
+            candidate.save()
+
+    def test_v2_candidate_description_and_url_remain_editable_after_start(self) -> None:
+        election = _make_election(Election.Status.draft, chain_version=2)
+        candidate = Candidate.objects.create(
+            election=election,
+            freeipa_username="alice",
+            nominated_by="nominator",
+            description="before",
+            url="https://example.com/candidates/before",
+        )
+        election.status = Election.Status.open
+        election.save(update_fields=["status", "updated_at"])
+
+        candidate.description = "after"
+        candidate.url = "https://example.com/candidates/after"
+        candidate.save()
+
+        candidate.refresh_from_db()
+        self.assertEqual(candidate.description, "after")
+        self.assertEqual(candidate.url, "https://example.com/candidates/after")
+
+    def test_v2_election_manifest_backed_fields_are_immutable_after_start(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Started v2",
+            description="",
+            start_datetime=now - datetime.timedelta(days=2),
+            end_datetime=now - datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+            chain_version=2,
+        )
+
+        election.name = "Tampered"
+
+        with self.assertRaises(ValidationError):
+            election.save()
+
+    def test_v2_election_description_and_url_remain_editable_after_start(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Started v2 mutable metadata",
+            description="before",
+            url="https://example.com/before",
+            start_datetime=now - datetime.timedelta(days=2),
+            end_datetime=now - datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+            chain_version=2,
+        )
+
+        election.description = "after"
+        election.url = "https://example.com/after"
+        election.save()
+
+        election.refresh_from_db()
+        self.assertEqual(election.description, "after")
+        self.assertEqual(election.url, "https://example.com/after")
+
+    def test_v2_exclusion_group_fields_are_immutable_after_start(self) -> None:
+        election = _make_election(Election.Status.draft, chain_version=2)
+        candidate = _make_candidate(election)
+        group = ExclusionGroup.objects.create(election=election, name="Employees", max_elected=1)
+        ExclusionGroupCandidate.objects.create(exclusion_group=group, candidate=candidate)
+        election.status = Election.Status.open
+        election.save(update_fields=["status", "updated_at"])
+
+        group.max_elected = 2
+
+        with self.assertRaises(ValidationError):
+            group.save()
+
+    def test_v2_exclusion_group_membership_is_immutable_after_start(self) -> None:
+        election = _make_election(Election.Status.draft, chain_version=2)
+        candidate = _make_candidate(election)
+        other_candidate = _make_candidate(election, username="bob")
+        group = ExclusionGroup.objects.create(election=election, name="Employees", max_elected=1)
+        membership = ExclusionGroupCandidate.objects.create(exclusion_group=group, candidate=candidate)
+        election.status = Election.Status.open
+        election.save(update_fields=["status", "updated_at"])
+
+        with self.assertRaises(ValidationError):
+            ExclusionGroupCandidate.objects.create(exclusion_group=group, candidate=other_candidate)
+
+        with self.assertRaises(ValidationError):
+            membership.delete()
+
+
+class ElectionChainVersionDatabaseTriggerTests(TransactionTestCase):
+    """Database-level trigger must reject ORM-bypassing chain_version writes."""
+
+    def test_chain_version_direct_sql_update_is_rejected_after_insert(self) -> None:
+        if connection.vendor != "postgresql":
+            self.skipTest("Election.chain_version trigger coverage requires PostgreSQL.")
+
+        election = _make_election(Election.Status.draft, chain_version=1)
+
+        with self.assertRaises(DatabaseError):
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE core_election SET chain_version = %s WHERE id = %s",
+                    [CHAIN_VERSION_CONFIG_ANCHOR_V2, election.id],
+                )
+
+        election.refresh_from_db()
+        self.assertEqual(election.chain_version, 1)
 
 
 class ElectionStartedAuditPayloadTests(TestCase):
@@ -206,6 +344,7 @@ def _make_tallied_election() -> Election:
         end_datetime=now - datetime.timedelta(days=1),
         number_of_seats=1,
         status=Election.Status.closed,
+        chain_version=1,
     )
     c1 = Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
     c2 = Candidate.objects.create(election=election, freeipa_username="bob", nominated_by="nominator")

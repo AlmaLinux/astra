@@ -1,13 +1,15 @@
 """Election listing, detail view, and voter eligibility context."""
 
 import datetime
+import re
+from pathlib import Path
 from typing import Any, cast
 
 from django.conf import settings
 from django.contrib import messages
 from django.db.models import Count, Prefetch
 from django.db.models.functions import TruncDate
-from django.http import Http404, HttpRequest, JsonResponse
+from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.urls import reverse
 from django.utils import timezone
@@ -19,6 +21,7 @@ from core.avatar_providers import resolve_avatar_urls_for_users
 from core.election_nominators import parse_nominator_identifier
 from core.elections_eligibility import ElectionEligibilityError
 from core.elections_services import candidate_username_by_id_map, election_quorum_status
+from core.elections_timestamping import _load_private_key, rekor_signing_public_key_material
 from core.models import (
     AuditLogEntry,
     Candidate,
@@ -39,10 +42,52 @@ from core.views_elections._helpers import (
 from core.views_groups import _serialize_group_user_list_items
 from core.views_utils import build_page_url_prefix, get_username, paginate_and_build_context
 
+VERIFY_AUDIT_LOG_SCRIPT_PATH = Path(__file__).resolve().parents[1] / "static" / "verify-audit-log.py"
+VERIFY_AUDIT_LOG_TRUSTED_PEM_RE = re.compile(
+    r'trusted_public_key_pem: str = """.*?"""',
+    re.DOTALL,
+)
+VERIFY_AUDIT_LOG_TRUSTED_FINGERPRINT_RE = re.compile(
+    r'trusted_public_key_sha256: str = "[^"]*"',
+)
+
 
 @require_GET
 def election_algorithm(request):
     return render(request, "core/election_algorithm.html", {})
+
+
+@require_GET
+def verify_audit_log_download(_request: HttpRequest) -> HttpResponse:
+    script_content = VERIFY_AUDIT_LOG_SCRIPT_PATH.read_text(encoding="utf-8")
+
+    try:
+        private_key = _load_private_key()
+        trusted_public_key_pem_bytes, trusted_public_key_sha256 = rekor_signing_public_key_material(
+            private_key=private_key
+        )
+    except (OSError, TypeError, ValueError):
+        return HttpResponse(
+            "Audit verifier download is temporarily unavailable.\n",
+            content_type="text/plain; charset=utf-8",
+            status=503,
+        )
+    else:
+        trusted_public_key_pem = trusted_public_key_pem_bytes.decode("utf-8").strip()
+        rendered_script = VERIFY_AUDIT_LOG_TRUSTED_PEM_RE.sub(
+            f'trusted_public_key_pem: str = """{trusted_public_key_pem}"""',
+            script_content,
+            count=1,
+        )
+        rendered_script = VERIFY_AUDIT_LOG_TRUSTED_FINGERPRINT_RE.sub(
+            f'trusted_public_key_sha256: str = "{trusted_public_key_sha256}"',
+            rendered_script,
+            count=1,
+        )
+
+    response = HttpResponse(rendered_script, content_type="text/x-python; charset=utf-8")
+    response["Content-Disposition"] = 'attachment; filename="verify-audit-log.py"'
+    return response
 
 
 def _can_manage_elections(request: HttpRequest) -> bool:

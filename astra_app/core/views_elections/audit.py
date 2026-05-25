@@ -15,6 +15,10 @@ from django.views.decorators.http import require_GET
 
 from core import elections_services
 from core.api_pagination import paginate_detail_items, serialize_pagination
+from core.election_chain import (
+    CHAIN_VERSION_CONFIG_ANCHOR_V2,
+    resolve_public_genesis_hash,
+)
 from core.elections_sankey import build_sankey_flows
 from core.elections_services import candidate_username_by_id_map
 from core.models import AuditLogEntry, Ballot, Candidate, Election
@@ -100,6 +104,26 @@ def _serialize_round_rows_for_api(rows: object) -> list[dict[str, object]]:
     return serialized
 
 
+def _serialize_start_candidates_for_api(payload: dict[str, object]) -> list[dict[str, object]]:
+    raw_candidates = payload.get("candidates")
+    if not isinstance(raw_candidates, list):
+        config_manifest = payload.get("config_manifest")
+        if isinstance(config_manifest, dict):
+            raw_candidates = config_manifest.get("candidates")
+    if not isinstance(raw_candidates, list):
+        return []
+
+    return [
+        {
+            "id": candidate.get("id"),
+            "freeipa_username": candidate.get("freeipa_username"),
+            "tiebreak_uuid": candidate.get("tiebreak_uuid"),
+        }
+        for candidate in raw_candidates
+        if isinstance(candidate, dict)
+    ]
+
+
 def _serialize_audit_log_payload_for_api(
     *,
     event_type: str,
@@ -130,19 +154,19 @@ def _serialize_audit_log_payload_for_api(
             return {key: payload[key] for key in allowed_keys if key in payload}
         case "election_started":
             serialized: dict[str, object] = {}
-            if "genesis_chain_hash" in payload:
-                serialized["genesis_chain_hash"] = payload["genesis_chain_hash"]
-            candidates = payload.get("candidates")
-            if isinstance(candidates, list):
-                serialized["candidates"] = [
-                    {
-                        "id": candidate.get("id"),
-                        "freeipa_username": candidate.get("freeipa_username"),
-                        "tiebreak_uuid": candidate.get("tiebreak_uuid"),
-                    }
-                    for candidate in candidates
-                    if isinstance(candidate, dict)
-                ]
+            chain_version = int(payload.get("chain_version") or 1)
+            genesis_hash = resolve_public_genesis_hash(payload=payload)
+            if chain_version == CHAIN_VERSION_CONFIG_ANCHOR_V2:
+                serialized["chain_version"] = CHAIN_VERSION_CONFIG_ANCHOR_V2
+                if "config_manifest_version" in payload:
+                    serialized["config_manifest_version"] = payload["config_manifest_version"]
+                if "config_manifest_sha256" in payload:
+                    serialized["config_manifest_sha256"] = payload["config_manifest_sha256"]
+            if genesis_hash:
+                serialized["genesis_hash"] = genesis_hash
+            candidates = _serialize_start_candidates_for_api(payload)
+            if candidates:
+                serialized["candidates"] = candidates
             return serialized
         case "election_closed":
             serialized = {"chain_head": payload["chain_head"]} if "chain_head" in payload else {}

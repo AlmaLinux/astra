@@ -18,6 +18,7 @@ from core.views_elections.detail import (
     election_detail_page_api,
     elections_api,
     elections_list,
+    verify_audit_log_download,
 )
 from core.views_elections.edit import election_edit
 from core.views_elections.lifecycle import (
@@ -58,4 +59,5 @@ __all__ = [
     "elections_turnout_report",
     "elections_turnout_report_detail_api",
     "elections_list",
+    "verify_audit_log_download",
 ]

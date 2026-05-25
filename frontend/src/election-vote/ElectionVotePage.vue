@@ -27,6 +27,8 @@ const resultMessage = ref("");
 const resultIsError = ref(false);
 const isSubmitting = ref(false);
 const ballotHash = ref("");
+const chainVersion = ref(0);
+const configManifestSha256 = ref("");
 const nonce = ref("");
 const previousChainHash = ref("");
 const chainHash = ref("");
@@ -110,6 +112,8 @@ function validateRanking(): boolean {
 
 function clearReceipt(): void {
   ballotHash.value = "";
+  chainVersion.value = 0;
+  configManifestSha256.value = "";
   nonce.value = "";
   previousChainHash.value = "";
   chainHash.value = "";
@@ -117,6 +121,8 @@ function clearReceipt(): void {
 
 function setReceipt(payload: VoteSubmitSuccess): void {
   ballotHash.value = payload.ballot_hash;
+  chainVersion.value = payload.chain_version;
+  configManifestSha256.value = payload.config_manifest_sha256;
   nonce.value = payload.nonce;
   previousChainHash.value = payload.previous_chain_hash;
   chainHash.value = payload.chain_hash;
@@ -304,57 +310,59 @@ onMounted(async () => {
                 </small>
 
                 <template v-if="election.voter_votes !== null">
-                  <p v-if="election.voter_votes > 0" class="form-text mb-0">
-                    You have <strong>{{ election.voter_votes }}</strong> vote{{ election.voter_votes === 1 ? "" : "s" }} for this election.
-                    <span v-if="election.voter_votes > 1 && voteWeightBreakdown.length > 0" class="position-relative d-inline-block">
-                      <button
-                        id="vote-breakdown-tooltip"
-                        type="button"
-                        class="btn btn-link p-0 align-baseline border-0"
-                        style="font-size: inherit; vertical-align: baseline;"
-                        data-placement="right"
-                        aria-label="How your vote count is computed"
-                        aria-describedby="vote-breakdown-tooltip-content"
-                        :aria-expanded="showVoteBreakdown"
-                        @click="showVoteBreakdown = !showVoteBreakdown"
-                        @mouseenter="showVoteBreakdown = true"
-                        @mouseleave="showVoteBreakdown = false"
-                        @focus="showVoteBreakdown = true"
-                        @blur="showVoteBreakdown = false"
-                      >
-                        <i class="fas fa-info-circle text-muted" aria-hidden="true"></i>
-                      </button>
-                      <div
-                        id="vote-breakdown-tooltip-content"
-                        class="tooltip vote-breakdown-tooltip bs-tooltip-right"
-                        :class="{ show: showVoteBreakdown }"
-                        role="tooltip"
-                        :style="{ position: 'absolute', left: '1.25rem', top: '-0.65rem', zIndex: 1070, minWidth: '18rem', pointerEvents: 'none' }"
-                      >
-                        <div class="arrow"></div>
-                        <div class="tooltip-inner text-left">
-                          <div class="vote-breakdown-lines">
-                            <div v-for="(row, index) in voteWeightBreakdown" :key="`${row.label}-${row.org_name ?? 'none'}-${row.votes}`" class="vote-breakdown-line">
-                              <span class="vote-breakdown-votes">{{ index === 0 ? "" : "+ " }}{{ row.votes }}</span>
-                              <span class="vote-breakdown-sep">:</span>
-                              <span class="vote-breakdown-text">{{ row.org_name ? "Representative of " : "" }}{{ row.label }} member{{ row.org_name ? ` (${row.org_name})` : "" }}</span>
-                            </div>
+                  <template v-if="election.voter_votes > 0">
+                    <p class="form-text mb-0">
+                      You have <strong>{{ election.voter_votes }}</strong> vote{{ election.voter_votes === 1 ? "" : "s" }} for this election.
+                      <span v-if="election.voter_votes > 1 && voteWeightBreakdown.length > 0" class="position-relative d-inline-block">
+                        <button
+                          id="vote-breakdown-tooltip"
+                          type="button"
+                          class="btn btn-link p-0 align-baseline border-0"
+                          style="font-size: inherit; vertical-align: baseline;"
+                          data-placement="right"
+                          aria-label="How your vote count is computed"
+                          aria-describedby="vote-breakdown-tooltip-content"
+                          :aria-expanded="showVoteBreakdown"
+                          @click="showVoteBreakdown = !showVoteBreakdown"
+                          @mouseenter="showVoteBreakdown = true"
+                          @mouseleave="showVoteBreakdown = false"
+                          @focus="showVoteBreakdown = true"
+                          @blur="showVoteBreakdown = false"
+                        >
+                          <i class="fas fa-info-circle text-muted" aria-hidden="true"></i>
+                        </button>
+                        <div
+                          id="vote-breakdown-tooltip-content"
+                          class="tooltip vote-breakdown-tooltip bs-tooltip-right"
+                          :class="{ show: showVoteBreakdown }"
+                          role="tooltip"
+                          :style="{ position: 'absolute', left: '1.25rem', top: '-0.65rem', zIndex: 1070, minWidth: '18rem', pointerEvents: 'none' }"
+                        >
+                          <div class="arrow"></div>
+                          <div class="tooltip-inner text-left">
+                            <div class="vote-breakdown-lines">
+                              <div v-for="(row, index) in voteWeightBreakdown" :key="`${row.label}-${row.org_name ?? 'none'}-${row.votes}`" class="vote-breakdown-line">
+                                <span class="vote-breakdown-votes">{{ index === 0 ? "" : "+ " }}{{ row.votes }}</span>
+                                <span class="vote-breakdown-sep">:</span>
+                                <span class="vote-breakdown-text">{{ row.org_name ? "Representative of " : "" }}{{ row.label }} member{{ row.org_name ? ` (${row.org_name})` : "" }}</span>
+                              </div>
 
-                            <div class="border-top my-1"></div>
+                              <div class="border-top my-1"></div>
 
-                            <div class="vote-breakdown-total">
-                              <span class="vote-breakdown-votes">{{ election.voter_votes }}</span>
-                              <span class="vote-breakdown-sep">:</span>
-                              <span class="vote-breakdown-text">Total Vote{{ election.voter_votes === 1 ? "" : "s" }}</span>
+                              <div class="vote-breakdown-total">
+                                <span class="vote-breakdown-votes">{{ election.voter_votes }}</span>
+                                <span class="vote-breakdown-sep">:</span>
+                                <span class="vote-breakdown-text">Total Vote{{ election.voter_votes === 1 ? "" : "s" }}</span>
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
-                    </span>
-                  </p>
-                  <small v-if="election.voter_votes > 1" class="text-muted">
-                    These votes are applied as extra weight to your single ranked ballot.
-                  </small>
+                      </span>
+                    </p>
+                    <small v-if="election.voter_votes > 1" class="text-muted">
+                      These votes are applied as extra weight to your single ranked ballot.
+                    </small>
+                  </template>
                   <p v-else class="form-text">You do not appear to be eligible for this election.</p>
                 </template>
               </div>
@@ -417,6 +425,19 @@ onMounted(async () => {
                 <div class="mt-2">
                   <label class="text-muted" for="election-chain-hash">Current ledger hash</label>
                   <input id="election-chain-hash" class="form-control" :value="chainHash" type="text" readonly />
+                </div>
+                <div v-if="chainVersion === 2 && configManifestSha256 !== ''" class="mt-2">
+                  <label class="text-muted" for="election-config-manifest-sha256">Election definition digest</label>
+                  <input
+                    id="election-config-manifest-sha256"
+                    class="form-control"
+                    :value="configManifestSha256"
+                    type="text"
+                    readonly
+                  />
+                  <div class="form-text text-muted">
+                    Save this with your ballot receipt code. It is the frozen digest of the election definition at start.
+                  </div>
                 </div>
               </div>
 

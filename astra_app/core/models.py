@@ -7,7 +7,7 @@ import secrets
 import uuid
 import warnings
 from io import BytesIO
-from typing import override
+from typing import ClassVar, override
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -1357,6 +1357,24 @@ class ElectionQuerySet(models.QuerySet):
 
 
 class Election(models.Model):
+    V2_IMMUTABLE_FIELD_NAMES: ClassVar[tuple[str, ...]] = (
+        "name",
+        "start_datetime",
+        "number_of_seats",
+        "quorum",
+        "eligible_group_cn",
+    )
+    V2_MANIFEST_BACKED_FIELD_NAMES: ClassVar[tuple[str, ...]] = (
+        "config_manifest_version",
+        "config_manifest",
+        "config_manifest_sha256",
+        "chain_anchor_hash",
+    )
+    V2_MANIFEST_ELECTION_FIELD_NAMES: ClassVar[tuple[str, ...]] = (
+        "id",
+        *V2_IMMUTABLE_FIELD_NAMES,
+    )
+
     class Status(models.TextChoices):
         draft = "draft", "Draft"
         open = "open", "Open"
@@ -1384,6 +1402,11 @@ class Election(models.Model):
         ),
     )
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.draft)
+    chain_version = models.PositiveSmallIntegerField(default=2)
+    config_manifest_version = models.PositiveSmallIntegerField(blank=True, null=True)
+    config_manifest = models.JSONField(blank=True, default=dict)
+    config_manifest_sha256 = models.CharField(max_length=64, blank=True, default="")
+    chain_anchor_hash = models.CharField(max_length=64, blank=True, default="")
 
     # Published machine-readable tally output.
     tally_result = models.JSONField(blank=True, default=dict)
@@ -1422,8 +1445,115 @@ class Election(models.Model):
     class Meta:
         ordering = ("-start_datetime", "id")
 
+    @classmethod
+    def v2_manifest_election_field_names(cls) -> tuple[str, ...]:
+        return cls.V2_MANIFEST_ELECTION_FIELD_NAMES
+
+    @classmethod
+    def v2_immutable_field_names(cls) -> tuple[str, ...]:
+        return cls.V2_IMMUTABLE_FIELD_NAMES
+
+    @classmethod
+    def v2_started_readonly_field_names(cls) -> tuple[str, ...]:
+        return (
+            *cls.V2_IMMUTABLE_FIELD_NAMES,
+            "chain_version",
+            *cls.V2_MANIFEST_BACKED_FIELD_NAMES,
+        )
+
+    def v2_immutable_field_values(self) -> dict[str, object]:
+        field_values = {
+            "name": self.name,
+            "start_datetime": self.start_datetime,
+            "number_of_seats": self.number_of_seats,
+            "quorum": self.quorum,
+            "eligible_group_cn": self.eligible_group_cn,
+        }
+        return {
+            field_name: field_values[field_name]
+            for field_name in self.v2_immutable_field_names()
+        }
+
     def __str__(self) -> str:
         return self.name
+
+    def _validate_chain_contract(self) -> None:
+        if self.pk is None:
+            return
+
+        original = Election.objects.only(
+            "status",
+            *self.v2_started_readonly_field_names(),
+        ).get(pk=self.pk)
+
+        if self.chain_version != original.chain_version:
+            raise ValidationError({"chain_version": "Cannot change chain_version after creation."})
+
+        if original.status == Election.Status.draft:
+            return
+
+        manifest_field_values = {
+            "config_manifest_version": self.config_manifest_version,
+            "config_manifest": self.config_manifest,
+            "config_manifest_sha256": self.config_manifest_sha256,
+            "chain_anchor_hash": self.chain_anchor_hash,
+        }
+        manifest_fields = {
+            field_name: manifest_field_values[field_name]
+            for field_name in self.V2_MANIFEST_BACKED_FIELD_NAMES
+        }
+        original_manifest_field_values = {
+            "config_manifest_version": original.config_manifest_version,
+            "config_manifest": original.config_manifest,
+            "config_manifest_sha256": original.config_manifest_sha256,
+            "chain_anchor_hash": original.chain_anchor_hash,
+        }
+        original_manifest_fields = {
+            field_name: original_manifest_field_values[field_name]
+            for field_name in self.V2_MANIFEST_BACKED_FIELD_NAMES
+        }
+
+        if int(original.chain_version or 1) != 2:
+            for field_name, value in manifest_fields.items():
+                if value != original_manifest_fields[field_name]:
+                    raise ValidationError(
+                        {field_name: f"Cannot change {field_name} on a {original.status} legacy election."}
+                    )
+            return
+
+        immutable_fields = self.v2_immutable_field_values()
+        immutable_fields.update(manifest_fields)
+        original_immutable_fields = original.v2_immutable_field_values()
+        original_immutable_fields.update(original_manifest_fields)
+
+        for field_name, value in immutable_fields.items():
+            if value != original_immutable_fields[field_name]:
+                raise ValidationError({field_name: f"Cannot change {field_name} on a {original.status} v2 election."})
+
+    @override
+    def clean(self) -> None:
+        super().clean()
+        self._validate_chain_contract()
+
+    @override
+    def save(self, *args, **kwargs) -> None:
+        self._validate_chain_contract()
+        super().save(*args, **kwargs)
+
+
+def _election_chain_state(*, election_id: int, lock: bool = False) -> tuple[str, int]:
+    queryset = Election.objects
+    if lock:
+        queryset = queryset.select_for_update()
+    election_status, chain_version = queryset.values_list("status", "chain_version").get(pk=election_id)
+    return str(election_status), int(chain_version or 1)
+
+
+def _started_v2_election_status(*, election_id: int, lock: bool = False) -> str | None:
+    election_status, chain_version = _election_chain_state(election_id=election_id, lock=lock)
+    if election_status == Election.Status.draft or int(chain_version or 1) != 2:
+        return None
+    return str(election_status)
 
 
 class Candidate(models.Model):
@@ -1453,25 +1583,61 @@ class Candidate(models.Model):
     def __str__(self) -> str:
         return f"{self.freeipa_username} ({self.election_id})"
 
+    def _validate_candidate_immutability(self, *, lock_election: bool = False) -> None:
+        if self.pk is None and self.election_id is None:
+            return
+
+        election_status = _started_v2_election_status(election_id=self.election_id, lock=lock_election)
+        if self.pk is None:
+            if election_status is not None:
+                raise ValidationError(f"Cannot add a candidate to a {election_status} v2 election.")
+            return
+
+        if election_status is None:
+            election_status, _chain_version = _election_chain_state(election_id=self.election_id, lock=lock_election)
+            if election_status == Election.Status.draft:
+                return
+            original = Candidate.objects.only("tiebreak_uuid").get(pk=self.pk)
+            if self.tiebreak_uuid != original.tiebreak_uuid:
+                raise ValidationError(
+                    f"Cannot change tiebreak_uuid on a candidate in a {election_status} election."
+                )
+            return
+
+        original = Candidate.objects.only(
+            "freeipa_username",
+            "nominated_by",
+            "tiebreak_uuid",
+        ).get(pk=self.pk)
+        immutable_fields = (
+            ("freeipa_username", self.freeipa_username, original.freeipa_username),
+            ("nominated_by", self.nominated_by, original.nominated_by),
+            ("tiebreak_uuid", self.tiebreak_uuid, original.tiebreak_uuid),
+        )
+        for field_name, new_value, old_value in immutable_fields:
+            if new_value != old_value:
+                raise ValidationError(
+                    {field_name: f"Cannot change {field_name} on a candidate in a {election_status} v2 election."}
+                )
+
+    @override
+    def clean(self) -> None:
+        super().clean()
+        self._validate_candidate_immutability()
+
     @override
     def save(self, *args, **kwargs) -> None:
-        # Enforce tiebreak_uuid immutability once the election is started.
-        if self.pk is not None:
-            election_status = Election.objects.values_list("status", flat=True).get(pk=self.election_id)
-            if election_status != Election.Status.draft:
-                original_uuid = Candidate.objects.values_list("tiebreak_uuid", flat=True).get(pk=self.pk)
-                if self.tiebreak_uuid != original_uuid:
-                    raise ValidationError(
-                        f"Cannot change tiebreak_uuid on a candidate in a {election_status} election."
-                    )
-        super().save(*args, **kwargs)
+        with transaction.atomic():
+            self._validate_candidate_immutability(lock_election=True)
+            super().save(*args, **kwargs)
 
     @override
     def delete(self, *args, **kwargs) -> tuple[int, dict[str, int]]:
-        election_status = Election.objects.values_list("status", flat=True).get(pk=self.election_id)
-        if election_status != Election.Status.draft:
-            raise ValidationError(f"Cannot delete a candidate from a {election_status} election.")
-        return super().delete(*args, **kwargs)
+        with transaction.atomic():
+            election_status, _chain_version = _election_chain_state(election_id=self.election_id, lock=True)
+            if election_status != Election.Status.draft:
+                raise ValidationError(f"Cannot delete a candidate from a {election_status} election.")
+            return super().delete(*args, **kwargs)
 
 
 class ExclusionGroup(models.Model):
@@ -1500,6 +1666,48 @@ class ExclusionGroup(models.Model):
     def __str__(self) -> str:
         return f"{self.election_id}:{self.name}"
 
+    def _validate_group_immutability(self, *, lock_election: bool = False) -> None:
+        if self.pk is None and self.election_id is None:
+            return
+
+        election_status = _started_v2_election_status(election_id=self.election_id, lock=lock_election)
+        if self.pk is None:
+            if election_status is not None:
+                raise ValidationError(f"Cannot add an exclusion group to a {election_status} v2 election.")
+            return
+        if election_status is None:
+            return
+
+        original = ExclusionGroup.objects.only("name", "max_elected").get(pk=self.pk)
+        immutable_fields = (
+            ("name", self.name, original.name),
+            ("max_elected", self.max_elected, original.max_elected),
+        )
+        for field_name, new_value, old_value in immutable_fields:
+            if new_value != old_value:
+                raise ValidationError(
+                    {field_name: f"Cannot change {field_name} on an exclusion group in a {election_status} v2 election."}
+                )
+
+    @override
+    def clean(self) -> None:
+        super().clean()
+        self._validate_group_immutability()
+
+    @override
+    def save(self, *args, **kwargs) -> None:
+        with transaction.atomic():
+            self._validate_group_immutability(lock_election=True)
+            super().save(*args, **kwargs)
+
+    @override
+    def delete(self, *args, **kwargs) -> tuple[int, dict[str, int]]:
+        with transaction.atomic():
+            election_status = _started_v2_election_status(election_id=self.election_id, lock=True)
+            if election_status is not None:
+                raise ValidationError(f"Cannot delete an exclusion group from a {election_status} v2 election.")
+            return super().delete(*args, **kwargs)
+
 
 class ExclusionGroupCandidate(models.Model):
     exclusion_group = models.ForeignKey(ExclusionGroup, on_delete=models.CASCADE, related_name="group_candidates")
@@ -1515,6 +1723,33 @@ class ExclusionGroupCandidate(models.Model):
 
     def __str__(self) -> str:
         return f"{self.exclusion_group_id}:{self.candidate_id}"
+
+    def _validate_membership_immutability(self, *, lock_election: bool = False) -> None:
+        election_status = _started_v2_election_status(
+            election_id=self.exclusion_group.election_id,
+            lock=lock_election,
+        )
+        if election_status is not None:
+            raise ValidationError(
+                f"Cannot change exclusion group membership in a {election_status} v2 election."
+            )
+
+    @override
+    def clean(self) -> None:
+        super().clean()
+        self._validate_membership_immutability()
+
+    @override
+    def save(self, *args, **kwargs) -> None:
+        with transaction.atomic():
+            self._validate_membership_immutability(lock_election=True)
+            super().save(*args, **kwargs)
+
+    @override
+    def delete(self, *args, **kwargs) -> tuple[int, dict[str, int]]:
+        with transaction.atomic():
+            self._validate_membership_immutability(lock_election=True)
+            return super().delete(*args, **kwargs)
 
 
 class VotingCredential(models.Model):
@@ -1885,7 +2120,7 @@ def _invalidate_badge_cache_on_membership_request_change(
 ) -> None:
     """Invalidate badge count cache when membership requests change."""
     from core.membership import invalidate_membership_review_badge_cache
-    
+
     invalidate_membership_review_badge_cache()
 
 
@@ -1897,5 +2132,5 @@ def _invalidate_badge_cache_on_membership_request_delete(
 ) -> None:
     """Invalidate badge count cache when membership requests are deleted."""
     from core.membership import invalidate_membership_review_badge_cache
-    
+
     invalidate_membership_review_badge_cache()

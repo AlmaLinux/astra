@@ -278,7 +278,14 @@ def queue_templated_email(
             for src in sources
             for m in _REQUIRED_TEMPLATE_VAR_PATTERN.finditer(src)
         }
-        for var in ["ballot_hash", "nonce", "weight", "chain_hash", "previous_chain_hash"]:
+        for var in [
+            "ballot_hash",
+            "nonce",
+            "weight",
+            "chain_hash",
+            "previous_chain_hash",
+            "config_manifest_sha256",
+        ]:
             if var not in rendered_vars:
                 logger.warning(
                     f"Vote receipt EmailTemplate is missing required variable: {var} (template={template_name})",

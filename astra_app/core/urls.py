@@ -76,6 +76,7 @@ urlpatterns = [
         name="elections-turnout-report",
     ),
     path("elections/algorithm/", views_elections.election_algorithm, name="election-algorithm"),
+    path("elections/verify-audit-log.py", views_elections.verify_audit_log_download, name="verify-audit-log-download"),
     path("elections/ballot/verify/", views_elections.ballot_verify, name="ballot-verify"),
     path("elections/ballot/verify.json", views_elections.ballot_verify_api, name="ballot-verify-api"),
     path("elections/<int:election_id>/edit/", views_elections.election_edit, name="election-edit"),

@@ -89,7 +89,7 @@ describe("ElectionAuditLogPage", () => {
                   icon_bg: "bg-green",
                   anchor: null,
                   payload: {
-                    genesis_chain_hash: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                    genesis_hash: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
                     candidates: [
                       {
                         id: 1,
@@ -130,7 +130,7 @@ describe("ElectionAuditLogPage", () => {
     expect(wrapper.text()).toContain("Board election");
     expect(wrapper.text()).toContain("Timeline");
     expect(wrapper.text()).toContain("Tally completed");
-    expect(wrapper.text()).toContain("Genesis chain head:");
+    expect(wrapper.text()).toContain("Genesis hash:");
     expect(wrapper.text()).toContain("Candidates (tie-break order):");
     expect(wrapper.text()).toContain("00000000-0000-0000-0000-000000000001");
     expect(wrapper.text()).toContain("12 ballots submitted.");
@@ -308,6 +308,318 @@ describe("ElectionAuditLogPage", () => {
     expect(wrapper.text()).toContain("Showing first 1 ballot.");
     expect(wrapper.find('a[href="#timeline-top"]').text()).toBe("Back to top");
     expect(wrapper.find("i.fas.fa-clock.bg-gray").exists()).toBe(true);
+  });
+
+  it("renders v2 election start anchor metadata without legacy root labels", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL | Request) => {
+        if (String(url).includes("audit-summary")) {
+          return new Response(
+            JSON.stringify({
+              summary: {
+                ballots_cast: 1,
+                votes_cast: 1,
+                quota: 1,
+                empty_seats: 0,
+                tally_elected_users: [],
+                sankey_flows: [],
+                sankey_elected_nodes: [],
+                sankey_eliminated_nodes: [],
+              },
+            }),
+          );
+        }
+
+        return new Response(
+          JSON.stringify({
+            audit_log: {
+              items: [
+                {
+                  timestamp: "2026-04-10T10:00:00+00:00",
+                  event_type: "election_started",
+                  title: "Election started",
+                  icon: "fas fa-play",
+                  icon_bg: "bg-green",
+                  anchor: null,
+                  payload: {
+                    chain_version: 2,
+                    chain_root_kind: "config_anchor_v2",
+                    config_manifest_version: 1,
+                    config_manifest_sha256: "b".repeat(64),
+                    genesis_hash: "c".repeat(64),
+                    candidates: [
+                      {
+                        id: 1,
+                        freeipa_username: "alice",
+                        tiebreak_uuid: "00000000-0000-0000-0000-000000000001",
+                      },
+                    ],
+                  },
+                },
+              ],
+              pagination: {
+                count: 1,
+                page: 1,
+                num_pages: 1,
+                page_numbers: [1],
+                has_previous: false,
+                has_next: false,
+                previous_page_number: null,
+                next_page_number: null,
+                start_index: 1,
+                end_index: 1,
+              },
+              jump_links: [],
+            },
+          }),
+        );
+      }),
+    );
+
+    const wrapper = mount(ElectionAuditLogPage, {
+      props: { bootstrap },
+      attachTo: document.body,
+    });
+
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.text()).not.toContain("Chain root kind:");
+    expect(wrapper.text()).toContain("Genesis hash:");
+    expect(wrapper.text()).toContain("Manifest digest:");
+    expect(wrapper.text()).not.toContain("Chain anchor hash:");
+  });
+
+  it("renders the v2 genesis hash from genesis_hash", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL | Request) => {
+        if (String(url).includes("audit-summary")) {
+          return new Response(
+            JSON.stringify({
+              summary: {
+                ballots_cast: 1,
+                votes_cast: 1,
+                quota: 1,
+                empty_seats: 0,
+                tally_elected_users: [],
+                sankey_flows: [],
+                sankey_elected_nodes: [],
+                sankey_eliminated_nodes: [],
+              },
+            }),
+          );
+        }
+
+        return new Response(
+          JSON.stringify({
+            audit_log: {
+              items: [
+                {
+                  timestamp: "2026-04-10T10:00:00+00:00",
+                  event_type: "election_started",
+                  title: "Election started",
+                  icon: "fas fa-play",
+                  icon_bg: "bg-green",
+                  anchor: null,
+                  payload: {
+                    chain_version: 2,
+                    genesis_hash: "c".repeat(64),
+                    config_manifest_version: 1,
+                    config_manifest_sha256: "b".repeat(64),
+                    candidates: [],
+                  },
+                },
+              ],
+              pagination: {
+                count: 1,
+                page: 1,
+                num_pages: 1,
+                page_numbers: [1],
+                has_previous: false,
+                has_next: false,
+                previous_page_number: null,
+                next_page_number: null,
+                start_index: 1,
+                end_index: 1,
+              },
+              jump_links: [],
+            },
+          }),
+        );
+      }),
+    );
+
+    const wrapper = mount(ElectionAuditLogPage, {
+      props: { bootstrap },
+      attachTo: document.body,
+    });
+
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain(`Genesis hash:${"c".repeat(16)}…`);
+  });
+
+  it("does not render a v2 chain origin from legacy chain_root_hash alone", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL | Request) => {
+        if (String(url).includes("audit-summary")) {
+          return new Response(
+            JSON.stringify({
+              summary: {
+                ballots_cast: 1,
+                votes_cast: 1,
+                quota: 1,
+                empty_seats: 0,
+                tally_elected_users: [],
+                sankey_flows: [],
+                sankey_elected_nodes: [],
+                sankey_eliminated_nodes: [],
+              },
+            }),
+          );
+        }
+
+        return new Response(
+          JSON.stringify({
+            audit_log: {
+              items: [
+                {
+                  timestamp: "2026-04-10T10:00:00+00:00",
+                  event_type: "election_started",
+                  title: "Election started",
+                  icon: "fas fa-play",
+                  icon_bg: "bg-green",
+                  anchor: null,
+                  payload: {
+                    chain_version: 2,
+                    chain_root_kind: "config_anchor_v2",
+                    chain_root_hash: "a".repeat(64),
+                    config_manifest_version: 1,
+                    config_manifest_sha256: "b".repeat(64),
+                    candidates: [],
+                  },
+                },
+              ],
+              pagination: {
+                count: 1,
+                page: 1,
+                num_pages: 1,
+                page_numbers: [1],
+                has_previous: false,
+                has_next: false,
+                previous_page_number: null,
+                next_page_number: null,
+                start_index: 1,
+                end_index: 1,
+              },
+              jump_links: [],
+            },
+          }),
+        );
+      }),
+    );
+
+    const wrapper = mount(ElectionAuditLogPage, {
+      props: { bootstrap },
+      attachTo: document.body,
+    });
+
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.text()).not.toContain("Chain anchor hash:");
+    expect(wrapper.text()).not.toContain(`Chain anchor hash:${"a".repeat(16)}…`);
+    expect(wrapper.text()).not.toContain("Genesis chain head:");
+    expect(wrapper.text()).toContain("Manifest digest:");
+  });
+
+  it("renders v2 start candidates from config_manifest in the same table style as v1", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL | Request) => {
+        if (String(url).includes("audit-summary")) {
+          return new Response(
+            JSON.stringify({
+              summary: {
+                ballots_cast: 0,
+                votes_cast: 0,
+                quota: 0,
+                empty_seats: 0,
+                tally_elected_users: [],
+                sankey_flows: [],
+                sankey_elected_nodes: [],
+                sankey_eliminated_nodes: [],
+              },
+            }),
+          );
+        }
+
+        return new Response(
+          JSON.stringify({
+            audit_log: {
+              items: [
+                {
+                  timestamp: "2026-04-10T10:00:00+00:00",
+                  event_type: "election_started",
+                  title: "Election started",
+                  icon: "fas fa-play",
+                  icon_bg: "bg-green",
+                  anchor: null,
+                  payload: {
+                    chain_version: 2,
+                    chain_root_kind: "config_anchor_v2",
+                    config_manifest_version: 1,
+                    config_manifest_sha256: "b".repeat(64),
+                    genesis_hash: "c".repeat(64),
+                    config_manifest: {
+                      candidates: [
+                        {
+                          id: 1,
+                          freeipa_username: "alice",
+                          tiebreak_uuid: "00000000-0000-0000-0000-000000000001",
+                        },
+                      ],
+                    },
+                  },
+                },
+              ],
+              pagination: {
+                count: 1,
+                page: 1,
+                num_pages: 1,
+                page_numbers: [1],
+                has_previous: false,
+                has_next: false,
+                previous_page_number: null,
+                next_page_number: null,
+                start_index: 1,
+                end_index: 1,
+              },
+              jump_links: [],
+            },
+          }),
+        );
+      }),
+    );
+
+    const wrapper = mount(ElectionAuditLogPage, {
+      props: { bootstrap },
+      attachTo: document.body,
+    });
+
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.text()).not.toContain("Chain root kind:");
+  expect(wrapper.text()).toContain("Genesis hash:");
+    expect(wrapper.text()).toContain("Candidates (tie-break order):");
+    expect(wrapper.text()).toContain("alice");
+    expect(wrapper.text()).toContain("00000000-0000-0000-0000-000000000001");
+    expect(wrapper.find("table.table.table-sm.table-borderless").exists()).toBe(true);
   });
 
   it("renders the legacy tally-completed Sankey chart container when flow data exists", async () => {
