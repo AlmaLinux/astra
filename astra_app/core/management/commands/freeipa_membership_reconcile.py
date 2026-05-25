@@ -1,5 +1,5 @@
 import logging
-from typing import override
+from typing import cast, override
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
@@ -464,6 +464,14 @@ class Command(BaseCommand):
             logger.error("freeipa_membership_reconcile: no_admin_recipients group=%s", admin_group_cn)
             return
 
+        alert_group_reports = [
+            report
+            for report in group_reports
+            if cast(int, report["missing_count"]) > 0
+            or cast(int, report["extra_count"]) > 0
+            or bool(cast(list[str], report["errors"]))
+        ]
+
         context = {
             "mode": mode,
             "group_cn_filter": group_cn_filter,
@@ -472,7 +480,7 @@ class Command(BaseCommand):
             "target": target,
             "request_id": resolved_request_id,
             "run_at": now.isoformat(),
-            "groups": group_reports,
+            "groups": alert_group_reports,
             "total_missing": total_missing,
             "total_extra": total_extra,
             "total_errors": total_errors,

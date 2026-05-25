@@ -554,10 +554,12 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
             with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
                 call_command("membership_expiration_notifications")
                 first_count = Email.objects.count()
-                call_command("membership_expiration_notifications")
+                with patch("core.signals.membership_expiring_soon.send", autospec=True) as send_mock:
+                    call_command("membership_expiration_notifications")
                 second_count = Email.objects.count()
 
         self.assertEqual(first_count, second_count)
+        send_mock.assert_not_called()
 
     def test_force_sends_even_if_already_sent_today(self) -> None:
         MembershipType.objects.update_or_create(

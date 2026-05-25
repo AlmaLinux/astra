@@ -121,6 +121,71 @@ class FreeIPAMembershipReconcileCommandTests(TestCase):
         add_mock.assert_called_once_with("alice")
         remove_mock.assert_called_once_with("bob")
 
+    def test_alert_omits_groups_with_only_zero_counts_when_other_group_has_drift(self) -> None:
+        individual_type, _ = MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={
+                "name": "Individual",
+                "group_cn": "almalinux-individual",
+                "category_id": "individual",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        sponsorship_type, _ = MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor",
+                "group_cn": "almalinux-gold",
+                "category_id": "sponsorship",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+        Membership.objects.create(target_username="alice", membership_type=individual_type)
+        organization = Organization.objects.create(name="Example Org", representative="bob")
+        Membership.objects.create(target_organization=organization, membership_type=sponsorship_type)
+
+        admin_group = self._group(settings.FREEIPA_ADMIN_GROUP, ["admin"])
+        individual_group = self._group("almalinux-individual", ["alice"])
+        sponsorship_group = self._group("almalinux-gold", [])
+        admin_user = FreeIPAUser(
+            "admin",
+            {
+                "uid": ["admin"],
+                "mail": ["admin@example.com"],
+                "memberof_group": [settings.FREEIPA_ADMIN_GROUP],
+            },
+        )
+
+        def _get_group(cn: str) -> FreeIPAGroup | None:
+            if cn == settings.FREEIPA_ADMIN_GROUP:
+                return admin_group
+            if cn == "almalinux-individual":
+                return individual_group
+            if cn == "almalinux-gold":
+                return sponsorship_group
+            return self._group(cn, [])
+
+        with (
+            patch("core.management.commands.freeipa_membership_reconcile.FreeIPAGroup.get", side_effect=_get_group),
+            patch("core.management.commands.freeipa_membership_reconcile.FreeIPAUser.get", return_value=admin_user),
+        ):
+            call_command("freeipa_membership_reconcile")
+
+        from post_office.models import Email
+
+        email = Email.objects.get(
+            to="admin@example.com",
+            template__name=settings.FREEIPA_MEMBERSHIP_RECONCILE_ALERT_EMAIL_TEMPLATE_NAME,
+        )
+        groups = list(dict(email.context or {}).get("groups") or [])
+
+        self.assertEqual([group["group_cn"] for group in groups], ["almalinux-gold"])
+        self.assertEqual(groups[0]["missing_count"], 1)
+        self.assertEqual(groups[0]["extra_count"], 0)
+        self.assertEqual(groups[0]["errors"], [])
+
     def test_targeted_mode_requires_selector(self) -> None:
         with self.assertRaisesMessage(
             CommandError,

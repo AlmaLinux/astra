@@ -753,6 +753,59 @@ class MattermostWebhookDispatchTests(TestCase):
         post_mock.assert_not_called()
         self.assertTrue(captured.records)
 
+    def test_dispatch_skips_membership_count_events_when_count_is_zero(self) -> None:
+        MattermostWebhookEndpoint.objects.create(
+            label="Membership",
+            url="https://hooks.example.invalid/membership",
+            enabled=True,
+            events=["membership_expired"],
+        )
+
+        with patch("core.mattermost_webhooks._post_to_endpoint") as post_mock:
+            dispatch_mattermost_event("membership_expired", count=0, membership_type="all", actor="system")
+
+        post_mock.assert_not_called()
+
+    def test_dispatch_skips_non_membership_event_when_count_is_zero(self) -> None:
+        MattermostWebhookEndpoint.objects.create(
+            label="Elections",
+            url="https://hooks.example.invalid/elections-zero",
+            enabled=True,
+            events=["election_opened"],
+        )
+
+        with patch("core.mattermost_webhooks._post_to_endpoint") as post_mock:
+            dispatch_mattermost_event("election_opened", count=0, actor="system")
+
+        post_mock.assert_not_called()
+
+    def test_dispatch_skips_membership_expiring_soon_when_count_is_zero(self) -> None:
+        MattermostWebhookEndpoint.objects.create(
+            label="Membership",
+            url="https://hooks.example.invalid/membership-expiring",
+            enabled=True,
+            events=["membership_expiring_soon"],
+        )
+
+        with patch("core.mattermost_webhooks._post_to_endpoint") as post_mock:
+            dispatch_mattermost_event("membership_expiring_soon", count=0, membership_type="all", actor="system")
+
+        post_mock.assert_not_called()
+
+    def test_dispatch_continues_when_count_is_malformed(self) -> None:
+        endpoint = MattermostWebhookEndpoint.objects.create(
+            label="Elections",
+            url="https://hooks.example.invalid/elections-malformed",
+            enabled=True,
+            events=["election_opened"],
+        )
+
+        with patch("core.mattermost_webhooks._post_to_endpoint") as post_mock:
+            dispatch_mattermost_event("election_opened", count="two", actor="system")
+
+        post_mock.assert_called_once()
+        self.assertEqual(post_mock.call_args.args[0].pk, endpoint.pk)
+
     def test_dispatch_logs_warning_and_skips_unknown_event_keys_in_endpoint_events(self) -> None:
         MattermostWebhookEndpoint.objects.create(
             label="Unknown route key",

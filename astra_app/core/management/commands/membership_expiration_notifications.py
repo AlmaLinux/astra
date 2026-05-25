@@ -115,8 +115,6 @@ class Command(BaseCommand):
 
         queued = 0
         skipped = 0
-        had_expiring_memberships = False
-
         membership_usernames: set[str] = {
             str(membership.target_username or "").strip()
             for membership in memberships
@@ -162,8 +160,6 @@ class Command(BaseCommand):
 
             if days_until not in schedule_days:
                 continue
-
-            had_expiring_memberships = True
 
             template = settings.MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME
 
@@ -246,8 +242,6 @@ class Command(BaseCommand):
 
             if days_until not in schedule_days:
                 continue
-
-            had_expiring_memberships = True
 
             template = settings.ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME
 
@@ -358,7 +352,7 @@ class Command(BaseCommand):
             logger.info("[dry-run] %s", summary)
         else:
             logger.info(summary)
-            if had_expiring_memberships:
+            if queued > 0:
                 astra_signals.membership_expiring_soon.send(
                     sender=astra_signals.MembershipExpirationCommand,
                     count=queued,

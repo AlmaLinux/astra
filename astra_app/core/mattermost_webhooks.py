@@ -1254,6 +1254,23 @@ def dispatch_mattermost_event(event_key: str, **kwargs: object) -> None:
             logger.warning("mattermost.unknown_event_key", extra={"event_key": event_key})
             return
 
+        raw_count = kwargs.get("count")
+        numeric_count: int | None = None
+        if raw_count is not None:
+            try:
+                numeric_count = int(raw_count)
+            except (TypeError, ValueError):
+                logger.warning(
+                    "mattermost.invalid_event_count",
+                    extra={"event_key": event_key, "count": raw_count},
+                )
+        if numeric_count is not None and numeric_count <= 0:
+            logger.info(
+                "mattermost.zero_count_event_suppressed",
+                extra={"event_key": event_key, "count": raw_count},
+            )
+            return
+
         if event_key in _MEMBERSHIP_REQUEST_DETAIL_EVENTS and kwargs.get("membership_request") is None:
             logger.warning("mattermost.membership_request_missing_context", extra={"event_key": event_key})
             return
