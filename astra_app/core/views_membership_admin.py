@@ -793,8 +793,7 @@ def _build_membership_stats_trends_payloads(
     exp_periods = sorted(exp_index)
     expirations_rows: list[dict[str, object]] = []
     if exp_periods:
-        current_local = timezone.localtime(now)
-        current = current_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        current = exp_periods[0]
         end = exp_periods[-1]
         while current <= end:
             expirations_rows.append(

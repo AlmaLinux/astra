@@ -17,6 +17,10 @@ describe("mountUserProfilePage", () => {
     const root = document.createElement("div");
     root.setAttribute("data-user-profile-root", "");
     root.setAttribute("data-user-profile-api-url", "/api/v1/users/alice/profile/detail");
+    root.setAttribute("data-user-profile-chat-irc-default-server", "irc.libera.chat");
+    root.setAttribute("data-user-profile-chat-matrix-default-server", "matrix.org");
+    root.setAttribute("data-user-profile-chat-mattermost-default-server", "chat.almalinux.org");
+    root.setAttribute("data-user-profile-chat-mattermost-default-team", "almalinux");
     root.setAttribute("data-user-profile-settings-profile-url", "/settings/?tab=profile");
     root.setAttribute("data-user-profile-settings-country-code-url", "/settings/?tab=profile&highlight=country_code");
     root.setAttribute("data-user-profile-settings-emails-url", "/settings/?tab=emails");

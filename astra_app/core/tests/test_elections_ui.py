@@ -190,7 +190,7 @@ class ElectionsDetailShellTests(TestCase):
         self.assertContains(resp, '<div class="col-lg-8">\n      <div\n        data-election-detail-root')
         self.assertContains(resp, '<div class="row" data-election-detail-wide-sections></div>')
         content = resp.content.decode()
-        self.assertLess(content.index("<div\n      data-election-detail-root"), content.index('<div class="col-lg-4">'))
+        self.assertLess(content.index('data-election-detail-root'), content.index('<div class="col-lg-4">'))
         self.assertLess(content.index('<div class="col-lg-4">'), content.index('data-election-detail-wide-sections'))
         self.assertContains(resp, reverse("api-election-detail-page", args=[election.id]))
         self.assertContains(resp, reverse("api-election-detail-candidates", args=[election.id]))

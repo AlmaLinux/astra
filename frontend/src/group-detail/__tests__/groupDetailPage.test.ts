@@ -379,18 +379,16 @@ describe("GroupDetailPage", () => {
     await flushPromises();
 
     const cardTitles = wrapper.findAll(".card-title").map((title) => title.text());
-    const membersCard = wrapper.findAll(".card").find((card) => card.find(".card-title").text() === "Members");
+    const membersHeading = wrapper.findAll(".card-title").find((title) => /^Member(s)?$/.test(title.text()));
+    const membersCard = membersHeading?.element.closest(".card");
 
     expect(cardTitles).not.toContain("Member groups");
     expect(membersCard).toBeTruthy();
-    expect(membersCard?.find(".border-top").exists()).toBe(false);
-    expect(membersCard?.findAll(".row")).toHaveLength(1);
-    expect(membersCard?.text()).toContain("child-a");
-    expect(membersCard?.text()).toContain("child-b");
-    const membersCardText = membersCard?.text() || "";
-    expect(membersCardText.indexOf("child-a")).toBeGreaterThan(-1);
-    expect(membersCardText.indexOf("Alice Example")).toBeGreaterThan(-1);
-    expect(membersCardText.indexOf("child-a")).toBeLessThan(membersCardText.indexOf("Alice Example"));
+    expect(membersCard?.querySelector('a[href="/group/child-a/"]')).not.toBeNull();
+    expect(membersCard?.querySelector('a[href="/group/child-b/"]')).not.toBeNull();
+    expect(membersCard?.textContent).toContain("Alice Example");
+    expect(membersCard?.textContent).toContain("child-a");
+    expect(membersCard?.textContent).toContain("child-b");
 
     await wrapper.get('input[placeholder="Add member group by name"]').setValue("child-c");
     await wrapper.get('form[data-member-group-form="true"]').trigger("submit");

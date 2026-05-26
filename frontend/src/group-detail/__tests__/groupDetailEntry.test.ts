@@ -18,6 +18,20 @@ function buildRoot(attributes: Record<string, string>): HTMLDivElement {
   return root;
 }
 
+function buildFeedbackFooter(): HTMLAnchorElement {
+  const footer = document.createElement("div");
+  footer.setAttribute("data-sentry-feedback-footer", "");
+  footer.className = "d-none";
+
+  const link = document.createElement("a");
+  link.setAttribute("data-sentry-feedback-link", "");
+  link.href = "mailto:astra@example.com";
+  link.textContent = "Contact support";
+  footer.appendChild(link);
+  document.body.appendChild(footer);
+  return link;
+}
+
 describe("mountGroupDetailPage", () => {
   afterEach(() => {
     document.body.innerHTML = "";
@@ -29,6 +43,7 @@ describe("mountGroupDetailPage", () => {
     (window as typeof window & { Sentry?: unknown }).Sentry = {
       getFeedback: () => ({ attachTo }),
     };
+    const feedbackLink = buildFeedbackFooter();
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input) => {
@@ -93,7 +108,7 @@ describe("mountGroupDetailPage", () => {
     expect(app).not.toBeNull();
     expect(root.querySelector("[data-group-detail-vue-root]")).not.toBeNull();
     await flushPromises();
-    expect(root.querySelector("[data-sentry-feedback-trigger]")).not.toBeNull();
+    expect(feedbackLink.getAttribute("data-sentry-feedback-bound")).toBe("true");
     expect(attachTo).toHaveBeenCalledTimes(1);
   });
 });

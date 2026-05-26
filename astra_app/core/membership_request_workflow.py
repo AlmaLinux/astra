@@ -1001,126 +1001,16 @@ def approve_membership_request(
         if org is None:
             raise ValidationError("Organization not found")
 
-        email_recipient = _organization_notification_email(org)
-
-        previous_expires_at = previous_expires_at_for_extension(
-            membership_request=membership_request,
-            membership_type=membership_type,
-        )
-
-        template_name: str | None = None
-        if send_approved_email and email_recipient:
-            template_name = _resolve_approval_template_name(
-                membership_type=membership_type,
-                override=approved_email_template_name,
-                previous_expires_at=previous_expires_at,
-            )
-            _ensure_configured_email_template_exists(template_name=template_name)
-        elif send_approved_email:
-            logger.warning(
-                "%s: approved email skipped due to missing recipient address request_id=%s org_id=%s",
-                log_prefix,
-                membership_request.pk,
-                org.pk,
-                extra={
-                    "event": "astra.membership.email.skipped_missing_recipient",
-                    "component": "membership",
-                    "outcome": "warning",
-                    "template_name": settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME,
-                    "request_id": membership_request.pk,
-                    "target_kind": "organization",
-                    "target_organization_id": org.pk,
-                    "action": "approved",
-                },
-            )
-
-        email_context: dict[str, object] = (
-            {
-                **system_email_context(),
-                **organization_sponsor_email_context(organization=org),
-                **membership_committee_email_context(),
-                "organization_name": org.name,
-                "membership_type": membership_type.name,
-                "membership_type_code": membership_type.code,
-            }
-            if template_name is not None
-            else {}
-        )
-
-    else:
-        user = FreeIPAUser.get(membership_request.requested_username, respect_privacy=False)
-        if user is None:
-            raise ValidationError("Unable to load the requested user from FreeIPA")
-
-        email_recipient = user.email
-
-        previous_expires_at = previous_expires_at_for_extension(
-            membership_request=membership_request,
-            membership_type=membership_type,
-        )
-
-        template_name = None
-        if send_approved_email and email_recipient:
-            template_name = _resolve_approval_template_name(
-                membership_type=membership_type,
-                override=approved_email_template_name,
-                previous_expires_at=previous_expires_at,
-            )
-            _ensure_configured_email_template_exists(template_name=template_name)
-        elif send_approved_email:
-            logger.warning(
-                "%s: approved email skipped due to missing recipient address request_id=%s target=%r",
-                log_prefix,
-                membership_request.pk,
-                membership_request.requested_username,
-                extra={
-                    "event": "astra.membership.email.skipped_missing_recipient",
-                    "component": "membership",
-                    "outcome": "warning",
-                    "template_name": settings.MEMBERSHIP_REQUEST_APPROVED_EMAIL_TEMPLATE_NAME,
-                    "request_id": membership_request.pk,
-                    "target_kind": "user",
-                    "target_username": membership_request.requested_username,
-                    "action": "approved",
-                },
-            )
-        email_context = (
-            {
-                **system_email_context(),
-                **user_email_context_from_user(user=user),
-                **membership_committee_email_context(),
-                "membership_type": membership_type.name,
-                "membership_type_code": membership_type.code,
-                "group_cn": membership_type.group_cn,
-            }
-            if template_name is not None
-            else {}
-        )
+    previous_expires_at = previous_expires_at_for_extension(
+        membership_request=membership_request,
+        membership_type=membership_type,
+    )
 
     membership_request.status = MembershipRequest.Status.approved
     membership_request.on_hold_at = None
     membership_request.decided_at = decided
     membership_request.decided_by_username = actor_username
     membership_request.save(update_fields=["status", "on_hold_at", "decided_at", "decided_by_username"])
-
-    sent_email = None
-    if template_name is not None:
-        try:
-            sent_email = queue_templated_email(
-                recipients=[email_recipient],
-                sender=settings.DEFAULT_FROM_EMAIL,
-                template_name=template_name,
-                context=email_context,
-                reply_to=[settings.MEMBERSHIP_COMMITTEE_EMAIL],
-            )
-        except Exception:
-            logger.exception(
-                "%s: sending approved email failed request_id=%s",
-                log_prefix,
-                membership_request.pk,
-                extra=current_exception_log_fields(),
-            )
-            raise
 
     log = _execute_membership_grant(
         actor_username=actor_username,
@@ -1133,6 +1023,35 @@ def approve_membership_request(
         membership_request=membership_request,
         on_group_add_success=on_group_add_success,
     )
+
+    sent_email = None
+    if send_approved_email:
+        template_name = _resolve_approval_template_name(
+            membership_type=membership_type,
+            override=approved_email_template_name,
+            previous_expires_at=previous_expires_at,
+        )
+        target = _build_membership_target(membership_request)
+        if target.email:
+            _ensure_configured_email_template_exists(template_name=template_name)
+        try:
+            sent_email = _send_membership_request_notification(
+                target=target,
+                membership_type=membership_type,
+                template_name=template_name,
+                log_context={
+                    "request_id": membership_request.pk,
+                    "action": "approved",
+                },
+            )
+        except Exception:
+            logger.exception(
+                "%s: sending approved email failed request_id=%s",
+                log_prefix,
+                membership_request.pk,
+                extra=current_exception_log_fields(),
+            )
+            raise
 
     _try_add_note(
         membership_request=membership_request,

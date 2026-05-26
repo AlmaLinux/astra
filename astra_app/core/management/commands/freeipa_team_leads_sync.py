@@ -5,6 +5,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 from core.freeipa.group import sync_materialized_team_leads_group
+from core.logging_extras import current_exception_log_fields
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,7 @@ class Command(BaseCommand):
                 "freeipa_team_leads_sync failed source=%s destination=%s",
                 settings.MATERIALIZED_TEAM_LEADS_SOURCE_GROUP_CN,
                 settings.MATERIALIZED_TEAM_LEADS_DESTINATION_GROUP_CN,
+                extra=current_exception_log_fields(),
             )
             raise CommandError(str(exc)) from exc
 

@@ -520,7 +520,7 @@ function formatHoursDuration(hours: number | null): string {
 
 function retentionTotal(values: Array<number | TimePoint> | undefined): number {
   if (!values) return 0;
-  return values.reduce((acc, value) => acc + (typeof value === "number" ? value : value.y), 0);
+  return values.reduce<number>((acc, value) => acc + (typeof value === "number" ? value : value.y), 0);
 }
 
 function hasRetentionCohortRows(): boolean {
