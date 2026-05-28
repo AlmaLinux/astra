@@ -242,5 +242,6 @@ class CoreConfig(AppConfig):
         _patch_jazzmin_side_menu_model_groups()
         _patch_django_avatar_get_user()
         __import__("core.checks_membership")
+        __import__("core.post_office_alerts")
         __import__("core.ses_signals")
         __import__("core.signal_receivers")
