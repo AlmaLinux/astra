@@ -142,6 +142,14 @@ Pre-change checklist (must answer mentally before finishing):
 - You don't need to restart the web container after code changes; it refreshes automatically.
 - This is python, you don't need to compile the code.
 - You can smoke-test Django with: `podman-compose exec -T web python manage.py check`
+- Playwright auth/profile E2E contract for this repo:
+  - Start the normal dev stack with: `podman-compose -p astra-dev up -d`
+  - Start the isolated E2E stack with: `podman-compose -p astra-e2e --env-file .env.e2e -f docker-compose.yml -f docker-compose.e2e.yml up -d db minio minio_init web`
+  - Reset the E2E auth/profile scenario with: `podman-compose -p astra-e2e --env-file .env.e2e -f docker-compose.yml -f docker-compose.e2e.yml exec -T web python manage.py auth_profile_reset`
+  - Install the browser dependency from `frontend/` with: `npm ci && npm run e2e:install`
+  - Run the checked-in Playwright spec from `frontend/` with: `cd frontend && npm run e2e:auth-profile`
+  - Prefer the checked-in wrapper for routine local runs: `scripts/auth-profile-e2e.sh` (default run, `down` to stop the isolated E2E stack)
+  - The dev stack stays on `http://127.0.0.1:8000` with Vite on `http://127.0.0.1:5173`; the E2E stack uses the `.env.e2e` port block and serves built assets from `http://127.0.0.1:18000`
 - You can run more tests with: `podman-compose exec -T web python manage.py test --noinput`
   - IMPORTANT: There are a lot of tests and they take a while to run, plus it's hard to miss the relevant output.
     Run the full test suite like this: `podman-compose exec -T web python manage.py test --keepdb 2>&1 | grep -E "^(FAIL|ERROR|OK|FAILED|Ran )"`. This will show you *which* tests fail and then you can run just those to see the details.

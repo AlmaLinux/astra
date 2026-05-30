@@ -14,6 +14,11 @@ from core.freeipa.circuit_breaker import (
     _record_freeipa_availability_failure,
     _reset_freeipa_circuit_failures,
 )
+from core.freeipa.e2e_registry import (
+    get_e2e_auth_client,
+    get_e2e_service_client,
+    is_e2e_fake_freeipa_enabled,
+)
 from core.freeipa.exceptions import FreeIPAUnavailableError
 from core.logging_extras import current_exception_log_fields
 
@@ -130,6 +135,9 @@ def _build_freeipa_client() -> ClientMeta:
 
 
 def _get_freeipa_client(username: str, password: str) -> ClientMeta:
+    if is_e2e_fake_freeipa_enabled():
+        return get_e2e_auth_client(username=username, password=password)
+
     client = _build_freeipa_client()
     client.login(username, password)
     return client
@@ -140,6 +148,11 @@ def _get_freeipa_service_client_cached() -> ClientMeta:
         client = _service_client_local.client
         if client is not None:
             return client
+
+    if is_e2e_fake_freeipa_enabled():
+        client = get_e2e_service_client()
+        _service_client_local.client = client
+        return client
 
     client = _get_freeipa_client(settings.FREEIPA_SERVICE_USER, settings.FREEIPA_SERVICE_PASSWORD)
     _service_client_local.client = client

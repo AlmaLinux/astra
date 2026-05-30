@@ -26,7 +26,7 @@ class FreeIPAAuthBackend(BaseBackend):
             user_data = FreeIPAUser._fetch_full_user(client, username)
             if user_data:
                 logger.debug("authenticate: success username=%s", username)
-                user = FreeIPAUser(username, user_data)
+                user = FreeIPAUser(normalized_username, user_data)
                 if request is not None and hasattr(request, 'session'):
                     request.session['_freeipa_username'] = normalized_username
                 return user
