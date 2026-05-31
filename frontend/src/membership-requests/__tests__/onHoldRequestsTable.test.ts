@@ -292,4 +292,31 @@ describe("OnHoldRequestsTable", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(wrapper.emitted("bulk-approve-on-hold")).toEqual([[{ requestIds: [88] }]]);
   });
+
+  it("shows the on-hold table selected count without depending on pending-table state", async () => {
+    const wrapper = mount(OnHoldRequestsTable, {
+      props: {
+        bootstrap,
+        rows: [row, { ...row, request_id: 89, target: { ...row.target, label: "Acme Org Two", secondary_label: "sponsor2@example.com", organization_id: 43 } }],
+        count: 2,
+        currentPage: 1,
+        totalPages: 1,
+        pageSize: 10,
+        isLoading: false,
+        error: "",
+      },
+      global: {
+        stubs: {
+          MembershipNotesCard: true,
+        },
+      },
+    });
+
+    expect(wrapper.text()).not.toContain("Selected: 1");
+
+    await wrapper.get<HTMLInputElement>('tbody input[type="checkbox"][name="selected"][value="88"]').setValue(true);
+
+    expect(wrapper.text()).toContain("Selected: 1");
+    expect(wrapper.text()).not.toContain("Selected: 2");
+  });
 });

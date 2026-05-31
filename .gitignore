@@ -60,3 +60,5 @@ terraform.rc
 agent-output/
 rekor-signing-key.pem
 memories/
+frontend/test-results/
+.e2e-reset-state/

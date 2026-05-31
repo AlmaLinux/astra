@@ -72,7 +72,7 @@ const memberGridItems = computed<MemberGridItem[]>(() => [
   ...memberGroupsRows.value.map((group) => ({ kind: "group", group }) satisfies MemberGridGroupItem),
   ...membersRows.value.map((member) => ({ kind: "user", member }) satisfies MemberGridUserItem),
 ]);
-const membersCount = computed(() => membersPayload.value?.pagination.count || groupInfo.value?.member_count || 0);
+const membersCount = computed(() => groupInfo.value?.member_count || 0);
 const membersPagination = computed(() => membersPayload.value?.pagination || null);
 const leaderItems = computed<GroupLeaderItem[]>(() => leadersPayload.value?.items || []);
 const leadersPagination = computed(() => leadersPayload.value?.pagination || null);

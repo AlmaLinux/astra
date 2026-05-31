@@ -87,6 +87,10 @@ function onPageChange(pageNumber: number): void {
         <div class="text-muted">On hold: {{ count }}</div>
       </template>
 
+      <template #footer-meta="{ selectedCount }">
+        <span v-if="selectedCount > 0" class="ml-2">Selected: {{ selectedCount }}</span>
+      </template>
+
       <template #row-extra-columns="{ row }">
         <td class="align-top">{{ row.membership_type.name }}</td>
         <td class="align-top">

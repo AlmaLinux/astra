@@ -1,11 +1,12 @@
 from unittest.mock import Mock, patch
 
-from django.http import HttpResponse
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.core.exceptions import ImproperlyConfigured
+from django.http import HttpResponse
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
+from core.freeipa import e2e_registry
 from core.freeipa.agreement import FreeIPAFASAgreement
 from core.freeipa.auth_backend import FreeIPAAuthBackend
 from core.freeipa.client import _get_freeipa_client
@@ -127,6 +128,54 @@ class E2EFakeFreeIPAAuthTests(TestCase):
         self.assertEqual(created.description, "CoC")
         self.assertEqual(created.users, [])
         self.assertEqual([agreement.cn for agreement in FreeIPAFASAgreement.all()], ["AlmaLinux Community Code of Conduct"])
+
+    def test_fake_freeipa_agreement_and_group_state_survive_simulated_new_process(self) -> None:
+        client = get_e2e_service_client()
+        agreement = FreeIPAFASAgreement.create("AlmaLinux Community Code of Conduct", description="CoC")
+        agreement.add_user("regular01")
+        client.group_add("new-membership-group", o_description="Membership type group")
+
+        e2e_registry._E2E_AGREEMENT_REGISTRY = None
+        e2e_registry._E2E_GROUP_REGISTRY = None
+
+        restored_agreement = FreeIPAFASAgreement.get("AlmaLinux Community Code of Conduct")
+        restored_group = client.group_find(o_cn="new-membership-group", o_all=True, o_no_members=False)
+
+        self.assertIsNotNone(restored_agreement)
+        assert restored_agreement is not None
+        self.assertIn("regular01", restored_agreement.users)
+        self.assertEqual(restored_group["count"], 1)
+
+    @override_settings(
+        CACHES={
+            "default": {
+                "BACKEND": "django.core.cache.backends.dummy.DummyCache",
+            }
+        }
+    )
+    def test_fake_freeipa_agreement_updates_persist_even_when_cache_backend_does_not_store_values(self) -> None:
+        agreement = FreeIPAFASAgreement.create("AlmaLinux Community Code of Conduct", description="CoC")
+
+        agreement.add_user("regular01")
+
+        restored_agreement = FreeIPAFASAgreement.get("AlmaLinux Community Code of Conduct")
+
+        self.assertIsNotNone(restored_agreement)
+        assert restored_agreement is not None
+        self.assertIn("regular01", restored_agreement.users)
+
+    def test_fake_freeipa_user_mod_persists_profile_updates_across_simulated_new_process(self) -> None:
+        client = get_e2e_service_client()
+
+        client.user_mod("regular01", c="US")
+
+        refreshed_before_reset = client.user_show("regular01")["result"]
+        e2e_registry._E2E_GROUP_REGISTRY = None
+        e2e_registry._E2E_AGREEMENT_REGISTRY = None
+        refreshed_after_reset = get_e2e_service_client().user_show("regular01")["result"]
+
+        self.assertEqual(refreshed_before_reset.get("c"), ["US"])
+        self.assertEqual(refreshed_after_reset.get("c"), ["US"])
 
     def test_reset_e2e_fake_freeipa_state_restores_mutable_registries_to_baseline(self) -> None:
         client = get_e2e_service_client()

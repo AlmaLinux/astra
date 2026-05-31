@@ -193,6 +193,7 @@ defineSlots<{
   header(): any;
   "header-tools"(): any;
   "header-meta"(): any;
+  "footer-meta"(props: { selectedCount: number }): any;
   "row-extra-columns"(props: { row: MembershipRequestRow }): any;
   "empty-state"(): any;
 }>();
@@ -232,6 +233,10 @@ defineSlots<{
 
     <template #header-meta>
       <slot name="header-meta" />
+    </template>
+
+    <template #footer-meta="{ selectedCount }">
+      <slot name="footer-meta" :selected-count="selectedCount" />
     </template>
 
     <template #row-cells="{ row }">

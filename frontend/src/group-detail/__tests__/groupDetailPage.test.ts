@@ -183,6 +183,70 @@ describe("GroupDetailPage", () => {
     expect(wrapper.find('a[href="not a channel"]').exists()).toBe(false);
   });
 
+  it("shows the recursive group member count in the header instead of the current direct-members page count", async () => {
+    const fetchMock = vi.fn(async (input) => {
+      const url = String(input);
+      if (url.includes("/info")) {
+        return new Response(
+          JSON.stringify({
+            group: {
+              cn: "infra",
+              description: "Infrastructure",
+              fas_url: "",
+              fas_mailing_list: "",
+              fas_discussion_url: "",
+              fas_irc_channels: [],
+              member_count: 3,
+              is_member: true,
+              is_sponsor: true,
+              required_agreements: [],
+              unsigned_usernames: [],
+            },
+          }),
+        );
+      }
+      if (url.includes("/leaders")) {
+        return new Response(JSON.stringify({ leaders: { items: [], pagination: { count: 0, page: 1, num_pages: 1, page_numbers: [1], show_first: false, show_last: false, has_previous: false, has_next: false, previous_page_number: null, next_page_number: null, start_index: 0, end_index: 0 } } }));
+      }
+      return new Response(
+        JSON.stringify({
+          members: {
+            q: "",
+            items: [{ username: "alice", full_name: "Alice Example", avatar_url: "/avatars/alice.png", is_leader: false }],
+            pagination: {
+              count: 1,
+              page: 1,
+              num_pages: 1,
+              page_numbers: [1],
+              show_first: false,
+              show_last: false,
+              has_previous: false,
+              has_next: false,
+              previous_page_number: null,
+              next_page_number: null,
+              start_index: 1,
+              end_index: 1,
+            },
+          },
+          member_groups: {
+            items: [{ cn: "ops" }],
+          },
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const wrapper = mount(GroupDetailPage, {
+      props: { bootstrap },
+    });
+
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("(3 members)");
+    expect(wrapper.text()).not.toContain("(1 member)");
+  });
+
   it("renders the info card and loading states before leaders and members finish loading", async () => {
     const leadersDeferred = deferredResponse();
     const membersDeferred = deferredResponse();
