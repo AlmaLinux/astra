@@ -3,7 +3,6 @@ version: '3.8'
 services:
   db:
     image: postgres:18
-    container_name: almalinux_db2
     restart: always
     environment:
       - POSTGRES_DB=almalinux_members
@@ -19,7 +18,6 @@ services:
 
   mailhog:
     image: mailhog/mailhog
-    container_name: almalinux_mailhog
     command:
       - -jim-accept=0.25
       - -jim-disconnect=0.25
@@ -27,19 +25,18 @@ services:
       - -jim-reject-recipient=0.25
       - -jim-reject-auth=0.25
     ports:
-      - "8025:8025"
-      - "1025:1025"
+      - "${MAILHOG_UI_PORT:-8025}:8025"
+      - "${MAILHOG_SMTP_PORT:-1025}:1025"
 
   minio:
     image: minio/minio:latest
-    container_name: almalinux_minio
     command: server /data --console-address ":9001"
     environment:
       - MINIO_ROOT_USER=minio
       - MINIO_ROOT_PASSWORD=minio12345
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio_data:/data
     healthcheck:
@@ -50,7 +47,6 @@ services:
 
   minio_init:
     image: minio/mc:latest
-    container_name: almalinux_minio_init
     depends_on:
       minio:
         condition: service_healthy
@@ -62,13 +58,12 @@ services:
 
   web:
     build: .
-    container_name: almalinux_web2
     command: python manage.py runserver 0.0.0.0:8000
     volumes:
       - .:/app:z
       - ./rekor-signing-key.pem:/run/secrets/rekor-signing-key.pem:ro,z
     ports:
-      - "8000:8000"
+      - "${WEB_PORT:-8000}:8000"
     healthcheck:
       test:
         [
@@ -90,7 +85,7 @@ services:
       - DEBUG=True
       - DJANGO_VITE_DEV_MODE=True
       - DJANGO_VITE_DEV_SERVER_HOST=localhost
-      - DJANGO_VITE_DEV_SERVER_PORT=5173
+      - DJANGO_VITE_DEV_SERVER_PORT=${DJANGO_VITE_DEV_SERVER_PORT:-5173}
       - DJANGO_VITE_DEV_SERVER_HEALTHCHECK_HOST=vite
       - DJANGO_VITE_DEV_SERVER_HEALTHCHECK_PORT=5173
       - SECRET_KEY=dev_secret_key
@@ -100,8 +95,8 @@ services:
       # - SENTRY_RELEASE=dev
       # - SENTRY_SEND_DEFAULT_PII=False
       #- DJANGO_AUTO_MIGRATE=1
-      - DATABASE_URL=postgres://postgres:postgres@almalinux_db2:5432/almalinux_members
-      - EMAIL_URL=smtp://almalinux_mailhog:1025
+      - DATABASE_URL=postgres://postgres:postgres@db:5432/almalinux_members
+      - EMAIL_URL=smtp://mailhog:1025
       - FREEIPA_HOST=ipa.tinystage.test
       - FREEIPA_VERIFY_SSL=False
       - FREEIPA_SERVICE_USER=admin
@@ -113,15 +108,14 @@ services:
       - AWS_S3_ENDPOINT_URL=http://minio:9000
       - AWS_S3_ADDRESSING_STYLE=path
       - AWS_QUERYSTRING_AUTH=False
-      - PUBLIC_BASE_URL=http://localhost:8000
-      - AWS_S3_DOMAIN=http://localhost:9000
+      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-http://127.0.0.1:8000}
+      - AWS_S3_DOMAIN=${AWS_S3_DOMAIN:-http://127.0.0.1:9000}
       - SELF_SERVICE_ADDRESS_COUNTRY_ATTR=fasstatusnote
       - ELECTION_REKOR_ENDPOINT=https://rekor.sigstore.dev
       - ELECTION_REKOR_SIGNING_KEY=/run/secrets/rekor-signing-key.pem
 
   vite:
     build: .
-    container_name: almalinux_vite
     working_dir: /app/frontend
     entrypoint: []
     command:
@@ -132,7 +126,7 @@ services:
       - .:/app:z
       - frontend_node_modules:/app/frontend/node_modules:z
     ports:
-      - "5173:5173"
+      - "${VITE_PORT:-5173}:5173"
     environment:
       - CHOKIDAR_USEPOLLING=true
       - WATCHPACK_POLLING=true

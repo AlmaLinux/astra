@@ -257,7 +257,7 @@ onMounted(async () => {
         </div>
       </div>
 
-      <div class="card">
+      <div class="card" data-test="request-card">
         <div class="card-body">
           <dl class="row mb-0">
             <dt class="col-sm-3">Status</dt>
@@ -304,62 +304,7 @@ onMounted(async () => {
             </dl>
           </template>
 
-          <template v-if="payload.viewer.mode === 'committee'">
-            <template v-if="payload.committee?.compliance_warning?.message">
-              <hr>
-              <div class="alert alert-warning" role="alert">
-                <strong>Compliance warning:</strong>
-                {{ payload.committee.compliance_warning.message }}
-              </div>
-            </template>
-
-            <template v-if="bootstrap.notesCanView">
-              <hr>
-              <MembershipNotesCard
-                :request-id="payload.request.id"
-                :summary-url="bootstrap.noteSummaryUrl"
-                :detail-url="bootstrap.noteDetailUrl"
-                :add-url="bootstrap.noteAddUrl"
-                :csrf-token="bootstrap.csrfToken"
-                :next-url="bootstrap.noteNextUrl"
-                :can-view="bootstrap.notesCanView"
-                :can-write="bootstrap.notesCanWrite"
-                :can-vote="bootstrap.notesCanVote"
-              />
-            </template>
-
-            <template v-if="payload.committee?.actions">
-              <hr>
-              <MembershipRequestDetailActions
-                :request-id="payload.request.id"
-                :request-status="payload.request.status"
-                :membership-type-name="payload.request.membership_type.name"
-                :request-target="targetLabel()"
-                :approve-url="bootstrap.approveUrl"
-                :approve-on-hold-url="bootstrap.approveOnHoldUrl"
-                :reject-url="bootstrap.rejectUrl"
-                :rfi-url="bootstrap.rfiUrl"
-                :ignore-url="bootstrap.ignoreUrl"
-                :can-request-info="payload.committee.actions.canRequestInfo"
-                :show-on-hold-approve="payload.committee.actions.showOnHoldApprove"
-                :csrf-token="bootstrap.csrfToken"
-                @action-success="onCommitteeActionSuccess"
-              />
-            </template>
-
-            <template v-if="payload.committee?.reopen.show">
-              <hr>
-              <button
-                type="button"
-                class="btn btn-sm btn-outline-secondary"
-                data-test="reopen-request"
-                :disabled="isReopening"
-                @click="reopenIgnoredRequest"
-              >Reopen</button>
-            </template>
-          </template>
-
-          <template v-else-if="payload.self_service">
+          <template v-if="payload.self_service">
             <template v-if="payload.self_service.can_resubmit && payload.self_service.committee_email">
               <hr>
               <div class="callout callout-danger">
@@ -451,6 +396,65 @@ onMounted(async () => {
                 </div>
               </div>
             </template>
+          </template>
+        </div>
+      </div>
+
+      <div v-if="payload.viewer.mode === 'committee'" class="card mt-3" data-test="committee-card">
+        <div class="card-header">
+          Membership Committee
+        </div>
+        <div class="card-body">
+          <template v-if="payload.committee?.compliance_warning?.message">
+            <div class="alert alert-warning" role="alert">
+              <strong>Compliance warning:</strong>
+              {{ payload.committee.compliance_warning.message }}
+            </div>
+          </template>
+
+          <template v-if="bootstrap.notesCanView">
+            <MembershipNotesCard
+              :request-id="payload.request.id"
+              :summary-url="bootstrap.noteSummaryUrl"
+              :detail-url="bootstrap.noteDetailUrl"
+              :add-url="bootstrap.noteAddUrl"
+              :csrf-token="bootstrap.csrfToken"
+              :next-url="bootstrap.noteNextUrl"
+              :can-view="bootstrap.notesCanView"
+              :can-write="bootstrap.notesCanWrite"
+              :can-vote="bootstrap.notesCanVote"
+              :initial-open="true"
+            />
+          </template>
+
+          <template v-if="payload.committee?.actions">
+            <hr>
+            <MembershipRequestDetailActions
+              :request-id="payload.request.id"
+              :request-status="payload.request.status"
+              :membership-type-name="payload.request.membership_type.name"
+              :request-target="targetLabel()"
+              :approve-url="bootstrap.approveUrl"
+              :approve-on-hold-url="bootstrap.approveOnHoldUrl"
+              :reject-url="bootstrap.rejectUrl"
+              :rfi-url="bootstrap.rfiUrl"
+              :ignore-url="bootstrap.ignoreUrl"
+              :can-request-info="payload.committee.actions.canRequestInfo"
+              :show-on-hold-approve="payload.committee.actions.showOnHoldApprove"
+              :csrf-token="bootstrap.csrfToken"
+              @action-success="onCommitteeActionSuccess"
+            />
+          </template>
+
+          <template v-if="payload.committee?.reopen.show">
+            <hr>
+            <button
+              type="button"
+              class="btn btn-sm btn-outline-secondary"
+              data-test="reopen-request"
+              :disabled="isReopening"
+              @click="reopenIgnoredRequest"
+            >Reopen</button>
           </template>
         </div>
       </div>

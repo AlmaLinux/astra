@@ -1,0 +1,1 @@
+// Legacy auth-profile smoke coverage moved into frontend/e2e/auth/*.spec.ts.

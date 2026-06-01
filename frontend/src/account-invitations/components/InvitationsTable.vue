@@ -34,8 +34,11 @@ const emit = defineEmits<{
 const isProcessing = ref(false);
 const bulkError = ref("");
 const actionError = ref("");
+const bulkSuccess = ref("");
+const actionSuccess = ref("");
 
 const scopeLabel = computed(() => (props.scope === "accepted" ? "Accepted" : "Pending"));
+const successMessage = computed(() => actionSuccess.value || bulkSuccess.value);
 
 const columns = computed(() => {
   if (props.scope === "pending") {
@@ -88,6 +91,8 @@ function matchedUsernames(row: unknown): readonly string[] {
 function clearInlineErrors(): void {
   bulkError.value = "";
   actionError.value = "";
+  bulkSuccess.value = "";
+  actionSuccess.value = "";
 }
 
 async function handleResend(invitationId: number): Promise<void> {
@@ -109,6 +114,9 @@ async function handleResend(invitationId: number): Promise<void> {
       actionError.value = data.error || "Failed to resend invitation.";
       return;
     }
+
+    const invitation = props.rows.find((candidate) => candidate.invitation_id === invitationId);
+    actionSuccess.value = invitation ? `Invitation resent to ${invitation.email}` : "Invitation resent.";
 
     emit("open-action", { invitationId, actionKind: "resend" });
     emit("bulk-success");
@@ -138,6 +146,8 @@ async function handleDismiss(invitationId: number): Promise<void> {
       actionError.value = data.error || "Failed to dismiss invitation.";
       return;
     }
+
+    actionSuccess.value = "Invitation dismissed";
 
     emit("open-action", { invitationId, actionKind: "dismiss" });
     emit("bulk-success");
@@ -179,6 +189,12 @@ async function handleBulkAction(payload: BulkSubmitPayload): Promise<void> {
       return;
     }
 
+    if (payload.action === "resend") {
+      bulkSuccess.value = `Resent ${payload.selectedIds.length} invitation(s)`;
+    } else {
+      bulkSuccess.value = `Dismissed ${payload.selectedIds.length} invitation(s)`;
+    }
+
     emit("bulk-success");
   } catch {
     bulkError.value = "Failed to perform bulk action.";
@@ -213,12 +229,17 @@ async function handleBulkAction(payload: BulkSubmitPayload): Promise<void> {
     :bulk-error="bulkError"
     :bulk-submitting="isProcessing"
     :header-error="actionError"
+    :header-success="successMessage"
     :page-size="bootstrap.pageSize"
     @page-change="emit('page-change', $event)"
     @bulk-submit="handleBulkAction"
   >
     <template #header-meta>
       <div class="text-muted">{{ scopeLabel }}: {{ count }}</div>
+    </template>
+
+    <template #footer-meta="{ selectedCount }">
+      <span v-if="selectedCount > 0" class="ml-2">Selected: {{ selectedCount }}</span>
     </template>
 
     <template #row-cells="{ row }">

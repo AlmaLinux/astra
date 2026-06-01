@@ -12,6 +12,7 @@ from django.utils import timezone
 from core.forms_base import StyledForm
 from core.membership import (
     get_membership_request_eligibility,
+    requestable_membership_types_for_target,
 )
 from core.membership_constants import MembershipCategoryCode
 from core.membership_response_normalization import (
@@ -215,17 +216,11 @@ class MembershipRequestForm(StyledForm):
 
         membership_type_field = self.fields["membership_type"]
         assert isinstance(membership_type_field, forms.ModelChoiceField)
-        base = MembershipType.objects.enabled()
-        if organization is None:
-            base = base.filter(category__is_individual=True)
-        else:
-            base = base.filter(category__is_organization=True)
-
-        membership_type_field.queryset = (
-            base.exclude(code__in=self._blocked_membership_type_codes)
-            .exclude(category_id__in=self._pending_membership_category_ids)
-            .ordered_for_display()
-        )
+        membership_type_field.queryset = requestable_membership_types_for_target(
+            username=username,
+            organization=organization,
+            eligibility=eligibility,
+        ).ordered_for_display()
         membership_type_field.choices = self._grouped_choices(list(membership_type_field.queryset))
         membership_type_field.widget.attrs["data-category-map"] = json.dumps(
             {membership_type.code: membership_type.category_id for membership_type in membership_type_field.queryset}

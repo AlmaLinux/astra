@@ -610,6 +610,17 @@ def _profile_context_for_user(
         if full_profile_user is not None:
             profile_email = str(full_profile_user.email or "").strip()
 
+    if profile_is_private and not is_self and viewer_is_membership_committee and not country_status.code:
+        try:
+            full_profile_user = full_profile_user if 'full_profile_user' in locals() else FreeIPAUser.get(fu.username, respect_privacy=False)
+        except Exception:
+            full_profile_user = None
+        if full_profile_user is not None:
+            full_country_status = country_code_status_from_user_data(full_profile_user._user_data)
+            if full_country_status.code:
+                country_status = full_country_status
+                profile_country = country_name_from_code(full_country_status.code)
+
     return {
         "fu": fu,
         "profile_email": profile_email,

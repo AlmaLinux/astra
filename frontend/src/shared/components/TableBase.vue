@@ -45,6 +45,7 @@ const props = withDefaults(defineProps<{
   bulkValidationMessage?: string;
   bulkSubmitting?: boolean;
   headerError?: string;
+  headerSuccess?: string;
   showSelection?: boolean;
 }>(), {
   showSelection: true,
@@ -219,6 +220,7 @@ defineSlots<{
             </form>
             <div v-if="effectiveBulkError" class="small text-danger">{{ effectiveBulkError }}</div>
             <div v-if="headerError" class="small text-danger">{{ headerError }}</div>
+            <div v-if="headerSuccess" class="small text-success">{{ headerSuccess }}</div>
             <slot name="header-tools" />
           </div>
           <slot name="header-meta">

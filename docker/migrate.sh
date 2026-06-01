@@ -27,7 +27,7 @@ fi
 
 echo "[entrypoint] Running migrations (with retry)..."
 for i in $(seq 1 "${DJANGO_MIGRATE_RETRIES:-10}"); do
-  if python manage.py migrate --noinput; then
+  if python manage.py migrate --noinput --skip-checks; then
     break
   fi
   echo "[entrypoint] migrate failed; retry ${i}/${DJANGO_MIGRATE_RETRIES:-10} in 2s"

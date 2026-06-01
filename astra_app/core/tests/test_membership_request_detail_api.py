@@ -298,6 +298,43 @@ class MembershipRequestDetailApiTests(TestCase):
         self.assertNotIn("action_url", payload["self_service"]["form"])
         self.assertNotIn("submit_label", payload["self_service"]["form"])
 
+    def test_committee_requester_detail_api_includes_self_service_rfi_controls(self) -> None:
+        membership_request = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="mirror",
+            status=MembershipRequest.Status.on_hold,
+            responses=[
+                {"Domain": "mirror.example.org"},
+                {"Pull request": "https://github.com/AlmaLinux/mirrors/pull/123"},
+            ],
+        )
+
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "mail": ["alice@example.com"],
+                "givenname": ["Alice"],
+                "sn": ["Committee"],
+                "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+            },
+        )
+
+        self._login_as_freeipa_user("alice")
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=alice):
+            response = self.client.get(reverse("api-membership-request-detail", args=[membership_request.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["viewer"]["mode"], "committee")
+        self.assertIn("committee", payload)
+        self.assertTrue(payload["self_service"]["can_resubmit"])
+        self.assertIsNotNone(payload["self_service"]["form"])
+        self.assertEqual(
+            [field["name"] for field in payload["self_service"]["form"]["fields"]],
+            ["q_domain", "q_pull_request", "q_additional_information"],
+        )
+
     @override_settings(MEMBERSHIP_EMBARGOED_COUNTRY_CODES=["IR"])
     def test_committee_detail_api_includes_embargo_compliance_warning(self) -> None:
         membership_request = MembershipRequest.objects.create(

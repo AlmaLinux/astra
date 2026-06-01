@@ -151,6 +151,76 @@ describe("InvitationsTable", () => {
     });
   });
 
+  it("shows selected-count feedback for pending table selections", async () => {
+    const wrapper = mount(InvitationsTable, {
+      props: {
+        bootstrap,
+        rows: [row],
+        count: 1,
+        currentPage: 1,
+        totalPages: 1,
+        isLoading: false,
+        error: null,
+        scope: "pending",
+        buildPageHref: (page: number) => `?page=${page}`,
+      },
+    });
+
+    await wrapper.get<HTMLInputElement>('tbody input[type="checkbox"][name="selected"][value="10"]').setValue(true);
+
+    expect(wrapper.text()).toContain("Selected: 1");
+  });
+
+  it("shows an inline success message after a resend action succeeds", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true, message: "Invitation resent to alice@example.com" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const wrapper = mount(InvitationsTable, {
+      props: {
+        bootstrap,
+        rows: [row],
+        count: 1,
+        currentPage: 1,
+        totalPages: 1,
+        isLoading: false,
+        error: null,
+        scope: "pending",
+        buildPageHref: (page: number) => `?page=${page}`,
+      },
+    });
+
+    await wrapper.get('form.d-inline').trigger("submit");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Invitation resent to alice@example.com");
+  });
+
+  it("shows an inline success message after a bulk action succeeds", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true, message: "Dismissed 1 invitation(s)" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const wrapper = mount(InvitationsTable, {
+      props: {
+        bootstrap,
+        rows: [acceptedRow],
+        count: 1,
+        currentPage: 1,
+        totalPages: 1,
+        isLoading: false,
+        error: null,
+        scope: "accepted",
+        buildPageHref: (page: number) => `?page=${page}`,
+      },
+    });
+
+    await wrapper.get<HTMLInputElement>('tbody input[type="checkbox"][name="selected"][value="20"]').setValue(true);
+    await wrapper.get('select[name="bulk_action"]').setValue("dismiss");
+    await wrapper.get("form#bulk-invitations-accepted-form").trigger("submit");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Dismissed 1 invitation(s)");
+  });
+
   it("submits the accepted bulk action as JSON with scope and selected ids", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);

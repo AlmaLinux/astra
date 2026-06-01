@@ -331,4 +331,33 @@ describe("PendingRequestsTable", () => {
       selected: [101],
     });
   });
+
+  it("shows the pending table selected count only for rows checked in the pending table", async () => {
+    const wrapper = mount(PendingRequestsTable, {
+      props: {
+        bootstrap,
+        rows: [row, { ...row, request_id: 102, target: { ...row.target, username: "alice2", label: "Alice Example Two", secondary_label: "alice2" } }],
+        count: 2,
+        filterOptions,
+        selectedFilter: "renewals",
+        currentPage: 1,
+        totalPages: 1,
+        pageSize: 25,
+        isLoading: false,
+        error: "",
+      },
+      global: {
+        stubs: {
+          MembershipNotesCard: true,
+        },
+      },
+    });
+
+    expect(wrapper.text()).not.toContain("Selected: 1");
+
+    await wrapper.get<HTMLInputElement>('tbody input[type="checkbox"][name="selected"][value="101"]').setValue(true);
+
+    expect(wrapper.text()).toContain("Selected: 1");
+    expect(wrapper.text()).not.toContain("Selected: 2");
+  });
 });

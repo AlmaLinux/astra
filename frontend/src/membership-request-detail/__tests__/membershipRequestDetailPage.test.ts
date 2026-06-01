@@ -386,8 +386,8 @@ describe("MembershipRequestDetailPage", () => {
       global: {
         stubs: {
           MembershipNotesCard: {
-            template: '<div data-test="notes-card" :data-summary-url="summaryUrl" :data-detail-url="detailUrl" :data-add-url="addUrl" :data-next-url="nextUrl"></div>',
-            props: ["requestId", "summaryUrl", "detailUrl", "addUrl", "csrfToken", "nextUrl", "canView", "canWrite", "canVote"],
+            template: '<div data-test="notes-card" :data-summary-url="summaryUrl" :data-detail-url="detailUrl" :data-add-url="addUrl" :data-next-url="nextUrl" :data-initial-open="String(initialOpen)"></div>',
+            props: ["requestId", "summaryUrl", "detailUrl", "addUrl", "csrfToken", "nextUrl", "canView", "canWrite", "canVote", "initialOpen"],
           },
           MembershipRequestDetailActions: {
             template: '<div data-test="actions-card" :data-approve-url="approveUrl" :data-reject-url="rejectUrl" :data-rfi-url="rfiUrl" :data-ignore-url="ignoreUrl"></div>',
@@ -411,12 +411,76 @@ describe("MembershipRequestDetailPage", () => {
     expect(notesCard.attributes("data-detail-url")).toBe("/api/v1/membership/notes/42");
     expect(notesCard.attributes("data-add-url")).toBe("/api/v1/membership/notes/42/add");
     expect(notesCard.attributes("data-next-url")).toBe("/membership/request/42/");
+    expect(notesCard.attributes("data-initial-open")).toBe("true");
 
     const actionsCard = wrapper.get('[data-test="actions-card"]');
     expect(actionsCard.attributes("data-approve-url")).toBe("/api/v1/membership/request/42/approve");
     expect(actionsCard.attributes("data-reject-url")).toBe("/api/v1/membership/request/42/reject");
     expect(actionsCard.attributes("data-rfi-url")).toBe("/api/v1/membership/request/42/rfi");
     expect(actionsCard.attributes("data-ignore-url")).toBe("/api/v1/membership/request/42/ignore");
+  });
+
+  it("renders committee controls in a separate card after the request card", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          viewer: {
+            mode: "committee",
+          },
+          request: {
+            id: 42,
+            status: "pending",
+            requested_at: "2026-04-26T10:00:00+00:00",
+            requested_by: { show: true, username: "alice", full_name: "Alice Example", deleted: false },
+            requested_for: { show: true, kind: "user", label: "Bob Example", username: "bob", organization_id: null, deleted: false },
+            membership_type: { name: "Mirror" },
+            responses: [],
+          },
+          committee: {
+            reopen: { show: false },
+            compliance_warning: {
+              country_code: "IR",
+              country_label: "Iran",
+              message: "This request matches the embargoed country list: Iran (IR).",
+            },
+            actions: {
+              canRequestInfo: true,
+              showOnHoldApprove: false,
+            },
+          },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const wrapper = mount(MembershipRequestDetailPage, {
+      props: { bootstrap },
+      global: {
+        stubs: {
+          MembershipNotesCard: {
+            template: '<div data-test="notes-card"></div>',
+          },
+          MembershipRequestDetailActions: {
+            template: '<div data-test="actions-card"></div>',
+          },
+        },
+      },
+    });
+
+    await flushPromises();
+    await flushPromises();
+
+    const requestCard = wrapper.get('[data-test="request-card"]');
+    const committeeCard = wrapper.get('[data-test="committee-card"]');
+
+    expect(Boolean(requestCard.element.compareDocumentPosition(committeeCard.element) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(requestCard.text()).toContain("Status");
+    expect(requestCard.find('[data-test="actions-card"]').exists()).toBe(false);
+    expect(requestCard.find('[data-test="notes-card"]').exists()).toBe(false);
+    expect(committeeCard.text()).toContain("Membership Committee");
+    expect(committeeCard.text()).toContain("Compliance warning:");
+    expect(committeeCard.find('[data-test="notes-card"]').exists()).toBe(true);
+    expect(committeeCard.find('[data-test="actions-card"]').exists()).toBe(true);
   });
 
   it("renders self-service organization copy parity for on-hold requests", async () => {
@@ -464,6 +528,68 @@ describe("MembershipRequestDetailPage", () => {
     expect(wrapper.text()).toContain("On Hold");
     expect(detailLabels).toContain("Organization");
     expect(detailLabels).not.toContain("Requested for");
+    expect(wrapper.text()).toContain("Please update your request below and submit it to resume review.");
+  });
+
+  it("renders the requester RFI response form when the requester is also a committee viewer", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          viewer: {
+            mode: "committee",
+          },
+          request: {
+            id: 42,
+            status: "on_hold",
+            requested_at: "2026-04-26T10:00:00+00:00",
+            requested_by: { show: true, username: "alice", full_name: "Alice Committee", deleted: false },
+            requested_for: { show: false, kind: "user", label: "", username: "", organization_id: null, deleted: false },
+            membership_type: { name: "Mirror" },
+            responses: [],
+          },
+          committee: {
+            reopen: { show: false },
+            actions: {
+              canRequestInfo: false,
+              showOnHoldApprove: true,
+            },
+          },
+          self_service: {
+            can_resubmit: true,
+            can_rescind: true,
+            committee_email: "committee@example.com",
+            user_email: "alice@example.com",
+            form: {
+              fields: [
+                { name: "q_domain", label: "Domain name of the mirror", widget: "text", value: "mirror.example.org", required: true, disabled: false, help_text: "", errors: [] },
+              ],
+              non_field_errors: [],
+            },
+          },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const wrapper = mount(MembershipRequestDetailPage, {
+      props: { bootstrap },
+      global: {
+        stubs: {
+          MembershipNotesCard: {
+            template: '<div data-test="notes-card"></div>',
+          },
+          MembershipRequestDetailActions: {
+            template: '<div data-test="actions-card"></div>',
+          },
+        },
+      },
+    });
+
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="actions-card"]').exists()).toBe(true);
+    expect(wrapper.get('input[name="q_domain"]').element).toBeTruthy();
     expect(wrapper.text()).toContain("Please update your request below and submit it to resume review.");
   });
 

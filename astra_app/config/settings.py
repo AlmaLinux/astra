@@ -943,6 +943,10 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 AUTHENTICATION_BACKENDS = [
     'core.freeipa.auth_backend.FreeIPAAuthBackend',
 ]
+ASTRA_E2E_MODE = _env_bool("ASTRA_E2E_MODE", default=False)
+ASTRA_E2E_FAKE_FREEIPA_ENABLED = _env_bool("ASTRA_E2E_FAKE_FREEIPA_ENABLED", default=False)
+if ASTRA_E2E_FAKE_FREEIPA_ENABLED and not ASTRA_E2E_MODE:
+    raise ImproperlyConfigured("ASTRA_E2E_FAKE_FREEIPA_ENABLED requires ASTRA_E2E_MODE=True.")
 
 # FreeIPA Configuration
 FREEIPA_HOST = _env_str("FREEIPA_HOST", default="ipa.demo1.freeipa.org")

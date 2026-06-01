@@ -47,6 +47,7 @@ class MembershipRequestDetailState:
     username: str
     membership_request: MembershipRequest
     viewer_mode: MembershipRequestViewerMode
+    can_view_as_self: bool
     payload: dict[str, object]
     bootstrap: dict[str, object]
 
@@ -188,6 +189,8 @@ def _render_membership_request_form_page(
     else:
         api_url = reverse("api-membership-request-form-detail")
         submit_url = reverse("membership-request")
+    if query_string := request.GET.urlencode():
+        api_url = f"{api_url}?{query_string}"
 
     return render(
         request,
@@ -316,10 +319,7 @@ def _build_membership_request_get_form_payload(
         initial=initial,
     )
 
-    no_types_available = (
-        not access_context.is_org_request
-        and not form.fields["membership_type"].queryset.exists()
-    )
+    no_types_available = not form.fields["membership_type"].queryset.exists()
 
     prefill_type_unavailable_name: str | None = None
     if prefill_membership_type and not access_context.is_org_request and not no_types_available:
@@ -497,8 +497,7 @@ def membership_request(request: HttpRequest, organization_id: int | None = None)
             form=form,
             organization=organization,
             no_types_available=(
-                not is_org_request
-                and not form.fields["membership_type"].queryset.exists()
+                not form.fields["membership_type"].queryset.exists()
             ),
             prefill_type_unavailable_name=None,
         )
@@ -915,6 +914,8 @@ def _build_membership_request_detail_state(request: HttpRequest, *, pk: int) -> 
         request_payload["requested_for"] = _self_service_requested_for_payload(
             membership_request=membership_request,
         )
+
+    if can_view_as_self:
         payload["self_service"] = _self_service_detail_payload(
             membership_request=membership_request,
             username=username,
@@ -925,6 +926,7 @@ def _build_membership_request_detail_state(request: HttpRequest, *, pk: int) -> 
         username=username,
         membership_request=membership_request,
         viewer_mode=viewer_mode,
+        can_view_as_self=can_view_as_self,
         payload=payload,
         bootstrap=bootstrap,
     )
@@ -1027,7 +1029,7 @@ def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
     state = _build_membership_request_detail_state(request, pk=pk)
 
     if request.method == "POST":
-        if state.viewer_mode != "self_service":
+        if not state.can_view_as_self:
             raise PermissionDenied
         return _handle_self_service_detail_post(request=request, state=state)
 

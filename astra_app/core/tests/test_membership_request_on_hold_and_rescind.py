@@ -222,6 +222,54 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
         self.assertEqual(payload["redirect_url"], None)
         self.assertEqual(payload["reread_targets"], ["detail"])
 
+    def test_committee_requester_can_post_on_hold_rfi_response_in_individual_capacity(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror",
+                "group_cn": "almalinux-mirror",
+                "category_id": "mirror",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        req = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="mirror",
+            status=MembershipRequest.Status.on_hold,
+            responses=[
+                {"Domain": "mirror.example.org"},
+                {"Pull request": "https://github.com/AlmaLinux/mirrors/pull/123"},
+            ],
+        )
+
+        self._add_freeipa_user(
+            username="alice",
+            email="alice@example.com",
+            groups=[settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+            first_name="Alice",
+            last_name="Committee",
+        )
+        self._login_as_freeipa_user("alice")
+
+        response = self.client.post(
+            reverse("membership-request-detail", args=[req.pk]),
+            data={
+                "q_domain": "mirror.example.org",
+                "q_pull_request": "https://github.com/AlmaLinux/mirrors/pull/456",
+                "q_additional_information": "Updated details.",
+            },
+            HTTP_X_ASTRA_COMPATIBILITY_MODE="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["redirect_url"], None)
+        self.assertEqual(payload["reread_targets"], ["detail"])
+
     def test_self_service_on_hold_invalid_html_post_keeps_detail_shell_with_initial_payload(self) -> None:
         from core.models import MembershipType
 
