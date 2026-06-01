@@ -8,7 +8,15 @@ from django.conf import settings
 from django.core.mail import EmailMessage as DjangoEmailMessage
 from django.db import IntegrityError, transaction
 from django.dispatch import receiver
-from django_ses.signals import bounce_received, complaint_received, delivery_received, message_sent, send_received
+from django_ses.signals import (
+    bounce_received,
+    click_received,
+    complaint_received,
+    delivery_received,
+    message_sent,
+    open_received,
+    send_received,
+)
 from post_office.models import STATUS as POST_OFFICE_STATUS
 from post_office.models import Email as PostOfficeEmail
 from post_office.models import Log as PostOfficeLog
@@ -22,6 +30,9 @@ logger = logging.getLogger(__name__)
 _RECIPIENT_STATUS_PRECEDENCE: dict[int, int] = {
     RecipientDeliveryStatus.ACCEPTED: 10,
     RecipientDeliveryStatus.DELIVERED: 20,
+    RecipientDeliveryStatus.OPENED: 30,
+    RecipientDeliveryStatus.CLICKED: 40,
+    RecipientDeliveryStatus.DEFERRED: 50,
     RecipientDeliveryStatus.SOFT_BOUNCED: 30,
     RecipientDeliveryStatus.UNDETERMINED_BOUNCED: 40,
     RecipientDeliveryStatus.HARD_BOUNCED: 50,
@@ -739,4 +750,62 @@ def handle_ses_complaint_received(
         recipient_delivery_status=RecipientDeliveryStatus.SPAM_COMPLAINT,
         exception_type="SESComplaint",
         message="SES spam complaint received",
+    )
+
+
+@receiver(open_received)
+def handle_ses_open_received(
+    sender: object,
+    mail_obj: dict[str, Any] | None,
+    open_obj: dict[str, Any] | None,
+    raw_message: bytes,
+    *args: object,
+    **kwargs: object,
+) -> None:
+    recipient_domain = _first_recipient_domain(
+        (open_obj or {}).get("recipients", []) if isinstance(open_obj, dict) else []
+    )
+    _log_ses_event(
+        ses_event_type="open",
+        mail_obj=mail_obj,
+        recipient_domain=recipient_domain,
+        event_source="django_ses.open_received",
+    )
+    _handle_ses_post_office_event(
+        ses_event_type="open",
+        mail_obj=mail_obj,
+        recipient_domain=recipient_domain,
+        event_source="django_ses.open_received",
+        recipient_delivery_status=RecipientDeliveryStatus.OPENED,
+        exception_type="SESOpen",
+        message="SES open tracked",
+    )
+
+
+@receiver(click_received)
+def handle_ses_click_received(
+    sender: object,
+    mail_obj: dict[str, Any] | None,
+    click_obj: dict[str, Any] | None,
+    raw_message: bytes,
+    *args: object,
+    **kwargs: object,
+) -> None:
+    recipient_domain = _first_recipient_domain(
+        (click_obj or {}).get("recipients", []) if isinstance(click_obj, dict) else []
+    )
+    _log_ses_event(
+        ses_event_type="click",
+        mail_obj=mail_obj,
+        recipient_domain=recipient_domain,
+        event_source="django_ses.click_received",
+    )
+    _handle_ses_post_office_event(
+        ses_event_type="click",
+        mail_obj=mail_obj,
+        recipient_domain=recipient_domain,
+        event_source="django_ses.click_received",
+        recipient_delivery_status=RecipientDeliveryStatus.CLICKED,
+        exception_type="SESClick",
+        message="SES click tracked",
     )

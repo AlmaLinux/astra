@@ -6,7 +6,7 @@ from django.apps import apps
 from django.contrib import admin
 from django.db import IntegrityError, close_old_connections, connection
 from django.test import SimpleTestCase, TestCase, TransactionTestCase, override_settings
-from django_ses.signals import bounce_received, complaint_received, message_sent
+from django_ses.signals import bounce_received, click_received, complaint_received, message_sent, open_received
 from post_office.models import STATUS as POST_OFFICE_STATUS
 from post_office.models import Email as PostOfficeEmail
 from post_office.models import Log as PostOfficeLog
@@ -488,6 +488,52 @@ class SESPostOfficeAuditLogTests(TestCase):
                 RecipientDeliveryStatus.SOFT_BOUNCED,
                 RecipientDeliveryStatus.SPAM_COMPLAINT,
             ],
+        )
+
+    def test_open_signal_creates_post_office_log_for_matching_smtp_message_id(self) -> None:
+        email = self._create_email(message_id="<open@example.com>", status=POST_OFFICE_STATUS.sent)
+
+        open_received.send(
+            sender=self.__class__,
+            mail_obj={"commonHeaders": {"messageId": "<open@example.com>"}},
+            open_obj={"recipients": ["to@example.com"]},
+            raw_message=b"{}",
+        )
+
+        email.refresh_from_db()
+        self.assertEqual(email.recipient_delivery_status, RecipientDeliveryStatus.OPENED)
+        self.assertEqual(
+            list(PostOfficeLog.objects.filter(email=email).values_list("status", flat=True)),
+            [RecipientDeliveryStatus.OPENED],
+        )
+
+    def test_click_signal_upgrades_open_and_suppresses_duplicate_click(self) -> None:
+        email = self._create_email(message_id="<click@example.com>", status=POST_OFFICE_STATUS.sent)
+
+        open_received.send(
+            sender=self.__class__,
+            mail_obj={"commonHeaders": {"messageId": "<click@example.com>"}},
+            open_obj={"recipients": ["to@example.com"]},
+            raw_message=b"{}",
+        )
+        click_received.send(
+            sender=self.__class__,
+            mail_obj={"commonHeaders": {"messageId": "<click@example.com>"}},
+            click_obj={"recipients": ["to@example.com"]},
+            raw_message=b"{}",
+        )
+        click_received.send(
+            sender=self.__class__,
+            mail_obj={"commonHeaders": {"messageId": "<click@example.com>"}},
+            click_obj={"recipients": ["to@example.com"]},
+            raw_message=b"{}",
+        )
+
+        email.refresh_from_db()
+        self.assertEqual(email.recipient_delivery_status, RecipientDeliveryStatus.CLICKED)
+        self.assertEqual(
+            list(PostOfficeLog.objects.filter(email=email).order_by("id").values_list("status", flat=True)),
+            [RecipientDeliveryStatus.OPENED, RecipientDeliveryStatus.CLICKED],
         )
 
 
