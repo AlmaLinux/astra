@@ -10,7 +10,7 @@ from core.country_codes import country_attr_name, country_label_from_code
 from core.freeipa.agreement import FreeIPAFASAgreement
 from core.freeipa.e2e_registry import get_e2e_service_client
 from core.membership_notes import CUSTOS
-from core.models import MembershipLog, MembershipRequest, MembershipType, Note
+from core.models import Membership, MembershipLog, MembershipRequest, MembershipType, Note
 from core.tests.utils_test_data import ensure_core_categories
 
 
@@ -150,6 +150,25 @@ class MembershipCommitteeResetCommandTests(TestCase):
         self.assertFalse(MembershipLog.objects.filter(pk=temporary_log.pk).exists())
         self.assertGreater(MembershipLog.objects.count(), 0)
         self.assertGreaterEqual(MembershipRequest.objects.count(), 11)
+
+    @override_settings(ASTRA_E2E_MODE=True, ASTRA_E2E_FAKE_FREEIPA_ENABLED=True)
+    def test_command_preserves_non_committee_memberships_for_shared_e2e_actors(self) -> None:
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror",
+                "group_cn": "almalinux-mirror",
+                "category_id": "mirror",
+                "sort_order": 1,
+                "enabled": True,
+            },
+        )
+        Membership.objects.create(target_username="regular03", membership_type_id="mirror")
+
+        call_command("membership_committee_reset")
+
+        self.assertTrue(Membership.objects.filter(target_username="regular03", membership_type_id="mirror").exists())
+        self.assertTrue(Membership.objects.filter(target_username="regular04", membership_type_id="mirror").exists())
 
     @override_settings(ASTRA_E2E_MODE=True, ASTRA_E2E_FAKE_FREEIPA_ENABLED=True)
     def test_command_assigns_committee_actor_and_signs_coc(self) -> None:

@@ -5,7 +5,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from core.freeipa.user import FreeIPAUser
-from core.models import Membership, MembershipType, MembershipTypeCategory, Organization
+from core.models import Membership, MembershipRequest, MembershipType, MembershipTypeCategory, Organization
 
 
 class MembershipRequestFormApiTests(TestCase):
@@ -51,6 +51,16 @@ class MembershipRequestFormApiTests(TestCase):
                 "group_cn": "almalinux-silver",
                 "category_id": "sponsorship",
                 "sort_order": 2,
+                "enabled": True,
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "group_cn": "almalinux-gold",
+                "category_id": "sponsorship",
+                "sort_order": 3,
                 "enabled": True,
             },
         )
@@ -154,10 +164,69 @@ class MembershipRequestFormApiTests(TestCase):
         self.assertNotIn("submit_url", payload)
         self.assertNotIn("rescind_url", payload)
 
+    def test_membership_request_page_bootstrap_preserves_prefill_query_on_api_endpoint(self) -> None:
+        alice = FreeIPAUser(
+            "alice",
+            {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": [], "c": ["US"]},
+        )
+        self._login_as_freeipa_user("alice")
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
+            patch("core.views_membership.user.block_action_without_coc", return_value=None),
+            patch("core.views_membership.user.block_action_without_country_code", return_value=None),
+        ):
+            response = self.client.get(reverse("membership-request"), {"membership_type": "mirror"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            f'data-membership-request-form-api-url="{reverse("api-membership-request-form-detail")}?membership_type=mirror"',
+        )
+
+    def test_organization_membership_request_form_detail_api_reports_no_types_when_all_org_types_are_unavailable(self) -> None:
+        organization = Organization.objects.create(name="Acme Org", representative="bob")
+        Membership.objects.create(target_organization=organization, membership_type_id="silver")
+        Membership.objects.create(target_organization=organization, membership_type_id="mirror")
+        MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=organization,
+            membership_type_id="gold",
+            status=MembershipRequest.Status.pending,
+            responses=[{"Sponsorship details": "Pending tier change"}],
+        )
+
+        bob = FreeIPAUser(
+            "bob",
+            {"uid": ["bob"], "mail": ["bob@example.com"], "memberof_group": [], "c": ["US"]},
+        )
+        self._login_as_freeipa_user("bob")
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=bob),
+            patch("core.views_membership.user.block_action_without_coc", return_value=None),
+            patch("core.views_membership.user.block_action_without_country_code", return_value=None),
+        ):
+            response = self.client.get(reverse("api-organization-membership-request-form-detail", args=[organization.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["no_types_available"])
+        option_values = [
+            option["value"]
+            for group in payload["form"]["fields"][0]["option_groups"]
+            for option in group["options"]
+        ]
+        self.assertEqual(option_values, [])
+
     def test_membership_request_form_detail_api_rejects_non_get_with_json_and_private_no_cache(self) -> None:
         self._login_as_freeipa_user("alice")
 
-        response = self.client.post(reverse("api-membership-request-form-detail"))
+        with patch(
+            "core.freeipa.user.FreeIPAUser.get",
+            return_value=FreeIPAUser("alice", {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": [], "c": ["US"]}),
+        ):
+            response = self.client.post(reverse("api-membership-request-form-detail"))
 
         self.assertEqual(response.status_code, 405)
         self.assertJSONEqual(response.content, {"error": "Method not allowed."})

@@ -197,11 +197,53 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
             check=False,
         )
 
-    def test_frontend_default_e2e_script_stays_on_green_auth_surface(self) -> None:
+    def _default_run_playwright_command(self, *playwright_args: str) -> str:
+        command = (
+            "npm\trun e2e:raw -- --project=chromium "
+            "e2e/auth "
+            "e2e/membership/committee-queue.spec.ts "
+            "e2e/membership/account-invitations.spec.ts "
+            "e2e/organizations/list-detail.spec.ts "
+            "e2e/organizations/claim.spec.ts "
+            "e2e/groups/list-detail.spec.ts "
+            "e2e/groups/management.spec.ts "
+            "e2e/elections/list-detail.spec.ts "
+            "e2e/elections/routes-shell.spec.ts "
+            "e2e/elections/ballot-verify.spec.ts "
+            "e2e/elections/lifecycle.spec.ts "
+            "e2e/membership/settings-membership.spec.ts "
+            "e2e/mail-tools.spec.ts "
+            "e2e/shell-routes.spec.ts "
+            "e2e/reports-admin.spec.ts "
+            "e2e/membership/self-service-entry.spec.ts "
+            "e2e/membership/self-service-detail.spec.ts"
+        )
+        if playwright_args:
+            command = f"{command} {' '.join(playwright_args)}"
+        return command
+
+    def _default_run_expected_command_fragments(self) -> list[str]:
+        return [
+            "podman\tps --filter label=io.podman.compose.project=astra-e2e --filter label=io.podman.compose.service=web --format {{.ID}}",
+            "podman-compose\t-p astra-e2e --env-file .env.e2e -f docker-compose.yml -f docker-compose.e2e.yml up -d db minio minio_init web",
+            "curl\t--retry 30 --retry-all-errors --retry-delay 2 -fsS http://127.0.0.1:18000/readyz",
+            "podman-compose\t-p astra-e2e --env-file .env.e2e -f docker-compose.yml -f docker-compose.e2e.yml exec -T web python manage.py auth_profile_reset",
+            "podman-compose\t-p astra-e2e --env-file .env.e2e -f docker-compose.yml -f docker-compose.e2e.yml exec -T web python manage.py membership_committee_reset",
+            "podman-compose\t-p astra-e2e --env-file .env.e2e -f docker-compose.yml -f docker-compose.e2e.yml exec -T web python manage.py account_invitations_reset",
+            "podman-compose\t-p astra-e2e --env-file .env.e2e -f docker-compose.yml -f docker-compose.e2e.yml exec -T web python manage.py organizations_reset",
+            "podman-compose\t-p astra-e2e --env-file .env.e2e -f docker-compose.yml -f docker-compose.e2e.yml exec -T web python manage.py groups_reset",
+            "podman-compose\t-p astra-e2e --env-file .env.e2e -f docker-compose.yml -f docker-compose.e2e.yml exec -T web python manage.py elections_reset",
+            "podman-compose\t-p astra-e2e --env-file .env.e2e -f docker-compose.yml -f docker-compose.e2e.yml exec -T web python manage.py membership_selfservice_reset",
+            "podman-compose\t-p astra-e2e --env-file .env.e2e -f docker-compose.yml -f docker-compose.e2e.yml restart web",
+            "curl\t--retry 30 --retry-all-errors --retry-delay 2 -fsS http://127.0.0.1:18000/readyz",
+            self._default_run_playwright_command(),
+        ]
+
+    def test_frontend_default_e2e_script_runs_all_playwright_tests(self) -> None:
         package_json = json.loads((self._repo_root() / "frontend" / "package.json").read_text(encoding="utf-8"))
         scripts = package_json["scripts"]
 
-        self.assertEqual(scripts["e2e"], "playwright test e2e/auth --project=chromium")
+        self.assertEqual(scripts["e2e"], "playwright test --project=chromium")
         self.assertEqual(scripts["e2e:raw"], "playwright test")
         self.assertEqual(scripts["e2e:wave1"], "playwright test e2e/auth --project=chromium")
         self.assertEqual(
@@ -218,22 +260,18 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
         )
         self.assertEqual(
             scripts["e2e:groups"],
-            "playwright test e2e/groups/list-detail.spec.ts --project=chromium",
-        )
-        self.assertEqual(
-            scripts["e2e:groups:management:evidence"],
-            "playwright test e2e/groups/management.evidence.spec.ts --project=chromium",
+            "playwright test e2e/groups/list-detail.spec.ts e2e/groups/management.spec.ts --project=chromium",
         )
         self.assertEqual(
             scripts["e2e:elections"],
-            "playwright test e2e/elections/list-detail.spec.ts e2e/elections/routes-shell.spec.ts e2e/elections/ballot-verify.spec.ts --project=chromium --workers=1",
-        )
-        self.assertEqual(
-            scripts["e2e:elections:evidence"],
-            "playwright test e2e/elections/lifecycle.evidence.spec.ts --project=chromium --workers=1",
+            "playwright test e2e/elections/list-detail.spec.ts e2e/elections/routes-shell.spec.ts e2e/elections/ballot-verify.spec.ts e2e/elections/lifecycle.spec.ts --project=chromium --workers=1",
         )
         self.assertEqual(
             scripts["e2e:membership-settings"],
+            "../scripts/auth-profile-e2e.sh run --theme membership-settings --no-rebuild",
+        )
+        self.assertEqual(
+            scripts["e2e:membership-settings:playwright"],
             "playwright test e2e/membership/settings-membership.spec.ts --project=chromium",
         )
         self.assertEqual(
@@ -249,9 +287,10 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
             "playwright test e2e/reports-admin.spec.ts --project=chromium",
         )
         self.assertEqual(
-            scripts["e2e:membership-self-service:evidence"],
-            "playwright test e2e/membership/self-service-entry.evidence.spec.ts e2e/membership/self-service-detail.evidence.spec.ts --project=chromium",
+            scripts["e2e:membership-self-service"],
+            "playwright test e2e/membership/self-service-entry.spec.ts e2e/membership/self-service-detail.spec.ts --project=chromium",
         )
+        self.assertFalse(any("green" in name or "evidence" in name for name in scripts))
 
     def test_help_output_describes_default_and_down_commands(self) -> None:
         result = subprocess.run(
@@ -279,7 +318,6 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
         self.assertIn("membership-invitations", result.stdout)
         self.assertIn("organizations", result.stdout)
         self.assertIn("groups", result.stdout)
-        self.assertIn("groups-management-evidence", result.stdout)
         self.assertIn("elections", result.stdout)
         self.assertIn("membership-settings", result.stdout)
         self.assertIn("mail-tools", result.stdout)
@@ -302,7 +340,7 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
         self.assertIn("ASTRA_E2E_SELF_SERVICE_RESET_STATE_FILE", result.stdout)
         self.assertIn("ASTRA_E2E_SELF_SERVICE_RESET_STATE_PATH", result.stdout)
         self.assertIn("When no theme, scenario, or spec path is supplied", result.stdout)
-        self.assertIn("suite under Chromium.", result.stdout)
+        self.assertIn("all available wrapper E2E tests under Chromium.", result.stdout)
 
     def test_run_theme_mail_tools_runs_auth_reset_and_theme_command(self) -> None:
         env, log_path = self._make_fake_environment(ps_output="astra-e2e_web_1\n")
@@ -369,7 +407,7 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
         self.assertLess(organizations_reset_index, playwright_index)
         self.assertEqual(sum("account_invitations_reset" in line for line in log_lines), 0, log_lines)
 
-    def test_default_run_starts_stack_when_missing_and_runs_reset_and_playwright(self) -> None:
+    def test_default_run_starts_stack_when_missing_and_runs_all_resets_and_playwright(self) -> None:
         env, log_path = self._make_fake_environment(ps_output="")
 
         result = self._run_script(env)
@@ -381,13 +419,7 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
         )
 
         log_lines = log_path.read_text(encoding="utf-8").splitlines()
-        expected_fragments = [
-            "podman\tps --filter label=io.podman.compose.project=astra-e2e --filter label=io.podman.compose.service=web --format {{.ID}}",
-            "podman-compose\t-p astra-e2e --env-file .env.e2e -f docker-compose.yml -f docker-compose.e2e.yml up -d db minio minio_init web",
-            "curl\t--retry 30 --retry-all-errors --retry-delay 2 -fsS http://127.0.0.1:18000/readyz",
-            "podman-compose\t-p astra-e2e --env-file .env.e2e -f docker-compose.yml -f docker-compose.e2e.yml exec -T web python manage.py auth_profile_reset",
-            "npm\trun e2e:auth",
-        ]
+        expected_fragments = self._default_run_expected_command_fragments()
 
         self.assertEqual(
             [line for line in log_lines if any(fragment in line for fragment in expected_fragments)],
@@ -395,7 +427,7 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
         )
         self.assertNotIn("npm\tci", log_lines)
 
-    def test_default_run_without_selectors_stays_on_auth_only_surface(self) -> None:
+    def test_default_run_without_selectors_runs_all_available_tests(self) -> None:
         env, log_path = self._make_fake_environment(ps_output="astra-e2e_web_1\n")
 
         result = self._run_script(env)
@@ -408,14 +440,15 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
 
         log_lines = log_path.read_text(encoding="utf-8").splitlines()
 
-        self.assertIn("npm\trun e2e:auth", log_lines)
-        self.assertNotIn("npm\trun e2e:raw -- --project=chromium", log_lines)
-        self.assertFalse(any("membership_committee_reset" in line for line in log_lines), log_lines)
-        self.assertFalse(any("account_invitations_reset" in line for line in log_lines), log_lines)
-        self.assertFalse(any("organizations_reset" in line for line in log_lines), log_lines)
-        self.assertFalse(any("groups_reset" in line for line in log_lines), log_lines)
-        self.assertFalse(any("elections_reset" in line for line in log_lines), log_lines)
-        self.assertFalse(any("membership_selfservice_reset" in line for line in log_lines), log_lines)
+        self.assertEqual(sum("auth_profile_reset" in line for line in log_lines), 1, log_lines)
+        self.assertEqual(sum("membership_committee_reset" in line for line in log_lines), 1, log_lines)
+        self.assertEqual(sum("account_invitations_reset" in line for line in log_lines), 1, log_lines)
+        self.assertEqual(sum("organizations_reset" in line for line in log_lines), 1, log_lines)
+        self.assertEqual(sum("groups_reset" in line for line in log_lines), 1, log_lines)
+        self.assertEqual(sum("elections_reset" in line for line in log_lines), 1, log_lines)
+        self.assertEqual(sum("membership_selfservice_reset" in line for line in log_lines), 1, log_lines)
+        self.assertIn(self._default_run_playwright_command(), log_lines)
+        self.assertNotIn("npm\trun e2e:auth", log_lines)
 
     def test_default_run_recreates_web_when_starting_a_stopped_stack(self) -> None:
         env, log_path = self._make_fake_environment(ps_output="")
@@ -463,14 +496,14 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
             log_lines,
         )
         self.assertFalse(any(" up -d db minio minio_init web" in line for line in log_lines), log_lines)
-        self.assertTrue(any("exec -T web python manage.py auth_profile_reset" in line for line in log_lines), log_lines)
-        self.assertFalse(any("membership_committee_reset" in line for line in log_lines), log_lines)
-        self.assertFalse(any("account_invitations_reset" in line for line in log_lines), log_lines)
-        self.assertFalse(any("organizations_reset" in line for line in log_lines), log_lines)
-        self.assertFalse(any("groups_reset" in line for line in log_lines), log_lines)
-        self.assertFalse(any("elections_reset" in line for line in log_lines), log_lines)
-        self.assertFalse(any("membership_selfservice_reset" in line for line in log_lines), log_lines)
-        self.assertTrue(any(line == "npm\trun e2e:auth" for line in log_lines), log_lines)
+        self.assertEqual(sum("auth_profile_reset" in line for line in log_lines), 1, log_lines)
+        self.assertEqual(sum("membership_committee_reset" in line for line in log_lines), 1, log_lines)
+        self.assertEqual(sum("account_invitations_reset" in line for line in log_lines), 1, log_lines)
+        self.assertEqual(sum("organizations_reset" in line for line in log_lines), 1, log_lines)
+        self.assertEqual(sum("groups_reset" in line for line in log_lines), 1, log_lines)
+        self.assertEqual(sum("elections_reset" in line for line in log_lines), 1, log_lines)
+        self.assertEqual(sum("membership_selfservice_reset" in line for line in log_lines), 1, log_lines)
+        self.assertIn(self._default_run_playwright_command(), log_lines)
 
     def test_run_no_rebuild_reuses_running_stack_without_recreating_web_service(self) -> None:
         env, log_path = self._make_fake_environment(ps_output="astra-e2e_web_1\n")
@@ -488,8 +521,14 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
             any("up -d --build --force-recreate --no-deps web" in line for line in log_lines),
             log_lines,
         )
-        self.assertTrue(any("exec -T web python manage.py auth_profile_reset" in line for line in log_lines), log_lines)
-        self.assertTrue(any(line == "npm\trun e2e:auth" for line in log_lines), log_lines)
+        self.assertEqual(sum("auth_profile_reset" in line for line in log_lines), 1, log_lines)
+        self.assertEqual(sum("membership_committee_reset" in line for line in log_lines), 1, log_lines)
+        self.assertEqual(sum("account_invitations_reset" in line for line in log_lines), 1, log_lines)
+        self.assertEqual(sum("organizations_reset" in line for line in log_lines), 1, log_lines)
+        self.assertEqual(sum("groups_reset" in line for line in log_lines), 1, log_lines)
+        self.assertEqual(sum("elections_reset" in line for line in log_lines), 1, log_lines)
+        self.assertEqual(sum("membership_selfservice_reset" in line for line in log_lines), 1, log_lines)
+        self.assertIn(self._default_run_playwright_command(), log_lines)
 
     def test_install_runs_browser_install_when_version_sentinel_is_missing(self) -> None:
         env, log_path = self._make_fake_environment(
@@ -645,9 +684,20 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
 
         result = self._run_script(env, "run", "--no-reset")
 
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("--no-reset is only supported for auth-only runs", result.stderr)
-        self.assertEqual(log_path.read_text(encoding="utf-8"), "")
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=f"script failed:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
+        log_lines = log_path.read_text(encoding="utf-8").splitlines()
+        self.assertFalse(any("auth_profile_reset" in line for line in log_lines), log_lines)
+        self.assertFalse(any("membership_committee_reset" in line for line in log_lines), log_lines)
+        self.assertFalse(any("account_invitations_reset" in line for line in log_lines), log_lines)
+        self.assertFalse(any("organizations_reset" in line for line in log_lines), log_lines)
+        self.assertFalse(any("groups_reset" in line for line in log_lines), log_lines)
+        self.assertFalse(any("elections_reset" in line for line in log_lines), log_lines)
+        self.assertFalse(any("membership_selfservice_reset" in line for line in log_lines), log_lines)
+        self.assertIn(self._default_run_playwright_command(), log_lines)
 
     def test_run_theme_auth_uses_auth_reset_and_auth_theme_command(self) -> None:
         env, log_path = self._make_fake_environment(ps_output="astra-e2e_web_1\n")
@@ -663,6 +713,15 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
         log_lines = log_path.read_text(encoding="utf-8").splitlines()
         self.assertTrue(any("auth_profile_reset" in line for line in log_lines), log_lines)
         self.assertFalse(any("membership_selfservice_reset" in line for line in log_lines), log_lines)
+        auth_reset_index = next(index for index, line in enumerate(log_lines) if "auth_profile_reset" in line)
+        restart_index = next(
+            index
+            for index, line in enumerate(log_lines)
+            if line == "podman-compose\t-p astra-e2e --env-file .env.e2e -f docker-compose.yml -f docker-compose.e2e.yml restart web"
+        )
+        playwright_index = next(index for index, line in enumerate(log_lines) if line == "npm\trun e2e:auth")
+        self.assertLess(auth_reset_index, restart_index)
+        self.assertLess(restart_index, playwright_index)
         self.assertIn("npm\trun e2e:auth", log_lines)
 
     def test_run_theme_membership_self_service_runs_ordered_resets_and_theme_command(self) -> None:
@@ -679,10 +738,15 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
         log_lines = log_path.read_text(encoding="utf-8").splitlines()
         auth_reset_index = next(index for index, line in enumerate(log_lines) if "auth_profile_reset" in line)
         membership_reset_index = next(index for index, line in enumerate(log_lines) if "membership_selfservice_reset" in line)
+        restart_index = next(
+            index
+            for index, line in enumerate(log_lines)
+            if line == "podman-compose\t-p astra-e2e --env-file .env.e2e -f docker-compose.yml -f docker-compose.e2e.yml restart web"
+        )
         playwright_index = next(
             index
             for index, line in enumerate(log_lines)
-            if line == "npm\trun e2e:membership-self-service:evidence"
+            if line == "npm\trun e2e:membership-self-service"
         )
         reset_state_line = next(
             line for line in log_lines if line.startswith("npm_env\tASTRA_E2E_SELF_SERVICE_RESET_STATE_FILE=")
@@ -690,6 +754,8 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
         settings_route_line = next(line for line in log_lines if line.startswith("npm_env_self_service_route\t"))
         reset_state_path = Path(reset_state_line.split("=", 1)[1])
         self.assertLess(auth_reset_index, membership_reset_index)
+        self.assertLess(membership_reset_index, restart_index)
+        self.assertLess(restart_index, playwright_index)
         self.assertLess(membership_reset_index, playwright_index)
         self.assertEqual(settings_route_line, "npm_env_self_service_route\t/settings/?tab=membership")
         self.assertFalse(reset_state_path.exists())
@@ -708,13 +774,22 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
         log_lines = log_path.read_text(encoding="utf-8").splitlines()
         auth_reset_index = next(index for index, line in enumerate(log_lines) if "auth_profile_reset" in line)
         membership_reset_index = next(index for index, line in enumerate(log_lines) if "membership_selfservice_reset" in line)
-        playwright_index = next(index for index, line in enumerate(log_lines) if line == "npm\trun e2e:membership-settings")
+        restart_index = next(
+            index
+            for index, line in enumerate(log_lines)
+            if line == "podman-compose\t-p astra-e2e --env-file .env.e2e -f docker-compose.yml -f docker-compose.e2e.yml restart web"
+        )
+        playwright_index = next(
+            index for index, line in enumerate(log_lines) if line == "npm\trun e2e:membership-settings:playwright"
+        )
         self.assertLess(auth_reset_index, membership_reset_index)
+        self.assertLess(membership_reset_index, restart_index)
+        self.assertLess(restart_index, playwright_index)
         self.assertLess(membership_reset_index, playwright_index)
 
     def test_run_theme_membership_self_service_cleans_up_generated_reset_state_file_after_playwright_failure(self) -> None:
         env, log_path = self._make_fake_environment(ps_output="astra-e2e_web_1\n")
-        env["ASTRA_E2E_TEST_NPM_FAIL_MATCH"] = "run e2e:membership-self-service:evidence"
+        env["ASTRA_E2E_TEST_NPM_FAIL_MATCH"] = "run e2e:membership-self-service"
         env["ASTRA_E2E_TEST_NPM_EXIT_CODE"] = "11"
         before_paths = set(self._self_service_reset_state_dir().glob("membership-selfservice-reset-state.*.json"))
 
@@ -1000,7 +1075,7 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
         self.assertEqual(payload["scenario"], "elections")
         self.assertEqual(payload["routes"]["ballot_verify"], "/elections/ballot/verify/")
 
-    def test_run_three_green_themes_deduplicates_resets_and_runs_union_command(self) -> None:
+    def test_run_three_themes_deduplicates_resets_and_runs_union_command(self) -> None:
         env, log_path = self._make_fake_environment(ps_output="astra-e2e_web_1\n")
 
         result = self._run_script(
@@ -1030,7 +1105,7 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
             log_lines,
         )
 
-    def test_run_green_themes_use_raw_union_without_self_service_evidence(self) -> None:
+    def test_run_themes_use_raw_union_without_unrequested_self_service(self) -> None:
         env, log_path = self._make_fake_environment(ps_output="astra-e2e_web_1\n")
 
         result = self._run_script(env, "run", "--theme", "auth", "--theme", "membership-committee")
@@ -1050,7 +1125,7 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
             log_lines,
         )
 
-    def test_run_green_union_with_membership_invitations_uses_raw_union_and_deduplicated_resets(self) -> None:
+    def test_run_union_with_membership_invitations_uses_raw_union_and_deduplicated_resets(self) -> None:
         env, log_path = self._make_fake_environment(ps_output="astra-e2e_web_1\n")
 
         result = self._run_script(env, "run", "--theme", "auth", "--theme", "membership-invitations")
@@ -1070,7 +1145,7 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
             log_lines,
         )
 
-    def test_run_green_union_with_organizations_uses_raw_union_and_deduplicated_resets(self) -> None:
+    def test_run_union_with_organizations_uses_raw_union_and_deduplicated_resets(self) -> None:
         env, log_path = self._make_fake_environment(ps_output="astra-e2e_web_1\n")
 
         result = self._run_script(env, "run", "--theme", "auth", "--theme", "organizations")
@@ -1089,7 +1164,7 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
             log_lines,
         )
 
-    def test_run_green_union_with_groups_runs_groups_reset_last_and_uses_raw_union(self) -> None:
+    def test_run_union_with_groups_runs_groups_reset_last_and_uses_raw_union(self) -> None:
         env, log_path = self._make_fake_environment(ps_output="astra-e2e_web_1\n")
 
         result = self._run_script(env, "run", "--theme", "organizations", "--theme", "groups")
@@ -1112,7 +1187,7 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
         playwright_index = next(
             index
             for index, line in enumerate(log_lines)
-            if line == "npm\trun e2e:raw -- --project=chromium e2e/organizations/list-detail.spec.ts e2e/organizations/claim.spec.ts e2e/groups/list-detail.spec.ts"
+            if line == "npm\trun e2e:raw -- --project=chromium e2e/organizations/list-detail.spec.ts e2e/organizations/claim.spec.ts e2e/groups/list-detail.spec.ts e2e/groups/management.spec.ts"
         )
 
         self.assertLess(auth_reset_index, organizations_reset_index)
@@ -1120,11 +1195,11 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
         self.assertLess(groups_reset_index, restart_index)
         self.assertLess(restart_index, playwright_index)
         self.assertIn(
-            "npm\trun e2e:raw -- --project=chromium e2e/organizations/list-detail.spec.ts e2e/organizations/claim.spec.ts e2e/groups/list-detail.spec.ts",
+            "npm\trun e2e:raw -- --project=chromium e2e/organizations/list-detail.spec.ts e2e/organizations/claim.spec.ts e2e/groups/list-detail.spec.ts e2e/groups/management.spec.ts",
             log_lines,
         )
 
-    def test_run_green_union_with_organizations_and_elections_exports_isolated_reset_state_files(self) -> None:
+    def test_run_union_with_organizations_and_elections_exports_isolated_reset_state_files(self) -> None:
         env, log_path = self._make_fake_environment(ps_output="astra-e2e_web_1\n")
 
         result = self._run_script(env, "run", "--theme", "organizations", "--theme", "elections")
@@ -1147,7 +1222,7 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
         playwright_index = next(
             index
             for index, line in enumerate(log_lines)
-            if line == "npm\trun e2e:raw -- --project=chromium e2e/organizations/list-detail.spec.ts e2e/organizations/claim.spec.ts e2e/elections/list-detail.spec.ts e2e/elections/routes-shell.spec.ts e2e/elections/ballot-verify.spec.ts"
+            if line == "npm\trun e2e:raw -- --project=chromium e2e/organizations/list-detail.spec.ts e2e/organizations/claim.spec.ts e2e/elections/list-detail.spec.ts e2e/elections/routes-shell.spec.ts e2e/elections/ballot-verify.spec.ts e2e/elections/lifecycle.spec.ts"
         )
         organizations_reset_state = next(
             line for line in log_lines if line.startswith("npm_env\tASTRA_E2E_RESET_STATE_FILE=")
@@ -1166,22 +1241,27 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
         self.assertFalse(organizations_path.exists())
         self.assertFalse(elections_path.exists())
         self.assertIn(
-            "npm\trun e2e:raw -- --project=chromium e2e/organizations/list-detail.spec.ts e2e/organizations/claim.spec.ts e2e/elections/list-detail.spec.ts e2e/elections/routes-shell.spec.ts e2e/elections/ballot-verify.spec.ts",
+            "npm\trun e2e:raw -- --project=chromium e2e/organizations/list-detail.spec.ts e2e/organizations/claim.spec.ts e2e/elections/list-detail.spec.ts e2e/elections/routes-shell.spec.ts e2e/elections/ballot-verify.spec.ts e2e/elections/lifecycle.spec.ts",
             log_lines,
         )
 
-    def test_run_rejects_self_service_mixed_with_green_theme(self) -> None:
+    def test_run_combines_self_service_with_auth_theme(self) -> None:
         env, log_path = self._make_fake_environment(ps_output="astra-e2e_web_1\n")
 
         result = self._run_script(env, "run", "--theme", "auth", "--theme", "membership-self-service")
 
         self.assertEqual(
             result.returncode,
-            1,
-            msg=f"script unexpectedly succeeded:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+            0,
+            msg=f"script failed:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
         )
-        self.assertIn("Evidence-only themes cannot be combined with green themes", result.stderr)
-        self.assertEqual(log_path.read_text(encoding="utf-8"), "")
+        log_lines = log_path.read_text(encoding="utf-8").splitlines()
+        self.assertTrue(any("auth_profile_reset" in line for line in log_lines), log_lines)
+        self.assertTrue(any("membership_selfservice_reset" in line for line in log_lines), log_lines)
+        self.assertIn(
+            "npm\trun e2e:raw -- --project=chromium e2e/auth e2e/membership/self-service-entry.spec.ts e2e/membership/self-service-detail.spec.ts",
+            log_lines,
+        )
 
     def test_run_rejects_membership_settings_mixed_with_self_service_raw_spec_paths(self) -> None:
         env, log_path = self._make_fake_environment(ps_output="astra-e2e_web_1\n")
@@ -1190,7 +1270,7 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
             env,
             "run",
             "frontend/e2e/membership/settings-membership.spec.ts",
-            "frontend/e2e/membership/self-service-entry.evidence.spec.ts",
+            "frontend/e2e/membership/self-service-entry.spec.ts",
         )
 
         self.assertEqual(
@@ -1198,10 +1278,10 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
             1,
             msg=f"script unexpectedly succeeded:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
         )
-        self.assertIn("Evidence-only themes cannot be combined with green themes", result.stderr)
+        self.assertIn("membership-settings cannot be combined with other themes", result.stderr)
         self.assertEqual(log_path.read_text(encoding="utf-8"), "")
 
-    def test_run_rejects_membership_settings_mixed_with_other_green_theme(self) -> None:
+    def test_run_rejects_membership_settings_mixed_with_other_theme(self) -> None:
         env, log_path = self._make_fake_environment(ps_output="astra-e2e_web_1\n")
 
         result = self._run_script(
@@ -1236,7 +1316,7 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
         self.assertTrue(any("auth_profile_reset" in line for line in log_lines), log_lines)
         self.assertTrue(any("membership_selfservice_reset" in line for line in log_lines), log_lines)
         self.assertIn(
-            "npm\trun e2e:membership-self-service:evidence -- --grep membership-rescind-pending-individual",
+            "npm\trun e2e:membership-self-service -- --grep membership-rescind-pending-individual",
             log_lines,
         )
 
@@ -1254,7 +1334,7 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
         log_lines = log_path.read_text(encoding="utf-8").splitlines()
         self.assertTrue(any("auth_profile_reset" in line for line in log_lines), log_lines)
         self.assertTrue(any("membership_selfservice_reset" in line for line in log_lines), log_lines)
-        self.assertIn("npm\trun e2e:membership-settings -- --grep membership-settings-shell", log_lines)
+        self.assertIn("npm\trun e2e:membership-settings:playwright -- --grep membership-settings-shell", log_lines)
 
     def test_run_committee_scenario_maps_to_membership_committee_theme(self) -> None:
         env, log_path = self._make_fake_environment(ps_output="astra-e2e_web_1\n")
@@ -1333,22 +1413,6 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
             "npm\trun e2e:groups -- --grep groups-detail-leaders-pagination",
             log_lines,
         )
-
-    def test_run_theme_groups_management_evidence_runs_groups_reset_and_evidence_command(self) -> None:
-        env, log_path = self._make_fake_environment(ps_output="astra-e2e_web_1\n")
-
-        result = self._run_script(env, "run", "--theme", "groups-management-evidence")
-
-        self.assertEqual(
-            result.returncode,
-            0,
-            msg=f"script failed:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
-        )
-
-        log_lines = log_path.read_text(encoding="utf-8").splitlines()
-        self.assertTrue(any("auth_profile_reset" in line for line in log_lines), log_lines)
-        self.assertTrue(any("groups_reset" in line for line in log_lines), log_lines)
-        self.assertIn("npm\trun e2e:groups:management:evidence", log_lines)
 
     def test_run_elections_scenario_maps_to_elections_theme(self) -> None:
         env, log_path = self._make_fake_environment(ps_output="astra-e2e_web_1\n")
@@ -1466,10 +1530,10 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
             log_lines,
         )
 
-    def test_run_raw_groups_management_evidence_spec_path_uses_evidence_surface(self) -> None:
+    def test_run_raw_groups_management_spec_path_maps_to_groups_theme_and_runs_unscoped_script(self) -> None:
         env, log_path = self._make_fake_environment(ps_output="astra-e2e_web_1\n")
 
-        result = self._run_script(env, "run", "frontend/e2e/groups/management.evidence.spec.ts")
+        result = self._run_script(env, "run", "frontend/e2e/groups/management.spec.ts")
 
         self.assertEqual(
             result.returncode,
@@ -1480,25 +1544,33 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
         log_lines = log_path.read_text(encoding="utf-8").splitlines()
         self.assertTrue(any("auth_profile_reset" in line for line in log_lines), log_lines)
         self.assertTrue(any("groups_reset" in line for line in log_lines), log_lines)
-        self.assertIn("npm\trun e2e:groups:management:evidence", log_lines)
+        self.assertIn(
+            "npm\trun e2e:raw -- --project=chromium e2e/groups/management.spec.ts",
+            log_lines,
+        )
 
-    def test_run_rejects_groups_management_evidence_mixed_with_green_raw_spec(self) -> None:
+    def test_run_combines_groups_management_with_other_raw_specs(self) -> None:
         env, log_path = self._make_fake_environment(ps_output="astra-e2e_web_1\n")
 
         result = self._run_script(
             env,
             "run",
             "frontend/e2e/auth/login.spec.ts",
-            "frontend/e2e/groups/management.evidence.spec.ts",
+            "frontend/e2e/groups/management.spec.ts",
         )
 
         self.assertEqual(
             result.returncode,
-            1,
-            msg=f"script unexpectedly succeeded:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+            0,
+            msg=f"script failed:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
         )
-        self.assertIn("Evidence-only themes cannot be combined with green themes", result.stderr)
-        self.assertEqual(log_path.read_text(encoding="utf-8"), "")
+        log_lines = log_path.read_text(encoding="utf-8").splitlines()
+        self.assertTrue(any("auth_profile_reset" in line for line in log_lines), log_lines)
+        self.assertTrue(any("groups_reset" in line for line in log_lines), log_lines)
+        self.assertIn(
+            "npm\trun e2e:raw -- --project=chromium e2e/auth/login.spec.ts e2e/groups/management.spec.ts",
+            log_lines,
+        )
 
     def test_run_raw_elections_spec_path_maps_to_elections_theme_and_runs_unscoped_script(self) -> None:
         env, log_path = self._make_fake_environment(ps_output="astra-e2e_web_1\n")
@@ -1538,10 +1610,10 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
             log_lines,
         )
 
-    def test_run_raw_elections_lifecycle_evidence_spec_path_uses_evidence_surface_and_exports_reset_state(self) -> None:
+    def test_run_raw_elections_lifecycle_spec_path_maps_to_elections_theme_and_exports_reset_state(self) -> None:
         env, log_path = self._make_fake_environment(ps_output="astra-e2e_web_1\n")
 
-        result = self._run_script(env, "run", "frontend/e2e/elections/lifecycle.evidence.spec.ts")
+        result = self._run_script(env, "run", "frontend/e2e/elections/lifecycle.spec.ts")
 
         self.assertEqual(
             result.returncode,
@@ -1556,20 +1628,28 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
             any(line.startswith("npm_env\tASTRA_E2E_ELECTIONS_RESET_STATE_FILE=") for line in log_lines),
             log_lines,
         )
-        self.assertIn("npm\trun e2e:elections:evidence", log_lines)
+        self.assertIn(
+            "npm\trun e2e:raw -- --project=chromium e2e/elections/lifecycle.spec.ts",
+            log_lines,
+        )
 
-    def test_run_rejects_elections_evidence_mixed_with_green_raw_spec(self) -> None:
+    def test_run_combines_elections_lifecycle_with_other_raw_specs(self) -> None:
         env, log_path = self._make_fake_environment(ps_output="astra-e2e_web_1\n")
 
-        result = self._run_script(env, "run", "frontend/e2e/auth/login.spec.ts", "frontend/e2e/elections/lifecycle.evidence.spec.ts")
+        result = self._run_script(env, "run", "frontend/e2e/auth/login.spec.ts", "frontend/e2e/elections/lifecycle.spec.ts")
 
         self.assertEqual(
             result.returncode,
-            1,
-            msg=f"script unexpectedly succeeded:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+            0,
+            msg=f"script failed:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
         )
-        self.assertIn("Evidence-only themes cannot be combined with green themes", result.stderr)
-        self.assertEqual(log_path.read_text(encoding="utf-8"), "")
+        log_lines = log_path.read_text(encoding="utf-8").splitlines()
+        self.assertTrue(any("auth_profile_reset" in line for line in log_lines), log_lines)
+        self.assertTrue(any("elections_reset" in line for line in log_lines), log_lines)
+        self.assertIn(
+            "npm\trun e2e:raw -- --project=chromium e2e/auth/login.spec.ts e2e/elections/lifecycle.spec.ts",
+            log_lines,
+        )
 
     def test_run_rejects_unapproved_raw_organization_spec_path(self) -> None:
         env, log_path = self._make_fake_environment(ps_output="astra-e2e_web_1\n")
@@ -1580,35 +1660,28 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
         self.assertIn("Unsupported raw spec path: frontend/e2e/organizations/form.spec.ts", result.stderr)
         self.assertEqual(log_path.read_text(encoding="utf-8"), "")
 
-    def test_run_rejects_retired_monolithic_self_service_raw_spec_path(self) -> None:
-        env, log_path = self._make_fake_environment(ps_output="astra-e2e_web_1\n")
-
-        result = self._run_script(env, "run", "frontend/e2e/membership/self-service-request.spec.ts")
-
-        self.assertEqual(result.returncode, 1)
-        self.assertIn(
-            "Unsupported raw spec path: frontend/e2e/membership/self-service-request.spec.ts",
-            result.stderr,
-        )
-        self.assertEqual(log_path.read_text(encoding="utf-8"), "")
-
-    def test_run_rejects_mixed_raw_spec_paths_when_one_is_evidence_only(self) -> None:
+    def test_run_combines_auth_and_self_service_raw_spec_paths(self) -> None:
         env, log_path = self._make_fake_environment(ps_output="astra-e2e_web_1\n")
 
         result = self._run_script(
             env,
             "run",
             "frontend/e2e/auth/login.spec.ts",
-            "frontend/e2e/membership/self-service-entry.evidence.spec.ts",
+            "frontend/e2e/membership/self-service-entry.spec.ts",
         )
 
         self.assertEqual(
             result.returncode,
-            1,
-            msg=f"script unexpectedly succeeded:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+            0,
+            msg=f"script failed:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
         )
-        self.assertIn("Evidence-only themes cannot be combined with green themes", result.stderr)
-        self.assertEqual(log_path.read_text(encoding="utf-8"), "")
+        log_lines = log_path.read_text(encoding="utf-8").splitlines()
+        self.assertTrue(any("auth_profile_reset" in line for line in log_lines), log_lines)
+        self.assertTrue(any("membership_selfservice_reset" in line for line in log_lines), log_lines)
+        self.assertIn(
+            "npm\trun e2e:raw -- --project=chromium e2e/auth/login.spec.ts e2e/membership/self-service-entry.spec.ts",
+            log_lines,
+        )
 
     def test_default_run_forwards_headed_and_ui_flags_to_playwright(self) -> None:
         env, log_path = self._make_fake_environment(ps_output="astra-e2e_web_1\n")
@@ -1623,17 +1696,23 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
 
         log_lines = log_path.read_text(encoding="utf-8").splitlines()
         self.assertTrue(any("auth_profile_reset" in line for line in log_lines), log_lines)
-        self.assertFalse(any("membership_selfservice_reset" in line for line in log_lines), log_lines)
-        self.assertIn("npm\trun e2e:auth -- --headed --ui", log_lines)
+        self.assertTrue(any("membership_selfservice_reset" in line for line in log_lines), log_lines)
+        self.assertIn(self._default_run_playwright_command("--headed", "--ui"), log_lines)
 
     def test_run_no_reset_forwards_ui_flag_to_playwright(self) -> None:
         env, log_path = self._make_fake_environment(ps_output="astra-e2e_web_1\n")
 
         result = self._run_script(env, "run", "--no-reset", "--ui")
 
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("--no-reset is only supported for auth-only runs", result.stderr)
-        self.assertEqual(log_path.read_text(encoding="utf-8"), "")
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=f"script failed:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
+        log_lines = log_path.read_text(encoding="utf-8").splitlines()
+        self.assertFalse(any("auth_profile_reset" in line for line in log_lines), log_lines)
+        self.assertFalse(any("membership_selfservice_reset" in line for line in log_lines), log_lines)
+        self.assertIn(self._default_run_playwright_command("--ui"), log_lines)
 
     def test_run_no_reset_rejects_organizations_theme(self) -> None:
         env, log_path = self._make_fake_environment(ps_output="astra-e2e_web_1\n")

@@ -20,9 +20,7 @@ COMMITTEE_THEME="membership-committee"
 INVITATIONS_THEME="membership-invitations"
 ORGANIZATIONS_THEME="organizations"
 GROUPS_THEME="groups"
-GROUPS_MANAGEMENT_EVIDENCE_THEME="groups-management-evidence"
 ELECTIONS_THEME="elections"
-ELECTIONS_EVIDENCE_THEME="elections-evidence"
 MEMBERSHIP_SETTINGS_THEME="membership-settings"
 MAIL_TOOLS_THEME="mail-tools"
 SHELL_ROUTES_THEME="shell-routes"
@@ -44,35 +42,28 @@ SELF_SERVICE_RESET_STATE_OWNED="no"
 ORGANIZATIONS_LIST_DETAIL_SPEC="e2e/organizations/list-detail.spec.ts"
 ORGANIZATIONS_CLAIM_SPEC="e2e/organizations/claim.spec.ts"
 GROUPS_LIST_DETAIL_SPEC="e2e/groups/list-detail.spec.ts"
-GROUPS_MANAGEMENT_EVIDENCE_SPEC="e2e/groups/management.evidence.spec.ts"
+GROUPS_MANAGEMENT_SPEC="e2e/groups/management.spec.ts"
 ELECTIONS_LIST_DETAIL_SPEC="e2e/elections/list-detail.spec.ts"
 ELECTIONS_ROUTES_SHELL_SPEC="e2e/elections/routes-shell.spec.ts"
 ELECTIONS_BALLOT_VERIFY_SPEC="e2e/elections/ballot-verify.spec.ts"
-ELECTIONS_LIFECYCLE_EVIDENCE_SPEC="e2e/elections/lifecycle.evidence.spec.ts"
+ELECTIONS_LIFECYCLE_SPEC="e2e/elections/lifecycle.spec.ts"
 MEMBERSHIP_SETTINGS_SPEC="e2e/membership/settings-membership.spec.ts"
 MAIL_TOOLS_SPEC="e2e/mail-tools.spec.ts"
 SHELL_ROUTES_SPEC="e2e/shell-routes.spec.ts"
 REPORTS_ADMIN_SPEC="e2e/reports-admin.spec.ts"
-SELF_SERVICE_ENTRY_EVIDENCE_SPEC="e2e/membership/self-service-entry.evidence.spec.ts"
-SELF_SERVICE_DETAIL_EVIDENCE_SPEC="e2e/membership/self-service-detail.evidence.spec.ts"
+SELF_SERVICE_ENTRY_SPEC="e2e/membership/self-service-entry.spec.ts"
+SELF_SERVICE_DETAIL_SPEC="e2e/membership/self-service-detail.spec.ts"
 ALL_THEME_NAMES=(
   "$AUTH_THEME"
   "$COMMITTEE_THEME"
   "$INVITATIONS_THEME"
   "$ORGANIZATIONS_THEME"
   "$GROUPS_THEME"
-  "$GROUPS_MANAGEMENT_EVIDENCE_THEME"
   "$ELECTIONS_THEME"
-  "$ELECTIONS_EVIDENCE_THEME"
   "$MEMBERSHIP_SETTINGS_THEME"
   "$MAIL_TOOLS_THEME"
   "$SHELL_ROUTES_THEME"
   "$REPORTS_ADMIN_THEME"
-  "$SELF_SERVICE_THEME"
-)
-EVIDENCE_ONLY_THEME_NAMES=(
-  "$GROUPS_MANAGEMENT_EVIDENCE_THEME"
-  "$ELECTIONS_EVIDENCE_THEME"
   "$SELF_SERVICE_THEME"
 )
 
@@ -82,29 +73,25 @@ declare -A THEME_SCRIPT_NAMES=(
   ["$INVITATIONS_THEME"]="e2e:membership-invitations"
   ["$ORGANIZATIONS_THEME"]="e2e:organizations"
   ["$GROUPS_THEME"]="e2e:groups"
-  ["$GROUPS_MANAGEMENT_EVIDENCE_THEME"]="e2e:groups:management:evidence"
   ["$ELECTIONS_THEME"]="e2e:elections"
-  ["$ELECTIONS_EVIDENCE_THEME"]="e2e:elections:evidence"
   ["$MEMBERSHIP_SETTINGS_THEME"]="e2e:membership-settings:playwright"
   ["$MAIL_TOOLS_THEME"]="e2e:mail-tools"
   ["$SHELL_ROUTES_THEME"]="e2e:shell-routes"
   ["$REPORTS_ADMIN_THEME"]="e2e:reports-admin"
-  ["$SELF_SERVICE_THEME"]="e2e:membership-self-service:evidence"
+  ["$SELF_SERVICE_THEME"]="e2e:membership-self-service"
 )
 declare -A THEME_SPEC_PATHS=(
   ["$AUTH_THEME"]="e2e/auth"
   ["$COMMITTEE_THEME"]="e2e/membership/committee-queue.spec.ts"
   ["$INVITATIONS_THEME"]="e2e/membership/account-invitations.spec.ts"
   ["$ORGANIZATIONS_THEME"]="$ORGANIZATIONS_LIST_DETAIL_SPEC $ORGANIZATIONS_CLAIM_SPEC"
-  ["$GROUPS_THEME"]="$GROUPS_LIST_DETAIL_SPEC"
-  ["$GROUPS_MANAGEMENT_EVIDENCE_THEME"]="$GROUPS_MANAGEMENT_EVIDENCE_SPEC"
-  ["$ELECTIONS_THEME"]="$ELECTIONS_LIST_DETAIL_SPEC $ELECTIONS_ROUTES_SHELL_SPEC $ELECTIONS_BALLOT_VERIFY_SPEC"
-  ["$ELECTIONS_EVIDENCE_THEME"]="$ELECTIONS_LIFECYCLE_EVIDENCE_SPEC"
+  ["$GROUPS_THEME"]="$GROUPS_LIST_DETAIL_SPEC $GROUPS_MANAGEMENT_SPEC"
+  ["$ELECTIONS_THEME"]="$ELECTIONS_LIST_DETAIL_SPEC $ELECTIONS_ROUTES_SHELL_SPEC $ELECTIONS_BALLOT_VERIFY_SPEC $ELECTIONS_LIFECYCLE_SPEC"
   ["$MEMBERSHIP_SETTINGS_THEME"]="$MEMBERSHIP_SETTINGS_SPEC"
   ["$MAIL_TOOLS_THEME"]="$MAIL_TOOLS_SPEC"
   ["$SHELL_ROUTES_THEME"]="$SHELL_ROUTES_SPEC"
   ["$REPORTS_ADMIN_THEME"]="$REPORTS_ADMIN_SPEC"
-  ["$SELF_SERVICE_THEME"]="$SELF_SERVICE_ENTRY_EVIDENCE_SPEC $SELF_SERVICE_DETAIL_EVIDENCE_SPEC"
+  ["$SELF_SERVICE_THEME"]="$SELF_SERVICE_ENTRY_SPEC $SELF_SERVICE_DETAIL_SPEC"
 )
 declare -A SCENARIO_THEME_NAMES=(
   ["auth-login-shell"]="$AUTH_THEME"
@@ -186,8 +173,7 @@ Commands:
            for the selected E2E theme(s), and execute the matching Playwright suite.
            The wrapper refreshes only the web service with a rebuild and forced recreate
            before resets so reused stacks pick up code and dependency changes.
-           When no theme, scenario, or spec path is supplied, runs the auth-only
-           Playwright suite under Chromium.
+           When no theme, scenario, or spec path is supplied, runs all available wrapper E2E tests under Chromium.
   up       Start or reuse the E2E stack and wait for /readyz.
   reset    Start or reuse the E2E stack, wait for /readyz, and run the ordered reset sequence
            for the selected E2E theme(s). Default: auth only.
@@ -200,9 +186,9 @@ Commands:
   help     Show this help output.
 
 Options:
-  --theme <theme>       Theme: auth, membership-committee, membership-invitations, organizations, groups, groups-management-evidence, elections, elections-evidence, membership-settings, mail-tools, shell-routes, reports-admin, or membership-self-service. May be repeated.
+  --theme <theme>       Theme: auth, membership-committee, membership-invitations, organizations, groups, elections, membership-settings, mail-tools, shell-routes, reports-admin, or membership-self-service. May be repeated.
   --scenario <scenario> Named scenario. Maps to exactly one theme.
-  --no-reset  Skip resets for explicit auth-only run commands.
+  --no-reset  Skip resets for default all-tests or explicit auth-only run commands.
   --no-rebuild Skip the web rebuild/recreate step when reusing or starting the E2E stack.
   --headed    Forward Playwright's --headed flag for the default run command.
   --ui        Forward Playwright's --ui flag for the default run command.
@@ -213,9 +199,7 @@ Themes:
   membership-invitations
   organizations
   groups
-  groups-management-evidence
   elections
-  elections-evidence
   membership-settings
   mail-tools
   shell-routes
@@ -223,8 +207,7 @@ Themes:
   membership-self-service
 
 Theme combinations:
-  Green themes may be combined, except membership-settings which remains standalone.
-  Evidence-only themes must be run explicitly and cannot be combined with green themes.
+  Themes may be combined, except membership-settings which remains standalone.
 
 Scenarios:
   auth-login-shell
@@ -661,22 +644,16 @@ infer_theme_from_spec_path() {
     "$ORGANIZATIONS_LIST_DETAIL_SPEC"|"$ORGANIZATIONS_CLAIM_SPEC")
       printf '%s\n' "$ORGANIZATIONS_THEME"
       ;;
-    "$GROUPS_LIST_DETAIL_SPEC")
+    "$GROUPS_LIST_DETAIL_SPEC"|"$GROUPS_MANAGEMENT_SPEC")
       printf '%s\n' "$GROUPS_THEME"
       ;;
-    "$GROUPS_MANAGEMENT_EVIDENCE_SPEC")
-      printf '%s\n' "$GROUPS_MANAGEMENT_EVIDENCE_THEME"
-      ;;
-    "$ELECTIONS_LIST_DETAIL_SPEC"|"$ELECTIONS_ROUTES_SHELL_SPEC"|"$ELECTIONS_BALLOT_VERIFY_SPEC")
+    "$ELECTIONS_LIST_DETAIL_SPEC"|"$ELECTIONS_ROUTES_SHELL_SPEC"|"$ELECTIONS_BALLOT_VERIFY_SPEC"|"$ELECTIONS_LIFECYCLE_SPEC")
       printf '%s\n' "$ELECTIONS_THEME"
-      ;;
-    "$ELECTIONS_LIFECYCLE_EVIDENCE_SPEC")
-      printf '%s\n' "$ELECTIONS_EVIDENCE_THEME"
       ;;
     "$MEMBERSHIP_SETTINGS_SPEC")
       printf '%s\n' "$MEMBERSHIP_SETTINGS_THEME"
       ;;
-    "$SELF_SERVICE_ENTRY_EVIDENCE_SPEC"|"$SELF_SERVICE_DETAIL_EVIDENCE_SPEC")
+    "$SELF_SERVICE_ENTRY_SPEC"|"$SELF_SERVICE_DETAIL_SPEC")
       printf '%s\n' "$SELF_SERVICE_THEME"
       ;;
     *)
@@ -695,38 +672,6 @@ append_unique() {
     fi
   done
   resolved_themes+=("$value")
-}
-
-theme_is_evidence_only() {
-  local theme_name="$1"
-  local evidence_theme
-
-  for evidence_theme in "${EVIDENCE_ONLY_THEME_NAMES[@]}"; do
-    if [[ "$evidence_theme" == "$theme_name" ]]; then
-      return 0
-    fi
-  done
-
-  return 1
-}
-
-ensure_evidence_theme_quarantine() {
-  local theme_name
-  local saw_evidence_theme="no"
-  local saw_green_theme="no"
-
-  for theme_name in "$@"; do
-    if theme_is_evidence_only "$theme_name"; then
-      saw_evidence_theme="yes"
-    else
-      saw_green_theme="yes"
-    fi
-  done
-
-  if [[ "$saw_evidence_theme" == "yes" && "$saw_green_theme" == "yes" ]]; then
-    echo "Evidence-only themes cannot be combined with green themes" >&2
-    exit 1
-  fi
 }
 
 ensure_membership_settings_standalone() {
@@ -752,6 +697,7 @@ resolve_themes() {
   local scenario_theme
   local spec_path
   local inferred_theme
+  local default_all_themes="no"
 
   resolved_themes=()
 
@@ -814,14 +760,18 @@ resolve_themes() {
   fi
 
   if [[ ${#resolved_themes[@]} -eq 0 ]]; then
-    resolved_themes=("$AUTH_THEME")
+    if [[ "$command_name" == "run" ]]; then
+      resolved_themes=("${ALL_THEME_NAMES[@]}")
+      default_all_themes="yes"
+    else
+      resolved_themes=("$AUTH_THEME")
+    fi
   fi
 
-  ensure_membership_settings_standalone "${resolved_themes[@]}"
-
-  if [[ ${#requested_themes[@]} -gt 0 || ${#requested_scenarios[@]} -gt 0 || ${#raw_spec_paths[@]} -gt 0 ]]; then
-    ensure_evidence_theme_quarantine "${resolved_themes[@]}"
+  if [[ "$default_all_themes" != "yes" ]]; then
+    ensure_membership_settings_standalone "${resolved_themes[@]}"
   fi
+
 }
 
 run_theme_resets() {
@@ -856,11 +806,7 @@ run_theme_resets() {
         include_auth_reset="yes"
         include_groups_reset="yes"
         ;;
-      "$GROUPS_MANAGEMENT_EVIDENCE_THEME")
-        include_auth_reset="yes"
-        include_groups_reset="yes"
-        ;;
-      "$ELECTIONS_THEME"|"$ELECTIONS_EVIDENCE_THEME")
+      "$ELECTIONS_THEME")
         include_auth_reset="yes"
         include_elections_reset="yes"
         ;;
@@ -891,15 +837,19 @@ run_theme_resets() {
 
   if [[ "$include_auth_reset" == "yes" ]]; then
     reset_auth_profile
+    restart_web_after_resets="yes"
   fi
   if [[ "$include_membership_committee_reset" == "yes" ]]; then
     reset_membership_committee
+    restart_web_after_resets="yes"
   fi
   if [[ "$include_membership_invitations_reset" == "yes" ]]; then
     reset_membership_invitations
+    restart_web_after_resets="yes"
   fi
   if [[ "$include_organizations_reset" == "yes" ]]; then
     reset_organizations
+    restart_web_after_resets="yes"
   else
     cleanup_organizations_reset_state
   fi
@@ -915,6 +865,7 @@ run_theme_resets() {
   fi
   if [[ "$include_membership_reset" == "yes" ]]; then
     reset_membership_selfservice
+    restart_web_after_resets="yes"
   else
     cleanup_self_service_reset_state
   fi
@@ -978,30 +929,12 @@ run_selected_playwright() {
     for spec_path in "${raw_spec_paths[@]}"; do
       normalized_spec_paths+=("$(normalize_spec_path "$spec_path")")
     done
-    if [[ ${#resolved_themes[@]} -eq 1 && "${resolved_themes[0]}" == "$GROUPS_MANAGEMENT_EVIDENCE_THEME" ]]; then
-      run_playwright_command "${THEME_SCRIPT_NAMES[$GROUPS_MANAGEMENT_EVIDENCE_THEME]}" "${playwright_args[@]}" "${grep_args[@]}"
-      return
-    fi
-    if [[ ${#resolved_themes[@]} -eq 1 && "${resolved_themes[0]}" == "$ELECTIONS_EVIDENCE_THEME" ]]; then
-      run_playwright_command "${THEME_SCRIPT_NAMES[$ELECTIONS_EVIDENCE_THEME]}" "${playwright_args[@]}" "${grep_args[@]}"
-      return
-    fi
     run_playwright_command "$RAW_PLAYWRIGHT_SCRIPT" --project=chromium "${normalized_spec_paths[@]}" "${playwright_args[@]}" "${grep_args[@]}"
-    return
-  fi
-
-  if [[ ${#requested_themes[@]} -eq 0 && ${#requested_scenarios[@]} -eq 0 ]]; then
-    run_playwright_command "${THEME_SCRIPT_NAMES[$AUTH_THEME]}" "${playwright_args[@]}"
     return
   fi
 
   if [[ ${#resolved_themes[@]} -gt 1 ]]; then
     run_multi_theme_playwright
-    return
-  fi
-
-  if [[ "${resolved_themes[0]}" == "$AUTH_THEME" && ${#requested_scenarios[@]} -eq 0 ]]; then
-    run_playwright_command "${THEME_SCRIPT_NAMES[$AUTH_THEME]}" "${playwright_args[@]}"
     return
   fi
 
@@ -1086,7 +1019,9 @@ fi
 resolve_themes
 
 if [[ "$command_name" == "run" && "$reset_requested" == "no" ]]; then
-  if [[ ${#resolved_themes[@]} -ne 1 || "${resolved_themes[0]}" != "$AUTH_THEME" ]]; then
+  if [[ ${#requested_themes[@]} -eq 0 && ${#requested_scenarios[@]} -eq 0 && ${#raw_spec_paths[@]} -eq 0 ]]; then
+    :
+  elif [[ ${#resolved_themes[@]} -ne 1 || "${resolved_themes[0]}" != "$AUTH_THEME" ]]; then
     echo "--no-reset is only supported for auth-only runs" >&2
     exit 1
   fi

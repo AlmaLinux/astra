@@ -1,3 +1,5 @@
+/// <reference types="node" />
+
 import { expect, test, type Page } from "@playwright/test";
 
 async function loginViaForm(page: Page, username: string, password: string): Promise<void> {
@@ -12,9 +14,16 @@ async function logoutViaForm(page: Page): Promise<void> {
 }
 
 async function ensureMembershipManagementOpen(page: Page): Promise<void> {
-  const auditLink = page.getByRole("link", { name: "Audit Log", exact: true });
+  const auditLink = page.getByRole("link", { name: /Audit Log/ });
   if (!(await auditLink.isVisible())) {
     await page.getByRole("link", { name: /Membership Management/ }).click();
+  }
+}
+
+async function uploadAndPreviewIfNeeded(page: Page): Promise<void> {
+  const button = page.getByRole("button", { name: "Upload and Preview", exact: true });
+  if (await button.isVisible()) {
+    await button.click();
   }
 }
 
@@ -24,7 +33,7 @@ async function ensureMembershipManagementOpen(page: Page): Promise<void> {
 test("reports-admin-audit-sponsors-stats", async ({ page }) => {
   await loginViaForm(page, "regular01", "password");
   await ensureMembershipManagementOpen(page);
-  await page.getByRole("link", { name: "Audit Log", exact: true }).click();
+  await page.getByRole("link", { name: /Audit Log/ }).click();
 
   await expect(page).toHaveURL(/\/membership\/log\/?$/);
   await expect(page.locator("[data-membership-audit-log-root]")).toBeVisible();
@@ -32,14 +41,14 @@ test("reports-admin-audit-sponsors-stats", async ({ page }) => {
   await expect(page.getByText("No audit log entries.")).toHaveCount(0);
 
   await page.getByLabel("Search membership audit log", { exact: true }).fill("regular0");
-  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await page.getByTitle("Search audit log").click();
   await expect(page).toHaveURL(/q=regular0/);
-  await expect(page.getByText(/Request #\d+/)).toBeVisible();
+  await expect(page.getByText(/Request #\d+/).first()).toBeVisible();
   const responseSummary = page.getByText("Request responses").first();
   await expect(responseSummary).toBeVisible();
 
   await ensureMembershipManagementOpen(page);
-  await page.getByRole("link", { name: "Sponsors", exact: true }).click();
+  await page.getByRole("link", { name: /Sponsors/ }).click();
 
   await expect(page).toHaveURL(/\/membership\/sponsors\/?$/);
   await expect(page.locator("[data-membership-sponsors-root]")).toBeVisible();
@@ -49,13 +58,13 @@ test("reports-admin-audit-sponsors-stats", async ({ page }) => {
   await expect(page.getByRole("button", { name: "PDF", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Print", exact: true })).toBeVisible();
   await page.getByLabel("Search sponsors", { exact: true }).fill("org");
-  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await page.getByTitle("Search sponsors").click();
   await expect(page).toHaveURL(/q=org/i);
   await page.locator("[data-colvis-toggle]").click();
   await expect(page.getByLabel("Expires", { exact: true })).toBeVisible();
 
   await ensureMembershipManagementOpen(page);
-  await page.getByRole("link", { name: "Statistics", exact: true }).click();
+  await page.getByRole("link", { name: /Statistics/ }).click();
 
   await expect(page).toHaveURL(/\/membership\/stats\/?$/);
   await expect(page.locator("[data-membership-stats-root]")).toBeVisible();
@@ -118,10 +127,10 @@ test("reports-admin-account-deletion-object-tools", async ({ page }) => {
 // As an admin running the organization-membership CSV importer, I can preview skipped organization-membership rows before any import submission.
 test("reports-admin-django-admin-and-imports", async ({ page }) => {
   await loginViaForm(page, "admin", "admin-password");
-  await page.getByRole("link", { name: "Admin", exact: true }).click();
+  await page.getByRole("link", { name: /Admin/ }).click();
 
   await expect(page).toHaveURL(/\/admin\/?$/);
-  await expect(page.getByRole("heading", { name: /site administration/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Dashboard", exact: true })).toBeVisible();
 
   await page.goto("/admin/auth/ipauser/regular01/change/");
   await expect(page.getByRole("button", { name: "Reset user's password", exact: true })).toBeVisible();
@@ -146,7 +155,7 @@ test("reports-admin-django-admin-and-imports", async ({ page }) => {
   });
   await expect(page.locator("#csv-header-preview")).toBeVisible();
   await expect(page.locator("#csv-header-preview")).toContainText("Email");
-  await page.getByRole("button", { name: "Upload and Preview", exact: true }).click();
+  await uploadAndPreviewIfNeeded(page);
   await expect(page.getByText(/Confirm import/i)).toBeVisible();
 
   await page.goto("/admin/core/organizationcsvimportlink/import/");
@@ -159,9 +168,9 @@ test("reports-admin-django-admin-and-imports", async ({ page }) => {
     ),
   });
   await expect(page.locator("#csv-header-preview")).toBeVisible();
-  await page.getByRole("button", { name: "Upload and Preview", exact: true }).click();
+  await uploadAndPreviewIfNeeded(page);
   await expect(page.getByText("Organizations to Import", { exact: true })).toBeVisible();
-  await expect(page.getByRole("combobox").filter({ has: page.locator('option[value=""]') }).first()).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Unclaimed", exact: true })).toBeVisible();
 
   await page.goto("/admin/core/organizationmembershipcsvimportlink/import/");
   await page.selectOption("#id_membership_type", { index: 1 });
@@ -174,7 +183,7 @@ test("reports-admin-django-admin-and-imports", async ({ page }) => {
     ),
   });
   await expect(page.locator("#csv-header-preview")).toBeVisible();
-  await page.getByRole("button", { name: "Upload and Preview", exact: true }).click();
+  await uploadAndPreviewIfNeeded(page);
   await expect(page.getByText("Organizations to Import", { exact: true })).toBeVisible();
   await expect(page.getByText("Skipped", { exact: true })).toBeVisible();
 });

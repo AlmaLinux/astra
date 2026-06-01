@@ -103,7 +103,7 @@ test("groups-detail-team-membership-controls expose datalist suggestions and agr
   await expect(page.getByText("Users must have signed required agreements before being added.", { exact: true })).toBeVisible();
 });
 
-// As a sponsor/team lead, I can inspect destructive management confirmations without submitting them in green coverage.
+// As a sponsor/team lead, I can inspect destructive management confirmations without submitting them.
 test("groups-detail-confirm-modal-variants cover team-lead and member actions", async ({ page }) => {
   await loginViaForm(page, SPONSOR.username, SPONSOR.password);
 

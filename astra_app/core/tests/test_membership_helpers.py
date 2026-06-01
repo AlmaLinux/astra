@@ -69,7 +69,7 @@ class MembershipHelperTests(TestCase):
             {"target_organization": org},
         )
 
-    def test_compute_membership_requestability_context_applies_held_category_exclusion(self) -> None:
+    def test_compute_membership_requestability_context_blocks_exact_held_types_not_categories(self) -> None:
         MembershipType.objects.update(enabled=False)
 
         MembershipType.objects.update_or_create(
@@ -83,11 +83,41 @@ class MembershipHelperTests(TestCase):
             },
         )
         MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold",
+                "category_id": "sponsorship",
+                "sort_order": 0,
+                "enabled": True,
+                "group_cn": "almalinux-gold",
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="ruby",
+            defaults={
+                "name": "Ruby",
+                "category_id": "sponsorship",
+                "sort_order": 2,
+                "enabled": True,
+                "group_cn": "almalinux-ruby",
+            },
+        )
+        MembershipType.objects.update_or_create(
+            code="platinum",
+            defaults={
+                "name": "Platinum",
+                "category_id": "sponsorship",
+                "sort_order": 3,
+                "enabled": True,
+                "group_cn": "almalinux-platinum",
+            },
+        )
+        MembershipType.objects.update_or_create(
             code="mirror",
             defaults={
                 "name": "Mirror",
                 "category_id": "mirror",
-                "sort_order": 2,
+                "sort_order": 4,
                 "enabled": True,
                 "group_cn": "almalinux-mirror",
             },
@@ -96,7 +126,7 @@ class MembershipHelperTests(TestCase):
         eligibility = {
             "valid_membership_type_codes": set(),
             "extendable_membership_type_codes": set(),
-            "blocked_membership_type_codes": set(),
+            "blocked_membership_type_codes": {"gold"},
             "pending_membership_category_ids": set(),
         }
         org = Organization.objects.create(name="Req Org", representative="bob")
@@ -106,7 +136,14 @@ class MembershipHelperTests(TestCase):
             eligibility=SimpleNamespace(**eligibility),
             held_category_ids={"sponsorship", "mirror"},
         )
-        self.assertFalse(context.membership_can_request_any)
+        self.assertTrue(context.membership_can_request_any)
+        self.assertEqual(
+            context.requestable_codes_by_category,
+            {
+                "sponsorship": {"platinum", "ruby", "silver"},
+                "mirror": {"mirror"},
+            },
+        )
 
         context_with_open_category = compute_membership_requestability_context(
             organization=org,
@@ -117,10 +154,23 @@ class MembershipHelperTests(TestCase):
         self.assertEqual(
             context_with_open_category.requestable_codes_by_category,
             {
-                "sponsorship": {"silver"},
+                "sponsorship": {"platinum", "ruby", "silver"},
                 "mirror": {"mirror"},
             },
         )
+
+        user_context = compute_membership_requestability_context(
+            username="alice",
+            eligibility=SimpleNamespace(
+                valid_membership_type_codes=set(),
+                extendable_membership_type_codes=set(),
+                blocked_membership_type_codes={"individual"},
+                pending_membership_category_ids=set(),
+            ),
+            held_category_ids={"individual"},
+        )
+        self.assertTrue(user_context.membership_can_request_any)
+        self.assertEqual(user_context.requestable_codes_by_category, {"mirror": {"mirror"}})
 
     def test_compute_membership_requestability_context_uses_effective_category_when_denorm_drifts(self) -> None:
         MembershipTypeCategory.objects.update_or_create(
@@ -156,7 +206,7 @@ class MembershipHelperTests(TestCase):
             eligibility=SimpleNamespace(
                 valid_membership_type_codes=set(),
                 extendable_membership_type_codes=set(),
-                blocked_membership_type_codes=set(),
+                blocked_membership_type_codes={"silver"},
                 pending_membership_category_ids=set(),
             ),
         )

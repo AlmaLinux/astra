@@ -12,13 +12,22 @@ from django.utils import timezone
 from core.e2e_membership_request_reset import seed_membership_request_workflow
 from core.freeipa.agreement import FreeIPAFASAgreement
 from core.freeipa.e2e_registry import get_e2e_service_client, is_e2e_fake_freeipa_enabled
-from core.models import Membership, MembershipLog, MembershipRequest, MembershipType, Note, Organization
+from core.models import (
+    Membership,
+    MembershipLog,
+    MembershipRequest,
+    MembershipType,
+    MembershipTypeCategory,
+    Note,
+    Organization,
+)
 
 
 class Command(BaseCommand):
     help = "Reset the self-service membership E2E scenario state."
 
-    actor_usernames = ["regular01", "regular02", "regular03", "regular04", "regular05", "regular06"]
+    actor_usernames = ["regular01", "regular32", "regular33", "regular34", "regular35", "regular36"]
+    cleanup_usernames = [*actor_usernames, "regular02", "regular04", "regular05", "regular06"]
     representative_org_names = [
         "Regular01 Sponsor Form Org",
         "Regular01 No Types Org",
@@ -48,6 +57,18 @@ class Command(BaseCommand):
         self.stdout.write(json.dumps(payload))
 
     def _ensure_membership_types(self) -> None:
+        MembershipTypeCategory.objects.update_or_create(
+            name="individual",
+            defaults={"is_individual": True, "is_organization": False, "sort_order": 0},
+        )
+        MembershipTypeCategory.objects.update_or_create(
+            name="mirror",
+            defaults={"is_individual": True, "is_organization": True, "sort_order": 1},
+        )
+        MembershipTypeCategory.objects.update_or_create(
+            name="sponsorship",
+            defaults={"is_individual": False, "is_organization": True, "sort_order": 2},
+        )
         MembershipType.objects.update_or_create(
             code="individual",
             defaults={
@@ -55,6 +76,36 @@ class Command(BaseCommand):
                 "group_cn": "almalinux-individual",
                 "category_id": "individual",
                 "sort_order": 0,
+                "enabled": True,
+            },
+        )
+        self._ensure_membership_type_preserving_order(
+            code="gold",
+            defaults={
+                "name": "Gold Sponsor Member",
+                "group_cn": "almalinux-gold",
+                "category_id": "sponsorship",
+                "sort_order": 3,
+                "enabled": True,
+            },
+        )
+        self._ensure_membership_type_preserving_order(
+            code="platinum",
+            defaults={
+                "name": "Platinum Sponsor",
+                "group_cn": "platinum-sponsors",
+                "category_id": "sponsorship",
+                "sort_order": 4,
+                "enabled": True,
+            },
+        )
+        self._ensure_membership_type_preserving_order(
+            code="ruby",
+            defaults={
+                "name": "Ruby Sponsor Member",
+                "group_cn": "almalinux-ruby",
+                "category_id": "sponsorship",
+                "sort_order": 5,
                 "enabled": True,
             },
         )
@@ -68,7 +119,7 @@ class Command(BaseCommand):
                 "enabled": True,
             },
         )
-        MembershipType.objects.update_or_create(
+        self._ensure_membership_type_preserving_order(
             code="silver",
             defaults={
                 "name": "Silver Sponsor Member",
@@ -79,14 +130,26 @@ class Command(BaseCommand):
             },
         )
 
+    def _ensure_membership_type_preserving_order(self, *, code: str, defaults: dict[str, object]) -> None:
+        membership_type, created = MembershipType.objects.get_or_create(code=code, defaults=defaults)
+        if created:
+            return
+        updates: dict[str, object] = {}
+        if membership_type.name != defaults["name"]:
+            updates["name"] = defaults["name"]
+        if membership_type.group_cn != defaults["group_cn"]:
+            updates["group_cn"] = defaults["group_cn"]
+        if membership_type.category_id != defaults["category_id"]:
+            updates["category_id"] = defaults["category_id"]
+        if membership_type.enabled != defaults["enabled"]:
+            updates["enabled"] = defaults["enabled"]
+        if updates:
+            MembershipType.objects.filter(pk=membership_type.pk).update(**updates)
+
     def _clear_existing_slice(self) -> None:
         membership_type_codes = ["individual", "mirror"]
 
-        request_queryset = MembershipRequest.objects.filter(
-            requested_username__in=self.actor_usernames,
-            membership_type_id__in=membership_type_codes,
-        )
-        request_ids = list(request_queryset.values_list("pk", flat=True))
+        request_ids = self._self_service_request_ids(membership_type_codes=membership_type_codes)
         representative_organizations = list(
             Organization.objects.filter(name__in=self.representative_org_names).values_list("pk", flat=True)
         )
@@ -95,23 +158,52 @@ class Command(BaseCommand):
             Note.objects.filter(membership_request_id__in=request_ids).delete()
             MembershipLog.objects.filter(
                 Q(membership_request_id__in=request_ids)
-                | Q(target_username__in=self.actor_usernames, membership_type_id__in=membership_type_codes)
+                | Q(
+                    target_username="regular33",
+                    membership_type_id="mirror",
+                )
             ).delete()
         else:
             MembershipLog.objects.filter(
-                target_username__in=self.actor_usernames,
-                membership_type_id__in=membership_type_codes,
+                target_username="regular33",
+                membership_type_id="mirror",
             ).delete()
 
-        request_queryset.delete()
+        MembershipRequest.objects.filter(pk__in=request_ids).delete()
         Membership.objects.filter(
-            target_username__in=self.actor_usernames,
-            membership_type_id__in=membership_type_codes,
+            target_username="regular33",
+            membership_type_id="mirror",
         ).delete()
         if representative_organizations:
             MembershipRequest.objects.filter(requested_organization_id__in=representative_organizations).delete()
             Membership.objects.filter(target_organization_id__in=representative_organizations).delete()
             Organization.objects.filter(pk__in=representative_organizations).delete()
+
+    def _self_service_request_ids(self, *, membership_type_codes: list[str]) -> list[int]:
+        owned_markers = {
+            "Seeded duplicate request for Wave 1.",
+            "https://mirror.regular03.example.test",
+            "https://mirror.regular33.example.test",
+            "https://mirror.regular04.example.test",
+            "https://mirror.regular34.example.test",
+            "Pending request for rescind scenario.",
+            "Initial mirror details pending clarification.",
+            "https://mirror.regular06-updated.example.test",
+            "https://mirror.regular36-updated.example.test",
+        }
+        request_ids: list[int] = []
+        for membership_request in MembershipRequest.objects.filter(
+            requested_username__in=self.cleanup_usernames,
+            membership_type_id__in=membership_type_codes,
+        ).only("pk", "responses"):
+            response_values = {
+                str(value)
+                for response in membership_request.responses
+                for value in response.values()
+            }
+            if response_values & owned_markers:
+                request_ids.append(membership_request.pk)
+        return request_ids
 
     def _ensure_signed_coc(self) -> None:
         agreement_cn = settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN
@@ -124,8 +216,9 @@ class Command(BaseCommand):
                 agreement.add_user(username)
 
         client = get_e2e_service_client()
+        country_attr = str(settings.SELF_SERVICE_ADDRESS_COUNTRY_ATTR).strip() or "c"
         for username in self.actor_usernames:
-            client.user_mod(username, c="US")
+            client.user_mod(username, **{country_attr: "US"})
 
     def _seed_slice(self) -> dict[str, object]:
         now = timezone.now().astimezone(datetime.UTC).replace(microsecond=0)
@@ -134,11 +227,12 @@ class Command(BaseCommand):
             for membership_type in MembershipType.objects.filter(code__in=["individual", "mirror"])
         }
         mirror_type = membership_type_by_code["mirror"]
-        self._ensure_group_membership(username="regular03", group_cn=mirror_type.group_cn)
+        self._ensure_group_membership(username="regular33", group_cn=mirror_type.group_cn)
 
         approved_request_requested_at = now - datetime.timedelta(days=46)
         approved_request_decided_at = now - datetime.timedelta(days=45)
-        membership_expires_at = now + datetime.timedelta(days=120)
+        renewal_window_days = max(int(settings.MEMBERSHIP_EXPIRING_SOON_DAYS) - 1, 1)
+        membership_expires_at = now + datetime.timedelta(days=renewal_window_days)
         duplicate_requested_at = now - datetime.timedelta(days=4)
         rescind_requested_at = now - datetime.timedelta(days=3)
         on_hold_requested_at = now - datetime.timedelta(days=2)
@@ -148,11 +242,11 @@ class Command(BaseCommand):
         followup_resubmitted_at = now - datetime.timedelta(days=4, hours=12)
 
         approved_request = seed_membership_request_workflow(
-            requested_username="regular03",
+            requested_username="regular33",
             requested_organization=None,
             membership_type=mirror_type,
             initial_responses=[
-                {"Domain": "https://mirror.regular03.example.test"},
+                {"Domain": "https://mirror.regular33.example.test"},
                 {"Pull request": "https://github.com/AlmaLinux/mirrors/pull/303"},
                 {"Additional information": "Primary EU mirror"},
             ],
@@ -161,13 +255,13 @@ class Command(BaseCommand):
                 (
                     "committee-alpha",
                     "vote_approve",
-                    "Mirror evidence looks complete.",
+                    "Mirror details look complete.",
                     approved_request_requested_at + datetime.timedelta(hours=2),
                 ),
                 (
                     "committee-beta",
                     "vote_approve",
-                    "Agreement evidence verified.",
+                    "Agreement details verified.",
                     approved_request_requested_at + datetime.timedelta(hours=4),
                 ),
             ],
@@ -177,12 +271,12 @@ class Command(BaseCommand):
             approved_expires_at=membership_expires_at,
             application_url=reverse("membership-request-detail", kwargs={"pk": 0}),
         )
-        membership = Membership.objects.get(target_username="regular03", membership_type_id="mirror")
+        membership = Membership.objects.get(target_username="regular33", membership_type_id="mirror")
         approved_request.refresh_from_db()
         membership.refresh_from_db()
 
         duplicate_request = seed_membership_request_workflow(
-            requested_username="regular02",
+            requested_username="regular32",
             requested_organization=None,
             membership_type=membership_type_by_code["individual"],
             initial_responses=[{"Contributions": "Seeded duplicate request for Wave 1."}],
@@ -197,7 +291,7 @@ class Command(BaseCommand):
                 (
                     "committee-beta",
                     "vote_disapprove",
-                    "Leave this pending for duplicate-state evidence.",
+                    "Leave this pending for duplicate-state coverage.",
                     duplicate_requested_at + datetime.timedelta(hours=2),
                 ),
             ],
@@ -207,11 +301,11 @@ class Command(BaseCommand):
         )
 
         on_hold_request = seed_membership_request_workflow(
-            requested_username="regular04",
+            requested_username="regular34",
             requested_organization=None,
             membership_type=mirror_type,
             initial_responses=[
-                {"Domain": "https://mirror.regular04.example.test"},
+                {"Domain": "https://mirror.regular34.example.test"},
                 {"Pull request": "https://github.com/AlmaLinux/mirrors/pull/404"},
                 {"Additional information": "Needs refreshed mirror details."},
             ],
@@ -238,7 +332,7 @@ class Command(BaseCommand):
         )
 
         rescind_request = seed_membership_request_workflow(
-            requested_username="regular05",
+            requested_username="regular35",
             requested_organization=None,
             membership_type=membership_type_by_code["individual"],
             initial_responses=[{"Contributions": "Pending request for rescind scenario."}],
@@ -253,7 +347,7 @@ class Command(BaseCommand):
                 (
                     "committee-beta",
                     "vote_approve",
-                    "Keep pending for rescind evidence.",
+                    "Keep pending for rescind coverage.",
                     rescind_requested_at + datetime.timedelta(hours=2),
                 ),
             ],
@@ -263,20 +357,20 @@ class Command(BaseCommand):
         )
 
         rfi_followup_request = seed_membership_request_workflow(
-            requested_username="regular06",
+            requested_username="regular36",
             requested_organization=None,
             membership_type=mirror_type,
             initial_responses=[
-                {"Domain": "https://mirror.regular06.example.test"},
+                {"Domain": "https://mirror.regular36.example.test"},
                 {"Pull request": "https://github.com/AlmaLinux/mirrors/pull/606"},
-                {"Additional information": "Initial mirror evidence pending clarification."},
+                {"Additional information": "Initial mirror details pending clarification."},
             ],
             requested_at=followup_requested_at,
             review_notes=[
                 (
                     "committee-alpha",
                     "vote_disapprove",
-                    "Need clearer mirror hosting evidence.",
+                    "Need clearer mirror hosting details.",
                     followup_requested_at + datetime.timedelta(hours=1),
                 ),
                 (
@@ -292,7 +386,7 @@ class Command(BaseCommand):
             rfi_message="Please add the updated mirror endpoint and refreshed PR link.",
             application_url=reverse("membership-request-detail", kwargs={"pk": 0}),
             resubmitted_responses=[
-                {"Domain": "https://mirror.regular06-updated.example.test"},
+                {"Domain": "https://mirror.regular36-updated.example.test"},
                 {"Pull request": "https://github.com/AlmaLinux/mirrors/pull/606"},
                 {"Additional information": "Updated after committee RFI."},
             ],
@@ -315,16 +409,11 @@ class Command(BaseCommand):
         )
         representative_no_types_org = Organization.objects.create(
             name="Regular01 No Types Org",
-            representative="regular02",
+            representative="regular32",
             website="https://regular01-no-types.example.test",
             business_contact_email="regular01-no-types@example.test",
             business_contact_name="Regular01 No Types Contact",
             country_code="US",
-        )
-        Membership.objects.create(
-            target_organization=representative_form_org,
-            membership_type_id="silver",
-            expires_at=now + datetime.timedelta(days=180),
         )
         Membership.objects.create(
             target_organization=representative_no_types_org,
@@ -336,6 +425,13 @@ class Command(BaseCommand):
             membership_type_id="mirror",
             expires_at=now + datetime.timedelta(days=180),
         )
+        MembershipRequest.objects.create(
+            requested_username="",
+            requested_organization=representative_no_types_org,
+            membership_type_id="gold",
+            status=MembershipRequest.Status.pending,
+            responses=[{"Sponsorship details": "Existing sponsorship tier-change request."}],
+        )
         organization_target_request = seed_membership_request_workflow(
             requested_username="",
             requested_organization=representative_form_org,
@@ -343,7 +439,7 @@ class Command(BaseCommand):
             initial_responses=[
                 {"Domain": "https://mirror.regular01-org.example.test"},
                 {"Pull request": "https://github.com/AlmaLinux/mirrors/pull/601"},
-                {"Additional information": "Organization-sponsored mirror application for cross-link evidence."},
+                {"Additional information": "Organization-sponsored mirror application for cross-link coverage."},
             ],
             requested_at=now - datetime.timedelta(hours=12),
             review_notes=[
@@ -356,7 +452,7 @@ class Command(BaseCommand):
                 (
                     "committee-beta",
                     "vote_disapprove",
-                    "Keep pending for organization-target evidence.",
+                    "Keep pending for organization-target coverage.",
                     now - datetime.timedelta(hours=10),
                 ),
             ],
@@ -393,7 +489,7 @@ class Command(BaseCommand):
                 "create": reverse("membership-request"),
                 "profiles": profile_routes,
                 "settings_membership": {
-                    "regular03": settings_membership_route,
+                    "regular33": settings_membership_route,
                 },
             },
             "actors": {
@@ -405,43 +501,43 @@ class Command(BaseCommand):
                     "request_aliases": {"organization_target_pending": organization_target_request.pk},
                     "membership_type_codes": ["individual"],
                 },
-                "regular02": {
-                    "username": "regular02",
+                "regular32": {
+                    "username": "regular32",
                     "password": "password",
-                    "profile_route": profile_routes["regular02"],
+                    "profile_route": profile_routes["regular32"],
                     "organization_aliases": {"representative_no_types_org": representative_no_types_org.pk},
                     "request_aliases": {"duplicate_pending": duplicate_request.pk},
                     "membership_type_codes": ["individual"],
                 },
-                "regular03": {
-                    "username": "regular03",
+                "regular33": {
+                    "username": "regular33",
                     "password": "password",
-                    "profile_route": profile_routes["regular03"],
+                    "profile_route": profile_routes["regular33"],
                     "settings_membership_route": settings_membership_route,
                     "organization_aliases": {},
                     "request_aliases": {"renewal_source": approved_request.pk},
                     "membership_type_codes": ["mirror"],
                 },
-                "regular04": {
-                    "username": "regular04",
+                "regular34": {
+                    "username": "regular34",
                     "password": "password",
-                    "profile_route": profile_routes["regular04"],
+                    "profile_route": profile_routes["regular34"],
                     "organization_aliases": {},
                     "request_aliases": {"resubmit_on_hold": on_hold_request.pk},
                     "membership_type_codes": ["mirror"],
                 },
-                "regular05": {
-                    "username": "regular05",
+                "regular35": {
+                    "username": "regular35",
                     "password": "password",
-                    "profile_route": profile_routes["regular05"],
+                    "profile_route": profile_routes["regular35"],
                     "organization_aliases": {},
                     "request_aliases": {"rescind_pending": rescind_request.pk},
                     "membership_type_codes": ["individual"],
                 },
-                "regular06": {
-                    "username": "regular06",
+                "regular36": {
+                    "username": "regular36",
                     "password": "password",
-                    "profile_route": profile_routes["regular06"],
+                    "profile_route": profile_routes["regular36"],
                     "organization_aliases": {},
                     "request_aliases": {"rfi_followup_review": rfi_followup_request.pk},
                     "membership_type_codes": ["mirror"],
@@ -465,7 +561,7 @@ class Command(BaseCommand):
             },
             "settings": {
                 "membership": {
-                    "actor_username": "regular03",
+                    "actor_username": "regular33",
                     "route": settings_membership_route,
                     "active_membership_alias": self.active_membership_alias,
                     "active_membership": {
@@ -529,7 +625,7 @@ class Command(BaseCommand):
             if membership_log is None:
                 membership_log = MembershipLog.objects.create(
                     actor_username="reviewer",
-                    target_username="regular03",
+                    target_username="regular33",
                     membership_type=membership_type,
                     membership_request=membership_request,
                     requested_group_cn=membership_type.group_cn,

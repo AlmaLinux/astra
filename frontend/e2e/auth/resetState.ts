@@ -45,7 +45,7 @@ function assertAuthResetState(state: AuthResetState): void {
   if (state.scenario !== "auth-profile" || state.status !== "reset") {
     throw new Error("Auth reset state is not an auth-profile reset payload.");
   }
-  if (!state.actors.regular01 || !state.actors.regular03 || !state.actors.admin) {
+  if (!state.actors.regular01 || !state.actors.regular03 || !state.actors.account_setup || !state.actors.admin) {
     throw new Error("Auth reset state is missing one or more required actors.");
   }
   if (

@@ -30,7 +30,7 @@ test("auth-profile-owner sees the seeded profile, memberships, and pending reque
   await expect(page.locator("#user_mail")).toContainText("regular03@example.test");
   await expect(page.locator("[title='Pronouns']")).toBeVisible();
   await expect(page.locator("[data-user-profile-membership-root]")).toBeVisible();
-  await expect(page.getByRole("link", { name: /request #/i })).toBeVisible();
+  await expect(page.getByRole("link", { name: /request #/i }).first()).toBeVisible();
 });
 
 // As another-profile viewer, I can target `/user/<username>/` directly; current source wiring indicates the shell route itself is not protected by the authenticated user-directory gate.
@@ -69,7 +69,7 @@ test("auth-profile-private committee viewers regain committee-only fields withou
 
 // As a user with unmet prerequisites, I see `Action required` or dismissible `Recommended` alerts with deep links.
 test("auth-profile-account-setup alerts expose deep links and recommended dismissal persists", async ({ page }) => {
-  const actor = authResetState.actors.regular01;
+  const actor = authResetState.actors.account_setup;
 
   await loginViaForm(page, actor.username, actor.password);
   await expect(page).toHaveURL(new RegExp(`${escapeRegExp(actor.profile_route)}$`));

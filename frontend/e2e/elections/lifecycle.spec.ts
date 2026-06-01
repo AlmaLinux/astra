@@ -58,25 +58,25 @@ test("elections-edit-manage-candidates-exclusion-groups-and-email opens the draf
   await page.getByRole("button", { name: "Add candidate", exact: true }).click();
   await selectUserFromSelect2(page, "candidates-0-freeipa_username", "regular18");
   await selectUserFromSelect2(page, "candidates-0-nominated_by", "regular19");
-  await page.locator('textarea[name="candidates-0-description"]').fill("Evidence-only lifecycle candidate.");
+  await page.locator('textarea[name="candidates-0-description"]').fill("Lifecycle candidate.");
 
   await page.getByRole("button", { name: /Configure exclusion groups/i }).click();
   await page.getByRole("button", { name: "Add exclusion group", exact: true }).click();
-  await page.locator('input[name="groups-0-name"]').fill("Evidence Group");
+  await page.locator('input[name="groups-0-name"]').fill("Lifecycle Group");
   await page.locator('input[name="groups-0-max_elected"]').fill("1");
   await page.locator('select[name="groups-0-candidate_usernames"]').selectOption("regular18");
 
   const subjectField = page.getByRole("textbox", { name: "Subject:", exact: true });
-  await subjectField.fill("Wave 7 evidence credential email");
+  await subjectField.fill("Wave 7 lifecycle credential email");
   await page.getByRole("button", { name: "Save Draft", exact: true }).click();
 
-  await expect(subjectField).toHaveValue("Wave 7 evidence credential email");
+  await expect(subjectField).toHaveValue("Wave 7 lifecycle credential email");
   await expect(page.locator('select[name="candidates-0-freeipa_username"]')).toHaveValue("regular18");
-  await expect(page.locator('input[name="groups-0-name"]')).toHaveValue("Evidence Group");
+  await expect(page.locator('input[name="groups-0-name"]')).toHaveValue("Lifecycle Group");
 });
 
 // As an election operator, I can start a draft election through an explicit confirmation modal.
-test("elections-edit-draft-save-and-start opens the draft start confirmation modal without mutating the shared green fixture", async ({ page }) => {
+test("elections-edit-draft-save-and-start opens the draft start confirmation modal without mutating the shared fixture", async ({ page }) => {
   const manager = resetState.actors.manager;
 
   await loginViaForm(page, manager.username, manager.password);
@@ -91,7 +91,7 @@ test("elections-edit-draft-save-and-start opens the draft start confirmation mod
 });
 
 // As an election operator, I can close an open election with or without immediate tally.
-test("elections-close-and-tally-modal-evidence exercises the typed-confirm conclude and tally modals without submitting them", async ({ page }) => {
+test("elections-close-and-tally-modal exercises the typed-confirm conclude and tally modals without submitting them", async ({ page }) => {
   const manager = resetState.actors.manager;
 
   await loginViaForm(page, manager.username, manager.password);
@@ -114,7 +114,7 @@ test("elections-close-and-tally-modal-evidence exercises the typed-confirm concl
 });
 
 // As a voter, auditor, or operator, I can open the election algorithm page and follow the verification resources it publishes.
-test("elections-algorithm-shell-evidence opens the standalone algorithm page and verification-resource links", async ({ page }) => {
+test("elections-algorithm-shell opens the standalone algorithm page and verification-resource links", async ({ page }) => {
   const manager = resetState.actors.manager;
 
   await loginViaForm(page, manager.username, manager.password);
@@ -127,7 +127,7 @@ test("elections-algorithm-shell-evidence opens the standalone algorithm page and
 });
 
 // As a voter, I can open the vote page, enter my credential, rank candidates, inspect vote-weight tooltip details, submit a ballot, and copy the ballot receipt.
-test("elections-vote-ranking-submit-and-copy-receipt-evidence submits a ranked ballot and copies the resulting receipt", async ({ page }) => {
+test("elections-vote-ranking-submit-and-copy-receipt submits a ranked ballot and copies the resulting receipt", async ({ page }) => {
   const manager = resetState.actors.manager;
   const credential = resetState.credentials.open_manager_credential.public_id;
   const electionId = resetState.elections.detail_open_election.id;

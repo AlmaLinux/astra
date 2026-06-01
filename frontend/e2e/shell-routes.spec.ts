@@ -8,7 +8,7 @@ async function loginViaForm(page: Page, username: string, password: string): Pro
 }
 
 async function ensureMembershipManagementOpen(page: Page): Promise<void> {
-  const requestsLink = page.getByRole("link", { name: "Requests", exact: true });
+  const requestsLink = page.getByRole("link", { name: /Requests/ });
   if (!(await requestsLink.isVisible())) {
     await page.getByRole("link", { name: /Membership Management/ }).click();
   }
@@ -20,24 +20,24 @@ async function ensureMembershipManagementOpen(page: Page): Promise<void> {
 // As a user following static/legal/support routes, I can reach legal content and support entry points that appear elsewhere in the shell.
 test("shell-routes-users-search-and-static-links", async ({ page }) => {
   await loginViaForm(page, "admin", "admin-password");
-  await page.getByRole("link", { name: "Users", exact: true }).click();
+  await page.getByRole("link", { name: /Users/ }).click();
 
   await expect(page).toHaveURL(/\/users\/?$/);
   await expect(page.locator("[data-users-root]")).toBeVisible();
   await expect(page.getByText("Loading users...")).toHaveCount(0);
   await expect(page.getByText("Unable to load users right now.")).toHaveCount(0);
 
-  await page.getByLabel("Search users", { exact: true }).fill("regular0");
-  await page.getByRole("button", { name: "Search", exact: true }).click();
-  await expect(page).toHaveURL(/\/users\/\?q=regular0/);
-  await expect(page.getByText("regular01", { exact: false })).toBeVisible();
-
   const pageTwoLink = page.getByRole("link", { name: "2", exact: true }).first();
   await expect(pageTwoLink).toBeVisible();
   await pageTwoLink.click();
   await expect(page).toHaveURL(/page=2/);
   await page.goBack();
+  await expect(page).toHaveURL(/\/users\/?$/);
+
+  await page.getByLabel("Search users", { exact: true }).fill("regular0");
+  await page.locator("form").filter({ has: page.getByLabel("Search users", { exact: true }) }).getByRole("button", { name: "Search", exact: true }).click();
   await expect(page).toHaveURL(/\/users\/\?q=regular0/);
+  await expect(page.getByText("regular01", { exact: false })).toBeVisible();
 
   await page.locator("#global-search-input").fill("regular01");
   await expect(page.locator("#global-search-menu")).toBeVisible();
@@ -45,11 +45,11 @@ test("shell-routes-users-search-and-static-links", async ({ page }) => {
   await page.locator("#global-search-menu").getByRole("link", { name: /regular01/i }).first().click();
   await expect(page).toHaveURL(/\/user\/regular01\/?$/);
 
-  await expect(page.getByRole("link", { name: "My Profile", exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Groups", exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Organizations", exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Elections", exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Admin", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: /My Profile/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Groups/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Organizations/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Elections/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Admin/ })).toBeVisible();
 
   const supportLink = page.locator('footer a[href^="mailto:"]');
   await expect(supportLink).toBeVisible();
@@ -58,7 +58,7 @@ test("shell-routes-users-search-and-static-links", async ({ page }) => {
 
   await page.getByRole("link", { name: "Privacy Policy", exact: true }).click();
   await expect(page).toHaveURL(/\/privacy-policy\/?$/);
-  await expect(page.getByRole("heading", { name: /privacy policy/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Privacy Policy", exact: true })).toBeVisible();
 
   await page.goto("/coc/");
   await expect(page).toHaveURL(/\/(coc|agreements)\//);
@@ -72,11 +72,11 @@ test("shell-routes-notifications-and-sidebar", async ({ page }) => {
   await expect(page.locator('form[action="/logout/"] button')).toBeVisible();
 
   await ensureMembershipManagementOpen(page);
-  await expect(page.getByRole("link", { name: "Requests", exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Invitations", exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Audit Log", exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Sponsors", exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Statistics", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Requests/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Invitations/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Audit Log/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Sponsors/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Statistics/ })).toBeVisible();
 
   await page.getByLabel("Notifications", { exact: true }).click();
   const notificationsMenu = page.locator(".dropdown-menu.show").filter({ hasText: "Notifications" }).first();

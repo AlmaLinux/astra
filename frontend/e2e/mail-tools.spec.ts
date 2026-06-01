@@ -1,3 +1,5 @@
+/// <reference types="node" />
+
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const tinyPng = Buffer.from(
@@ -41,7 +43,12 @@ async function openSendMailWorkflow(page: Page): Promise<void> {
 }
 
 async function selectExistingTemplate(page: Page): Promise<void> {
+  const previewResponse = page.waitForResponse((response) => {
+    return response.url().includes("/email-tools/send-mail/render-preview/")
+      && response.request().method() === "POST";
+  });
   await page.locator('select[name="email_template_id"]').selectOption({ label: existingTemplateName });
+  await previewResponse;
   await expect(page.locator("#id_subject")).toHaveValue(existingTemplateSubject);
   await expect(page.locator("iframe[title='Rendered HTML preview']")).toBeVisible();
   await expect(page.locator("iframe[title='Rendered text preview']")).toBeVisible();
@@ -65,6 +72,10 @@ async function confirmSendAndExpectQueued(page: Page, recipientCount: number): P
 }
 
 async function selectUserRecipients(page: Page, usernames: string[]): Promise<void> {
+  const previewResponse = page.waitForResponse((response) => {
+    return response.url().includes("/email-tools/send-mail/")
+      && response.request().method() === "POST";
+  });
   await page.locator("#id_user_usernames").evaluate((element, values) => {
     const select = element as HTMLSelectElement;
     for (const option of select.options) {
@@ -72,6 +83,8 @@ async function selectUserRecipients(page: Page, usernames: string[]): Promise<vo
     }
     select.dispatchEvent(new Event("change", { bubbles: true }));
   }, usernames);
+  await previewResponse;
+  await page.waitForLoadState("domcontentloaded");
 }
 
 // As a send-mail operator, I can choose recipients by group, users, CSV, or manual addresses.

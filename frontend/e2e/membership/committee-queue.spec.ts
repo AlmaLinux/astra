@@ -121,7 +121,7 @@ test("committee-queue-shell renders the queue shell with table-scoped selection 
   await expect(rowByRequestId(onHold, onHoldShellObserverId)).toBeVisible();
   await expect(requestIdLink(onHold, onHoldShellObserverId)).toBeVisible();
   await expect(rowByRequestId(onHold, onHoldShellObserverId).locator('a[href="/user/regular03/"]').first()).toBeVisible();
-  await expect(pending.getByText("Renewal", { exact: true })).toBeVisible();
+  await expect(pending.getByText("Renewal", { exact: true }).first()).toBeVisible();
   await expect(rowByRequestId(pending, pendingShellObserverId).getByRole("button", { name: "Approve", exact: true })).toBeVisible();
   await expect(rowByRequestId(pending, pendingShellObserverId).getByRole("button", { name: "Request for Information" })).toBeVisible();
   await expect(rowByRequestId(onHold, onHoldShellObserverId).getByRole("button", { name: "Approve", exact: true })).toBeVisible();
@@ -159,7 +159,7 @@ test("committee-pending-filter-renewals preserves on-hold pagination while filte
   await expect(page).toHaveURL(/on_hold_page=2/);
   await expect(rowByRequestId(pending, renewalRequestId)).toBeVisible();
   await expect(rowByRequestId(pending, nonRenewalRequestId)).toHaveCount(0);
-  await expect(pending.getByText("Renewal", { exact: true })).toBeVisible();
+  await expect(rowByRequestId(pending, renewalRequestId).getByText("Renewal", { exact: true })).toBeVisible();
   await expect(onHold.locator(".page-item.active").getByRole("link", { name: "2", exact: true })).toBeVisible();
   await expect(onHold.locator("tbody tr")).toHaveCount(onHoldPageTwoPayload.data.length);
   for (const row of onHoldPageTwoPayload.data) {
@@ -287,7 +287,9 @@ test("committee-pending-bulk-accept isolates pending selection and refreshes awa
   await expect(rowByRequestId(pending, pendingSecondaryId)).toBeVisible();
   await expect(rowByRequestId(pending, pendingExtraId)).toBeVisible();
 
-  await pending.locator('input[aria-label="Select all requests"]').check();
+  await rowCheckboxByRequestId(pending, pendingPrimaryId).check();
+  await rowCheckboxByRequestId(pending, pendingSecondaryId).check();
+  await rowCheckboxByRequestId(pending, pendingExtraId).check();
   await expectCheckedCount(pending, "request-checkbox--pending", 3);
   await expectCheckedCount(onHold, "request-checkbox--on-hold", 0);
   await expect(pending.getByText(/Selected:\s*3/)).toBeVisible();

@@ -269,8 +269,9 @@ class Command(BaseCommand):
             ).delete()
 
         request_queryset.delete()
+        renewal_usernames = [str(row["username"]) for row in COMMITTEE_REQUEST_MATRIX if bool(row.get("is_renewal", False))]
         Membership.objects.filter(
-            target_username__in=COMMITTEE_REQUEST_USERNAMES,
+            target_username__in=renewal_usernames,
             membership_type_id__in=membership_type_codes,
         ).delete()
 

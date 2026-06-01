@@ -13,7 +13,15 @@ from django.urls import reverse
 
 from core.freeipa.agreement import FreeIPAFASAgreement
 from core.freeipa.e2e_registry import get_e2e_service_client
-from core.models import FreeIPAPermissionGrant, Membership, MembershipRequest, MembershipType, Note, Organization
+from core.models import (
+    AccountDeletionRequest,
+    FreeIPAPermissionGrant,
+    Membership,
+    MembershipRequest,
+    MembershipType,
+    Note,
+    Organization,
+)
 from core.permissions import ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP
 from core.rate_limit import (
     _rate_limit_cache_key,
@@ -219,6 +227,14 @@ class AuthProfileResetCommandTests(TestCase):
                 "settings_route": f'{reverse("settings")}?tab=profile',
             },
         )
+        self.assertEqual(
+            payload["actors"]["account_setup"],
+            {
+                "username": "regular50",
+                "password": "password",
+                "profile_route": reverse("user-profile", kwargs={"username": "regular50"}),
+            },
+        )
         self.assertEqual(payload["routes"]["login"], reverse("login"))
         self.assertEqual(payload["routes"]["password_reset_request"], reverse("password-reset"))
         self.assertEqual(payload["routes"]["password_expired"], reverse("password-expired"))
@@ -342,6 +358,20 @@ class AuthProfileResetCommandTests(TestCase):
 
     @override_settings(ASTRA_E2E_MODE=True, ASTRA_E2E_FAKE_FREEIPA_ENABLED=True)
     def test_command_seeds_private_profile_and_membership_settings_state_for_auth_playwright(self) -> None:
+        Membership.objects.create(target_username="regular01", membership_type_id="individual")
+        MembershipRequest.objects.create(
+            requested_username="regular01",
+            membership_type_id="individual",
+            status=MembershipRequest.Status.pending,
+            responses=[{"Contributions": "Stale request from another E2E theme."}],
+        )
+        AccountDeletionRequest.objects.create(
+            username="regular08",
+            request_source=AccountDeletionRequest.RequestSource.user_settings,
+            reason_category=AccountDeletionRequest.ReasonCategory.privacy,
+            status=AccountDeletionRequest.Status.pending_review,
+        )
+
         call_command("auth_profile_reset")
 
         client = get_e2e_service_client()
@@ -373,6 +403,9 @@ class AuthProfileResetCommandTests(TestCase):
                 principal_name="regular01",
             ).exists()
         )
+        self.assertFalse(Membership.objects.filter(target_username="regular01").exists())
+        self.assertFalse(MembershipRequest.objects.filter(requested_username="regular01").exists())
+        self.assertFalse(AccountDeletionRequest.objects.filter(username="regular08").exists())
         self.assertTrue(
             FreeIPAPermissionGrant.objects.filter(
                 permission=ASTRA_CHANGE_MEMBERSHIP,

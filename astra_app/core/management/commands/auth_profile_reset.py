@@ -20,7 +20,14 @@ from core.freeipa.e2e_registry import (
     reset_e2e_fake_freeipa_state,
 )
 from core.freeipa.utils import _user_cache_key
-from core.models import FreeIPAPermissionGrant, Membership, MembershipLog, MembershipRequest, MembershipType
+from core.models import (
+    AccountDeletionRequest,
+    FreeIPAPermissionGrant,
+    Membership,
+    MembershipLog,
+    MembershipRequest,
+    MembershipType,
+)
 from core.permissions import ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP
 from core.rate_limit import clear_subject_rate_limit
 from core.tokens import (
@@ -39,6 +46,7 @@ REGISTER_ACTIVATE_USERNAME = "signup-activate-01"
 PROFILE_OWNER_USERNAME = "regular03"
 PRIVATE_PROFILE_USERNAME = "regular07"
 MEMBERSHIP_REVIEWER_USERNAME = "regular01"
+ACCOUNT_SETUP_USERNAME = "regular50"
 
 
 class Command(BaseCommand):
@@ -94,7 +102,7 @@ class Command(BaseCommand):
         )
 
     def _clear_profile_membership_slice(self) -> None:
-        target_usernames = [PROFILE_OWNER_USERNAME, PRIVATE_PROFILE_USERNAME]
+        target_usernames = [PROFILE_OWNER_USERNAME, PRIVATE_PROFILE_USERNAME, MEMBERSHIP_REVIEWER_USERNAME]
         membership_type_codes = ["individual", "mirror"]
         request_ids = list(
             MembershipRequest.objects.filter(
@@ -116,6 +124,7 @@ class Command(BaseCommand):
             target_username__in=target_usernames,
             membership_type_id__in=membership_type_codes,
         ).delete()
+        AccountDeletionRequest.objects.filter(username__in=SETTINGS_USERNAMES).delete()
         FreeIPAPermissionGrant.objects.filter(
             permission__in=[ASTRA_VIEW_MEMBERSHIP, ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP],
             principal_type=FreeIPAPermissionGrant.PrincipalType.user,
@@ -160,6 +169,7 @@ class Command(BaseCommand):
         actors: dict[str, dict[str, str]] = {
             "regular01": self._actor_payload(username="regular01", password=REGULAR_PASSWORD),
             "regular02": self._actor_payload(username="regular02", password=REGULAR_PASSWORD),
+            "account_setup": self._actor_payload(username=ACCOUNT_SETUP_USERNAME, password=REGULAR_PASSWORD),
             "admin": self._actor_payload(
                 username="admin",
                 password="admin-password",

@@ -148,9 +148,9 @@ Pre-change checklist (must answer mentally before finishing):
   - Reset the E2E auth/profile scenario with: `podman-compose -p astra-e2e --env-file .env.e2e -f docker-compose.yml -f docker-compose.e2e.yml exec -T web python manage.py auth_profile_reset`
   - Install the browser dependency from `frontend/` with: `npm ci && npm run e2e:install`
   - Run the checked-in Playwright spec from `frontend/` with: `cd frontend && npm run e2e:auth-profile`
-  - Theme-specific Playwright runs from `frontend/` are available via: `npm run e2e:auth` and `npm run e2e:wave1`; the known-red membership self-service proof stays opt-in via `npm run e2e:membership-self-service:evidence`
+  - Theme-specific Playwright runs from `frontend/` are available via: `npm run e2e:auth`, `npm run e2e:wave1`, and focused theme commands such as `npm run e2e:membership-self-service`
   - Prefer the checked-in wrapper for routine local runs: `scripts/auth-profile-e2e.sh` (default run, `down` to stop the isolated E2E stack)
-  - The wrapper also supports focused runs via `scripts/auth-profile-e2e.sh run --theme <auth|membership-self-service>` and `scripts/auth-profile-e2e.sh run --scenario <scenario-name>`; `membership-self-service` remains explicit non-gating bug evidence until its browser failures are fixed
+  - The wrapper also supports focused runs via `scripts/auth-profile-e2e.sh run --theme <auth|membership-self-service>` and `scripts/auth-profile-e2e.sh run --scenario <scenario-name>`; all wrapper themes are expected to pass
   - The dev stack stays on `http://127.0.0.1:8000` with Vite on `http://127.0.0.1:5173`; the E2E stack uses the `.env.e2e` port block and serves built assets from `http://127.0.0.1:18000`
 - You can run more tests with: `podman-compose exec -T web python manage.py test --noinput`
   - IMPORTANT: There are a lot of tests and they take a while to run, plus it's hard to miss the relevant output.

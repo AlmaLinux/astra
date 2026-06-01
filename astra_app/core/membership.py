@@ -196,25 +196,11 @@ def compute_membership_requestability_context(
     for category_id, code in requestable_rows:
         requestable_codes_by_category.setdefault(category_id, set()).add(code)
 
-    resolved_held_category_ids = (
-        held_category_ids
-        if held_category_ids is not None
-        else {
-            membership.membership_type.category_id
-            for membership in get_valid_memberships(username=username, organization=organization)
-        }
-    )
-
     membership_can_request_any = membership_request_can_request_any(
         username=username,
         organization=organization,
         eligibility=resolved_eligibility,
     )
-    if membership_can_request_any:
-        membership_can_request_any = any(
-            category_id not in resolved_held_category_ids
-            for category_id, _code in requestable_rows
-        )
 
     return MembershipRequestabilityContext(
         requestable_codes_by_category=requestable_codes_by_category,
