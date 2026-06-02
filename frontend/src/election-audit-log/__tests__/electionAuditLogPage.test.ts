@@ -4,6 +4,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import ElectionAuditLogPage from "../ElectionAuditLogPage.vue";
 import type { ElectionAuditBootstrap } from "../types";
 
+type WindowWithChart = Window & typeof globalThis & { Chart?: unknown };
+
+const chartWindow = window as WindowWithChart;
+
 function flushPromises(): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, 0);
@@ -43,7 +47,7 @@ describe("ElectionAuditLogPage", () => {
     vi.useRealTimers();
     window.history.replaceState(null, "", "/elections/1/audit/");
     document.body.innerHTML = "";
-    delete window.Chart;
+    delete chartWindow.Chart;
     vi.restoreAllMocks();
   });
 
@@ -313,7 +317,7 @@ describe("ElectionAuditLogPage", () => {
   it("renders the legacy tally-completed Sankey chart container when flow data exists", async () => {
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({} as CanvasRenderingContext2D);
     const chartMock = vi.fn(() => ({ destroy: vi.fn() }));
-    window.Chart = chartMock as never;
+    chartWindow.Chart = chartMock;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string | URL | Request) => {
@@ -393,6 +397,143 @@ describe("ElectionAuditLogPage", () => {
     expect(dataset.colorTo({ raw: { to: "Round 1 · alice" } })).toBe("#1f77b4");
   });
 
+  it("renders the Sankey chart after the audit log finishes when summary data resolves first", async () => {
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({} as CanvasRenderingContext2D);
+    const chartMock = vi.fn(() => ({ destroy: vi.fn() }));
+    chartWindow.Chart = chartMock;
+    const auditLogResponse = deferredResponse();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string | URL | Request) => {
+        if (String(url).includes("audit-summary")) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                summary: {
+                  ballots_cast: 3,
+                  votes_cast: 3,
+                  quota: 2,
+                  empty_seats: 1,
+                  tally_elected_users: [{ username: "alice", full_name: "Alice Example" }],
+                  sankey_flows: [{ from: "Voters", to: "Round 1 · alice", flow: 3 }],
+                  sankey_elected_nodes: ["Round 1 · alice"],
+                  sankey_eliminated_nodes: [],
+                },
+              }),
+            ),
+          );
+        }
+        return auditLogResponse.promise;
+      }),
+    );
+
+    const wrapper = mount(ElectionAuditLogPage, {
+      props: { bootstrap },
+      attachTo: document.body,
+    });
+
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.find("#tally-sankey-chart").exists()).toBe(false);
+    expect(chartMock).not.toHaveBeenCalled();
+
+    auditLogResponse.resolve(
+      new Response(
+        JSON.stringify({
+          audit_log: {
+            items: [
+              {
+                timestamp: "2026-04-11T10:15:00+00:00",
+                event_type: "tally_completed",
+                title: "Tally completed",
+                icon: "fas fa-flag-checkered",
+                icon_bg: "bg-success",
+                anchor: "jump-tally-completed",
+                payload: {},
+                elected_users: [{ username: "alice", full_name: "Alice Example" }],
+              },
+            ],
+            pagination: { count: 1, page: 1, num_pages: 1, page_numbers: [1], has_previous: false, has_next: false, previous_page_number: null, next_page_number: null, start_index: 1, end_index: 1 },
+            jump_links: [{ anchor: "jump-tally-completed", label: "Results" }],
+          },
+        }),
+      ),
+    );
+
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.find("#tally-sankey-chart").exists()).toBe(true);
+    expect(chartMock).toHaveBeenCalledOnce();
+  });
+
+  it("retries Sankey rendering when Chart.js becomes available after the canvas is mounted", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({} as CanvasRenderingContext2D);
+    const chartMock = vi.fn(() => ({ destroy: vi.fn() }));
+    delete chartWindow.Chart;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL | Request) => {
+        if (String(url).includes("audit-summary")) {
+          return new Response(
+            JSON.stringify({
+              summary: {
+                ballots_cast: 3,
+                votes_cast: 3,
+                quota: 2,
+                empty_seats: 1,
+                tally_elected_users: [{ username: "alice", full_name: "Alice Example" }],
+                sankey_flows: [{ from: "Voters", to: "Round 1 · alice", flow: 3 }],
+                sankey_elected_nodes: ["Round 1 · alice"],
+                sankey_eliminated_nodes: [],
+              },
+            }),
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            audit_log: {
+              items: [
+                {
+                  timestamp: "2026-04-11T10:15:00+00:00",
+                  event_type: "tally_completed",
+                  title: "Tally completed",
+                  icon: "fas fa-flag-checkered",
+                  icon_bg: "bg-success",
+                  anchor: "jump-tally-completed",
+                  payload: {},
+                  elected_users: [{ username: "alice", full_name: "Alice Example" }],
+                },
+              ],
+              pagination: { count: 1, page: 1, num_pages: 1, page_numbers: [1], has_previous: false, has_next: false, previous_page_number: null, next_page_number: null, start_index: 1, end_index: 1 },
+              jump_links: [{ anchor: "jump-tally-completed", label: "Results" }],
+            },
+          }),
+        );
+      }),
+    );
+
+    const wrapper = mount(ElectionAuditLogPage, {
+      props: { bootstrap },
+      attachTo: document.body,
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+
+    expect(wrapper.find("#tally-sankey-chart").exists()).toBe(true);
+    expect(chartMock).not.toHaveBeenCalled();
+
+    chartWindow.Chart = chartMock;
+
+    await vi.advanceTimersByTimeAsync(50);
+    await Promise.resolve();
+
+    expect(chartMock).toHaveBeenCalledOnce();
+  });
+
   it("uses hash jump links as local anchors without reloading audit data", async () => {
     const scrollIntoView = vi.fn();
     vi.stubGlobal(
@@ -464,7 +605,7 @@ describe("ElectionAuditLogPage", () => {
     const clearTimeout = vi.spyOn(window, "clearTimeout");
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({} as CanvasRenderingContext2D);
     const chartMock = vi.fn(() => ({ destroy: vi.fn() }));
-    window.Chart = chartMock as never;
+    chartWindow.Chart = chartMock;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string | URL | Request) => {

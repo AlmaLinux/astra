@@ -26,8 +26,11 @@ const currentPage = ref(1);
 const auditLoading = ref(false);
 const error = ref("");
 const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const sankeyRenderRetryDelayMs = 50;
+const sankeyRenderMaxAttempts = 20;
 let sankeyChart: { destroy?: () => void } | null = null;
 let sankeyRenderTimeoutId: number | null = null;
+let sankeyRenderAttempt = 0;
 
 type ChartConstructor = new (...args: unknown[]) => { destroy?: () => void };
 type WindowWithChart = Window & typeof globalThis & { Chart?: ChartConstructor };
@@ -179,12 +182,20 @@ function cancelQueuedSankeyChartRender(): void {
   sankeyRenderTimeoutId = null;
 }
 
-function queueSankeyChartRender(): void {
+function queueSankeyChartRender(resetAttempts = true): void {
   cancelQueuedSankeyChartRender();
+  if (resetAttempts) {
+    sankeyRenderAttempt = 0;
+  }
+  if (sankeyRenderAttempt >= sankeyRenderMaxAttempts) {
+    return;
+  }
+  const delay = resetAttempts ? 0 : sankeyRenderRetryDelayMs;
   sankeyRenderTimeoutId = window.setTimeout(() => {
     sankeyRenderTimeoutId = null;
+    sankeyRenderAttempt += 1;
     void renderSankeyChart();
-  }, 0);
+  }, delay);
 }
 
 async function renderSankeyChart(): Promise<void> {
@@ -200,6 +211,7 @@ async function renderSankeyChart(): Promise<void> {
   const canvas = document.getElementById("tally-sankey-chart") as HTMLCanvasElement | null;
   const chartFactory = (window as WindowWithChart).Chart ?? (globalThis as GlobalWithChart).Chart;
   if (!canvas || !canvas.getContext || !chartFactory) {
+    queueSankeyChartRender(false);
     return;
   }
 
@@ -210,6 +222,11 @@ async function renderSankeyChart(): Promise<void> {
     summary.value?.sankey_elected_nodes || [],
     summary.value?.sankey_eliminated_nodes || [],
   );
+  if (sankeyChart) {
+    sankeyRenderAttempt = 0;
+    return;
+  }
+  queueSankeyChartRender(false);
 }
 
 async function loadSummary(): Promise<boolean> {
@@ -275,7 +292,7 @@ async function load(pushState: boolean, includeSummary = false): Promise<void> {
     auditLoading.value = false;
   }
 
-  if (!includeSummary && summary.value) {
+  if (summary.value) {
     queueSankeyChartRender();
   }
 }
@@ -310,6 +327,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener("popstate", onPopState);
   cancelQueuedSankeyChartRender();
+  sankeyRenderAttempt = 0;
   destroySankeyChart();
 });
 </script>
