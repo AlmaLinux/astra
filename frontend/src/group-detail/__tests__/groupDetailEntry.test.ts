@@ -92,6 +92,8 @@ describe("mountGroupDetailPage", () => {
       "data-group-detail-leaders-api-url": "/api/v1/groups/infra/leaders",
       "data-group-detail-members-api-url": "/api/v1/groups/infra/members",
       "data-group-detail-action-url": "/api/v1/groups/infra/action",
+      "data-group-detail-user-search-api-url": "/groups/member-users/search/",
+      "data-group-detail-group-search-api-url": "/groups/member-groups/search/",
       "data-group-detail-chat-irc-default-server": "irc.libera.chat",
       "data-group-detail-chat-matrix-default-server": "matrix.org",
       "data-group-detail-chat-mattermost-default-server": "chat.almalinux.org",

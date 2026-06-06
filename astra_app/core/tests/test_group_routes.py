@@ -102,6 +102,11 @@ class GroupDetailRouteTests(TestCase):
         self.assertContains(resp, 'data-group-detail-leaders-api-url="/api/v1/groups/fas1/leaders"')
         self.assertContains(resp, 'data-group-detail-members-api-url="/api/v1/groups/fas1/members"')
         self.assertContains(resp, 'data-group-detail-action-url="/api/v1/groups/fas1/action"')
+        self.assertContains(resp, 'data-group-detail-user-search-api-url="/groups/member-users/search/"')
+        self.assertContains(resp, 'data-group-detail-group-search-api-url="/groups/member-groups/search/"')
+        self.assertContains(resp, 'admin/css/vendor/select2/select2.css')
+        self.assertContains(resp, 'core/css/select2_overrides.css')
+        self.assertContains(resp, 'admin/js/vendor/select2/select2.full.js')
         self.assertContains(resp, 'src="http://localhost:5173/src/entrypoints/groupDetail.ts"')
         self.assertContains(resp, "Loading group details...")
 

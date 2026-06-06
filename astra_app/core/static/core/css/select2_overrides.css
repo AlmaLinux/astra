@@ -6,6 +6,7 @@
 
 .select2-container {
   width: 100% !important;
+  max-width: 100%;
 }
 
 /* --- Single-selection variant --- */
@@ -19,6 +20,9 @@
 .select2-container--default .select2-selection--single .select2-selection__rendered {
   line-height: 1.5;
   padding-left: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .select2-container--default .select2-selection--single .select2-selection__arrow {
@@ -44,4 +48,14 @@
 .select2-container--default .select2-selection--multiple .select2-selection__choice__display,
 .select2-container--default .select2-selection--multiple .select2-selection__choice__remove {
   color: #000;
+}
+
+.select2-results__options {
+  overflow-x: hidden;
+}
+
+.select2-results__option {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

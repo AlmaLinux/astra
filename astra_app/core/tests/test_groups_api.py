@@ -8,6 +8,8 @@ from django.urls import reverse
 from core.freeipa.exceptions import FreeIPAOperationFailed
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import FreeIPAUser
+from core.models import FreeIPAPermissionGrant
+from core.permissions import ASTRA_ADD_ELECTION
 
 
 class GroupsApiTests(TestCase):
@@ -209,8 +211,153 @@ class GroupsApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'data-group-detail-url-template="/group/__group_name__/"')
         self.assertContains(response, 'data-group-detail-edit-url-template="/group/__group_name__/edit/"')
+        self.assertContains(response, 'data-group-detail-user-search-api-url="/groups/member-users/search/"')
+        self.assertContains(response, 'data-group-detail-group-search-api-url="/groups/member-groups/search/"')
         self.assertContains(response, 'data-group-detail-agreement-detail-url-template="/settings/?tab=agreements&amp;agreement=__agreement_cn__"')
         self.assertContains(response, 'data-group-detail-agreements-list-url="/settings/?tab=agreements"')
+
+    def test_group_member_user_search_returns_users_for_logged_in_team_lead(self) -> None:
+        self._login_as_freeipa_user("alice")
+
+        group = self._make_group("infra-team", sponsors=["alice"])
+
+        with patch("core.views_groups.FreeIPAGroup.all", return_value=[group]):
+            with patch(
+                "core.views_groups.search_freeipa_users",
+                return_value=[SimpleNamespace(username="bob", full_name="Bob Example")],
+            ):
+                response = self.client.get(
+                    reverse("group-member-user-search"),
+                    {"q": "bob"},
+                    HTTP_ACCEPT="application/json",
+                )
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        self.assertEqual(payload["users"], [{"username": "bob", "full_name": "Bob Example"}])
+
+    def test_group_member_user_search_rejects_logged_in_non_team_lead_without_election_permission(self) -> None:
+        self._login_as_freeipa_user("alice")
+
+        alpha = self._make_group("child-alpha", description="Alpha Child")
+        beta = self._make_group("child-beta", description="Beta Child", sponsors=["carol"])
+
+        with patch("core.views_groups.FreeIPAGroup.all", return_value=[beta, alpha]):
+            response = self.client.get(
+                reverse("group-member-user-search"),
+                {"q": "bob"},
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 403)
+        payload = json.loads(response.content)
+        self.assertEqual(payload["error"], "Permission denied.")
+
+    def test_group_search_returns_select2_results_for_logged_in_team_lead(self) -> None:
+        self._login_as_freeipa_user("alice")
+
+        alpha = self._make_group("child-alpha", description="Alpha Child")
+        beta = self._make_group("child-beta", description="Beta Child", sponsors=["alice"])
+        hidden = FreeIPAGroup(
+            "hidden-non-fas",
+            {
+                "cn": ["hidden-non-fas"],
+                "description": ["Hidden Child"],
+                "member_user": [],
+                "membermanager_user": [],
+                "membermanager_group": [],
+                "member_group": [],
+                "objectclass": [],
+            },
+        )
+
+        with patch("core.views_groups.FreeIPAGroup.all", return_value=[beta, hidden, alpha]):
+            response = self.client.get(
+                reverse("group-search"),
+                {"q": "child"},
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        self.assertEqual(
+            payload["results"],
+            [
+                {"id": "child-alpha", "text": "child-alpha — Alpha Child"},
+                {"id": "child-beta", "text": "child-beta — Beta Child"},
+                {"id": "hidden-non-fas", "text": "hidden-non-fas — Hidden Child"},
+            ],
+        )
+
+    def test_group_member_group_search_returns_only_fas_groups_for_logged_in_team_lead(self) -> None:
+        self._login_as_freeipa_user("alice")
+
+        alpha = self._make_group("child-alpha", description="Alpha Child")
+        beta = self._make_group("child-beta", description="Beta Child", sponsors=["alice"])
+        hidden = FreeIPAGroup(
+            "hidden-non-fas",
+            {
+                "cn": ["hidden-non-fas"],
+                "description": ["Hidden Child"],
+                "member_user": [],
+                "membermanager_user": [],
+                "membermanager_group": [],
+                "member_group": [],
+                "objectclass": [],
+            },
+        )
+
+        with patch("core.views_groups.FreeIPAGroup.all", return_value=[beta, hidden, alpha]):
+            response = self.client.get(
+                reverse("group-member-group-search"),
+                {"q": "child"},
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        self.assertEqual(
+            payload["results"],
+            [
+                {"id": "child-alpha", "text": "child-alpha — Alpha Child"},
+                {"id": "child-beta", "text": "child-beta — Beta Child"},
+            ],
+        )
+
+    def test_group_search_rejects_logged_in_non_team_lead_without_election_permission(self) -> None:
+        self._login_as_freeipa_user("alice")
+
+        with patch("core.views_groups.FreeIPAGroup.all", return_value=[]):
+            response = self.client.get(
+                reverse("group-search"),
+                {"q": "child"},
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 403)
+        payload = json.loads(response.content)
+        self.assertEqual(payload["error"], "Permission denied.")
+
+    def test_group_search_allows_election_manager_without_team_lead_membership(self) -> None:
+        self._login_as_freeipa_user("alice")
+        FreeIPAPermissionGrant.objects.create(
+            permission=ASTRA_ADD_ELECTION,
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="alice",
+        )
+
+        alpha = self._make_group("child-alpha", description="Alpha Child")
+
+        with patch("core.views_groups.FreeIPAGroup.all", return_value=[alpha]):
+            response = self.client.get(
+                reverse("group-search"),
+                {"q": "child"},
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        self.assertEqual(payload["results"], [{"id": "child-alpha", "text": "child-alpha — Alpha Child"}])
 
     def test_group_leaders_api_returns_paginated_mixed_leader_items(self) -> None:
         self._login_as_freeipa_user("alice")

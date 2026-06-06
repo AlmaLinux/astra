@@ -103,6 +103,8 @@ export interface GroupDetailBootstrap {
   leadersApiUrl: string;
   membersApiUrl: string;
   actionUrl: string;
+  userSearchApiUrl: string;
+  groupSearchApiUrl: string;
   chatConfig: ChatLinkConfig;
   currentUsername: string;
   detailUrlTemplate: string;
@@ -123,6 +125,8 @@ export function readGroupDetailBootstrap(root: HTMLElement): GroupDetailBootstra
   const leadersApiUrl = String(root.dataset.groupDetailLeadersApiUrl || "").trim();
   const membersApiUrl = String(root.dataset.groupDetailMembersApiUrl || "").trim();
   const actionUrl = String(root.dataset.groupDetailActionUrl || "").trim();
+  const userSearchApiUrl = String(root.dataset.groupDetailUserSearchApiUrl || "").trim();
+  const groupSearchApiUrl = String(root.dataset.groupDetailGroupSearchApiUrl || "").trim();
   const chatIrcDefaultServer = String(root.dataset.groupDetailChatIrcDefaultServer || "").trim();
   const chatMatrixDefaultServer = String(root.dataset.groupDetailChatMatrixDefaultServer || "").trim();
   const chatMattermostDefaultServer = String(root.dataset.groupDetailChatMattermostDefaultServer || "").trim();
@@ -138,6 +142,8 @@ export function readGroupDetailBootstrap(root: HTMLElement): GroupDetailBootstra
     || !leadersApiUrl
     || !membersApiUrl
     || !actionUrl
+    || !userSearchApiUrl
+    || !groupSearchApiUrl
     || !chatIrcDefaultServer
     || !chatMatrixDefaultServer
     || !chatMattermostDefaultServer
@@ -154,6 +160,8 @@ export function readGroupDetailBootstrap(root: HTMLElement): GroupDetailBootstra
     leadersApiUrl,
     membersApiUrl,
     actionUrl,
+    userSearchApiUrl,
+    groupSearchApiUrl,
     chatConfig: {
       irc: { defaultServer: chatIrcDefaultServer },
       matrix: { defaultServer: chatMatrixDefaultServer },

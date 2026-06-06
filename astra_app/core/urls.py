@@ -27,6 +27,8 @@ urlpatterns = [
     path("user/<str:username>/", views_users.user_profile, name="user-profile"),
     path("groups/", views_groups.groups, name="groups"),
     path("groups/search/", views_groups.group_search, name="group-search"),
+    path("groups/member-groups/search/", views_groups.group_member_group_search, name="group-member-group-search"),
+    path("groups/member-users/search/", views_groups.group_member_user_search, name="group-member-user-search"),
     path("group/<str:name>/", views_groups.group_detail, name="group-detail"),
     path("group/<str:name>/edit/", views_groups.group_edit, name="group-edit"),
 

@@ -29,6 +29,40 @@ async function loginViaForm(page: Page, username: string, password: string): Pro
   await page.getByRole("button", { name: /log in/i }).click();
 }
 
+async function selectOptionFromSelect2(page: Page, fieldName: string, searchTerm: string, optionText: string): Promise<void> {
+  const select = page.locator(`select[name="${fieldName}"]`);
+  await expect(select).toHaveCount(1);
+  const ajaxUrl = await select.getAttribute("data-ajax-url");
+  if (!ajaxUrl) {
+    throw new Error(`Select2 field ${fieldName} is missing data-ajax-url`);
+  }
+  const ajaxPath = new URL(ajaxUrl, "http://127.0.0.1").pathname;
+
+  const select2Container = select.locator("xpath=following-sibling::span[contains(@class, 'select2')]");
+  await expect(select2Container).toBeVisible();
+  await select2Container.click();
+
+  const searchResponse = page.waitForResponse((response) => {
+    const responseUrl = new URL(response.url());
+    return responseUrl.pathname === ajaxPath
+      && responseUrl.searchParams.get("q") === searchTerm
+      && response.request().method() === "GET";
+  });
+
+  const searchInput = page.locator(".select2-container--open .select2-search__field");
+  await searchInput.fill("");
+  await searchInput.pressSequentially(searchTerm);
+  const response = await searchResponse;
+  if (!response.ok()) {
+    throw new Error(`Select2 search for ${fieldName} returned ${response.status()}: ${await response.text()}`);
+  }
+
+  const result = page.locator(".select2-results__option").filter({ hasText: optionText }).first();
+  await expect(result).toBeVisible();
+  await result.click();
+  await expect(select).toHaveValue(searchTerm);
+}
+
 async function logoutViaForm(page: Page): Promise<void> {
   await page.locator('form[action="/logout/"] button').click();
   await expect(page).toHaveURL(/\/login\/?$/);
@@ -78,26 +112,32 @@ async function signRequiredAgreement(page: Page): Promise<void> {
   await logoutViaForm(page);
 }
 
-// As a sponsor/team lead, I can inspect management controls, suggestions, and agreement prerequisites before taking action.
-test("groups-detail-team-membership-controls expose datalist suggestions and agreement prerequisites", async ({ page }) => {
+// As a sponsor/team lead, I can inspect management controls, searchable select2 pickers, and agreement prerequisites before taking action.
+test("groups-detail-team-membership-controls expose select2 member and group pickers with agreement prerequisites", async ({ page }) => {
   await loginViaForm(page, SPONSOR.username, SPONSOR.password);
 
   await page.goto(`/group/${GROUPS.detailFocus}/`);
   await expect(page.locator("[data-group-detail-root]")).toBeVisible();
 
-  await expect(page.getByPlaceholder("Add member by username")).toBeVisible();
-  await expect(page.getByPlaceholder("Add member group by name")).toBeVisible();
+  const memberSelect = page.locator('select[name="username"]');
+  const groupSelect = page.locator('select[name="group_name"]');
+
+  await expect(memberSelect).toHaveCount(1);
+  await expect(groupSelect).toHaveCount(1);
+  await expect(memberSelect).toHaveAttribute("data-ajax-url", /\/groups\/member-users\/search\/$/);
+  await expect(groupSelect).toHaveAttribute("data-ajax-url", /\/groups\/member-groups\/search\/$/);
+
+  const memberContainer = memberSelect.locator("xpath=following-sibling::span[contains(@class, 'select2')]");
+  const groupContainer = groupSelect.locator("xpath=following-sibling::span[contains(@class, 'select2')]");
+  await expect(memberContainer).toBeVisible();
+  await expect(groupContainer).toBeVisible();
+  await expect(memberContainer).toContainText("Add member by username");
+  await expect(groupContainer).toContainText("Add member group by name");
   await expect(page.getByRole("button", { name: "Add", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Add group", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Stop being a Team Lead", exact: true })).toBeVisible();
 
-  const suggestionsResponse = page.waitForResponse((response) => {
-    return response.url().includes(`/search/?q=${VIEWER.username}`) && response.request().method() === "GET";
-  });
-  await page.getByPlaceholder("Add member by username").fill(VIEWER.username);
-  await suggestionsResponse;
-
-  await expect(page.locator(`#sponsor-user-suggestions option[value="${VIEWER.username}"]`)).toHaveCount(1);
+  await selectOptionFromSelect2(page, "username", VIEWER.username, VIEWER.username);
   await expect(page.getByText("wave5-group-access-agreement (Signed)", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Settings → Agreements", exact: true })).toBeVisible();
   await expect(page.getByText("Users must have signed required agreements before being added.", { exact: true })).toBeVisible();
@@ -213,7 +253,7 @@ test("groups-detail-team-lead-manages-member-actions", async ({ page }) => {
   await expect(userCard(page, teamLeadsCard, USERS.detailDirectMember)).toHaveCount(0);
 
   const addMemberResponse = actionResponse(page, "add_member");
-  await page.getByPlaceholder("Add member by username").fill(USERS.detailDirectMember);
+  await selectOptionFromSelect2(page, "username", USERS.detailDirectMember, USERS.detailDirectMember);
   await page.getByRole("button", { name: "Add", exact: true }).click();
   await addMemberResponse;
   membersCard = cardByHeading(page, /^Members$/);
@@ -242,5 +282,5 @@ test("groups-detail-team-lead-manages-member-actions", async ({ page }) => {
   teamLeadsCard = cardByHeading(page, /^Team Leads?$/);
   await expect(page.getByRole("button", { name: "Stop being a Team Lead", exact: true })).toHaveCount(0);
   await expect(userCard(page, teamLeadsCard, SPONSOR.username)).toHaveCount(0);
-  await expect(page.getByPlaceholder("Add member by username")).toHaveCount(0);
+  await expect(page.locator('select[name="username"]')).toHaveCount(0);
 });

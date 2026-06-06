@@ -1,5 +1,6 @@
 {% extends 'core/base.html' %}
 {% load django_vite %}
+{% load static %}
 
 {% block title %}Group {{ group.cn }}{% endblock %}
 
@@ -7,6 +8,8 @@
   {{ block.super }}
   {% vite_hmr_client %}
   {% vite_asset 'src/entrypoints/groupDetail.ts' %}
+  <link rel="stylesheet" href="{% static 'admin/css/vendor/select2/select2.css' %}">
+  <link rel="stylesheet" href="{% static 'core/css/select2_overrides.css' %}">
 {% endblock %}
 
 {% block header %}{% endblock %}
@@ -26,9 +29,16 @@
     data-group-detail-current-username="{{ request.user.get_username }}"
     data-group-detail-url-template="{{ group_detail_url_template }}"
     data-group-detail-edit-url-template="{{ group_edit_url_template }}"
+    data-group-detail-user-search-api-url="{{ user_search_api_url }}"
+    data-group-detail-group-search-api-url="{{ group_search_api_url }}"
     data-group-detail-agreement-detail-url-template="{{ agreement_detail_url_template }}"
     data-group-detail-agreements-list-url="{{ agreements_list_url }}"
   >
     <div class="text-muted">Loading group details...</div>
   </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ block.super }}
+  <script src="{% static 'admin/js/vendor/select2/select2.full.js' %}"></script>
 {% endblock %}

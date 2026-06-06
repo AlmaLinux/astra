@@ -2,6 +2,7 @@ import { mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import GroupDetailPage from "../GroupDetailPage.vue";
+import { normalizeSelect2Results } from "../select2";
 import type { GroupDetailBootstrap } from "../types";
 
 function flushPromises(): Promise<void> {
@@ -26,6 +27,8 @@ const bootstrap = {
   leadersApiUrl: "/api/v1/groups/infra/leaders",
   membersApiUrl: "/api/v1/groups/infra/members",
   actionUrl: "/api/v1/groups/infra/action",
+  userSearchApiUrl: "/groups/member-users/search/",
+  groupSearchApiUrl: "/groups/member-groups/search/",
   currentUsername: "admin",
   detailUrlTemplate: "/group/__group_name__/",
   editUrlTemplate: "/group/__group_name__/edit/",
@@ -42,6 +45,22 @@ const bootstrap = {
 describe("GroupDetailPage", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("truncates long group descriptions in select2 results", () => {
+    const payload = normalizeSelect2Results({
+      results: [
+        {
+          id: "infra-very-long-group",
+          text: `infra-very-long-group — ${"A very long description ".repeat(8).trim()}`,
+        },
+      ],
+    }, "groups");
+
+    expect(payload.results).toHaveLength(1);
+    expect(payload.results[0]?.text).toContain("infra-very-long-group — ");
+    expect(payload.results[0]?.text.endsWith("...")).toBe(true);
+    expect(payload.results[0]?.text.length).toBeLessThan(100);
   });
 
   it("loads and renders group details and members", async () => {
@@ -138,6 +157,16 @@ describe("GroupDetailPage", () => {
     expect(wrapper.find('img[src="/avatars/alice.png"]').exists()).toBe(true);
     expect(wrapper.find('.card-tools a[href="/group/infra/edit/"]').exists()).toBe(true);
     expect(wrapper.find('a[href="/group/infra/edit/"]').exists()).toBe(true);
+    expect(wrapper.find('select[name="username"][data-ajax-url="/groups/member-users/search/"]').exists()).toBe(true);
+    expect(wrapper.find('select[name="group_name"][data-ajax-url="/groups/member-groups/search/"]').exists()).toBe(true);
+    expect(wrapper.find('form[data-member-user-form="true"] .d-flex.align-items-stretch').exists()).toBe(true);
+    expect(wrapper.find('form[data-member-group-form="true"] .d-flex.align-items-stretch').exists()).toBe(true);
+    expect(wrapper.find('form[data-member-user-form="true"] .flex-grow-1 select[name="username"]').exists()).toBe(true);
+    expect(wrapper.find('form[data-member-user-form="true"] .flex-grow-1').attributes("style")).toContain("min-width: 0");
+    expect(wrapper.find('form[data-member-user-form="true"] .d-flex.align-items-stretch > button').text()).toBe("Add");
+    expect(wrapper.find('form[data-member-group-form="true"] .flex-grow-1 select[name="group_name"]').exists()).toBe(true);
+    expect(wrapper.find('form[data-member-group-form="true"] .flex-grow-1').attributes("style")).toContain("min-width: 0");
+    expect(wrapper.find('form[data-member-group-form="true"] .d-flex.align-items-stretch > button').text()).toBe("Add group");
   });
 
   it("renders linked chat channels when values are parseable and plain text otherwise", async () => {
@@ -454,7 +483,10 @@ describe("GroupDetailPage", () => {
     expect(membersCard?.textContent).toContain("child-a");
     expect(membersCard?.textContent).toContain("child-b");
 
-    await wrapper.get('input[placeholder="Add member group by name"]').setValue("child-c");
+    const groupSelect = wrapper.get('select[name="group_name"]');
+    const nativeGroupSelect = groupSelect.element as HTMLSelectElement;
+    nativeGroupSelect.append(new Option("child-c", "child-c", true, true));
+    await groupSelect.setValue("child-c");
     await wrapper.get('form[data-member-group-form="true"]').trigger("submit");
     await flushPromises();
     await flushPromises();

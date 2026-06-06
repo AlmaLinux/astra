@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 
 import { buildChatLink } from "../shared/chatLinks";
 import WidgetGrid from "../shared/components/WidgetGrid.vue";
@@ -20,6 +20,7 @@ import {
   type GroupDetailRouteState,
 } from "./types";
 import { fillUrlTemplate } from "../shared/urlTemplates";
+import { normalizeSelect2Results } from "./select2";
 
 type MemberGridUserItem = {
   kind: "user";
@@ -32,6 +33,18 @@ type MemberGridGroupItem = {
 };
 
 type MemberGridItem = MemberGridUserItem | MemberGridGroupItem;
+
+type JQueryCollection = {
+  select2?: (options?: unknown) => void;
+  trigger?: (event: string) => void;
+  val?: (value?: string | null) => unknown;
+};
+
+type JQueryFunction = ((target: Element | string) => JQueryCollection) & {
+  fn?: {
+    select2?: unknown;
+  };
+};
 
 const props = defineProps<{
   bootstrap: GroupDetailBootstrap;
@@ -52,8 +65,9 @@ const q = ref("");
 const currentPage = ref(1);
 const leadersPage = ref(1);
 const addMemberUsername = ref("");
+const addMemberUsernameLabel = ref("");
 const addMemberGroupName = ref("");
-const addMemberSuggestions = ref<string[]>([]);
+const addMemberGroupLabel = ref("");
 const confirmModalOpen = ref(false);
 const pendingAction = ref<{ action: string; username: string; groupName: string }>({
   action: "",
@@ -111,6 +125,80 @@ function asMemberGridUser(row: unknown): GroupMemberItem {
 
 function asMemberGridGroup(row: unknown): GroupMemberGroupItem {
   return (row as MemberGridGroupItem).group;
+}
+
+function getJQuery(): JQueryFunction | null {
+  const maybeJQuery = (window as typeof window & { jQuery?: JQueryFunction; $?: JQueryFunction }).jQuery
+    || (window as typeof window & { jQuery?: JQueryFunction; $?: JQueryFunction }).$;
+  return maybeJQuery || null;
+}
+
+function supportsSelect2(jquery: JQueryFunction | null): jquery is JQueryFunction {
+  return Boolean(jquery?.fn && typeof jquery.fn.select2 === "function");
+}
+
+function selectedOptionLabel(select: HTMLSelectElement): string {
+  return Array.from(select.selectedOptions)
+    .map((option) => String(option.textContent || "").trim())
+    .find((text) => text.length > 0) || "";
+}
+
+function initSponsorSelect2(): void {
+  const jquery = getJQuery();
+  if (!supportsSelect2(jquery)) {
+    return;
+  }
+
+  document.querySelectorAll<HTMLSelectElement>("select.alx-select2").forEach((element) => {
+    if (element.dataset.alxSelect2Initialized === "true") {
+      return;
+    }
+
+    element.dataset.alxSelect2Initialized = "true";
+    const ajaxUrl = String(element.dataset.ajaxUrl || "").trim();
+    const placeholder = String(element.dataset.placeholder || "").trim();
+    const resultKind = String(element.dataset.resultKind || "groups").trim();
+
+    jquery(element).select2?.({
+      width: "100%",
+      allowClear: true,
+      placeholder,
+      minimumInputLength: 1,
+      ajax: {
+        url: ajaxUrl,
+        dataType: "json",
+        delay: 200,
+        data: (params: { term?: string } | undefined) => ({
+          q: params?.term != null ? String(params.term) : "",
+        }),
+        processResults: (payload: unknown) => normalizeSelect2Results(payload, resultKind),
+        cache: true,
+      },
+    });
+  });
+}
+
+function resetSponsorSelect(fieldName: "username" | "group_name"): void {
+  const select = document.querySelector<HTMLSelectElement>(`select[name="${fieldName}"]`);
+  if (!select) {
+    return;
+  }
+
+  Array.from(select.options).forEach((option) => {
+    if (option.value) {
+      option.remove();
+    }
+  });
+
+  const jquery = getJQuery();
+  if (supportsSelect2(jquery)) {
+    jquery(select).val?.(null);
+    jquery(select).trigger?.("change");
+    return;
+  }
+
+  select.value = "";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
 function isLeaderGroup(item: GroupLeaderItem): item is GroupLeaderGroupItem {
@@ -517,7 +605,8 @@ async function addMemberAction(event: Event): Promise<void> {
   }
   await postAction("add_member", { username: addMemberUsername.value.trim() });
   addMemberUsername.value = "";
-  addMemberSuggestions.value = [];
+  addMemberUsernameLabel.value = "";
+  resetSponsorSelect("username");
 }
 
 async function addMemberGroupAction(event: Event): Promise<void> {
@@ -527,6 +616,28 @@ async function addMemberGroupAction(event: Event): Promise<void> {
   }
   await postAction("add_member_group", { groupName: addMemberGroupName.value.trim() });
   addMemberGroupName.value = "";
+  addMemberGroupLabel.value = "";
+  resetSponsorSelect("group_name");
+}
+
+function onAddMemberSelectionChange(event: Event): void {
+  const select = event.target as HTMLSelectElement | null;
+  if (!select) {
+    return;
+  }
+
+  addMemberUsername.value = String(select.value || "").trim();
+  addMemberUsernameLabel.value = addMemberUsername.value ? selectedOptionLabel(select) : "";
+}
+
+function onAddMemberGroupSelectionChange(event: Event): void {
+  const select = event.target as HTMLSelectElement | null;
+  if (!select) {
+    return;
+  }
+
+  addMemberGroupName.value = String(select.value || "").trim();
+  addMemberGroupLabel.value = addMemberGroupName.value ? selectedOptionLabel(select) : "";
 }
 
 function openConfirmModal(action: string, username?: string, groupName?: string): void {
@@ -621,55 +732,17 @@ function confirmModalBody(): string {
   return "Are you sure you want to continue?";
 }
 
-let addMemberSuggestionsTimer: number | null = null;
-let addMemberSuggestionsAbortController: AbortController | null = null;
-
-function setAddMemberSuggestions(usernames: string[]): void {
-  addMemberSuggestions.value = usernames.slice(0, 12);
-}
-
-function queueAddMemberSuggestionsFetch(): void {
-  const query = addMemberUsername.value.trim();
-  if (addMemberSuggestionsTimer !== null) {
-    window.clearTimeout(addMemberSuggestionsTimer);
-  }
-  addMemberSuggestionsTimer = window.setTimeout(() => {
-    void fetchAddMemberSuggestions(query);
-  }, 180);
-}
-
-async function fetchAddMemberSuggestions(query: string): Promise<void> {
-  if (!query) {
-    setAddMemberSuggestions([]);
-    return;
-  }
-  if (addMemberSuggestionsAbortController !== null) {
-    addMemberSuggestionsAbortController.abort();
-  }
-  addMemberSuggestionsAbortController = new AbortController();
-
-  try {
-    const response = await fetch(`/search/?q=${encodeURIComponent(query)}`, {
-      headers: { Accept: "application/json" },
-      credentials: "same-origin",
-      signal: addMemberSuggestionsAbortController.signal,
-    });
-    if (!response.ok) {
+watch(
+  () => groupInfo.value?.is_sponsor,
+  async (isSponsor) => {
+    if (!isSponsor) {
       return;
     }
-    const payloadUsers = (await response.json()) as { users?: Array<{ username?: string }> };
-    const usernames = Array.isArray(payloadUsers.users)
-      ? payloadUsers.users
-          .map((item) => String(item?.username || "").trim())
-          .filter((username) => username.length > 0)
-      : [];
-    setAddMemberSuggestions(usernames);
-  } catch (error: unknown) {
-    if (error instanceof DOMException && error.name === "AbortError") {
-      return;
-    }
-  }
-}
+    await nextTick();
+    initSponsorSelect2();
+  },
+  { flush: "post" },
+);
 
 onMounted(async () => {
   applyRouteState(readGroupDetailRouteState(window.location.href));
@@ -774,41 +847,45 @@ onMounted(async () => {
               <h3 class="card-title">Team membership</h3>
             </div>
             <div class="card-body">
-              <form class="mb-2" @submit.prevent="addMemberAction">
-                <div class="input-group">
-                  <input
-                    v-model="addMemberUsername"
-                    type="text"
-                    list="sponsor-user-suggestions"
-                    name="username"
-                    class="form-control"
-                    placeholder="Add member by username"
-                    autocomplete="off"
-                    :disabled="actionSubmitting"
-                    @input="queueAddMemberSuggestionsFetch"
-                  >
+              <form class="mb-2" data-member-user-form="true" @submit.prevent="addMemberAction">
+                <div class="d-flex align-items-stretch" style="gap: .5rem;">
+                  <div class="flex-grow-1" style="min-width: 0;">
+                    <select
+                      name="username"
+                      class="form-control alx-select2"
+                      data-result-kind="users"
+                      :data-ajax-url="bootstrap.userSearchApiUrl"
+                      data-placeholder="Add member by username"
+                      :disabled="actionSubmitting"
+                      @change="onAddMemberSelectionChange"
+                    >
+                      <option value=""></option>
+                      <option v-if="addMemberUsername" :value="addMemberUsername">{{ addMemberUsernameLabel || addMemberUsername }}</option>
+                    </select>
+                  </div>
                   <button class="btn btn-primary" type="submit" :disabled="actionSubmitting" title="Add this user to the group">Add</button>
                 </div>
               </form>
 
               <form class="mb-2" data-member-group-form="true" @submit.prevent="addMemberGroupAction">
-                <div class="input-group">
-                  <input
-                    v-model="addMemberGroupName"
-                    type="text"
-                    name="group_name"
-                    class="form-control"
-                    placeholder="Add member group by name"
-                    autocomplete="off"
-                    :disabled="actionSubmitting"
-                  >
+                <div class="d-flex align-items-stretch" style="gap: .5rem;">
+                  <div class="flex-grow-1" style="min-width: 0;">
+                    <select
+                      name="group_name"
+                      class="form-control alx-select2"
+                      data-result-kind="groups"
+                      :data-ajax-url="bootstrap.groupSearchApiUrl"
+                      data-placeholder="Add member group by name"
+                      :disabled="actionSubmitting"
+                      @change="onAddMemberGroupSelectionChange"
+                    >
+                      <option value=""></option>
+                      <option v-if="addMemberGroupName" :value="addMemberGroupName">{{ addMemberGroupLabel || addMemberGroupName }}</option>
+                    </select>
+                  </div>
                   <button class="btn btn-primary" type="submit" :disabled="actionSubmitting" title="Add group">Add group</button>
                 </div>
               </form>
-
-              <datalist id="sponsor-user-suggestions">
-                <option v-for="username in addMemberSuggestions" :key="username" :value="username"></option>
-              </datalist>
 
               <button
                 type="button"

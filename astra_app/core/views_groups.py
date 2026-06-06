@@ -18,6 +18,7 @@ from core.freeipa.circuit_breaker import _freeipa_circuit_open
 from core.freeipa.exceptions import FreeIPAOperationFailed
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import DegradedFreeIPAUser, FreeIPAUser
+from core.freeipa_directory import search_freeipa_users
 from core.permissions import ASTRA_ADD_ELECTION, json_permission_required
 from core.templatetags._user_helpers import try_get_full_name
 from core.views_utils import (
@@ -32,14 +33,50 @@ from core.views_utils import (
 )
 
 
-@require_GET
-@json_permission_required(ASTRA_ADD_ELECTION)
-def group_search(request: HttpRequest) -> HttpResponse:
-    q = _normalize_str(request.GET.get("q"))
+def _can_use_group_management_search(request: HttpRequest) -> bool:
+    if request.user.has_perm(ASTRA_ADD_ELECTION):
+        return True
+
+    username = get_username(request)
+    if not username:
+        return False
+
+    user_groups: set[str] = set()
+    if isinstance(request.user, FreeIPAUser):
+        user_groups = set(request.user.groups_list)
+    user_groups_lower = {group_name.lower() for group_name in user_groups}
+
+    for group in FreeIPAGroup.all():
+        if not group.fas_group:
+            continue
+
+        try:
+            sponsors = {str(sponsor).strip() for sponsor in group.sponsors if str(sponsor).strip()}
+        except AttributeError:
+            sponsors = set()
+
+        if username in sponsors:
+            return True
+
+        try:
+            sponsor_groups = {str(group_name).strip() for group_name in group.sponsor_groups if str(group_name).strip()}
+        except AttributeError:
+            sponsor_groups = set()
+
+        if {group_name.lower() for group_name in sponsor_groups} & user_groups_lower:
+            return True
+
+    return False
+
+
+def _group_search_results(*, q: str, fas_only: bool) -> list[dict[str, str]]:
     q_lower = q.lower()
 
     results: list[dict[str, str]] = []
     for g in FreeIPAGroup.all():
+        if fas_only and not g.fas_group:
+            continue
+
         if q_lower:
             if q_lower not in g.cn.lower() and q_lower not in (g.description or "").lower():
                 continue
@@ -54,7 +91,49 @@ def group_search(request: HttpRequest) -> HttpResponse:
             break
 
     results.sort(key=lambda r: r["id"].lower())
-    return JsonResponse({"results": results})
+    return results
+
+
+@login_required
+@require_GET
+def group_search(request: HttpRequest) -> HttpResponse:
+    if not _can_use_group_management_search(request):
+        return JsonResponse({"error": "Permission denied."}, status=403)
+
+    q = _normalize_str(request.GET.get("q"))
+    return JsonResponse({"results": _group_search_results(q=q, fas_only=False)})
+
+
+@login_required
+@require_GET
+def group_member_group_search(request: HttpRequest) -> HttpResponse:
+    if not _can_use_group_management_search(request):
+        return JsonResponse({"error": "Permission denied."}, status=403)
+
+    q = _normalize_str(request.GET.get("q"))
+    return JsonResponse({"results": _group_search_results(q=q, fas_only=True)})
+
+
+@login_required
+@require_GET
+def group_member_user_search(request: HttpRequest) -> HttpResponse:
+    if not _can_use_group_management_search(request):
+        return JsonResponse({"error": "Permission denied."}, status=403)
+
+    q = _normalize_str(request.GET.get("q"))
+    if not q:
+        return JsonResponse({"users": []})
+
+    users = search_freeipa_users(query=q, limit=20)
+    return JsonResponse(
+        {
+            "users": [
+                {"username": str(user.username), "full_name": str(user.full_name)}
+                for user in users
+                if str(user.username).strip()
+            ]
+        }
+    )
 
 
 def _groups_page_context(request: HttpRequest) -> dict[str, object]:
@@ -308,6 +387,8 @@ def group_detail(request: HttpRequest, name: str) -> HttpResponse:
             "group_edit_url_template": reverse("group-edit", args=["placeholder-group"]).replace(
                 "placeholder-group", "__group_name__"
             ),
+            "user_search_api_url": reverse("group-member-user-search"),
+            "group_search_api_url": reverse("group-member-group-search"),
             "agreement_detail_url_template": agreement_settings_url("placeholder-agreement").replace(
                 "placeholder-agreement", "__agreement_cn__"
             ),
