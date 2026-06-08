@@ -534,6 +534,9 @@ def _add_membership_request_note(
     if note_action not in {"", "message"}:
         raise ValueError("Invalid note action.")
 
+    if message.strip() == "":
+        raise ValueError("Note text is required.")
+
     add_note(
         membership_request=membership_request,
         username=actor_username,

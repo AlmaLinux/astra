@@ -79,6 +79,9 @@ async function onToggle(): Promise<void> {
 }
 
 async function submit(noteAction: string): Promise<void> {
+  if (noteAction === "message" && !canSubmitMessage.value) {
+    return;
+  }
   await postNote(noteAction, message.value);
   if (!postError.value) {
     message.value = "";
@@ -98,6 +101,7 @@ function onComposerKeydown(event: KeyboardEvent): void {
 }
 
 const voteText = computed(() => summary.value?.current_user_vote ?? "");
+const canSubmitMessage = computed(() => message.value.trim().length > 0);
 const approvalBadgeClass = computed(() => {
   if (!props.canVote) {
     return "badge-success";
@@ -371,6 +375,7 @@ function groupTimestampLabel(group: NoteGroup): string {
                 data-note-action="message"
                 title="Send (Ctrl+Enter)"
                 aria-label="Send note"
+                :disabled="!canSubmitMessage"
                 @click.prevent="submit('message')"
               >
                 <i class="fas fa-paper-plane" aria-hidden="true"></i>

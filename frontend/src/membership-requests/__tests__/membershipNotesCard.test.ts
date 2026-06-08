@@ -222,6 +222,53 @@ describe("MembershipNotesCard", () => {
     expect(wrapper.find(".card-footer .alert .close").exists()).toBe(true);
   });
 
+  it("disables message submission until the composer has non-whitespace text", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "POST") {
+        return new Response(JSON.stringify({ ok: true, message: "Note added." }));
+      }
+      if (url.endsWith("/summary")) {
+        return new Response(JSON.stringify({ note_count: 0, approvals: 0, disapprovals: 0, current_user_vote: null }));
+      }
+      return new Response(JSON.stringify({ groups: [] }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const wrapper = mount(MembershipNotesCard, {
+      props: {
+        requestId: 17,
+        summaryUrl: "/api/v1/membership/notes/17/summary",
+        detailUrl: "/api/v1/membership/notes/17",
+        addUrl: "/membership/requests/17/notes/add/",
+        requestDetailTemplate: "/membership/request/__request_id__/",
+        csrfToken: "csrf-token",
+        nextUrl: "/membership/requests/",
+        canView: true,
+        canWrite: true,
+        canVote: false,
+      },
+    });
+
+    await flushPromises();
+    await wrapper.get('[data-membership-notes-toggle="17"]').trigger("click");
+    await flushPromises();
+
+    const textarea = wrapper.get('textarea[name="message"]');
+    const submitButton = wrapper.get('button[data-note-action="message"]');
+    expect(submitButton.attributes("disabled")).toBeDefined();
+
+    await textarea.setValue("   ");
+    expect(submitButton.attributes("disabled")).toBeDefined();
+
+    await submitButton.trigger("click");
+    await textarea.trigger("keydown", { key: "Enter", ctrlKey: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    await textarea.setValue("Ready to send");
+    expect(submitButton.attributes("disabled")).toBeUndefined();
+  });
+
   it("keeps the form hidden for read-only viewers", async () => {
     vi.stubGlobal(
       "fetch",

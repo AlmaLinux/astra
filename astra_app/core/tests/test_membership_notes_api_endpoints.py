@@ -109,6 +109,21 @@ class MembershipNotesApiEndpointTests(TestCase):
         self.assertEqual(response.json(), {"ok": True, "message": "Note added."})
         self.assertNotIn("html", response.json())
 
+    def test_request_notes_add_api_rejects_blank_message_note(self) -> None:
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+        self._login_as("reviewer")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer()):
+            response = self.client.post(
+                reverse("api-membership-request-notes-add", args=[req.pk]),
+                data={"note_action": "message", "message": "   \n\t"},
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"error": "Note text is required."})
+        self.assertFalse(Note.objects.filter(membership_request=req).exists())
+
     def test_request_notes_add_api_allows_change_permission_without_add_permission(self) -> None:
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
         self._login_as("change_only")
