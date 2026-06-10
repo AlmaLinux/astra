@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 
-import { fetchSendMailPayload, type SendMailBootstrap, type SendMailField, type SendMailFieldOption, type SendMailPayload } from "./types";
+import ComposeCard from "./ComposeCard.vue";
+import { fetchSendMailPayload, toComposeFieldSpec, type SendMailBootstrap, type SendMailField, type SendMailFieldOption, type SendMailPayload } from "./types";
 
 declare global {
   interface Window {
@@ -48,10 +49,6 @@ function listFieldValue(name: string): string[] {
 
 function fieldClass(name: string, fallback = "form-control"): string {
   return field(name)?.attrs.class || fallback;
-}
-
-function fieldRows(name: string, fallback = 12): number {
-  return Number.parseInt(field(name)?.attrs.rows || String(fallback), 10);
 }
 
 function fieldAttrs(name: string): Record<string, string> {
@@ -108,31 +105,10 @@ const showExtraOptions = computed(() => {
   return ["cc", "bcc", "reply_to"].some((name) => stringFieldValue(name).trim().length > 0);
 });
 
-function formatVariableToken(name: string): string {
-  return `{{ ${name} }}`;
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-const htmlPreviewSrcdoc = computed(() => {
-  const html = payload.value?.compose.preview.html || "";
-  return html || '<span class="text-muted">No preview yet.</span>';
-});
-
-const textPreviewSrcdoc = computed(() => {
-  const text = payload.value?.compose.preview.text || "";
-  if (!text) {
-    return '<span class="text-muted">No preview yet.</span>';
-  }
-  return `<pre style="margin:0;white-space:pre-wrap;font-family:inherit;">${escapeHtml(text)}</pre>`;
-});
+const subjectField = computed(() => toComposeFieldSpec(field("subject"), "subject"));
+const htmlContentField = computed(() => toComposeFieldSpec(field("html_content"), "html_content"));
+const textContentField = computed(() => toComposeFieldSpec(field("text_content"), "text_content"));
+const composePreview = computed(() => payload.value?.compose.preview ?? { subject: "", html: "", text: "" });
 
 async function loadPayload(): Promise<void> {
   if (payload.value !== null || !props.bootstrap.apiUrl) {
@@ -308,155 +284,79 @@ onMounted(async () => {
         </div>
       </div>
 
-      <div class="row">
-        <div class="col-lg-12">
-          <div class="templated-email-compose" data-templated-email-compose :data-compose-preview-url="bootstrap.previewUrl" :data-compose-skip-initial-preview-refresh="hasInitialPreview ? '1' : null">
-            <div class="card card-outline card-success">
-              <div class="card-header">
-                <div class="d-flex align-items-center justify-content-between flex-wrap" style="gap: .5rem;">
-                  <h3 class="card-title mb-0">Compose email</h3>
-                  <span class="badge badge-warning d-none" data-compose-unsaved-badge>Unsaved changes</span>
-                </div>
-              </div>
-              <div class="card-body">
-                <div class="row">
-                  <div class="col-md-6">
-                    <div class="text-muted small mb-2">Use recipient variables to personalize the subject and content.</div>
-                    <div class="form-group mb-2">
-                      <label>Email template</label>
-                      <select class="form-control" name="email_template_id">
-                        <option value="">(None)</option>
-                        <option v-for="template in payload.templates" :key="template.id" :value="template.id" :selected="payload.compose.selectedTemplateId === template.id">{{ template.name }}</option>
-                      </select>
-                      <small class="form-text text-muted">Selecting a template will populate subject + bodies.</small>
-                      <div class="mt-2">
-                        <button type="button" class="btn btn-outline-secondary btn-sm" data-compose-action="restore" title="Restore last saved content" disabled>Restore</button>
-                        <button type="button" class="btn btn-outline-primary btn-sm" data-compose-action="save" title="Save to selected template">Save</button>
-                        <button type="button" class="btn btn-outline-primary btn-sm" data-compose-action="save-as" title="Save as a new template">Save as…</button>
+      <ComposeCard
+        title="Compose email"
+        help-text="Use recipient variables to personalize the subject and content."
+        :template-options="payload.templates"
+        :selected-template-id="payload.compose.selectedTemplateId"
+        :available-variables="availableVariables"
+        :preview-url="bootstrap.previewUrl"
+        :skip-initial-preview-refresh="hasInitialPreview"
+        :preview="composePreview"
+        :subject-field="subjectField"
+        :html-content-field="htmlContentField"
+        :text-content-field="textContentField"
+      >
+        <template #template-selector-extra>
+          <div class="mt-2">
+            <button type="button" class="btn btn-outline-secondary btn-sm" data-compose-action="restore" title="Restore last saved content" disabled>Restore</button>
+            <button type="button" class="btn btn-outline-primary btn-sm" data-compose-action="save" title="Save to selected template">Save</button>
+            <button type="button" class="btn btn-outline-primary btn-sm" data-compose-action="save-as" title="Save as a new template">Save as…</button>
+          </div>
+        </template>
+
+        <template #after-card>
+          <div data-compose-modal="save">
+            <div class="modal fade" tabindex="-1" role="dialog" aria-hidden="true">
+              <div class="modal-dialog" role="document">
+                <div class="modal-content">
+                  <div class="modal-header">
+                    <h5 class="modal-title">Save email template</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog"><span aria-hidden="true">&times;</span></button>
+                  </div>
+                  <div class="modal-body">
+                    <div class="mb-3">Overwrite the selected email template with the current subject and contents?</div>
+                    <form method="post" action="#" class="m-0">
+                      <input type="hidden" name="csrfmiddlewaretoken" :value="bootstrap.csrfToken">
+                      <div class="d-flex justify-content-between">
+                        <button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel" title="Close dialog without applying changes">Cancel</button>
+                        <button type="submit" class="btn btn-primary" title="Confirm and apply this action">Save</button>
                       </div>
-                    </div>
-                  </div>
-                  <div class="col-md-6">
-                    <div class="card card-outline card-info mb-0">
-                      <div class="card-header py-2">
-                        <h3 class="card-title">Available variables</h3>
-                      </div>
-                      <div class="card-body p-0" style="max-height: 240px; overflow: auto;">
-                        <table v-if="availableVariables.length" class="table table-sm table-striped mb-0">
-                          <thead>
-                            <tr>
-                              <th style="width: 45%">Variable</th>
-                              <th>Example</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            <tr v-for="variable in availableVariables" :key="variable.name">
-                              <td><code>{{ formatVariableToken(variable.name) }}</code></td>
-                              <td><span class="text-monospace">{{ variable.example }}</span></td>
-                            </tr>
-                          </tbody>
-                        </table>
-                        <div v-else class="p-3 text-muted small">No variables available yet.</div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="row">
-                  <div class="col-md-12">
-                    <div class="form-group">
-                      <label :for="field('subject')?.id || 'id_subject'">Subject:</label>
-                      <input :id="field('subject')?.id || 'id_subject'" type="text" name="subject" :class="fieldClass('subject')" :value="stringFieldValue('subject')" v-bind="fieldAttrs('subject')">
-                      <div v-for="errorItem in fieldErrors('subject')" :key="errorItem" class="invalid-feedback d-block">{{ errorItem }}</div>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="row">
-                  <div class="col-md">
-                    <label :for="field('html_content')?.id || 'id_html_content'">HTML content</label>
-                    <textarea :id="field('html_content')?.id || 'id_html_content'" name="html_content" :rows="fieldRows('html_content')" :class="fieldClass('html_content')" v-bind="fieldAttrs('html_content')">{{ stringFieldValue('html_content') }}</textarea>
-                  </div>
-                  <div class="col-md-auto d-flex align-items-center justify-content-center px-1">
-                    <button type="button" class="btn btn-outline-secondary btn-sm" data-compose-action="copy-html-to-text" title="Copy HTML -> Text (strip formatting)" aria-label="Copy HTML to Text" style="min-width: 3rem;">&gt;</button>
-                  </div>
-                  <div class="col-md">
-                    <label :for="field('text_content')?.id || 'id_text_content'">Text content</label>
-                    <textarea :id="field('text_content')?.id || 'id_text_content'" name="text_content" :rows="fieldRows('text_content')" :class="fieldClass('text_content')" v-bind="fieldAttrs('text_content')">{{ stringFieldValue('text_content') }}</textarea>
-                  </div>
-                </div>
-
-                <hr>
-
-                <div class="row">
-                  <div class="col-md-6">
-                    <h5>Rendered preview (HTML, first recipient)</h5>
-                    <div class="border rounded p-2 bg-white" style="min-height: 140px;" data-compose-preview="html">
-                      <iframe data-compose-preview-iframe="1" title="Rendered HTML preview" sandbox="allow-popups" referrerpolicy="no-referrer" style="display:block;width:100%;height:400px;border:0;background:#fff;" :srcdoc="htmlPreviewSrcdoc" />
-                    </div>
-                  </div>
-                  <div class="col-md-6">
-                    <h5>Rendered preview (text, first recipient)</h5>
-                    <div class="border rounded p-2 bg-white" style="min-height: 140px;" data-compose-preview="text">
-                      <iframe data-compose-preview-iframe="1" title="Rendered text preview" sandbox="allow-popups" referrerpolicy="no-referrer" style="display:block;width:100%;height:400px;border:0;background:#fff;" :srcdoc="textPreviewSrcdoc" />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div data-compose-modal="save">
-              <div class="modal fade" tabindex="-1" role="dialog" aria-hidden="true">
-                <div class="modal-dialog" role="document">
-                  <div class="modal-content">
-                    <div class="modal-header">
-                      <h5 class="modal-title">Save email template</h5>
-                      <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog"><span aria-hidden="true">&times;</span></button>
-                    </div>
-                    <div class="modal-body">
-                      <div class="mb-3">Overwrite the selected email template with the current subject and contents?</div>
-                      <form method="post" action="#" class="m-0">
-                        <input type="hidden" name="csrfmiddlewaretoken" :value="bootstrap.csrfToken">
-                        <div class="d-flex justify-content-between">
-                          <button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel" title="Close dialog without applying changes">Cancel</button>
-                          <button type="submit" class="btn btn-primary" title="Confirm and apply this action">Save</button>
-                        </div>
-                      </form>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div data-compose-modal="save-as">
-              <div class="modal fade" tabindex="-1" role="dialog" aria-hidden="true">
-                <div class="modal-dialog" role="document" style="text-align: left;">
-                  <div class="modal-content">
-                    <div class="modal-header">
-                      <h5 class="modal-title">Save email template as…</h5>
-                      <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog"><span aria-hidden="true">&times;</span></button>
-                    </div>
-                    <div class="modal-body">
-                      <div class="mb-3">Create a new template from the current subject and contents?</div>
-                      <form method="post" action="#" class="m-0">
-                        <input type="hidden" name="csrfmiddlewaretoken" :value="bootstrap.csrfToken">
-                        <div class="form-group">
-                          <label>New template name</label>
-                          <input type="text" class="form-control" name="name" required autocomplete="off">
-                        </div>
-                        <div class="d-flex justify-content-between">
-                          <button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel" title="Close dialog without applying changes">Cancel</button>
-                          <button type="submit" class="btn btn-primary" title="Confirm and apply this action">Create</button>
-                        </div>
-                      </form>
-                    </div>
+                    </form>
                   </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
-      </div>
+
+          <div data-compose-modal="save-as">
+            <div class="modal fade" tabindex="-1" role="dialog" aria-hidden="true">
+              <div class="modal-dialog" role="document" style="text-align: left;">
+                <div class="modal-content">
+                  <div class="modal-header">
+                    <h5 class="modal-title">Save email template as…</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog"><span aria-hidden="true">&times;</span></button>
+                  </div>
+                  <div class="modal-body">
+                    <div class="mb-3">Create a new template from the current subject and contents?</div>
+                    <form method="post" action="#" class="m-0">
+                      <input type="hidden" name="csrfmiddlewaretoken" :value="bootstrap.csrfToken">
+                      <div class="form-group">
+                        <label>New template name</label>
+                        <input type="text" class="form-control" name="name" required autocomplete="off">
+                      </div>
+                      <div class="d-flex justify-content-between">
+                        <button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel" title="Close dialog without applying changes">Cancel</button>
+                        <button type="submit" class="btn btn-primary" title="Confirm and apply this action">Create</button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
+      </ComposeCard>
 
       <div class="row">
         <div class="col-lg-12">

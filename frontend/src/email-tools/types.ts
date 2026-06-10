@@ -44,15 +44,68 @@ export interface EmailTemplateEditorForm {
   fields: EmailTemplateEditorField[];
 }
 
-export interface EmailTemplateEditorTemplateOption {
+export interface ComposeTemplateOption {
   id: number;
   name: string;
 }
 
-export interface EmailTemplateEditorVariable {
+export interface ComposeVariable {
   name: string;
   example: string;
 }
+
+export interface ComposeFieldSpec {
+  id: string;
+  name: string;
+  value: string;
+  cssClass: string;
+  rows?: number;
+  attrs: Record<string, string>;
+  errors: string[];
+  disabled?: boolean;
+  required?: boolean;
+}
+
+export interface ComposePreview {
+  subject: string;
+  html: string;
+  text: string;
+}
+
+/** Minimal field shape accepted by toComposeFieldSpec. */
+interface ComposeFieldInput {
+  id: string;
+  name: string;
+  value: string | string[];
+  required: boolean;
+  disabled: boolean;
+  errors: string[];
+  attrs: Record<string, string>;
+}
+
+export function toComposeFieldSpec(f: ComposeFieldInput | null | undefined, fallbackName = ""): ComposeFieldSpec {
+  if (!f) {
+    return { id: fallbackName ? `id_${fallbackName}` : "", name: fallbackName, value: "", cssClass: "form-control", rows: 12, attrs: {}, errors: [] };
+  }
+  const attrs = { ...f.attrs };
+  delete attrs.class;
+  delete attrs.rows;
+  return {
+    id: f.id,
+    name: f.name,
+    value: Array.isArray(f.value) ? f.value.join(", ") : String(f.value || ""),
+    cssClass: f.attrs.class || "form-control",
+    rows: Number.parseInt(f.attrs.rows || "12", 10),
+    attrs,
+    errors: f.errors,
+    disabled: f.disabled,
+    required: f.required,
+  };
+}
+
+export type EmailTemplateEditorTemplateOption = ComposeTemplateOption;
+
+export type EmailTemplateEditorVariable = ComposeVariable;
 
 export interface EmailTemplateEditorPayload {
   mode: "create" | "edit";
@@ -175,15 +228,9 @@ export interface SendMailForm {
   fields: SendMailField[];
 }
 
-export interface SendMailTemplateOption {
-  id: number;
-  name: string;
-}
+export type SendMailTemplateOption = ComposeTemplateOption;
 
-export interface SendMailRecipientVariable {
-  name: string;
-  example: string;
-}
+export type SendMailRecipientVariable = ComposeVariable;
 
 export interface SendMailPayload {
   selectedRecipientMode: string;
