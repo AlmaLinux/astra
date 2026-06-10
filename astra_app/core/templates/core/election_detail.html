@@ -6,6 +6,8 @@
   {{ block.super }}
   {% vite_hmr_client %}
   {% vite_asset 'src/entrypoints/electionDetail.ts' %}
+  <link rel="stylesheet" href="{% static 'admin/css/vendor/select2/select2.css' %}">
+  <link rel="stylesheet" href="{% static 'core/css/select2_overrides.css' %}">
   <style>
     /* Keep header tools aligned across collapsed/expanded cards. */
     .election-collapsible-card > .card-header {
@@ -146,4 +148,5 @@
 {% block scripts %}
   {{ block.super }}
   <script src="{% static 'core/vendor/chartjs/chart.umd.min.js' %}"></script>
+  <script src="{% static 'admin/js/vendor/select2/select2.full.js' %}"></script>
 {% endblock %}

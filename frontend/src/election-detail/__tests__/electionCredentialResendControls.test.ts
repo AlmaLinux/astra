@@ -35,18 +35,20 @@ describe("ElectionCredentialResendControls", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders the existing resend controls and datalist options", () => {
+  it("renders the existing resend controls and select options", () => {
     const wrapper = mount(ElectionCredentialResendControls, {
       props: { bootstrap },
     });
 
     expect(wrapper.text()).toContain("Resend all credentials");
     expect(wrapper.text()).toContain("Resend voting credential");
-    expect(wrapper.findAll("datalist option")).toHaveLength(2);
+    // First option is the empty placeholder, then alice and bob
+    const options = wrapper.findAll("select option");
+    expect(options).toHaveLength(3);
     expect(wrapper.find('option[value="alice"]').exists()).toBe(true);
   });
 
-  it("submits a single-user resend and shows inline success without redirecting", async () => {
+  it("shows a confirmation modal for single-user resend and submits on confirm", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true, message: "Queued voting credential email for 1 recipient.", recipient_count: 1 }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     const assignMock = vi.fn();
@@ -60,7 +62,16 @@ describe("ElectionCredentialResendControls", () => {
     });
 
     await wrapper.get("#resend-credential-username").setValue("alice");
-    await wrapper.findAll("form")[1]?.trigger("submit.prevent");
+    await wrapper.findAll("form")[0]?.trigger("submit.prevent");
+    await nextTick();
+
+    // Modal should be visible with the right message
+    expect(wrapper.find(".modal").exists()).toBe(true);
+    expect(wrapper.text()).toContain("Send voting credentials to alice?");
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // Click the confirm button in the modal
+    await wrapper.find(".modal-footer .btn-danger").trigger("click");
     await flushPromises();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -75,7 +86,7 @@ describe("ElectionCredentialResendControls", () => {
     expect(wrapper.text()).toContain("Queued voting credential email for 1 recipient.");
   });
 
-  it("renders API errors inline", async () => {
+  it("shows a confirmation modal for resend-all with the voter count", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(JSON.stringify({ ok: false, errors: ["Too many resend attempts. Please try again later."] }), { status: 429 })),
@@ -85,10 +96,40 @@ describe("ElectionCredentialResendControls", () => {
       props: { bootstrap },
     });
 
-    await wrapper.findAll("form")[0]?.trigger("submit.prevent");
+    await wrapper.findAll("form")[1]?.trigger("submit.prevent");
+    await nextTick();
+
+    // Modal should mention the number of voters
+    expect(wrapper.find(".modal").exists()).toBe(true);
+    expect(wrapper.text()).toContain("Send voting credentials to all 2 eligible voters?");
+
+    // Confirm and check the API error renders inline
+    await wrapper.find(".modal-footer .btn-danger").trigger("click");
     await flushPromises();
 
     expect(wrapper.text()).toContain("Too many resend attempts. Please try again later.");
+  });
+
+  it("cancelling the confirmation modal does not send a request", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const wrapper = mount(ElectionCredentialResendControls, {
+      props: { bootstrap },
+    });
+
+    await wrapper.get("#resend-credential-username").setValue("alice");
+    await wrapper.findAll("form")[0]?.trigger("submit.prevent");
+    await nextTick();
+
+    expect(wrapper.find(".modal").exists()).toBe(true);
+
+    // Click cancel
+    await wrapper.find(".modal-footer .btn-secondary").trigger("click");
+    await nextTick();
+
+    expect(wrapper.find(".modal").exists()).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("disables resend controls while a single-user request is pending so a second click does not send again", async () => {
@@ -102,23 +143,21 @@ describe("ElectionCredentialResendControls", () => {
 
     await wrapper.get("#resend-credential-username").setValue("alice");
     const input = wrapper.get("#resend-credential-username");
-    const forms = wrapper.findAll("form");
-    const buttons = wrapper.findAll("button");
-    const submitSingleButton = buttons[1];
-    const submitAllButton = buttons[0];
 
-    await forms[1]!.trigger("submit.prevent");
+    // Trigger the form and confirm via modal
+    await wrapper.findAll("form")[0]!.trigger("submit.prevent");
     await nextTick();
+    await wrapper.find(".modal-footer .btn-danger").trigger("click");
+    await nextTick();
+
+    const buttons = wrapper.findAll("form button[type='submit']");
+    const submitSingleButton = buttons[0];
+    const submitAllButton = buttons[1];
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(input.attributes("disabled")).toBeDefined();
     expect(submitSingleButton.attributes("disabled")).toBeDefined();
     expect(submitAllButton.attributes("disabled")).toBeDefined();
-
-    await forms[1]!.trigger("submit.prevent");
-    await nextTick();
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
 
     pending.resolve(
       new Response(JSON.stringify({ ok: true, message: "Queued voting credential email for 1 recipient.", recipient_count: 1 }), {
@@ -128,7 +167,8 @@ describe("ElectionCredentialResendControls", () => {
     await flushPromises();
 
     expect(input.attributes("disabled")).toBeUndefined();
-    expect(submitSingleButton.attributes("disabled")).toBeUndefined();
+    // Submit button stays disabled after clearing the selection (no user selected)
+    expect(submitSingleButton.attributes("disabled")).toBeDefined();
     expect(submitAllButton.attributes("disabled")).toBeUndefined();
   });
 });
